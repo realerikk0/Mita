@@ -1,0 +1,12 @@
+{
+  "welcome": "嗨，你好吗？",
+  "description": "Silence 已准备好安安静静地完成主人交代的工作。",
+  "status": {
+    "empty": "未找到聊天"
+  },
+  "sendMessage": "发送消息",
+  "newConversation": "新对话",
+  "clearHistory": "清除历史记录",
+  "temporaryChat": "临时聊天",
+  "temporaryChatDescription": "开始一个临时对话，不会保存到您的聊天历史记录中。"
+}

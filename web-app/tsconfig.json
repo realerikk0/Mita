@@ -1,0 +1,14 @@
+{
+  "files": [],
+  "references": [
+    { "path": "./tsconfig.app.json" },
+    { "path": "./tsconfig.node.json" }
+  ],
+  "compilerOptions": {
+    "paths": {
+      "@/*": ["./src/*"],
+      "@janhq/core": ["../core/dist/types/index.d.ts"],
+      "@janhq/conversational-extension": ["../extensions/conversational-extension/src/index.ts"]
+    }
+  }
+}
