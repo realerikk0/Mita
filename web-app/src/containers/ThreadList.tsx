@@ -29,6 +29,9 @@ import { toast } from 'sonner'
 import { cn } from '@/lib/utils'
 import { ThreadMessage } from '@janhq/core'
 
+const INTRO_THREAD_TITLE = 'What is Silence?'
+const LEGACY_INTRO_THREAD_TITLE = 'What is Jan?'
+
 const ThreadItem = memo(
   ({
     thread,
@@ -100,9 +103,16 @@ const ThreadItem = memo(
       return textContent?.text?.value
     }, [messages])
 
+    const displayTitle = thread.title === LEGACY_INTRO_THREAD_TITLE
+      ? INTRO_THREAD_TITLE
+      : thread.title
+    const isProtectedIntroThread =
+      !localStorage.getItem('setup-completed') &&
+      (thread.title === LEGACY_INTRO_THREAD_TITLE || thread.title === INTRO_THREAD_TITLE)
+
     const plainTitleForRename = useMemo(() => {
-      return (thread.title || '').replace(/<span[^>]*>|<\/span>/g, '')
-    }, [thread.title])
+      return (displayTitle || '').replace(/<span[^>]*>|<\/span>/g, '')
+    }, [displayTitle])
 
     const availableProjects = useMemo(() => {
       return folders
@@ -138,7 +148,7 @@ const ThreadItem = memo(
       <SidebarMenuItem>
         {currentProjectId ?
           <Link to="/threads/$threadId" params={{ threadId: thread.id }} className="bg-card dark:bg-secondary/20 mb-2 px-4 py-4 border hover:dark:bg-secondary/30 rounded-lg block max-w-full overflow-hidden">
-              <span className="block truncate" title={thread.title || t('common:newThread')}>{thread.title || t('common:newThread')}</span>
+              <span className="block truncate" title={displayTitle || t('common:newThread')}>{displayTitle || t('common:newThread')}</span>
               {currentProjectId && lastUserMessageText && (
                 <div className="text-muted-foreground text-xs mt-1 line-clamp-1 pr-10">
                   {lastUserMessageText}
@@ -148,7 +158,7 @@ const ThreadItem = memo(
           :
           <SidebarMenuButton asChild>
             <Link to="/threads/$threadId" params={{ threadId: thread.id }}>
-              <span className="block truncate" title={thread.title || t('common:newThread')}>{thread.title || t('common:newThread')}</span>
+              <span className="block truncate" title={displayTitle || t('common:newThread')}>{displayTitle || t('common:newThread')}</span>
             </Link>
           </SidebarMenuButton>
         }
@@ -227,9 +237,9 @@ const ThreadItem = memo(
             <DropdownMenuSeparator />
             <DropdownMenuItem
               variant="destructive"
-              disabled={thread.title === 'What is Jan?' && !localStorage.getItem('setup-completed')}
+              disabled={isProtectedIntroThread}
               onSelect={() => {
-                if (thread.title !== 'What is Jan?' || localStorage.getItem('setup-completed')) {
+                if (!isProtectedIntroThread) {
                   setDeleteConfirmOpen(true)
                 }
               }}

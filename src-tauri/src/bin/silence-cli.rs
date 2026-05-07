@@ -33,11 +33,11 @@ directly to your own hardware — no cloud account, no usage fees, full privacy.
 Models downloaded in the Silence desktop app are automatically available here.",
     after_help = "Examples:\n  \
   silence launch claude                                      # pick a model, then run Claude Code against it\n  \
-  silence launch claude --model janhq/Jan-code-4b-gguf       # use a specific model\n  \
-  silence launch openclaw --model janhq/Jan-code-4b-gguf     # wire openclaw to a local model\n  \
-  silence serve janhq/Jan-code-4b-gguf                       # expose a model at localhost:6767/v1\n  \
-  silence serve janhq/Jan-code-4b-gguf --fit                 # auto-fit context to available VRAM\n  \
-  silence serve janhq/Jan-code-4b-gguf --detach              # run in the background\n  \
+  silence launch claude --model owner/model-gguf             # use a specific model\n  \
+  silence launch openclaw --model owner/model-gguf           # wire openclaw to a local model\n  \
+  silence serve owner/model-gguf                             # expose a model at localhost:6767/v1\n  \
+  silence serve owner/model-gguf --fit                       # auto-fit context to available VRAM\n  \
+  silence serve owner/model-gguf --detach                    # run in the background\n  \
   silence models list                                        # show all installed models",
     version
 )]

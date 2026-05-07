@@ -3,7 +3,7 @@ use tauri_plugin_llamacpp::state::LlamacppState;
 use tauri_plugin_mlx::state::MlxState;
 
 use crate::core::server::proxy;
-use crate::core::app::commands::get_jan_data_folder_path;
+use crate::core::app::commands::get_silence_data_folder_path;
 use crate::core::state::AppState;
 
 
@@ -53,7 +53,7 @@ pub async fn start_server<R: Runtime>(
         state.provider_configs.clone(),
         state.mcp_servers.clone(),
         state.mcp_settings.clone(),
-        get_jan_data_folder_path(app_handle.clone()).to_string_lossy().into_owned(),
+        get_silence_data_folder_path(app_handle.clone()).to_string_lossy().into_owned(),
         enable_server_tool_execution.unwrap_or(false),
     )
     .await

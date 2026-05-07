@@ -10,7 +10,7 @@
 
 import {
   AIEngine,
-  getJanDataFolderPath,
+  getSilenceDataFolderPath,
   fs,
   joinPath,
   modelInfo,
@@ -60,7 +60,7 @@ export default class mlx_extension extends AIEngine {
 
   private config: any = {}
   private providerPath!: string
-  private apiSecret: string = 'JanMLX'
+  private apiSecret: string = 'SilenceMLX'
   private loadingModels = new Map<string, Promise<SessionInfo>>()
 
   override async onLoad(): Promise<void> {
@@ -88,7 +88,7 @@ export default class mlx_extension extends AIEngine {
   async getProviderPath(): Promise<string> {
     if (!this.providerPath) {
       // Use mlx folder for models
-      this.providerPath = await joinPath([await getJanDataFolderPath(), 'mlx'])
+      this.providerPath = await joinPath([await getSilenceDataFolderPath(), 'mlx'])
     }
     return this.providerPath
   }
@@ -268,7 +268,7 @@ export default class mlx_extension extends AIEngine {
 
     const cfg = { ...this.config, ...(overrideSettings ?? {}) }
 
-    const janDataFolderPath = await getJanDataFolderPath()
+    const silenceDataFolderPath = await getSilenceDataFolderPath()
     const modelConfigPath = await joinPath([
       this.providerPath,
       'models',
@@ -294,8 +294,8 @@ export default class mlx_extension extends AIEngine {
       // Absolute path
       modelPath = modelConfig.model_path
     } else {
-      // Relative path - resolve from Jan data folder
-      modelPath = await joinPath([janDataFolderPath, modelConfig.model_path])
+      // Relative path - resolve from Silence data folder
+      modelPath = await joinPath([silenceDataFolderPath, modelConfig.model_path])
     }
 
     const mlxConfig: MlxConfig = {
@@ -528,11 +528,11 @@ export default class mlx_extension extends AIEngine {
       !modelConfig.model_path.startsWith('/') &&
       !modelConfig.model_path.includes(':')
     ) {
-      // Model file is at {janDataFolder}/{model_path}
+      // Model file is at {silenceDataFolder}/{model_path}
       // Delete the parent folder containing the actual model file
-      const janDataFolderPath = await getJanDataFolderPath()
+      const silenceDataFolderPath = await getSilenceDataFolderPath()
       const modelPath = await joinPath([
-        janDataFolderPath,
+        silenceDataFolderPath,
         modelConfig.model_path,
       ])
       const parentDir = modelPath.substring(0, modelPath.lastIndexOf('/'))
@@ -610,9 +610,9 @@ export default class mlx_extension extends AIEngine {
 
     if (sourcePath.startsWith('https://')) {
       // Download from URL to mlx models folder
-      const janDataFolderPath = await getJanDataFolderPath()
+      const silenceDataFolderPath = await getSilenceDataFolderPath()
       const modelDir = await joinPath([
-        janDataFolderPath,
+        silenceDataFolderPath,
         'mlx',
         'models',
         modelId,
@@ -921,9 +921,9 @@ export default class mlx_extension extends AIEngine {
       // Absolute path
       modelPath = modelConfig.model_path
     } else {
-      // Relative path - resolve from Jan data folder
-      const janDataFolderPath = await getJanDataFolderPath()
-      modelPath = await joinPath([janDataFolderPath, modelConfig.model_path])
+      // Relative path - resolve from Silence data folder
+      const silenceDataFolderPath = await getSilenceDataFolderPath()
+      modelPath = await joinPath([silenceDataFolderPath, modelConfig.model_path])
     }
 
     // Check if model is safetensors or GGUF

@@ -53,7 +53,7 @@ describe('useAssistant', () => {
 
     const updatedAssistant = {
       ...defaultAssistant,
-      name: 'Updated Jan',
+      name: 'Updated Silence',
       description: 'Updated description',
     }
 
@@ -61,7 +61,7 @@ describe('useAssistant', () => {
       result.current.updateAssistant(updatedAssistant)
     })
 
-    expect(result.current.assistants[0].name).toBe('Updated Jan')
+    expect(result.current.assistants[0].name).toBe('Updated Silence')
     expect(result.current.assistants[0].description).toBe('Updated description')
   })
 
@@ -152,13 +152,48 @@ describe('useAssistant', () => {
     const { result } = renderHook(() => useAssistant())
 
     expect(result.current.currentAssistant.id).toBe('jan')
-    expect(result.current.currentAssistant.name).toBe('Jan')
+    expect(result.current.currentAssistant.name).toBe('Silence')
     expect(result.current.currentAssistant.avatar).toBe('👋')
     expect(result.current.currentAssistant.instructions).toContain(
-      'Before engaging any tools, articulate your complete thought process in natural language'
+      'Never say that you are Jan'
+    )
+    expect(result.current.currentAssistant.instructions).toContain(
+      'Never translate it as "沉默"'
+    )
+    expect(result.current.currentAssistant.instructions).toContain(
+      'Use tools when they are needed'
     )
     expect(typeof result.current.currentAssistant.created_at).toBe('number')
     expect(typeof result.current.currentAssistant.parameters).toBe('object')
+  })
+
+  it('should normalize legacy Jan/Menlo default assistant identity', () => {
+    const { result } = renderHook(() => useAssistant())
+
+    act(() => {
+      result.current.setAssistants([
+        {
+          ...defaultAssistant,
+          name: 'Jan',
+          description: 'Jan is a helpful desktop assistant',
+          instructions:
+            '我是Jan，由Menlo Research（https://www.menlo.ai）训练的AI助手。',
+        },
+      ])
+    })
+
+    expect(result.current.assistants[0].name).toBe('Silence')
+    expect(result.current.assistants[0].description).toContain('Silence')
+    expect(result.current.assistants[0].instructions).toContain('You are Silence')
+    expect(result.current.assistants[0].instructions).toContain(
+      'Never say that you are Jan'
+    )
+    expect(result.current.assistants[0].instructions).toContain(
+      'Never translate it as "沉默"'
+    )
+    expect(result.current.assistants[0].instructions).not.toContain(
+      'Menlo Research（https://www.menlo.ai）'
+    )
   })
 
   it('should handle empty assistants list', () => {
@@ -176,13 +211,13 @@ describe('useAssistant', () => {
 
     const updatedDefaultAssistant = {
       ...defaultAssistant,
-      name: 'Updated Jan Name',
+      name: 'Updated Silence Name',
     }
 
     act(() => {
       result.current.updateAssistant(updatedDefaultAssistant)
     })
 
-    expect(result.current.currentAssistant.name).toBe('Updated Jan Name')
+    expect(result.current.currentAssistant.name).toBe('Updated Silence Name')
   })
 })

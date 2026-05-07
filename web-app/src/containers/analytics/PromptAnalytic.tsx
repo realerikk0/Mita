@@ -25,7 +25,7 @@ export function PromptAnalytic() {
       <div className="flex items-center gap-2">
         <IconFileTextShield className="text-muted-foreground" />
         <h2 className="font-medium">
-          {t('helpUsImproveJan')}
+          {t('helpUsImproveSilence')}
         </h2>
       </div>
       <p className="mt-2 text-xs text-muted-foreground leading-normal">

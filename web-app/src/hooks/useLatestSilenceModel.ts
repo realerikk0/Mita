@@ -4,22 +4,22 @@ import { localStorageKey, CACHE_EXPIRY_MS } from '@/constants/localStorage'
 import { getServiceHub } from '@/hooks/useServiceHub'
 import type { CatalogModel } from '@/services/models/types'
 
-type LatestJanModelState = {
+type LatestSilenceModelState = {
   model: CatalogModel | null
   lastFetchedAt: number | null
   loading: boolean
   error: boolean
-  fetchLatestJanModel: (force?: boolean) => Promise<void>
+  fetchLatestSilenceModel: (force?: boolean) => Promise<void>
 }
 
-export const useLatestJanModel = create<LatestJanModelState>()(
+export const useLatestSilenceModel = create<LatestSilenceModelState>()(
   persist(
     (set, get) => ({
       model: null,
       lastFetchedAt: null,
       loading: false,
       error: false,
-      fetchLatestJanModel: async (force = false) => {
+      fetchLatestSilenceModel: async (force = false) => {
         const { lastFetchedAt, loading } = get()
 
         if (loading) return
@@ -37,7 +37,7 @@ export const useLatestJanModel = create<LatestJanModelState>()(
         try {
           const result = await getServiceHub()
             .models()
-            .fetchLatestJanModel()
+            .fetchLatestSilenceModel()
 
           if (result) {
             set({
@@ -54,7 +54,7 @@ export const useLatestJanModel = create<LatestJanModelState>()(
       },
     }),
     {
-      name: localStorageKey.latestJanModel,
+      name: localStorageKey.latestSilenceModel,
       storage: createJSONStorage(() => localStorage),
       partialize: (state) => ({
         model: state.model,

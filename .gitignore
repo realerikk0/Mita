@@ -26,6 +26,10 @@ src-tauri/gen/apple
 src-tauri/gen/android
 src-tauri/resources/bin
 
+# Vendored Cargo patches
+!src-tauri/vendor/
+!src-tauri/vendor/**
+
 # Helper tools
 .opencode
 OpenCode.md

@@ -6,10 +6,10 @@ import {
 } from '@janhq/core'
 
 /**
- * JanConversationalExtension is a ConversationalExtension implementation that provides
+ * SilenceConversationalExtension is a ConversationalExtension implementation that provides
  * functionality for managing threads.
  */
-export default class JanConversationalExtension extends ConversationalExtension {
+export default class SilenceConversationalExtension extends ConversationalExtension {
   /**
    * Called when the extension is loaded.
    */

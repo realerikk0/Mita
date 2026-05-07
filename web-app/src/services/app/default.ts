@@ -23,12 +23,12 @@ export class DefaultAppService implements AppService {
     }
   }
 
-  async getJanDataFolder(): Promise<string | undefined> {
+  async getSilenceDataFolder(): Promise<string | undefined> {
     return undefined
   }
 
-  async relocateJanDataFolder(path: string): Promise<void> {
-    console.log('relocateJanDataFolder called with path:', path)
+  async relocateSilenceDataFolder(path: string): Promise<void> {
+    console.log('relocateSilenceDataFolder called with path:', path)
     // No-op - not implemented in default service
   }
 

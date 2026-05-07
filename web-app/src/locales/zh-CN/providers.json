@@ -58,5 +58,23 @@
   },
   "addProvider": "添加提供商",
   "addOpenAIProvider": "添加 OpenAI 提供商",
-  "enterNameForProvider": "输入提供商名称"
+  "enterNameForProvider": "输入提供商名称",
+  "apiKeys": {
+    "title": "API 密钥",
+    "description": "输入您的 API 密钥。可以在高级设置中添加备用密钥，某个密钥失败时 Silence 会自动尝试下一个。",
+    "placeholder": "sk-…\nsk-…",
+    "primaryPlaceholder": "输入主 API 密钥",
+    "keyPlaceholder": "输入 API 密钥",
+    "primaryBadge": "主密钥",
+    "test": "测试密钥",
+    "testing": "测试中...",
+    "testHint": "使用每个密钥检查 /models，并显示逐个密钥的状态。",
+    "advanced": "高级",
+    "hideAdvanced": "隐藏高级",
+    "oneKeyHint": "备用密钥可在高级设置中配置。",
+    "retryHintPrefix": "主密钥是",
+    "retryHintSuffix": "Silence 仅在以下状态码时重试下一个密钥：",
+    "addKey": "添加密钥",
+    "removeKey": "移除密钥"
+  }
 }

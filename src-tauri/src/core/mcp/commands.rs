@@ -12,7 +12,7 @@ use super::{
     helpers::{restart_active_mcp_servers, start_mcp_server},
 };
 use crate::core::{
-    app::commands::get_jan_data_folder_path,
+    app::commands::get_silence_data_folder_path,
     mcp::models::{McpSettings, ServerSummary},
     state::AppState,
 };
@@ -563,7 +563,7 @@ fn browser_mcp_bridge_port(config: &Value) -> Option<u16> {
 
 #[tauri::command]
 pub async fn get_mcp_configs<R: Runtime>(app: AppHandle<R>) -> Result<String, String> {
-    let mut path = get_jan_data_folder_path(app.clone());
+    let mut path = get_silence_data_folder_path(app.clone());
     path.push("mcp_config.json");
 
     // Create default empty config if file doesn't exist
@@ -784,7 +784,7 @@ pub async fn save_mcp_configs<R: Runtime>(
     app: AppHandle<R>,
     configs: String,
 ) -> Result<(), String> {
-    let mut path = get_jan_data_folder_path(app.clone());
+    let mut path = get_silence_data_folder_path(app.clone());
     path.push("mcp_config.json");
     log::info!("save mcp configs, path: {path:?}");
 

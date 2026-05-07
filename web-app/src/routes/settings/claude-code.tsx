@@ -16,7 +16,7 @@ import { useState, useMemo, useRef, useEffect } from 'react'
 import { useDownloadStore } from '@/hooks/useDownloadStore'
 import { useGeneralSetting } from '@/hooks/useGeneralSetting'
 import type { CatalogModel } from '@/services/models/types'
-import { JAN_CODE_HF_REPO } from '@/constants/models'
+import { RECOMMENDED_CODE_HF_REPO } from '@/constants/models'
 import { toast } from 'sonner'
 import { getModelToStart } from '@/utils/getModelToStart'
 import { invoke } from '@tauri-apps/api/core'
@@ -280,7 +280,7 @@ function ClaudeCodeIntegration() {
                   />
                 }
                 descriptionOutside={
-                  <JanCodeRecommendation
+                  <CodeModelRecommendation
                     selectedModel={helperModels.small}
                     onSelect={(modelId: string) =>
                       setHelperModel('small', modelId)
@@ -557,7 +557,7 @@ function HelperModelSelector({
   )
 }
 
-function JanCodeRecommendation({
+function CodeModelRecommendation({
   selectedModel,
   onSelect,
 }: {
@@ -569,17 +569,17 @@ function JanCodeRecommendation({
     useDownloadStore()
   const { getProviderByName } = useModelProvider()
   const huggingfaceToken = useGeneralSetting((state) => state.huggingfaceToken)
-  const [janCodeCatalog, setJanCodeCatalog] = useState<CatalogModel | null>(
+  const [codeModelCatalog, setCodeModelCatalog] = useState<CatalogModel | null>(
     null
   )
 
   useEffect(() => {
     serviceHub
       .models()
-      .fetchHuggingFaceRepo(JAN_CODE_HF_REPO, huggingfaceToken)
+      .fetchHuggingFaceRepo(RECOMMENDED_CODE_HF_REPO, huggingfaceToken)
       .then((repo) => {
         if (repo)
-          setJanCodeCatalog(
+          setCodeModelCatalog(
             serviceHub.models().convertHfRepoToCatalogModel(repo)
           )
       })
@@ -587,15 +587,15 @@ function JanCodeRecommendation({
   }, [serviceHub, huggingfaceToken])
 
   const defaultVariant = useMemo(() => {
-    if (!janCodeCatalog) return null
+    if (!codeModelCatalog) return null
     return (
-      janCodeCatalog.quants?.find((q) =>
+      codeModelCatalog.quants?.find((q) =>
         q.model_id.toLowerCase().includes('q4_k_m')
       ) ??
-      janCodeCatalog.quants?.[0] ??
+      codeModelCatalog.quants?.[0] ??
       null
     )
-  }, [janCodeCatalog])
+  }, [codeModelCatalog])
 
   const llamaProvider = getProviderByName('llamacpp')
 
@@ -645,7 +645,7 @@ function JanCodeRecommendation({
     <div className="p-2.5 rounded-lg min-h-[54px] border border-primary/20 bg-primary/5 flex items-center justify-between gap-3">
       <div className="flex flex-col gap-0.5">
         <span className="text-xs font-medium text-foreground">
-          Use Jan-Code for a quick start
+          Use the recommended coding model
         </span>
       </div>
       <div className="shrink-0">

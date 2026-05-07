@@ -6,7 +6,7 @@ import {
   TooltipProvider,
   TooltipTrigger,
 } from '@/components/ui/tooltip'
-import { getJanDataFolderPath, joinPath, fs } from '@janhq/core'
+import { getSilenceDataFolderPath, joinPath, fs } from '@janhq/core'
 import { useServiceHub } from '@/hooks/useServiceHub'
 
 interface ModelSupportStatusProps {
@@ -34,11 +34,11 @@ export const ModelSupportStatus = ({
       ctxSize: number
     ): Promise<'RED' | 'YELLOW' | 'GREEN' | 'GREY' | null> => {
       try {
-        const janDataFolder = await getJanDataFolderPath()
+        const silenceDataFolder = await getSilenceDataFolderPath()
 
         // First try the standard downloaded model path
         const ggufModelPath = await joinPath([
-          janDataFolder,
+          silenceDataFolder,
           'llamacpp',
           'models',
           id,
@@ -52,7 +52,7 @@ export const ModelSupportStatus = ({
 
         // If model.gguf doesn't exist, try reading from model.yml (for imported models)
         const modelConfigPath = await joinPath([
-          janDataFolder,
+          silenceDataFolder,
           'llamacpp',
           'models',
           id,
@@ -76,7 +76,7 @@ export const ModelSupportStatus = ({
           modelConfig.model_path.startsWith('/') ||
           modelConfig.model_path.match(/^[A-Za-z]:/)
             ? modelConfig.model_path // absolute path, use as-is
-            : await joinPath([janDataFolder, modelConfig.model_path]) // relative path, join with data folder
+            : await joinPath([silenceDataFolder, modelConfig.model_path]) // relative path, join with data folder
 
         return await serviceHub.models().isModelSupported(actualModelPath, ctxSize)
       } catch (error) {

@@ -15,6 +15,7 @@ const h = vi.hoisted(() => {
   const mockSetChatMessages = vi.fn()
   const mockUpdateRag = vi.fn()
   const mockSetContinueFromContent = vi.fn()
+  const useChatArgs: any[] = []
 
   const chatState: { messages: any[]; status: string; error: Error | null } = {
     messages: [],
@@ -131,6 +132,7 @@ const h = vi.hoisted(() => {
     mockSetChatMessages,
     mockUpdateRag,
     mockSetContinueFromContent,
+    useChatArgs,
     chatState,
     threadsState,
     useThreadsMock,
@@ -310,18 +312,21 @@ vi.mock('zustand/react/shallow', () => ({
 }))
 
 vi.mock('@/hooks/use-chat', () => ({
-  useChat: (_args: any) => ({
-    messages: h.chatState.messages,
-    status: h.chatState.status,
-    error: h.chatState.error,
-    sendMessage: h.mockSendMessage,
-    regenerate: h.mockRegenerate,
-    setMessages: h.mockSetChatMessages,
-    stop: h.mockStop,
-    addToolOutput: h.mockAddToolOutput,
-    updateRagToolsAvailability: h.mockUpdateRag,
-    setContinueFromContent: h.mockSetContinueFromContent,
-  }),
+  useChat: (args: any) => {
+    h.useChatArgs.push(args)
+    return {
+      messages: h.chatState.messages,
+      status: h.chatState.status,
+      error: h.chatState.error,
+      sendMessage: h.mockSendMessage,
+      regenerate: h.mockRegenerate,
+      setMessages: h.mockSetChatMessages,
+      stop: h.mockStop,
+      addToolOutput: h.mockAddToolOutput,
+      updateRagToolsAvailability: h.mockUpdateRag,
+      setContinueFromContent: h.mockSetContinueFromContent,
+    }
+  },
 }))
 
 vi.mock('@/hooks/useThreads', () => ({ useThreads: h.useThreadsMock }))
@@ -412,6 +417,7 @@ describe('ThreadDetail route', () => {
     h.messageQueueState.dequeue = vi.fn(() => null)
     h.messageQueueState.clearQueue = vi.fn()
     h.agentModeState.agentThreads = {}
+    h.useChatArgs.length = 0
     sessionStorage.clear()
   })
 
@@ -432,6 +438,39 @@ describe('ThreadDetail route', () => {
     expect(screen.getByTestId('model-dropdown')).toHaveTextContent('gpt-x')
     expect(screen.getByTestId('chat-input')).toBeInTheDocument()
     expect(screen.getByTestId('chat-status')).toHaveTextContent('ready')
+  })
+
+  it('injects Silence identity prompt even when thread has no assistant', () => {
+    renderComponent()
+
+    expect(h.useChatArgs.at(-1)?.systemMessage).toContain(
+      'rendered:You are Silence'
+    )
+    expect(h.useChatArgs.at(-1)?.systemMessage).toContain(
+      'Never say that you are Jan'
+    )
+    expect(h.useChatArgs.at(-1)?.systemMessage).toContain(
+      'Never translate it as "沉默"'
+    )
+  })
+
+  it('prepends Silence identity guard to custom assistant instructions', () => {
+    h.threadsState.threads['thread-1'].assistants = [
+      { id: 'custom', name: 'Custom', instructions: 'Use a concise tone.' },
+    ]
+
+    renderComponent()
+
+    expect(h.useChatArgs.at(-1)?.systemMessage).toContain(
+      'rendered:You are Silence'
+    )
+    expect(h.useChatArgs.at(-1)?.systemMessage).toContain(
+      'Never say that you are Jan'
+    )
+    expect(h.useChatArgs.at(-1)?.systemMessage).toContain(
+      'Never translate it as "沉默"'
+    )
+    expect(h.useChatArgs.at(-1)?.systemMessage).toContain('Use a concise tone.')
   })
 
   it('sets current thread id on mount and resets on unmount', () => {

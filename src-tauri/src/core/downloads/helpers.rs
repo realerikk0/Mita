@@ -1,6 +1,6 @@
 use super::models::{DownloadEvent, DownloadItem, ProgressTracker, ProxyConfig};
-use crate::core::app::commands::get_jan_data_folder_path;
-use crate::core::filesystem::helpers::resolve_path_within_jan_data_folder;
+use crate::core::app::commands::get_silence_data_folder_path;
+use crate::core::filesystem::helpers::resolve_path_within_silence_data_folder;
 use crate::core::updater::hmac_client::SignedRequestHeaders;
 use crate::core::updater::session::get_session_id;
 use futures_util::StreamExt;
@@ -16,11 +16,11 @@ use url::Url;
 
 // ===== CONSTANTS =====
 
-/// Jan mirror prefix for HuggingFace downloads
+/// Model mirror prefix for HuggingFace downloads
 /// - Stable builds: https://apps.jan.ai/
 /// - Nightly builds: https://apps-nightly.jan.ai/
-const JAN_MIRROR_PREFIX_STABLE: &str = "https://apps.jan.ai/";
-const JAN_MIRROR_PREFIX_NIGHTLY: &str = "https://apps-nightly.jan.ai/";
+const MODEL_MIRROR_PREFIX_STABLE: &str = "https://apps.jan.ai/";
+const MODEL_MIRROR_PREFIX_NIGHTLY: &str = "https://apps-nightly.jan.ai/";
 
 /// Domains that should use mirror download with fallback
 const MIRROR_DOMAINS: &[&str] = &["huggingface.co"];
@@ -34,18 +34,21 @@ fn is_nightly_build() -> bool {
 /// Get the appropriate mirror prefix based on build type
 fn get_mirror_prefix() -> &'static str {
     if is_nightly_build() {
-        JAN_MIRROR_PREFIX_NIGHTLY
+        MODEL_MIRROR_PREFIX_NIGHTLY
     } else {
-        JAN_MIRROR_PREFIX_STABLE
+        MODEL_MIRROR_PREFIX_STABLE
     }
 }
 
 /// Secret key for HMAC request authentication
-/// - In CI: Set JAN_SIGNING_KEY environment variable at build time
+/// - In CI: Set SILENCE_SIGNING_KEY environment variable at build time
 /// - In local dev: Falls back to a test key
-const SECRET_KEY: &str = match option_env!("JAN_SIGNING_KEY") {
+const SECRET_KEY: &str = match option_env!("SILENCE_SIGNING_KEY") {
     Some(key) => key,
-    None => "local-dev-test-key-not-for-production",
+    None => match option_env!("JAN_SIGNING_KEY") {
+        Some(key) => key,
+        None => "local-dev-test-key-not-for-production",
+    },
 };
 
 // ===== UTILITY FUNCTIONS =====
@@ -54,7 +57,7 @@ pub fn err_to_string<E: std::fmt::Display>(e: E) -> String {
     format!("Error: {e}")
 }
 
-/// Converts a URL to Jan mirror URL if applicable
+/// Converts a URL to the configured model mirror URL if applicable
 /// e.g., https://huggingface.co/... -> https://apps.jan.ai/huggingface.co/...
 /// or for nightly: https://huggingface.co/... -> https://apps-nightly.jan.ai/huggingface.co/...
 pub fn convert_to_mirror_url(url: &str) -> Option<String> {
@@ -421,15 +424,15 @@ pub async fn _download_files_internal(
     // Create progress tracker
     let progress_tracker = ProgressTracker::new(items, file_sizes.clone());
 
-    // save file under Jan data folder
-    let jan_data_folder = get_jan_data_folder_path(app.clone());
+    // save file under Silence data folder
+    let silence_data_folder = get_silence_data_folder_path(app.clone());
 
     // Collect download tasks for parallel execution
     let mut download_tasks = Vec::new();
 
     for (index, item) in items.iter().enumerate() {
         let (canonical_data, save_path) =
-            resolve_path_within_jan_data_folder(&jan_data_folder, &item.save_path)?;
+            resolve_path_within_silence_data_folder(&silence_data_folder, &item.save_path)?;
 
         // Spawn download task for each file
         let item_clone = item.clone();
@@ -447,7 +450,7 @@ pub async fn _download_files_internal(
 
         let task = tokio::spawn(async move {
             log::debug!(
-                "Downloading {} into Jan data folder {}",
+                "Downloading {} into Silence data folder {}",
                 item_clone.url,
                 canonical_data.display()
             );
@@ -638,7 +641,7 @@ async fn download_single_file(
 
     // Log which URL is being used for download
     if actual_url != item.url {
-        log::info!("Downloading via Jan mirror: {}", actual_url);
+        log::info!("Downloading via Silence mirror: {}", actual_url);
     }
 
     // If HEAD gave us no size, refine the running total from the GET response
@@ -745,15 +748,15 @@ pub async fn _get_maybe_resume_with_fallback(
 ) -> Result<(reqwest::Response, String), String> {
     // Try mirror URL first if applicable
     if let Some(mirror_url) = convert_to_mirror_url(url) {
-        log::info!("Attempting download from Jan mirror: {}", mirror_url);
+        log::info!("Attempting download from Silence mirror: {}", mirror_url);
         match _get_maybe_resume_with_hmac(client, &mirror_url, start_bytes).await {
             Ok(resp) => {
-                log::info!("Successfully connected to Jan mirror");
+                log::info!("Successfully connected to Silence mirror");
                 return Ok((resp, mirror_url));
             }
             Err(e) => {
                 log::warn!(
-                    "Jan mirror download failed: {}. Falling back to original URL...",
+                    "Silence mirror download failed: {}. Falling back to original URL...",
                     e
                 );
             }
@@ -766,7 +769,7 @@ pub async fn _get_maybe_resume_with_fallback(
     Ok((resp, url.to_string()))
 }
 
-/// Download from URL with HMAC headers for Jan mirror authentication
+/// Download from URL with HMAC headers for Silence mirror authentication
 async fn _get_maybe_resume_with_hmac(
     client: &reqwest::Client,
     url: &str,

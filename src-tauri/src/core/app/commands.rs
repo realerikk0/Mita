@@ -127,7 +127,7 @@ pub fn resolve_config_file_path() -> PathBuf {
 
 /// Resolve the Silence data folder path without an AppHandle (for CLI use).
 /// Reads AppConfiguration from the config file; falls back to the default location.
-pub fn resolve_jan_data_folder() -> PathBuf {
+pub fn resolve_silence_data_folder() -> PathBuf {
     let config_file = resolve_config_file_path();
 
     if config_file.exists() {
@@ -220,7 +220,7 @@ pub fn update_app_configuration<R: Runtime>(
 }
 
 #[tauri::command]
-pub fn get_jan_data_folder_path<R: Runtime>(app_handle: tauri::AppHandle<R>) -> PathBuf {
+pub fn get_silence_data_folder_path<R: Runtime>(app_handle: tauri::AppHandle<R>) -> PathBuf {
     if cfg!(test) {
         use std::cell::RefCell;
         thread_local! {
@@ -247,6 +247,11 @@ pub fn get_jan_data_folder_path<R: Runtime>(app_handle: tauri::AppHandle<R>) -> 
 
     let app_configurations = get_app_configurations(app_handle);
     PathBuf::from(app_configurations.data_folder)
+}
+
+#[tauri::command]
+pub fn get_jan_data_folder_path<R: Runtime>(app_handle: tauri::AppHandle<R>) -> PathBuf {
+    get_silence_data_folder_path(app_handle)
 }
 
 #[tauri::command]
@@ -296,7 +301,7 @@ pub fn change_app_data_folder<R: Runtime>(
     new_data_folder: String,
 ) -> Result<(), String> {
     // Get current data folder path
-    let current_data_folder = get_jan_data_folder_path(app_handle.clone());
+    let current_data_folder = get_silence_data_folder_path(app_handle.clone());
     let new_data_folder_path = PathBuf::from(&new_data_folder);
 
     // Create the new data folder if it doesn't exist

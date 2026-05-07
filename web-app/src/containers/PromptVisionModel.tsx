@@ -6,8 +6,8 @@ import { useModelProvider } from '@/hooks/useModelProvider'
 import { useEffect, useState, useMemo, useCallback, useRef } from 'react'
 import type { CatalogModel } from '@/services/models/types'
 import {
-  JAN_V2_VL_MODEL_HF_REPO,
-  JAN_V2_VL_QUANTIZATIONS,
+  RECOMMENDED_VISION_MODEL_HF_REPO,
+  RECOMMENDED_VISION_QUANTIZATIONS,
 } from '@/constants/models'
 import { AppEvent, events } from '@janhq/core'
 
@@ -28,7 +28,7 @@ export function PromptVisionModel({
   const { getProviderByName } = useModelProvider()
   const huggingfaceToken = useGeneralSetting((state) => state.huggingfaceToken)
 
-  const [janV2VLModel, setJanV2VLModel] = useState<CatalogModel | null>(null)
+  const [visionModel, setVisionModel] = useState<CatalogModel | null>(null)
   const [isLoading, setIsLoading] = useState(true)
   const [supportedVariants, setSupportedVariants] = useState<
     Map<string, 'RED' | 'YELLOW' | 'GREEN' | 'GREY'>
@@ -51,23 +51,23 @@ export function PromptVisionModel({
     }
   }, [open, existingModel, onDownloadComplete])
 
-  const fetchJanV2VLModel = useCallback(async () => {
+  const fetchVisionModel = useCallback(async () => {
     if (fetchAttempted.current) return
     fetchAttempted.current = true
 
     try {
       const repo = await serviceHub
         .models()
-        .fetchHuggingFaceRepo(JAN_V2_VL_MODEL_HF_REPO, huggingfaceToken)
+        .fetchHuggingFaceRepo(RECOMMENDED_VISION_MODEL_HF_REPO, huggingfaceToken)
 
       if (repo) {
         const catalogModel = serviceHub
           .models()
           .convertHfRepoToCatalogModel(repo)
-        setJanV2VLModel(catalogModel)
+        setVisionModel(catalogModel)
       }
     } catch (error) {
-      console.error('Error fetching Jan V2 VL Model:', error)
+      console.error('Error fetching recommended vision model:', error)
     } finally {
       setIsLoading(false)
     }
@@ -75,21 +75,21 @@ export function PromptVisionModel({
 
   useEffect(() => {
     if (open && !existingModel) {
-      fetchJanV2VLModel()
+      fetchVisionModel()
     }
-  }, [open, existingModel, fetchJanV2VLModel])
+  }, [open, existingModel, fetchVisionModel])
 
   useEffect(() => {
     const checkModelSupport = async () => {
-      if (!janV2VLModel) return
+      if (!visionModel) return
 
       const variantSupportMap = new Map<
         string,
         'RED' | 'YELLOW' | 'GREEN' | 'GREY'
       >()
 
-      for (const quantization of JAN_V2_VL_QUANTIZATIONS) {
-        const variant = janV2VLModel.quants?.find((quant) =>
+      for (const quantization of RECOMMENDED_VISION_QUANTIZATIONS) {
+        const variant = visionModel.quants?.find((quant) =>
           quant.model_id.toLowerCase().includes(quantization)
         )
 
@@ -113,10 +113,10 @@ export function PromptVisionModel({
     }
 
     checkModelSupport()
-  }, [janV2VLModel, serviceHub])
+  }, [visionModel, serviceHub])
 
   const defaultVariant = useMemo(() => {
-    if (!janV2VLModel) return null
+    if (!visionModel) return null
 
     const priorityOrder: Array<'GREEN' | 'YELLOW' | 'GREY'> = [
       'GREEN',
@@ -125,8 +125,8 @@ export function PromptVisionModel({
     ]
 
     for (const status of priorityOrder) {
-      for (const quantization of JAN_V2_VL_QUANTIZATIONS) {
-        const variant = janV2VLModel.quants?.find((quant) =>
+      for (const quantization of RECOMMENDED_VISION_QUANTIZATIONS) {
+        const variant = visionModel.quants?.find((quant) =>
           quant.model_id.toLowerCase().includes(quantization)
         )
 
@@ -136,15 +136,15 @@ export function PromptVisionModel({
       }
     }
 
-    for (const quantization of JAN_V2_VL_QUANTIZATIONS) {
-      const variant = janV2VLModel.quants?.find((quant) =>
+    for (const quantization of RECOMMENDED_VISION_QUANTIZATIONS) {
+      const variant = visionModel.quants?.find((quant) =>
         quant.model_id.toLowerCase().includes(quantization)
       )
       if (variant) return variant
     }
 
-    return janV2VLModel.quants?.[0]
-  }, [janV2VLModel, supportedVariants])
+    return visionModel.quants?.[0]
+  }, [visionModel, supportedVariants])
 
   const isDownloading = useMemo(() => {
     if (!defaultVariant) return false
@@ -173,7 +173,7 @@ export function PromptVisionModel({
   }, [onDownloadComplete])
 
   const handleDownload = () => {
-    if (!defaultVariant || !janV2VLModel) return
+    if (!defaultVariant || !visionModel) return
 
     downloadStartedModelId.current = defaultVariant.model_id
     addLocalDownloadingModel(defaultVariant.model_id)
@@ -181,7 +181,7 @@ export function PromptVisionModel({
     serviceHub.models().pullModelWithMetadata(
       defaultVariant.model_id,
       defaultVariant.path,
-      janV2VLModel.mmproj_models?.[0]?.path,
+      visionModel.mmproj_models?.[0]?.path,
       huggingfaceToken,
       true
     )
@@ -195,12 +195,12 @@ export function PromptVisionModel({
       <div className="flex items-center gap-2">
         <img src="/images/jan-logo.png" alt="Silence" className="size-5" />
         <h2 className="font-medium">
-          Jan V2 VL Model
+          Silence Vision Model
           <span className="text-muted-foreground"> (~5GB)</span>
         </h2>
       </div>
       <p className="mt-2 text-sm text-muted-foreground">
-        Add vision capabilities to chat with images. Download Jan V2 VL, our
+        Add vision capabilities to chat with images. Download our
         recommended vision model.
       </p>
       <div className="mt-4 flex justify-end space-x-2">

@@ -133,7 +133,7 @@ export class DefaultThreadsService implements ThreadsService {
           name: e.name,
           instructions: e.instructions,
         })) ?? [
-          { model: toModelPayload(thread.model), id: 'jan', name: 'Jan' },
+          { model: toModelPayload(thread.model), id: 'jan', name: 'Silence' },
         ],
         metadata: {
           ...thread.metadata,

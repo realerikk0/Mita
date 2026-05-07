@@ -3,17 +3,17 @@ import { create } from 'zustand'
 import { createJSONStorage, persist } from 'zustand/middleware'
 import { useModelProvider } from './useModelProvider'
 import { useDownloadStore } from './useDownloadStore'
-import { useLatestJanModel } from './useLatestJanModel'
+import { useLatestSilenceModel } from './useLatestSilenceModel'
 import { predefinedProviders } from '@/constants/providers'
 import { providerHasRemoteApiKeys } from '@/lib/provider-api-keys'
 
-export type JanModelPromptDismissedState = {
+export type SilenceModelPromptDismissedState = {
   dismissedModelName: string | null
   setDismissedModelName: (modelName: string) => void
 }
 
-export const useJanModelPromptDismissed =
-  create<JanModelPromptDismissedState>()(
+export const useSilenceModelPromptDismissed =
+  create<SilenceModelPromptDismissedState>()(
     persist(
       (set) => ({
         dismissedModelName: null,
@@ -21,7 +21,7 @@ export const useJanModelPromptDismissed =
           set({ dismissedModelName: modelName }),
       }),
       {
-        name: localStorageKey.janModelPromptDismissed,
+        name: localStorageKey.silenceModelPromptDismissed,
         storage: createJSONStorage(() => localStorage),
         version: 1,
         migrate: (persistedState: unknown) => {
@@ -29,7 +29,7 @@ export const useJanModelPromptDismissed =
           if ('dismissed' in state && !('dismissedModelName' in state)) {
             return { dismissedModelName: null }
           }
-          return state as JanModelPromptDismissedState
+          return state as SilenceModelPromptDismissedState
         },
       }
     )
@@ -37,12 +37,12 @@ export const useJanModelPromptDismissed =
 
 const MIN_VERSION = '0.7.6'
 
-export const useJanModelPrompt = () => {
+export const useSilenceModelPrompt = () => {
   const { dismissedModelName, setDismissedModelName } =
-    useJanModelPromptDismissed()
+    useSilenceModelPromptDismissed()
   const { getProviderByName, providers } = useModelProvider()
   const { localDownloadingModels } = useDownloadStore()
-  const latestModel = useLatestJanModel((state) => state.model)
+  const latestModel = useLatestSilenceModel((state) => state.model)
 
   const llamaProvider = getProviderByName('llamacpp')
 
@@ -65,13 +65,13 @@ export const useJanModelPrompt = () => {
   })
   const isOnSetupScreen = !hasValidProviders
 
-  // Build set of known quant model IDs from the latest Jan model
+  // Build set of known quant model IDs from the latest Silence model
   const latestModelQuantIds = new Set(
     latestModel?.quants?.map((q) => q.model_id.toLowerCase()) ?? []
   )
 
-  // Check if any variant of the latest Jan model is downloaded
-  const isJanModelDownloaded =
+  // Check if any variant of the latest Silence model is downloaded
+  const isSilenceModelDownloaded =
     latestModelQuantIds.size > 0 &&
     (llamaProvider?.models.some(
       (m: { id: string }) => latestModelQuantIds.has(m.id.toLowerCase())
@@ -89,18 +89,18 @@ export const useJanModelPrompt = () => {
     latestModel != null &&
     dismissedModelName === latestModel.model_name
 
-  const showJanModelPrompt =
+  const showSilenceModelPrompt =
     isTargetVersion &&
     !isOnSetupScreen &&
     !isDismissed &&
     latestModel != null &&
-    !isJanModelDownloaded &&
+    !isSilenceModelDownloaded &&
     !isDownloading
 
   return {
-    showJanModelPrompt,
+    showSilenceModelPrompt,
     setDismissedModelName,
-    isJanModelDownloaded,
+    isSilenceModelDownloaded,
     isDownloading,
   }
 }

@@ -32,7 +32,7 @@ Object.defineProperty(global, 'MODEL_CATALOG_URL', {
   writable: true,
   configurable: true,
 })
-Object.defineProperty(global, 'LATEST_JAN_MODEL_URL', {
+Object.defineProperty(global, 'LATEST_SILENCE_MODEL_URL', {
   value: 'https://example.com/latest',
   writable: true,
   configurable: true,

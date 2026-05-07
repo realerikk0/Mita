@@ -875,8 +875,9 @@ function ProviderDetail() {
                           </div>
 
                           <div className="text-xs text-muted-foreground">
-                            Primary key is <span className="font-medium">#1</span>. Jan
-                            retries the next key only on{' '}
+                            {t('providers:apiKeys.retryHintPrefix')}{' '}
+                            <span className="font-medium">#1</span>.{' '}
+                            {t('providers:apiKeys.retryHintSuffix')}{' '}
                             <span className="font-medium">401/403/429</span>.
                           </div>
 

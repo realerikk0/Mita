@@ -441,7 +441,7 @@ describe('DefaultThreadsService', () => {
             {
               model: { id: 'gpt-4', engine: 'openai' },
               id: 'jan',
-              name: 'Jan',
+              name: 'Silence',
             },
           ],
         })

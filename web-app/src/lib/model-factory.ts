@@ -133,17 +133,65 @@ const CLIENT_SIDE_PARAM_KEYS: ReadonlySet<string> = new Set([
   'auto_compact',
 ])
 
+const REMOTE_UNSUPPORTED_PARAM_KEYS: ReadonlySet<string> = new Set([
+  'top_k',
+  'repeat_penalty',
+])
+
+function isClaudeModel(modelId: string): boolean {
+  return modelId.toLowerCase().startsWith('claude-')
+}
+
+function isClaudeOpus47Model(modelId: string): boolean {
+  const lowerModelId = modelId.toLowerCase()
+  return lowerModelId.startsWith('claude-opus-4-7')
+}
+
+function normalizeInferenceParameters(
+  parameters: Record<string, unknown>,
+  options: {
+    keepLlamacppOnly?: boolean
+    modelId?: string
+    remote?: boolean
+  } = {}
+): Record<string, unknown> {
+  const { keepLlamacppOnly = false, modelId, remote = !keepLlamacppOnly } = options
+  const normalised: Record<string, unknown> = {}
+
+  for (const [key, value] of Object.entries(parameters)) {
+    if (CLIENT_SIDE_PARAM_KEYS.has(key)) continue
+    if (!keepLlamacppOnly && LLAMACPP_ONLY_PARAM_KEYS.has(key)) continue
+    if (remote && REMOTE_UNSUPPORTED_PARAM_KEYS.has(key)) continue
+
+    const targetKey = key === 'max_output_tokens' ? 'max_tokens' : key
+    normalised[targetKey] = value
+  }
+
+  if (modelId && isClaudeOpus47Model(modelId)) {
+    delete normalised.temperature
+    delete normalised.top_p
+  }
+
+  if (
+    modelId &&
+    isClaudeModel(modelId) &&
+    normalised.temperature !== undefined &&
+    normalised.top_p !== undefined
+  ) {
+    delete normalised.top_p
+  }
+
+  return normalised
+}
+
 function filterParameters(
   parameters: Record<string, unknown>,
   keepLlamacppOnly: boolean
 ): Record<string, unknown> {
-  if (keepLlamacppOnly) return parameters
-  const out: Record<string, unknown> = {}
-  for (const [k, v] of Object.entries(parameters)) {
-    if (LLAMACPP_ONLY_PARAM_KEYS.has(k)) continue
-    out[k] = v
-  }
-  return out
+  return normalizeInferenceParameters(parameters, {
+    keepLlamacppOnly,
+    remote: false,
+  })
 }
 
 /**
@@ -151,25 +199,23 @@ function filterParameters(
  * request body, normalising key names for OpenAI-compatible APIs:
  * - `max_output_tokens` is remapped to `max_tokens`
  * - client-side-only keys (e.g. `ctx_len`) are stripped
+ * - local/remote-incompatible sampling keys are stripped for remote providers
  */
 function createCustomFetch(
   baseFetch: typeof globalThis.fetch,
   parameters: Record<string, unknown>,
-  keepLlamacppOnly = false
+  keepLlamacppOnly = false,
+  modelId?: string
 ): typeof globalThis.fetch {
   return async (input: RequestInfo | URL, init?: RequestInit): Promise<Response> => {
     if (init?.method === 'POST' || !init?.method) {
       const body = init?.body ? JSON.parse(init.body as string) : {}
 
-      // Normalise and merge inference parameters
-      const normalised: Record<string, unknown> = {}
-      for (const [key, value] of Object.entries(parameters)) {
-        if (CLIENT_SIDE_PARAM_KEYS.has(key)) continue
-        if (!keepLlamacppOnly && LLAMACPP_ONLY_PARAM_KEYS.has(key)) continue
-        // max_output_tokens → max_tokens (OpenAI-compatible field name)
-        const targetKey = key === 'max_output_tokens' ? 'max_tokens' : key
-        normalised[targetKey] = value
-      }
+      const normalised = normalizeInferenceParameters(parameters, {
+        keepLlamacppOnly,
+        modelId,
+        remote: !keepLlamacppOnly,
+      })
 
       init = { ...init, body: JSON.stringify({ ...body, ...normalised }) }
     }
@@ -185,9 +231,10 @@ function createApiKeyRotatingFetch(
   baseFetch: typeof globalThis.fetch,
   apiKeys: string[],
   parameters: Record<string, unknown>,
-  headerMode: ApiKeyHeaderMode
+  headerMode: ApiKeyHeaderMode,
+  modelId?: string
 ): typeof globalThis.fetch {
-  const inner = createCustomFetch(baseFetch, parameters)
+  const inner = createCustomFetch(baseFetch, parameters, false, modelId)
   if (apiKeys.length <= 1) {
     return inner
   }
@@ -387,7 +434,7 @@ export class ModelFactory {
       case 'perplexity':
       case 'moonshot':
       case 'minimax':
-        return this.createOpenAICompatibleModel(modelId, provider)
+        return this.createOpenAICompatibleModel(modelId, provider, parameters)
 
       case 'xai':
         return this.createXaiModel(modelId, provider, parameters)
@@ -648,9 +695,10 @@ export class ModelFactory {
             getRuntimeFetch(),
             keyChain,
             parameters,
-            'x-api-key'
+            'x-api-key',
+            modelId
           )
-        : createCustomFetch(getRuntimeFetch(), parameters)
+        : createCustomFetch(getRuntimeFetch(), parameters, false, modelId)
 
     const anthropic = createAnthropic({
       apiKey: keyChain[0] ?? provider.api_key ?? '',
@@ -686,9 +734,10 @@ export class ModelFactory {
             getRuntimeFetch(),
             keyChain,
             parameters,
-            'x-api-key'
+            'x-api-key',
+            modelId
           )
-        : createCustomFetch(getRuntimeFetch(), parameters)
+        : createCustomFetch(getRuntimeFetch(), parameters, false, modelId)
 
     const google = createGoogleGenerativeAI({
       apiKey: keyChain[0] ?? provider.api_key ?? '',
@@ -724,9 +773,10 @@ export class ModelFactory {
             getRuntimeFetch(),
             keyChain,
             parameters,
-            'authorization-bearer'
+            'authorization-bearer',
+            modelId
           )
-        : createCustomFetch(getRuntimeFetch(), parameters)
+        : createCustomFetch(getRuntimeFetch(), parameters, false, modelId)
 
     const openai = createOpenAI({
       apiKey: keyChain[0] ?? provider.api_key ?? '',
@@ -762,9 +812,10 @@ export class ModelFactory {
             getRuntimeFetch(),
             keyChain,
             parameters,
-            'authorization-bearer'
+            'authorization-bearer',
+            modelId
           )
-        : createCustomFetch(getRuntimeFetch(), parameters)
+        : createCustomFetch(getRuntimeFetch(), parameters, false, modelId)
 
     const xai = createXai({
       apiKey: keyChain[0] ?? provider.api_key ?? '',
@@ -804,9 +855,10 @@ export class ModelFactory {
             getRuntimeFetch(),
             keyChain,
             parameters,
-            'authorization-bearer'
+            'authorization-bearer',
+            modelId
           )
-        : createCustomFetch(getRuntimeFetch(), parameters)
+        : createCustomFetch(getRuntimeFetch(), parameters, false, modelId)
 
     const openAICompatible = createOpenAICompatible({
       name: provider.provider,

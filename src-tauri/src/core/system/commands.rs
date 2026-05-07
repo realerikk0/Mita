@@ -4,7 +4,7 @@ use tauri::{AppHandle, Manager, Runtime, State};
 use tauri_plugin_llamacpp::cleanup_llama_processes;
 
 use crate::core::app::commands::{
-    default_data_folder_path, get_jan_data_folder_path, update_app_configuration,
+    default_data_folder_path, get_silence_data_folder_path, update_app_configuration,
 };
 use crate::core::app::constants::{
     SILENCE_DATA_DIRS_COMMON, SILENCE_DATA_DIRS_CONVERSATIONS, SILENCE_DATA_DIRS_MODELS,
@@ -150,7 +150,7 @@ pub fn factory_reset<R: Runtime>(
             });
         }
     }
-    let data_folder = get_jan_data_folder_path(app_handle.clone());
+    let data_folder = get_silence_data_folder_path(app_handle.clone());
     log::info!(
         "Factory reset (keep_app_data={}, keep_models_and_configs={}), data folder: {:?}",
         keep_app_data,
@@ -268,7 +268,7 @@ pub fn open_file_explorer(path: String) {
 
 #[tauri::command]
 pub async fn read_logs<R: Runtime>(app: AppHandle<R>) -> Result<String, String> {
-    let log_path = get_jan_data_folder_path(app).join("logs").join("app.log");
+    let log_path = get_silence_data_folder_path(app).join("logs").join("app.log");
     if log_path.exists() {
         let content = fs::read_to_string(log_path).map_err(|e| e.to_string())?;
         Ok(content)

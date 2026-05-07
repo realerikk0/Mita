@@ -99,12 +99,12 @@ describe('TauriAppService – coverage', () => {
     })
   })
 
-  describe('getJanDataFolder', () => {
+  describe('getSilenceDataFolder', () => {
     it('returns undefined on error', async () => {
       const spy = vi.spyOn(console, 'error').mockImplementation(() => {})
       mockWindowCore.api.getAppConfigurations.mockRejectedValue(new Error('fail'))
 
-      const result = await svc.getJanDataFolder()
+      const result = await svc.getSilenceDataFolder()
 
       expect(result).toBeUndefined()
       expect(spy).toHaveBeenCalled()
@@ -114,7 +114,7 @@ describe('TauriAppService – coverage', () => {
     it('returns undefined when config has no data_folder', async () => {
       mockWindowCore.api.getAppConfigurations.mockResolvedValue({})
 
-      const result = await svc.getJanDataFolder()
+      const result = await svc.getSilenceDataFolder()
 
       expect(result).toBeUndefined()
     })

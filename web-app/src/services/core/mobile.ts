@@ -8,7 +8,7 @@
 
 import { TauriCoreService } from './tauri'
 import type { ExtensionManifest } from '@/lib/extension'
-import JanConversationalExtension from '@janhq/conversational-extension'
+import SilenceConversationalExtension from '@janhq/conversational-extension'
 
 export class MobileCoreService extends TauriCoreService {
   /**
@@ -45,7 +45,7 @@ export class MobileCoreService extends TauriCoreService {
    * Private method to return pre-bundled mobile extensions
    */
   private getBundledExtensions(): ExtensionManifest[] {
-    const conversationalExt = new JanConversationalExtension(
+    const conversationalExt = new SilenceConversationalExtension(
       'built-in',
       '@janhq/conversational-extension',
       'Conversational Extension',

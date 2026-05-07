@@ -26,6 +26,7 @@ import { useServiceHub } from '@/hooks/useServiceHub'
 import { getLastUsedModel } from '@/utils/getModelToStart'
 import { ChevronsUpDown } from 'lucide-react'
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip'
+import { isChatModelSelectable } from '@/lib/chat-models'
 
 type DropdownModelProviderProps = {
   model?: ThreadModel
@@ -83,7 +84,9 @@ const DropdownModelProvider = memo(function DropdownModelProvider({
       const provider = providers.find(
         (p) => p.provider === providerName && p.active
       )
-      return provider?.models.find((m) => m.id === modelId)
+      return provider?.models.find(
+        (m) => m.id === modelId && isChatModelSelectable(m.id)
+      )
     },
     [providers]
   )
@@ -268,6 +271,7 @@ const DropdownModelProvider = memo(function DropdownModelProvider({
       provider.models.forEach((modelItem) => {
         // Skip embedding models - they can't be used for chat
         if (modelItem.embedding) return
+        if (!isChatModelSelectable(modelItem.id)) return
 
         // Skip models that require API key but don't have one (except llamacpp)
         // For custom providers, allow if they have at least one model loaded

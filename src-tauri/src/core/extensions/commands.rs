@@ -2,12 +2,17 @@ use std::fs;
 use std::path::PathBuf;
 use tauri::{AppHandle, Runtime};
 
-use crate::core::app::commands::get_jan_data_folder_path;
+use crate::core::app::commands::get_silence_data_folder_path;
 use crate::core::setup;
 
 #[tauri::command]
+pub fn get_silence_extensions_path<R: Runtime>(app_handle: tauri::AppHandle<R>) -> PathBuf {
+    get_silence_data_folder_path(app_handle).join("extensions")
+}
+
+#[tauri::command]
 pub fn get_jan_extensions_path<R: Runtime>(app_handle: tauri::AppHandle<R>) -> PathBuf {
-    get_jan_data_folder_path(app_handle).join("extensions")
+    get_silence_extensions_path(app_handle)
 }
 
 #[tauri::command]
@@ -28,9 +33,9 @@ pub fn get_active_extensions<R: Runtime>(app: AppHandle<R>) -> Vec<serde_json::V
 
     #[cfg(not(any(target_os = "android", target_os = "ios")))]
     {
-        let mut path = get_jan_extensions_path(app);
+        let mut path = get_silence_extensions_path(app);
         path.push("extensions.json");
-        log::info!("get jan extensions, path: {path:?}");
+        log::info!("get silence extensions, path: {path:?}");
 
         let contents = fs::read_to_string(path);
         let contents: Vec<serde_json::Value> = match contents {

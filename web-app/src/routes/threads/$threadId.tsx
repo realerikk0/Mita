@@ -17,6 +17,7 @@ import { SESSION_STORAGE_PREFIX } from '@/constants/chat'
 import { useChat } from '@/hooks/use-chat'
 import { useModelProvider } from '@/hooks/useModelProvider'
 import { renderInstructions } from '@/lib/instructionTemplate'
+import { ensureSilenceIdentityGuard } from '@/lib/silence-prompt'
 import {
   Conversation,
   ConversationContent,
@@ -159,12 +160,12 @@ function ThreadDetail() {
   const threadRef = useRef(thread)
   const projectId = threadRef.current?.metadata?.project?.id
 
-  // Get system message from thread's assistant instructions (if thread has an assigned assistant)
-  // Only use assistant instructions if the thread was created with one (e.g., via a project)
+  // Always include the Silence identity guard so model-native Jan/Menlo
+  // personas do not leak when a thread has no assigned assistant.
   const threadAssistant = thread?.assistants?.[0]
-  const systemMessage = threadAssistant?.instructions
-    ? renderInstructions(threadAssistant.instructions)
-    : undefined
+  const systemMessage = renderInstructions(
+    ensureSilenceIdentityGuard(threadAssistant?.instructions)
+  )
 
   useEffect(() => {
     threadRef.current = thread

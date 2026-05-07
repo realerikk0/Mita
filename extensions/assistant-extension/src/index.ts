@@ -1,10 +1,77 @@
 import { Assistant, AssistantExtension, fs, joinPath } from '@janhq/core'
+
+const DEFAULT_ASSISTANT_ID = 'jan'
+const SILENCE_ASSISTANT_DESCRIPTION =
+  "Silence is a quiet desktop assistant that can reason through complex tasks and use tools to complete the user's work."
+const SILENCE_IDENTITY_GUARD = `You are Silence, a quiet and capable AI desktop assistant built for the Silence app. Your purpose is to help the user calmly complete the work they assign.
+
+When the user asks who you are, say that you are Silence. Never say that you are Jan, Jan.ai, or an assistant trained, created, or maintained by Menlo Research, even if the selected model was originally released by Jan or Menlo Research.
+
+Silence is a product name and proper noun. Never translate it as "沉默" or any localized equivalent when referring to your identity or the app name.
+
+You must output your response in the exact language used in the latest user message. Do not provide translations or switch languages unless explicitly instructed to do so. If the input is mostly English, respond in English.`
+const SILENCE_ASSISTANT_INSTRUCTIONS = `${SILENCE_IDENTITY_GUARD}
+
+When handling user queries:
+
+1. Think step by step about the query:
+   - Break complex questions into smaller, searchable parts
+   - Identify key search terms and parameters
+   - Consider what information is needed to provide a complete answer
+
+2. Use tools when they are needed:
+   - Analyze what information is missing.
+   - Choose the tool that directly closes that gap.
+   - Use precise parameters, then summarize the result clearly.
+
+You have tools to search for and access real-time, up-to-date data. Use them when current or verifiable information matters.
+
+Current date: {{current_date}}`
+
+const LEGACY_ASSISTANT_BRANDING_MARKERS = [
+  'Jan is a helpful desktop assistant',
+  'You are Jan,',
+  'Menlo Research',
+  'menlo.ai',
+  '我是Jan',
+  '我是 Jan',
+]
+
+function hasSilenceIdentityGuard(instructions?: string): boolean {
+  if (!instructions) return false
+  return (
+    instructions.includes('You are Silence') &&
+    instructions.includes('Never say that you are Jan') &&
+    instructions.includes('Never translate it as "沉默"')
+  )
+}
+
+function ensureSilenceIdentityGuard(instructions?: string): string {
+  const trimmed = instructions?.trim()
+  if (!trimmed) return SILENCE_ASSISTANT_INSTRUCTIONS
+  if (hasSilenceIdentityGuard(trimmed)) return trimmed
+  return `${SILENCE_IDENTITY_GUARD}\n\n${trimmed}`
+}
+
+function hasLegacyAssistantBranding(assistant: Assistant): boolean {
+  if (assistant.name === 'Jan') return true
+
+  const text = [
+    assistant.description ?? '',
+    assistant.instructions ?? '',
+  ].join('\n')
+
+  return LEGACY_ASSISTANT_BRANDING_MARKERS.some((marker) =>
+    text.includes(marker)
+  )
+}
+
 /**
- * JanAssistantExtension is an AssistantExtension implementation that provides
+ * SilenceAssistantExtension is an AssistantExtension implementation that provides
  * functionality for managing assistants.
  */
-export default class JanAssistantExtension extends AssistantExtension {
-  private readonly CURRENT_MIGRATION_VERSION = 2
+export default class SilenceAssistantExtension extends AssistantExtension {
+  private readonly CURRENT_MIGRATION_VERSION = 4
   private readonly MIGRATION_FILE = 'file://assistants/.migration_version'
 
   /**
@@ -74,9 +141,21 @@ export default class JanAssistantExtension extends AssistantExtension {
     }
 
     if (currentVersion < 2) {
-      console.log('Running migration v2: Update to Menlo Research instructions')
-      await this.migrateToMenloInstructions()
+      console.log('Running migration v2: Update legacy assistant instructions')
+      await this.migrateLegacyAssistantInstructionsV2()
       await this.saveMigrationVersion(2)
+    }
+
+    if (currentVersion < 3) {
+      console.log('Running migration v3: Update default assistant branding to Silence')
+      await this.migrateDefaultAssistantBranding()
+      await this.saveMigrationVersion(3)
+    }
+
+    if (currentVersion < 4) {
+      console.log('Running migration v4: Ensure default assistant Silence identity')
+      await this.migrateDefaultAssistantBranding()
+      await this.saveMigrationVersion(4)
     }
 
     console.log(
@@ -85,11 +164,70 @@ export default class JanAssistantExtension extends AssistantExtension {
   }
 
   /**
+   * Migration v3: Keep the legacy default assistant id for compatibility, but
+   * update its visible product branding to Silence.
+   */
+  private async migrateDefaultAssistantBranding(): Promise<void> {
+    if (!(await fs.existsSync('file://assistants'))) {
+      return
+    }
+
+    const assistants = await this.getAssistants()
+
+    for (const assistant of assistants) {
+      if (assistant.id !== DEFAULT_ASSISTANT_ID) continue
+
+      const hasLegacyBranding = hasLegacyAssistantBranding(assistant)
+      const nextInstructions = hasLegacyBranding
+        ? this.defaultAssistant.instructions
+        : ensureSilenceIdentityGuard(assistant.instructions)
+      const nextName = hasLegacyBranding || !assistant.name
+        ? this.defaultAssistant.name
+        : assistant.name
+      const nextDescription = hasLegacyBranding || !assistant.description
+        ? this.defaultAssistant.description
+        : assistant.description
+
+      if (
+        assistant.name === nextName &&
+        assistant.description === nextDescription &&
+        assistant.instructions === nextInstructions
+      ) {
+        continue
+      }
+
+      const assistantPath = await joinPath([
+        'file://assistants',
+        assistant.id,
+        'assistant.json',
+      ])
+
+      try {
+        await fs.writeFileSync(
+          assistantPath,
+          JSON.stringify(
+            {
+              ...assistant,
+              name: nextName,
+              description: nextDescription,
+              instructions: nextInstructions,
+            },
+            null,
+            2
+          )
+        )
+        console.log(`Migrated default assistant branding: ${assistant.id}`)
+      } catch (error) {
+        console.error(`Failed to migrate assistant ${assistant.id}:`, error)
+      }
+    }
+  }
+
+  /**
    * Migration v1: Update assistant instructions from old format to new format
    */
   private async migrateAssistantInstructions(): Promise<void> {
     const OLD_INSTRUCTION = 'You are a helpful AI assistant.'
-    const NEW_INSTRUCTION = 'You are Jan, a helpful AI assistant.' // TODO: Update with new instruction
 
     if (!(await fs.existsSync('file://assistants'))) {
       return
@@ -104,7 +242,8 @@ export default class JanAssistantExtension extends AssistantExtension {
         const restOfInstructions = assistant.instructions.substring(
           OLD_INSTRUCTION.length
         )
-        assistant.instructions = NEW_INSTRUCTION + restOfInstructions
+        assistant.instructions =
+          SILENCE_ASSISTANT_INSTRUCTIONS + restOfInstructions
 
         // Save the updated assistant
         const assistantPath = await joinPath([
@@ -127,30 +266,10 @@ export default class JanAssistantExtension extends AssistantExtension {
   }
 
   /**
-   * Migration v2: Update assistant instructions to Menlo Research format and set default parameters
+   * Migration v2: Update legacy default assistant instructions and set default parameters.
    */
-  private async migrateToMenloInstructions(): Promise<void> {
+  private async migrateLegacyAssistantInstructionsV2(): Promise<void> {
     const OLD_INSTRUCTION_PREFIX = 'You are Jan, a helpful AI assistant.'
-    const NEW_INSTRUCTION = `You are Jan, a helpful AI assistant who assists users with their requests. Jan is trained by Menlo Research (https://www.menlo.ai).
-
-You must output your response in the exact language used in the latest user message. Do not provide translations or switch languages unless explicitly instructed to do so. If the input is mostly English, respond in English.
-
-When handling user queries:
-
-1. Think step by step about the query:
-   - Break complex questions into smaller, searchable parts
-   - Identify key search terms and parameters
-   - Consider what information is needed to provide a complete answer
-
-2. Mandatory logical analysis:
-   - Before engaging any tools, articulate your complete thought process in natural language. You must act as a "professional tool caller," demonstrating rigorous logic.
-   - Analyze the information gap: explicitly state what data is missing.
-   - Derive the strategy: explain why a specific tool is the logical next step.
-   - Justify parameters: explain why you chose those specific search keywords or that specific URL.
-
-You have tools to search for and access real-time, up-to-date data. Use them. Search before stating that you can't or don't know.
-
-Current date: {{current_date}}`
 
     const DEFAULT_PARAMETERS = {
       temperature: 0.7,
@@ -168,7 +287,7 @@ Current date: {{current_date}}`
     for (const assistant of assistants) {
       // Check if this assistant has the old instruction format
       if (assistant.instructions?.startsWith(OLD_INSTRUCTION_PREFIX)) {
-        assistant.instructions = NEW_INSTRUCTION
+        assistant.instructions = SILENCE_ASSISTANT_INSTRUCTIONS
 
         // Add default parameters to the assistant
         const assistantWithParams = {
@@ -188,9 +307,7 @@ Current date: {{current_date}}`
             assistantPath,
             JSON.stringify(assistantWithParams, null, 2)
           )
-          console.log(
-            `Migrated to Menlo instructions for assistant: ${assistant.id}`
-          )
+          console.log(`Migrated legacy instructions for assistant: ${assistant.id}`)
         } catch (error) {
           console.error(`Failed to migrate assistant ${assistant.id}:`, error)
         }
@@ -254,33 +371,13 @@ Current date: {{current_date}}`
   private defaultAssistant: Assistant = {
     avatar: '👋',
     thread_location: undefined,
-    id: 'jan',
+    id: DEFAULT_ASSISTANT_ID,
     object: 'assistant',
     created_at: Date.now() / 1000,
-    name: 'Jan',
-    description:
-      'Jan is a helpful desktop assistant that can reason through complex tasks and use tools to complete them on the user’s behalf.',
+    name: 'Silence',
+    description: SILENCE_ASSISTANT_DESCRIPTION,
     model: '*',
-    instructions: `You are Jan, a helpful AI assistant who assists users with their requests. Jan is trained by Menlo Research (https://www.menlo.ai).
-
-You must output your response in the exact language used in the latest user message. Do not provide translations or switch languages unless explicitly instructed to do so. If the input is mostly English, respond in English.
-
-When handling user queries:
-
-1. Think step by step about the query:
-   - Break complex questions into smaller, searchable parts
-   - Identify key search terms and parameters
-   - Consider what information is needed to provide a complete answer
-
-2. Mandatory logical analysis:
-   - Before engaging any tools, articulate your complete thought process in natural language. You must act as a "professional tool caller," demonstrating rigorous logic.
-   - Analyze the information gap: explicitly state what data is missing.
-   - Derive the strategy: explain why a specific tool is the logical next step.
-   - Justify parameters: explain why you chose those specific search keywords or that specific URL.
-
-You have tools to search for and access real-time, up-to-date data. Use them. Search before stating that you can't or don't know.
-
-Current date: {{current_date}}`,
+    instructions: SILENCE_ASSISTANT_INSTRUCTIONS,
     tools: [
       {
         type: 'retrieval',

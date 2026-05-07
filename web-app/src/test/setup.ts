@@ -38,8 +38,8 @@ const mockServiceHub = {
     getAppSettings: vi.fn().mockResolvedValue({}),
     updateAppSettings: vi.fn().mockResolvedValue(undefined),
     getSystemInfo: vi.fn().mockResolvedValue({}),
-    relocateJanDataFolder: vi.fn().mockResolvedValue(undefined),
-    getJanDataFolder: vi.fn().mockResolvedValue('/mock/jan/data'),
+    relocateSilenceDataFolder: vi.fn().mockResolvedValue(undefined),
+    getSilenceDataFolder: vi.fn().mockResolvedValue('/mock/silence/data'),
   }),
   analytic: () => ({
     track: vi.fn(),
@@ -165,7 +165,8 @@ Object.defineProperty(window, 'matchMedia', {
 // Mock globalThis.core.api for @janhq/core functions // cspell: disable-line
 ;(globalThis as Record<string, unknown>).core = {
   api: {
-    getJanDataFolderPath: vi.fn().mockResolvedValue('/mock/jan/data'),
+    getSilenceDataFolderPath: vi.fn().mockResolvedValue('/mock/silence/data'),
+    getJanDataFolderPath: vi.fn().mockResolvedValue('/mock/silence/data'),
     openFileExplorer: vi.fn().mockResolvedValue(undefined),
     joinPath: vi.fn((...paths: string[]) => paths.join('/')),
   }

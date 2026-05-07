@@ -230,6 +230,119 @@ describe('ModelFactory', () => {
       expect(model).toBeDefined()
       expect(model.type).toBe('openai-compatible')
     })
+
+    it('should strip remote-incompatible parameters for OpenAI-compatible requests', async () => {
+      const provider: ProviderObject = {
+        provider: 'jingxing',
+        api_key: 'test-api-key',
+        base_url: 'https://api.jingxing.uk/v1',
+        models: [],
+        settings: [],
+        active: true,
+      }
+
+      await ModelFactory.createModel('gpt-4o-mini', provider, {
+        temperature: 0.7,
+        top_p: 0.8,
+        top_k: 20,
+        repeat_penalty: 1.12,
+        max_output_tokens: 128,
+        ctx_len: 4096,
+      })
+
+      const config = mockedCreateOpenAICompatible.mock.calls.at(-1)?.[0] as
+        | { fetch?: typeof fetch }
+        | undefined
+      expect(config?.fetch).toEqual(expect.any(Function))
+
+      mockGlobalFetch.mockClear()
+      await config!.fetch!('https://api.jingxing.uk/v1/chat/completions', {
+        method: 'POST',
+        body: JSON.stringify({ messages: [] }),
+      })
+
+      const [, requestInit] = mockGlobalFetch.mock.calls[0]!
+      const body = JSON.parse(String(requestInit?.body))
+      expect(body).toEqual({
+        messages: [],
+        temperature: 0.7,
+        top_p: 0.8,
+        max_tokens: 128,
+      })
+    })
+
+    it('should avoid sending both temperature and top_p for Claude models', async () => {
+      const provider: ProviderObject = {
+        provider: 'jingxing',
+        api_key: 'test-api-key',
+        base_url: 'https://api.jingxing.uk/v1',
+        models: [],
+        settings: [],
+        active: true,
+      }
+
+      await ModelFactory.createModel('claude-haiku-4-5-20251001', provider, {
+        temperature: 0.7,
+        top_p: 0.8,
+        top_k: 20,
+        repeat_penalty: 1.12,
+      })
+
+      const config = mockedCreateOpenAICompatible.mock.calls.at(-1)?.[0] as
+        | { fetch?: typeof fetch }
+        | undefined
+      expect(config?.fetch).toEqual(expect.any(Function))
+
+      mockGlobalFetch.mockClear()
+      await config!.fetch!('https://api.jingxing.uk/v1/chat/completions', {
+        method: 'POST',
+        body: JSON.stringify({ messages: [] }),
+      })
+
+      const [, requestInit] = mockGlobalFetch.mock.calls[0]!
+      const body = JSON.parse(String(requestInit?.body))
+      expect(body).toEqual({
+        messages: [],
+        temperature: 0.7,
+      })
+    })
+
+    it('should strip deprecated sampling parameters for Claude Opus 4.7', async () => {
+      const provider: ProviderObject = {
+        provider: 'jingxing',
+        api_key: 'test-api-key',
+        base_url: 'https://api.jingxing.uk/v1',
+        models: [],
+        settings: [],
+        active: true,
+      }
+
+      await ModelFactory.createModel('claude-opus-4-7', provider, {
+        temperature: 0.7,
+        top_p: 0.8,
+        top_k: 20,
+        repeat_penalty: 1.12,
+        max_output_tokens: 32,
+      })
+
+      const config = mockedCreateOpenAICompatible.mock.calls.at(-1)?.[0] as
+        | { fetch?: typeof fetch }
+        | undefined
+      expect(config?.fetch).toEqual(expect.any(Function))
+
+      mockGlobalFetch.mockClear()
+      await config!.fetch!('https://api.jingxing.uk/v1/chat/completions', {
+        method: 'POST',
+        body: JSON.stringify({ messages: [] }),
+      })
+
+      const [, requestInit] = mockGlobalFetch.mock.calls[0]!
+      const body = JSON.parse(String(requestInit?.body))
+      expect(body).toEqual({
+        messages: [],
+        max_tokens: 32,
+      })
+    })
   })
 
   describe('foundation-models provider', () => {

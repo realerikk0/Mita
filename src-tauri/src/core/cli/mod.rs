@@ -5,7 +5,7 @@
 use std::path::PathBuf;
 use std::sync::Arc;
 
-use crate::core::app::commands::{resolve_config_file_path, resolve_jan_data_folder};
+use crate::core::app::commands::{resolve_config_file_path, resolve_silence_data_folder};
 use crate::core::server::proxy;
 use crate::core::state::AppState;
 use crate::core::threads::{
@@ -37,7 +37,7 @@ pub fn init_mlx_state() -> MlxState {
 pub async fn cli_list_threads() -> Result<Vec<serde_json::Value>, String> {
     use std::fs;
 
-    let data_folder = resolve_jan_data_folder();
+    let data_folder = resolve_silence_data_folder();
     ensure_data_dirs(&data_folder)?;
     let data_dir = get_data_dir(&data_folder);
     let mut threads = Vec::new();
@@ -65,7 +65,7 @@ pub async fn cli_list_threads() -> Result<Vec<serde_json::Value>, String> {
 
 /// List messages for a thread.
 pub fn cli_list_messages(thread_id: &str) -> Result<Vec<serde_json::Value>, String> {
-    let data_folder = resolve_jan_data_folder();
+    let data_folder = resolve_silence_data_folder();
     read_messages_from_file(&data_folder, thread_id)
 }
 
@@ -73,7 +73,7 @@ pub fn cli_list_messages(thread_id: &str) -> Result<Vec<serde_json::Value>, Stri
 pub fn cli_delete_thread(thread_id: &str) -> Result<(), String> {
     use std::fs;
 
-    let data_folder = resolve_jan_data_folder();
+    let data_folder = resolve_silence_data_folder();
     let thread_dir = get_thread_dir(&data_folder, thread_id);
     if thread_dir.exists() {
         fs::remove_dir_all(thread_dir).map_err(|e| e.to_string())?;
@@ -83,7 +83,7 @@ pub fn cli_delete_thread(thread_id: &str) -> Result<(), String> {
 
 /// Get thread metadata by ID.
 pub fn cli_get_thread(thread_id: &str) -> Result<serde_json::Value, String> {
-    let data_folder = resolve_jan_data_folder();
+    let data_folder = resolve_silence_data_folder();
     let path = get_thread_metadata_path(&data_folder, thread_id);
     if !path.exists() {
         return Err(format!("Thread '{thread_id}' not found"));
@@ -118,7 +118,7 @@ pub async fn cli_start_server(
         app_state.provider_configs.clone(),
         app_state.mcp_servers.clone(),
         app_state.mcp_settings.clone(),
-        resolve_jan_data_folder().to_string_lossy().into_owned(),
+        resolve_silence_data_folder().to_string_lossy().into_owned(),
         false,
     )
     .await
@@ -162,7 +162,7 @@ pub type ModelEntry = (String, ModelYml);
 pub fn list_models(engine: &str) -> Vec<ModelEntry> {
     use std::fs;
 
-    let data_folder = resolve_jan_data_folder();
+    let data_folder = resolve_silence_data_folder();
     let models_root = data_folder.join(engine).join("models");
 
     if !models_root.exists() {
@@ -206,7 +206,7 @@ pub fn list_models(engine: &str) -> Vec<ModelEntry> {
 /// resolve its paths.  Tries `llamacpp` first, then `mlx`.
 /// Returns `(engine, model_path, mmproj_path)`.
 pub fn resolve_model_engine(model_id: &str) -> Result<(String, PathBuf, Option<PathBuf>), String> {
-    let data_folder = resolve_jan_data_folder();
+    let data_folder = resolve_silence_data_folder();
     for engine in &["llamacpp", "mlx"] {
         let yml_path = data_folder
             .join(engine)
@@ -235,7 +235,7 @@ pub fn resolve_model_by_id(
     model_id: &str,
     engine: &str,
 ) -> Result<(PathBuf, Option<PathBuf>), String> {
-    let data_folder = resolve_jan_data_folder();
+    let data_folder = resolve_silence_data_folder();
     let yml_path = data_folder
         .join(engine)
         .join("models")
@@ -281,7 +281,7 @@ pub fn resolve_model_by_id(
 pub fn discover_llamacpp_binary() -> Option<PathBuf> {
     use std::fs;
 
-    let data_folder = resolve_jan_data_folder();
+    let data_folder = resolve_silence_data_folder();
     let backends_dir = data_folder.join("llamacpp").join("backends");
 
     if !backends_dir.exists() {
@@ -487,7 +487,7 @@ pub async fn download_hf_model(
     use futures_util::StreamExt;
     use tokio::io::AsyncWriteExt;
 
-    let data_folder = resolve_jan_data_folder();
+    let data_folder = resolve_silence_data_folder();
     let model_dir = data_folder.join("llamacpp").join("models").join(repo_id);
     tokio::fs::create_dir_all(&model_dir)
         .await
@@ -547,7 +547,7 @@ pub async fn download_hf_model(
 // ── App config ────────────────────────────────────────────────────────────
 
 pub fn cli_get_data_folder() -> PathBuf {
-    resolve_jan_data_folder()
+    resolve_silence_data_folder()
 }
 
 pub fn cli_get_config() -> Result<serde_json::Value, String> {

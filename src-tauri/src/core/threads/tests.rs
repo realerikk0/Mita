@@ -8,7 +8,7 @@ use super::utils::{
     ensure_data_dirs, ensure_thread_dir_exists, get_data_dir, get_messages_path, get_thread_dir,
     get_thread_metadata_path,
 };
-use crate::core::app::commands::get_jan_data_folder_path;
+use crate::core::app::commands::get_silence_data_folder_path;
 use futures_util::future;
 use serde_json::json;
 use std::fs;
@@ -35,7 +35,7 @@ impl std::ops::Deref for DataDirGuard {
 fn mock_app_with_temp_data_dir() -> (tauri::App<MockRuntime>, DataDirGuard) {
     let app = mock_app();
     // Get the actual data dir that will be used by storage code
-    let data_dir = get_jan_data_folder_path(app.handle().clone());
+    let data_dir = get_silence_data_folder_path(app.handle().clone());
     println!("Mock app data dir: {}", data_dir.display());
     (app, DataDirGuard(data_dir))
 }

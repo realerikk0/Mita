@@ -18,7 +18,7 @@ use tokio::{
 };
 
 use crate::core::{
-    app::commands::get_jan_data_folder_path,
+    app::commands::get_silence_data_folder_path,
     mcp::constants::{is_browser_mcp_name, normalize_browser_mcp_server_key},
     mcp::models::{McpServerConfig, McpSettings},
     state::{AppState, RunningServiceEnum, SharedMcpServers},
@@ -63,7 +63,7 @@ pub async fn run_mcp_commands<R: Runtime>(
     app: &AppHandle<R>,
     servers_state: SharedMcpServers,
 ) -> Result<(), String> {
-    let app_path = get_jan_data_folder_path(app.clone());
+    let app_path = get_silence_data_folder_path(app.clone());
     let config_path = app_path.join("mcp_config.json");
     let app_path_str = app_path.to_str().unwrap().to_string();
     log::trace!(
@@ -406,7 +406,7 @@ async fn schedule_mcp_start_task<R: Runtime>(
     name: String,
     config: Value,
 ) -> Result<(), String> {
-    let app_path = get_jan_data_folder_path(app.clone());
+    let app_path = get_silence_data_folder_path(app.clone());
     let exe_path = env::current_exe().expect("Failed to get current exe path");
     let exe_parent_path = exe_path
         .parent()
@@ -452,7 +452,7 @@ async fn schedule_mcp_start_task<R: Runtime>(
             protocol_version: Default::default(),
             capabilities: ClientCapabilities::default(),
             client_info: Implementation {
-                name: "Jan Streamable Client".to_string(),
+                name: "Silence Streamable Client".to_string(),
                 version: "0.0.1".to_string(),
                 title: None,
                 website_url: None,
@@ -520,7 +520,7 @@ async fn schedule_mcp_start_task<R: Runtime>(
             protocol_version: Default::default(),
             capabilities: ClientCapabilities::default(),
             client_info: Implementation {
-                name: "Jan SSE Client".to_string(),
+                name: "Silence SSE Client".to_string(),
                 version: "0.0.1".to_string(),
                 title: None,
                 website_url: None,
@@ -1208,7 +1208,7 @@ pub fn add_server_config_with_path<R: Runtime>(
     config_filename: Option<&str>,
 ) -> Result<(), String> {
     let config_filename = config_filename.unwrap_or("mcp_config.json");
-    let config_path = get_jan_data_folder_path(app_handle).join(config_filename);
+    let config_path = get_silence_data_folder_path(app_handle).join(config_filename);
 
     let mut config: Value = serde_json::from_str(
         &std::fs::read_to_string(&config_path)

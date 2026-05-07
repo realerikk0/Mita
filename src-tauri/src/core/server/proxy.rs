@@ -511,18 +511,18 @@ use tauri_plugin_mlx::state::{MlxBackendSession, SessionInfo};
 
 use rmcp::model::{CallToolRequestParam, CallToolResult};
 
-fn assistant_json_path(jan_data_folder: &str, assistant_id: &str) -> PathBuf {
-    PathBuf::from(jan_data_folder)
+fn assistant_json_path(silence_data_folder: &str, assistant_id: &str) -> PathBuf {
+    PathBuf::from(silence_data_folder)
         .join("assistants")
         .join(assistant_id)
         .join("assistant.json")
 }
 
 fn load_assistant_config(
-    jan_data_folder: &str,
+    silence_data_folder: &str,
     assistant_id: &str,
 ) -> Result<(Option<String>, Option<String>), String> {
-    let assistant_path = assistant_json_path(jan_data_folder, assistant_id);
+    let assistant_path = assistant_json_path(silence_data_folder, assistant_id);
     let raw = fs::read_to_string(&assistant_path)
         .map_err(|e| format!("Failed to read assistant.json: {assistant_path:?}: {e}"))?;
 
@@ -877,7 +877,7 @@ async fn run_server_side_openai_orchestration(
     mlx_sessions: Arc<Mutex<HashMap<i32, MlxBackendSession>>>,
     mcp_servers: SharedMcpServers,
     mcp_settings: Arc<Mutex<McpSettings>>,
-    jan_data_folder: &str,
+    silence_data_folder: &str,
 ) -> Result<serde_json::Value, String> {
     let messages_value = json_body
         .get("messages")
@@ -891,7 +891,7 @@ async fn run_server_side_openai_orchestration(
         .filter(|v| !v.is_empty());
 
     let (assistant_instructions, assistant_model_hint) = if let Some(assistant_id) = assistant_id {
-        load_assistant_config(jan_data_folder, assistant_id)?
+        load_assistant_config(silence_data_folder, assistant_id)?
     } else {
         (None, None)
     };
@@ -1027,7 +1027,7 @@ async fn proxy_request(
     provider_configs: Arc<Mutex<HashMap<String, ProviderConfig>>>,
     mcp_servers: SharedMcpServers,
     mcp_settings: Arc<Mutex<McpSettings>>,
-    jan_data_folder: String,
+    silence_data_folder: String,
 ) -> Result<Response<Body>, hyper::Error> {
     if req.method() == hyper::Method::OPTIONS {
         log::debug!(
@@ -1356,7 +1356,7 @@ async fn proxy_request(
                             mlx_sessions.clone(),
                             mcp_servers.clone(),
                             mcp_settings.clone(),
-                            &jan_data_folder,
+                            &silence_data_folder,
                         )
                         .await
                         {
@@ -1586,7 +1586,7 @@ async fn proxy_request(
 
             // Load assistant config for system prompt + model hint when assistant_id is provided.
             let (assistant_instructions, assistant_model_hint) = if let Some(assistant_id) = assistant_id.as_deref() {
-                match load_assistant_config(&jan_data_folder, assistant_id) {
+                match load_assistant_config(&silence_data_folder, assistant_id) {
                     Ok(v) => v,
                     Err(e) => {
                         let mut error_response =
@@ -1885,7 +1885,7 @@ async fn proxy_request(
                             mlx_sessions.clone(),
                             mcp_servers.clone(),
                             mcp_settings.clone(),
-                            &jan_data_folder,
+                            &silence_data_folder,
                         )
                         .await
                         {
@@ -2656,7 +2656,7 @@ pub async fn start_server(
     provider_configs: Arc<Mutex<HashMap<String, ProviderConfig>>>,
     mcp_servers: SharedMcpServers,
     mcp_settings: Arc<Mutex<McpSettings>>,
-    jan_data_folder: String,
+    silence_data_folder: String,
     enable_server_tool_execution: bool,
 ) -> Result<u16, Box<dyn std::error::Error + Send + Sync>> {
     start_server_internal(
@@ -2672,7 +2672,7 @@ pub async fn start_server(
         provider_configs,
         mcp_servers,
         mcp_settings,
-        jan_data_folder,
+        silence_data_folder,
         enable_server_tool_execution,
     )
     .await
@@ -2691,7 +2691,7 @@ async fn start_server_internal(
     provider_configs: Arc<Mutex<HashMap<String, ProviderConfig>>>,
     mcp_servers: SharedMcpServers,
     mcp_settings: Arc<Mutex<McpSettings>>,
-    jan_data_folder: String,
+    silence_data_folder: String,
     enable_server_tool_execution: bool,
 ) -> Result<u16, Box<dyn std::error::Error + Send + Sync>> {
     let mut handle_guard = server_handle.lock().await;
@@ -2735,7 +2735,7 @@ async fn start_server_internal(
         let provider_configs = provider_configs.clone();
         let mcp_servers = mcp_servers.clone();
         let mcp_settings = mcp_settings.clone();
-        let jan_data_folder = jan_data_folder.clone();
+        let silence_data_folder = silence_data_folder.clone();
 
         async move {
             Ok::<_, Infallible>(service_fn(move |req| {
@@ -2748,7 +2748,7 @@ async fn start_server_internal(
                     provider_configs.clone(),
                     mcp_servers.clone(),
                     mcp_settings.clone(),
-                    jan_data_folder.clone(),
+                    silence_data_folder.clone(),
                 )
             }))
         }
@@ -2761,7 +2761,7 @@ async fn start_server_internal(
             return Err(Box::new(e));
         }
     };
-    log::info!("Jan API server started on http://{addr}");
+    log::info!("Silence API server started on http://{addr}");
 
     let server_task = tokio::spawn(async move {
         if let Err(e) = server.await {
@@ -2773,7 +2773,7 @@ async fn start_server_internal(
 
     *handle_guard = Some(server_task);
     let actual_port = addr.port();
-    log::info!("Jan API server started successfully on port {actual_port}");
+    log::info!("Silence API server started successfully on port {actual_port}");
     Ok(actual_port)
 }
 
@@ -2785,7 +2785,7 @@ pub async fn stop_server(
     if let Some(handle) = handle_guard.take() {
         handle.abort();
         *handle_guard = None;
-        log::info!("Jan API server stopped");
+        log::info!("Silence API server stopped");
     } else {
         log::debug!("Server was not running");
     }

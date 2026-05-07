@@ -2,11 +2,11 @@
  * Apple Foundation Models Extension
  *
  * Provides access to Apple's on-device Foundation Models (macOS 26+ with Apple
- * Intelligence) as a Jan AI engine. The model runs fully locally — no internet
+ * Intelligence) as a Silence AI engine. The model runs fully locally — no internet
  * connection or external API key is required.
  *
  * Architecture:
- *   Jan extension (TypeScript) → Tauri plugin (Rust / fm-rs) → FoundationModels.framework
+ *   Silence extension (TypeScript) → Tauri plugin (Rust / fm-rs) → FoundationModels.framework
  *
  * The Tauri plugin calls Apple's FoundationModels framework directly via Rust
  * FFI bindings (fm-rs), eliminating the need for a separate HTTP server process.
@@ -259,13 +259,13 @@ export default class FoundationModelsExtension extends AIEngine {
 
   override async delete(_modelId: string): Promise<void> {
     throw new Error(
-      'Apple Foundation Models are part of the operating system and cannot be deleted from Jan.'
+      'Apple Foundation Models are part of the operating system and cannot be deleted from Silence.'
     )
   }
 
   override async update(_modelId: string, _model: Partial<modelInfo>): Promise<void> {
     throw new Error(
-      'Apple Foundation Models are managed by the OS and cannot be updated from Jan.'
+      'Apple Foundation Models are managed by the OS and cannot be updated from Silence.'
     )
   }
 

@@ -6,7 +6,7 @@ import type { UIMessage } from '@ai-sdk/react'
 type ThreadContent = NonNullable<ThreadMessage['content']>[number]
 
 /**
- * Convert AI SDK UIMessage to Jan's ThreadMessage format.
+ * Convert AI SDK UIMessage to Silence ThreadMessage format.
  * This allows using chatMessages from useChat with ThreadContent component.
  */
 export function convertUIMessageToThreadMessage(
@@ -108,7 +108,7 @@ export function convertUIMessageToThreadMessage(
 }
 
 /**
- * Convert an array of AI SDK UIMessages to Jan's ThreadMessage format.
+ * Convert an array of AI SDK UIMessages to Silence ThreadMessage format.
  */
 export function convertUIMessagesToThreadMessages(
   uiMessages: UIMessage[],
@@ -171,7 +171,7 @@ export const parseReasoning = (text: string) => {
 }
 
 /**
- * Convert Jan's ThreadMessage format to AI SDK UIMessage format.
+ * Convert Silence ThreadMessage format to AI SDK UIMessage format.
  * This is used to load existing messages into the AI SDK chat.
  * Tool calls are now part of the content array and will be converted to tool parts.
  */
@@ -326,7 +326,7 @@ export function convertThreadMessageToUIMessage(
 }
 
 /**
- * Convert an array of Jan's ThreadMessages to AI SDK UIMessage format.
+ * Convert an array of Silence ThreadMessages to AI SDK UIMessage format.
  * Tool calls are now part of the content array, so no special merging is needed.
  */
 export function convertThreadMessagesToUIMessages(

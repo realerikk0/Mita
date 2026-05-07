@@ -6,7 +6,7 @@ import React from 'react'
 
 const h = vi.hoisted(() => ({
   productAnalyticPrompt: false,
-  showJanModelPrompt: false,
+  showSilenceModelPrompt: false,
   leftPanelOpen: true,
   sidebarWidth: 260,
   setLeftPanel: vi.fn(),
@@ -88,8 +88,8 @@ vi.mock('@/containers/dialogs/ErrorDialog', () => ({
 vi.mock('@/containers/analytics/PromptAnalytic', () => ({
   PromptAnalytic: () => <div data-testid="prompt-analytic" />,
 }))
-vi.mock('@/containers/PromptJanModel', () => ({
-  PromptJanModel: () => <div data-testid="prompt-jan" />,
+vi.mock('@/containers/PromptSilenceModel', () => ({
+  PromptSilenceModel: () => <div data-testid="prompt-silence" />,
 }))
 vi.mock('@/containers/GlobalError', () => ({
   default: ({ error }: any) => <div data-testid="global-error">{error?.message}</div>,
@@ -115,8 +115,10 @@ vi.mock('@/components/ui/sidebar', () => ({
 vi.mock('@/hooks/useAnalytic', () => ({
   useAnalytic: () => ({ productAnalyticPrompt: h.productAnalyticPrompt }),
 }))
-vi.mock('@/hooks/useJanModelPrompt', () => ({
-  useJanModelPrompt: () => ({ showJanModelPrompt: h.showJanModelPrompt }),
+vi.mock('@/hooks/useSilenceModelPrompt', () => ({
+  useSilenceModelPrompt: () => ({
+    showSilenceModelPrompt: h.showSilenceModelPrompt,
+  }),
 }))
 vi.mock('@/hooks/useLeftPanel', () => ({
   useLeftPanel: () => ({
@@ -146,7 +148,7 @@ describe('__root route', () => {
   beforeEach(() => {
     vi.clearAllMocks()
     h.productAnalyticPrompt = false
-    h.showJanModelPrompt = false
+    h.showSilenceModelPrompt = false
     // reset document state
     document.body.className = ''
     const loader = document.getElementById('initial-loader')
@@ -192,10 +194,10 @@ describe('__root route', () => {
     expect(screen.queryByTestId('prompt-analytic')).not.toBeInTheDocument()
   })
 
-  it('does not render the Jan local model prompt in Silence', () => {
-    h.showJanModelPrompt = true
+  it('does not render the Silence local model prompt', () => {
+    h.showSilenceModelPrompt = true
     renderComponent()
-    expect(screen.queryByTestId('prompt-jan')).not.toBeInTheDocument()
+    expect(screen.queryByTestId('prompt-silence')).not.toBeInTheDocument()
   })
 
   it('uses LogsLayout on /logs path (no sidebar)', () => {

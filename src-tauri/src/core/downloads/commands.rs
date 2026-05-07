@@ -1,7 +1,7 @@
 use super::helpers::{_download_files_internal, err_to_string};
 use super::models::DownloadItem;
-use crate::core::app::commands::get_jan_data_folder_path;
-use crate::core::filesystem::helpers::resolve_path_within_jan_data_folder;
+use crate::core::app::commands::get_silence_data_folder_path;
+use crate::core::filesystem::helpers::resolve_path_within_silence_data_folder;
 use crate::core::state::AppState;
 use std::collections::HashMap;
 use tauri::{Runtime, State};
@@ -46,10 +46,10 @@ pub async fn download_files<R: Runtime>(
 
     // delete files if cancelled
     if cancel_token.is_cancelled() {
-        let jan_data_folder = get_jan_data_folder_path(app.clone());
+        let silence_data_folder = get_silence_data_folder_path(app.clone());
         for item in items {
             if let Ok((_, save_path)) =
-                resolve_path_within_jan_data_folder(&jan_data_folder, &item.save_path)
+                resolve_path_within_silence_data_folder(&silence_data_folder, &item.save_path)
             {
                 let _ = std::fs::remove_file(&save_path); // don't check error
             }

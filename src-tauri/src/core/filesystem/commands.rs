@@ -1,6 +1,6 @@
 // WARNING: These APIs will be deprecated soon due to removing FS API access from frontend.
 // It's added to ensure the legacy implementation from frontend still functions before removal.
-use super::helpers::{resolve_app_path_within_jan_data_folder, resolve_path};
+use super::helpers::{resolve_app_path_within_silence_data_folder, resolve_path};
 use super::models::{DialogOpenOptions, FileStat};
 use rfd::AsyncFileDialog;
 use std::fs;
@@ -12,11 +12,11 @@ pub fn rm<R: Runtime>(app_handle: tauri::AppHandle<R>, args: Vec<String>) -> Res
         return Err("rm error: Invalid argument".to_string());
     }
 
-    let (canonical_data, path) = resolve_app_path_within_jan_data_folder(app_handle, &args[0])
-        .map_err(|_| format!("rm error: path {} is not under jan data folder", args[0]))?;
+    let (canonical_data, path) = resolve_app_path_within_silence_data_folder(app_handle, &args[0])
+        .map_err(|_| format!("rm error: path {} is not under silence data folder", args[0]))?;
     if !path.starts_with(&canonical_data) {
         return Err(format!(
-            "rm error: path {} is not under jan data folder {}",
+            "rm error: path {} is not under silence data folder {}",
             path.display(),
             canonical_data.display()
         ));
@@ -155,7 +155,7 @@ pub fn write_yaml(
     save_path: &str,
 ) -> Result<(), String> {
     // TODO: have an internal function to check scope
-    let (_jan_data_folder, save_path) = resolve_app_path_within_jan_data_folder(app, save_path)?;
+    let (_silence_data_folder, save_path) = resolve_app_path_within_silence_data_folder(app, save_path)?;
     let file = fs::File::create(&save_path).map_err(|e| e.to_string())?;
     let mut writer = std::io::BufWriter::new(file);
     serde_yaml::to_writer(&mut writer, &data).map_err(|e| e.to_string())?;
@@ -167,7 +167,7 @@ pub fn read_yaml<R: Runtime>(
     app: tauri::AppHandle<R>,
     path: &str,
 ) -> Result<serde_json::Value, String> {
-    let (_jan_data_folder, path) = resolve_app_path_within_jan_data_folder(app, path)?;
+    let (_silence_data_folder, path) = resolve_app_path_within_silence_data_folder(app, path)?;
     let file = fs::File::open(&path).map_err(|e| e.to_string())?;
     let reader = std::io::BufReader::new(file);
     let data: serde_json::Value = serde_yaml::from_reader(reader).map_err(|e| e.to_string())?;
@@ -181,8 +181,8 @@ pub fn decompress<R: Runtime>(
     output_dir: &str,
 ) -> Result<(), String> {
     let path_buf = std::path::PathBuf::from(path);
-    let (_jan_data_folder, output_dir_buf) =
-        resolve_app_path_within_jan_data_folder(app, output_dir)?;
+    let (_silence_data_folder, output_dir_buf) =
+        resolve_app_path_within_silence_data_folder(app, output_dir)?;
 
     // Ensure output directory exists
     fs::create_dir_all(&output_dir_buf).map_err(|e| {

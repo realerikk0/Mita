@@ -42,7 +42,7 @@
   "reportAnIssueDesc": "發現錯誤？透過在 GitHub 上提交問題來幫助我們。",
   "reportIssue": "報告問題",
   "credits": "致謝",
-  "creditsDesc1": "Silence 由 Menlo 團隊用 ❤️ 構建。",
+  "creditsDesc1": "Silence 由 Jingxing 團隊用 ❤️ 構建。",
   "creditsDesc2": "特別感謝我們的開源依賴項——尤其是 llama.cpp 和 Tauri——以及我們出色的 AI 社群。",
   "appVersion": "應用程式版本",
   "dataFolder": {
@@ -250,7 +250,7 @@
     "reportAnIssueDesc": "發現錯誤？透過在 GitHub 上提交問題來幫助我們。",
     "reportIssue": "報告問題",
     "credits": "致謝",
-    "creditsDesc1": "Silence 由 Menlo 團隊用 ❤️ 構建。",
+    "creditsDesc1": "Silence 由 Jingxing 團隊用 ❤️ 構建。",
     "creditsDesc2": "特別感謝我們的開源依賴項——尤其是 llama.cpp 和 Tauri——以及我們出色的 AI 社群。",
     "huggingfaceToken": "HuggingFace 代幣",
     "huggingfaceTokenDesc": "您的 HuggingFace API 代幣，用於存取模型。"
