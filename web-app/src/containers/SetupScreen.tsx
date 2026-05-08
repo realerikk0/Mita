@@ -4,6 +4,7 @@ import { predefinedProviders } from '@/constants/providers'
 import { route } from '@/constants/routes'
 import { useServiceHub } from '@/hooks/useServiceHub'
 import { useModelProvider } from '@/hooks/useModelProvider'
+import { getModelCapabilities } from '@/lib/models'
 import { useNavigate } from '@tanstack/react-router'
 import { KeyRound, RefreshCw } from 'lucide-react'
 import { useMemo, useState } from 'react'
@@ -87,7 +88,7 @@ function SetupScreen() {
         model: id,
         name: id,
         displayName: id,
-        capabilities: ['completion'],
+        capabilities: getModelCapabilities(JINGXING_PROVIDER, id),
         version: '1.0',
         provider: JINGXING_PROVIDER,
       })) as Model[]

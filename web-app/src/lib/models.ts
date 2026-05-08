@@ -1,6 +1,84 @@
 import { providerModels as models } from '@/constants/models'
 import { ModelCapabilities } from '@/types/models'
 
+const REASONING_CAPABILITY = 'reasoning'
+
+const uniqueCapabilities = (capabilities: Array<string | undefined>) =>
+  capabilities.filter(
+    (capability, index, arr): capability is string =>
+      Boolean(capability) && arr.indexOf(capability) === index
+  )
+
+export const isJingxingImageGenerationModel = (modelId?: string): boolean => {
+  if (!modelId) return false
+  const normalized = modelId.toLowerCase()
+
+  return [
+    /^gpt-image(?:-|$)/,
+    /^gemini-\d+(?:\.\d+)?-(?:flash|pro)-image(?:-preview)?$/,
+  ].some((pattern) => pattern.test(normalized))
+}
+
+export const inferJingxingModelCapabilities = (modelId: string): string[] => {
+  const normalized = modelId.toLowerCase()
+
+  if (isJingxingImageGenerationModel(normalized)) {
+    return uniqueCapabilities([
+      ModelCapabilities.IMAGE_GENERATION,
+      ModelCapabilities.TEXT_TO_IMAGE,
+      ModelCapabilities.IMAGE_TO_IMAGE,
+    ])
+  }
+
+  const capabilities: string[] = [ModelCapabilities.COMPLETION]
+  const isClaude = normalized.startsWith('claude-')
+  const isGemini = normalized.startsWith('gemini-')
+  const isGpt = /^gpt-(?:4o|4\.1|5(?:[-.\w]*))/.test(normalized)
+  const isCodex = normalized.includes('codex')
+  const isGrok = normalized.startsWith('grok-')
+
+  if (isClaude || isGemini || isGpt || isGrok) {
+    capabilities.push(ModelCapabilities.TOOLS)
+  }
+
+  if (isClaude || isGemini || (isGpt && !isCodex)) {
+    capabilities.push(ModelCapabilities.VISION)
+  }
+
+  const isExplicitNonReasoning = normalized.includes('non-reasoning')
+  if (
+    !isExplicitNonReasoning &&
+    (normalized.includes('reasoning') ||
+      normalized.includes('multi-agent') ||
+      isCodex)
+  ) {
+    capabilities.push(REASONING_CAPABILITY)
+  }
+
+  return uniqueCapabilities(capabilities)
+}
+
+export const normalizeModelCapabilitiesForProvider = (
+  providerName: string,
+  model: {
+    id?: string
+    model?: string
+    capabilities?: string[]
+    _userConfiguredCapabilities?: boolean
+  }
+): string[] | undefined => {
+  if (model._userConfiguredCapabilities === true) {
+    return model.capabilities
+  }
+
+  const modelId = model.id || model.model
+  if (providerName !== 'jingxing' || !modelId) {
+    return model.capabilities
+  }
+
+  return inferJingxingModelCapabilities(modelId)
+}
+
 export const defaultModel = (provider?: string) => {
   if (!provider || !Object.keys(models).includes(provider)) {
     return models.openai.models[0]
@@ -22,6 +100,10 @@ export const getModelCapabilities = (
   providerName: string,
   modelId: string
 ): string[] => {
+  if (providerName === 'jingxing') {
+    return inferJingxingModelCapabilities(modelId)
+  }
+
   const providerConfig = models[providerName as unknown as keyof typeof models]
 
   const supportsToolCalls = Array.isArray(

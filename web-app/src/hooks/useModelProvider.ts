@@ -2,6 +2,7 @@ import { create } from 'zustand'
 import { persist, createJSONStorage } from 'zustand/middleware'
 import { localStorageKey } from '@/constants/localStorage'
 import { getServiceHub } from '@/hooks/useServiceHub'
+import { normalizeModelCapabilitiesForProvider } from '@/lib/models'
 import { modelSettings } from '@/lib/predefined'
 
 type ModelProviderState = {
@@ -86,7 +87,18 @@ export const useModelProvider = create<ModelProviderState>()(
                   !currentDeletedModels.includes(e.id)
               ),
               ...models,
-            ]
+            ].map((model) => {
+              const normalizedCapabilities = normalizeModelCapabilitiesForProvider(
+                provider.provider,
+                model as Model
+              )
+              return {
+                ...model,
+                ...(normalizedCapabilities
+                  ? { capabilities: normalizedCapabilities }
+                  : {}),
+              }
+            })
             const updatedModels = provider.models?.map((model) => {
               const settings =
                 (legacyModels && legacyModels?.length > 0
@@ -107,16 +119,24 @@ export const useModelProvider = create<ModelProviderState>()(
                   }
                 )?._userConfiguredCapabilities === true
 
+              const normalizedModelCapabilities =
+                normalizeModelCapabilitiesForProvider(provider.provider, {
+                  ...model,
+                  _userConfiguredCapabilities: userConfiguredCapabilities,
+                })
+
               // When the user set tools/vision in Edit Model, honor that list on every
               // refresh from the engine; otherwise fresh engine data would re-add defaults.
               const mergedCapabilities = userConfiguredCapabilities
                 ? [...(existingModel?.capabilities || [])]
-                : [
-                    ...(model.capabilities || []),
-                    ...(existingModel?.capabilities || []).filter(
-                      (cap) => !(model.capabilities || []).includes(cap)
-                    ),
-                  ]
+                : provider.provider === 'jingxing' && normalizedModelCapabilities
+                  ? normalizedModelCapabilities
+                  : [
+                      ...(model.capabilities || []),
+                      ...(existingModel?.capabilities || []).filter(
+                        (cap) => !(model.capabilities || []).includes(cap)
+                      ),
+                    ]
               return {
                 ...model,
                 settings: settings,
@@ -584,9 +604,24 @@ export const useModelProvider = create<ModelProviderState>()(
             })
           })
         }
+        if (version <= 13 && state?.providers) {
+          state.providers.forEach((provider) => {
+            if (provider.provider !== 'jingxing' || !provider.models) return
+
+            provider.models.forEach((model) => {
+              const normalizedCapabilities = normalizeModelCapabilitiesForProvider(
+                provider.provider,
+                model as Model & { _userConfiguredCapabilities?: boolean }
+              )
+              if (normalizedCapabilities) {
+                model.capabilities = normalizedCapabilities
+              }
+            })
+          })
+        }
         return state
       },
-      version: 13,
+      version: 14,
     }
   )
 )

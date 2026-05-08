@@ -6,6 +6,9 @@ import {
   extractModelName,
   extractModelRepo,
   getModelCapabilities,
+  inferJingxingModelCapabilities,
+  isJingxingImageGenerationModel,
+  normalizeModelCapabilitiesForProvider,
 } from '../models'
 import { ModelCapabilities } from '@/types/models'
 
@@ -303,5 +306,154 @@ describe('getModelCapabilities', () => {
     expect(capabilities).toContain(ModelCapabilities.COMPLETION)
     expect(capabilities).toContain(ModelCapabilities.TOOLS)
     expect(capabilities).not.toContain(ModelCapabilities.VISION)
+  })
+
+  it('infers Jingxing chat model capabilities from the current visible model families', () => {
+    const expectations: Record<string, string[]> = {
+      'claude-haiku-4-5-20251001': [
+        ModelCapabilities.COMPLETION,
+        ModelCapabilities.TOOLS,
+        ModelCapabilities.VISION,
+      ],
+      'claude-opus-4-6': [
+        ModelCapabilities.COMPLETION,
+        ModelCapabilities.TOOLS,
+        ModelCapabilities.VISION,
+      ],
+      'claude-opus-4-7': [
+        ModelCapabilities.COMPLETION,
+        ModelCapabilities.TOOLS,
+        ModelCapabilities.VISION,
+      ],
+      'claude-sonnet-4-6': [
+        ModelCapabilities.COMPLETION,
+        ModelCapabilities.TOOLS,
+        ModelCapabilities.VISION,
+      ],
+      'gemini-3-flash-preview': [
+        ModelCapabilities.COMPLETION,
+        ModelCapabilities.TOOLS,
+        ModelCapabilities.VISION,
+      ],
+      'gemini-3.1-pro-preview': [
+        ModelCapabilities.COMPLETION,
+        ModelCapabilities.TOOLS,
+        ModelCapabilities.VISION,
+      ],
+      'gpt-4o-mini': [
+        ModelCapabilities.COMPLETION,
+        ModelCapabilities.TOOLS,
+        ModelCapabilities.VISION,
+      ],
+      'gpt-5.3-chat': [
+        ModelCapabilities.COMPLETION,
+        ModelCapabilities.TOOLS,
+        ModelCapabilities.VISION,
+      ],
+      'gpt-5.3-codex': [
+        ModelCapabilities.COMPLETION,
+        ModelCapabilities.TOOLS,
+        'reasoning',
+      ],
+      'gpt-5.4': [
+        ModelCapabilities.COMPLETION,
+        ModelCapabilities.TOOLS,
+        ModelCapabilities.VISION,
+      ],
+      'gpt-5.4-mini': [
+        ModelCapabilities.COMPLETION,
+        ModelCapabilities.TOOLS,
+        ModelCapabilities.VISION,
+      ],
+      'gpt-5.4-nano': [
+        ModelCapabilities.COMPLETION,
+        ModelCapabilities.TOOLS,
+        ModelCapabilities.VISION,
+      ],
+      'gpt-5.4-pro': [
+        ModelCapabilities.COMPLETION,
+        ModelCapabilities.TOOLS,
+        ModelCapabilities.VISION,
+      ],
+      'gpt-5.5': [
+        ModelCapabilities.COMPLETION,
+        ModelCapabilities.TOOLS,
+        ModelCapabilities.VISION,
+      ],
+      'grok-4-1-fast-non-reasoning': [
+        ModelCapabilities.COMPLETION,
+        ModelCapabilities.TOOLS,
+      ],
+      'grok-4-1-fast-reasoning': [
+        ModelCapabilities.COMPLETION,
+        ModelCapabilities.TOOLS,
+        'reasoning',
+      ],
+      'grok-4.20-0309-non-reasoning': [
+        ModelCapabilities.COMPLETION,
+        ModelCapabilities.TOOLS,
+      ],
+      'grok-4.20-0309-reasoning': [
+        ModelCapabilities.COMPLETION,
+        ModelCapabilities.TOOLS,
+        'reasoning',
+      ],
+      'grok-4.20-multi-agent-0309': [
+        ModelCapabilities.COMPLETION,
+        ModelCapabilities.TOOLS,
+        'reasoning',
+      ],
+      'grok-4.3': [
+        ModelCapabilities.COMPLETION,
+        ModelCapabilities.TOOLS,
+      ],
+    }
+
+    for (const [modelId, expectedCapabilities] of Object.entries(expectations)) {
+      expect(inferJingxingModelCapabilities(modelId)).toEqual(
+        expectedCapabilities
+      )
+      expect(getModelCapabilities('jingxing', modelId)).toEqual(
+        expectedCapabilities
+      )
+    }
+  })
+
+  it('marks Jingxing image generation models as non-chat image models', () => {
+    for (const modelId of [
+      'gemini-2.5-flash-image',
+      'gemini-3-pro-image-preview',
+      'gemini-3.1-flash-image-preview',
+      'gpt-image-1.5',
+      'gpt-image-2',
+    ]) {
+      expect(isJingxingImageGenerationModel(modelId)).toBe(true)
+      expect(inferJingxingModelCapabilities(modelId)).toEqual([
+        ModelCapabilities.IMAGE_GENERATION,
+        ModelCapabilities.TEXT_TO_IMAGE,
+        ModelCapabilities.IMAGE_TO_IMAGE,
+      ])
+    }
+  })
+
+  it('normalizes stale Jingxing capabilities while preserving user configured values', () => {
+    expect(
+      normalizeModelCapabilitiesForProvider('jingxing', {
+        id: 'gpt-image-2',
+        capabilities: [ModelCapabilities.COMPLETION],
+      })
+    ).toEqual([
+      ModelCapabilities.IMAGE_GENERATION,
+      ModelCapabilities.TEXT_TO_IMAGE,
+      ModelCapabilities.IMAGE_TO_IMAGE,
+    ])
+
+    expect(
+      normalizeModelCapabilitiesForProvider('jingxing', {
+        id: 'gpt-image-2',
+        capabilities: [ModelCapabilities.COMPLETION],
+        _userConfiguredCapabilities: true,
+      })
+    ).toEqual([ModelCapabilities.COMPLETION])
   })
 })

@@ -18,6 +18,7 @@ import { FavoriteModelAction } from '@/containers/FavoriteModelAction'
 import { route } from '@/constants/routes'
 import DeleteProvider from '@/containers/dialogs/DeleteProvider'
 import { useServiceHub } from '@/hooks/useServiceHub'
+import { getModelCapabilities } from '@/lib/models'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Switch } from '@/components/ui/switch'
@@ -403,7 +404,7 @@ function ProviderDetail() {
         id,
         model: id,
         name: id,
-        capabilities: ['completion'], // Default capability
+        capabilities: getModelCapabilities(providerName, id),
         version: '1.0',
       }))
 
