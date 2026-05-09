@@ -23,11 +23,12 @@ export const localStorageKey = {
   favoriteModels: 'favorite-models',
   setupCompleted: 'setup-completed',
   threadManagement: 'thread-management',
-  modelSupportCache: 'jan_model_support_cache',
+  modelSupportCache: 'mita_model_support_cache',
   recentSearches: 'recent-searches',
-  silenceModelPromptDismissed: 'jan-model-prompt-dismissed',
+  mitaModelPromptDismissed: 'mita-model-prompt-dismissed',
   agentMode: 'agent-mode',
-  latestSilenceModel: 'latest-jan-model',
+  latestMitaModel: 'latest-mita-model',
+  webSearch: 'mita-web-search',
 }
 
 export const CACHE_EXPIRY_MS = 1000 * 60 * 60 * 24

@@ -29,8 +29,9 @@ import { toast } from 'sonner'
 import { cn } from '@/lib/utils'
 import { ThreadMessage } from '@janhq/core'
 
-const INTRO_THREAD_TITLE = 'What is Silence?'
+const INTRO_THREAD_TITLE = 'What is Mita?'
 const LEGACY_INTRO_THREAD_TITLE = 'What is Jan?'
+const LEGACY_SILENCE_INTRO_THREAD_TITLE = 'What is Silence?'
 
 const ThreadItem = memo(
   ({
@@ -103,12 +104,16 @@ const ThreadItem = memo(
       return textContent?.text?.value
     }, [messages])
 
-    const displayTitle = thread.title === LEGACY_INTRO_THREAD_TITLE
+    const displayTitle = thread.title === LEGACY_INTRO_THREAD_TITLE || thread.title === LEGACY_SILENCE_INTRO_THREAD_TITLE
       ? INTRO_THREAD_TITLE
       : thread.title
     const isProtectedIntroThread =
       !localStorage.getItem('setup-completed') &&
-      (thread.title === LEGACY_INTRO_THREAD_TITLE || thread.title === INTRO_THREAD_TITLE)
+      (
+        thread.title === LEGACY_INTRO_THREAD_TITLE ||
+        thread.title === LEGACY_SILENCE_INTRO_THREAD_TITLE ||
+        thread.title === INTRO_THREAD_TITLE
+      )
 
     const plainTitleForRename = useMemo(() => {
       return (displayTitle || '').replace(/<span[^>]*>|<\/span>/g, '')

@@ -1,12 +1,12 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <component type="desktop-application">
-  <id>ai.jan.Jan</id>
+  <id>uk.jingxing.Mita</id>
   <metadata_license>FSFAP</metadata_license>
   <project_license>Apache-2.0</project_license>
-  <developer_name>Menlo Research Pte. Ltd.</developer_name>
+  <developer_name>Jingxing</developer_name>
 
-  <name>Jan</name>
-  <icon type="stock">ai.jan.Jan</icon>
+  <name>Mita</name>
+  <icon type="stock">uk.jingxing.Mita</icon>
 
   <summary>Private offline AI assistant</summary>
   <summary xml:lang="pl">Prywatny asystent SI działający bez dostępu do sieci</summary>
@@ -20,10 +20,10 @@
 
   <description>
     <p>
-      Jan is an open source alternative to ChatGPT that runs 100% offline on your computer.
+      Mita is an open source alternative to ChatGPT that runs 100% offline on your computer.
     </p>
     <p xml:lang="pl">
-      Jan to otwartoźródłowa alternatywa dla ChatGPT, która działa w 100% bez dostępu do sieci na Twoim komputerze.
+      Mita to otwartoźródłowa alternatywa dla ChatGPT, która działa w 100% bez dostępu do sieci na Twoim komputerze.
     </p>
 
     <p>Features</p>
@@ -38,62 +38,62 @@
       <li xml:lang="pl">Własne asystenty: Twórz asystenty wyspecjalizowane do pisania, kodowania, podsumowywania itd.</li>
 
       <li>OpenAI-compatible API: Includes a local API server at localhost:1337 for tools expecting the OpenAI format</li>
-      <li xml:lang="pl">Interfejs API kompatybilny z OpenAI: Jan posiada lokalny serwer API, dostępny pod adresem localhost:1337, dla narzędzi zgodnych z formatem OpenAI.</li>
+      <li xml:lang="pl">Interfejs API kompatybilny z OpenAI: Mita posiada lokalny serwer API, dostępny pod adresem localhost:1337, dla narzędzi zgodnych z formatem OpenAI.</li>
 
       <li>MCP support: Integrates the Model Context Protocol for enhanced workflows and tooling</li>
-      <li xml:lang="pl">Obsługa MCP: Jan obsługuje Model Context Protocol dla lepszego przepływu pracy i obsługi narzędzi.</li>
+      <li xml:lang="pl">Obsługa MCP: Mita obsługuje Model Context Protocol dla lepszego przepływu pracy i obsługi narzędzi.</li>
 
-      <li>Privacy-aware design: Jan works offline by default. Cloud access is optional and user-controlled</li>
-      <li xml:lang="pl">Projekt uwzględniający prywatność: Jan domyślnie działa w trybie bez dostępu do sieci. Dostęp do chmury jest opcjonalny i pozostaje pod kontrolą użytkownika.</li>
+      <li>Privacy-aware design: Mita works offline by default. Cloud access is optional and user-controlled</li>
+      <li xml:lang="pl">Projekt uwzględniający prywatność: Mita domyślnie działa w trybie bez dostępu do sieci. Dostęp do chmury jest opcjonalny i pozostaje pod kontrolą użytkownika.</li>
     </ul>
 
     <p>
-      Jan is actively maintained by Menlo Research.  
+      Mita is actively maintained by Jingxing.  
       Feedback, bug reports and feature requests are welcomed through GitHub.
     </p>
     <p xml:lang="pl">
-      Aplikacja Jan jest aktywnie utrzymywana przez Menlo Research.
+      Aplikacja Mita jest aktywnie utrzymywana przez Jingxing.
       Informacje zwrotne, zgłoszenia błędów i prośby o nowe funkcje są mile widziane za pośrednictwem platformy GitHub.
     </p>
   </description>
 
-  <launchable type="desktop-id">ai.jan.Jan.desktop</launchable>
+  <launchable type="desktop-id">uk.jingxing.Mita.desktop</launchable>
   <screenshots>
   <screenshot>
-    <image>https://catalog.jan.ai/flatpak/jan_screenshot_1.png</image>
-    <caption>Blank Jan page with 0 threads</caption>
-    <caption xml:lang="pl">Pusta strona Jan bez żadnych wątków</caption>
+    <image>https://updates.jingxing.uk/mita/flatpak/mita_screenshot_1.png</image>
+    <caption>Blank Mita page with 0 threads</caption>
+    <caption xml:lang="pl">Pusta strona Mita bez żadnych wątków</caption>
   </screenshot>
   <screenshot type="default">
-    <image>https://catalog.jan.ai/flatpak/jan_screenshot_2.png</image>
-    <caption>Jan using a search MCP to gather information</caption>
-    <caption xml:lang="pl">Aplikacja Jan używająca wyszukiwania MCP celem zgromadzenia informacji</caption>
+    <image>https://updates.jingxing.uk/mita/flatpak/mita_screenshot_2.png</image>
+    <caption>Mita using a search MCP to gather information</caption>
+    <caption xml:lang="pl">Aplikacja Mita używająca wyszukiwania MCP celem zgromadzenia informacji</caption>
   </screenshot>
   <screenshot>
-    <image>https://catalog.jan.ai/flatpak/jan_screenshot_3.png</image>
+    <image>https://updates.jingxing.uk/mita/flatpak/mita_screenshot_3.png</image>
     <caption>Assistant creation screen</caption>
     <caption xml:lang="pl">Ekran tworzenia asystenta</caption>
   </screenshot>
   <screenshot>
-    <image>https://catalog.jan.ai/flatpak/jan_screenshot_4.png</image>
-    <caption>Jan Hub</caption>
-    <caption xml:lang="pl">Centrum modeli Jan</caption>
+    <image>https://updates.jingxing.uk/mita/flatpak/mita_screenshot_4.png</image>
+    <caption>Mita Hub</caption>
+    <caption xml:lang="pl">Centrum modeli Mita</caption>
   </screenshot>
   <screenshot>
-    <image>https://catalog.jan.ai/flatpak/jan_screenshot_5.png</image>
+    <image>https://updates.jingxing.uk/mita/flatpak/mita_screenshot_5.png</image>
     <caption>Llama.cpp screen showcasing the models</caption>
     <caption xml:lang="pl">Ekran Llama.cpp z listą modeli</caption>
   </screenshot>
   <screenshot>
-    <image>https://catalog.jan.ai/flatpak/jan_screenshot_6.png</image>
+    <image>https://updates.jingxing.uk/mita/flatpak/mita_screenshot_6.png</image>
     <caption>MCP Settings</caption>
     <caption xml:lang="pl">Ustawienia MCP</caption>
   </screenshot>
 </screenshots>
 
-  <url type="homepage">https://jan.ai/</url>
-  <url type="bugtracker">https://github.com/janhq/jan/issues</url>
-  <url type="vcs-browser">https://github.com/janhq/jan</url>
+  <url type="homepage">https://jingxing.uk/</url>
+  <url type="bugtracker">https://github.com/realerikk0/Mita/issues</url>
+  <url type="vcs-browser">https://github.com/realerikk0/Mita</url>
 
   <content_rating type="oars-1.1"/>
 
@@ -111,7 +111,7 @@
     </release>
     <release version="0.7.8" date="2026-03-11">
       <description>
-        <p>OpenClaw integration, a new Jan CLI, and automatic context management for uninterrupted conversations</p>
+        <p>OpenClaw integration, a new Mita CLI, and automatic context management for uninterrupted conversations</p>
       </description>
     </release>
     <release version="0.7.7" date="2026-02-11">
@@ -121,7 +121,7 @@
     </release>
     <release version="0.7.6" date="2026-01-27">
     <description>
-      <p>Unified interface seamlessly integrated with the groundbreaking Jan V3 model, delivering an unparalleled AI experience</p>
+      <p>Unified interface seamlessly integrated with the groundbreaking Mita V3 model, delivering an unparalleled AI experience</p>
     </description>
   </release>
     <release version="0.7.5" date="2025-12-08">

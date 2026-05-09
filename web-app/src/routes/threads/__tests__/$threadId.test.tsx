@@ -440,21 +440,21 @@ describe('ThreadDetail route', () => {
     expect(screen.getByTestId('chat-status')).toHaveTextContent('ready')
   })
 
-  it('injects Silence identity prompt even when thread has no assistant', () => {
+  it('injects Mita identity prompt even when thread has no assistant', () => {
     renderComponent()
 
     expect(h.useChatArgs.at(-1)?.systemMessage).toContain(
-      'rendered:You are Silence'
+      'rendered:You are Mita'
     )
     expect(h.useChatArgs.at(-1)?.systemMessage).toContain(
       'Never say that you are Jan'
     )
     expect(h.useChatArgs.at(-1)?.systemMessage).toContain(
-      'Never translate it as "沉默"'
+      'your agent identity is Mita'
     )
   })
 
-  it('prepends Silence identity guard to custom assistant instructions', () => {
+  it('prepends Mita identity guard to custom assistant instructions', () => {
     h.threadsState.threads['thread-1'].assistants = [
       { id: 'custom', name: 'Custom', instructions: 'Use a concise tone.' },
     ]
@@ -462,13 +462,13 @@ describe('ThreadDetail route', () => {
     renderComponent()
 
     expect(h.useChatArgs.at(-1)?.systemMessage).toContain(
-      'rendered:You are Silence'
+      'rendered:You are Mita'
     )
     expect(h.useChatArgs.at(-1)?.systemMessage).toContain(
       'Never say that you are Jan'
     )
     expect(h.useChatArgs.at(-1)?.systemMessage).toContain(
-      'Never translate it as "沉默"'
+      'your agent identity is Mita'
     )
     expect(h.useChatArgs.at(-1)?.systemMessage).toContain('Use a concise tone.')
   })

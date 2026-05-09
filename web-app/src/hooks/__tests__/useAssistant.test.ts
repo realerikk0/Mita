@@ -53,7 +53,7 @@ describe('useAssistant', () => {
 
     const updatedAssistant = {
       ...defaultAssistant,
-      name: 'Updated Silence',
+      name: 'Updated Mita',
       description: 'Updated description',
     }
 
@@ -61,7 +61,7 @@ describe('useAssistant', () => {
       result.current.updateAssistant(updatedAssistant)
     })
 
-    expect(result.current.assistants[0].name).toBe('Updated Silence')
+    expect(result.current.assistants[0].name).toBe('Updated Mita')
     expect(result.current.assistants[0].description).toBe('Updated description')
   })
 
@@ -89,7 +89,7 @@ describe('useAssistant', () => {
     })
 
     expect(result.current.assistants).toHaveLength(1)
-    expect(result.current.assistants[0].id).toBe('jan')
+    expect(result.current.assistants[0].id).toBe('mita')
   })
 
   it('should set current assistant', () => {
@@ -151,14 +151,14 @@ describe('useAssistant', () => {
   it('should maintain assistant structure', () => {
     const { result } = renderHook(() => useAssistant())
 
-    expect(result.current.currentAssistant.id).toBe('jan')
-    expect(result.current.currentAssistant.name).toBe('Silence')
+    expect(result.current.currentAssistant.id).toBe('mita')
+    expect(result.current.currentAssistant.name).toBe('Mita')
     expect(result.current.currentAssistant.avatar).toBe('👋')
     expect(result.current.currentAssistant.instructions).toContain(
       'Never say that you are Jan'
     )
     expect(result.current.currentAssistant.instructions).toContain(
-      'Never translate it as "沉默"'
+      'your agent identity is Mita'
     )
     expect(result.current.currentAssistant.instructions).toContain(
       'Use tools when they are needed'
@@ -182,14 +182,14 @@ describe('useAssistant', () => {
       ])
     })
 
-    expect(result.current.assistants[0].name).toBe('Silence')
-    expect(result.current.assistants[0].description).toContain('Silence')
-    expect(result.current.assistants[0].instructions).toContain('You are Silence')
+    expect(result.current.assistants[0].name).toBe('Mita')
+    expect(result.current.assistants[0].description).toContain('Mita')
+    expect(result.current.assistants[0].instructions).toContain('You are Mita')
     expect(result.current.assistants[0].instructions).toContain(
       'Never say that you are Jan'
     )
     expect(result.current.assistants[0].instructions).toContain(
-      'Never translate it as "沉默"'
+      'your agent identity is Mita'
     )
     expect(result.current.assistants[0].instructions).not.toContain(
       'Menlo Research（https://www.menlo.ai）'
@@ -203,7 +203,7 @@ describe('useAssistant', () => {
       result.current.setAssistants([])
     })
 
-    expect(result.current.assistants).toEqual([])
+    expect(result.current.assistants).toEqual([defaultAssistant])
   })
 
   it('should update assistant in current assistant if it matches', () => {
@@ -211,13 +211,13 @@ describe('useAssistant', () => {
 
     const updatedDefaultAssistant = {
       ...defaultAssistant,
-      name: 'Updated Silence Name',
+      name: 'Updated Mita Name',
     }
 
     act(() => {
       result.current.updateAssistant(updatedDefaultAssistant)
     })
 
-    expect(result.current.currentAssistant.name).toBe('Updated Silence Name')
+    expect(result.current.currentAssistant.name).toBe('Updated Mita Name')
   })
 })

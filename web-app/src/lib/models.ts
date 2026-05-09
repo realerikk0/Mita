@@ -19,6 +19,16 @@ export const isJingxingImageGenerationModel = (modelId?: string): boolean => {
   ].some((pattern) => pattern.test(normalized))
 }
 
+export const isJingxingNativeWebSearchModel = (modelId?: string): boolean => {
+  if (!modelId || isJingxingImageGenerationModel(modelId)) return false
+  const normalized = modelId.toLowerCase()
+
+  return (
+    /^gpt-(?:4o|4\.1|5(?:[-.\w]*))/.test(normalized) ||
+    normalized.startsWith('grok-')
+  )
+}
+
 export const inferJingxingModelCapabilities = (modelId: string): string[] => {
   const normalized = modelId.toLowerCase()
 
@@ -53,6 +63,10 @@ export const inferJingxingModelCapabilities = (modelId: string): string[] => {
       isCodex)
   ) {
     capabilities.push(REASONING_CAPABILITY)
+  }
+
+  if (isJingxingNativeWebSearchModel(normalized)) {
+    capabilities.push(ModelCapabilities.WEB_SEARCH)
   }
 
   return uniqueCapabilities(capabilities)

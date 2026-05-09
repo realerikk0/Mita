@@ -133,7 +133,7 @@ describe('Index route', () => {
     expect(screen.getByTestId('chat-input')).toBeInTheDocument()
   })
 
-  it('renders chat UI when jan provider has models', () => {
+  it('renders chat UI when the legacy local provider has models', () => {
     h.providers = [{ provider: 'jan', models: [{ id: 'j' }] }]
     renderComponent()
     expect(screen.getByTestId('chat-input')).toBeInTheDocument()

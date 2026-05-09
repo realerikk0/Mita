@@ -49,7 +49,7 @@ export const predefinedProviders = [
         key: 'base-url',
         title: 'Base URL',
         description:
-          'The Jingxing OpenAI-compatible endpoint used by Silence.',
+          'The Jingxing OpenAI-compatible endpoint used by Mita.',
         controller_type: 'input',
         controller_props: {
           placeholder: 'https://api.jingxing.uk/v1',

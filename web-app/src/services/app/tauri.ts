@@ -41,19 +41,19 @@ export class TauriAppService extends DefaultAppService {
     return logData.split('\n').map(this.parseLogLine)
   }
 
-  async getSilenceDataFolder(): Promise<string | undefined> {
+  async getMitaDataFolder(): Promise<string | undefined> {
     try {
       const appConfiguration: AppConfiguration | undefined =
         await window.core?.api?.getAppConfigurations()
 
       return appConfiguration?.data_folder
     } catch (error) {
-      console.error('Failed to get Silence data folder:', error)
+      console.error('Failed to get Mita data folder:', error)
       return undefined
     }
   }
 
-  async relocateSilenceDataFolder(path: string): Promise<void> {
+  async relocateMitaDataFolder(path: string): Promise<void> {
     await window.core?.api?.changeAppDataFolder({ newDataFolder: path })
   }
 

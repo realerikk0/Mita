@@ -1,5 +1,5 @@
 /**
- * EventEmitter class - matches jan-dev implementation
+ * EventEmitter class - matches the upstream implementation
  * Used by ExtensionProvider to set window.core.events
  */
 

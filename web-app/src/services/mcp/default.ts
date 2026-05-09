@@ -76,7 +76,7 @@ export class DefaultMCPService implements MCPService {
     // No-op - not implemented in default service
   }
 
-  async checkSilenceBrowserExtensionConnected(): Promise<boolean> {
+  async checkMitaWebResearchConnected(): Promise<boolean> {
     return false
   }
 }

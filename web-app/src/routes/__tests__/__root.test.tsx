@@ -6,7 +6,7 @@ import React from 'react'
 
 const h = vi.hoisted(() => ({
   productAnalyticPrompt: false,
-  showSilenceModelPrompt: false,
+  showMitaModelPrompt: false,
   leftPanelOpen: true,
   sidebarWidth: 260,
   setLeftPanel: vi.fn(),
@@ -88,8 +88,8 @@ vi.mock('@/containers/dialogs/ErrorDialog', () => ({
 vi.mock('@/containers/analytics/PromptAnalytic', () => ({
   PromptAnalytic: () => <div data-testid="prompt-analytic" />,
 }))
-vi.mock('@/containers/PromptSilenceModel', () => ({
-  PromptSilenceModel: () => <div data-testid="prompt-silence" />,
+vi.mock('@/containers/PromptMitaModel', () => ({
+  PromptMitaModel: () => <div data-testid="prompt-mita" />,
 }))
 vi.mock('@/containers/GlobalError', () => ({
   default: ({ error }: any) => <div data-testid="global-error">{error?.message}</div>,
@@ -115,9 +115,9 @@ vi.mock('@/components/ui/sidebar', () => ({
 vi.mock('@/hooks/useAnalytic', () => ({
   useAnalytic: () => ({ productAnalyticPrompt: h.productAnalyticPrompt }),
 }))
-vi.mock('@/hooks/useSilenceModelPrompt', () => ({
-  useSilenceModelPrompt: () => ({
-    showSilenceModelPrompt: h.showSilenceModelPrompt,
+vi.mock('@/hooks/useMitaModelPrompt', () => ({
+  useMitaModelPrompt: () => ({
+    showMitaModelPrompt: h.showMitaModelPrompt,
   }),
 }))
 vi.mock('@/hooks/useLeftPanel', () => ({
@@ -148,7 +148,7 @@ describe('__root route', () => {
   beforeEach(() => {
     vi.clearAllMocks()
     h.productAnalyticPrompt = false
-    h.showSilenceModelPrompt = false
+    h.showMitaModelPrompt = false
     // reset document state
     document.body.className = ''
     const loader = document.getElementById('initial-loader')
@@ -194,10 +194,10 @@ describe('__root route', () => {
     expect(screen.queryByTestId('prompt-analytic')).not.toBeInTheDocument()
   })
 
-  it('does not render the Silence local model prompt', () => {
-    h.showSilenceModelPrompt = true
+  it('does not render the Mita local model prompt', () => {
+    h.showMitaModelPrompt = true
     renderComponent()
-    expect(screen.queryByTestId('prompt-silence')).not.toBeInTheDocument()
+    expect(screen.queryByTestId('prompt-mita')).not.toBeInTheDocument()
   })
 
   it('uses LogsLayout on /logs path (no sidebar)', () => {

@@ -132,16 +132,21 @@ vi.mock('@/hooks/useChatAttachments', () => ({
     }),
 }))
 
-vi.mock('@/hooks/useSilenceBrowserExtension', () => ({
-  useSilenceBrowserExtension: () => ({
+vi.mock('@/hooks/useWebSearch', () => ({
+  useWebSearch: (selector: any) =>
+    selector({
+      enabled: false,
+      setEnabled: vi.fn(),
+      toggle: vi.fn(),
+    }),
+}))
+
+vi.mock('@/hooks/useMitaWebResearch', () => ({
+  useMitaWebResearch: () => ({
     hasConfig: false,
     isActive: false,
     isLoading: false,
-    dialogOpen: false,
-    dialogState: null,
-    toggleBrowser: vi.fn(),
-    handleCancel: vi.fn(),
-    setDialogOpen: vi.fn(),
+    setActive: vi.fn(),
   }),
 }))
 
@@ -228,10 +233,6 @@ vi.mock('@/containers/AvatarEmoji', () => ({
 }))
 vi.mock('@/containers/McpExtensionToolLoader', () => ({
   McpExtensionToolLoader: () => null,
-}))
-vi.mock('@/containers/dialogs/SilenceBrowserExtensionDialog', () => ({
-  __esModule: true,
-  default: () => null,
 }))
 vi.mock('@/containers/PromptVisionModel', () => ({
   PromptVisionModel: () => null,

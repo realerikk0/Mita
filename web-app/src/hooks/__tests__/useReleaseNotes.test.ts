@@ -65,7 +65,7 @@ describe('useReleaseNotes', () => {
       })
 
       expect(mockFetch).toHaveBeenCalledWith(
-        'https://api.github.com/repos/realerikk0/Silence/releases'
+        'https://api.github.com/repos/realerikk0/Mita/releases'
       )
       expect(result.current.loading).toBe(false)
       expect(result.current.error).toBe(null)
@@ -292,7 +292,7 @@ describe('useReleaseNotes', () => {
           draft: false,
           body: 'Release notes',
           published_at: '2024-01-01T00:00:00Z',
-          html_url: 'https://github.com/realerikk0/Silence/releases/tag/v1.5.0',
+          html_url: 'https://github.com/realerikk0/Mita/releases/tag/v1.5.0',
           assets: [],
         },
       ]

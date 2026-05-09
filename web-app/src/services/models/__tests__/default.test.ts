@@ -27,7 +27,7 @@ vi.mock('../tokenCountToolContext', () => ({
 
 global.fetch = vi.fn()
 Object.defineProperty(global, 'MODEL_CATALOG_URL', { value: 'https://example.com/models', writable: true, configurable: true })
-Object.defineProperty(global, 'LATEST_SILENCE_MODEL_URL', { value: 'https://example.com/latest', writable: true, configurable: true })
+Object.defineProperty(global, 'LATEST_MITA_MODEL_URL', { value: 'https://example.com/latest', writable: true, configurable: true })
 
 describe('DefaultModelsService - additional coverage', () => {
   let svc: DefaultModelsService
@@ -69,24 +69,24 @@ describe('DefaultModelsService - additional coverage', () => {
     })
   })
 
-  describe('fetchLatestSilenceModel', () => {
+  describe('fetchLatestMitaModel', () => {
     it.each([
       ['object response', { model_name: 'jan-nano' }, { model_name: 'jan-nano' }],
       ['array response', [{ model_name: 'jan-nano' }, { model_name: 'jan-micro' }], { model_name: 'jan-nano' }],
       ['empty array', [], null],
     ])('handles %s', async (_label, response, expected) => {
       ;(fetch as any).mockResolvedValue({ ok: true, json: vi.fn().mockResolvedValue(response) })
-      expect(await svc.fetchLatestSilenceModel()).toEqual(expected)
+      expect(await svc.fetchLatestMitaModel()).toEqual(expected)
     })
 
     it('returns null on non-ok response', async () => {
       ;(fetch as any).mockResolvedValue({ ok: false, status: 500, statusText: 'Error' })
-      expect(await svc.fetchLatestSilenceModel()).toBeNull()
+      expect(await svc.fetchLatestMitaModel()).toBeNull()
     })
 
     it('returns null on network error', async () => {
       ;(fetch as any).mockRejectedValue(new Error('network'))
-      expect(await svc.fetchLatestSilenceModel()).toBeNull()
+      expect(await svc.fetchLatestMitaModel()).toBeNull()
     })
   })
 

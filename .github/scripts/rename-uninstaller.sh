@@ -18,8 +18,8 @@ if [ ! -f "$FILE_PATH" ]; then
 fi
 
 # Perform the replacements
-sed -i -e "s#Jan#Jan-$CHANNEL#g" "$FILE_PATH"
-sed -i -e "s#jan#jan-$CHANNEL#g" "$FILE_PATH"
+sed -i -e "s#Mita#Mita-$CHANNEL#g" "$FILE_PATH"
+sed -i -e "s#jan#mita-$CHANNEL#g" "$FILE_PATH"
 
 # Notify completion
 echo "File has been updated: $FILE_PATH"

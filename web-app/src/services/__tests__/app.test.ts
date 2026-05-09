@@ -114,24 +114,24 @@ describe('TauriAppService', () => {
     })
   })
 
-  describe('getSilenceDataFolder', () => {
-    it('should get silence data folder path', async () => {
-      const mockConfig = { data_folder: '/path/to/silence/data' }
+  describe('getMitaDataFolder', () => {
+    it('should get mita data folder path', async () => {
+      const mockConfig = { data_folder: '/path/to/mita/data' }
       mockWindow.core.api.getAppConfigurations.mockResolvedValue(mockConfig)
 
-      const result = await appService.getSilenceDataFolder()
+      const result = await appService.getMitaDataFolder()
 
       expect(mockWindow.core.api.getAppConfigurations).toHaveBeenCalled()
-      expect(result).toBe('/path/to/silence/data')
+      expect(result).toBe('/path/to/mita/data')
     })
   })
 
-  describe('relocateSilenceDataFolder', () => {
-    it('should relocate silence data folder', async () => {
-      const newPath = '/new/path/to/silence/data'
+  describe('relocateMitaDataFolder', () => {
+    it('should relocate mita data folder', async () => {
+      const newPath = '/new/path/to/mita/data'
       mockWindow.core.api.changeAppDataFolder.mockResolvedValue(undefined)
 
-      await appService.relocateSilenceDataFolder(newPath)
+      await appService.relocateMitaDataFolder(newPath)
 
       expect(mockWindow.core.api.changeAppDataFolder).toHaveBeenCalledWith({
         newDataFolder: newPath,

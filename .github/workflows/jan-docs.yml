@@ -1,4 +1,4 @@
-name: Jan Docs
+name: Mita Docs
 
 on:
   push:
@@ -6,11 +6,11 @@ on:
       - main
     paths:
       - 'docs/**'
-      - '.github/workflows/jan-docs.yml'
+      - '.github/workflows/mita-docs.yml'
   pull_request:
     paths:
       - 'docs/**'
-      - '.github/workflows/jan-docs.yml'
+      - '.github/workflows/mita-docs.yml'
     # Review gh actions docs if you want to further define triggers, paths, etc
     # https://docs.github.com/en/actions/using-workflows/workflow-syntax-for-github-actions#on
   workflow_dispatch:

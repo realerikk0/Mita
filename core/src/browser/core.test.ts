@@ -2,7 +2,7 @@ import { describe, it, expect, vi } from 'vitest'
 import { openExternalUrl } from './core'
 import { joinPath } from './core'
 import { openFileExplorer } from './core'
-import { getSilenceDataFolderPath } from './core'
+import { getMitaDataFolderPath } from './core'
 import { executeOnMain } from './core'
 
 describe('test core apis', () => {
@@ -42,17 +42,17 @@ describe('test core apis', () => {
     expect(result).toBe('opened')
   })
 
-  it('should get silence data folder path', async () => {
+  it('should get mita data folder path', async () => {
     globalThis.core = {
       api: {
-        getSilenceDataFolderPath: vi
+        getMitaDataFolderPath: vi
           .fn()
-          .mockResolvedValue('/path/to/silence/data'),
+          .mockResolvedValue('/path/to/mita/data'),
       },
     }
-    const result = await getSilenceDataFolderPath()
-    expect(globalThis.core.api.getSilenceDataFolderPath).toHaveBeenCalled()
-    expect(result).toBe('/path/to/silence/data')
+    const result = await getMitaDataFolderPath()
+    expect(globalThis.core.api.getMitaDataFolderPath).toHaveBeenCalled()
+    expect(result).toBe('/path/to/mita/data')
   })
 })
 

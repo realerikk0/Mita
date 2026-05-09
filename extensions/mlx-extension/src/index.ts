@@ -10,7 +10,7 @@
 
 import {
   AIEngine,
-  getSilenceDataFolderPath,
+  getMitaDataFolderPath,
   fs,
   joinPath,
   modelInfo,
@@ -60,7 +60,7 @@ export default class mlx_extension extends AIEngine {
 
   private config: any = {}
   private providerPath!: string
-  private apiSecret: string = 'SilenceMLX'
+  private apiSecret: string = 'MitaMLX'
   private loadingModels = new Map<string, Promise<SessionInfo>>()
 
   override async onLoad(): Promise<void> {
@@ -88,7 +88,7 @@ export default class mlx_extension extends AIEngine {
   async getProviderPath(): Promise<string> {
     if (!this.providerPath) {
       // Use mlx folder for models
-      this.providerPath = await joinPath([await getSilenceDataFolderPath(), 'mlx'])
+      this.providerPath = await joinPath([await getMitaDataFolderPath(), 'mlx'])
     }
     return this.providerPath
   }
@@ -268,7 +268,7 @@ export default class mlx_extension extends AIEngine {
 
     const cfg = { ...this.config, ...(overrideSettings ?? {}) }
 
-    const silenceDataFolderPath = await getSilenceDataFolderPath()
+    const mitaDataFolderPath = await getMitaDataFolderPath()
     const modelConfigPath = await joinPath([
       this.providerPath,
       'models',
@@ -294,8 +294,8 @@ export default class mlx_extension extends AIEngine {
       // Absolute path
       modelPath = modelConfig.model_path
     } else {
-      // Relative path - resolve from Silence data folder
-      modelPath = await joinPath([silenceDataFolderPath, modelConfig.model_path])
+      // Relative path - resolve from Mita data folder
+      modelPath = await joinPath([mitaDataFolderPath, modelConfig.model_path])
     }
 
     const mlxConfig: MlxConfig = {
@@ -528,11 +528,11 @@ export default class mlx_extension extends AIEngine {
       !modelConfig.model_path.startsWith('/') &&
       !modelConfig.model_path.includes(':')
     ) {
-      // Model file is at {silenceDataFolder}/{model_path}
+      // Model file is at {mitaDataFolder}/{model_path}
       // Delete the parent folder containing the actual model file
-      const silenceDataFolderPath = await getSilenceDataFolderPath()
+      const mitaDataFolderPath = await getMitaDataFolderPath()
       const modelPath = await joinPath([
-        silenceDataFolderPath,
+        mitaDataFolderPath,
         modelConfig.model_path,
       ])
       const parentDir = modelPath.substring(0, modelPath.lastIndexOf('/'))
@@ -610,9 +610,9 @@ export default class mlx_extension extends AIEngine {
 
     if (sourcePath.startsWith('https://')) {
       // Download from URL to mlx models folder
-      const silenceDataFolderPath = await getSilenceDataFolderPath()
+      const mitaDataFolderPath = await getMitaDataFolderPath()
       const modelDir = await joinPath([
-        silenceDataFolderPath,
+        mitaDataFolderPath,
         'mlx',
         'models',
         modelId,
@@ -921,9 +921,9 @@ export default class mlx_extension extends AIEngine {
       // Absolute path
       modelPath = modelConfig.model_path
     } else {
-      // Relative path - resolve from Silence data folder
-      const silenceDataFolderPath = await getSilenceDataFolderPath()
-      modelPath = await joinPath([silenceDataFolderPath, modelConfig.model_path])
+      // Relative path - resolve from Mita data folder
+      const mitaDataFolderPath = await getMitaDataFolderPath()
+      modelPath = await joinPath([mitaDataFolderPath, modelConfig.model_path])
     }
 
     // Check if model is safetensors or GGUF

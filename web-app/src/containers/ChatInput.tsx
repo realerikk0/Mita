@@ -29,7 +29,6 @@ import {
   IconPaperclip,
   IconLoader2,
   IconWorld,
-  IconBrandChrome,
   IconUser,
 } from '@tabler/icons-react'
 import { generateId } from 'ai'
@@ -83,12 +82,13 @@ import {
   createImageAttachment,
   createDocumentAttachment,
 } from '@/types/attachment'
-import SilenceBrowserExtensionDialog from '@/containers/dialogs/SilenceBrowserExtensionDialog'
-import { useSilenceBrowserExtension } from '@/hooks/useSilenceBrowserExtension'
+import { useWebSearch } from '@/hooks/useWebSearch'
+import { useMitaWebResearch } from '@/hooks/useMitaWebResearch'
 import { isBrowserMCPServerName } from '@/constants/mcp'
 import { PromptVisionModel } from '@/containers/PromptVisionModel'
 import { useAgentMode } from '@/hooks/useAgentMode'
 import { AssistantsMenu } from '@/components/AssistantsMenu'
+import { isJingxingNativeWebSearchModel } from '@/lib/models'
 
 type ChatInputProps = {
   className?: string
@@ -231,30 +231,74 @@ const ChatInput = memo(function ChatInput({
 
   // No auto-selection: let the user explicitly pick an assistant
 
-  // Silence Browser Extension hook
+  const webSearchEnabled = useWebSearch((state) => state.enabled)
+  const setWebSearchEnabled = useWebSearch((state) => state.setEnabled)
   const {
-    hasConfig: hasSilenceBrowserMCPConfig,
-    isActive: silenceBrowserMCPActive,
-    isLoading: isSilenceBrowserMCPLoading,
-    dialogOpen: extensionDialogOpen,
-    dialogState: extensionDialogState,
-    toggleBrowser: handleBrowseClick,
-    handleCancel: handleExtensionDialogCancel,
-    setDialogOpen: setExtensionDialogOpen,
-  } = useSilenceBrowserExtension()
+    hasConfig: hasWebResearchConfig,
+    isActive: webResearchActive,
+    isLoading: webResearchLoading,
+    setActive: setWebResearchActive,
+  } = useMitaWebResearch()
 
-  // Check if model supports browser feature (requires both vision and tools)
-  const modelSupportsBrowser = useMemo(() => {
+  const modelSupportsNativeWebSearch = useMemo(
+    () =>
+      selectedProvider === 'jingxing' &&
+      isJingxingNativeWebSearchModel(selectedModel?.id),
+    [selectedModel?.id, selectedProvider]
+  )
+
+  const modelSupportsExternalWebResearch = useMemo(() => {
     const capabilities = selectedModel?.capabilities || []
-    return capabilities.includes('vision') && capabilities.includes('tools')
+    return capabilities.includes('tools')
   }, [selectedModel?.capabilities])
 
-  // Auto-disable browser feature when model doesn't support it
-  useEffect(() => {
-    if (silenceBrowserMCPActive && !modelSupportsBrowser) {
-      handleBrowseClick()
+  const modelSupportsAnyWebSearch =
+    modelSupportsNativeWebSearch || modelSupportsExternalWebResearch
+
+  const handleWebSearchToggle = useCallback(async () => {
+    const nextEnabled = !webSearchEnabled
+
+    if (nextEnabled && !modelSupportsAnyWebSearch) {
+      toast.error('Web Search is not available for this model')
+      return
     }
-  }, [silenceBrowserMCPActive, modelSupportsBrowser, handleBrowseClick])
+
+    if (modelSupportsNativeWebSearch) {
+      setWebSearchEnabled(nextEnabled)
+      return
+    }
+
+    if (!hasWebResearchConfig) {
+      if (nextEnabled) {
+        toast.error('Mita Web Research is not configured')
+      }
+      return
+    }
+
+    if (nextEnabled && !webResearchActive) {
+      const activated = await setWebResearchActive(true)
+      if (!activated) return
+    } else if (!nextEnabled && webResearchActive) {
+      const deactivated = await setWebResearchActive(false)
+      if (!deactivated) return
+    }
+
+    setWebSearchEnabled(nextEnabled)
+  }, [
+    hasWebResearchConfig,
+    modelSupportsAnyWebSearch,
+    modelSupportsNativeWebSearch,
+    setWebResearchActive,
+    setWebSearchEnabled,
+    webResearchActive,
+    webSearchEnabled,
+  ])
+
+  useEffect(() => {
+    if (webSearchEnabled && !modelSupportsAnyWebSearch) {
+      setWebSearchEnabled(false)
+    }
+  }, [modelSupportsAnyWebSearch, setWebSearchEnabled, webSearchEnabled])
 
   const attachmentsEnabled = useAttachments((s) => s.enabled)
   const parsePreference = useAttachments((s) => s.parseMode)
@@ -1771,48 +1815,6 @@ const ChatInput = memo(function ChatInput({
                     useLastUsedModel={initialMessage}
                   />
                 )} */}
-                {!effectiveAgentMode && hasSilenceBrowserMCPConfig && modelSupportsBrowser && (
-                  <Tooltip>
-                    <TooltipTrigger asChild>
-                      <Button
-                        variant="ghost"
-                        size="icon-xs"
-                        disabled={isSilenceBrowserMCPLoading}
-                        className={cn(silenceBrowserMCPActive && "text-primary")}
-                        onClick={
-                          isSilenceBrowserMCPLoading
-                            ? undefined
-                            : handleBrowseClick
-                        }
-                      >
-                        {isSilenceBrowserMCPLoading ? (
-                          <IconLoader2
-                            size={18}
-                            className="text-primary animate-spin"
-                          />
-                        ) : (
-                          <IconBrandChrome
-                            size={18}
-                            className={cn(
-                              'text-muted-foreground',
-                              silenceBrowserMCPActive && 'text-primary'
-                            )}
-                          />
-                        )}
-                      </Button>
-                    </TooltipTrigger>
-                    <TooltipContent>
-                      <p>
-                        {isSilenceBrowserMCPLoading
-                          ? 'Starting...'
-                          : silenceBrowserMCPActive
-                            ? 'Browse (Active)'
-                            : 'Browse'}
-                      </p>
-                    </TooltipContent>
-                  </Tooltip>
-                )}
-
                 {!effectiveAgentMode && selectedModel?.capabilities?.includes('embeddings') && (
                   <Tooltip>
                     <TooltipTrigger asChild>
@@ -1928,18 +1930,40 @@ const ChatInput = memo(function ChatInput({
                   </Tooltip>
                 )}
 
-                {!effectiveAgentMode && selectedModel?.capabilities?.includes('web_search') && (
+                {!effectiveAgentMode && modelSupportsAnyWebSearch && (
                   <Tooltip>
                     <TooltipTrigger asChild>
-                      <Button variant="ghost" size="icon-xs">
-                        <IconWorld
-                          size={18}
-                          className="text-muted-foreground"
-                        />
+                      <Button
+                        variant="ghost"
+                        size="icon-xs"
+                        disabled={webResearchLoading}
+                        className={cn(webSearchEnabled && 'text-primary')}
+                        onClick={webResearchLoading ? undefined : handleWebSearchToggle}
+                      >
+                        {webResearchLoading ? (
+                          <IconLoader2
+                            size={18}
+                            className="text-primary animate-spin"
+                          />
+                        ) : (
+                          <IconWorld
+                            size={18}
+                            className={cn(
+                              'text-muted-foreground',
+                              webSearchEnabled && 'text-primary'
+                            )}
+                          />
+                        )}
                       </Button>
                     </TooltipTrigger>
                     <TooltipContent>
-                      <p>Web Search</p>
+                      <p>
+                        {webSearchEnabled
+                          ? 'Web Search enabled'
+                          : modelSupportsNativeWebSearch
+                            ? 'Web Search'
+                            : 'Web Search via Mita Web Research'}
+                      </p>
                     </TooltipContent>
                   </Tooltip>
                 )}
@@ -2067,13 +2091,6 @@ const ChatInput = memo(function ChatInput({
             />
           </div>
         )}
-
-      <SilenceBrowserExtensionDialog
-        open={extensionDialogOpen}
-        onOpenChange={setExtensionDialogOpen}
-        state={extensionDialogState}
-        onCancel={handleExtensionDialogCancel}
-      />
 
       {/* Vision Model Download Prompt */}
       <PromptVisionModel

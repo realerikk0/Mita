@@ -83,15 +83,15 @@ jobs:
 
           if [ "${{ inputs.channel }}" != "stable" ]; then
             if [[ "${{ inputs.channel }}" == "nightly" ]]; then
-              jq '.plugins.updater.endpoints = ["https://apps-nightly.jan.ai/update-check", "https://delta.jan.ai/${{ inputs.channel }}/latest.json"]' ./src-tauri/tauri.conf.json > /tmp/tauri.conf.json
+              jq '.plugins.updater.endpoints = ["https://updates.jingxing.uk/mita/update-check", "https://updates.jingxing.uk/mita/${{ inputs.channel }}/latest.json"]' ./src-tauri/tauri.conf.json > /tmp/tauri.conf.json
             else
-              jq '.plugins.updater.endpoints = ["https://delta.jan.ai/${{ inputs.channel }}/latest.json"]' ./src-tauri/tauri.conf.json > /tmp/tauri.conf.json
+              jq '.plugins.updater.endpoints = ["https://updates.jingxing.uk/mita/${{ inputs.channel }}/latest.json"]' ./src-tauri/tauri.conf.json > /tmp/tauri.conf.json
             fi
             mv /tmp/tauri.conf.json ./src-tauri/tauri.conf.json
             chmod +x .github/scripts/rename-tauri-app.sh
             .github/scripts/rename-tauri-app.sh ./src-tauri/tauri.conf.json ${{ inputs.channel }}
-            ctoml ./src-tauri/Cargo.toml package.name "Jan-${{ inputs.channel }}"
-            ctoml ./src-tauri/Cargo.toml package.default-run "Jan-${{ inputs.channel }}"
+            ctoml ./src-tauri/Cargo.toml package.name "Mita-${{ inputs.channel }}"
+            ctoml ./src-tauri/Cargo.toml package.default-run "Mita-${{ inputs.channel }}"
             ctoml ./src-tauri/Cargo.toml dependencies.tauri.features[] "devtools"
             chmod +x .github/scripts/rename-workspace.sh
             .github/scripts/rename-workspace.sh ./package.json ${{ inputs.channel }}
@@ -114,6 +114,6 @@ jobs:
       - name: Upload Artifact
         uses: actions/upload-artifact@v4
         with:
-          name: jan-${{ inputs.channel }}-mac-universal-${{ inputs.new_version }}.dmg
+          name: mita-${{ inputs.channel }}-mac-universal-${{ inputs.new_version }}.dmg
           path: |
             ./src-tauri/target/universal-apple-darwin/release/bundle/dmg/*.dmg

@@ -420,10 +420,14 @@ pub fn is_orphaned_mcp_process(process_info: &ProcessUsingPort) -> bool {
 
     let is_js_runtime =
         name_lower.contains("node") || name_lower.contains("npx") || name_lower.contains("bun");
-    let is_jan_mcp_server = cmd_str.contains("search-mcp-server")
+    let is_mita_mcp_server = cmd_str.contains("mita-web-research")
+        || cmd_str.contains("silence-web-research")
+        || cmd_str.contains("search-mcp-server")
+        || (cmd_str.contains("mita") && cmd_str.contains("mcp"))
+        || (cmd_str.contains("silence") && cmd_str.contains("mcp"))
         || (cmd_str.contains("jan") && cmd_str.contains("mcp"))
         || cmd_str.contains("node")
         || cmd_str.contains("bun");
 
-    is_js_runtime && is_jan_mcp_server
+    is_js_runtime && is_mita_mcp_server
 }

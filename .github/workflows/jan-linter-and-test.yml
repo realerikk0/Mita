@@ -5,7 +5,7 @@ on:
     branches:
       - main
     paths:
-      - .github/workflows/jan-linter-and-test.yml
+      - .github/workflows/mita-linter-and-test.yml
       - 'web/**'
       - 'joi/**'
       - 'package.json'
@@ -21,7 +21,7 @@ on:
       - main
       - release/**
     paths:
-      - .github/workflows/jan-linter-and-test.yml
+      - .github/workflows/mita-linter-and-test.yml
       - 'web/**'
       - 'joi/**'
       - 'package.json'
@@ -98,7 +98,7 @@ jobs:
           mkdir -p src-tauri/resources/bin src-tauri/resources/pre-install src-tauri/icons
           touch src-tauri/resources/pre-install/.gitkeep
           touch src-tauri/resources/LICENSE
-          touch src-tauri/resources/bin/jan-cli
+          touch src-tauri/resources/bin/mita-cli
           for bin in uv bun; do
             touch "src-tauri/resources/bin/${bin}-${TRIPLE}"
           done

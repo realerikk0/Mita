@@ -32,6 +32,12 @@ import {
 } from './context-manager'
 import { mcpOrchestrator } from '@/lib/mcp-orchestrator'
 import { isRouterModelSelectable } from '@/lib/mcp-router-model-filter'
+import { isBrowserMCPServerName } from '@/constants/mcp'
+import { useWebSearch } from '@/hooks/useWebSearch'
+import {
+  canUseJingxingNativeWebSearch,
+  streamJingxingResponsesWebSearch,
+} from '@/lib/jingxing-responses-web-search'
 
 export type TokenUsageCallback = (
   usage: LanguageModelUsage,
@@ -346,6 +352,9 @@ export class CustomChatTransport implements ChatTransport<UIMessage> {
           // MCP tools added after RAG tools, so they take precedence on name conflicts
           mcpTools.forEach((tool) => {
             const serverName = tool.server || 'unknown'
+            if (isBrowserMCPServerName(serverName) && !useWebSearch.getState().enabled) {
+              return
+            }
             if (!isToolDisabled(serverName, tool.name)) {
               toolsRecord[tool.name] = {
                 description: tool.description,
@@ -446,6 +455,7 @@ export class CustomChatTransport implements ChatTransport<UIMessage> {
     if (!this.serviceHub || !modelId || !provider) {
       throw new Error('ServiceHub not initialized or model/provider missing.')
     }
+    let effectiveProvider = provider
 
     this.lastUserMessage = extractLatestUserText(options.messages)
 
@@ -453,6 +463,7 @@ export class CustomChatTransport implements ChatTransport<UIMessage> {
       const updatedProvider = useModelProvider
         .getState()
         .getProviderByName(providerId)
+      effectiveProvider = updatedProvider ?? provider
 
       const currentAssistant = useAssistant.getState().currentAssistant
       const inferenceParams = currentAssistant?.parameters
@@ -461,7 +472,7 @@ export class CustomChatTransport implements ChatTransport<UIMessage> {
       // structured LLM routing when many servers are connected.
       this.model = await ModelFactory.createModel(
         modelId,
-        updatedProvider ?? provider,
+        effectiveProvider,
         inferenceParams ?? {}
       )
     } catch (error) {
@@ -583,9 +594,28 @@ export class CustomChatTransport implements ChatTransport<UIMessage> {
       }
     }
 
-    const baseMessages = convertToModelMessages(
-      this.mapUserInlineAttachments(effectiveMessages)
-    )
+    const mappedMessages = this.mapUserInlineAttachments(effectiveMessages)
+
+    if (
+      useWebSearch.getState().enabled &&
+      canUseJingxingNativeWebSearch({
+        providerName: providerId,
+        modelId,
+        messages: mappedMessages,
+      })
+    ) {
+      return streamJingxingResponsesWebSearch({
+        modelId,
+        provider: effectiveProvider,
+        messages: mappedMessages,
+        system: this.systemMessage,
+        maxOutputTokens,
+        abortSignal: options.abortSignal,
+        onTokenUsage: this.onTokenUsage,
+      })
+    }
+
+    const baseMessages = convertToModelMessages(mappedMessages)
 
     // If continuing a truncated response, append the partial assistant content as a
     // prefill so the model resumes from where it left off rather than regenerating.

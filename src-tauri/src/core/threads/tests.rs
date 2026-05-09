@@ -8,7 +8,7 @@ use super::utils::{
     ensure_data_dirs, ensure_thread_dir_exists, get_data_dir, get_messages_path, get_thread_dir,
     get_thread_metadata_path,
 };
-use crate::core::app::commands::get_silence_data_folder_path;
+use crate::core::app::commands::get_mita_data_folder_path;
 use futures_util::future;
 use serde_json::json;
 use std::fs;
@@ -35,7 +35,7 @@ impl std::ops::Deref for DataDirGuard {
 fn mock_app_with_temp_data_dir() -> (tauri::App<MockRuntime>, DataDirGuard) {
     let app = mock_app();
     // Get the actual data dir that will be used by storage code
-    let data_dir = get_silence_data_folder_path(app.handle().clone());
+    let data_dir = get_mita_data_folder_path(app.handle().clone());
     println!("Mock app data dir: {}", data_dir.display());
     (app, DataDirGuard(data_dir))
 }
@@ -411,7 +411,6 @@ async fn test_modify_thread_assistant() {
         .await
         .unwrap();
     assert_eq!(retrieved["assistant_name"], "Modified Assistant");
-
 }
 
 #[tokio::test]
@@ -438,7 +437,6 @@ async fn test_thread_not_found_errors() {
             .await
             .is_err()
     );
-
 }
 
 #[tokio::test]
@@ -455,7 +453,6 @@ async fn test_message_without_id_gets_generated() {
     let created_msg = create_message(app_handle, message).await.unwrap();
 
     assert!(created_msg["id"].as_str().is_some_and(|id| !id.is_empty()));
-
 }
 
 #[tokio::test]
@@ -485,7 +482,6 @@ async fn test_concurrent_message_operations() {
 
     let messages = list_messages(app_handle, thread_id).await.unwrap();
     assert_eq!(messages.len(), 5);
-
 }
 
 #[tokio::test]
@@ -512,7 +508,6 @@ async fn test_empty_message_list() {
         .await
         .unwrap();
     assert_eq!(messages.len(), 0);
-
 }
 
 // ---------- constants.rs ----------

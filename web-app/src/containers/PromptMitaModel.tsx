@@ -1,21 +1,21 @@
 import { Button } from '@/components/ui/button'
-import { useSilenceModelPromptDismissed } from '@/hooks/useSilenceModelPrompt'
+import { useMitaModelPromptDismissed } from '@/hooks/useMitaModelPrompt'
 import { useServiceHub } from '@/hooks/useServiceHub'
 import { useDownloadStore } from '@/hooks/useDownloadStore'
 import { useGeneralSetting } from '@/hooks/useGeneralSetting'
 import { useMemo } from 'react'
 import { SETUP_SCREEN_QUANTIZATIONS } from '@/constants/models'
-import { useLatestSilenceModel } from '@/hooks/useLatestSilenceModel'
+import { useLatestMitaModel } from '@/hooks/useLatestMitaModel'
 
-export function PromptSilenceModel() {
+export function PromptMitaModel() {
 
-  const { setDismissedModelName } = useSilenceModelPromptDismissed()
+  const { setDismissedModelName } = useMitaModelPromptDismissed()
   const serviceHub = useServiceHub()
   const { downloads, localDownloadingModels, addLocalDownloadingModel } =
     useDownloadStore()
   const huggingfaceToken = useGeneralSetting((state) => state.huggingfaceToken)
 
-  const { model: recommendedModel, loading: isLoading } = useLatestSilenceModel()
+  const { model: recommendedModel, loading: isLoading } = useLatestMitaModel()
 
   const defaultVariant = useMemo(() => {
     if (!recommendedModel) return null
@@ -65,9 +65,9 @@ export function PromptSilenceModel() {
   return (
     <div className="fixed bottom-4 right-4 z-50 p-4 shadow-lg bg-background w-4/5 md:w-100 border rounded-lg">
       <div className="flex items-center gap-2">
-        <img src="/images/jan-logo.png" alt="Silence" className="size-5" />
+        <img src="/images/mita-logo.png" alt="Mita" className="size-5" />
         <h2 className="font-medium">
-          {recommendedModel?.display_name ?? recommendedModel?.model_name ?? 'Silence Model'}
+          {recommendedModel?.display_name ?? recommendedModel?.model_name ?? 'Mita Model'}
           {defaultVariant && (
           <span className="text-muted-foreground">
             {' '}
@@ -77,7 +77,7 @@ export function PromptSilenceModel() {
         </h2>
       </div>
       <p className="mt-2 text-sm text-muted-foreground">
-        Get started with {recommendedModel?.display_name ?? 'Silence'}, our recommended local AI model optimized for your device.
+        Get started with {recommendedModel?.display_name ?? 'Mita'}, our recommended local AI model optimized for your device.
       </p>
       <div className="mt-4 flex justify-end space-x-2">
         <Button

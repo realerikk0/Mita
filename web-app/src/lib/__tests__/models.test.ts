@@ -8,6 +8,7 @@ import {
   getModelCapabilities,
   inferJingxingModelCapabilities,
   isJingxingImageGenerationModel,
+  isJingxingNativeWebSearchModel,
   normalizeModelCapabilitiesForProvider,
 } from '../models'
 import { ModelCapabilities } from '@/types/models'
@@ -344,68 +345,82 @@ describe('getModelCapabilities', () => {
         ModelCapabilities.COMPLETION,
         ModelCapabilities.TOOLS,
         ModelCapabilities.VISION,
+        ModelCapabilities.WEB_SEARCH,
       ],
       'gpt-5.3-chat': [
         ModelCapabilities.COMPLETION,
         ModelCapabilities.TOOLS,
         ModelCapabilities.VISION,
+        ModelCapabilities.WEB_SEARCH,
       ],
       'gpt-5.3-codex': [
         ModelCapabilities.COMPLETION,
         ModelCapabilities.TOOLS,
         'reasoning',
+        ModelCapabilities.WEB_SEARCH,
       ],
       'gpt-5.4': [
         ModelCapabilities.COMPLETION,
         ModelCapabilities.TOOLS,
         ModelCapabilities.VISION,
+        ModelCapabilities.WEB_SEARCH,
       ],
       'gpt-5.4-mini': [
         ModelCapabilities.COMPLETION,
         ModelCapabilities.TOOLS,
         ModelCapabilities.VISION,
+        ModelCapabilities.WEB_SEARCH,
       ],
       'gpt-5.4-nano': [
         ModelCapabilities.COMPLETION,
         ModelCapabilities.TOOLS,
         ModelCapabilities.VISION,
+        ModelCapabilities.WEB_SEARCH,
       ],
       'gpt-5.4-pro': [
         ModelCapabilities.COMPLETION,
         ModelCapabilities.TOOLS,
         ModelCapabilities.VISION,
+        ModelCapabilities.WEB_SEARCH,
       ],
       'gpt-5.5': [
         ModelCapabilities.COMPLETION,
         ModelCapabilities.TOOLS,
         ModelCapabilities.VISION,
+        ModelCapabilities.WEB_SEARCH,
       ],
       'grok-4-1-fast-non-reasoning': [
         ModelCapabilities.COMPLETION,
         ModelCapabilities.TOOLS,
+        ModelCapabilities.WEB_SEARCH,
       ],
       'grok-4-1-fast-reasoning': [
         ModelCapabilities.COMPLETION,
         ModelCapabilities.TOOLS,
         'reasoning',
+        ModelCapabilities.WEB_SEARCH,
       ],
       'grok-4.20-0309-non-reasoning': [
         ModelCapabilities.COMPLETION,
         ModelCapabilities.TOOLS,
+        ModelCapabilities.WEB_SEARCH,
       ],
       'grok-4.20-0309-reasoning': [
         ModelCapabilities.COMPLETION,
         ModelCapabilities.TOOLS,
         'reasoning',
+        ModelCapabilities.WEB_SEARCH,
       ],
       'grok-4.20-multi-agent-0309': [
         ModelCapabilities.COMPLETION,
         ModelCapabilities.TOOLS,
         'reasoning',
+        ModelCapabilities.WEB_SEARCH,
       ],
       'grok-4.3': [
         ModelCapabilities.COMPLETION,
         ModelCapabilities.TOOLS,
+        ModelCapabilities.WEB_SEARCH,
       ],
     }
 
@@ -417,6 +432,14 @@ describe('getModelCapabilities', () => {
         expectedCapabilities
       )
     }
+  })
+
+  it('only marks probed Jingxing GPT and Grok chat models as native web search capable', () => {
+    expect(isJingxingNativeWebSearchModel('gpt-5.4')).toBe(true)
+    expect(isJingxingNativeWebSearchModel('grok-4.3')).toBe(true)
+    expect(isJingxingNativeWebSearchModel('claude-opus-4-7')).toBe(false)
+    expect(isJingxingNativeWebSearchModel('gemini-3.1-pro-preview')).toBe(false)
+    expect(isJingxingNativeWebSearchModel('gpt-image-2')).toBe(false)
   })
 
   it('marks Jingxing image generation models as non-chat image models', () => {

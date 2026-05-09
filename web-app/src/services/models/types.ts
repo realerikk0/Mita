@@ -106,7 +106,7 @@ export interface ModelsService {
   getModel(modelId: string): Promise<modelInfo | undefined>
   fetchModels(): Promise<modelInfo[]>
   fetchModelCatalog(): Promise<ModelCatalog>
-  fetchLatestSilenceModel(): Promise<CatalogModel | null>
+  fetchLatestMitaModel(): Promise<CatalogModel | null>
   fetchHuggingFaceRepo(
     repoId: string,
     hfToken?: string

@@ -6,9 +6,9 @@ pub struct VectorDBState {
 
 impl VectorDBState {
     pub fn new() -> Self {
-        // Default vector db path: /Jan/data/db
+        // Default vector db path: /Mita/data/db
         let mut base = dirs::data_dir().unwrap_or_else(|| PathBuf::from("."));
-        base.push("Jan");
+        base.push("Mita");
         base.push("data");
         base.push("db");
         std::fs::create_dir_all(&base).ok();

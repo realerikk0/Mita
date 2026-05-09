@@ -21,7 +21,7 @@ on:
       - release/**
       - main
     paths:
-      - '.github/workflows/jan-tauri-build-nightly.yaml'
+      - '.github/workflows/mita-tauri-build-nightly.yaml'
       - '.github/workflows/template-get-update-version.yml'
       - '.github/workflows/template-tauri-build-macos.yml'
       - '.github/workflows/template-tauri-build-windows-x64.yml'
@@ -129,11 +129,11 @@ jobs:
           VERSION=${{ needs.get-update-version.outputs.new_version }}
           PUB_DATE=$(date -u +"%Y-%m-%dT%H:%M:%S.%3NZ")
           LINUX_SIGNATURE="${{ needs.build-linux-x64.outputs.APPIMAGE_SIG }}"
-          LINUX_URL="https://delta.jan.ai/nightly/${{ needs.build-linux-x64.outputs.APPIMAGE_FILE_NAME }}"
+          LINUX_URL="https://updates.jingxing.uk/mita/nightly/${{ needs.build-linux-x64.outputs.APPIMAGE_FILE_NAME }}"
           WINDOWS_SIGNATURE="${{ needs.build-windows-x64.outputs.WIN_SIG }}"
-          WINDOWS_URL="https://delta.jan.ai/nightly/${{ needs.build-windows-x64.outputs.FILE_NAME }}"
+          WINDOWS_URL="https://updates.jingxing.uk/mita/nightly/${{ needs.build-windows-x64.outputs.FILE_NAME }}"
           DARWIN_SIGNATURE="${{ needs.build-macos.outputs.MAC_UNIVERSAL_SIG }}"
-          DARWIN_URL="https://delta.jan.ai/nightly/Jan-nightly_${{ needs.get-update-version.outputs.new_version }}.app.tar.gz"
+          DARWIN_URL="https://updates.jingxing.uk/mita/nightly/Mita-nightly_${{ needs.get-update-version.outputs.new_version }}.app.tar.gz"
 
           jq --arg version "$VERSION" \
             --arg pub_date "$PUB_DATE" \

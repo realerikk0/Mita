@@ -1,265 +1,274 @@
-# Silence Development Plan
+# Mita / 幂塔 Development Plan
 
-Last updated: 2026-04-30
+Last updated: 2026-05-08
 
 ## Product Direction
 
-Silence is a desktop AI chat client for online model workflows. It is based on a lean Jan fork and keeps the upstream Tauri + Rust + React/TypeScript architecture, local thread storage, provider management, and streaming chat path.
+Mita（幂塔）is a desktop AI chat client for online model workflows. It is based on a lean Jan fork and keeps the upstream Tauri + Rust + React/TypeScript architecture, local thread storage, provider management, and streaming chat path.
 
-The product goal is simple: "安安静静地完成主人交代的工作". The first version should feel focused, quiet, and task-oriented rather than like a full local-model hub.
+The product goal is: "幂塔会安安静静地完成主人交代的工作". The agent identity is always `Mita`; Chinese UI may show `幂塔`.
 
 ## Baseline
 
 - Upstream repository: `janhq/jan`
 - Upstream branch: `main`
 - Upstream commit: `17771a60b8dc89e8fdfcb486d7292e6c4b22cb9a`
-- Silence branch: `silence-main`
+- Local workspace: `/Volumes/Data/CodexProjects/silence`
+- Current branch: `silence-main`
 - Desktop stack: Tauri, Rust, React, TypeScript, Vite, Yarn 4
 - Storage model: Jan-compatible `thread.json` plus `messages.jsonl`
 - Primary API shape: OpenAI-compatible `/v1/models` and `/v1/chat/completions`
 
-## Architecture Plan
+## Implementation Plan And Current Progress
 
-### 1. Project Initialization
+### 1. App Identity And Packaging
 
-- Keep the current Jan fork in `/Volumes/Data/CodexProjects/silence`.
-- Use `silence-main` as the main development branch.
-- Preserve the upstream baseline in `UPSTREAM_JAN_COMMIT.md`.
-- Keep the upstream directory structure:
-  - `src-tauri/` for desktop shell, Rust commands, app identifiers, MCP runtime, CLI bridge.
-  - `web-app/` for React UI, provider setup, chat UX, auto-run controls.
-  - `core/` for shared Jan core packages.
+Scope:
 
-Current progress: done.
-
-### 2. Branding And App Identity
-
-Implementation scope:
-
-- Rename desktop product to `Silence`.
-- Change Tauri bundle identifier to `uk.jingxing.silence`.
-- Change platform-specific identifiers:
-  - macOS/iOS plist and Tauri config
-  - Android config
-  - Windows/Linux bundle metadata
-- Rename CLI entrypoint from Jan-oriented naming to Silence-oriented naming.
-- Update visible UI copy from Jan to Silence where it appears in the primary app surface.
-- Keep legacy Jan constants only when needed for migration or cleanup.
+- Product name: `Mita`
+- Chinese visible brand: `幂塔`
+- Bundle identifier: `uk.jingxing.mita`
+- URL scheme: `mita://`
+- Legacy URL scheme: `silence://`
+- CLI command: `mita`
+- CLI package/bin: `mita-cli`
+- Updater and release artifact naming: Mita-oriented
 
 Current progress:
 
-- `src-tauri/tauri.conf.json` product name and identifier updated.
-- `src-tauri/Info.plist` uses `uk.jingxing.silence` and `silence://`.
-- iOS and Android identifiers updated.
-- Rust app constants now expose `APP_NAME = "Silence"` and `SILENCE_DATA_*`.
-- Legacy `Jan` and `jan.ai.app` constants remain only for migration.
-- Claude Code shell environment marker now writes `Silence Local API Server`, while cleanup still recognizes old `Jan Local API Server` blocks.
-- Root `README.md` now describes Silence instead of upstream Jan.
+- Tauri product name, bundle identifiers, app titles, platform configs, Cargo metadata, Info.plist, URL schemes, resources, and CLI binary names have been moved to Mita.
+- `silence://` is retained as a compatibility scheme for one migration cycle.
+- Shell marker now writes `# Mita Local API Server`; cleanup still recognizes legacy Silence and Jan markers.
+- Linux AppImage helper and build scripts now use Mita naming.
 
 Remaining work:
 
-- Sweep lower-priority docs, localized READMEs, historical changelog text, and package metadata that still intentionally or incidentally reference Jan.
-- Decide whether internal Rust helper names like `get_jan_data_folder_path` should be renamed now or kept temporarily to reduce churn.
+- Rename remote GitHub repository/release channels from `Silence` to `Mita` when the repository migration is scheduled.
+- Re-check final packaged artifact names after the next `build:tauri`.
 
-### 3. Jingxing Provider
+### 2. Data And Configuration Migration
 
-Implementation scope:
+Scope:
 
-- Add a built-in `jingxing` provider preset.
-- Default base URL: `https://api.jingxing.uk/v1`.
+- Canonical app data folder: `Mita`
+- Canonical bundle data id: `uk.jingxing.mita`
+- First launch should restore from Silence or Jan config if Mita config does not exist.
+- Never delete old Silence data automatically.
+
+Current progress:
+
+- Rust app constants now expose Mita as canonical and keep legacy Silence/Jan constants.
+- App config migration checks Mita first, then Silence human-readable data dir, then `uk.jingxing.silence`, then legacy Jan locations.
+- Core browser API exposes `getMitaDataFolderPath`, while `getSilenceDataFolderPath` and `getJanDataFolderPath` remain compatibility wrappers.
+
+Remaining work:
+
+- Manual startup test using a real old Silence data folder to confirm provider keys, threads, assistants, and MCP settings migrate cleanly.
+
+### 3. Agent Identity And Prompt
+
+Scope:
+
+- Default assistant id: `mita`
+- Default assistant name: `Mita`
+- Identity guard: "You are Mita"
+- Never answer as Jan, Silence, Jan.ai, or Menlo Research.
+- Migrate old `jan` / `silence` default assistants to Mita.
+
+Current progress:
+
+- Web default assistant and prompt guard are now Mita.
+- Assistant extension default id/name/instructions are now Mita.
+- Legacy assistant branding markers detect Jan and Silence prompts.
+- Existing default assistant ids `jan` and `silence` are migrated into `mita`; if Mita already exists, old default assistant files are removed from the active list.
+
+Remaining work:
+
+- Run a live chat smoke test asking "你是谁" after rebuilding extensions and launching the desktop app.
+
+### 4. Web UI And Locale Sweep
+
+Scope:
+
+- Chinese locale should display `幂塔`.
+- English and non-Chinese locales should display `Mita`.
+- Setup, chat, settings, analytics, provider, MCP, errors, toasts, empty states, tests, and visible assets should not show Silence except as legacy compatibility text.
+
+Current progress:
+
+- Setup and chat surfaces have been moved to Mita/幂塔.
+- `jan-logo.png` has been renamed to `mita-logo.png`; the image content is temporarily reused.
+- Chinese locale visible brand strings now use `幂塔`.
+- Non-Chinese locale visible brand strings now use `Mita`.
+
+Remaining work:
+
+- Run full web tests and a fresh-user desktop walkthrough.
+- Replace the placeholder logo artwork when final Mita visual identity is ready.
+
+### 5. Jingxing Provider
+
+Scope:
+
+- Keep provider name `Jingxing`.
+- Base URL: `https://api.jingxing.uk/v1`
+- Help link: `https://jingxing.uk/`
 - Use Bearer token authentication through the existing provider settings UI.
 - Load models through `GET /models`.
-- Send chat through the OpenAI-compatible chat completions path.
-- Avoid adding a custom SDK until the API surface needs non-compatible features.
+- Send standard chat through OpenAI-compatible chat completions.
 
 Current progress:
 
-- Provider preset added in `web-app/src/constants/providers.ts`.
-- Existing Tauri provider service is reused for model fetching and authentication.
-- Existing model factory path handles Jingxing through the OpenAI-compatible branch.
+- Provider preset and setup screen are implemented.
+- Jingxing model capability overrides hide non-chat image models from the chat selector.
+- Provider setup includes a Jingxing website link for registration/recharge guidance.
 
 Remaining work:
 
-- Manual validation with a real Jingxing token.
-- Improve first-run guidance so users are nudged to configure Jingxing before chatting.
-- Add provider-specific error copy for missing token, permission errors, and invalid base URL.
+- Re-run provider smoke tests after the Mita rename build.
 
-### 4. Auto-Run V1
+### 6. Auto-Run V1
 
-Implementation scope:
+Scope:
 
-- Add a front-end auto-run store.
-- Add a compact auto-run panel near the chat input.
-- Let the user configure maximum rounds.
-- Support start, pause, resume, and stop.
-- Reuse the current chat transport and message pipeline.
-- Append a control message for each generated round.
-- Persist run state in thread metadata:
-  - `metadata.silenceAutoRun.status`
-  - `metadata.silenceAutoRun.maxRounds`
-  - `metadata.silenceAutoRun.currentRound`
-  - `metadata.silenceAutoRun.startedAt`
-  - `metadata.silenceAutoRun.updatedAt`
-- Tag generated messages with `metadata.silence`.
+- Single-thread round-based continuation.
+- Start, pause, resume, and stop.
+- New metadata keys:
+  - `metadata.mitaAutoRun`
+  - `metadata.mita`
+- Legacy reads:
+  - `metadata.silenceAutoRun`
+  - `metadata.silence`
 
 Current progress:
 
-- `web-app/src/stores/auto-run-store.ts` added.
-- `web-app/src/containers/AutoRunPanel.tsx` added.
-- Chat input integration is in place.
-- Thread metadata plumbing has been started through the existing thread hooks.
+- Auto-run store and chat integration are in place.
+- Thread metadata now writes `mitaAutoRun`.
+- Generated auto-run messages now write Mita metadata.
+- Legacy Silence metadata is still read for migration compatibility.
 
 Remaining work:
 
-- Full desktop manual test with a real model.
-- Confirm paused runs do not enqueue extra hidden requests.
-- Confirm stopped runs do not pollute ordinary chat.
-- Confirm metadata survives app restart and thread reload.
-- Add targeted UI tests around pause/resume/stop once behavior is stable.
+- Manual test 3-round and 10-round runs after the next desktop launch.
+- Add regression tests for pause/resume/stop if behavior changes.
 
-### 5. Multi-Agent Preparation
+### 7. Multi-Agent Preparation
 
-Implementation scope:
+Scope:
 
-- Reserve a stable type surface for future agent execution.
-- Support the roles:
+- Type prefix: `MitaAgent*`
+- Roles:
   - `planner`
   - `worker`
   - `coordinator`
   - `verifier`
-- Store future configuration in `metadata.silenceAgents`.
-- Do not ship a complex orchestration UI in v1.
+- New metadata key: `metadata.mitaAgents`
+- Legacy read key: `metadata.silenceAgents`
 
 Current progress:
 
-- `web-app/src/types/silence-agent.ts` added.
-- Role and config types are reserved.
+- `web-app/src/types/mita-agent.ts` defines the reserved type surface.
+- New threads write `mitaAgents`.
+- Existing threads can still read `silenceAgents`.
 
 Remaining work:
 
 - Build the actual multi-agent executor.
-- Decide how role prompts, provider/model overrides, and verification results are stored.
-- Add migration strategy if the metadata format changes after v1.
+- Decide whether orchestration runs in frontend, Rust backend, or a hybrid.
 
-### 6. Silence Browser MCP
+### 8. Web Research And MCP
 
-Implementation scope:
+Scope:
 
-- Rename product-visible `Jan Browser MCP` to `Silence Browser MCP`.
-- Keep old config compatibility.
-- Prevent duplicate startup when both old and new MCP keys exist.
-- Keep Chrome Store extension link unchanged until the browser extension itself is forked.
-
-Current progress:
-
-- Backend constants now include `SILENCE_BROWSER_MCP_NAME` and `LEGACY_JAN_BROWSER_MCP_NAME`.
-- MCP config read/write normalizes legacy key to the Silence key.
-- Tauri command `check_silence_browser_extension_connected` added.
-- Old `check_jan_browser_extension_connected` remains as a compatibility wrapper.
-- Frontend hook and dialog renamed to Silence.
-- Tool filtering recognizes both old and new server names.
-- Tests updated for hook, MCP service, Rust MCP config, migration, and connection checks.
-
-Remaining work:
-
-- Fork or replace the browser extension when product distribution requires it.
-- Update extension-store references only after the extension is actually owned by Silence.
-
-### 7. Product Simplification
-
-Implementation scope:
-
-- Hide or de-emphasize heavy Jan-first experiences for v1:
-  - Hub
-  - local model download flows
-  - hardware monitor
-  - upstream Jan update/source links
-- Keep settings, provider management, threads, and MCP controls available.
-- Make first-run focus on provider setup and immediate chat.
+- New visible server name: `Mita Web Research`
+- New runtime command/profile/env:
+  - `mita-web-research`
+  - `~/.mita-web-research`
+  - `MITA_WEB_RESEARCH_*`
+- Legacy compatibility:
+  - `Silence Web Research`
+  - `Silence Browser MCP`
+  - `Jan Browser MCP`
+- Do not copy old browser profiles automatically.
 
 Current progress:
 
-- Primary app copy and settings/navigation surfaces have been partially renamed.
-- Local heavy surfaces have been reduced in the main experience.
+- Tauri resources and scripts have been renamed to `mita-web-research-mcp.mjs`.
+- Browser profile is now independent at `~/.mita-web-research`.
+- MCP config migration normalizes legacy Silence/Jan keys into Mita.
+- Tauri commands now include Mita commands plus Silence/Jan compatibility wrappers.
+- Frontend hook/test names have been moved to Mita.
 
 Remaining work:
 
-- Run a fresh first-launch UI walkthrough.
-- Decide which upstream local-model surfaces should remain hidden, removed, or reintroduced later.
-- Sweep all visible settings routes for old Jan naming.
+- Manual test the Web Search toggle with Mita Web Research after desktop launch.
 
-## Verification History
+### 9. Product Simplification
 
-Completed checks:
+Scope:
 
-- `cargo test --manifest-path src-tauri/Cargo.toml core::app --no-default-features --features test-tauri`
-  - Result: 19 passed
-- `cargo test --manifest-path src-tauri/Cargo.toml core::system --no-default-features --features test-tauri`
-  - Result: 10 passed
-- `cargo test --manifest-path src-tauri/Cargo.toml mcp --no-default-features --features test-tauri`
-  - Result: 47 passed during Browser MCP rename verification
-- `corepack yarn vitest run --project @janhq/web-app web-app/src/hooks/__tests__/useSilenceBrowserExtension.test.ts web-app/src/services/mcp/__tests__/default.test.ts web-app/src/services/mcp/__tests__/tauri.coverage.test.ts`
-  - Result: 34 passed
-- `corepack yarn vitest run --project @janhq/web-app web-app/src/services/deeplink/__tests__/tauri.test.ts web-app/src/providers/__tests__/DataProvider.test.tsx`
-  - Result: 24 passed
-- `corepack yarn workspace @janhq/web-app lint`
-  - Result: passed with existing React Fast Refresh warnings
-- `corepack yarn workspace @janhq/web-app build`
-  - Result: passed with existing Vite dynamic import/chunk warnings
-- `git diff --check`
-  - Result: passed
+- Keep chat, provider setup, settings, threads, MCP, auto-run, and web search as primary surfaces.
+- Continue hiding or de-emphasizing heavy Jan-first local model/Hub experiences in v1.
 
-## Publishing Plan
+Current progress:
 
-Repository target:
+- Primary onboarding now focuses on provider setup.
+- Non-text-generation models are hidden from chat selection.
+- Chrome extension based Jan search path has been replaced by Mita Web Research planning/runtime work.
 
-- Owner: `realerikk0`
-- Repository name: `Silence`
-- URL: `https://github.com/realerikk0/Silence`
-- Visibility: public
-- Default branch: `silence-main`
+Remaining work:
 
-Publish steps:
+- Full fresh-user walkthrough after build.
 
-1. Update this plan and root README.
-2. Run focused verification.
-3. Stage the current Silence fork changes.
-4. Commit with a clear initial implementation message.
-5. Create the public GitHub repository.
-6. Point `origin` to the new Silence repository.
-7. Push `silence-main` and set it as the tracked/default branch.
+## Verification Plan
 
-## Next Milestones
+Target checks:
 
-### Milestone 1: Public Fork Baseline
+```bash
+corepack yarn install
+corepack yarn test:core
+corepack yarn test:web
+corepack yarn workspace @janhq/web-app build
+corepack yarn build:core
+corepack yarn build:extensions
+cargo test --manifest-path src-tauri/Cargo.toml
+corepack yarn build:tauri
+```
 
-- Publish the repository.
-- Ensure README and development plan are visible.
-- Confirm GitHub default branch and public visibility.
+Current local verification on 2026-05-08:
 
-### Milestone 2: Real Provider Smoke Test
+- `corepack yarn install` passed with existing peer dependency warnings.
+- `corepack yarn test:web` passed.
+- `corepack yarn workspace @janhq/web-app build` passed with existing Vite chunk/dynamic import warnings.
+- `corepack yarn build:core` passed and refreshed `core/package.tgz` for extension consumers.
+- `corepack yarn build:extensions` passed; Tauri plugin imports remain external by design.
+- `cargo test --manifest-path src-tauri/Cargo.toml --no-default-features --features test-tauri --lib` passed with 256 tests.
+- Full `cargo test --manifest-path src-tauri/Cargo.toml --no-default-features --features test-tauri` ran all unit tests successfully, then failed only at rustdoc doctest setup because this toolchain requires `-Z unstable-options` for `check-cfg`.
+- Bare `corepack yarn tauri build` compiled the app but failed at bundling because it skips the project script that builds `mita-cli`; use `corepack yarn build:tauri` instead.
+- `corepack yarn build:tauri` passed and produced:
+  - `src-tauri/target/universal-apple-darwin/release/bundle/macos/Mita.app`
+  - `src-tauri/target/universal-apple-darwin/release/bundle/dmg/Mita_0.6.599_universal.dmg`
 
-- Configure a Jingxing token locally.
-- Fetch models from `https://api.jingxing.uk/v1/models`.
-- Send a short streaming chat request.
-- Capture error behavior for invalid token and invalid base URL.
+Manual checks:
 
-### Milestone 3: Auto-Run Hardening
+- Fresh user launch shows `幂塔` in Chinese UI and `Mita` in system surfaces.
+- Existing Silence data starts without losing threads, provider config, API key, MCP config, and assistants.
+- Asking "你是谁" returns Mita/幂塔, never Jan/Silence/Menlo.
+- `mita://` works and `silence://` still routes.
+- Mita Web Research starts with an isolated profile and does not read system Chrome cookies.
 
-- Test 3-round and 10-round runs.
-- Verify pause/resume/stop semantics.
-- Confirm metadata persistence after restart.
-- Add regression tests for state transitions.
+## Static Scan Policy
 
-### Milestone 4: Branding Sweep
+Allowed remaining `Jan` references:
 
-- Sweep remaining visible Jan copy in docs, localized strings, package metadata, and settings.
-- Decide what remains as explicit upstream attribution.
-- Keep migration constants and compatibility wrappers documented.
+- Upstream package scopes such as `@janhq/core` and `@janhq/web-app`.
+- Upstream attribution and license/history files.
+- Legacy migration constants, tests, and compatibility wrappers.
+- Model ids or provider ids that are genuinely named `jan`.
 
-### Milestone 5: Multi-Agent Executor Design
+Allowed remaining `Silence` references:
 
-- Define role execution contracts.
-- Decide whether orchestration runs fully in frontend, Rust backend, or a hybrid.
-- Add storage schema for agent traces and verification results.
-- Ship a minimal planner -> worker -> verifier loop behind a feature flag.
+- Legacy migration constants and compatibility wrappers.
+- Historical development notes or upstream attribution.
+- `silence://` compatibility.
+- Legacy metadata read paths such as `silenceAutoRun` and `silenceAgents`.

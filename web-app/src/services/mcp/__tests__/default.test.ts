@@ -108,9 +108,9 @@ describe('DefaultMCPService', () => {
     })
   })
 
-  describe('checkSilenceBrowserExtensionConnected', () => {
+  describe('checkMitaWebResearchConnected', () => {
     it('returns false', async () => {
-      const result = await svc.checkSilenceBrowserExtensionConnected()
+      const result = await svc.checkMitaWebResearchConnected()
       expect(result).toBe(false)
     })
   })

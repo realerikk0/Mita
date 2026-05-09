@@ -43,16 +43,16 @@ describe('DefaultAppService', () => {
     })
   })
 
-  describe('getSilenceDataFolder', () => {
+  describe('getMitaDataFolder', () => {
     it('returns undefined', async () => {
-      const result = await svc.getSilenceDataFolder()
+      const result = await svc.getMitaDataFolder()
       expect(result).toBeUndefined()
     })
   })
 
-  describe('relocateSilenceDataFolder', () => {
+  describe('relocateMitaDataFolder', () => {
     it('resolves without error', async () => {
-      await expect(svc.relocateSilenceDataFolder('/new/path')).resolves.toBeUndefined()
+      await expect(svc.relocateMitaDataFolder('/new/path')).resolves.toBeUndefined()
     })
   })
 

@@ -3,17 +3,17 @@ import { create } from 'zustand'
 import { createJSONStorage, persist } from 'zustand/middleware'
 import { useModelProvider } from './useModelProvider'
 import { useDownloadStore } from './useDownloadStore'
-import { useLatestSilenceModel } from './useLatestSilenceModel'
+import { useLatestMitaModel } from './useLatestMitaModel'
 import { predefinedProviders } from '@/constants/providers'
 import { providerHasRemoteApiKeys } from '@/lib/provider-api-keys'
 
-export type SilenceModelPromptDismissedState = {
+export type MitaModelPromptDismissedState = {
   dismissedModelName: string | null
   setDismissedModelName: (modelName: string) => void
 }
 
-export const useSilenceModelPromptDismissed =
-  create<SilenceModelPromptDismissedState>()(
+export const useMitaModelPromptDismissed =
+  create<MitaModelPromptDismissedState>()(
     persist(
       (set) => ({
         dismissedModelName: null,
@@ -21,7 +21,7 @@ export const useSilenceModelPromptDismissed =
           set({ dismissedModelName: modelName }),
       }),
       {
-        name: localStorageKey.silenceModelPromptDismissed,
+        name: localStorageKey.mitaModelPromptDismissed,
         storage: createJSONStorage(() => localStorage),
         version: 1,
         migrate: (persistedState: unknown) => {
@@ -29,7 +29,7 @@ export const useSilenceModelPromptDismissed =
           if ('dismissed' in state && !('dismissedModelName' in state)) {
             return { dismissedModelName: null }
           }
-          return state as SilenceModelPromptDismissedState
+          return state as MitaModelPromptDismissedState
         },
       }
     )
@@ -37,12 +37,12 @@ export const useSilenceModelPromptDismissed =
 
 const MIN_VERSION = '0.7.6'
 
-export const useSilenceModelPrompt = () => {
+export const useMitaModelPrompt = () => {
   const { dismissedModelName, setDismissedModelName } =
-    useSilenceModelPromptDismissed()
+    useMitaModelPromptDismissed()
   const { getProviderByName, providers } = useModelProvider()
   const { localDownloadingModels } = useDownloadStore()
-  const latestModel = useLatestSilenceModel((state) => state.model)
+  const latestModel = useLatestMitaModel((state) => state.model)
 
   const llamaProvider = getProviderByName('llamacpp')
 
@@ -65,13 +65,13 @@ export const useSilenceModelPrompt = () => {
   })
   const isOnSetupScreen = !hasValidProviders
 
-  // Build set of known quant model IDs from the latest Silence model
+  // Build set of known quant model IDs from the latest Mita model
   const latestModelQuantIds = new Set(
     latestModel?.quants?.map((q) => q.model_id.toLowerCase()) ?? []
   )
 
-  // Check if any variant of the latest Silence model is downloaded
-  const isSilenceModelDownloaded =
+  // Check if any variant of the latest Mita model is downloaded
+  const isMitaModelDownloaded =
     latestModelQuantIds.size > 0 &&
     (llamaProvider?.models.some(
       (m: { id: string }) => latestModelQuantIds.has(m.id.toLowerCase())
@@ -89,18 +89,18 @@ export const useSilenceModelPrompt = () => {
     latestModel != null &&
     dismissedModelName === latestModel.model_name
 
-  const showSilenceModelPrompt =
+  const showMitaModelPrompt =
     isTargetVersion &&
     !isOnSetupScreen &&
     !isDismissed &&
     latestModel != null &&
-    !isSilenceModelDownloaded &&
+    !isMitaModelDownloaded &&
     !isDownloading
 
   return {
-    showSilenceModelPrompt,
+    showMitaModelPrompt,
     setDismissedModelName,
-    isSilenceModelDownloaded,
+    isMitaModelDownloaded,
     isDownloading,
   }
 }

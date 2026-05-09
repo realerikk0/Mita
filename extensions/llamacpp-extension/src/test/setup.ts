@@ -50,7 +50,7 @@ vi.mock('@tauri-apps/api/path', () => ({
 
 // Mock @janhq/core
 vi.mock('@janhq/core', () => ({
-  getSilenceDataFolderPath: vi.fn(),
+  getMitaDataFolderPath: vi.fn(),
   fs: {
     existsSync: vi.fn(),
     readdirSync: vi.fn(),

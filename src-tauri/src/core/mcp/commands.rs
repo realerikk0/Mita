@@ -7,12 +7,13 @@ use tokio::time::timeout;
 use super::{
     constants::{
         is_browser_mcp_name, normalize_browser_mcp_server_key, DEFAULT_MCP_CONFIG,
-        LEGACY_JAN_BROWSER_MCP_NAME, SILENCE_BROWSER_MCP_NAME,
+        LEGACY_JAN_BROWSER_MCP_NAME, LEGACY_SILENCE_BROWSER_MCP_NAME,
+        LEGACY_SILENCE_WEB_RESEARCH_MCP_NAME, MITA_WEB_RESEARCH_MCP_NAME,
     },
     helpers::{restart_active_mcp_servers, start_mcp_server},
 };
 use crate::core::{
-    app::commands::get_silence_data_folder_path,
+    app::commands::get_mita_data_folder_path,
     mcp::models::{McpSettings, ServerSummary},
     state::AppState,
 };
@@ -159,7 +160,9 @@ pub async fn deactivate_mcp_server<R: Runtime>(
         let active_servers = state.mcp_active_servers.lock().await;
         active_servers
             .get(&name)
-            .or_else(|| active_servers.get(SILENCE_BROWSER_MCP_NAME))
+            .or_else(|| active_servers.get(MITA_WEB_RESEARCH_MCP_NAME))
+            .or_else(|| active_servers.get(LEGACY_SILENCE_WEB_RESEARCH_MCP_NAME))
+            .or_else(|| active_servers.get(LEGACY_SILENCE_BROWSER_MCP_NAME))
             .or_else(|| active_servers.get(LEGACY_JAN_BROWSER_MCP_NAME))
             .and_then(browser_mcp_bridge_port)
     } else {
@@ -171,7 +174,9 @@ pub async fn deactivate_mcp_server<R: Runtime>(
     {
         let mut active_servers = state.mcp_active_servers.lock().await;
         if is_browser_mcp_name(&name) {
-            active_servers.remove(SILENCE_BROWSER_MCP_NAME);
+            active_servers.remove(MITA_WEB_RESEARCH_MCP_NAME);
+            active_servers.remove(LEGACY_SILENCE_WEB_RESEARCH_MCP_NAME);
+            active_servers.remove(LEGACY_SILENCE_BROWSER_MCP_NAME);
             active_servers.remove(LEGACY_JAN_BROWSER_MCP_NAME);
         } else {
             active_servers.remove(&name);
@@ -184,8 +189,17 @@ pub async fn deactivate_mcp_server<R: Runtime>(
     let mut servers_map = servers.lock().await;
     let resolved_name = if servers_map.contains_key(&name) {
         name.clone()
-    } else if is_browser_mcp_name(&name) && servers_map.contains_key(SILENCE_BROWSER_MCP_NAME) {
-        SILENCE_BROWSER_MCP_NAME.to_string()
+    } else if is_browser_mcp_name(&name) && servers_map.contains_key(MITA_WEB_RESEARCH_MCP_NAME)
+    {
+        MITA_WEB_RESEARCH_MCP_NAME.to_string()
+    } else if is_browser_mcp_name(&name)
+        && servers_map.contains_key(LEGACY_SILENCE_WEB_RESEARCH_MCP_NAME)
+    {
+        LEGACY_SILENCE_WEB_RESEARCH_MCP_NAME.to_string()
+    } else if is_browser_mcp_name(&name)
+        && servers_map.contains_key(LEGACY_SILENCE_BROWSER_MCP_NAME)
+    {
+        LEGACY_SILENCE_BROWSER_MCP_NAME.to_string()
     } else if is_browser_mcp_name(&name) && servers_map.contains_key(LEGACY_JAN_BROWSER_MCP_NAME) {
         LEGACY_JAN_BROWSER_MCP_NAME.to_string()
     } else {
@@ -563,7 +577,7 @@ fn browser_mcp_bridge_port(config: &Value) -> Option<u16> {
 
 #[tauri::command]
 pub async fn get_mcp_configs<R: Runtime>(app: AppHandle<R>) -> Result<String, String> {
-    let mut path = get_silence_data_folder_path(app.clone());
+    let mut path = get_mita_data_folder_path(app.clone());
     path.push("mcp_config.json");
 
     // Create default empty config if file doesn't exist
@@ -612,7 +626,7 @@ pub async fn get_mcp_configs<R: Runtime>(app: AppHandle<R>) -> Result<String, St
         .ok_or("mcpServers is not an object")?;
 
     if normalize_browser_mcp_server_key(mcp_servers) {
-        log::info!("Migrated Browser MCP config to '{SILENCE_BROWSER_MCP_NAME}'");
+        log::info!("Migrated Browser MCP config to '{MITA_WEB_RESEARCH_MCP_NAME}'");
         mutated = true;
     }
 
@@ -666,14 +680,16 @@ fn get_result_text(result: &rmcp::model::CallToolResult) -> Option<&str> {
         .map(|t| t.text.as_str())
 }
 
-/// Check if Silence Browser extension is connected via MCP
+/// Check if Mita Web Research is connected via MCP.
 #[tauri::command]
-pub async fn check_silence_browser_extension_connected(
+pub async fn check_mita_web_research_connected(
     state: State<'_, AppState>,
 ) -> Result<bool, String> {
     let servers = state.mcp_servers.lock().await;
     let service = match servers
-        .get(SILENCE_BROWSER_MCP_NAME)
+        .get(MITA_WEB_RESEARCH_MCP_NAME)
+        .or_else(|| servers.get(LEGACY_SILENCE_WEB_RESEARCH_MCP_NAME))
+        .or_else(|| servers.get(LEGACY_SILENCE_BROWSER_MCP_NAME))
         .or_else(|| servers.get(LEGACY_JAN_BROWSER_MCP_NAME))
     {
         Some(s) => s,
@@ -704,10 +720,24 @@ pub async fn check_silence_browser_extension_connected(
 }
 
 #[tauri::command]
+pub async fn check_mita_browser_extension_connected(
+    state: State<'_, AppState>,
+) -> Result<bool, String> {
+    check_mita_web_research_connected(state).await
+}
+
+#[tauri::command]
+pub async fn check_silence_browser_extension_connected(
+    state: State<'_, AppState>,
+) -> Result<bool, String> {
+    check_mita_web_research_connected(state).await
+}
+
+#[tauri::command]
 pub async fn check_jan_browser_extension_connected(
     state: State<'_, AppState>,
 ) -> Result<bool, String> {
-    check_silence_browser_extension_connected(state).await
+    check_mita_web_research_connected(state).await
 }
 
 enum PingResult {
@@ -784,7 +814,7 @@ pub async fn save_mcp_configs<R: Runtime>(
     app: AppHandle<R>,
     configs: String,
 ) -> Result<(), String> {
-    let mut path = get_silence_data_folder_path(app.clone());
+    let mut path = get_mita_data_folder_path(app.clone());
     path.push("mcp_config.json");
     log::info!("save mcp configs, path: {path:?}");
 

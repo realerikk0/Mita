@@ -6,7 +6,7 @@ import { TEMPORARY_CHAT_ID } from '@/constants/chat'
 import { useAgentMode } from '@/hooks/useAgentMode'
 import { ExtensionManager } from '@/lib/extension'
 import { ExtensionTypeEnum, VectorDBExtension } from '@janhq/core'
-import { DEFAULT_SILENCE_AGENTS } from '@/types/silence-agent'
+import { DEFAULT_MITA_AGENTS } from '@/types/mita-agent'
 
 type ThreadState = {
   threads: Record<string, Thread>
@@ -319,18 +319,18 @@ export const useThreads = create<ThreadState>()((set, get) => ({
       updated: Date.now() / 1000,
       assistants: assistant ? [assistant] : [],
       metadata: {
-        silenceAgents: DEFAULT_SILENCE_AGENTS,
+        mitaAgents: DEFAULT_MITA_AGENTS,
       },
       ...(projectMetadata &&
         !isTemporary && {
           metadata: {
-            silenceAgents: DEFAULT_SILENCE_AGENTS,
+            mitaAgents: DEFAULT_MITA_AGENTS,
             project: projectMetadata,
           },
         }),
       ...(isTemporary && {
         metadata: {
-          silenceAgents: DEFAULT_SILENCE_AGENTS,
+          mitaAgents: DEFAULT_MITA_AGENTS,
           isTemporary: true,
           ...(projectMetadata && { project: projectMetadata }),
         },

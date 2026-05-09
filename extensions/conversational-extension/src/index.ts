@@ -6,10 +6,10 @@ import {
 } from '@janhq/core'
 
 /**
- * SilenceConversationalExtension is a ConversationalExtension implementation that provides
+ * MitaConversationalExtension is a ConversationalExtension implementation that provides
  * functionality for managing threads.
  */
-export default class SilenceConversationalExtension extends ConversationalExtension {
+export default class MitaConversationalExtension extends ConversationalExtension {
   /**
    * Called when the extension is loaded.
    */

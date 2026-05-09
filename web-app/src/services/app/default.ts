@@ -23,12 +23,12 @@ export class DefaultAppService implements AppService {
     }
   }
 
-  async getSilenceDataFolder(): Promise<string | undefined> {
+  async getMitaDataFolder(): Promise<string | undefined> {
     return undefined
   }
 
-  async relocateSilenceDataFolder(path: string): Promise<void> {
-    console.log('relocateSilenceDataFolder called with path:', path)
+  async relocateMitaDataFolder(path: string): Promise<void> {
+    console.log('relocateMitaDataFolder called with path:', path)
     // No-op - not implemented in default service
   }
 

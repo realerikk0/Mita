@@ -28,23 +28,23 @@ ${StrLoc}
 
 !define WEBVIEW2APPGUID "{F3017226-FE2A-4295-8BDF-00C3A9A7E4C5}"
 
-!define MANUFACTURER "Menlo Research Pte. Ltd."
-!define PRODUCTNAME "jan_productname"
-!define VERSION "jan_version"
-!define VERSIONWITHBUILD "jan_build"
+!define MANUFACTURER "Jingxing"
+!define PRODUCTNAME "mita_productname"
+!define VERSION "mita_version"
+!define VERSIONWITHBUILD "mita_build"
 !define HOMEPAGE ""
 !define INSTALLMODE "currentUser"
 !define LICENSE ""
-!define INSTALLERICON "D:\a\jan\jan\src-tauri\icons\icon.ico"
+!define INSTALLERICON "D:\a\Mita\Mita\src-tauri\icons\icon.ico"
 !define SIDEBARIMAGE ""
 !define HEADERIMAGE ""
-!define MAINBINARYNAME "jan_mainbinaryname"
-!define MAINBINARYSRCPATH "D:\a\jan\jan\src-tauri\target\release\jan_mainbinaryname.exe"
-!define BUNDLEID "jan_mainbinaryname.ai.app"
+!define MAINBINARYNAME "mita_mainbinaryname"
+!define MAINBINARYSRCPATH "D:\a\Mita\Mita\src-tauri\target\release\mita_mainbinaryname.exe"
+!define BUNDLEID "uk.jingxing.mita"
 !define COPYRIGHT ""
 !define OUTFILE "nsis-output.exe"
 !define ARCH "x64"
-!define ADDITIONALPLUGINSPATH "D:\a\jan\jan\src-tauri\target\release\nsis\x64\Plugins\x86-unicode\additional"
+!define ADDITIONALPLUGINSPATH "D:\a\Mita\Mita\src-tauri\target\release\nsis\x64\Plugins\x86-unicode\additional"
 !define ALLOWDOWNGRADES "true"
 !define DISPLAYLANGUAGESELECTOR "false"
 !define INSTALLWEBVIEW2MODE "downloadBootstrapper"
@@ -499,7 +499,7 @@ Function .onInit
     Call RestorePreviousInstallLocation
   ${EndIf}
 
-  ; Remove old Jan if it exists
+  ; Remove old Electron-era install if it exists
   ${If} ${FileExists} "$INSTDIR\LICENSE.electron.txt"
       DeleteRegKey HKLM "Software\${PRODUCTNAME}"
       RMDir /r "$INSTDIR"
@@ -698,16 +698,16 @@ Section Install
     CreateDirectory "$INSTDIR\resources\pre-install"
     CreateDirectory "$INSTDIR\resources\bin"
     SetOutPath $INSTDIR
-    File /a "/oname=LICENSE" "D:\a\jan\jan\src-tauri\resources\LICENSE"
+    File /a "/oname=LICENSE" "D:\a\Mita\Mita\src-tauri\resources\LICENSE"
     SetOutPath "$INSTDIR\resources\pre-install"
-    File /nonfatal /a /r "D:\a\jan\jan\src-tauri\resources\pre-install\"
+    File /nonfatal /a /r "D:\a\Mita\Mita\src-tauri\resources\pre-install\"
     SetOutPath "$INSTDIR\resources\bin"
-    File /a "/oname=silence-cli.exe" "D:\a\jan\jan\src-tauri\resources\bin\silence-cli.exe"
+    File /a "/oname=mita-cli.exe" "D:\a\Mita\Mita\src-tauri\resources\bin\mita-cli.exe"
     SetOutPath $INSTDIR
 
   ; Copy external binaries
-    File /a "/oname=bun.exe" "D:\a\jan\jan\src-tauri\resources\bin\bun-x86_64-pc-windows-msvc.exe"
-    File /a "/oname=uv.exe" "D:\a\jan\jan\src-tauri\resources\bin\uv-x86_64-pc-windows-msvc.exe"
+    File /a "/oname=bun.exe" "D:\a\Mita\Mita\src-tauri\resources\bin\bun-x86_64-pc-windows-msvc.exe"
+    File /a "/oname=uv.exe" "D:\a\Mita\Mita\src-tauri\resources\bin\uv-x86_64-pc-windows-msvc.exe"
 
   ; Create file associations
 

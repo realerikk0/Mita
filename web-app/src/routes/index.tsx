@@ -44,7 +44,7 @@ function Index() {
   useTools()
 
   // Conditional to check if there are any valid providers
-  // required min 1 api_key or 1 model in llama.cpp or jan provider
+  // required min 1 api_key or 1 local model provider model
   // Custom providers (not in predefinedProviders) don't require api_key but need models
   const hasValidProviders = providers.some((provider) => {
     const isPredefinedProvider = predefinedProviders.some(
@@ -56,7 +56,7 @@ function Index() {
       return provider.models.length > 0
     }
 
-    // Predefined providers need either API key or models (for llamacpp/jan)
+    // Predefined providers need either API key or local models
     return (
       providerHasRemoteApiKeys(provider) ||
       (provider.provider === 'llamacpp' && provider.models.length) ||

@@ -83,7 +83,7 @@ const getGgufFiles: (paths: string[]) => Promise<any> = (paths) =>
  * Gets the file's stats.
  *
  * @param path - The path to the file.
- * @param outsideSilenceDataFolder - Whether the file is outside the Silence data folder.
+ * @param outsideMitaDataFolder - Whether the file is outside the Mita data folder.
  * @returns {Promise<FileStat>} - A promise that resolves with the file's stats.
  */
 const fileStat: (path: string) => Promise<FileStat | undefined> = (path) =>

@@ -18,7 +18,8 @@ use std::sync::OnceLock;
 use tauri::{AppHandle, Manager, Runtime};
 use tokio::sync::Mutex;
 
-const DB_NAME: &str = "jan.db";
+const DB_NAME: &str = "mita.db";
+const LEGACY_DB_NAMES: &[&str] = &["jan.db"];
 
 /// Global database pool for mobile platforms
 static DB_POOL: OnceLock<Mutex<Option<SqlitePool>>> = OnceLock::new();
@@ -35,8 +36,24 @@ pub async fn init_database<R: Runtime>(app: &AppHandle<R>) -> Result<(), String>
     std::fs::create_dir_all(&app_data_dir)
         .map_err(|e| format!("Failed to create app data dir: {}", e))?;
 
-    // Create database path
+    // Create database path, preserving legacy mobile data when present.
     let db_path = app_data_dir.join(DB_NAME);
+    if !db_path.exists() {
+        for legacy_name in LEGACY_DB_NAMES {
+            let legacy_path = app_data_dir.join(legacy_name);
+            if legacy_path.exists() {
+                std::fs::copy(&legacy_path, &db_path).map_err(|e| {
+                    format!(
+                        "Failed to copy legacy database {} to {}: {}",
+                        legacy_path.display(),
+                        db_path.display(),
+                        e
+                    )
+                })?;
+                break;
+            }
+        }
+    }
     let db_url = format!("sqlite:{}", db_path.display());
 
     log::info!("Initializing SQLite database at: {}", db_url);

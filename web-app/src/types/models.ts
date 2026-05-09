@@ -13,6 +13,7 @@ export enum ModelCapabilities {
   IMAGE_TO_IMAGE = 'image_to_image',
   TEXT_TO_AUDIO = 'text_to_audio',
   AUDIO_TO_TEXT = 'audio_to_text',
+  WEB_SEARCH = 'web_search',
   // Need to consolidate the capabilities list
   VISION = 'vision',
 }

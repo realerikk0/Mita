@@ -58,7 +58,7 @@ function General() {
   }
   const { checkForUpdate } = useAppUpdater()
   const { pausePolling } = useHardware()
-  const [silenceDataFolder, setSilenceDataFolder] = useState<
+  const [mitaDataFolder, setMitaDataFolder] = useState<
     string | undefined
   >()
   const [isCopied, setIsCopied] = useState(false)
@@ -72,8 +72,8 @@ function General() {
 
   useEffect(() => {
     const fetchDataFolder = async () => {
-      const path = await serviceHub.app().getSilenceDataFolder()
-      setSilenceDataFolder(path)
+      const path = await serviceHub.app().getMitaDataFolder()
+      setMitaDataFolder(path)
     }
 
     fetchDataFolder()
@@ -81,7 +81,7 @@ function General() {
 
   useEffect(() => {
     if (!IS_TAURI) return
-    invoke<{ installed: boolean; path: string | null }>('check_silence_cli_installed')
+    invoke<{ installed: boolean; path: string | null }>('check_mita_cli_installed')
       .then((s) => { setCliInstalled(s.installed); setCliPath(s.path) })
       .catch(() => setCliInstalled(false))
   }, [])
@@ -89,10 +89,10 @@ function General() {
   const handleInstallCli = async () => {
     setIsCliLoading(true)
     try {
-      const s = await invoke<{ installed: boolean; path: string | null }>('install_silence_cli')
+      const s = await invoke<{ installed: boolean; path: string | null }>('install_mita_cli')
       setCliInstalled(s.installed)
       setCliPath(s.path)
-      toast.success(`Silence CLI installed to ${s.path}`)
+      toast.success(`Mita CLI installed to ${s.path}`)
     } catch (e) {
       toast.error('Install failed', { description: String(e) })
     } finally {
@@ -103,10 +103,10 @@ function General() {
   const handleUninstallCli = async () => {
     setIsCliLoading(true)
     try {
-      await invoke('uninstall_silence_cli')
+      await invoke('uninstall_mita_cli')
       setCliInstalled(false)
       setCliPath(null)
-      toast.success('Silence CLI uninstalled')
+      toast.success('Mita CLI uninstalled')
     } catch (e) {
       toast.error('Uninstall failed', { description: String(e) })
     } finally {
@@ -115,7 +115,7 @@ function General() {
   }
 
   const resetApp = async (options: FactoryResetOptions) => {
-    if (isRootDir(silenceDataFolder ?? '/')) {
+    if (isRootDir(mitaDataFolder ?? '/')) {
       toast.error(t('settings:general.couldNotResetRootDirectory'))
       return
     }
@@ -145,10 +145,10 @@ function General() {
     const selectedPath = await serviceHub.dialog().open({
       multiple: false,
       directory: true,
-      defaultPath: silenceDataFolder,
+      defaultPath: mitaDataFolder,
     })
 
-    if (selectedPath === silenceDataFolder) return
+    if (selectedPath === mitaDataFolder) return
     if (selectedPath !== null) {
       setSelectedNewPath(selectedPath as string)
       setIsDialogOpen(true)
@@ -165,8 +165,8 @@ function General() {
             // Prevent relocating to root directory (e.g., C:\ or D:\ on Windows, / on Unix)
             if (isRootDir(selectedNewPath))
               throw new Error(t('settings:general.couldNotRelocateToRoot'))
-            await serviceHub.app().relocateSilenceDataFolder(selectedNewPath)
-            setSilenceDataFolder(selectedNewPath)
+            await serviceHub.app().relocateMitaDataFolder(selectedNewPath)
+            setMitaDataFolder(selectedNewPath)
             // Only relaunch if relocation was successful
             window.core?.api?.relaunch()
             setSelectedNewPath(null)
@@ -183,8 +183,8 @@ function General() {
       } catch (error) {
         console.error('Failed to relocate data folder:', error)
         // Revert the data folder path on error
-        const originalPath = await serviceHub.app().getSilenceDataFolder()
-        setSilenceDataFolder(originalPath)
+        const originalPath = await serviceHub.app().getMitaDataFolder()
+        setMitaDataFolder(originalPath)
 
         toast.error(t('settings:general.failedToRelocateDataFolderDesc'))
       }
@@ -274,15 +274,15 @@ function General() {
                     <div className="flex items-center gap-2 mt-1">
                       <div className="max-w-100 bg-secondary rounded-sm px-1 py-0.5">
                         <span
-                          title={silenceDataFolder}
+                          title={mitaDataFolder}
                           className="text-xs line-clamp-1 break-all"
                         >
-                          {silenceDataFolder}
+                          {mitaDataFolder}
                         </span>
                       </div>
                       <button
                         onClick={() =>
-                          silenceDataFolder && copyToClipboard(silenceDataFolder)
+                          mitaDataFolder && copyToClipboard(mitaDataFolder)
                         }
                         className="cursor-pointer flex items-center justify-center rounded-sm bg-secondary transition-all duration-200 ease-in-out p-1"
                         title={
@@ -324,7 +324,7 @@ function General() {
                     </Button>
                     {selectedNewPath && (
                       <ChangeDataFolderLocation
-                        currentPath={silenceDataFolder || ''}
+                        currentPath={mitaDataFolder || ''}
                         newPath={selectedNewPath}
                         onConfirm={confirmDataFolderChange}
                         open={isDialogOpen}
@@ -354,10 +354,10 @@ function General() {
                       size="sm"
                       className="p-0"
                       onClick={async () => {
-                        if (silenceDataFolder) {
+                        if (mitaDataFolder) {
                           try {
                             const logsPath = await serviceHub.path().join(
-                              silenceDataFolder,
+                              mitaDataFolder,
                               'logs'
                             )
                             await serviceHub.opener().revealItemInDir(logsPath)
@@ -395,11 +395,11 @@ function General() {
             <Card title="Advanced">
               {IS_TAURI && (
                 <CardItem
-                  title="Silence CLI"
+                  title="Mita CLI"
                   description={
                     cliInstalled && cliPath
-                      ? `Installed at ${cliPath} — use silence from your terminal to serve models.`
-                      : 'Use silence from your terminal to serve models without opening the app.'
+                      ? `Installed at ${cliPath} — use mita from your terminal to serve models.`
+                      : 'Use mita from your terminal to serve models without opening the app.'
                   }
                   actions={
                     cliInstalled ? (
@@ -545,7 +545,7 @@ function General() {
                 description={t('settings:general.documentationDesc')}
                 actions={
                   <a
-                    href="https://github.com/realerikk0/Silence#readme"
+                    href="https://github.com/realerikk0/Mita#readme"
                     target="_blank"
                     rel="noopener noreferrer"
                   >
@@ -561,7 +561,7 @@ function General() {
                 description={t('settings:general.releaseNotesDesc')}
                 actions={
                   <a
-                    href="https://github.com/realerikk0/Silence/releases"
+                    href="https://github.com/realerikk0/Mita/releases"
                     target="_blank"
                     rel="noopener noreferrer"
                   >
@@ -581,7 +581,7 @@ function General() {
                 description={t('settings:general.githubDesc')}
                 actions={
                   <a
-                    href="https://github.com/realerikk0/Silence"
+                    href="https://github.com/realerikk0/Mita"
                     target="_blank"
                     rel="noopener noreferrer"
                   >
@@ -617,7 +617,7 @@ function General() {
                 description={t('settings:general.reportAnIssueDesc')}
                 actions={
                   <a
-                    href="https://github.com/realerikk0/Silence/issues/new"
+                    href="https://github.com/realerikk0/Mita/issues/new"
                     target="_blank"
                   >
                     <div className="flex items-center gap-1">

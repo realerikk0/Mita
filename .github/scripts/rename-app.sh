@@ -24,14 +24,14 @@ fi
 
 # Use jq to transform the content
 jq --arg channel "$CHANNEL" --arg updater "$UPDATER" '
-    .name = "jan-\($channel)" |
-    .productName = "Jan-\($channel)" |
-    .build.appId = "jan-\($channel).ai.app" |
-    .build.productName = "Jan-\($channel)" |
-    .build.appId = "jan-\($channel).ai.app" |
-    .build.protocols[0].name = "Jan-\($channel)" |
-    .build.protocols[0].schemes = ["jan-\($channel)"] |
-    .build.artifactName = "jan-\($channel)-${os}-${arch}-${version}.${ext}" |
+    .name = "mita-\($channel)" |
+    .productName = "Mita-\($channel)" |
+    .build.appId = "mita-\($channel).ai.app" |
+    .build.productName = "Mita-\($channel)" |
+    .build.appId = "mita-\($channel).ai.app" |
+    .build.protocols[0].name = "Mita-\($channel)" |
+    .build.protocols[0].schemes = ["mita-\($channel)"] |
+    .build.artifactName = "mita-\($channel)-${os}-${arch}-${version}.${ext}" |
     .build.publish[0].channel = $updater
 ' "$INPUT_JSON_FILE" > ./package.json.tmp
 
@@ -49,7 +49,7 @@ if [ ! -f "$LAYOUT_FILE_PATH" ]; then
 fi
 
 # Perform the replacements
-sed -i -e "s#Jan#Jan-$CHANNEL#g" "$LAYOUT_FILE_PATH"
+sed -i -e "s#Mita#Mita-$CHANNEL#g" "$LAYOUT_FILE_PATH"
 
 # Notify completion
 echo "File has been updated: $LAYOUT_FILE_PATH"

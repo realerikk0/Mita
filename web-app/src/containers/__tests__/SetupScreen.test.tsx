@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
-import { render, screen, fireEvent, waitFor } from '@testing-library/react'
+import { render, screen, fireEvent, waitFor, within } from '@testing-library/react'
 import '@testing-library/jest-dom'
 
 // ---- Module mocks ----------------------------------------------------------
@@ -76,6 +76,23 @@ vi.mock('@/constants/providers', () => ({
         },
       ],
     },
+    {
+      provider: 'openai',
+      active: true,
+      api_key: '',
+      base_url: 'https://api.openai.com/v1',
+      models: [],
+      settings: [
+        {
+          key: 'api-key',
+          controller_props: { value: '' },
+        },
+        {
+          key: 'base-url',
+          controller_props: { value: 'https://api.openai.com/v1' },
+        },
+      ],
+    },
   ],
 }))
 
@@ -94,6 +111,19 @@ vi.mock('@/components/ui/button', () => ({
   ),
 }))
 
+vi.mock('@/components/ui/dialog', () => ({
+  Dialog: ({ children, open }: any) =>
+    open ? <div data-testid="dialog-root">{children}</div> : null,
+  DialogContent: ({ children }: any) => <div>{children}</div>,
+  DialogFooter: ({ children }: any) => <div>{children}</div>,
+  DialogHeader: ({ children }: any) => <div>{children}</div>,
+  DialogTitle: ({ children }: any) => <h2>{children}</h2>,
+}))
+
+vi.mock('@/components/ui/textarea', () => ({
+  Textarea: (props: any) => <textarea {...props} />,
+}))
+
 import SetupScreen from '../SetupScreen'
 
 describe('SetupScreen', () => {
@@ -107,14 +137,19 @@ describe('SetupScreen', () => {
     localStorage.clear()
   })
 
-  it('renders the Silence Jingxing setup form', () => {
+  it('renders the Mita provider setup form with Jingxing selected by default', () => {
     render(<SetupScreen />)
-    expect(screen.getByText('Silence')).toBeInTheDocument()
+    expect(screen.getByText('幂塔')).toBeInTheDocument()
     expect(
       screen.getByText('安安静静地完成主人交代的工作')
     ).toBeInTheDocument()
-    expect(screen.getByText('Jingxing API Token')).toBeInTheDocument()
+    expect(screen.getByText('Model Provider')).toBeInTheDocument()
+    expect(screen.getByText('导入')).toBeInTheDocument()
+    expect(screen.getByText('Jingxing API Key')).toBeInTheDocument()
     expect(screen.getByText('Connect Jingxing')).toBeInTheDocument()
+    expect(
+      screen.getByRole('link', { name: /没有井陉账号？前往注册并充值/i })
+    ).toHaveAttribute('href', 'https://jingxing.uk/')
   })
 
   it('renders the header page component', () => {
@@ -126,7 +161,68 @@ describe('SetupScreen', () => {
     render(<SetupScreen />)
     fireEvent.click(screen.getByText('Connect Jingxing'))
     expect(hoisted.toastMock.error).toHaveBeenCalledWith(
-      'Add your Jingxing API token first'
+      'Add your Jingxing API key first'
+    )
+  })
+
+  it('imports provider config into the cold start form', async () => {
+    render(<SetupScreen />)
+
+    fireEvent.click(screen.getByText('导入'))
+    fireEvent.change(screen.getByPlaceholderText('粘贴 AI Provider 配置 JSON'), {
+      target: {
+        value: JSON.stringify({
+          _type: 'ai_provider_connection',
+          version: 1,
+          provider: 'openai-compatible',
+          apiKey: 'sk-imported',
+          baseUrl: 'https://api.example.com/v1///',
+          headers: {
+            Authorization: 'Bearer should-not-apply',
+            'X-Custom': 'custom-value',
+          },
+        }),
+      },
+    })
+    fireEvent.click(
+      within(screen.getByTestId('dialog-root')).getByText('导入')
+    )
+
+    expect(hoisted.toastMock.success).toHaveBeenCalledWith('配置已导入')
+    expect(screen.getByPlaceholderText('sk-...')).toHaveValue('sk-imported')
+    expect(screen.getByDisplayValue('https://api.example.com/v1')).toBeInTheDocument()
+
+    fireEvent.click(screen.getByText('Connect Jingxing'))
+    await waitFor(() =>
+      expect(hoisted.fetchModelsFromProviderMock).toHaveBeenCalledWith(
+        expect.objectContaining({
+          api_key: 'sk-imported',
+          base_url: 'https://api.example.com/v1',
+          custom_header: [
+            {
+              header: 'X-Custom',
+              value: 'custom-value',
+            },
+          ],
+        })
+      )
+    )
+  })
+
+  it('shows a generic error when cold start import config is invalid', () => {
+    render(<SetupScreen />)
+
+    fireEvent.click(screen.getByText('导入'))
+    fireEvent.change(screen.getByPlaceholderText('粘贴 AI Provider 配置 JSON'), {
+      target: { value: '{bad' },
+    })
+    fireEvent.click(
+      within(screen.getByTestId('dialog-root')).getByText('导入')
+    )
+
+    expect(hoisted.toastMock.error).toHaveBeenCalledWith(
+      '配置格式不正确',
+      expect.objectContaining({ description: '配置格式不正确' })
     )
   })
 
@@ -165,6 +261,48 @@ describe('SetupScreen', () => {
       description: '2 models loaded',
     })
     expect(hoisted.navigateMock).toHaveBeenCalledWith({ to: '/' })
+  })
+
+  it('allows selecting and connecting a non-Jingxing provider', async () => {
+    render(<SetupScreen />)
+    fireEvent.change(screen.getByRole('combobox'), {
+      target: { value: 'openai' },
+    })
+    expect(
+      screen.queryByRole('link', { name: /没有井陉账号？前往注册并充值/i })
+    ).not.toBeInTheDocument()
+    fireEvent.change(screen.getByPlaceholderText('sk-...'), {
+      target: { value: 'sk-openai' },
+    })
+    fireEvent.click(screen.getByText('Connect OpenAI'))
+
+    await waitFor(() =>
+      expect(hoisted.fetchModelsFromProviderMock).toHaveBeenCalledWith(
+        expect.objectContaining({
+          provider: 'openai',
+          api_key: 'sk-openai',
+          base_url: 'https://api.openai.com/v1',
+        })
+      )
+    )
+    expect(hoisted.providersMock.addProvider).toHaveBeenCalledWith(
+      expect.objectContaining({
+        provider: 'openai',
+        models: expect.arrayContaining([
+          expect.objectContaining({
+            id: 'gpt-4.1-mini',
+            provider: 'openai',
+          }),
+        ]),
+      })
+    )
+    expect(hoisted.providersMock.selectModelProvider).toHaveBeenCalledWith(
+      'openai',
+      'gpt-4.1-mini'
+    )
+    expect(hoisted.toastMock.success).toHaveBeenCalledWith('OpenAI is ready', {
+      description: '2 models loaded',
+    })
   })
 
   it('updates an existing Jingxing provider', async () => {

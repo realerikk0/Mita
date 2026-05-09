@@ -16,7 +16,7 @@ use super::{
         get_thread_dir, get_thread_metadata_path,
     },
 };
-use crate::core::app::commands::get_silence_data_folder_path;
+use crate::core::app::commands::get_mita_data_folder_path;
 
 /// Lists all threads by reading their metadata from the threads directory or database.
 /// Returns a vector of thread metadata as JSON values.
@@ -31,7 +31,7 @@ pub async fn list_threads<R: Runtime>(
     }
 
     // Use file-based storage on desktop
-    let data_folder = get_silence_data_folder_path(app_handle);
+    let data_folder = get_mita_data_folder_path(app_handle);
     ensure_data_dirs(&data_folder)?;
     let data_dir = get_data_dir(&data_folder);
     let mut threads = Vec::new();
@@ -74,7 +74,7 @@ pub async fn create_thread<R: Runtime>(
     }
 
     // Use file-based storage on desktop
-    let data_folder = get_silence_data_folder_path(app_handle);
+    let data_folder = get_mita_data_folder_path(app_handle);
     ensure_data_dirs(&data_folder)?;
     let uuid = Uuid::new_v4().to_string();
     thread["id"] = serde_json::Value::String(uuid.clone());
@@ -101,7 +101,7 @@ pub async fn modify_thread<R: Runtime>(
     }
 
     // Use file-based storage on desktop
-    let data_folder = get_silence_data_folder_path(app_handle);
+    let data_folder = get_mita_data_folder_path(app_handle);
     let thread_id = thread
         .get("id")
         .and_then(|id| id.as_str())
@@ -128,7 +128,7 @@ pub async fn delete_thread<R: Runtime>(
     }
 
     // Use file-based storage on desktop
-    let data_folder = get_silence_data_folder_path(app_handle);
+    let data_folder = get_mita_data_folder_path(app_handle);
     let thread_dir = get_thread_dir(&data_folder, &thread_id);
     if thread_dir.exists() {
         let _ = fs::remove_dir_all(thread_dir);
@@ -149,7 +149,7 @@ pub async fn list_messages<R: Runtime>(
     }
 
     // Use file-based storage on desktop
-    let data_folder = get_silence_data_folder_path(app_handle);
+    let data_folder = get_mita_data_folder_path(app_handle);
     read_messages_from_file(&data_folder, &thread_id)
 }
 
@@ -166,7 +166,7 @@ pub async fn create_message<R: Runtime>(
     }
 
     // Use file-based storage on desktop
-    let data_folder = get_silence_data_folder_path(app_handle);
+    let data_folder = get_mita_data_folder_path(app_handle);
     let thread_id = {
         let id = message
             .get("thread_id")
@@ -219,7 +219,7 @@ pub async fn modify_message<R: Runtime>(
     }
 
     // Use file-based storage on desktop
-    let data_folder = get_silence_data_folder_path(app_handle);
+    let data_folder = get_mita_data_folder_path(app_handle);
     let thread_id = message
         .get("thread_id")
         .and_then(|v| v.as_str())
@@ -264,7 +264,7 @@ pub async fn delete_message<R: Runtime>(
     }
 
     // Use file-based storage on desktop
-    let data_folder = get_silence_data_folder_path(app_handle);
+    let data_folder = get_mita_data_folder_path(app_handle);
     // Acquire per-thread lock before modifying
     {
         let lock = get_lock_for_thread(&thread_id).await;
@@ -294,7 +294,7 @@ pub async fn get_thread_assistant<R: Runtime>(
     }
 
     // Use file-based storage on desktop
-    let data_folder = get_silence_data_folder_path(app_handle);
+    let data_folder = get_mita_data_folder_path(app_handle);
     let path = get_thread_metadata_path(&data_folder, &thread_id);
     if !path.exists() {
         return Err("Thread not found".to_string());
@@ -326,7 +326,7 @@ pub async fn create_thread_assistant<R: Runtime>(
     }
 
     // Use file-based storage on desktop
-    let data_folder = get_silence_data_folder_path(app_handle);
+    let data_folder = get_mita_data_folder_path(app_handle);
     let path = get_thread_metadata_path(&data_folder, &thread_id);
     if !path.exists() {
         return Err("Thread not found".to_string());
@@ -358,7 +358,7 @@ pub async fn modify_thread_assistant<R: Runtime>(
     }
 
     // Use file-based storage on desktop
-    let data_folder = get_silence_data_folder_path(app_handle);
+    let data_folder = get_mita_data_folder_path(app_handle);
     let path = get_thread_metadata_path(&data_folder, &thread_id);
     if !path.exists() {
         return Err("Thread not found".to_string());

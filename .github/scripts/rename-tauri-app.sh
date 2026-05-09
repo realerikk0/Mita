@@ -24,8 +24,8 @@ fi
 
 # Use jq to transform the content
 jq --arg channel "$CHANNEL" --arg updater "$UPDATER" '
-    .productName = "Jan-\($channel)" |
-    .identifier = "jan-\($channel).ai.app"
+    .productName = "Mita-\($channel)" |
+    .identifier = "mita-\($channel).ai.app"
 ' "$INPUT_JSON_FILE" > ./tauri.conf.json.tmp
 
 cat ./tauri.conf.json.tmp
@@ -38,11 +38,11 @@ INFO_PLIST_PATH="./src-tauri/Info.plist"
 if [ -f "$INFO_PLIST_PATH" ]; then
     echo "Updating Info.plist..."
     
-    # Replace jan.ai.app with jan-{channel}.ai.app
-    sed -i '' "s|jan\.ai\.app|jan-${CHANNEL}.ai.app|g" "$INFO_PLIST_PATH"
+    # Replace the stable bundle id with the channel-specific bundle id
+    sed -i '' "s|jan\.ai\.app|mita-${CHANNEL}.ai.app|g" "$INFO_PLIST_PATH"
     
-    # Replace <string>jan</string> with <string>jan-{channel}</string>
-    sed -i '' "s|<string>jan</string>|<string>jan-${CHANNEL}</string>|g" "$INFO_PLIST_PATH"
+    # Replace <string>jan</string> with <string>mita-{channel}</string>
+    sed -i '' "s|<string>jan</string>|<string>mita-${CHANNEL}</string>|g" "$INFO_PLIST_PATH"
 
     echo "Info.plist updated"
 
@@ -57,7 +57,7 @@ fi
 # fi
 
 # Perform the replacements
-# sed -i -e "s#Jan#Jan-$CHANNEL#g" "$LAYOUT_FILE_PATH"
+# sed -i -e "s#Mita#Mita-$CHANNEL#g" "$LAYOUT_FILE_PATH"
 
 # Notify completion
 # echo "File has been updated: $LAYOUT_FILE_PATH"

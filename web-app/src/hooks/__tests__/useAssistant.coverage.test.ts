@@ -86,7 +86,7 @@ describe('useAssistant - coverage', () => {
       result.current.setAssistants([defaultAssistant] as any)
     })
 
-    expect(result.current.currentAssistant?.id).toBe('jan')
+    expect(result.current.currentAssistant?.id).toBe('mita')
   })
 
   it('setAssistants handles empty string last used ID', () => {
@@ -114,29 +114,29 @@ describe('useAssistant - coverage', () => {
       result.current.deleteAssistant('a2')
     })
 
-    expect(result.current.currentAssistant?.id).toBe('jan')
+    expect(result.current.currentAssistant?.id).toBe('mita')
   })
 
   it('should delete the default assistant and reset', () => {
     const { result } = renderHook(() => useAssistant())
 
     act(() => {
-      result.current.setDefaultAssistant('jan')
+      result.current.setDefaultAssistant('mita')
     })
 
     act(() => {
-      result.current.deleteAssistant('jan')
+      result.current.deleteAssistant('mita')
     })
 
     // defaultAssistantId should reset
-    expect(result.current.assistants.find(a => a.id === 'jan')).toBeUndefined()
+    expect(result.current.assistants.find(a => a.id === 'mita')).toBeUndefined()
   })
 
   it('setCurrentAssistant should not change if defaultAssistantId matches', () => {
     const { result } = renderHook(() => useAssistant())
 
     act(() => {
-      useAssistant.setState({ defaultAssistantId: 'jan' })
+      useAssistant.setState({ defaultAssistantId: 'mita' })
     })
 
     const a2 = { id: 'a2', name: 'A2' } as any
@@ -145,7 +145,7 @@ describe('useAssistant - coverage', () => {
     })
 
     // Should not change because current is the default
-    expect(result.current.currentAssistant?.id).toBe('jan')
+    expect(result.current.currentAssistant?.id).toBe('mita')
   })
 
   it('setCurrentAssistant with saveToStorage false', () => {
@@ -170,18 +170,18 @@ describe('useAssistant - coverage', () => {
     })
 
     // Should be the same - no change
-    expect(result.current.currentAssistant?.id).toBe('jan')
+    expect(result.current.currentAssistant?.id).toBe('mita')
   })
 
   it('setDefaultAssistant should set and persist', () => {
     const { result } = renderHook(() => useAssistant())
 
     act(() => {
-      result.current.setDefaultAssistant('jan')
+      result.current.setDefaultAssistant('mita')
     })
 
-    expect(result.current.defaultAssistantId).toBe('jan')
-    expect(result.current.currentAssistant?.id).toBe('jan')
+    expect(result.current.defaultAssistantId).toBe('mita')
+    expect(result.current.currentAssistant?.id).toBe('mita')
   })
 
   it('setDefaultAssistant with non-existent ID', () => {
@@ -216,7 +216,7 @@ describe('useAssistant - coverage', () => {
       result.current.updateAssistant({ ...a2, name: 'Updated A2' } as any)
     })
 
-    // currentAssistant should still be jan
-    expect(result.current.currentAssistant?.id).toBe('jan')
+    // currentAssistant should still point at the legacy default id
+    expect(result.current.currentAssistant?.id).toBe('mita')
   })
 })

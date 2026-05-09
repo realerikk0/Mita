@@ -1,10 +1,10 @@
-# Makefile for Jan Electron App - Build, Lint, Test, and Clean
+# Makefile for Mita Desktop App - Build, Lint, Test, and Clean
 
 REPORT_PORTAL_URL ?= ""
 REPORT_PORTAL_API_KEY ?= ""
 REPORT_PORTAL_PROJECT_NAME ?= ""
-REPORT_PORTAL_LAUNCH_NAME ?= "Jan App"
-REPORT_PORTAL_DESCRIPTION ?= "Jan App report"
+REPORT_PORTAL_LAUNCH_NAME ?= "Mita App"
+REPORT_PORTAL_DESCRIPTION ?= "Mita App report"
 
 # Detect OS
 ifeq ($(OS),Windows_NT)
@@ -185,45 +185,45 @@ else
 	@echo "Skipping MLX server build (macOS only)"
 endif
 
-# Build Silence CLI (release, platform-aware) → src-tauri/resources/bin/silence-cli[.exe]
+# Build Mita CLI (release, platform-aware) → src-tauri/resources/bin/mita-cli[.exe]
 build-cli:
 ifeq ($(DETECTED_OS),Darwin)
-	cd src-tauri && cargo build --release --features cli --bin silence-cli --target aarch64-apple-darwin
-	cd src-tauri && cargo build --release --features cli --bin silence-cli --target x86_64-apple-darwin
+	cd src-tauri && cargo build --release --features cli --bin mita-cli --target aarch64-apple-darwin
+	cd src-tauri && cargo build --release --features cli --bin mita-cli --target x86_64-apple-darwin
 	lipo -create \
-		src-tauri/target/aarch64-apple-darwin/release/silence-cli \
-		src-tauri/target/x86_64-apple-darwin/release/silence-cli \
-		-output src-tauri/resources/bin/silence-cli
-	chmod +x src-tauri/resources/bin/silence-cli
+		src-tauri/target/aarch64-apple-darwin/release/mita-cli \
+		src-tauri/target/x86_64-apple-darwin/release/mita-cli \
+		-output src-tauri/resources/bin/mita-cli
+	chmod +x src-tauri/resources/bin/mita-cli
 	$(call MKDIR,'src-tauri/target/universal-apple-darwin/release')
 
 	echo "Checking for code signing identity..."; \
 	SIGNING_IDENTITY=$$(security find-identity -v -p codesigning | grep "Developer ID Application" | head -1 | sed 's/.*"\(.*\)".*/\1/'); \
 	if [ -n "$$SIGNING_IDENTITY" ]; then \
-		echo "Signing silence-cli with identity: $$SIGNING_IDENTITY"; \
-		codesign --force --options runtime --timestamp --sign "$$SIGNING_IDENTITY" src-tauri/resources/bin/silence-cli; \
+		echo "Signing mita-cli with identity: $$SIGNING_IDENTITY"; \
+		codesign --force --options runtime --timestamp --sign "$$SIGNING_IDENTITY" src-tauri/resources/bin/mita-cli; \
 		echo "Code signing completed successfully"; \
 	else \
 		echo "Warning: No Developer ID Application identity found. Skipping code signing (notarization will fail)."; \
 	fi
 
-	cp src-tauri/resources/bin/silence-cli src-tauri/target/universal-apple-darwin/release/silence-cli
+	cp src-tauri/resources/bin/mita-cli src-tauri/target/universal-apple-darwin/release/mita-cli
 else ifeq ($(DETECTED_OS),Windows)
-	cd src-tauri && cargo build --release --features cli --bin silence-cli
-	cp src-tauri/target/release/silence-cli.exe src-tauri/resources/bin/silence-cli.exe
+	cd src-tauri && cargo build --release --features cli --bin mita-cli
+	cp src-tauri/target/release/mita-cli.exe src-tauri/resources/bin/mita-cli.exe
 else
-	cd src-tauri && cargo build --release --features cli --bin silence-cli
-	cp src-tauri/target/release/silence-cli src-tauri/resources/bin/silence-cli
+	cd src-tauri && cargo build --release --features cli --bin mita-cli
+	cp src-tauri/target/release/mita-cli src-tauri/resources/bin/mita-cli
 endif
 
 # Debug build for local dev (faster, native arch only)
 build-cli-dev:
 	$(call MKDIR,'src-tauri/resources/bin')	
-	cd src-tauri && cargo build --features cli --bin silence-cli
+	cd src-tauri && cargo build --features cli --bin mita-cli
 ifeq ($(DETECTED_OS),Windows)
-	copy src-tauri\target\debug\silence-cli.exe src-tauri\resources\bin\silence-cli.exe
+	copy src-tauri\target\debug\mita-cli.exe src-tauri\resources\bin\mita-cli.exe
 else
-	install -m755 src-tauri/target/debug/silence-cli src-tauri/resources/bin/silence-cli
+	install -m755 src-tauri/target/debug/mita-cli src-tauri/resources/bin/mita-cli
 endif
 
 # Build

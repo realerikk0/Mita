@@ -17,7 +17,7 @@ import { SESSION_STORAGE_PREFIX } from '@/constants/chat'
 import { useChat } from '@/hooks/use-chat'
 import { useModelProvider } from '@/hooks/useModelProvider'
 import { renderInstructions } from '@/lib/instructionTemplate'
-import { ensureSilenceIdentityGuard } from '@/lib/silence-prompt'
+import { ensureMitaIdentityGuard } from '@/lib/mita-prompt'
 import {
   Conversation,
   ConversationContent,
@@ -60,11 +60,11 @@ import { useMessageQueue } from '@/stores/message-queue-store'
 import { generateThreadTitle } from '@/lib/thread-title-summarizer'
 import { useAutoScroll } from '@/hooks/useAutoScroll'
 import {
-  DEFAULT_SILENCE_AGENTS,
-  DEFAULT_SILENCE_AUTO_RUN,
-  type SilenceAutoRunMetadata,
-  type SilenceMessageMetadata,
-} from '@/types/silence-agent'
+  DEFAULT_MITA_AGENTS,
+  DEFAULT_MITA_AUTO_RUN,
+  type MitaAutoRunMetadata,
+  type MitaMessageMetadata,
+} from '@/types/mita-agent'
 
 const CHAT_STATUS = {
   STREAMING: 'streaming',
@@ -129,7 +129,7 @@ function ThreadDetail() {
   const titleAbortRef = useRef<AbortController | null>(null)
   const titleAttemptsRef = useRef(0)
   const pendingAutoRunResponseMetaRef = useRef<{
-    silence: SilenceMessageMetadata
+    mita: MitaMessageMetadata
   } | null>(null)
   const autoRunSendingRef = useRef(false)
 
@@ -151,7 +151,7 @@ function ThreadDetail() {
   const thread = useThreads(useShallow((state) => state.threads[threadId]))
   const autoRun =
     useAutoRunStore((state) => state.runs[threadId]) ??
-    DEFAULT_SILENCE_AUTO_RUN
+    DEFAULT_MITA_AUTO_RUN
 
   // Get model and provider for useChat
   const selectedModel = useModelProvider((state) => state.selectedModel)
@@ -160,11 +160,11 @@ function ThreadDetail() {
   const threadRef = useRef(thread)
   const projectId = threadRef.current?.metadata?.project?.id
 
-  // Always include the Silence identity guard so model-native Jan/Menlo
+  // Always include the Mita identity guard so model-native Jan/Menlo
   // personas do not leak when a thread has no assigned assistant.
   const threadAssistant = thread?.assistants?.[0]
   const systemMessage = renderInstructions(
-    ensureSilenceIdentityGuard(threadAssistant?.instructions)
+    ensureMitaIdentityGuard(threadAssistant?.instructions)
   )
 
   useEffect(() => {
@@ -172,27 +172,38 @@ function ThreadDetail() {
   }, [thread])
 
   useEffect(() => {
-    const storedAutoRun = thread?.metadata
-      ?.silenceAutoRun as SilenceAutoRunMetadata | undefined
+    const metadata = thread?.metadata as
+      | (Record<string, unknown> & {
+          mitaAutoRun?: MitaAutoRunMetadata
+          silenceAutoRun?: MitaAutoRunMetadata
+        })
+      | undefined
+    const storedAutoRun = metadata?.mitaAutoRun ?? metadata?.silenceAutoRun
     if (!storedAutoRun) return
 
     useAutoRunStore.getState().setRun(threadId, {
-      ...DEFAULT_SILENCE_AUTO_RUN,
+      ...DEFAULT_MITA_AUTO_RUN,
       ...storedAutoRun,
     })
-  }, [threadId, thread?.metadata?.silenceAutoRun])
+  }, [
+    threadId,
+    thread?.metadata?.mitaAutoRun,
+    thread?.metadata?.silenceAutoRun,
+  ])
 
   const persistAutoRunState = useCallback(
-    (patch: Partial<SilenceAutoRunMetadata>) => {
+    (patch: Partial<MitaAutoRunMetadata>) => {
       const nextRun = useAutoRunStore.getState().patchRun(threadId, patch)
       const currentThread =
         useThreads.getState().threads[threadId] ?? threadRef.current
 
       useThreads.getState().updateThread(threadId, {
         metadata: {
-          silenceAutoRun: nextRun,
-          silenceAgents:
-            currentThread?.metadata?.silenceAgents ?? DEFAULT_SILENCE_AGENTS,
+          mitaAutoRun: nextRun,
+          mitaAgents:
+            currentThread?.metadata?.mitaAgents ??
+            currentThread?.metadata?.silenceAgents ??
+            DEFAULT_MITA_AGENTS,
         },
       })
 
@@ -291,8 +302,8 @@ function ThreadDetail() {
             unknown
           >
           if (pendingAutoRunResponseMetaRef.current) {
-            messageMetadata.silence =
-              pendingAutoRunResponseMetaRef.current.silence
+            messageMetadata.mita =
+              pendingAutoRunResponseMetaRef.current.mita
             pendingAutoRunResponseMetaRef.current = null
           }
 
@@ -788,9 +799,9 @@ function ThreadDetail() {
       )
       addMessage(userMessage)
 
-      if (metadata?.silence) {
+      if (metadata?.mita) {
         pendingAutoRunResponseMetaRef.current = {
-          silence: metadata.silence as SilenceMessageMetadata,
+          mita: metadata.mita as MitaMessageMetadata,
         }
       }
 
@@ -1158,11 +1169,11 @@ function ThreadDetail() {
     })
 
     sendQueuedMessage(createAutoRunPrompt(round, run.maxRounds), {
-      silence: {
+      mita: {
         runId,
         round,
         mode: 'single-thread',
-      } satisfies SilenceMessageMetadata,
+      } satisfies MitaMessageMetadata,
     })
       .catch((error) => {
         persistAutoRunState({

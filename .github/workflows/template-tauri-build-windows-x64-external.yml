@@ -109,19 +109,19 @@ jobs:
               new_build_version="${base_version}.${t_value}"
           }
           generate_build_version ${{ inputs.new_version }}
-          sed -i "s/jan_version/$new_base_version/g" ./src-tauri/tauri.bundle.windows.nsis.template
-          sed -i "s/jan_build/$new_build_version/g" ./src-tauri/tauri.bundle.windows.nsis.template
+          sed -i "s/mita_version/$new_base_version/g" ./src-tauri/tauri.bundle.windows.nsis.template
+          sed -i "s/mita_build/$new_build_version/g" ./src-tauri/tauri.bundle.windows.nsis.template
 
           if [ "${{ inputs.channel }}" != "stable" ]; then
             if [[ "${{ inputs.channel }}" == "nightly" ]]; then
-              jq '.plugins.updater.endpoints = ["https://apps-nightly.jan.ai/update-check", "https://delta.jan.ai/${{ inputs.channel }}/latest.json"]' ./src-tauri/tauri.conf.json > /tmp/tauri.conf.json
+              jq '.plugins.updater.endpoints = ["https://updates.jingxing.uk/mita/update-check", "https://updates.jingxing.uk/mita/${{ inputs.channel }}/latest.json"]' ./src-tauri/tauri.conf.json > /tmp/tauri.conf.json
             else
-              jq '.plugins.updater.endpoints = ["https://delta.jan.ai/${{ inputs.channel }}/latest.json"]' ./src-tauri/tauri.conf.json > /tmp/tauri.conf.json
+              jq '.plugins.updater.endpoints = ["https://updates.jingxing.uk/mita/${{ inputs.channel }}/latest.json"]' ./src-tauri/tauri.conf.json > /tmp/tauri.conf.json
             fi
             mv /tmp/tauri.conf.json ./src-tauri/tauri.conf.json
 
             # Update product name
-            jq --arg name "Jan-${{ inputs.channel }}" '.productName = $name' ./src-tauri/tauri.conf.json > /tmp/tauri.conf.json
+            jq --arg name "Mita-${{ inputs.channel }}" '.productName = $name' ./src-tauri/tauri.conf.json > /tmp/tauri.conf.json
             mv /tmp/tauri.conf.json ./src-tauri/tauri.conf.json
 
             chmod +x .github/scripts/rename-tauri-app.sh
@@ -131,8 +131,8 @@ jobs:
             cat ./src-tauri/tauri.conf.json
 
             # Update Cargo.toml
-            ctoml ./src-tauri/Cargo.toml package.name "Jan-${{ inputs.channel }}"
-            ctoml ./src-tauri/Cargo.toml package.default-run "Jan-${{ inputs.channel }}"
+            ctoml ./src-tauri/Cargo.toml package.name "Mita-${{ inputs.channel }}"
+            ctoml ./src-tauri/Cargo.toml package.default-run "Mita-${{ inputs.channel }}"
             ctoml ./src-tauri/Cargo.toml dependencies.tauri.features[] "devtools"
             echo "------------------"
             cat ./src-tauri/Cargo.toml
@@ -140,11 +140,11 @@ jobs:
             chmod +x .github/scripts/rename-workspace.sh
             .github/scripts/rename-workspace.sh ./package.json ${{ inputs.channel }}
             cat ./package.json
-            sed -i "s/jan_productname/Jan-${{ inputs.channel }}/g" ./src-tauri/tauri.bundle.windows.nsis.template
-            sed -i "s/jan_mainbinaryname/jan-${{ inputs.channel }}/g" ./src-tauri/tauri.bundle.windows.nsis.template
+            sed -i "s/mita_productname/Mita-${{ inputs.channel }}/g" ./src-tauri/tauri.bundle.windows.nsis.template
+            sed -i "s/mita_mainbinaryname/mita-${{ inputs.channel }}/g" ./src-tauri/tauri.bundle.windows.nsis.template
           else
-            sed -i "s/jan_productname/Jan/g" ./src-tauri/tauri.bundle.windows.nsis.template
-            sed -i "s/jan_mainbinaryname/jan/g" ./src-tauri/tauri.bundle.windows.nsis.template
+            sed -i "s/mita_productname/Mita/g" ./src-tauri/tauri.bundle.windows.nsis.template
+            sed -i "s/mita_mainbinaryname/jan/g" ./src-tauri/tauri.bundle.windows.nsis.template
           fi
           echo "---------nsis.template---------"
           cat ./src-tauri/tauri.bundle.windows.nsis.template
@@ -164,6 +164,6 @@ jobs:
       - name: Upload Artifact
         uses: actions/upload-artifact@v4
         with:
-          name: jan-windows-${{ inputs.new_version }}
+          name: mita-windows-${{ inputs.new_version }}
           path: |
             ./src-tauri/target/release/bundle/nsis/*.exe

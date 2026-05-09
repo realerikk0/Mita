@@ -120,8 +120,8 @@ export class TauriMCPService extends DefaultMCPService {
     return await invoke('deactivate_mcp_server', { name })
   }
 
-  async checkSilenceBrowserExtensionConnected(): Promise<boolean> {
-    return await invoke('check_silence_browser_extension_connected')
+  async checkMitaWebResearchConnected(): Promise<boolean> {
+    return await invoke('check_mita_web_research_connected')
   }
 }
 

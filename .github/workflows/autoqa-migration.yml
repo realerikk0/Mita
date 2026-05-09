@@ -55,7 +55,7 @@ jobs:
         with:
           python-version: '3.13'
 
-      - name: Clean existing Jan installations
+      - name: Clean existing Mita installations
         shell: powershell
         run: |
           .\autoqa\scripts\windows_cleanup.ps1 -IsNightly $false
@@ -72,8 +72,8 @@ jobs:
             -DefaultUrl "" `
             -DefaultIsNightly ""
 
-          $oldSrc = Join-Path $env:TEMP 'jan-installer.exe'
-          $oldOut = Join-Path $env:TEMP 'jan-old.exe'
+          $oldSrc = Join-Path $env:TEMP 'mita-installer.exe'
+          $oldOut = Join-Path $env:TEMP 'mita-old.exe'
           Copy-Item -Path $oldSrc -Destination $oldOut -Force
 
           # Download NEW installer using existing script
@@ -85,8 +85,8 @@ jobs:
             -DefaultUrl "" `
             -DefaultIsNightly ""
 
-          $newSrc = Join-Path $env:TEMP 'jan-installer.exe'
-          $newOut = Join-Path $env:TEMP 'jan-new.exe'
+          $newSrc = Join-Path $env:TEMP 'mita-installer.exe'
+          $newOut = Join-Path $env:TEMP 'mita-new.exe'
           Copy-Item -Path $newSrc -Destination $newOut -Force
 
           Write-Host "OLD installer: $oldOut"
@@ -179,7 +179,7 @@ jobs:
           chmod +x autoqa/scripts/setup_permissions.sh || true
           ./autoqa/scripts/setup_permissions.sh || true
 
-      - name: Clean existing Jan installations
+      - name: Clean existing Mita installations
         run: |
           ./autoqa/scripts/ubuntu_cleanup.sh
 
@@ -194,7 +194,7 @@ jobs:
             "" \
             "" \
             ""
-          cp /tmp/jan-installer.deb /tmp/jan-old.deb
+          cp /tmp/mita-installer.deb /tmp/mita-old.deb
 
           # Download NEW installer using existing script
           ./autoqa/scripts/ubuntu_download.sh \
@@ -204,10 +204,10 @@ jobs:
             "" \
             "" \
             ""
-          cp /tmp/jan-installer.deb /tmp/jan-new.deb
+          cp /tmp/mita-installer.deb /tmp/mita-new.deb
 
-          echo "OLD_VERSION=/tmp/jan-old.deb" >> $GITHUB_ENV
-          echo "NEW_VERSION=/tmp/jan-new.deb" >> $GITHUB_ENV
+          echo "OLD_VERSION=/tmp/mita-old.deb" >> $GITHUB_ENV
+          echo "NEW_VERSION=/tmp/mita-new.deb" >> $GITHUB_ENV
 
       - name: Install Python dependencies
         working-directory: autoqa
@@ -262,7 +262,7 @@ jobs:
           chmod +x autoqa/scripts/setup_permissions.sh || true
           ./autoqa/scripts/setup_permissions.sh || true
 
-      - name: Clean existing Jan installations
+      - name: Clean existing Mita installations
         run: |
           ./autoqa/scripts/macos_cleanup.sh
 
@@ -277,7 +277,7 @@ jobs:
             "" \
             "" \
             ""
-          cp /tmp/jan-installer.dmg /tmp/jan-old.dmg
+          cp /tmp/mita-installer.dmg /tmp/mita-old.dmg
 
           # Download NEW installer using existing script
           ./autoqa/scripts/macos_download.sh \
@@ -287,10 +287,10 @@ jobs:
             "" \
             "" \
             ""
-          cp /tmp/jan-installer.dmg /tmp/jan-new.dmg
+          cp /tmp/mita-installer.dmg /tmp/mita-new.dmg
 
-          echo "OLD_VERSION=/tmp/jan-old.dmg" >> $GITHUB_ENV
-          echo "NEW_VERSION=/tmp/jan-new.dmg" >> $GITHUB_ENV
+          echo "OLD_VERSION=/tmp/mita-old.dmg" >> $GITHUB_ENV
+          echo "NEW_VERSION=/tmp/mita-new.dmg" >> $GITHUB_ENV
 
       - name: Install Python dependencies
         working-directory: autoqa

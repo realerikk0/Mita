@@ -7,16 +7,16 @@ import {
   verifyBackendInstallation,
 } from '../backend'
 import { getSystemInfo } from '@janhq/tauri-plugin-hardware-api'
-import { fs, getSilenceDataFolderPath, events } from '@janhq/core'
+import { fs, getMitaDataFolderPath, events } from '@janhq/core'
 import { invoke } from '@tauri-apps/api/core'
 import { dirname } from '@tauri-apps/api/path'
 
 // Mock constants
-const MOCK_SILENCE_PATH_STRING = '/path/to/jan'
+const MOCK_MITA_PATH_STRING = '/path/to/jan'
 
 // Mock the core dependencies
 vi.mock('@janhq/core', () => ({
-  getSilenceDataFolderPath: vi.fn().mockResolvedValue('/path/to/jan'),
+  getMitaDataFolderPath: vi.fn().mockResolvedValue('/path/to/jan'),
   fs: {
     existsSync: vi.fn(),
     readdirSync: vi.fn().mockResolvedValue([]),
@@ -76,7 +76,7 @@ vi.mocked(window.core.extensionManager.getByName).mockReturnValue(
 describe('Backend functions', () => {
   beforeEach(async () => {
     vi.clearAllMocks()
-    vi.mocked(getSilenceDataFolderPath).mockResolvedValue(MOCK_SILENCE_PATH_STRING)
+    vi.mocked(getMitaDataFolderPath).mockResolvedValue(MOCK_MITA_PATH_STRING)
 
     vi.mocked(getSystemInfo).mockResolvedValue({
       os_type: 'linux',
@@ -102,7 +102,7 @@ describe('Backend functions', () => {
 
   describe('getBackendDir', () => {
     it('should call invoke with correct params and return the path', async () => {
-      const expectedDir = `${MOCK_SILENCE_PATH_STRING}/llamacpp/backends/v1.2.3/linux-avx2-x64`
+      const expectedDir = `${MOCK_MITA_PATH_STRING}/llamacpp/backends/v1.2.3/linux-avx2-x64`
       vi.mocked(invoke).mockResolvedValueOnce(expectedDir)
 
       const dir = await getBackendDir('linux-avx2-x64', 'v1.2.3')
@@ -110,13 +110,13 @@ describe('Backend functions', () => {
       expect(invoke).toHaveBeenCalledWith('plugin:llamacpp|get_backend_dir', {
         backend: 'linux-avx2-x64',
         version: 'v1.2.3',
-        silenceDataFolder: MOCK_SILENCE_PATH_STRING,
+        mitaDataFolder: MOCK_MITA_PATH_STRING,
       })
       expect(dir).toBe(expectedDir)
     })
 
     it('should call invoke with correct params for new common backend name', async () => {
-      const expectedDir = `${MOCK_SILENCE_PATH_STRING}/llamacpp/backends/v2.0.0/win-common_cpus-x64`
+      const expectedDir = `${MOCK_MITA_PATH_STRING}/llamacpp/backends/v2.0.0/win-common_cpus-x64`
       vi.mocked(invoke).mockResolvedValueOnce(expectedDir)
 
       const dir = await getBackendDir('win-common_cpus-x64', 'v2.0.0')
@@ -124,7 +124,7 @@ describe('Backend functions', () => {
       expect(invoke).toHaveBeenCalledWith('plugin:llamacpp|get_backend_dir', {
         backend: 'win-common_cpus-x64',
         version: 'v2.0.0',
-        silenceDataFolder: MOCK_SILENCE_PATH_STRING,
+        mitaDataFolder: MOCK_MITA_PATH_STRING,
       })
       expect(dir).toBe(expectedDir)
     })
@@ -133,7 +133,7 @@ describe('Backend functions', () => {
   describe('getBackendExePath', () => {
     it('should call invoke with correct params including isWindows', async () => {
       vi.stubGlobal('IS_WINDOWS', false)
-      const expectedExe = `${MOCK_SILENCE_PATH_STRING}/llamacpp/backends/v1.2.3/linux-avx2-x64/llama-server`
+      const expectedExe = `${MOCK_MITA_PATH_STRING}/llamacpp/backends/v1.2.3/linux-avx2-x64/llama-server`
       vi.mocked(invoke).mockResolvedValueOnce(expectedExe)
 
       const exePath = await getBackendExePath('linux-avx2-x64', 'v1.2.3')
@@ -143,7 +143,7 @@ describe('Backend functions', () => {
         {
           backend: 'linux-avx2-x64',
           version: 'v1.2.3',
-          silenceDataFolder: MOCK_SILENCE_PATH_STRING,
+          mitaDataFolder: MOCK_MITA_PATH_STRING,
           isWindows: false,
         }
       )
@@ -152,7 +152,7 @@ describe('Backend functions', () => {
 
     it('should pass isWindows=true on Windows', async () => {
       vi.stubGlobal('IS_WINDOWS', true)
-      const expectedExe = `${MOCK_SILENCE_PATH_STRING}/llamacpp/backends/v1.2.3/win-avx2-x64/llama-server.exe`
+      const expectedExe = `${MOCK_MITA_PATH_STRING}/llamacpp/backends/v1.2.3/win-avx2-x64/llama-server.exe`
       vi.mocked(invoke).mockResolvedValueOnce(expectedExe)
 
       const exePath = await getBackendExePath('win-avx2-x64', 'v1.2.3')
@@ -162,7 +162,7 @@ describe('Backend functions', () => {
         {
           backend: 'win-avx2-x64',
           version: 'v1.2.3',
-          silenceDataFolder: MOCK_SILENCE_PATH_STRING,
+          mitaDataFolder: MOCK_MITA_PATH_STRING,
           isWindows: true,
         }
       )
@@ -182,7 +182,7 @@ describe('Backend functions', () => {
         {
           backend: 'win-avx2-x64',
           version: 'v1.0.0',
-          silenceDataFolder: MOCK_SILENCE_PATH_STRING,
+          mitaDataFolder: MOCK_MITA_PATH_STRING,
           isWindows: false,
         }
       )
@@ -219,7 +219,7 @@ describe('Backend functions', () => {
         {
           backend: 'linux-vulkan-common_cpus-x64',
           version: 'b8795',
-          silenceDataFolder: MOCK_SILENCE_PATH_STRING,
+          mitaDataFolder: MOCK_MITA_PATH_STRING,
           isWindows: false,
         }
       )
@@ -292,7 +292,7 @@ describe('Backend functions', () => {
       const mockItems = [
         {
           url: 'https://github.com/janhq/llama.cpp/releases/download/v1.0.0/llama-v1.0.0-bin-linux-avx2-x64.tar.gz',
-          save_path: `${MOCK_SILENCE_PATH_STRING}/llamacpp/backends/v1.0.0/linux-avx2-x64/backend.tar.gz`,
+          save_path: `${MOCK_MITA_PATH_STRING}/llamacpp/backends/v1.0.0/linux-avx2-x64/backend.tar.gz`,
           model_id: taskId,
         },
       ]
@@ -312,7 +312,7 @@ describe('Backend functions', () => {
           backend: 'linux-avx2-x64',
           version: 'v1.0.0',
           source: 'github',
-          silenceDataFolder: MOCK_SILENCE_PATH_STRING,
+          mitaDataFolder: MOCK_MITA_PATH_STRING,
           osType: 'linux',
         }
       )
@@ -341,12 +341,12 @@ describe('Backend functions', () => {
       const mockItems = [
         {
           url: 'https://github.com/janhq/llama.cpp/releases/download/v1.0.0/llama-v1.0.0-bin-win-cuda-12-common_cpus-x64.tar.gz',
-          save_path: `${MOCK_SILENCE_PATH_STRING}/llamacpp/backends/v1.0.0/win-cuda-12-common_cpus-x64/backend.tar.gz`,
+          save_path: `${MOCK_MITA_PATH_STRING}/llamacpp/backends/v1.0.0/win-cuda-12-common_cpus-x64/backend.tar.gz`,
           model_id: taskId,
         },
         {
           url: 'https://github.com/janhq/llama.cpp/releases/download/v1.0.0/cudart-llama-bin-win-cu12.0-x64.tar.gz',
-          save_path: `${MOCK_SILENCE_PATH_STRING}/llamacpp/backends/v1.0.0/win-cuda-12-common_cpus-x64/build/bin/cuda12.tar.gz`,
+          save_path: `${MOCK_MITA_PATH_STRING}/llamacpp/backends/v1.0.0/win-cuda-12-common_cpus-x64/build/bin/cuda12.tar.gz`,
           model_id: taskId,
         },
       ]
@@ -365,11 +365,11 @@ describe('Backend functions', () => {
       expect(downloadItems.length).toBe(2)
       expect(downloadItems[0].url).toContain('win-cuda-12-common_cpus-x64.tar.gz')
       expect(downloadItems[0].save_path).toBe(
-        `${MOCK_SILENCE_PATH_STRING}/llamacpp/backends/v1.0.0/win-cuda-12-common_cpus-x64/backend.tar.gz`
+        `${MOCK_MITA_PATH_STRING}/llamacpp/backends/v1.0.0/win-cuda-12-common_cpus-x64/backend.tar.gz`
       )
       expect(downloadItems[1].url).toContain('cudart-llama-bin-win-cu12.0-x64.tar.gz')
       expect(downloadItems[1].save_path).toBe(
-        `${MOCK_SILENCE_PATH_STRING}/llamacpp/backends/v1.0.0/win-cuda-12-common_cpus-x64/build/bin/cuda12.tar.gz`
+        `${MOCK_MITA_PATH_STRING}/llamacpp/backends/v1.0.0/win-cuda-12-common_cpus-x64/build/bin/cuda12.tar.gz`
       )
       expect(downloadItems[0].proxy).toBeDefined()
       expect(downloadItems[1].proxy).toBeDefined()
@@ -392,12 +392,12 @@ describe('Backend functions', () => {
       const mockItems = [
         {
           url: 'https://github.com/janhq/llama.cpp/releases/download/v1.0.0/llama-v1.0.0-bin-linux-avx2-cuda-cu11.7-x64.tar.gz',
-          save_path: `${MOCK_SILENCE_PATH_STRING}/llamacpp/backends/v1.0.0/linux-avx2-cuda-cu11.7-x64/backend.tar.gz`,
+          save_path: `${MOCK_MITA_PATH_STRING}/llamacpp/backends/v1.0.0/linux-avx2-cuda-cu11.7-x64/backend.tar.gz`,
           model_id: taskId,
         },
         {
           url: 'https://github.com/janhq/llama.cpp/releases/download/v1.0.0/cudart-llama-bin-linux-cu11.7-x64.tar.gz',
-          save_path: `${MOCK_SILENCE_PATH_STRING}/llamacpp/backends/v1.0.0/linux-avx2-cuda-cu11.7-x64/build/bin/cuda11.tar.gz`,
+          save_path: `${MOCK_MITA_PATH_STRING}/llamacpp/backends/v1.0.0/linux-avx2-cuda-cu11.7-x64/build/bin/cuda11.tar.gz`,
           model_id: taskId,
         },
       ]
@@ -416,11 +416,11 @@ describe('Backend functions', () => {
       expect(downloadItems.length).toBe(2)
       expect(downloadItems[0].url).toContain('linux-avx2-cuda-cu11.7-x64.tar.gz')
       expect(downloadItems[0].save_path).toBe(
-        `${MOCK_SILENCE_PATH_STRING}/llamacpp/backends/v1.0.0/linux-avx2-cuda-cu11.7-x64/backend.tar.gz`
+        `${MOCK_MITA_PATH_STRING}/llamacpp/backends/v1.0.0/linux-avx2-cuda-cu11.7-x64/backend.tar.gz`
       )
       expect(downloadItems[1].url).toContain('cudart-llama-bin-linux-cu11.7-x64.tar.gz')
       expect(downloadItems[1].save_path).toBe(
-        `${MOCK_SILENCE_PATH_STRING}/llamacpp/backends/v1.0.0/linux-avx2-cuda-cu11.7-x64/build/bin/cuda11.tar.gz`
+        `${MOCK_MITA_PATH_STRING}/llamacpp/backends/v1.0.0/linux-avx2-cuda-cu11.7-x64/build/bin/cuda11.tar.gz`
       )
     })
 
@@ -433,7 +433,7 @@ describe('Backend functions', () => {
       } as any)
 
       const taskId = 'llamacpp-v1-0-0-win-avx2-x64'
-      const backendTarPath = `${MOCK_SILENCE_PATH_STRING}/llamacpp/backends/v1.0.0/win-avx2-x64/backend.tar.gz`
+      const backendTarPath = `${MOCK_MITA_PATH_STRING}/llamacpp/backends/v1.0.0/win-avx2-x64/backend.tar.gz`
       const mockItems = [
         {
           url: 'https://github.com/janhq/llama.cpp/releases/download/v1.0.0/llama-v1.0.0-bin-win-avx2-x64.tar.gz',
@@ -450,14 +450,14 @@ describe('Backend functions', () => {
       })
 
       vi.mocked(dirname).mockResolvedValue(
-        `${MOCK_SILENCE_PATH_STRING}/llamacpp/backends/v1.0.0/win-avx2-x64`
+        `${MOCK_MITA_PATH_STRING}/llamacpp/backends/v1.0.0/win-avx2-x64`
       )
 
       await downloadBackend('win-avx2-x64', 'v1.0.0')
 
       expect(invoke).toHaveBeenCalledWith('decompress', {
         path: backendTarPath,
-        outputDir: `${MOCK_SILENCE_PATH_STRING}/llamacpp/backends/v1.0.0/win-avx2-x64`,
+        outputDir: `${MOCK_MITA_PATH_STRING}/llamacpp/backends/v1.0.0/win-avx2-x64`,
       })
     })
 
@@ -473,7 +473,7 @@ describe('Backend functions', () => {
       const mockItems = [
         {
           url: 'https://github.com/janhq/llama.cpp/releases/download/v1.0.0/llama-v1.0.0-bin-linux-avx2-x64.tar.gz',
-          save_path: `${MOCK_SILENCE_PATH_STRING}/llamacpp/backends/v1.0.0/linux-avx2-x64/backend.tar.gz`,
+          save_path: `${MOCK_MITA_PATH_STRING}/llamacpp/backends/v1.0.0/linux-avx2-x64/backend.tar.gz`,
           model_id: taskId,
         },
       ]

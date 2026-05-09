@@ -35,7 +35,12 @@ import { useModelProvider } from '@/hooks/useModelProvider'
 import { McpRouterModelPicker } from '@/containers/McpRouterModelPicker'
 import { isRouterModelSelectable } from '@/lib/mcp-router-model-filter'
 import { normalizeAppError } from '@/utils/appError'
-
+import {
+  LEGACY_JAN_BROWSER_MCP_NAME,
+  LEGACY_SILENCE_BROWSER_MCP_NAME,
+  LEGACY_SILENCE_WEB_RESEARCH_MCP_NAME,
+  MITA_WEB_RESEARCH_MCP_NAME,
+} from '@/constants/mcp'
 
 // Function to mask sensitive URL parameters
 const maskSensitiveUrl = (url: string) => {
@@ -602,8 +607,8 @@ function MCPServersDesktop() {
                           {config.official && (
                             <div className="flex items-center gap-1.5 px-2 py-0.5 text-xs bg-secondary border rounded-sm">
                               <img
-                                src="/images/jan-logo.png"
-                                alt="Silence"
+                                src="/images/mita-logo.png"
+                                alt="Mita"
                                 className="w-3 h-3 object-contain"
                               />
                               <span>Official</span>
@@ -640,18 +645,19 @@ function MCPServersDesktop() {
                                 )}
                               {config.official && (
                                 <div className="mt-2 text-xs text-muted-foreground pt-2">
-                                  <p className="mb-1">
-                                    Requires the browser extension to be installed
-                                    in your Chrome-based browser.
-                                  </p>
-                                  <a
-                                    href="https://chromewebstore.google.com/detail/jan-browser-mcp/mkciifcjehgnpaigoiaakdgabbpfppal"
-                                    target="_blank"
-                                    rel="noopener noreferrer"
-                                    className="text-blue-500 hover:underline"
-                                  >
-                                    Install Extension →
-                                  </a>
+                                  {key === MITA_WEB_RESEARCH_MCP_NAME ? (
+                                    <p>
+                                      Uses the bundled private browser runtime and does not read your system browser profile.
+                                    </p>
+                                  ) : key === LEGACY_SILENCE_WEB_RESEARCH_MCP_NAME ||
+                                    key === LEGACY_SILENCE_BROWSER_MCP_NAME ||
+                                    key === LEGACY_JAN_BROWSER_MCP_NAME ? (
+                                    <p>
+                                      Legacy browser MCP configuration. It will be migrated to Mita Web Research on restart.
+                                    </p>
+                                  ) : (
+                                    <p>Official Mita MCP server.</p>
+                                  )}
                                 </div>
                               )}
                             </>

@@ -64,13 +64,13 @@ export class DefaultModelsService implements ModelsService {
     }
   }
 
-  async fetchLatestSilenceModel(): Promise<CatalogModel | null> {
+  async fetchLatestMitaModel(): Promise<CatalogModel | null> {
     try {
-      const response = await fetch(LATEST_SILENCE_MODEL_URL)
+      const response = await fetch(LATEST_MITA_MODEL_URL)
 
       if (!response.ok) {
         console.error(
-          `Failed to fetch latest Silence model: ${response.status} ${response.statusText}`
+          `Failed to fetch latest Mita model: ${response.status} ${response.statusText}`
         )
         return null
       }
@@ -80,7 +80,7 @@ export class DefaultModelsService implements ModelsService {
       const model: CatalogModel = Array.isArray(data) ? data[0] : data
       return model ?? null
     } catch (error) {
-      console.error('Error fetching latest Silence model:', error)
+      console.error('Error fetching latest Mita model:', error)
       return null
     }
   }
@@ -618,7 +618,7 @@ export class DefaultModelsService implements ModelsService {
       }
 
       if (engine && typeof engine.getTokensCount === 'function') {
-        // Transform Silence ThreadMessage format to OpenAI chat completion format
+        // Transform Mita ThreadMessage format to OpenAI chat completion format
         const transformedMessages = messages
           .map((message) => {
             // Handle different content types

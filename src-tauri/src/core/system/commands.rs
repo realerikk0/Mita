@@ -4,18 +4,20 @@ use tauri::{AppHandle, Manager, Runtime, State};
 use tauri_plugin_llamacpp::cleanup_llama_processes;
 
 use crate::core::app::commands::{
-    default_data_folder_path, get_silence_data_folder_path, update_app_configuration,
+    default_data_folder_path, get_mita_data_folder_path, update_app_configuration,
 };
 use crate::core::app::constants::{
-    SILENCE_DATA_DIRS_COMMON, SILENCE_DATA_DIRS_CONVERSATIONS, SILENCE_DATA_DIRS_MODELS,
-    SILENCE_DATA_FILES_CONFIGS, SILENCE_DATA_FILES_SETTINGS,
+    MITA_DATA_DIRS_COMMON, MITA_DATA_DIRS_CONVERSATIONS, MITA_DATA_DIRS_MODELS,
+    MITA_DATA_FILES_CONFIGS, MITA_DATA_FILES_SETTINGS,
 };
 use crate::core::app::models::AppConfiguration;
 use crate::core::mcp::helpers::{stop_mcp_servers_with_context, ShutdownContext};
 use crate::core::state::AppState;
 
-const SILENCE_LOCAL_API_MARKER: &str = "# Silence Local API Server - Claude Code Config";
-const SILENCE_LOCAL_API_MARKER_PREFIX: &str = "# Silence Local API Server";
+const MITA_LOCAL_API_MARKER: &str = "# Mita Local API Server - Claude Code Config";
+const MITA_LOCAL_API_MARKER_PREFIX: &str = "# Mita Local API Server";
+const LEGACY_SILENCE_LOCAL_API_MARKER: &str = "# Silence Local API Server - Claude Code Config";
+const LEGACY_SILENCE_LOCAL_API_MARKER_PREFIX: &str = "# Silence Local API Server";
 const LEGACY_JAN_LOCAL_API_MARKER: &str = "# Jan Local API Server - Claude Code Config";
 const LEGACY_JAN_LOCAL_API_MARKER_PREFIX: &str = "# Jan Local API Server";
 
@@ -47,7 +49,7 @@ fn remove_file(data_folder: &std::path::Path, name: &str) {
 /// Delete conversations and user data (threads, assistants).
 fn delete_conversations(data_folder: &std::path::Path) {
     log::info!("Deleting conversations (threads, assistants)");
-    for dir in SILENCE_DATA_DIRS_CONVERSATIONS {
+    for dir in MITA_DATA_DIRS_CONVERSATIONS {
         remove_dir(data_folder, dir);
     }
 }
@@ -56,10 +58,10 @@ fn delete_conversations(data_folder: &std::path::Path) {
 /// (engine settings, MCP config, etc.).
 fn delete_models_and_configs(data_folder: &std::path::Path) {
     log::info!("Deleting models, engines, and configurations");
-    for dir in SILENCE_DATA_DIRS_MODELS {
+    for dir in MITA_DATA_DIRS_MODELS {
         remove_dir(data_folder, dir);
     }
-    for file in SILENCE_DATA_FILES_CONFIGS {
+    for file in MITA_DATA_FILES_CONFIGS {
         remove_file(data_folder, file);
     }
 }
@@ -67,7 +69,7 @@ fn delete_models_and_configs(data_folder: &std::path::Path) {
 /// Delete extensions, logs, caches — always cleaned during any reset.
 fn delete_common_data(data_folder: &std::path::Path) {
     log::info!("Deleting common data (extensions, logs, caches)");
-    for dir in SILENCE_DATA_DIRS_COMMON {
+    for dir in MITA_DATA_DIRS_COMMON {
         remove_dir(data_folder, dir);
     }
 }
@@ -76,7 +78,7 @@ fn delete_common_data(data_folder: &std::path::Path) {
 /// when the user is not keeping any data.
 fn delete_settings(data_folder: &std::path::Path) {
     log::info!("Deleting cross-category settings (store.json)");
-    for file in SILENCE_DATA_FILES_SETTINGS {
+    for file in MITA_DATA_FILES_SETTINGS {
         remove_file(data_folder, file);
     }
 }
@@ -101,8 +103,10 @@ fn detect_shell_env_file(home_dir: &str, is_macos: bool) -> (&'static str, Strin
 }
 
 fn should_remove_claude_code_env_line(line: &str) -> bool {
-    line.starts_with(SILENCE_LOCAL_API_MARKER)
-        || line.starts_with(SILENCE_LOCAL_API_MARKER_PREFIX)
+    line.starts_with(MITA_LOCAL_API_MARKER)
+        || line.starts_with(MITA_LOCAL_API_MARKER_PREFIX)
+        || line.starts_with(LEGACY_SILENCE_LOCAL_API_MARKER)
+        || line.starts_with(LEGACY_SILENCE_LOCAL_API_MARKER_PREFIX)
         || line.starts_with(LEGACY_JAN_LOCAL_API_MARKER)
         || line.starts_with(LEGACY_JAN_LOCAL_API_MARKER_PREFIX)
         || line.starts_with("export ANTHROPIC_")
@@ -123,7 +127,7 @@ fn write_env_to_shell(env_file_path: &str, env_vars: &[(String, String)]) -> Res
 
     let new_content = format!(
         "{}\n{}\n{}\n",
-        SILENCE_LOCAL_API_MARKER, new_entries, SILENCE_LOCAL_API_MARKER
+        MITA_LOCAL_API_MARKER, new_entries, MITA_LOCAL_API_MARKER
     );
 
     let final_content = cleaned.join("\n") + &new_content;
@@ -150,7 +154,7 @@ pub fn factory_reset<R: Runtime>(
             });
         }
     }
-    let data_folder = get_silence_data_folder_path(app_handle.clone());
+    let data_folder = get_mita_data_folder_path(app_handle.clone());
     log::info!(
         "Factory reset (keep_app_data={}, keep_models_and_configs={}), data folder: {:?}",
         keep_app_data,
@@ -268,7 +272,9 @@ pub fn open_file_explorer(path: String) {
 
 #[tauri::command]
 pub async fn read_logs<R: Runtime>(app: AppHandle<R>) -> Result<String, String> {
-    let log_path = get_silence_data_folder_path(app).join("logs").join("app.log");
+    let log_path = get_mita_data_folder_path(app)
+        .join("logs")
+        .join("app.log");
     if log_path.exists() {
         let content = fs::read_to_string(log_path).map_err(|e| e.to_string())?;
         Ok(content)
@@ -309,7 +315,7 @@ pub fn launch_claude_code_with_config(
 
     env_vars.push((
         "ANTHROPIC_AUTH_TOKEN".to_string(),
-        api_key.unwrap_or_else(|| "silence".to_string()),
+        api_key.unwrap_or_else(|| "mita".to_string()),
     ));
 
     if let Some(model) = big_model {
@@ -378,13 +384,13 @@ pub fn launch_claude_code_with_config(
                     .map(|(k, v)| format!("export {}='{}'\n", k, v))
                     .collect();
 
-                let new_block = format!("{}\n{}", SILENCE_LOCAL_API_MARKER, env_content);
+                let new_block = format!("{}\n{}", MITA_LOCAL_API_MARKER, env_content);
 
                 let final_content =
-                    cleaned.join("\n") + "\n" + &new_block + SILENCE_LOCAL_API_MARKER;
+                    cleaned.join("\n") + "\n" + &new_block + MITA_LOCAL_API_MARKER;
 
                 // Write to a temp file first, then use osascript to move it
-                let temp_script_path = format!("{}/.silence_env_update.sh", home_dir);
+                let temp_script_path = format!("{}/.mita_env_update.sh", home_dir);
                 std::fs::write(&temp_script_path, &final_content).map_err(|e| e.to_string())?;
 
                 // Use admin privileges to move the temp file
@@ -425,9 +431,9 @@ pub fn launch_claude_code_with_config(
                 return Ok(());
             }
             Err(_) => {
-                let silence_config_dir = format!("{}/.config/silence", home_dir);
+                let mita_config_dir = format!("{}/.config/mita", home_dir);
                 let ext = if shell_name == "bash" { "bash" } else { "zsh" };
-                let env_file = format!("{}/claude-code-env.{}", silence_config_dir, ext);
+                let env_file = format!("{}/claude-code-env.{}", mita_config_dir, ext);
                 return Err(format!("NEED_PERMISSION:{}", env_file));
             }
         }
@@ -457,12 +463,12 @@ pub struct CliInstallStatus {
     pub path: Option<String>,
 }
 
-/// Check if the `silence` CLI binary is accessible on PATH.
+/// Check if the `mita` CLI binary is accessible on PATH.
 #[tauri::command]
-pub async fn check_silence_cli_installed() -> CliInstallStatus {
+pub async fn check_mita_cli_installed() -> CliInstallStatus {
     let which_cmd = if cfg!(windows) { "where" } else { "which" };
     let mut cmd = std::process::Command::new(which_cmd);
-    cmd.arg("silence");
+    cmd.arg("mita");
 
     #[cfg(windows)]
     {
@@ -505,18 +511,18 @@ pub async fn check_silence_cli_installed() -> CliInstallStatus {
 }
 
 /// Core install logic — synchronous, no Tauri command overhead.
-pub fn install_silence_cli_sync<R: Runtime>(
+pub fn install_mita_cli_sync<R: Runtime>(
     app_handle: &AppHandle<R>,
 ) -> Result<CliInstallStatus, String> {
     let bin_name = if cfg!(windows) {
-        "silence-cli.exe"
+        "mita-cli.exe"
     } else {
-        "silence-cli"
+        "mita-cli"
     };
     let dest_bin_name = if cfg!(windows) {
-        "silence.exe"
+        "mita.exe"
     } else {
-        "silence"
+        "mita"
     };
     let resource_bin_dir = app_handle
         .path()
@@ -527,14 +533,14 @@ pub fn install_silence_cli_sync<R: Runtime>(
     let dest = resource_bin_dir.join(dest_bin_name);
 
     if !bundled.exists() && !dest.exists() {
-        return Err("Silence CLI binary not bundled with this version of Silence.".to_string());
+        return Err("Mita CLI binary not bundled with this version of Mita.".to_string());
     }
 
     #[cfg(windows)]
     {
         if bundled.exists() {
             if let Err(e) = std::fs::rename(&bundled, &dest) {
-                log::warn!("Could not rename silence-cli.exe to silence.exe: {}", e);
+                log::warn!("Could not rename mita-cli.exe to mita.exe: {}", e);
             }
         }
         add_to_path_windows(&resource_bin_dir)?;
@@ -546,12 +552,12 @@ pub fn install_silence_cli_sync<R: Runtime>(
 
     #[cfg(unix)]
     {
-        let install_dir = silence_cli_install_dir()?;
+        let install_dir = mita_cli_install_dir()?;
         std::fs::create_dir_all(&install_dir).map_err(|e| e.to_string())?;
         let dest = install_dir.join(dest_bin_name);
 
         std::fs::copy(&bundled, &dest)
-            .map_err(|e| format!("Failed to copy silence to {}: {}", dest.display(), e))?;
+            .map_err(|e| format!("Failed to copy mita to {}: {}", dest.display(), e))?;
 
         use std::os::unix::fs::PermissionsExt;
         std::fs::set_permissions(&dest, std::fs::Permissions::from_mode(0o755))
@@ -564,31 +570,31 @@ pub fn install_silence_cli_sync<R: Runtime>(
     }
 }
 
-/// Copy the bundled `silence` binary to the system PATH (Tauri command wrapper).
+/// Copy the bundled `mita` binary to the system PATH (Tauri command wrapper).
 #[tauri::command]
-pub async fn install_silence_cli<R: Runtime>(
+pub async fn install_mita_cli<R: Runtime>(
     app_handle: AppHandle<R>,
 ) -> Result<CliInstallStatus, String> {
-    install_silence_cli_sync(&app_handle)
+    install_mita_cli_sync(&app_handle)
 }
 
-/// Remove the installed `silence` CLI binary.
+/// Remove the installed `mita` CLI binary.
 #[tauri::command]
-pub fn uninstall_silence_cli() -> Result<(), String> {
+pub fn uninstall_mita_cli() -> Result<(), String> {
     #[cfg(windows)]
     {
-        let bin_dir = silence_cli_bin_dir_windows()?;
+        let bin_dir = mita_cli_bin_dir_windows()?;
         remove_from_path_windows(&bin_dir)?;
         return Ok(());
     }
 
     #[cfg(unix)]
     {
-        let dest = silence_cli_install_dir()?.join("silence");
+        let dest = mita_cli_install_dir()?.join("mita");
         if dest.exists() {
             std::fs::remove_file(&dest).map_err(|e| {
                 format!(
-                    "Failed to remove Silence CLI from {}: {}",
+                    "Failed to remove Mita CLI from {}: {}",
                     dest.display(),
                     e
                 )
@@ -598,7 +604,7 @@ pub fn uninstall_silence_cli() -> Result<(), String> {
     }
 }
 
-/// Build the cleaned shell-file content with all Silence CC env vars stripped out.
+/// Build the cleaned shell-file content with all Mita CC env vars stripped out.
 fn build_cleaned_env_content(env_file_path: &str) -> String {
     let existing_content = std::fs::read_to_string(env_file_path).unwrap_or_default();
     let cleaned: Vec<&str> = existing_content
@@ -609,7 +615,7 @@ fn build_cleaned_env_content(env_file_path: &str) -> String {
     cleaned.join("\n").trim_end().to_string() + "\n"
 }
 
-/// Clear all Silence-written Claude Code environment variables from the shell config.
+/// Clear all Mita-written Claude Code environment variables from the shell config.
 /// Uses the same write-probe + osascript-fallback logic as `launch_claude_code_with_config`.
 #[tauri::command]
 pub fn clear_claude_code_env() -> Result<(), String> {
@@ -635,7 +641,7 @@ pub fn clear_claude_code_env() -> Result<(), String> {
             }
             Err(_) => {
                 // Write cleaned content to a temp file, then use osascript to move it
-                let temp_path = format!("{}/.silence_env_clear.sh", home_dir);
+                let temp_path = format!("{}/.mita_env_clear.sh", home_dir);
                 std::fs::write(&temp_path, &cleaned).map_err(|e| e.to_string())?;
 
                 let script = format!(
@@ -697,12 +703,12 @@ pub fn clear_claude_code_env() -> Result<(), String> {
     }
 }
 
-/// Determine the best writable directory for the Silence CLI install (Unix only).
+/// Determine the best writable directory for the Mita CLI install (Unix only).
 #[cfg(unix)]
-fn silence_cli_install_dir() -> Result<PathBuf, String> {
+fn mita_cli_install_dir() -> Result<PathBuf, String> {
     let usr_local_bin = PathBuf::from("/usr/local/bin");
     if usr_local_bin.exists() {
-        let probe = usr_local_bin.join(".silence_write_probe");
+        let probe = usr_local_bin.join(".mita_write_probe");
         if std::fs::write(&probe, b"").is_ok() {
             let _ = std::fs::remove_file(&probe);
             return Ok(usr_local_bin);
@@ -714,12 +720,12 @@ fn silence_cli_install_dir() -> Result<PathBuf, String> {
 
 /// Return the directory containing the bundled CLI binary on Windows.
 #[cfg(windows)]
-fn silence_cli_bin_dir_windows() -> Result<PathBuf, String> {
+fn mita_cli_bin_dir_windows() -> Result<PathBuf, String> {
     let local_app_data =
         std::env::var("LOCALAPPDATA").map_err(|_| "Cannot determine LOCALAPPDATA".to_string())?;
     Ok(PathBuf::from(local_app_data)
         .join("Programs")
-        .join("Silence")
+        .join("Mita")
         .join("resources")
         .join("bin"))
 }
@@ -884,11 +890,11 @@ mod tests {
     use tempfile::tempdir;
 
     fn create_all_data(dir: &std::path::Path) {
-        for subdir in SILENCE_DATA_SUBDIRS {
+        for subdir in MITA_DATA_SUBDIRS {
             fs::create_dir_all(dir.join(subdir)).unwrap();
             fs::write(dir.join(subdir).join("dummy.txt"), "data").unwrap();
         }
-        for file in SILENCE_DATA_FILES {
+        for file in MITA_DATA_FILES {
             fs::write(dir.join(file), "data").unwrap();
         }
     }
@@ -902,14 +908,14 @@ mod tests {
     }
 
     #[test]
-    fn test_write_env_to_shell_uses_silence_marker_and_cleans_legacy() {
+    fn test_write_env_to_shell_uses_mita_marker_and_cleans_legacy() {
         let tmp = tempdir().unwrap();
         let env_file = tmp.path().join("env");
         fs::write(
             &env_file,
             format!(
                 "KEEP_ME=1\n{}\nexport ANTHROPIC_AUTH_TOKEN='old'\n{}\n",
-                LEGACY_JAN_LOCAL_API_MARKER, SILENCE_LOCAL_API_MARKER
+                LEGACY_JAN_LOCAL_API_MARKER, MITA_LOCAL_API_MARKER
             ),
         )
         .unwrap();
@@ -922,28 +928,28 @@ mod tests {
 
         let content = fs::read_to_string(&env_file).unwrap();
         assert!(content.contains("KEEP_ME=1"));
-        assert!(content.contains(SILENCE_LOCAL_API_MARKER));
+        assert!(content.contains(MITA_LOCAL_API_MARKER));
         assert!(content.contains("export ANTHROPIC_AUTH_TOKEN='new'"));
         assert!(!content.contains(LEGACY_JAN_LOCAL_API_MARKER));
         assert!(!content.contains("export ANTHROPIC_AUTH_TOKEN='old'"));
     }
 
     #[test]
-    fn test_build_cleaned_env_content_removes_silence_and_legacy_markers() {
+    fn test_build_cleaned_env_content_removes_mita_and_legacy_markers() {
         let tmp = tempdir().unwrap();
         let env_file = tmp.path().join("env");
         fs::write(
             &env_file,
             format!(
                 "KEEP_ME=1\n{}\n{}\nexport ANTHROPIC_BASE_URL='old'\n",
-                SILENCE_LOCAL_API_MARKER, LEGACY_JAN_LOCAL_API_MARKER
+                MITA_LOCAL_API_MARKER, LEGACY_JAN_LOCAL_API_MARKER
             ),
         )
         .unwrap();
 
         let content = build_cleaned_env_content(env_file.to_str().unwrap());
         assert!(content.contains("KEEP_ME=1"));
-        assert!(!content.contains(SILENCE_LOCAL_API_MARKER));
+        assert!(!content.contains(MITA_LOCAL_API_MARKER));
         assert!(!content.contains(LEGACY_JAN_LOCAL_API_MARKER));
         assert!(!content.contains("export ANTHROPIC_BASE_URL"));
     }
@@ -956,9 +962,9 @@ mod tests {
 
         delete_conversations(d);
 
-        assert!(!exists_any(d, SILENCE_DATA_DIRS_CONVERSATIONS));
-        assert!(exists_all(d, SILENCE_DATA_DIRS_MODELS));
-        assert!(exists_all(d, SILENCE_DATA_DIRS_COMMON));
+        assert!(!exists_any(d, MITA_DATA_DIRS_CONVERSATIONS));
+        assert!(exists_all(d, MITA_DATA_DIRS_MODELS));
+        assert!(exists_all(d, MITA_DATA_DIRS_COMMON));
         assert!(d.join("settings.json").exists());
         assert!(d.join("mcp_config.json").exists());
     }
@@ -971,10 +977,10 @@ mod tests {
 
         delete_models_and_configs(d);
 
-        assert!(!exists_any(d, SILENCE_DATA_DIRS_MODELS));
-        assert!(!exists_any(d, SILENCE_DATA_FILES_CONFIGS));
-        assert!(exists_all(d, SILENCE_DATA_DIRS_CONVERSATIONS));
-        assert!(exists_all(d, SILENCE_DATA_DIRS_COMMON));
+        assert!(!exists_any(d, MITA_DATA_DIRS_MODELS));
+        assert!(!exists_any(d, MITA_DATA_FILES_CONFIGS));
+        assert!(exists_all(d, MITA_DATA_DIRS_CONVERSATIONS));
+        assert!(exists_all(d, MITA_DATA_DIRS_COMMON));
         assert!(d.join("settings.json").exists());
     }
 
@@ -986,9 +992,9 @@ mod tests {
 
         delete_common_data(d);
 
-        assert!(!exists_any(d, SILENCE_DATA_DIRS_COMMON));
-        assert!(exists_all(d, SILENCE_DATA_DIRS_CONVERSATIONS));
-        assert!(exists_all(d, SILENCE_DATA_DIRS_MODELS));
+        assert!(!exists_any(d, MITA_DATA_DIRS_COMMON));
+        assert!(exists_all(d, MITA_DATA_DIRS_CONVERSATIONS));
+        assert!(exists_all(d, MITA_DATA_DIRS_MODELS));
         assert!(d.join("settings.json").exists());
         assert!(d.join("mcp_config.json").exists());
     }
@@ -1002,9 +1008,9 @@ mod tests {
         delete_settings(d);
 
         assert!(!d.join("settings.json").exists());
-        assert!(exists_all(d, SILENCE_DATA_DIRS_CONVERSATIONS));
-        assert!(exists_all(d, SILENCE_DATA_DIRS_MODELS));
-        assert!(exists_all(d, SILENCE_DATA_DIRS_COMMON));
+        assert!(exists_all(d, MITA_DATA_DIRS_CONVERSATIONS));
+        assert!(exists_all(d, MITA_DATA_DIRS_MODELS));
+        assert!(exists_all(d, MITA_DATA_DIRS_COMMON));
         assert!(d.join("mcp_config.json").exists());
     }
 
@@ -1043,8 +1049,8 @@ mod tests {
         delete_settings(d);
 
         assert!(!d.join("settings.json").exists());
-        assert!(!exists_any(d, SILENCE_DATA_SUBDIRS));
-        assert!(!exists_any(d, SILENCE_DATA_FILES));
+        assert!(!exists_any(d, MITA_DATA_SUBDIRS));
+        assert!(!exists_any(d, MITA_DATA_FILES));
     }
 
     #[test]
@@ -1063,10 +1069,10 @@ mod tests {
         assert!(!is_safe_to_delete(std::path::Path::new("/")));
         assert!(!is_safe_to_delete(std::path::Path::new("/home")));
         assert!(is_safe_to_delete(std::path::Path::new(
-            "/home/user/silence"
+            "/home/user/mita"
         )));
         assert!(is_safe_to_delete(std::path::Path::new(
-            "/home/user/.local/share/silence"
+            "/home/user/.local/share/mita"
         )));
     }
 }

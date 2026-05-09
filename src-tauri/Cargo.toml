@@ -1,22 +1,22 @@
 [package]
-name = "Silence"
+name = "Mita"
 version = "0.6.599"
 description = "Use offline LLMs with your own data. Run open source models like Llama2 or Falcon on your internal computers/servers."
 authors = ["Jingxing"]
 license = "MIT"
-repository = "https://github.com/janhq/jan"
+repository = "https://github.com/realerikk0/Mita"
 edition = "2021"
 rust-version = "1.77.2"
 resolver = "2"
-default-run = "Silence"
+default-run = "Mita"
 
 [lib]
 name = "app_lib"
 crate-type = ["staticlib", "cdylib", "rlib"]
 
 [[bin]]
-name = "silence-cli"
-path = "src/bin/silence-cli.rs"
+name = "mita-cli"
+path = "src/bin/mita-cli.rs"
 required-features = ["cli"]
 
 [features]

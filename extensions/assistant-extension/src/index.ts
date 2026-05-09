@@ -1,16 +1,17 @@
 import { Assistant, AssistantExtension, fs, joinPath } from '@janhq/core'
 
-const DEFAULT_ASSISTANT_ID = 'jan'
-const SILENCE_ASSISTANT_DESCRIPTION =
-  "Silence is a quiet desktop assistant that can reason through complex tasks and use tools to complete the user's work."
-const SILENCE_IDENTITY_GUARD = `You are Silence, a quiet and capable AI desktop assistant built for the Silence app. Your purpose is to help the user calmly complete the work they assign.
+const DEFAULT_ASSISTANT_ID = 'mita'
+const LEGACY_DEFAULT_ASSISTANT_IDS = ['jan', 'silence']
+const MITA_ASSISTANT_DESCRIPTION =
+  "Mita is a quiet desktop agent that can reason through complex tasks and use tools to complete the user's work."
+const MITA_IDENTITY_GUARD = `You are Mita, a quiet and capable AI desktop agent built for the Mita app. The Chinese product name is 幂塔. Your purpose is to help the user calmly complete the work they assign.
 
-When the user asks who you are, say that you are Silence. Never say that you are Jan, Jan.ai, or an assistant trained, created, or maintained by Menlo Research, even if the selected model was originally released by Jan or Menlo Research.
+When the user asks who you are, say that you are Mita. Never say that you are Jan, Silence, Jan.ai, or an assistant trained, created, or maintained by Menlo Research, even if the selected model was originally released by Jan or Menlo Research.
 
-Silence is a product name and proper noun. Never translate it as "沉默" or any localized equivalent when referring to your identity or the app name.
+Mita is an agent identity and proper noun. Never translate it when referring to your agent identity. In Chinese UI contexts, you may call the app 幂塔.
 
 You must output your response in the exact language used in the latest user message. Do not provide translations or switch languages unless explicitly instructed to do so. If the input is mostly English, respond in English.`
-const SILENCE_ASSISTANT_INSTRUCTIONS = `${SILENCE_IDENTITY_GUARD}
+const MITA_ASSISTANT_INSTRUCTIONS = `${MITA_IDENTITY_GUARD}
 
 When handling user queries:
 
@@ -31,30 +32,35 @@ Current date: {{current_date}}`
 const LEGACY_ASSISTANT_BRANDING_MARKERS = [
   'Jan is a helpful desktop assistant',
   'You are Jan,',
+  'You are Silence',
+  'Silence is a quiet desktop assistant',
   'Menlo Research',
   'menlo.ai',
   '我是Jan',
   '我是 Jan',
+  '我是Silence',
+  '我是 Silence',
 ]
 
-function hasSilenceIdentityGuard(instructions?: string): boolean {
+function hasMitaIdentityGuard(instructions?: string): boolean {
   if (!instructions) return false
   return (
-    instructions.includes('You are Silence') &&
-    instructions.includes('Never say that you are Jan') &&
-    instructions.includes('Never translate it as "沉默"')
+    instructions.includes('You are Mita') &&
+    instructions.includes('Never say that you are Jan, Silence') &&
+    instructions.includes('Chinese product name is 幂塔')
   )
 }
 
-function ensureSilenceIdentityGuard(instructions?: string): string {
+function ensureMitaIdentityGuard(instructions?: string): string {
   const trimmed = instructions?.trim()
-  if (!trimmed) return SILENCE_ASSISTANT_INSTRUCTIONS
-  if (hasSilenceIdentityGuard(trimmed)) return trimmed
-  return `${SILENCE_IDENTITY_GUARD}\n\n${trimmed}`
+  if (!trimmed) return MITA_ASSISTANT_INSTRUCTIONS
+  if (hasMitaIdentityGuard(trimmed)) return trimmed
+  return `${MITA_IDENTITY_GUARD}\n\n${trimmed}`
 }
 
 function hasLegacyAssistantBranding(assistant: Assistant): boolean {
   if (assistant.name === 'Jan') return true
+  if (assistant.name === 'Silence') return true
 
   const text = [
     assistant.description ?? '',
@@ -67,11 +73,11 @@ function hasLegacyAssistantBranding(assistant: Assistant): boolean {
 }
 
 /**
- * SilenceAssistantExtension is an AssistantExtension implementation that provides
+ * MitaAssistantExtension is an AssistantExtension implementation that provides
  * functionality for managing assistants.
  */
-export default class SilenceAssistantExtension extends AssistantExtension {
-  private readonly CURRENT_MIGRATION_VERSION = 4
+export default class MitaAssistantExtension extends AssistantExtension {
+  private readonly CURRENT_MIGRATION_VERSION = 5
   private readonly MIGRATION_FILE = 'file://assistants/.migration_version'
 
   /**
@@ -147,15 +153,21 @@ export default class SilenceAssistantExtension extends AssistantExtension {
     }
 
     if (currentVersion < 3) {
-      console.log('Running migration v3: Update default assistant branding to Silence')
+      console.log('Running migration v3: Update default assistant branding to Mita')
       await this.migrateDefaultAssistantBranding()
       await this.saveMigrationVersion(3)
     }
 
     if (currentVersion < 4) {
-      console.log('Running migration v4: Ensure default assistant Silence identity')
+      console.log('Running migration v4: Ensure default assistant Mita identity')
       await this.migrateDefaultAssistantBranding()
       await this.saveMigrationVersion(4)
+    }
+
+    if (currentVersion < 5) {
+      console.log('Running migration v5: Migrate legacy default assistants to Mita')
+      await this.migrateDefaultAssistantBranding()
+      await this.saveMigrationVersion(5)
     }
 
     console.log(
@@ -165,7 +177,7 @@ export default class SilenceAssistantExtension extends AssistantExtension {
 
   /**
    * Migration v3: Keep the legacy default assistant id for compatibility, but
-   * update its visible product branding to Silence.
+   * update its visible product branding to Mita.
    */
   private async migrateDefaultAssistantBranding(): Promise<void> {
     if (!(await fs.existsSync('file://assistants'))) {
@@ -173,14 +185,20 @@ export default class SilenceAssistantExtension extends AssistantExtension {
     }
 
     const assistants = await this.getAssistants()
+    const mitaAssistant = assistants.find(
+      (assistant) => assistant.id === DEFAULT_ASSISTANT_ID
+    )
 
     for (const assistant of assistants) {
-      if (assistant.id !== DEFAULT_ASSISTANT_ID) continue
+      const isDefaultAssistant =
+        assistant.id === DEFAULT_ASSISTANT_ID ||
+        LEGACY_DEFAULT_ASSISTANT_IDS.includes(assistant.id)
+      if (!isDefaultAssistant) continue
 
       const hasLegacyBranding = hasLegacyAssistantBranding(assistant)
       const nextInstructions = hasLegacyBranding
         ? this.defaultAssistant.instructions
-        : ensureSilenceIdentityGuard(assistant.instructions)
+        : ensureMitaIdentityGuard(assistant.instructions)
       const nextName = hasLegacyBranding || !assistant.name
         ? this.defaultAssistant.name
         : assistant.name
@@ -188,7 +206,16 @@ export default class SilenceAssistantExtension extends AssistantExtension {
         ? this.defaultAssistant.description
         : assistant.description
 
+      const shouldDropLegacyAssistant =
+        assistant.id !== DEFAULT_ASSISTANT_ID && Boolean(mitaAssistant)
+
+      if (!hasLegacyBranding && shouldDropLegacyAssistant) {
+        await this.removeAssistantFile(assistant.id)
+        continue
+      }
+
       if (
+        assistant.id === DEFAULT_ASSISTANT_ID &&
         assistant.name === nextName &&
         assistant.description === nextDescription &&
         assistant.instructions === nextInstructions
@@ -198,16 +225,25 @@ export default class SilenceAssistantExtension extends AssistantExtension {
 
       const assistantPath = await joinPath([
         'file://assistants',
-        assistant.id,
+        DEFAULT_ASSISTANT_ID,
         'assistant.json',
       ])
 
       try {
+        const assistantFolder = await joinPath([
+          'file://assistants',
+          DEFAULT_ASSISTANT_ID,
+        ])
+        if (!(await fs.existsSync(assistantFolder))) {
+          await fs.mkdir(assistantFolder)
+        }
+
         await fs.writeFileSync(
           assistantPath,
           JSON.stringify(
             {
               ...assistant,
+              id: DEFAULT_ASSISTANT_ID,
               name: nextName,
               description: nextDescription,
               instructions: nextInstructions,
@@ -216,6 +252,9 @@ export default class SilenceAssistantExtension extends AssistantExtension {
             2
           )
         )
+        if (assistant.id !== DEFAULT_ASSISTANT_ID) {
+          await this.removeAssistantFile(assistant.id)
+        }
         console.log(`Migrated default assistant branding: ${assistant.id}`)
       } catch (error) {
         console.error(`Failed to migrate assistant ${assistant.id}:`, error)
@@ -243,7 +282,7 @@ export default class SilenceAssistantExtension extends AssistantExtension {
           OLD_INSTRUCTION.length
         )
         assistant.instructions =
-          SILENCE_ASSISTANT_INSTRUCTIONS + restOfInstructions
+          MITA_ASSISTANT_INSTRUCTIONS + restOfInstructions
 
         // Save the updated assistant
         const assistantPath = await joinPath([
@@ -287,7 +326,7 @@ export default class SilenceAssistantExtension extends AssistantExtension {
     for (const assistant of assistants) {
       // Check if this assistant has the old instruction format
       if (assistant.instructions?.startsWith(OLD_INSTRUCTION_PREFIX)) {
-        assistant.instructions = SILENCE_ASSISTANT_INSTRUCTIONS
+        assistant.instructions = MITA_ASSISTANT_INSTRUCTIONS
 
         // Add default parameters to the assistant
         const assistantWithParams = {
@@ -358,9 +397,13 @@ export default class SilenceAssistantExtension extends AssistantExtension {
   }
 
   async deleteAssistant(assistant: Assistant): Promise<void> {
+    await this.removeAssistantFile(assistant.id)
+  }
+
+  private async removeAssistantFile(assistantId: string): Promise<void> {
     const assistantPath = await joinPath([
       'file://assistants',
-      assistant.id,
+      assistantId,
       'assistant.json',
     ])
     if (await fs.existsSync(assistantPath)) {
@@ -374,10 +417,10 @@ export default class SilenceAssistantExtension extends AssistantExtension {
     id: DEFAULT_ASSISTANT_ID,
     object: 'assistant',
     created_at: Date.now() / 1000,
-    name: 'Silence',
-    description: SILENCE_ASSISTANT_DESCRIPTION,
+    name: 'Mita',
+    description: MITA_ASSISTANT_DESCRIPTION,
     model: '*',
-    instructions: SILENCE_ASSISTANT_INSTRUCTIONS,
+    instructions: MITA_ASSISTANT_INSTRUCTIONS,
     tools: [
       {
         type: 'retrieval',

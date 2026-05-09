@@ -7,7 +7,7 @@ use rmcp::{
     ServiceExt,
 };
 use serde_json::Value;
-use std::{collections::HashMap, env, process::Stdio, sync::Arc, time::Duration};
+use std::{collections::HashMap, env, path::PathBuf, process::Stdio, sync::Arc, time::Duration};
 use tauri::{AppHandle, Emitter, Manager, Runtime, State};
 use tauri_plugin_http::reqwest;
 use tokio::{
@@ -18,7 +18,7 @@ use tokio::{
 };
 
 use crate::core::{
-    app::commands::get_silence_data_folder_path,
+    app::commands::get_mita_data_folder_path,
     mcp::constants::{is_browser_mcp_name, normalize_browser_mcp_server_key},
     mcp::models::{McpServerConfig, McpSettings},
     state::{AppState, RunningServiceEnum, SharedMcpServers},
@@ -63,7 +63,7 @@ pub async fn run_mcp_commands<R: Runtime>(
     app: &AppHandle<R>,
     servers_state: SharedMcpServers,
 ) -> Result<(), String> {
-    let app_path = get_silence_data_folder_path(app.clone());
+    let app_path = get_mita_data_folder_path(app.clone());
     let config_path = app_path.join("mcp_config.json");
     let app_path_str = app_path.to_str().unwrap().to_string();
     log::trace!(
@@ -87,7 +87,7 @@ pub async fn run_mcp_commands<R: Runtime>(
                     .map_err(|e| format!("Failed to serialize MCP config: {e}"))?,
             )
             .map_err(|e| format!("Failed to write MCP config: {e}"))?;
-            log::info!("Migrated Browser MCP config to Silence Browser MCP");
+            log::info!("Migrated Browser MCP config to Mita Web Research");
         }
     }
 
@@ -406,7 +406,7 @@ async fn schedule_mcp_start_task<R: Runtime>(
     name: String,
     config: Value,
 ) -> Result<(), String> {
-    let app_path = get_silence_data_folder_path(app.clone());
+    let app_path = get_mita_data_folder_path(app.clone());
     let exe_path = env::current_exe().expect("Failed to get current exe path");
     let exe_parent_path = exe_path
         .parent()
@@ -452,7 +452,7 @@ async fn schedule_mcp_start_task<R: Runtime>(
             protocol_version: Default::default(),
             capabilities: ClientCapabilities::default(),
             client_info: Implementation {
-                name: "Silence Streamable Client".to_string(),
+                name: "Mita Streamable Client".to_string(),
                 version: "0.0.1".to_string(),
                 title: None,
                 website_url: None,
@@ -520,7 +520,7 @@ async fn schedule_mcp_start_task<R: Runtime>(
             protocol_version: Default::default(),
             capabilities: ClientCapabilities::default(),
             client_info: Implementation {
-                name: "Silence SSE Client".to_string(),
+                name: "Mita SSE Client".to_string(),
                 version: "0.0.1".to_string(),
                 title: None,
                 website_url: None,
@@ -560,7 +560,7 @@ async fn schedule_mcp_start_task<R: Runtime>(
                                 }
                                 Ok(false) => {
                                     return Err(format!(
-                                        "Port {} is already in use. Please close the application using this port or restart Silence.",
+                                        "Port {} is already in use. Please close the application using this port or restart Mita.",
                                         port
                                     ));
                                 }
@@ -578,6 +578,22 @@ async fn schedule_mcp_start_task<R: Runtime>(
         } else {
             bin_path.join("bun")
         };
+        if config_params.command.clone() == "mita-web-research" {
+            let bun_path = resolve_bun_path(&bin_path);
+            let script_path = resolve_web_research_script_path(&app)?;
+            cmd = Command::new(bun_path);
+            cmd.arg(script_path);
+            cmd.env(
+                "MITA_WEB_RESEARCH_PROFILE_DIR",
+                app_path.join("web-research-profile"),
+            );
+            if let Some(browsers_path) = resolve_playwright_browsers_path(&app) {
+                cmd.env("PLAYWRIGHT_BROWSERS_PATH", browsers_path);
+            }
+            if let Some(module_path) = resolve_playwright_module_path(&app) {
+                cmd.env("MITA_WEB_RESEARCH_PLAYWRIGHT_MODULE", module_path);
+            }
+        }
         if config_params.command.clone() == "npx"
             && can_override_npx(bun_x_path.display().to_string())
         {
@@ -759,7 +775,7 @@ async fn schedule_mcp_start_task<R: Runtime>(
         // If all attempts failed, we still proceed to emit the event.
         // The health monitor will handle ongoing reconnection.
 
-        // Create lock file for Silence Browser MCP
+        // Create lock file for Mita Web Research and legacy browser MCP servers.
         if is_browser_mcp_name(&name) {
             if let Some(port_str) = config_params.envs.get("BRIDGE_PORT") {
                 if let Some(port_str) = port_str.as_str() {
@@ -776,6 +792,88 @@ async fn schedule_mcp_start_task<R: Runtime>(
         emit_mcp_update_event(&app, &name);
     }
     Ok(())
+}
+
+fn resolve_bun_path(bin_path: &std::path::Path) -> PathBuf {
+    let bundled = if cfg!(windows) {
+        bin_path.join("bun.exe")
+    } else {
+        bin_path.join("bun")
+    };
+    if bundled.exists() {
+        return bundled;
+    }
+
+    let dev_bundled = if cfg!(windows) {
+        PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("resources/bin/bun.exe")
+    } else {
+        PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("resources/bin/bun")
+    };
+    if dev_bundled.exists() {
+        return dev_bundled;
+    }
+
+    PathBuf::from("bun")
+}
+
+fn resolve_web_research_script_path<R: Runtime>(app: &AppHandle<R>) -> Result<PathBuf, String> {
+    if let Ok(resource_dir) = app.path().resource_dir() {
+        let bundled = resource_dir
+            .join("resources")
+            .join("bin")
+            .join("mita-web-research-mcp.mjs");
+        if bundled.exists() {
+            return Ok(bundled);
+        }
+    }
+
+    let dev_path = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .join("resources")
+        .join("bin")
+        .join("mita-web-research-mcp.mjs");
+    if dev_path.exists() {
+        return Ok(dev_path);
+    }
+
+    Err("Mita Web Research sidecar script was not found.".to_string())
+}
+
+fn resolve_playwright_browsers_path<R: Runtime>(app: &AppHandle<R>) -> Option<PathBuf> {
+    if let Ok(resource_dir) = app.path().resource_dir() {
+        let bundled = resource_dir.join("resources").join("ms-playwright");
+        if bundled.exists() {
+            return Some(bundled);
+        }
+    }
+
+    let dev_path = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("resources/ms-playwright");
+    if dev_path.exists() {
+        return Some(dev_path);
+    }
+
+    None
+}
+
+fn resolve_playwright_module_path<R: Runtime>(app: &AppHandle<R>) -> Option<PathBuf> {
+    if let Ok(resource_dir) = app.path().resource_dir() {
+        let bundled = resource_dir
+            .join("resources")
+            .join("node_modules")
+            .join("playwright")
+            .join("index.js");
+        if bundled.exists() {
+            return Some(bundled);
+        }
+    }
+
+    let dev_path = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .parent()
+        .map(|root| root.join("node_modules/playwright/index.js"))?;
+    if dev_path.exists() {
+        return Some(dev_path);
+    }
+
+    None
 }
 
 fn emit_mcp_update_event<R: Runtime>(app: &AppHandle<R>, name: &str) {
@@ -927,7 +1025,7 @@ pub async fn kill_orphaned_mcp_process_with_app<R: Runtime>(
 
     if !jan_utils::network::is_orphaned_mcp_process(&process_info) {
         log::warn!(
-            "Port {} occupied by non-Silence process '{}' (PID {})",
+            "Port {} occupied by non-Mita process '{}' (PID {})",
             port,
             process_info.name,
             process_info.pid
@@ -1208,7 +1306,7 @@ pub fn add_server_config_with_path<R: Runtime>(
     config_filename: Option<&str>,
 ) -> Result<(), String> {
     let config_filename = config_filename.unwrap_or("mcp_config.json");
-    let config_path = get_silence_data_folder_path(app_handle).join(config_filename);
+    let config_path = get_mita_data_folder_path(app_handle).join(config_filename);
 
     let mut config: Value = serde_json::from_str(
         &std::fs::read_to_string(&config_path)

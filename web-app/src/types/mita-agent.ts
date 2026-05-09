@@ -1,8 +1,8 @@
-export type SilenceAgentRole = 'planner' | 'worker' | 'coordinator' | 'verifier'
+export type MitaAgentRole = 'planner' | 'worker' | 'coordinator' | 'verifier'
 
-export type SilenceAgentConfig = {
+export type MitaAgentConfig = {
   id: string
-  role: SilenceAgentRole
+  role: MitaAgentRole
   name: string
   modelId?: string
   provider?: string
@@ -10,7 +10,7 @@ export type SilenceAgentConfig = {
   enabled: boolean
 }
 
-export type SilenceAutoRunStatus =
+export type MitaAutoRunStatus =
   | 'idle'
   | 'running'
   | 'paused'
@@ -18,8 +18,8 @@ export type SilenceAutoRunStatus =
   | 'completed'
   | 'error'
 
-export type SilenceAutoRunMetadata = {
-  status: SilenceAutoRunStatus
+export type MitaAutoRunMetadata = {
+  status: MitaAutoRunStatus
   maxRounds: number
   currentRound: number
   enabled: boolean
@@ -29,36 +29,36 @@ export type SilenceAutoRunMetadata = {
   lastError?: string
 }
 
-export type SilenceMessageMetadata = {
+export type MitaMessageMetadata = {
   runId: string
   round: number
   mode: 'single-thread'
 }
 
-export const DEFAULT_SILENCE_AGENTS: SilenceAgentConfig[] = [
+export const DEFAULT_MITA_AGENTS: MitaAgentConfig[] = [
   {
-    id: 'silence-planner',
+    id: 'mita-planner',
     role: 'planner',
     name: 'Planner',
     systemPrompt: 'Break the owner request into a quiet, concrete plan before work begins.',
     enabled: false,
   },
   {
-    id: 'silence-worker',
+    id: 'mita-worker',
     role: 'worker',
     name: 'Worker',
     systemPrompt: 'Carry out the current plan step and return the concrete result.',
     enabled: false,
   },
   {
-    id: 'silence-coordinator',
+    id: 'mita-coordinator',
     role: 'coordinator',
     name: 'Coordinator',
     systemPrompt: 'Coordinate role outputs and decide whether another round is needed.',
     enabled: false,
   },
   {
-    id: 'silence-verifier',
+    id: 'mita-verifier',
     role: 'verifier',
     name: 'Verifier',
     systemPrompt: 'Verify the result against the owner request and call out gaps.',
@@ -66,7 +66,7 @@ export const DEFAULT_SILENCE_AGENTS: SilenceAgentConfig[] = [
   },
 ]
 
-export const DEFAULT_SILENCE_AUTO_RUN: SilenceAutoRunMetadata = {
+export const DEFAULT_MITA_AUTO_RUN: MitaAutoRunMetadata = {
   status: 'idle',
   maxRounds: 3,
   currentRound: 0,

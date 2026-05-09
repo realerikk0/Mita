@@ -20,8 +20,16 @@ import DeleteProvider from '@/containers/dialogs/DeleteProvider'
 import { useServiceHub } from '@/hooks/useServiceHub'
 import { getModelCapabilities } from '@/lib/models'
 import { Button } from '@/components/ui/button'
+import {
+  Dialog,
+  DialogContent,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from '@/components/ui/dialog'
 import { Input } from '@/components/ui/input'
 import { Switch } from '@/components/ui/switch'
+import { Textarea } from '@/components/ui/textarea'
 import {
   IconFolderPlus,
   IconLoader,
@@ -42,6 +50,12 @@ import {
   providerHasRemoteApiKeys,
   providerRemoteApiKeyChain,
 } from '@/lib/provider-api-keys'
+import {
+  mergeProviderCustomHeaders,
+  parseProviderConnection,
+  providerConnectionHeadersToCustomHeaders,
+  type ParsedProviderConnection,
+} from '@/lib/provider-connection-import'
 
 // as route.threadsDetail
 export const Route = createFileRoute('/settings/providers/$providerName')({
@@ -53,6 +67,24 @@ export const Route = createFileRoute('/settings/providers/$providerName')({
     }
   },
 })
+
+const providerConnectionSettingMap: Record<
+  string,
+  keyof Pick<
+    ParsedProviderConnection,
+    'apiKey' | 'baseUrl' | 'apiVersion' | 'deployment' | 'defaultModel'
+  >
+> = {
+  'api-key': 'apiKey',
+  'base-url': 'baseUrl',
+  'api-version': 'apiVersion',
+  apiVersion: 'apiVersion',
+  deployment: 'deployment',
+  'deployment-name': 'deployment',
+  'default-model': 'defaultModel',
+  defaultModel: 'defaultModel',
+  model: 'defaultModel',
+}
 
 function ProviderDetail() {
   const { t } = useTranslation()
@@ -67,6 +99,8 @@ function ProviderDetail() {
   const [isInstallingBackend, setIsInstallingBackend] = useState(false)
   const [importingModel, setImportingModel] = useState<string | null>(null)
   const [apiKeysDraft, setApiKeysDraft] = useState('')
+  const [isProviderImportOpen, setIsProviderImportOpen] = useState(false)
+  const [providerImportDraft, setProviderImportDraft] = useState('')
   const [showAdvancedApiKeys, setShowAdvancedApiKeys] = useState(false)
   const [isTestingKeys, setIsTestingKeys] = useState(false)
   const [keyCheckResults, setKeyCheckResults] = useState<
@@ -226,6 +260,62 @@ function ProviderDetail() {
       api_key_fallbacks: nextFallbacks,
     })
   }, [apiKeysDraft, provider, providerName, serviceHub, updateProvider])
+
+  const handleImportProviderConnection = useCallback(() => {
+    if (!provider) return
+
+    try {
+      const importedConnection = parseProviderConnection(providerImportDraft)
+      const newSettings = provider.settings.map((setting) => {
+        const importedField = providerConnectionSettingMap[setting.key]
+        if (!importedField) return setting
+
+        return {
+          ...setting,
+          controller_props: {
+            ...setting.controller_props,
+            value: importedConnection[importedField],
+          },
+        }
+      })
+      const importedHeaders = providerConnectionHeadersToCustomHeaders(
+        importedConnection.headers
+      )
+      const updateObj: Partial<ModelProvider> = {
+        ...provider,
+        settings: newSettings,
+        api_key: importedConnection.apiKey,
+        api_key_fallbacks: [],
+        base_url: importedConnection.baseUrl,
+      }
+
+      if (importedHeaders.length > 0) {
+        updateObj.custom_header = mergeProviderCustomHeaders(
+          provider.custom_header,
+          importedHeaders
+        )
+      }
+
+      serviceHub.providers().updateSettings(providerName, newSettings)
+      updateProvider(providerName, updateObj)
+      setApiKeysDraft(importedConnection.apiKey)
+      setKeyCheckResults([])
+      setShowAdvancedApiKeys(false)
+      setProviderImportDraft('')
+      setIsProviderImportOpen(false)
+      toast.success('配置已导入')
+    } catch (error) {
+      toast.error('配置格式不正确', {
+        description: error instanceof Error ? error.message : undefined,
+      })
+    }
+  }, [
+    provider,
+    providerImportDraft,
+    providerName,
+    serviceHub,
+    updateProvider,
+  ])
 
   const rawApiKeyLines = apiKeysDraft.split(/\r?\n/)
   const primaryKeyDraft = (rawApiKeyLines[0] ?? '').trim()
@@ -557,6 +647,36 @@ function ProviderDetail() {
 
   return (
     <div className="flex flex-col h-svh w-full">
+      <Dialog
+        open={isProviderImportOpen}
+        onOpenChange={setIsProviderImportOpen}
+      >
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>导入配置</DialogTitle>
+          </DialogHeader>
+          <Textarea
+            className="min-h-48 font-mono text-xs"
+            placeholder="粘贴 AI Provider 配置 JSON"
+            value={providerImportDraft}
+            onChange={(event) => setProviderImportDraft(event.target.value)}
+            spellCheck={false}
+            autoComplete="off"
+          />
+          <DialogFooter>
+            <Button
+              variant="outline"
+              onClick={() => {
+                setProviderImportDraft('')
+                setIsProviderImportOpen(false)
+              }}
+            >
+              {t('common:cancel')}
+            </Button>
+            <Button onClick={handleImportProviderConnection}>导入</Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
       <HeaderPage>
         <div className="flex items-center gap-2 w-full">
           <span className="font-medium text-base font-studio">
@@ -572,10 +692,26 @@ function ProviderDetail() {
               <h1 className="font-medium text-base">
                 {getProviderTitle(providerName)}
               </h1>
-              <Switch
-                checked={provider?.active ?? false}
-                onCheckedChange={(checked) => provider && updateProvider(providerName, { active: checked })}
-              />
+              <div className="flex items-center gap-2">
+                {provider &&
+                  provider.provider !== 'llamacpp' &&
+                  provider.provider !== 'mlx' && (
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      onClick={() => setIsProviderImportOpen(true)}
+                    >
+                      <IconUpload size={14} />
+                      <span>导入</span>
+                    </Button>
+                  )}
+                <Switch
+                  checked={provider?.active ?? false}
+                  onCheckedChange={(checked) =>
+                    provider && updateProvider(providerName, { active: checked })
+                  }
+                />
+              </div>
             </div>
 
             <div

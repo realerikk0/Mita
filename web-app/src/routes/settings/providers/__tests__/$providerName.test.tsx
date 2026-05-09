@@ -1,6 +1,13 @@
 /* eslint-disable @typescript-eslint/no-explicit-any */
 import { describe, it, expect, vi, beforeEach } from 'vitest'
-import { render, screen, fireEvent, waitFor, act } from '@testing-library/react'
+import {
+  render,
+  screen,
+  fireEvent,
+  waitFor,
+  act,
+  within,
+} from '@testing-library/react'
 import '@testing-library/jest-dom'
 import React from 'react'
 
@@ -259,6 +266,19 @@ vi.mock('@/components/ui/input', () => ({
   Input: (props: any) => <input {...props} />,
 }))
 
+vi.mock('@/components/ui/textarea', () => ({
+  Textarea: (props: any) => <textarea {...props} />,
+}))
+
+vi.mock('@/components/ui/dialog', () => ({
+  Dialog: ({ children, open }: any) =>
+    open ? <div data-testid="dialog-root">{children}</div> : null,
+  DialogContent: ({ children }: any) => <div>{children}</div>,
+  DialogFooter: ({ children }: any) => <div>{children}</div>,
+  DialogHeader: ({ children }: any) => <div>{children}</div>,
+  DialogTitle: ({ children }: any) => <h2>{children}</h2>,
+}))
+
 vi.mock('@/components/ui/switch', () => ({
   Switch: ({ checked, onCheckedChange }: any) => (
     <input
@@ -447,6 +467,118 @@ describe('ProviderDetail route', () => {
       expect(sw.checked).toBe(true)
       fireEvent.click(sw)
       expect(h.updateProvider).toHaveBeenCalledWith('openai', { active: false })
+    })
+  })
+
+  describe('Provider config import', () => {
+    it('imports generic provider connection data into the current provider form', () => {
+      renderComponent()
+
+      fireEvent.click(screen.getByText('导入'))
+      fireEvent.change(screen.getByPlaceholderText('粘贴 AI Provider 配置 JSON'), {
+        target: {
+          value: JSON.stringify({
+            _type: 'ai_provider_connection',
+            version: 1,
+            provider: 'openai-compatible',
+            name: 'Imported',
+            apiKey: 'sk-imported',
+            baseUrl: 'https://api.example.com/v1///',
+            headers: {
+              Authorization: 'Bearer should-not-apply',
+              'X-Custom': 'custom-value',
+            },
+          }),
+        },
+      })
+
+      fireEvent.click(
+        within(screen.getByTestId('dialog-root')).getByText('导入')
+      )
+
+      expect(h.providersSvc.updateSettings).toHaveBeenCalledWith(
+        'openai',
+        expect.arrayContaining([
+          expect.objectContaining({
+            key: 'api-key',
+            controller_props: expect.objectContaining({
+              value: 'sk-imported',
+            }),
+          }),
+          expect.objectContaining({
+            key: 'base-url',
+            controller_props: expect.objectContaining({
+              value: 'https://api.example.com/v1',
+            }),
+          }),
+        ])
+      )
+      expect(h.updateProvider).toHaveBeenCalledWith(
+        'openai',
+        expect.objectContaining({
+          api_key: 'sk-imported',
+          api_key_fallbacks: [],
+          base_url: 'https://api.example.com/v1',
+          custom_header: [
+            {
+              header: 'X-Custom',
+              value: 'custom-value',
+            },
+          ],
+        })
+      )
+      expect(h.toastSuccess).toHaveBeenCalledWith('配置已导入')
+    })
+
+    it('imports legacy newapi channel connection data', () => {
+      renderComponent()
+
+      fireEvent.click(screen.getByText('导入'))
+      fireEvent.change(screen.getByPlaceholderText('粘贴 AI Provider 配置 JSON'), {
+        target: {
+          value: JSON.stringify({
+            _type: 'newapi_channel_conn',
+            version: 1,
+            key: 'sk-legacy',
+            url: 'https://legacy.example.com/',
+          }),
+        },
+      })
+
+      fireEvent.click(
+        within(screen.getByTestId('dialog-root')).getByText('导入')
+      )
+
+      expect(h.updateProvider).toHaveBeenCalledWith(
+        'openai',
+        expect.objectContaining({
+          api_key: 'sk-legacy',
+          api_key_fallbacks: [],
+          base_url: 'https://legacy.example.com',
+        })
+      )
+      expect(h.toastSuccess).toHaveBeenCalledWith('配置已导入')
+    })
+
+    it('shows a generic error when pasted config is invalid', () => {
+      renderComponent()
+
+      fireEvent.click(screen.getByText('导入'))
+      fireEvent.change(screen.getByPlaceholderText('粘贴 AI Provider 配置 JSON'), {
+        target: { value: '{bad' },
+      })
+
+      fireEvent.click(
+        within(screen.getByTestId('dialog-root')).getByText('导入')
+      )
+
+      expect(h.toastError).toHaveBeenCalledWith(
+        '配置格式不正确',
+        expect.objectContaining({
+          description: '配置格式不正确',
+        })
+      )
+      expect(h.updateProvider).not.toHaveBeenCalled()
     })
   })
 

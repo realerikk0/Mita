@@ -4,11 +4,12 @@ import { create } from 'zustand'
 import { localStorageKey } from '@/constants/localStorage'
 import {
   DEFAULT_ASSISTANT_ID,
-  SILENCE_ASSISTANT_DESCRIPTION,
-  SILENCE_ASSISTANT_INSTRUCTIONS,
-  ensureSilenceIdentityGuard,
+  LEGACY_DEFAULT_ASSISTANT_IDS,
+  MITA_ASSISTANT_DESCRIPTION,
+  MITA_ASSISTANT_INSTRUCTIONS,
+  ensureMitaIdentityGuard,
   hasLegacyAssistantBranding,
-} from '@/lib/silence-prompt'
+} from '@/lib/mita-prompt'
 
 interface AssistantState {
   assistants: Assistant[]
@@ -36,7 +37,7 @@ const setLastUsedAssistantId = (assistantId: string) => {
 
 export const defaultAssistant: Assistant = {
   id: DEFAULT_ASSISTANT_ID,
-  name: 'Silence',
+  name: 'Mita',
   created_at: 1747029866.542,
   parameters: {
     temperature: 0.7,
@@ -45,17 +46,24 @@ export const defaultAssistant: Assistant = {
     repeat_penalty: 1.12,
   },
   avatar: '👋',
-  description: SILENCE_ASSISTANT_DESCRIPTION,
-  instructions: SILENCE_ASSISTANT_INSTRUCTIONS,
+  description: MITA_ASSISTANT_DESCRIPTION,
+  instructions: MITA_ASSISTANT_INSTRUCTIONS,
 }
 
+const isLegacyDefaultAssistantId = (id?: string) =>
+  !!id && LEGACY_DEFAULT_ASSISTANT_IDS.includes(id)
+
 const normalizeDefaultAssistantBranding = (assistant: Assistant): Assistant => {
-  if (assistant.id !== DEFAULT_ASSISTANT_ID) return assistant
+  const assistantId = assistant.id?.toString()
+  const isDefaultAssistant =
+    assistantId === DEFAULT_ASSISTANT_ID ||
+    isLegacyDefaultAssistantId(assistantId)
+  if (!isDefaultAssistant) return assistant
 
   const hasLegacyBranding = hasLegacyAssistantBranding(assistant)
   const nextInstructions = hasLegacyBranding
     ? defaultAssistant.instructions
-    : ensureSilenceIdentityGuard(assistant.instructions)
+    : ensureMitaIdentityGuard(assistant.instructions)
   const nextName = hasLegacyBranding || !assistant.name
     ? defaultAssistant.name
     : assistant.name
@@ -73,10 +81,35 @@ const normalizeDefaultAssistantBranding = (assistant: Assistant): Assistant => {
 
   return {
     ...assistant,
+    id: DEFAULT_ASSISTANT_ID,
     name: nextName,
     description: nextDescription,
     instructions: nextInstructions,
   }
+}
+
+const dedupeDefaultAssistant = (assistants: Assistant[]): Assistant[] => {
+  const result: Assistant[] = []
+  let defaultIndex = -1
+
+  for (const assistant of assistants) {
+    if (assistant.id === DEFAULT_ASSISTANT_ID) {
+      if (defaultIndex === -1) {
+        defaultIndex = result.length
+        result.push(assistant)
+      } else {
+        result[defaultIndex] = assistant
+      }
+      continue
+    }
+    result.push(assistant)
+  }
+
+  if (defaultIndex === -1 && result.length === 0) {
+    result.unshift(defaultAssistant)
+  }
+
+  return result
 }
 
 const getLastUsedAssistantId = (assistants: Assistant[]): string => {
@@ -85,6 +118,10 @@ const getLastUsedAssistantId = (assistants: Assistant[]): string => {
     lastUsedId = localStorage.getItem(localStorageKey.lastUsedAssistant)
   } catch (error) {
     console.debug('Failed to get last used assistant from localStorage:', error)
+  }
+
+  if (isLegacyDefaultAssistantId(lastUsedId ?? undefined)) {
+    return defaultAssistant.id
   }
 
   if (lastUsedId) {
@@ -108,7 +145,9 @@ const getDefaultAssistantId = (): string | null => {
     console.debug('Failed to get last used assistant from localStorage:', error)
   }
 
-  return defaultAssistantId
+  return isLegacyDefaultAssistantId(defaultAssistantId ?? undefined)
+    ? defaultAssistant.id
+    : defaultAssistantId
 }
 
 const setDefaultAssistantId = (assistantId: string) => {
@@ -217,11 +256,13 @@ export const useAssistant = create<AssistantState>((set, get) => ({
   },
   setAssistants: (assistants) => {
     if (assistants) {
-      const normalizedAssistants = assistants.map((a) =>
-        normalizeDefaultAssistantBranding({
-          ...a,
-          id: a.id?.toString(), // new String("id") !== "id"
-        })
+      const normalizedAssistants = dedupeDefaultAssistant(
+        assistants.map((a) =>
+          normalizeDefaultAssistantBranding({
+            ...a,
+            id: a.id?.toString(), // new String("id") !== "id"
+          })
+        )
       )
       const lastUsedId = getLastUsedAssistantId(normalizedAssistants)
       const lastUsedAssist = normalizedAssistants.find((a) => a.id === lastUsedId)

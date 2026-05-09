@@ -3,14 +3,15 @@
 <plist version="1.0">
 <dict>
   <key>CFBundleIdentifier</key>
-  <string>uk.jingxing.silence</string>
+  <string>uk.jingxing.mita</string>
   <key>CFBundleURLTypes</key>
   <array>
     <dict>
       <key>CFBundleURLName</key>
-      <string>uk.jingxing.silence</string>
+      <string>uk.jingxing.mita</string>
       <key>CFBundleURLSchemes</key>
       <array>
+        <string>mita</string>
         <string>silence</string>
       </array>
     </dict>

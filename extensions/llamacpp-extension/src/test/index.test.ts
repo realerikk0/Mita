@@ -49,9 +49,9 @@ describe('llamacpp_extension', () => {
 
   describe('getProviderPath', () => {
     it('should return correct provider path', async () => {
-      const { getSilenceDataFolderPath, joinPath } = await import('@janhq/core')
+      const { getMitaDataFolderPath, joinPath } = await import('@janhq/core')
       
-      vi.mocked(getSilenceDataFolderPath).mockResolvedValue('/path/to/jan')
+      vi.mocked(getMitaDataFolderPath).mockResolvedValue('/path/to/jan')
       vi.mocked(joinPath).mockResolvedValue('/path/to/jan/llamacpp')
 
       const result = await extension.getProviderPath()
@@ -62,9 +62,9 @@ describe('llamacpp_extension', () => {
 
   describe('list', () => {
     it('should return empty array when models directory does not exist', async () => {
-      const { getSilenceDataFolderPath, joinPath, fs } = await import('@janhq/core')
+      const { getMitaDataFolderPath, joinPath, fs } = await import('@janhq/core')
       
-      vi.mocked(getSilenceDataFolderPath).mockResolvedValue('/path/to/jan')
+      vi.mocked(getMitaDataFolderPath).mockResolvedValue('/path/to/jan')
       vi.mocked(joinPath).mockResolvedValue('/path/to/jan/llamacpp/models')
       vi.mocked(fs.existsSync)
         .mockResolvedValueOnce(false) // models directory doesn't exist initially
@@ -78,7 +78,7 @@ describe('llamacpp_extension', () => {
     })
 
     it('should return model list when models exist', async () => {
-      const { getSilenceDataFolderPath, joinPath, fs } = await import('@janhq/core')
+      const { getMitaDataFolderPath, joinPath, fs } = await import('@janhq/core')
       const { invoke } = await import('@tauri-apps/api/core')
       
       // Set up providerPath first
@@ -86,7 +86,7 @@ describe('llamacpp_extension', () => {
       
       const modelsDir = '/path/to/jan/llamacpp/models'
       
-      vi.mocked(getSilenceDataFolderPath).mockResolvedValue('/path/to/jan')
+      vi.mocked(getMitaDataFolderPath).mockResolvedValue('/path/to/jan')
       
       // Mock joinPath to handle the directory traversal logic
       vi.mocked(joinPath).mockImplementation((paths) => {
@@ -134,9 +134,9 @@ describe('llamacpp_extension', () => {
     })
 
     it('should throw error if model already exists', async () => {
-      const { getSilenceDataFolderPath, joinPath, fs } = await import('@janhq/core')
+      const { getMitaDataFolderPath, joinPath, fs } = await import('@janhq/core')
       
-      vi.mocked(getSilenceDataFolderPath).mockResolvedValue('/path/to/jan')
+      vi.mocked(getMitaDataFolderPath).mockResolvedValue('/path/to/jan')
       vi.mocked(joinPath).mockResolvedValue('/path/to/jan/llamacpp/models/test-model/model.yml')
       vi.mocked(fs.existsSync).mockResolvedValue(true)
 
@@ -145,7 +145,7 @@ describe('llamacpp_extension', () => {
     })
 
     it('should import model from URL', async () => {
-      const { getSilenceDataFolderPath, joinPath, fs } = await import('@janhq/core')
+      const { getMitaDataFolderPath, joinPath, fs } = await import('@janhq/core')
       const { invoke } = await import('@tauri-apps/api/core')
       
       const mockDownloadManager = {
@@ -154,7 +154,7 @@ describe('llamacpp_extension', () => {
       
       window.core.extensionManager.getByName = vi.fn().mockReturnValue(mockDownloadManager)
       
-      vi.mocked(getSilenceDataFolderPath).mockResolvedValue('/path/to/jan')
+      vi.mocked(getMitaDataFolderPath).mockResolvedValue('/path/to/jan')
       vi.mocked(joinPath).mockImplementation((paths) => Promise.resolve(paths.join('/')))
       vi.mocked(fs.existsSync).mockResolvedValue(false)
       vi.mocked(fs.fileStat).mockResolvedValue({ size: 1000000 })
@@ -185,7 +185,7 @@ describe('llamacpp_extension', () => {
     })
 
     it('should load model successfully', async () => {
-      const { getSilenceDataFolderPath, joinPath, fs } = await import('@janhq/core')
+      const { getMitaDataFolderPath, joinPath, fs } = await import('@janhq/core')
       const { invoke } = await import('@tauri-apps/api/core')
       
       // Mock system info for getBackendExePath
@@ -235,7 +235,7 @@ describe('llamacpp_extension', () => {
       // Set up providerPath
       extension['providerPath'] = '/path/to/jan/llamacpp'
       
-      vi.mocked(getSilenceDataFolderPath).mockResolvedValue('/path/to/jan')
+      vi.mocked(getMitaDataFolderPath).mockResolvedValue('/path/to/jan')
       vi.mocked(joinPath).mockImplementation((paths) => Promise.resolve(paths.join('/')))
       
       // Mock model config
@@ -373,9 +373,9 @@ describe('llamacpp_extension', () => {
 
   describe('delete', () => {
     it('should throw error if model does not exist', async () => {
-      const { getSilenceDataFolderPath, joinPath, fs } = await import('@janhq/core')
+      const { getMitaDataFolderPath, joinPath, fs } = await import('@janhq/core')
       
-      vi.mocked(getSilenceDataFolderPath).mockResolvedValue('/path/to/jan')
+      vi.mocked(getMitaDataFolderPath).mockResolvedValue('/path/to/jan')
       vi.mocked(joinPath).mockImplementation((paths) => Promise.resolve(paths.join('/')))
       vi.mocked(fs.existsSync).mockResolvedValue(false)
 
@@ -383,9 +383,9 @@ describe('llamacpp_extension', () => {
     })
 
     it('should delete model successfully', async () => {
-      const { getSilenceDataFolderPath, joinPath, fs } = await import('@janhq/core')
+      const { getMitaDataFolderPath, joinPath, fs } = await import('@janhq/core')
       
-      vi.mocked(getSilenceDataFolderPath).mockResolvedValue('/path/to/jan')
+      vi.mocked(getMitaDataFolderPath).mockResolvedValue('/path/to/jan')
       vi.mocked(joinPath).mockImplementation((paths) => Promise.resolve(paths.join('/')))
       vi.mocked(fs.existsSync).mockResolvedValue(true)
       vi.mocked(fs.rm).mockResolvedValue(undefined)
@@ -639,8 +639,8 @@ describe('llamacpp_extension', () => {
         extension['getSettings'] = vi.fn().mockResolvedValue([])
         extension['updateSettings'] = vi.fn().mockResolvedValue(undefined)
 
-        const { getSilenceDataFolderPath, joinPath } = await import('@janhq/core')
-        vi.mocked(getSilenceDataFolderPath).mockResolvedValue('/path/to/jan')
+        const { getMitaDataFolderPath, joinPath } = await import('@janhq/core')
+        vi.mocked(getMitaDataFolderPath).mockResolvedValue('/path/to/jan')
         vi.mocked(joinPath).mockResolvedValue('/path/to/jan/llamacpp/backends')
 
         const { mapOldBackendToNew, removeOldBackendVersions } = await import('@janhq/tauri-plugin-llamacpp-api')
@@ -697,8 +697,8 @@ describe('llamacpp_extension', () => {
         extension['getSettings'] = vi.fn().mockResolvedValue([])
         extension['updateSettings'] = vi.fn().mockResolvedValue(undefined)
 
-        const { getSilenceDataFolderPath, joinPath } = await import('@janhq/core')
-        vi.mocked(getSilenceDataFolderPath).mockResolvedValue('/path/to/jan')
+        const { getMitaDataFolderPath, joinPath } = await import('@janhq/core')
+        vi.mocked(getMitaDataFolderPath).mockResolvedValue('/path/to/jan')
         vi.mocked(joinPath).mockResolvedValue('/path/to/jan/llamacpp/backends')
 
         const { mapOldBackendToNew, removeOldBackendVersions } = await import('@janhq/tauri-plugin-llamacpp-api')
@@ -721,8 +721,8 @@ describe('llamacpp_extension', () => {
         extension['getSettings'] = vi.fn().mockResolvedValue([])
         extension['updateSettings'] = vi.fn().mockResolvedValue(undefined)
 
-        const { getSilenceDataFolderPath, joinPath } = await import('@janhq/core')
-        vi.mocked(getSilenceDataFolderPath).mockResolvedValue('/path/to/jan')
+        const { getMitaDataFolderPath, joinPath } = await import('@janhq/core')
+        vi.mocked(getMitaDataFolderPath).mockResolvedValue('/path/to/jan')
         vi.mocked(joinPath).mockResolvedValue('/path/to/jan/llamacpp/backends')
 
         const { mapOldBackendToNew, removeOldBackendVersions } = await import('@janhq/tauri-plugin-llamacpp-api')

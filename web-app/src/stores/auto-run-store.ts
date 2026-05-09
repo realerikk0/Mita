@@ -1,23 +1,23 @@
 import { create } from 'zustand'
 import {
-  DEFAULT_SILENCE_AUTO_RUN,
-  type SilenceAutoRunMetadata,
-} from '@/types/silence-agent'
+  DEFAULT_MITA_AUTO_RUN,
+  type MitaAutoRunMetadata,
+} from '@/types/mita-agent'
 
 type AutoRunStoreState = {
-  runs: Record<string, SilenceAutoRunMetadata>
-  getRun: (threadId: string) => SilenceAutoRunMetadata
-  setRun: (threadId: string, run: SilenceAutoRunMetadata) => void
+  runs: Record<string, MitaAutoRunMetadata>
+  getRun: (threadId: string) => MitaAutoRunMetadata
+  setRun: (threadId: string, run: MitaAutoRunMetadata) => void
   patchRun: (
     threadId: string,
-    patch: Partial<SilenceAutoRunMetadata>
-  ) => SilenceAutoRunMetadata
+    patch: Partial<MitaAutoRunMetadata>
+  ) => MitaAutoRunMetadata
   clearRun: (threadId: string) => void
 }
 
 export const useAutoRunStore = create<AutoRunStoreState>((set, get) => ({
   runs: {},
-  getRun: (threadId) => get().runs[threadId] ?? DEFAULT_SILENCE_AUTO_RUN,
+  getRun: (threadId) => get().runs[threadId] ?? DEFAULT_MITA_AUTO_RUN,
   setRun: (threadId, run) => {
     set((state) => ({
       runs: {

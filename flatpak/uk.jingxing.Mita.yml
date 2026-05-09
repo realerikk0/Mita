@@ -1,8 +1,8 @@
-id: ai.jan.Jan
+id: uk.jingxing.Mita
 runtime: org.gnome.Platform
 runtime-version: '49'
 sdk: org.gnome.Sdk
-command: Jan
+command: Mita
 finish-args:
   - --socket=wayland # Permission needed to show the window
   - --socket=fallback-x11 # Permission needed to show the window on X11
@@ -84,26 +84,26 @@ modules:
       - type: patch
         path: patches/fix-cstdint.patch
 
-  - name: jan-binary
+  - name: mita-binary
     buildsystem: simple
     sources:
       - type: file
-        url: https://catalog.jan.ai/flatpak/Jan_0.7.3_amd64.deb
+        url: https://updates.jingxing.uk/mita/flatpak/Mita_0.0.0_amd64.deb
         sha256: de852b052cf85007f8ac9728c0607926af2c1d7375ee1652d31d5e91be4a6283
         only-arches: [x86_64]
       - type: file
-        path: ai.jan.Jan.metainfo.xml
+        path: uk.jingxing.Mita.metainfo.xml
     build-commands:
       - ar -x *.deb
       - tar -xf data.tar.gz
-      - 'install -Dm755 usr/bin/Jan /app/bin/Jan'
+      - 'install -Dm755 usr/bin/Mita /app/bin/Mita'
       - 'install -Dm755 usr/bin/bun /app/bin/bun'
       - 'install -Dm755 usr/bin/uv /app/bin/uv'
       - cp -rv usr/lib/* /app/lib/.
-      - install -Dm644 usr/share/applications/Jan.desktop /app/share/applications/ai.jan.Jan.desktop
-      - desktop-file-edit --set-key=Exec --set-value=/app/bin/Jan --set-icon=ai.jan.Jan /app/share/applications/ai.jan.Jan.desktop
-      - install -Dm644 usr/share/icons/hicolor/128x128/apps/Jan.png /app/share/icons/hicolor/128x128/apps/ai.jan.Jan.png
-      - install -Dm644 usr/share/icons/hicolor/32x32/apps/Jan.png /app/share/icons/hicolor/32x32/apps/ai.jan.Jan.png
-      - install -Dm644 usr/share/icons/hicolor/256x256@2/apps/Jan.png /app/share/icons/hicolor/256x256@2/apps/ai.jan.Jan.png
-      - install -Dm644 ai.jan.Jan.metainfo.xml /app/share/metainfo/ai.jan.Jan.metainfo.xml
+      - install -Dm644 usr/share/applications/Mita.desktop /app/share/applications/uk.jingxing.Mita.desktop
+      - desktop-file-edit --set-key=Exec --set-value=/app/bin/Mita --set-icon=uk.jingxing.Mita /app/share/applications/uk.jingxing.Mita.desktop
+      - install -Dm644 usr/share/icons/hicolor/128x128/apps/Mita.png /app/share/icons/hicolor/128x128/apps/uk.jingxing.Mita.png
+      - install -Dm644 usr/share/icons/hicolor/32x32/apps/Mita.png /app/share/icons/hicolor/32x32/apps/uk.jingxing.Mita.png
+      - install -Dm644 usr/share/icons/hicolor/256x256@2/apps/Mita.png /app/share/icons/hicolor/256x256@2/apps/uk.jingxing.Mita.png
+      - install -Dm644 uk.jingxing.Mita.metainfo.xml /app/share/metainfo/uk.jingxing.Mita.metainfo.xml
       - mkdir -p /app/lib/GL

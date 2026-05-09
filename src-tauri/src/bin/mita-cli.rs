@@ -1,7 +1,7 @@
-//! silence — headless CLI for Silence.
+//! mita — headless CLI for Mita.
 //!
-//! Shares all core logic with the Silence desktop app.
-//! Build with: cargo build --features cli --bin silence-cli
+//! Shares all core logic with the Mita desktop app.
+//! Build with: cargo build --features cli --bin mita-cli
 
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -25,20 +25,20 @@ use std::path::PathBuf;
 
 #[derive(Parser)]
 #[command(
-    name = "silence",
+    name = "mita",
     about = "Serve local helper models and wire them to agents",
-    long_about = "Silence can run local helper models (LlamaCPP / MLX) and expose them via an\n\
+    long_about = "Mita can run local helper models (LlamaCPP / MLX) and expose them via an\n\
 OpenAI-compatible API, then wires AI coding agent like Claude Code\n\
 directly to your own hardware — no cloud account, no usage fees, full privacy.\n\n\
-Models downloaded in the Silence desktop app are automatically available here.",
+Models downloaded in the Mita desktop app are automatically available here.",
     after_help = "Examples:\n  \
-  silence launch claude                                      # pick a model, then run Claude Code against it\n  \
-  silence launch claude --model owner/model-gguf             # use a specific model\n  \
-  silence launch openclaw --model owner/model-gguf           # wire openclaw to a local model\n  \
-  silence serve owner/model-gguf                             # expose a model at localhost:6767/v1\n  \
-  silence serve owner/model-gguf --fit                       # auto-fit context to available VRAM\n  \
-  silence serve owner/model-gguf --detach                    # run in the background\n  \
-  silence models list                                        # show all installed models",
+  mita launch claude                                      # pick a model, then run Claude Code against it\n  \
+  mita launch claude --model owner/model-gguf             # use a specific model\n  \
+  mita launch openclaw --model owner/model-gguf           # wire openclaw to a local model\n  \
+  mita serve owner/model-gguf                             # expose a model at localhost:6767/v1\n  \
+  mita serve owner/model-gguf --fit                       # auto-fit context to available VRAM\n  \
+  mita serve owner/model-gguf --detach                    # run in the background\n  \
+  mita models list                                        # show all installed models",
     version
 )]
 struct Cli {
@@ -66,14 +66,14 @@ enum Commands {
         /// Model ID to load (omit to pick interactively)
         #[arg(long)]
         model: Option<String>,
-        /// Path to the inference binary (auto-discovered from Silence data folder when omitted)
+        /// Path to the inference binary (auto-discovered from Mita data folder when omitted)
         #[arg(long)]
         bin: Option<String>,
         /// Port the model server listens on
         #[arg(long, default_value_t = 6767)]
         port: u16,
         /// API key for the model server (exported as OPENAI_API_KEY and ANTHROPIC_AUTH_TOKEN)
-        #[arg(long, default_value = "silence")]
+        #[arg(long, default_value = "mita")]
         api_key: String,
         /// GPU layers to offload (-1 = all layers, 0 = CPU only)
         #[arg(long, default_value_t = -1)]
@@ -91,13 +91,13 @@ enum Commands {
         #[arg(long, default_value_t = false)]
         select: bool,
     },
-    /// List and inspect conversation threads saved by the Silence app
+    /// List and inspect conversation threads saved by the Mita app
     #[command(display_order = 10)]
     Threads {
         #[command(subcommand)]
         cmd: ThreadsCommands,
     },
-    /// List and load models installed in the Silence data folder
+    /// List and load models installed in the Mita data folder
     #[command(display_order = 11)]
     Models {
         #[command(subcommand)]
@@ -137,7 +137,7 @@ struct ServeArgs {
     /// Path to the GGUF file (auto-resolved from model.yml when omitted)
     #[arg(long)]
     model_path: Option<String>,
-    /// Path to the inference binary (auto-discovered from Silence data folder when omitted)
+    /// Path to the inference binary (auto-discovered from Mita data folder when omitted)
     #[arg(long)]
     bin: Option<String>,
     /// Port the model server listens on (0 = pick a random free port)
@@ -185,7 +185,7 @@ struct ServeArgs {
 
 #[derive(Subcommand)]
 enum ModelsCommands {
-    /// Print all installed models as JSON (from the Silence data folder)
+    /// Print all installed models as JSON (from the Mita data folder)
     List {
         /// Filter by engine: llamacpp, mlx, or all
         #[arg(long, default_value = "all")]
@@ -198,13 +198,13 @@ enum ModelsCommands {
     },
     /// Load an MLX model directly (macOS / Apple Silicon only)
     LoadMlx {
-        /// Model ID as shown by `silence models list --engine mlx`
+        /// Model ID as shown by `mita models list --engine mlx`
         #[arg(long)]
         model_id: String,
         /// Path to the MLX model directory (auto-resolved from model.yml when omitted)
         #[arg(long)]
         model_path: Option<String>,
-        /// Path to the mlx-server binary (auto-discovered from Silence.app when omitted)
+        /// Path to the mlx-server binary (auto-discovered from Mita.app when omitted)
         #[arg(long)]
         bin: Option<String>,
         /// Port the model server listens on (0 = pick a random free port)
@@ -229,7 +229,7 @@ enum ModelsCommands {
 
 /// Build a left-aligned, bright-yellow ASCII logo for the help header.
 fn make_logo() -> String {
-    // "SILENCE" in ANSI Shadow block letters
+    // "MITA" in ANSI Shadow block letters
     let lines = [
         r"███████╗██╗██╗     ███████╗███╗   ██╗ ██████╗███████╗",
         r"██╔════╝██║██║     ██╔════╝████╗  ██║██╔════╝██╔════╝",
@@ -275,7 +275,7 @@ async fn main() {
     // Inject the logo at runtime so we can use ANSI styling.
     let logo = make_logo();
     let matches = Cli::command()
-        .bin_name("silence")
+        .bin_name("mita")
         .before_help(logo.clone())
         .before_long_help(logo)
         .get_matches();
@@ -420,7 +420,7 @@ async fn handle_models(cmd: ModelsCommands) {
                     None => {
                         eprintln!(
                             "Error: mlx-server binary not found. \
-                            Install Silence or pass --bin <path>."
+                            Install Mita or pass --bin <path>."
                         );
                         std::process::exit(1);
                     }
@@ -594,7 +594,7 @@ async fn auto_download_hf_model(repo_id: &str, select_quantization: bool) -> Str
     });
 
     dl_pb.finish_and_clear();
-    eprintln!("  ✓ Saved to Silence data folder\n");
+    eprintln!("  ✓ Saved to Mita data folder\n");
 
     model_id
 }
@@ -932,7 +932,7 @@ async fn handle_serve(args: ServeArgs) {
                 Some(p) => p.to_string_lossy().into_owned(),
                 None => {
                     finish_progress(pb, "✗ mlx-server binary not found");
-                    eprintln!("Install Silence or pass --bin <path>.");
+                    eprintln!("Install Mita or pass --bin <path>.");
                     std::process::exit(1);
                 }
             },
@@ -983,7 +983,7 @@ async fn handle_serve(args: ServeArgs) {
                 Some(p) => p.to_string_lossy().into_owned(),
                 None => {
                     finish_progress(pb, "✗ llama-server binary not found");
-                    eprintln!("Install a backend from Silence settings or pass --bin <path>.");
+                    eprintln!("Install a backend from Mita settings or pass --bin <path>.");
                     std::process::exit(1);
                 }
             },
@@ -1114,7 +1114,7 @@ async fn handle_launch(
     )
     .await;
 
-    // Model is ready — silence server request/response logs so they don't
+    // Model is ready — mita server request/response logs so they don't
     // flood the launched program's terminal (e.g. Claude Code's shell).
     if verbose {
         log::set_max_level(log::LevelFilter::Warn);
@@ -1124,7 +1124,7 @@ async fn handle_launch(
     let v1_url = format!("{base_url}/v1");
 
     // openclaw is configured via ~/.openclaw/openclaw.json, not env vars.
-    // Write the silence provider entry and set the default model, then launch `openclaw tui`.
+    // Write the mita provider entry and set the default model, then launch `openclaw tui`.
     let mut program_args = program_args;
     if is_openclaw {
         configure_openclaw(&v1_url, &api_key, &model_id);
@@ -1133,8 +1133,8 @@ async fn handle_launch(
             program_args.insert(0, "tui".to_string());
         }
         eprintln!();
-        eprintln!("  ~/.openclaw/openclaw.json → silence provider configured");
-        eprintln!("  agents.defaults.model.primary = silence/{model_id}");
+        eprintln!("  ~/.openclaw/openclaw.json → mita provider configured");
+        eprintln!("  agents.defaults.model.primary = mita/{model_id}");
     } else {
         let anthropic_key_var = if is_claude {
             "ANTHROPIC_AUTH_TOKEN"
@@ -1223,9 +1223,9 @@ async fn handle_launch(
 // ── openclaw config writer ─────────────────────────────────────────────────
 
 /// Write (or merge into) `~/.openclaw/openclaw.json` so that openclaw uses
-/// the local Silence server as its provider and selects `model_id` by default.
+/// the local Mita server as its provider and selects `model_id` by default.
 ///
-/// The "silence" provider entry is always overwritten with the current server
+/// The "mita" provider entry is always overwritten with the current server
 /// address and key. All other config values are preserved.
 /// Also clears the session model override so the new default takes effect.
 fn configure_openclaw(v1_url: &str, api_key: &str, model_id: &str) {
@@ -1240,8 +1240,8 @@ fn configure_openclaw(v1_url: &str, api_key: &str, model_id: &str) {
         .and_then(|s| serde_json::from_str(&s).ok())
         .unwrap_or(serde_json::json!({}));
 
-    // Inject (or overwrite) the silence provider.
-    config["models"]["providers"]["silence"] = serde_json::json!({
+    // Inject (or overwrite) the mita provider.
+    config["models"]["providers"]["mita"] = serde_json::json!({
         "baseUrl": v1_url,
         "apiKey":  api_key,
         "api":     "openai-completions",
@@ -1256,9 +1256,9 @@ fn configure_openclaw(v1_url: &str, api_key: &str, model_id: &str) {
         }]
     });
 
-    // Set silence/<model_id> as the primary default model.
+    // Set mita/<model_id> as the primary default model.
     config["agents"]["defaults"]["model"]["primary"] =
-        serde_json::json!(format!("silence/{model_id}"));
+        serde_json::json!(format!("mita/{model_id}"));
 
     if let Some(parent) = config_path.parent() {
         let _ = std::fs::create_dir_all(parent);
@@ -1319,7 +1319,7 @@ async fn start_model_server(
                 Some(p) => p,
                 None => {
                     finish_progress(pb, "✗ mlx-server binary not found");
-                    eprintln!("Install Silence or pass --bin <path>.");
+                    eprintln!("Install Mita or pass --bin <path>.");
                     std::process::exit(1);
                 }
             };
@@ -1364,7 +1364,7 @@ async fn start_model_server(
             Some(p) => p,
             None => {
                 finish_progress(pb, "✗ llama-server binary not found");
-                eprintln!("Install a backend from Silence settings or pass --bin <path>.");
+                eprintln!("Install a backend from Mita settings or pass --bin <path>.");
                 std::process::exit(1);
             }
         };

@@ -40,7 +40,7 @@ on:
         required: false
       TAURI_SIGNING_PRIVATE_KEY_PASSWORD:
         required: false
-      JAN_SIGNING_KEY:
+      MITA_SIGNING_KEY:
         required: false
 jobs:
   build-linux-x64:
@@ -130,9 +130,9 @@ jobs:
           # Change app name for beta and nightly builds
           if [ "${{ inputs.channel }}" != "stable" ]; then
             if [[ "${{ inputs.channel }}" == "nightly" ]]; then
-              jq '.plugins.updater.endpoints = ["https://apps-nightly.jan.ai/update-check", "https://delta.jan.ai/${{ inputs.channel }}/latest.json"]' ./src-tauri/tauri.conf.json > /tmp/tauri.conf.json
+              jq '.plugins.updater.endpoints = ["https://updates.jingxing.uk/mita/update-check", "https://updates.jingxing.uk/mita/${{ inputs.channel }}/latest.json"]' ./src-tauri/tauri.conf.json > /tmp/tauri.conf.json
             else
-              jq '.plugins.updater.endpoints = ["https://delta.jan.ai/${{ inputs.channel }}/latest.json"]' ./src-tauri/tauri.conf.json > /tmp/tauri.conf.json
+              jq '.plugins.updater.endpoints = ["https://updates.jingxing.uk/mita/${{ inputs.channel }}/latest.json"]' ./src-tauri/tauri.conf.json > /tmp/tauri.conf.json
             fi
             mv /tmp/tauri.conf.json ./src-tauri/tauri.conf.json
 
@@ -142,8 +142,8 @@ jobs:
             cat ./src-tauri/tauri.conf.json
 
             # Update Cargo.toml
-            ctoml ./src-tauri/Cargo.toml package.name "Jan-${{ inputs.channel }}"
-            ctoml ./src-tauri/Cargo.toml package.default-run "Jan-${{ inputs.channel }}"
+            ctoml ./src-tauri/Cargo.toml package.name "Mita-${{ inputs.channel }}"
+            ctoml ./src-tauri/Cargo.toml package.default-run "Mita-${{ inputs.channel }}"
             ctoml ./src-tauri/Cargo.toml dependencies.tauri.features[] "devtools"
             echo "------------------"
             cat ./src-tauri/Cargo.toml
@@ -172,7 +172,7 @@ jobs:
           TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
           TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
           AUTO_UPDATER_DISABLED: ${{ inputs.disable_updater && 'true' || 'false' }}
-          JAN_SIGNING_KEY: ${{ secrets.JAN_SIGNING_KEY }}
+          MITA_SIGNING_KEY: ${{ secrets.MITA_SIGNING_KEY }}
           TAURI_TRAY: libappindicator3
       # Publish app
 
@@ -181,7 +181,7 @@ jobs:
         if: inputs.public_provider != 'github'
         uses: actions/upload-artifact@v4
         with:
-          name: jan-linux-amd64-flatpak-${{ inputs.new_version }}-deb
+          name: mita-linux-amd64-flatpak-${{ inputs.new_version }}-deb
           path: ./src-tauri/target/release/bundle/deb/*.deb
 
       ## Set output filename for linux
@@ -189,8 +189,8 @@ jobs:
         id: packageinfo
         run: |
           cd ./src-tauri/target/release/bundle
-          DEB_FILE_NAME=Jan_${{ inputs.new_version }}_amd64.deb
-          DEB_SIG=$(cat deb/Jan_${{ inputs.new_version }}_amd64.deb.sig)
+          DEB_FILE_NAME=Mita_${{ inputs.new_version }}_amd64.deb
+          DEB_SIG=$(cat deb/Mita_${{ inputs.new_version }}_amd64.deb.sig)
 
           echo "DEB_SIG=$DEB_SIG" >> $GITHUB_OUTPUT
           echo "DEB_FILE_NAME=$DEB_FILE_NAME" >> $GITHUB_OUTPUT

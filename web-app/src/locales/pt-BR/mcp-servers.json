@@ -6,8 +6,8 @@
       "checking": "Verificando status da extensão..."
     },
     "notInstalled": {
-      "title": "Silence completa tarefas no seu navegador",
-      "description": "Instale a extensão para dar ao Silence acesso ao navegador",
+      "title": "Mita completa tarefas no seu navegador",
+      "description": "Instale a extensão para dar ao Mita acesso ao navegador",
       "getExtension": "Obter Extensão"
     }
   },
@@ -56,11 +56,11 @@
   "serverStatusInactive": "Servidor {{serverKey}} desativado com sucesso",
   "runtimeSettings": {
     "title": "Configurações de Execução",
-    "description": "Configure como o Silence gerencia e tenta novamente os servidores MCP.",
+    "description": "Configure como o Mita gerencia e tenta novamente os servidores MCP.",
     "toolCallTimeout": "Tempo limite de chamada da ferramenta (segundos)",
     "toolCallTimeoutDesc": "Tempo máximo de espera por uma resposta da ferramenta MCP antes de atingir o tempo limite.",
     "smartToolRouting": "Roteamento inteligente de ferramentas MCP",
-    "smartToolRoutingDesc": "Quando ativado, o Silence seleciona servidores MCP relevantes antes de carregar as ferramentas. Desative para sempre carregar a lista completa de ferramentas MCP.",
+    "smartToolRoutingDesc": "Quando ativado, o Mita seleciona servidores MCP relevantes antes de carregar as ferramentas. Desative para sempre carregar a lista completa de ferramentas MCP.",
     "useLightweightRouterModel": "Usar um modelo dedicado para roteamento",
     "useLightweightRouterModelDesc": "Com o roteamento inteligente ativo, a etapa de roteamento usa um modelo separado (geralmente menor) em vez do modelo do chat. Desative para sempre usar o modelo ativo do chat para roteamento.",
     "routerModel": "Modelo de roteamento",

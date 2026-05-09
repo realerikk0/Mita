@@ -15,7 +15,7 @@ vi.mock('@/hooks/useServiceHub', () => ({
 }))
 
 vi.mock('@/constants/localStorage', () => ({
-  localStorageKey: { modelProvider: 'jan-model-provider' },
+  localStorageKey: { modelProvider: 'model-provider' },
 }))
 
 const makeProvider = (provider: string, models: any[] = [], extra: any = {}) => ({
@@ -196,6 +196,7 @@ describe('useModelProvider - coverage', () => {
             settings: [{ key: 'api-key', controller_props: { value: 'sk-123' } }],
             api_key: 'sk-existing', base_url: 'https://custom.api.com',
             api_key_fallbacks: ['fallback'],
+            custom_header: [{ header: 'X-Custom', value: 'custom-value' }],
           })],
         })
       })
@@ -211,6 +212,9 @@ describe('useModelProvider - coverage', () => {
       expect(provider?.api_key).toBe('sk-existing')
       expect(provider?.base_url).toBe('https://custom.api.com')
       expect(provider?.api_key_fallbacks).toEqual(['fallback'])
+      expect(provider?.custom_header).toEqual([
+        { header: 'X-Custom', value: 'custom-value' },
+      ])
       expect(provider?.models.find((m: any) => m.id === 'new-model')).toBeDefined()
     })
 

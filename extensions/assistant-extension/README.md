@@ -1,6 +1,6 @@
-# Create a Jan Extension using Typescript
+# Create a Mita Extension using Typescript
 
-Use this template to bootstrap the creation of a TypeScript Jan extension. 🚀
+Use this template to bootstrap the creation of a TypeScript Mita extension. 🚀
 
 ## Create Your Own Extension
 
@@ -56,7 +56,7 @@ contents of this directory with your own code.
 
 There are a few things to keep in mind when writing your extension code:
 
-- Most Jan Extension functions are processed asynchronously.
+- Most Mita Extension functions are processed asynchronously.
   In `index.ts`, you will see that the extension function will return a `Promise<any>`.
 
   ```typescript
@@ -69,7 +69,7 @@ There are a few things to keep in mind when writing your extension code:
   }
   ```
 
-  For more information about the Jan Extension Core module, see the
-  [documentation](https://github.com/janhq/jan/blob/main/core/README.md).
+  For more information about the Mita Extension Core module, see the
+  [documentation](https://github.com/realerikk0/Mita/blob/main/core/README.md).
 
 So, what are you waiting for? Go ahead and start customizing your extension!

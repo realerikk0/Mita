@@ -406,7 +406,7 @@ pub fn setup_windows_process_flags(command: &mut tokio::process::Command) {
     }
     #[cfg(not(all(windows, target_arch = "x86_64")))]
     {
-        let _ = command; // Silence unused parameter warning on non-Windows platforms
+        let _ = command; // Suppress unused parameter warning on non-Windows platforms
     }
 }
 

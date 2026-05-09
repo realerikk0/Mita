@@ -1,5 +1,5 @@
 {
-  "identifier": "uk.jingxing.silence.ios",
+  "identifier": "uk.jingxing.mita.ios",
   "build": {
     "devUrl": null,
     "frontendDist": "../web-app/dist",

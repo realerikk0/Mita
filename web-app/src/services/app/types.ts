@@ -18,8 +18,8 @@ export interface AppService {
   factoryReset(options?: FactoryResetOptions): Promise<void>
   readLogs(): Promise<LogEntry[]>
   parseLogLine(line: string): LogEntry
-  getSilenceDataFolder(): Promise<string | undefined>
-  relocateSilenceDataFolder(path: string): Promise<void>
+  getMitaDataFolder(): Promise<string | undefined>
+  relocateMitaDataFolder(path: string): Promise<void>
   getServerStatus(): Promise<boolean>
   readYaml<T = unknown>(path: string): Promise<T>
 }

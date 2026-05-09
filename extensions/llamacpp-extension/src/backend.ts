@@ -1,4 +1,4 @@
-import { getSilenceDataFolderPath, fs, joinPath, events } from '@janhq/core'
+import { getMitaDataFolderPath, fs, joinPath, events } from '@janhq/core'
 import { invoke } from '@tauri-apps/api/core'
 import { getProxyConfig } from './util'
 import { dirname } from '@tauri-apps/api/path'
@@ -13,15 +13,15 @@ import {
 } from '@janhq/tauri-plugin-llamacpp-api'
 
 /*
- * Reads currently installed backends in silenceDataFolderPath
+ * Reads currently installed backends in mitaDataFolderPath
  *
  */
 export async function getLocalInstalledBackends(): Promise<
   { version: string; backend: string }[]
 > {
-  const silenceDataFolderPath = await getSilenceDataFolderPath()
+  const mitaDataFolderPath = await getMitaDataFolderPath()
   const backendDir = await joinPath([
-    silenceDataFolderPath,
+    mitaDataFolderPath,
     'llamacpp',
     'backends',
   ])
@@ -29,7 +29,7 @@ export async function getLocalInstalledBackends(): Promise<
 }
 
 // folder structure
-// <Silence's data folder>/llamacpp/backends/<backend_version>/<backend_type>
+// <Mita's data folder>/llamacpp/backends/<backend_version>/<backend_type>
 
 // what should be available to the user for selection?
 export async function listSupportedBackends(): Promise<BackendVersion[]> {
@@ -57,7 +57,7 @@ export async function listSupportedBackends(): Promise<BackendVersion[]> {
     )
   } catch (e) {
     console.debug(
-      `Not able to get remote backends, Silence might be offline or network problem: ${String(e)}`
+      `Not able to get remote backends, Mita might be offline or network problem: ${String(e)}`
     )
   }
 
@@ -72,11 +72,11 @@ export async function getBackendDir(
   backend: string,
   version: string
 ): Promise<string> {
-  const silenceDataFolder = await getSilenceDataFolderPath()
+  const mitaDataFolder = await getMitaDataFolderPath()
   return invoke<string>('plugin:llamacpp|get_backend_dir', {
     backend,
     version,
-    silenceDataFolder,
+    mitaDataFolder,
   })
 }
 
@@ -84,11 +84,11 @@ export async function getBackendExePath(
   backend: string,
   version: string
 ): Promise<string> {
-  const silenceDataFolder = await getSilenceDataFolderPath()
+  const mitaDataFolder = await getMitaDataFolderPath()
   return invoke<string>('plugin:llamacpp|get_backend_exe_path', {
     backend,
     version,
-    silenceDataFolder,
+    mitaDataFolder,
     isWindows: IS_WINDOWS,
   })
 }
@@ -97,11 +97,11 @@ export async function isBackendInstalled(
   backend: string,
   version: string
 ): Promise<boolean> {
-  const silenceDataFolder = await getSilenceDataFolderPath()
+  const mitaDataFolder = await getMitaDataFolderPath()
   return invoke<boolean>('plugin:llamacpp|check_backend_installed', {
     backend,
     version,
-    silenceDataFolder,
+    mitaDataFolder,
     isWindows: IS_WINDOWS,
   })
 }
@@ -116,13 +116,13 @@ export async function verifyBackendInstallation(
   backend: string,
   version: string
 ): Promise<BackendVerificationResult> {
-  const silenceDataFolder = await getSilenceDataFolderPath()
+  const mitaDataFolder = await getMitaDataFolderPath()
   return invoke<BackendVerificationResult>(
     'plugin:llamacpp|verify_backend_installation',
     {
       backend,
       version,
-      silenceDataFolder,
+      mitaDataFolder,
       isWindows: IS_WINDOWS,
     }
   )
@@ -133,7 +133,7 @@ export async function downloadBackend(
   version: string,
   source: 'github' | 'cdn' = 'github'
 ): Promise<void> {
-  const silenceDataFolderPath = await getSilenceDataFolderPath()
+  const mitaDataFolderPath = await getMitaDataFolderPath()
   const sysInfo = await getSystemInfo()
   const proxyConfig = getProxyConfig()
 
@@ -146,7 +146,7 @@ export async function downloadBackend(
     backend,
     version,
     source,
-    silenceDataFolder: silenceDataFolderPath,
+    mitaDataFolder: mitaDataFolderPath,
     osType: sysInfo.os_type,
   })
 

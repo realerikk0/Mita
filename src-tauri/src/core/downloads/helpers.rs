@@ -1,6 +1,6 @@
 use super::models::{DownloadEvent, DownloadItem, ProgressTracker, ProxyConfig};
-use crate::core::app::commands::get_silence_data_folder_path;
-use crate::core::filesystem::helpers::resolve_path_within_silence_data_folder;
+use crate::core::app::commands::get_mita_data_folder_path;
+use crate::core::filesystem::helpers::resolve_path_within_mita_data_folder;
 use crate::core::updater::hmac_client::SignedRequestHeaders;
 use crate::core::updater::session::get_session_id;
 use futures_util::StreamExt;
@@ -41,9 +41,9 @@ fn get_mirror_prefix() -> &'static str {
 }
 
 /// Secret key for HMAC request authentication
-/// - In CI: Set SILENCE_SIGNING_KEY environment variable at build time
+/// - In CI: Set MITA_SIGNING_KEY environment variable at build time
 /// - In local dev: Falls back to a test key
-const SECRET_KEY: &str = match option_env!("SILENCE_SIGNING_KEY") {
+const SECRET_KEY: &str = match option_env!("MITA_SIGNING_KEY") {
     Some(key) => key,
     None => match option_env!("JAN_SIGNING_KEY") {
         Some(key) => key,
@@ -424,15 +424,15 @@ pub async fn _download_files_internal(
     // Create progress tracker
     let progress_tracker = ProgressTracker::new(items, file_sizes.clone());
 
-    // save file under Silence data folder
-    let silence_data_folder = get_silence_data_folder_path(app.clone());
+    // save file under Mita data folder
+    let mita_data_folder = get_mita_data_folder_path(app.clone());
 
     // Collect download tasks for parallel execution
     let mut download_tasks = Vec::new();
 
     for (index, item) in items.iter().enumerate() {
         let (canonical_data, save_path) =
-            resolve_path_within_silence_data_folder(&silence_data_folder, &item.save_path)?;
+            resolve_path_within_mita_data_folder(&mita_data_folder, &item.save_path)?;
 
         // Spawn download task for each file
         let item_clone = item.clone();
@@ -450,7 +450,7 @@ pub async fn _download_files_internal(
 
         let task = tokio::spawn(async move {
             log::debug!(
-                "Downloading {} into Silence data folder {}",
+                "Downloading {} into Mita data folder {}",
                 item_clone.url,
                 canonical_data.display()
             );
@@ -641,7 +641,7 @@ async fn download_single_file(
 
     // Log which URL is being used for download
     if actual_url != item.url {
-        log::info!("Downloading via Silence mirror: {}", actual_url);
+        log::info!("Downloading via Mita mirror: {}", actual_url);
     }
 
     // If HEAD gave us no size, refine the running total from the GET response
@@ -748,15 +748,15 @@ pub async fn _get_maybe_resume_with_fallback(
 ) -> Result<(reqwest::Response, String), String> {
     // Try mirror URL first if applicable
     if let Some(mirror_url) = convert_to_mirror_url(url) {
-        log::info!("Attempting download from Silence mirror: {}", mirror_url);
+        log::info!("Attempting download from Mita mirror: {}", mirror_url);
         match _get_maybe_resume_with_hmac(client, &mirror_url, start_bytes).await {
             Ok(resp) => {
-                log::info!("Successfully connected to Silence mirror");
+                log::info!("Successfully connected to Mita mirror");
                 return Ok((resp, mirror_url));
             }
             Err(e) => {
                 log::warn!(
-                    "Silence mirror download failed: {}. Falling back to original URL...",
+                    "Mita mirror download failed: {}. Falling back to original URL...",
                     e
                 );
             }
@@ -769,7 +769,7 @@ pub async fn _get_maybe_resume_with_fallback(
     Ok((resp, url.to_string()))
 }
 
-/// Download from URL with HMAC headers for Silence mirror authentication
+/// Download from URL with HMAC headers for Mita mirror authentication
 async fn _get_maybe_resume_with_hmac(
     client: &reqwest::Client,
     url: &str,

@@ -3,7 +3,7 @@
     "windows": [
       {
         "label": "main",
-        "title": "Silence",
+        "title": "Mita",
         "width": 1200,
         "minWidth": 1024,
         "height": 800,
@@ -30,7 +30,14 @@
   },
   "bundle": {
     "targets": ["app", "dmg"],
-    "resources": ["resources/LICENSE", "resources/bin/silence-cli"],
+    "resources": [
+      "resources/LICENSE",
+      "resources/bin/mita-cli",
+      "resources/bin/mita-web-research-mcp.mjs",
+      "resources/ms-playwright/**/*",
+      "resources/node_modules/playwright/**/*",
+      "resources/node_modules/playwright-core/**/*"
+    ],
     "externalBin": ["resources/bin/bun", "resources/bin/uv"],
     "macOS": {
       "entitlements": "./Entitlements.plist"

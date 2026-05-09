@@ -193,9 +193,9 @@ export function PromptVisionModel({
   return (
     <div className="fixed bottom-4 right-4 z-50 p-4 shadow-lg bg-background w-4/5 md:w-100 border rounded-lg">
       <div className="flex items-center gap-2">
-        <img src="/images/jan-logo.png" alt="Silence" className="size-5" />
+        <img src="/images/mita-logo.png" alt="Mita" className="size-5" />
         <h2 className="font-medium">
-          Silence Vision Model
+          Mita Vision Model
           <span className="text-muted-foreground"> (~5GB)</span>
         </h2>
       </div>

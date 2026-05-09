@@ -15,14 +15,15 @@ use tauri::{
 };
 use tauri_plugin_store::Store;
 
-use crate::core::app::commands::get_silence_data_folder_path;
+use crate::core::app::commands::get_mita_data_folder_path;
 use crate::core::mcp::constants::{
-    default_browser_mcp_config, DEFAULT_MCP_CONFIG, SILENCE_BROWSER_MCP_NAME,
+    default_web_research_mcp_config, DEFAULT_MCP_CONFIG, MITA_WEB_RESEARCH_MCP_NAME,
 };
 use crate::core::mcp::helpers::add_server_config;
 
 use super::{
-    extensions::commands::get_silence_extensions_path, mcp::helpers::run_mcp_commands, state::AppState,
+    extensions::commands::get_mita_extensions_path, mcp::helpers::run_mcp_commands,
+    state::AppState,
 };
 
 pub fn install_extensions<R: Runtime>(app: tauri::AppHandle<R>, force: bool) -> Result<(), String> {
@@ -33,7 +34,7 @@ pub fn install_extensions<R: Runtime>(app: tauri::AppHandle<R>, force: bool) -> 
         return Ok(());
     }
 
-    let extensions_path = get_silence_extensions_path(app.clone());
+    let extensions_path = get_mita_extensions_path(app.clone());
     let pre_install_path = app
         .path()
         .resource_dir()
@@ -187,14 +188,14 @@ pub fn migrate_mcp_servers(
         }
     }
     if mcp_version < 2 {
-        log::info!("Migrating MCP schema version 2: Adding Silence Browser MCP");
+        log::info!("Migrating MCP schema version 2: Adding Mita Web Research");
         let result = add_server_config(
             app_handle.clone(),
-            SILENCE_BROWSER_MCP_NAME.to_string(),
-            default_browser_mcp_config(),
+            MITA_WEB_RESEARCH_MCP_NAME.to_string(),
+            default_web_research_mcp_config(),
         );
         if let Err(e) = result {
-            log::error!("Failed to add Silence Browser MCP server config: {e}");
+            log::error!("Failed to add Mita Web Research server config: {e}");
         }
     }
     if mcp_version < 3 {
@@ -209,13 +210,46 @@ pub fn migrate_mcp_servers(
             log::error!("Failed to disable bundled Exa MCP: {e}");
         }
     }
-    store.set("mcp_version", 4);
+    if mcp_version < 5 {
+        log::info!(
+            "Migrating MCP schema version 5: Replacing Browser MCP with Mita Web Research"
+        );
+        if let Err(e) = migrate_browser_mcp_to_web_research(app_handle.clone()) {
+            log::error!("Failed to migrate Browser MCP to Mita Web Research: {e}");
+        }
+    }
+    store.set("mcp_version", 5);
     store.save().expect("Failed to save store");
     Ok(())
 }
 
+fn migrate_browser_mcp_to_web_research(app_handle: tauri::AppHandle) -> Result<(), String> {
+    let config_path = get_mita_data_folder_path(app_handle).join("mcp_config.json");
+    if !config_path.exists() {
+        return Ok(());
+    }
+
+    let config_str =
+        fs::read_to_string(&config_path).map_err(|e| format!("Failed to read MCP config: {e}"))?;
+    let mut config: serde_json::Value = serde_json::from_str(&config_str)
+        .map_err(|e| format!("Failed to parse MCP config: {e}"))?;
+
+    if let Some(servers) = config.get_mut("mcpServers").and_then(|s| s.as_object_mut()) {
+        crate::core::mcp::constants::normalize_browser_mcp_server_key(servers);
+    }
+
+    fs::write(
+        &config_path,
+        serde_json::to_string_pretty(&config)
+            .map_err(|e| format!("Failed to serialize MCP config: {e}"))?,
+    )
+    .map_err(|e| format!("Failed to write MCP config: {e}"))?;
+
+    Ok(())
+}
+
 fn disable_exa_mcp_by_default(app_handle: tauri::AppHandle) -> Result<(), String> {
-    let config_path = get_silence_data_folder_path(app_handle).join("mcp_config.json");
+    let config_path = get_mita_data_folder_path(app_handle).join("mcp_config.json");
     if !config_path.exists() {
         return Ok(());
     }
@@ -244,7 +278,7 @@ fn disable_exa_mcp_by_default(app_handle: tauri::AppHandle) -> Result<(), String
 }
 
 fn migrate_exa_to_http(app_handle: tauri::AppHandle) -> Result<(), String> {
-    let config_path = get_silence_data_folder_path(app_handle).join("mcp_config.json");
+    let config_path = get_mita_data_folder_path(app_handle).join("mcp_config.json");
 
     let config_str =
         fs::read_to_string(&config_path).map_err(|e| format!("Failed to read MCP config: {e}"))?;
@@ -306,7 +340,7 @@ pub fn extract_extension_manifest<R: Read>(
     Ok(None)
 }
 
-/// Install/update the bundled `silence` CLI binary.
+/// Install/update the bundled `mita` CLI binary.
 ///
 /// - `version_changed`: pass `true` whenever the app version has changed (i.e. after an update).
 ///   When `true` the binary is always overwritten so the CLI stays in sync with the new app.
@@ -314,28 +348,28 @@ pub fn extract_extension_manifest<R: Read>(
 ///
 /// Runs in a background task — never blocks startup.
 /// Errors are logged as warnings and never prevent the app from starting.
-pub fn setup_silence_cli<R: Runtime>(app_handle: tauri::AppHandle<R>, version_changed: bool) {
+pub fn setup_mita_cli<R: Runtime>(app_handle: tauri::AppHandle<R>, version_changed: bool) {
     tauri::async_runtime::spawn(async move {
         // On a normal launch where the version hasn't changed, skip reinstall if already on PATH.
         if !version_changed {
             let which_cmd = if cfg!(windows) { "where" } else { "which" };
             let mut cmd = std::process::Command::new(which_cmd);
-            cmd.arg("silence");
+            cmd.arg("mita");
             #[cfg(windows)]
             {
                 use std::os::windows::process::CommandExt;
                 cmd.creation_flags(0x08000000); // CREATE_NO_WINDOW
             }
             if cmd.output().map(|o| o.status.success()).unwrap_or(false) {
-                log::debug!("silence CLI already on PATH — skipping reinstall");
+                log::debug!("mita CLI already on PATH — skipping reinstall");
                 return;
             }
         }
 
-        match crate::core::system::commands::install_silence_cli_sync(&app_handle) {
+        match crate::core::system::commands::install_mita_cli_sync(&app_handle) {
             Ok(status) => {
                 log::info!(
-                    "silence CLI {} to {}",
+                    "mita CLI {} to {}",
                     if version_changed {
                         "updated"
                     } else {
@@ -345,7 +379,7 @@ pub fn setup_silence_cli<R: Runtime>(app_handle: tauri::AppHandle<R>, version_ch
                 );
             }
             Err(e) => {
-                log::warn!("silence CLI auto-install skipped: {e}");
+                log::warn!("mita CLI auto-install skipped: {e}");
             }
         }
     });
@@ -359,7 +393,7 @@ pub fn setup_mcp<R: Runtime>(app: &App<R>) {
         use crate::core::mcp::lockfile::cleanup_all_stale_locks;
 
         // Create default mcp_config.json if it doesn't exist
-        let config_path = get_silence_data_folder_path(app_handle.clone()).join("mcp_config.json");
+        let config_path = get_mita_data_folder_path(app_handle.clone()).join("mcp_config.json");
         if !config_path.exists() {
             log::info!("mcp_config.json not found, creating default config");
             if let Err(e) = fs::write(&config_path, DEFAULT_MCP_CONFIG) {
@@ -382,7 +416,7 @@ pub fn setup_mcp<R: Runtime>(app: &App<R>) {
 
 #[cfg(feature = "desktop")]
 pub fn setup_tray(app: &App) -> tauri::Result<TrayIcon> {
-    let show_i = MenuItem::with_id(app.handle(), "open", "Open Silence", true, None::<&str>)?;
+    let show_i = MenuItem::with_id(app.handle(), "open", "Open Mita", true, None::<&str>)?;
     let quit_i = MenuItem::with_id(app.handle(), "quit", "Quit", true, None::<&str>)?;
     let separator_i = PredefinedMenuItem::separator(app.handle())?;
     let menu = Menu::with_items(app.handle(), &[&show_i, &separator_i, &quit_i])?;

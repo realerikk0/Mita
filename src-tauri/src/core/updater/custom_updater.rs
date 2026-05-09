@@ -1,5 +1,5 @@
 /**
- * Custom Updater for Silence with HMAC request signing
+ * Custom Updater for Mita with HMAC request signing
  *
  * This module provides a custom update checker that:
  * 1. Reads endpoints from tauri.conf.json (plugins.updater.endpoints)
@@ -7,7 +7,7 @@
  * 3. Remaining endpoints are FALLBACK - no signing needed
  *
  * Convention: The first endpoint in the list should be the signed endpoint
- * (e.g., https://updates.jingxing.uk/silence/latest.json)
+ * (e.g., https://updates.jingxing.uk/mita/latest.json)
  */
 use super::hmac_client::SignedRequestHeaders;
 use reqwest::Client;
@@ -16,9 +16,9 @@ use std::time::Duration;
 use thiserror::Error;
 
 /// Secret key for HMAC signature
-/// - In CI: Set SILENCE_SIGNING_KEY environment variable at build time
+/// - In CI: Set MITA_SIGNING_KEY environment variable at build time
 /// - In local dev: Falls back to a test key
-const SECRET_KEY: &str = match option_env!("SILENCE_SIGNING_KEY") {
+const SECRET_KEY: &str = match option_env!("MITA_SIGNING_KEY") {
     Some(key) => key,
     None => match option_env!("JAN_SIGNING_KEY") {
         Some(key) => key,
@@ -85,11 +85,11 @@ impl CustomUpdater {
         })
     }
 
-    /// Build User-Agent header: Silence/{version} ({os}; {arch})
+    /// Build User-Agent header: Mita/{version} ({os}; {arch})
     fn build_user_agent(app_version: &str) -> String {
         let os = std::env::consts::OS;
         let arch = std::env::consts::ARCH;
-        format!("Silence/{} ({}; {})", app_version, os, arch)
+        format!("Mita/{} ({}; {})", app_version, os, arch)
     }
 
     /// Check for updates using endpoints list

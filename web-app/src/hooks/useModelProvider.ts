@@ -171,6 +171,8 @@ export const useModelProvider = create<ModelProviderState>()(
                 existingProvider?.api_key_fallbacks ??
                 provider.api_key_fallbacks,
               base_url: existingProvider?.base_url || provider.base_url,
+              custom_header:
+                existingProvider?.custom_header ?? provider.custom_header,
               active: existingProvider ? existingProvider?.active : true,
             }
           })
@@ -604,7 +606,7 @@ export const useModelProvider = create<ModelProviderState>()(
             })
           })
         }
-        if (version <= 13 && state?.providers) {
+        if (version <= 14 && state?.providers) {
           state.providers.forEach((provider) => {
             if (provider.provider !== 'jingxing' || !provider.models) return
 
@@ -621,7 +623,7 @@ export const useModelProvider = create<ModelProviderState>()(
         }
         return state
       },
-      version: 14,
+      version: 15,
     }
   )
 )

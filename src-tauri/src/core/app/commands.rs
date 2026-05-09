@@ -6,7 +6,8 @@ use tauri::{AppHandle, Manager, Runtime, State};
 
 use super::{
     constants::{
-        APP_NAME, CONFIGURATION_FILE_NAME, LEGACY_APP_NAME, LEGACY_TAURI_BUNDLE_IDENTIFIER,
+        APP_NAME, CONFIGURATION_FILE_NAME, LEGACY_APP_NAME, LEGACY_SILENCE_APP_NAME,
+        LEGACY_SILENCE_TAURI_BUNDLE_IDENTIFIER, LEGACY_TAURI_BUNDLE_IDENTIFIER,
         TAURI_BUNDLE_IDENTIFIER,
     },
     helpers::copy_dir_recursive,
@@ -14,17 +15,17 @@ use super::{
 };
 use crate::core::state::AppState;
 
-/// Canonical Silence app support directory (`%APPDATA%/Silence` on Windows).
+/// Canonical Mita app support directory (`%APPDATA%/Mita` on Windows).
 fn resolve_human_readable_app_data_dir() -> Option<PathBuf> {
     dirs::data_dir().map(|d| d.join(APP_NAME))
 }
 
-/// Tauri bundle-id app support directory (e.g. `%APPDATA%/uk.jingxing.silence` on Windows).
+/// Tauri bundle-id app support directory (e.g. `%APPDATA%/uk.jingxing.mita` on Windows).
 fn resolve_bundle_app_data_dir() -> Option<PathBuf> {
     dirs::data_dir().map(|d| d.join(TAURI_BUNDLE_IDENTIFIER))
 }
 
-/// Keep `%APPDATA%/Silence/settings.json` as canonical, but recover from legacy or
+/// Keep `%APPDATA%/Mita/settings.json` as canonical, but recover from legacy or
 /// alternate locations if users removed one directory (#7898).
 fn migrate_legacy_app_configuration(app_data_dir: &Path) -> std::io::Result<()> {
     fs::create_dir_all(app_data_dir)?;
@@ -62,6 +63,16 @@ fn legacy_app_config_candidate_paths(_app_data_dir: &Path) -> Vec<PathBuf> {
         paths.push(bundle_dir.join(CONFIGURATION_FILE_NAME));
     }
     if let Some(data_dir) = dirs::data_dir() {
+        paths.push(
+            data_dir
+                .join(LEGACY_SILENCE_APP_NAME)
+                .join(CONFIGURATION_FILE_NAME),
+        );
+        paths.push(
+            data_dir
+                .join(LEGACY_SILENCE_TAURI_BUNDLE_IDENTIFIER)
+                .join(CONFIGURATION_FILE_NAME),
+        );
         paths.push(data_dir.join(LEGACY_APP_NAME).join(CONFIGURATION_FILE_NAME));
         paths.push(
             data_dir
@@ -77,6 +88,11 @@ fn legacy_app_config_candidate_paths(_app_data_dir: &Path) -> Vec<PathBuf> {
             if legacy != _app_data_dir.join(CONFIGURATION_FILE_NAME) {
                 paths.push(legacy);
             }
+            paths.push(
+                config_dir
+                    .join(LEGACY_SILENCE_APP_NAME)
+                    .join(CONFIGURATION_FILE_NAME),
+            );
             paths.push(
                 config_dir
                     .join(LEGACY_APP_NAME)
@@ -107,8 +123,8 @@ fn app_data_dir_with_fallback<R: Runtime>(app_handle: &tauri::AppHandle<R>) -> P
         .join(APP_NAME)
 }
 
-/// Resolve the Silence config file path without an AppHandle (for CLI use).
-/// Canonical location is `%APPDATA%/Silence/settings.json` (or OS equivalent),
+/// Resolve the Mita config file path without an AppHandle (for CLI use).
+/// Canonical location is `%APPDATA%/Mita/settings.json` (or OS equivalent),
 /// with fallback recovery from bundle-id location when needed.
 pub fn resolve_config_file_path() -> PathBuf {
     let app_data = resolve_human_readable_app_data_dir().unwrap_or_else(|| {
@@ -125,9 +141,9 @@ pub fn resolve_config_file_path() -> PathBuf {
     app_data.join(CONFIGURATION_FILE_NAME)
 }
 
-/// Resolve the Silence data folder path without an AppHandle (for CLI use).
+/// Resolve the Mita data folder path without an AppHandle (for CLI use).
 /// Reads AppConfiguration from the config file; falls back to the default location.
-pub fn resolve_silence_data_folder() -> PathBuf {
+pub fn resolve_mita_data_folder() -> PathBuf {
     let config_file = resolve_config_file_path();
 
     if config_file.exists() {
@@ -138,7 +154,7 @@ pub fn resolve_silence_data_folder() -> PathBuf {
         }
     }
 
-    // Default: data_dir/Silence/data  (mirrors default_data_folder_path)
+    // Default: data_dir/Mita/data  (mirrors default_data_folder_path)
     let app_name = std::env::var("APP_NAME").unwrap_or_else(|_| APP_NAME.to_string());
     if let Some(data_dir) = dirs::data_dir() {
         return data_dir.join(&app_name).join("data");
@@ -220,7 +236,7 @@ pub fn update_app_configuration<R: Runtime>(
 }
 
 #[tauri::command]
-pub fn get_silence_data_folder_path<R: Runtime>(app_handle: tauri::AppHandle<R>) -> PathBuf {
+pub fn get_mita_data_folder_path<R: Runtime>(app_handle: tauri::AppHandle<R>) -> PathBuf {
     if cfg!(test) {
         use std::cell::RefCell;
         thread_local! {
@@ -251,7 +267,12 @@ pub fn get_silence_data_folder_path<R: Runtime>(app_handle: tauri::AppHandle<R>)
 
 #[tauri::command]
 pub fn get_jan_data_folder_path<R: Runtime>(app_handle: tauri::AppHandle<R>) -> PathBuf {
-    get_silence_data_folder_path(app_handle)
+    get_mita_data_folder_path(app_handle)
+}
+
+#[tauri::command]
+pub fn get_silence_data_folder_path<R: Runtime>(app_handle: tauri::AppHandle<R>) -> PathBuf {
+    get_mita_data_folder_path(app_handle)
 }
 
 #[tauri::command]
@@ -301,7 +322,7 @@ pub fn change_app_data_folder<R: Runtime>(
     new_data_folder: String,
 ) -> Result<(), String> {
     // Get current data folder path
-    let current_data_folder = get_silence_data_folder_path(app_handle.clone());
+    let current_data_folder = get_mita_data_folder_path(app_handle.clone());
     let new_data_folder_path = PathBuf::from(&new_data_folder);
 
     // Create the new data folder if it doesn't exist

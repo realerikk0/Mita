@@ -1,35 +1,58 @@
 use serde_json::{json, Map, Value};
 
-pub const SILENCE_BROWSER_MCP_NAME: &str = "Silence Browser MCP";
+pub const MITA_WEB_RESEARCH_MCP_NAME: &str = "Mita Web Research";
+pub const LEGACY_SILENCE_WEB_RESEARCH_MCP_NAME: &str = "Silence Web Research";
+pub const LEGACY_SILENCE_BROWSER_MCP_NAME: &str = "Silence Browser MCP";
 pub const LEGACY_JAN_BROWSER_MCP_NAME: &str = "Jan Browser MCP";
 
 pub fn is_browser_mcp_name(name: &str) -> bool {
-    matches!(name, SILENCE_BROWSER_MCP_NAME | LEGACY_JAN_BROWSER_MCP_NAME)
+    matches!(
+        name,
+        MITA_WEB_RESEARCH_MCP_NAME
+            | LEGACY_SILENCE_WEB_RESEARCH_MCP_NAME
+            | LEGACY_SILENCE_BROWSER_MCP_NAME
+            | LEGACY_JAN_BROWSER_MCP_NAME
+    )
 }
 
-pub fn default_browser_mcp_config() -> Value {
+pub fn default_web_research_mcp_config() -> Value {
     json!({
-        "command": "npx",
-        "args": ["-y", "search-mcp-server@latest"],
+        "command": "mita-web-research",
+        "args": [],
         "env": {
-            "BRIDGE_HOST": "127.0.0.1",
-            "BRIDGE_PORT": "17389"
+            "MITA_WEB_RESEARCH_HEADLESS": "true"
         },
         "active": false,
-        "official": true
+        "official": true,
+        "capabilities": ["web", "search", "browser"],
+        "description": "Mita built-in web research tools using a private browser profile."
     })
 }
 
 pub fn normalize_browser_mcp_server_key(mcp_servers: &mut Map<String, Value>) -> bool {
-    let has_silence = mcp_servers.contains_key(SILENCE_BROWSER_MCP_NAME);
-    let legacy_config = mcp_servers.remove(LEGACY_JAN_BROWSER_MCP_NAME);
+    let has_web_research = mcp_servers.contains_key(MITA_WEB_RESEARCH_MCP_NAME);
+    let legacy_silence_web_research_config =
+        mcp_servers.remove(LEGACY_SILENCE_WEB_RESEARCH_MCP_NAME);
+    let legacy_silence_browser_config = mcp_servers.remove(LEGACY_SILENCE_BROWSER_MCP_NAME);
+    let legacy_jan_config = mcp_servers.remove(LEGACY_JAN_BROWSER_MCP_NAME);
+    let legacy_config = legacy_silence_web_research_config
+        .or(legacy_silence_browser_config)
+        .or(legacy_jan_config);
 
-    if has_silence {
+    if has_web_research {
         return legacy_config.is_some();
     }
 
-    let browser_config = legacy_config.unwrap_or_else(default_browser_mcp_config);
-    mcp_servers.insert(SILENCE_BROWSER_MCP_NAME.to_string(), browser_config);
+    let old_active = legacy_config
+        .as_ref()
+        .and_then(|config| config.get("active"))
+        .and_then(Value::as_bool)
+        .unwrap_or(false);
+    let mut browser_config = default_web_research_mcp_config();
+    if let Some(config) = browser_config.as_object_mut() {
+        config.insert("active".to_string(), json!(old_active));
+    }
+    mcp_servers.insert(MITA_WEB_RESEARCH_MCP_NAME.to_string(), browser_config);
     true
 }
 
@@ -41,15 +64,16 @@ pub const DEFAULT_MCP_BACKOFF_MULTIPLIER: f64 = 2.0; // Double the delay each ti
 
 pub const DEFAULT_MCP_CONFIG: &str = r#"{
   "mcpServers": {
-    "Silence Browser MCP": {
-      "command": "npx",
-      "args": ["-y", "search-mcp-server@latest"],
+    "Mita Web Research": {
+      "command": "mita-web-research",
+      "args": [],
       "env": {
-        "BRIDGE_HOST": "127.0.0.1",
-        "BRIDGE_PORT": "17389"
+        "MITA_WEB_RESEARCH_HEADLESS": "true"
       },
       "active": false,
-      "official": true
+      "official": true,
+      "capabilities": ["web", "search", "browser"],
+      "description": "Mita built-in web research tools using a private browser profile."
     },
     "exa": {
       "type": "http",

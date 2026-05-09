@@ -1,6 +1,6 @@
 use super::helpers::*;
 use super::models::*;
-use crate::core::filesystem::helpers::resolve_path_within_silence_data_folder;
+use crate::core::filesystem::helpers::resolve_path_within_mita_data_folder;
 use reqwest::header::HeaderMap;
 use std::collections::HashMap;
 
@@ -295,9 +295,11 @@ fn test_download_scope_accepts_absolute_path_inside_canonical_root() {
     symlink(&canonical_root, &configured_root).unwrap();
 
     let candidate = canonical_root.join("llamacpp/backends/v1/backend.tar.gz");
-    let (_, resolved_path) =
-        resolve_path_within_silence_data_folder(&configured_root, candidate.to_string_lossy().as_ref())
-            .unwrap();
+    let (_, resolved_path) = resolve_path_within_mita_data_folder(
+        &configured_root,
+        candidate.to_string_lossy().as_ref(),
+    )
+    .unwrap();
 
     let expected_path = canonical_root
         .canonicalize()

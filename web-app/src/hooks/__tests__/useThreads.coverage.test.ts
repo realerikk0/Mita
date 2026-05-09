@@ -126,7 +126,7 @@ describe('useThreads - coverage', () => {
       title: 'My Thread',
       metadata: expect.objectContaining({
         project: { id: 'p1', name: 'Project', updated_at: 1 },
-        silenceAgents: expect.any(Array),
+        mitaAgents: expect.any(Array),
       }),
     }))
   })
@@ -151,7 +151,7 @@ describe('useThreads - coverage', () => {
       metadata: expect.objectContaining({
         isTemporary: true,
         project: { id: 'p1', name: 'Project', updated_at: 1 },
-        silenceAgents: expect.any(Array),
+        mitaAgents: expect.any(Array),
       }),
     }))
   })
@@ -161,7 +161,7 @@ describe('useThreads - coverage', () => {
     mockCreateThread.mockResolvedValue(thread)
 
     const { result } = renderHook(() => useThreads())
-    const assistant = { id: 'jan', name: 'Silence' } as any
+    const assistant = { id: 'mita', name: 'Mita' } as any
 
     await act(async () => {
       await result.current.createThread({ id: 'm1', provider: 'openai' } as any, 'Title', assistant)

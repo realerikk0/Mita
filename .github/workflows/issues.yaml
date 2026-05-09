@@ -12,5 +12,5 @@ jobs:
     steps:
       - uses: actions/add-to-project@v1.0.2
         with:
-          project-url: https://github.com/orgs/${{ vars.ORG_NAME }}/projects/${{ vars.JAN_PROJECT_NUMBER }}
+          project-url: https://github.com/orgs/${{ vars.ORG_NAME }}/projects/${{ vars.MITA_PROJECT_NUMBER }}
           github-token: ${{ secrets.AUTO_ADD_TICKET_PAT }}

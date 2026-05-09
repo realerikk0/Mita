@@ -1,15 +1,17 @@
 import { SystemInformation } from '../types'
 
 /**
- * Gets Silence's data folder path.
+ * Gets Mita's data folder path.
  *
- * @returns {Promise<string>} A Promise that resolves with Silence's data folder path.
+ * @returns {Promise<string>} A Promise that resolves with Mita's data folder path.
  */
-const getSilenceDataFolderPath = (): Promise<string> =>
+const getMitaDataFolderPath = (): Promise<string> =>
+  globalThis.core.api?.getMitaDataFolderPath?.() ??
   globalThis.core.api?.getSilenceDataFolderPath?.() ??
   globalThis.core.api?.getJanDataFolderPath?.()
 
-const getJanDataFolderPath = getSilenceDataFolderPath
+const getSilenceDataFolderPath = getMitaDataFolderPath
+const getJanDataFolderPath = getMitaDataFolderPath
 
 /**
  * Opens the file explorer at a specific path.
@@ -105,6 +107,7 @@ export type RegisterExtensionPoint = (
  * Functions exports
  */
 export {
+  getMitaDataFolderPath,
   getSilenceDataFolderPath,
   getJanDataFolderPath,
   openFileExplorer,

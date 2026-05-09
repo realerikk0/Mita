@@ -5,7 +5,7 @@ on:
     branches:
       - main
     paths:
-      - '.github/workflows/jan-tauri-build-nightly-external.yaml'
+      - '.github/workflows/mita-tauri-build-nightly-external.yaml'
       - '.github/workflows/template-tauri-build-*-external.yml'
       - 'src-tauri/**'
       - 'core/**'

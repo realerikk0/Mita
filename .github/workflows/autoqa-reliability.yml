@@ -9,21 +9,21 @@ on:
         type: choice
         options: [url]
         default: url
-      jan_app_windows_source:
+      mita_app_windows_source:
         description: 'Windows installer URL path (used when source_type=url or to select artifact)'
         required: true
         type: string
-        default: 'https://catalog.jan.ai/windows/Jan_0.6.8_x64-setup.exe'
-      jan_app_ubuntu_source:
+        default: 'https://updates.jingxing.uk/mita/windows/Mita_0.6.8_x64-setup.exe'
+      mita_app_ubuntu_source:
         description: 'Ubuntu .deb URL path'
         required: true
         type: string
-        default: 'https://delta.jan.ai/nightly/Jan-nightly_0.6.4-728_amd64.deb'
-      jan_app_macos_source:
+        default: 'https://updates.jingxing.uk/mita/nightly/Mita-nightly_0.6.4-728_amd64.deb'
+      mita_app_macos_source:
         description: 'macOS .dmg URL path'
         required: true
         type: string
-        default: 'https://delta.jan.ai/nightly/Jan-nightly_0.6.4-728_universal.dmg'
+        default: 'https://updates.jingxing.uk/mita/nightly/Mita-nightly_0.6.4-728_universal.dmg'
       is_nightly:
         description: 'Is the app a nightly build?'
         required: true
@@ -51,7 +51,7 @@ jobs:
     runs-on: windows-11-nvidia-gpu
     timeout-minutes: 60
     env:
-      DEFAULT_JAN_APP_URL: 'https://catalog.jan.ai/windows/Jan_0.6.8_x64-setup.exe'
+      DEFAULT_MITA_APP_URL: 'https://updates.jingxing.uk/mita/windows/Mita_0.6.8_x64-setup.exe'
       DEFAULT_IS_NIGHTLY: 'false'
     steps:
       - name: Checkout repository
@@ -62,23 +62,23 @@ jobs:
         with:
           python-version: '3.13'
 
-      - name: Clean existing Jan installations
+      - name: Clean existing Mita installations
         shell: powershell
         run: |
           .\autoqa\scripts\windows_cleanup.ps1 -IsNightly "${{ inputs.is_nightly }}"
 
-      - name: Download/Prepare Jan app
+      - name: Download/Prepare Mita app
         shell: powershell
         run: |
           .\autoqa\scripts\windows_download.ps1 `
-            -WorkflowInputUrl "${{ inputs.jan_app_windows_source }}" `
+            -WorkflowInputUrl "${{ inputs.mita_app_windows_source }}" `
             -WorkflowInputIsNightly "${{ inputs.is_nightly }}" `
-            -RepoVariableUrl "${{ vars.JAN_APP_URL }}" `
+            -RepoVariableUrl "${{ vars.MITA_APP_URL }}" `
             -RepoVariableIsNightly "${{ vars.IS_NIGHTLY }}" `
-            -DefaultUrl "$env:DEFAULT_JAN_APP_URL" `
+            -DefaultUrl "$env:DEFAULT_MITA_APP_URL" `
             -DefaultIsNightly "$env:DEFAULT_IS_NIGHTLY"
 
-      - name: Install Jan app
+      - name: Install Mita app
         shell: powershell
         run: |
           .\autoqa\scripts\windows_install.ps1 -IsNightly "$env:IS_NIGHTLY"

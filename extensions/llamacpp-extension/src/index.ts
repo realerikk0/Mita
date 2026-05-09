@@ -8,7 +8,7 @@
 
 import {
   AIEngine,
-  getSilenceDataFolderPath,
+  getMitaDataFolderPath,
   fs,
   joinPath,
   modelInfo,
@@ -67,7 +67,7 @@ import { getSystemUsage, getSystemInfo } from '@janhq/tauri-plugin-hardware-api'
 // Error message constant - matches web-app/src/utils/error.ts
 
 /**
- * Override the default app.log function to use Silence's logging system.
+ * Override the default app.log function to use Mita's logging system.
  * @param args
  */
 const logger = {
@@ -101,7 +101,7 @@ function parseBuildNumber(version: string): number | null {
 }
 
 // Folder structure for llamacpp extension:
-// <Silence's data folder>/llamacpp
+// <Mita's data folder>/llamacpp
 //  - models/<modelId>/
 //    - model.yml (required)
 //    - model.gguf (optional, present if downloaded from URL)
@@ -140,7 +140,7 @@ export default class llamacpp_extension extends AIEngine {
       if (fitItem) fitItem.controllerProps.value = true
     }
 
-    // This makes the settings (including the backend options and initial value) available to the Silence UI.
+    // This makes the settings (including the backend options and initial value) available to the Mita UI.
     this.registerSettings(settings)
 
     let loadedConfig: any = {}
@@ -679,9 +679,9 @@ export default class llamacpp_extension extends AIEngine {
 
       // Clean up old versions — best-effort, don't fail the update if this errors
       try {
-        const silenceDataFolderPath = await getSilenceDataFolderPath()
+        const mitaDataFolderPath = await getMitaDataFolderPath()
         const backendsDir = await joinPath([
-          silenceDataFolderPath,
+          mitaDataFolderPath,
           'llamacpp',
           'backends',
         ])
@@ -834,7 +834,7 @@ export default class llamacpp_extension extends AIEngine {
   async getProviderPath(): Promise<string> {
     if (!this.providerPath) {
       this.providerPath = await joinPath([
-        await getSilenceDataFolderPath(),
+        await getMitaDataFolderPath(),
         this.providerId,
       ])
     }
@@ -945,9 +945,9 @@ export default class llamacpp_extension extends AIEngine {
     // Migration logic: Detect from GGUF
     let isEmbedding = false
     try {
-      const silenceDataFolderPath = await getSilenceDataFolderPath()
+      const mitaDataFolderPath = await getMitaDataFolderPath()
       const fullModelPath = await joinPath([
-        silenceDataFolderPath,
+        mitaDataFolderPath,
         modelConfig.model_path,
       ])
 
@@ -1062,8 +1062,8 @@ export default class llamacpp_extension extends AIEngine {
     // Attempt to migrate only once
     if (localStorage.getItem('cortex_models_migrated') === 'true') return
 
-    const silenceDataFolderPath = await getSilenceDataFolderPath()
-    const modelsDir = await joinPath([silenceDataFolderPath, 'models'])
+    const mitaDataFolderPath = await getMitaDataFolderPath()
+    const modelsDir = await joinPath([mitaDataFolderPath, 'models'])
     if (!(await fs.existsSync(modelsDir))) return
 
     // DFS
@@ -1111,12 +1111,12 @@ export default class llamacpp_extension extends AIEngine {
               ])
               if (await fs.existsSync(configPath)) continue // Don't reimport
 
-              // this is relative to Silence's data folder
+              // this is relative to Mita's data folder
               const modelDir = `${this.providerId}/models/${modelId}`
 
               let size_bytes = (
                 await fs.fileStat(
-                  await joinPath([silenceDataFolderPath, legacyModelPath])
+                  await joinPath([mitaDataFolderPath, legacyModelPath])
                 )
               ).size
 
@@ -1126,7 +1126,7 @@ export default class llamacpp_extension extends AIEngine {
                 name: modelName,
                 size_bytes,
               } as ModelConfig
-              await fs.mkdir(await joinPath([silenceDataFolderPath, modelDir]))
+              await fs.mkdir(await joinPath([mitaDataFolderPath, modelDir]))
               await invoke<void>('write_yaml', {
                 data: modelConfig,
                 savePath: configPath,
@@ -1303,7 +1303,7 @@ export default class llamacpp_extension extends AIEngine {
     if (await fs.existsSync(configPath))
       throw new Error(`Model ${modelId} already exists`)
 
-    // this is relative to Silence's data folder
+    // this is relative to Mita's data folder
     const modelDir = `${this.providerId}/models/${modelId}`
 
     // we only use these from opts
@@ -1420,8 +1420,8 @@ export default class llamacpp_extension extends AIEngine {
     }
 
     // Validate GGUF files
-    const silenceDataFolderPath = await getSilenceDataFolderPath()
-    const fullModelPath = await joinPath([silenceDataFolderPath, modelPath])
+    const mitaDataFolderPath = await getMitaDataFolderPath()
+    const fullModelPath = await joinPath([mitaDataFolderPath, modelPath])
     let isEmbedding = false
 
     try {
@@ -1439,7 +1439,7 @@ export default class llamacpp_extension extends AIEngine {
 
       // Validate mmproj file if present
       if (mmprojPath) {
-        const fullMmprojPath = await joinPath([silenceDataFolderPath, mmprojPath])
+        const fullMmprojPath = await joinPath([mitaDataFolderPath, mmprojPath])
         const mmprojMetadata = await readGgufMetadata(fullMmprojPath)
         logger.info(
           `Mmproj GGUF validation successful: version ${mmprojMetadata.version}, tensors: ${mmprojMetadata.tensor_count}`
@@ -1458,7 +1458,7 @@ export default class llamacpp_extension extends AIEngine {
     let size_bytes = (await fs.fileStat(fullModelPath)).size
     if (mmprojPath) {
       size_bytes += (
-        await fs.fileStat(await joinPath([silenceDataFolderPath, mmprojPath]))
+        await fs.fileStat(await joinPath([mitaDataFolderPath, mmprojPath]))
       ).size
     }
 
@@ -1475,7 +1475,7 @@ export default class llamacpp_extension extends AIEngine {
       mmproj_size_bytes: opts.mmprojSize,
       embedding: isEmbedding,
     } as ModelConfig
-    await fs.mkdir(await joinPath([silenceDataFolderPath, modelDir]))
+    await fs.mkdir(await joinPath([mitaDataFolderPath, modelDir]))
     await invoke<void>('write_yaml', {
       data: modelConfig,
       savePath: configPath,
@@ -1682,7 +1682,7 @@ export default class llamacpp_extension extends AIEngine {
     // Ensure backend is downloaded and ready before proceeding
     await this.ensureBackendReady(backend, version)
 
-    const silenceDataFolderPath = await getSilenceDataFolderPath()
+    const mitaDataFolderPath = await getMitaDataFolderPath()
     const modelConfigPath = await joinPath([
       this.providerPath,
       'models',
@@ -1704,14 +1704,14 @@ export default class llamacpp_extension extends AIEngine {
 
     // Resolve model path
     const modelPath = await joinPath([
-      silenceDataFolderPath,
+      mitaDataFolderPath,
       modelConfig.model_path,
     ])
 
     // Resolve mmproj path if present
     let mmprojPath: string | undefined = undefined
     if (modelConfig.mmproj_path) {
-      mmprojPath = await joinPath([silenceDataFolderPath, modelConfig.mmproj_path])
+      mmprojPath = await joinPath([mitaDataFolderPath, modelConfig.mmproj_path])
     }
 
     // Migrate old env vars
@@ -2244,7 +2244,7 @@ export default class llamacpp_extension extends AIEngine {
    * @returns
    */
   async isToolSupported(modelId: string): Promise<boolean> {
-    const silenceDataFolderPath = await getSilenceDataFolderPath()
+    const mitaDataFolderPath = await getMitaDataFolderPath()
     const modelConfigPath = await joinPath([
       this.providerPath,
       'models',
@@ -2255,9 +2255,9 @@ export default class llamacpp_extension extends AIEngine {
       path: modelConfigPath,
     })
     // model option is required
-    // NOTE: model_path and mmproj_path can be either relative to Silence's data folder or absolute path
+    // NOTE: model_path and mmproj_path can be either relative to Mita's data folder or absolute path
     const modelPath = await joinPath([
-      silenceDataFolderPath,
+      mitaDataFolderPath,
       modelConfig.model_path,
     ])
     return (await readGgufMetadata(modelPath)).metadata?.[

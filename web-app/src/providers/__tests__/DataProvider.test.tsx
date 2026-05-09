@@ -419,7 +419,7 @@ describe('DataProvider', () => {
   })
 
   it('navigates to hub model route when handling a valid deep link', async () => {
-    const deeplinkUrl = 'silence://host/action/owner/repo'
+    const deeplinkUrl = 'mita://host/action/owner/repo'
     hubState.deeplinkGetCurrent.mockResolvedValue([deeplinkUrl])
     render(<DataProvider />)
     await waitFor(() => {
@@ -431,7 +431,7 @@ describe('DataProvider', () => {
   })
 
   it('ignores deep links with insufficient path segments', async () => {
-    hubState.deeplinkGetCurrent.mockResolvedValue(['silence://only'])
+    hubState.deeplinkGetCurrent.mockResolvedValue(['mita://only'])
     render(<DataProvider />)
     await act(async () => {
       await Promise.resolve()

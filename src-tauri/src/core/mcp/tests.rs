@@ -1,9 +1,10 @@
 use super::commands::is_extension_not_connected_error;
 use super::constants::{
-    normalize_browser_mcp_server_key, LEGACY_JAN_BROWSER_MCP_NAME, SILENCE_BROWSER_MCP_NAME,
+    normalize_browser_mcp_server_key, LEGACY_JAN_BROWSER_MCP_NAME, LEGACY_SILENCE_BROWSER_MCP_NAME,
+    LEGACY_SILENCE_WEB_RESEARCH_MCP_NAME, MITA_WEB_RESEARCH_MCP_NAME,
 };
 use super::helpers::{add_server_config, add_server_config_with_path, run_mcp_commands};
-use crate::core::app::commands::get_silence_data_folder_path;
+use crate::core::app::commands::get_mita_data_folder_path;
 use crate::core::state::{AppState, SharedMcpServers};
 use std::collections::HashMap;
 use std::fs::File;
@@ -25,7 +26,7 @@ async fn test_run_mcp_commands() {
     });
 
     // Get the app path where the config should be created
-    let app_path = get_silence_data_folder_path(app.handle().clone());
+    let app_path = get_mita_data_folder_path(app.handle().clone());
     let config_path = app_path.join("mcp_config.json");
 
     // Ensure the directory exists
@@ -51,7 +52,7 @@ async fn test_run_mcp_commands() {
 #[test]
 fn test_add_server_config_new_file() {
     let app = mock_app();
-    let app_path = get_silence_data_folder_path(app.handle().clone());
+    let app_path = get_mita_data_folder_path(app.handle().clone());
     let config_path = app_path.join("mcp_config_test_new.json");
 
     // Ensure the directory exists
@@ -102,7 +103,7 @@ fn test_add_server_config_new_file() {
 #[test]
 fn test_add_server_config_existing_servers() {
     let app = mock_app();
-    let app_path = get_silence_data_folder_path(app.handle().clone());
+    let app_path = get_mita_data_folder_path(app.handle().clone());
     let config_path = app_path.join("mcp_config_test_existing.json");
 
     // Ensure the directory exists
@@ -169,7 +170,7 @@ fn test_add_server_config_existing_servers() {
 #[test]
 fn test_add_server_config_missing_config_file() {
     let app = mock_app();
-    let app_path = get_silence_data_folder_path(app.handle().clone());
+    let app_path = get_mita_data_folder_path(app.handle().clone());
 
     // Ensure the directory exists
     if let Some(parent) = app_path.parent() {
@@ -520,7 +521,9 @@ fn test_default_mcp_config_parses_as_valid_json() {
     assert!(value["mcpServers"].is_object());
     assert!(value["mcpSettings"].is_object());
     // Spot-check known servers
-    assert!(value["mcpServers"][SILENCE_BROWSER_MCP_NAME].is_object());
+    assert!(value["mcpServers"][MITA_WEB_RESEARCH_MCP_NAME].is_object());
+    assert!(value["mcpServers"][LEGACY_SILENCE_WEB_RESEARCH_MCP_NAME].is_null());
+    assert!(value["mcpServers"][LEGACY_SILENCE_BROWSER_MCP_NAME].is_null());
     assert!(value["mcpServers"][LEGACY_JAN_BROWSER_MCP_NAME].is_null());
     assert!(value["mcpServers"]["fetch"].is_object());
     assert_eq!(value["mcpServers"]["fetch"]["command"], "uvx");
@@ -549,21 +552,34 @@ fn test_browser_mcp_config_migrates_legacy_key() {
     );
 
     assert!(normalize_browser_mcp_server_key(&mut servers));
-    assert!(servers.contains_key(SILENCE_BROWSER_MCP_NAME));
+    assert!(servers.contains_key(MITA_WEB_RESEARCH_MCP_NAME));
     assert!(!servers.contains_key(LEGACY_JAN_BROWSER_MCP_NAME));
-    assert_eq!(servers[SILENCE_BROWSER_MCP_NAME]["active"], true);
+    assert_eq!(servers[MITA_WEB_RESEARCH_MCP_NAME]["active"], true);
+    assert_eq!(
+        servers[MITA_WEB_RESEARCH_MCP_NAME]["command"],
+        "mita-web-research"
+    );
 }
 
 #[test]
-fn test_browser_mcp_config_prefers_silence_key() {
+fn test_browser_mcp_config_prefers_web_research_key() {
     let mut servers = serde_json::Map::new();
     servers.insert(
-        SILENCE_BROWSER_MCP_NAME.to_string(),
+        MITA_WEB_RESEARCH_MCP_NAME.to_string(),
+        serde_json::json!({
+            "command": "mita-web-research",
+            "args": [],
+            "env": {},
+            "active": false
+        }),
+    );
+    servers.insert(
+        LEGACY_SILENCE_BROWSER_MCP_NAME.to_string(),
         serde_json::json!({
             "command": "npx",
             "args": ["-y", "search-mcp-server@latest"],
             "env": {},
-            "active": false
+            "active": true
         }),
     );
     servers.insert(
@@ -577,9 +593,10 @@ fn test_browser_mcp_config_prefers_silence_key() {
     );
 
     assert!(normalize_browser_mcp_server_key(&mut servers));
-    assert!(servers.contains_key(SILENCE_BROWSER_MCP_NAME));
+    assert!(servers.contains_key(MITA_WEB_RESEARCH_MCP_NAME));
+    assert!(!servers.contains_key(LEGACY_SILENCE_BROWSER_MCP_NAME));
     assert!(!servers.contains_key(LEGACY_JAN_BROWSER_MCP_NAME));
-    assert_eq!(servers[SILENCE_BROWSER_MCP_NAME]["active"], false);
+    assert_eq!(servers[MITA_WEB_RESEARCH_MCP_NAME]["active"], false);
 }
 
 #[test]
@@ -848,7 +865,7 @@ fn test_mcp_lock_file_serde_round_trip() {
     let lock = McpLockFile {
         pid: 4242,
         port: 17389,
-        server_name: SILENCE_BROWSER_MCP_NAME.to_string(),
+        server_name: MITA_WEB_RESEARCH_MCP_NAME.to_string(),
         created_at: "2026-01-01T00:00:00+00:00".to_string(),
         hostname: "test-host".to_string(),
     };
@@ -856,7 +873,7 @@ fn test_mcp_lock_file_serde_round_trip() {
     let parsed: McpLockFile = serde_json::from_str(&json).unwrap();
     assert_eq!(parsed.pid, 4242);
     assert_eq!(parsed.port, 17389);
-    assert_eq!(parsed.server_name, SILENCE_BROWSER_MCP_NAME);
+    assert_eq!(parsed.server_name, MITA_WEB_RESEARCH_MCP_NAME);
     assert_eq!(parsed.created_at, "2026-01-01T00:00:00+00:00");
     assert_eq!(parsed.hostname, "test-host");
 }
