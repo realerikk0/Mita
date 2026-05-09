@@ -1,0 +1,318 @@
+name: Desktop Release
+
+on:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: write
+
+concurrency:
+  group: desktop-release-${{ github.ref }}
+  cancel-in-progress: false
+
+env:
+  NODE_OPTIONS: "--max-old-space-size=4196"
+  YARN_ENABLE_IMMUTABLE_INSTALLS: "false"
+  AUTO_UPDATER_DISABLED: "true"
+
+jobs:
+  build-macos:
+    name: Build macOS Universal
+    runs-on: macos-latest
+    timeout-minutes: 180
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Derive version
+        id: version
+        shell: bash
+        run: |
+          VERSION="${GITHUB_REF_NAME#v}"
+          if [ -z "$VERSION" ] || [ "$VERSION" = "$GITHUB_REF_NAME" ]; then
+            echo "Release tags must start with v, for example v0.6.599" >&2
+            exit 1
+          fi
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: yarn
+          cache-dependency-path: yarn.lock
+
+      - name: Setup Yarn
+        shell: bash
+        run: |
+          corepack enable
+          corepack prepare yarn@4.5.3 --activate
+          yarn --version
+          yarn config set -H enableImmutableInstalls false
+
+      - name: Setup Rust targets
+        shell: bash
+        run: |
+          rustup default stable
+          rustup target add aarch64-apple-darwin x86_64-apple-darwin
+          rustc --version
+          cargo --version
+
+      - name: Select Xcode
+        shell: bash
+        run: |
+          if [ -d /Applications/Xcode_26.2.app ]; then
+            sudo xcode-select -s /Applications/Xcode_26.2.app/Contents/Developer
+          fi
+          xcodebuild -version
+
+      - name: Stamp release version
+        shell: bash
+        env:
+          VERSION: ${{ steps.version.outputs.version }}
+        run: |
+          node <<'NODE'
+          const fs = require('node:fs')
+
+          const version = process.env.VERSION
+          if (!version) {
+            throw new Error('VERSION is required')
+          }
+
+          function writeJson(file, update) {
+            if (!fs.existsSync(file)) return
+            const value = JSON.parse(fs.readFileSync(file, 'utf8'))
+            update(value)
+            fs.writeFileSync(file, `${JSON.stringify(value, null, 2)}\n`)
+          }
+
+          function stampCargoVersion(file) {
+            if (!fs.existsSync(file)) return
+            const source = fs.readFileSync(file, 'utf8')
+            const next = source.replace(/^version\s*=\s*"[^"]+"/m, `version = "${version}"`)
+            fs.writeFileSync(file, next)
+          }
+
+          writeJson('src-tauri/tauri.conf.json', (json) => {
+            json.version = version
+            json.bundle ??= {}
+            json.bundle.createUpdaterArtifacts = false
+          })
+
+          writeJson('web-app/package.json', (json) => {
+            json.version = version
+          })
+
+          const pluginDirs = [
+            'tauri-plugin-foundation-models',
+            'tauri-plugin-hardware',
+            'tauri-plugin-llamacpp',
+            'tauri-plugin-mlx',
+            'tauri-plugin-rag',
+            'tauri-plugin-vector-db',
+          ]
+
+          for (const dir of pluginDirs) {
+            writeJson(`src-tauri/plugins/${dir}/package.json`, (json) => {
+              json.version = version
+            })
+            stampCargoVersion(`src-tauri/plugins/${dir}/Cargo.toml`)
+          }
+
+          stampCargoVersion('src-tauri/Cargo.toml')
+          console.log(`Stamped release version ${version}`)
+          NODE
+
+      - name: Build app
+        shell: bash
+        env:
+          APP_PATH: "."
+        run: make build
+
+      - name: Upload macOS artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: mita-macos-universal-${{ steps.version.outputs.version }}
+          if-no-files-found: error
+          path: src-tauri/target/universal-apple-darwin/release/bundle/dmg/*.dmg
+
+  build-windows-x64:
+    name: Build Windows x64
+    runs-on: windows-latest
+    timeout-minutes: 180
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Derive version
+        id: version
+        shell: bash
+        run: |
+          VERSION="${GITHUB_REF_NAME#v}"
+          if [ -z "$VERSION" ] || [ "$VERSION" = "$GITHUB_REF_NAME" ]; then
+            echo "Release tags must start with v, for example v0.6.599" >&2
+            exit 1
+          fi
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: yarn
+          cache-dependency-path: yarn.lock
+
+      - name: Setup Yarn
+        shell: bash
+        run: |
+          corepack enable
+          corepack prepare yarn@4.5.3 --activate
+          yarn --version
+          yarn config set -H enableImmutableInstalls false
+
+      - name: Setup Rust
+        shell: bash
+        run: |
+          rustup default stable
+          rustc --version
+          cargo --version
+
+      - name: Install GNU make
+        shell: pwsh
+        run: choco install make -y --no-progress
+
+      - name: Stamp release version and disable signing
+        shell: bash
+        env:
+          VERSION: ${{ steps.version.outputs.version }}
+        run: |
+          node <<'NODE'
+          const fs = require('node:fs')
+
+          const version = process.env.VERSION
+          if (!version) {
+            throw new Error('VERSION is required')
+          }
+
+          function writeJson(file, update) {
+            if (!fs.existsSync(file)) return
+            const value = JSON.parse(fs.readFileSync(file, 'utf8'))
+            update(value)
+            fs.writeFileSync(file, `${JSON.stringify(value, null, 2)}\n`)
+          }
+
+          function stampCargoVersion(file) {
+            if (!fs.existsSync(file)) return
+            const source = fs.readFileSync(file, 'utf8')
+            const next = source.replace(/^version\s*=\s*"[^"]+"/m, `version = "${version}"`)
+            fs.writeFileSync(file, next)
+          }
+
+          function windowsVersionInfo(appVersion) {
+            const [base] = appVersion.split('+')
+            const [numericBase, suffix = '0'] = base.split('-', 2)
+            const suffixNumber = suffix.match(/\d+$/)?.[0] ?? '0'
+            return {
+              fileVersion: numericBase,
+              productVersion: `${numericBase}.${suffixNumber}`,
+            }
+          }
+
+          writeJson('src-tauri/tauri.conf.json', (json) => {
+            json.version = version
+            json.bundle ??= {}
+            json.bundle.createUpdaterArtifacts = false
+          })
+
+          writeJson('src-tauri/tauri.windows.conf.json', (json) => {
+            json.bundle ??= {}
+            json.bundle.windows ??= {}
+            delete json.bundle.windows.signCommand
+            if (json.bundle.windows.nsis) {
+              delete json.bundle.windows.nsis.template
+            }
+          })
+
+          writeJson('web-app/package.json', (json) => {
+            json.version = version
+          })
+
+          const pluginDirs = [
+            'tauri-plugin-foundation-models',
+            'tauri-plugin-hardware',
+            'tauri-plugin-llamacpp',
+            'tauri-plugin-mlx',
+            'tauri-plugin-rag',
+            'tauri-plugin-vector-db',
+          ]
+
+          for (const dir of pluginDirs) {
+            writeJson(`src-tauri/plugins/${dir}/package.json`, (json) => {
+              json.version = version
+            })
+            stampCargoVersion(`src-tauri/plugins/${dir}/Cargo.toml`)
+          }
+
+          stampCargoVersion('src-tauri/Cargo.toml')
+
+          const templatePath = 'src-tauri/tauri.bundle.windows.nsis.template'
+          if (fs.existsSync(templatePath)) {
+            const { fileVersion, productVersion } = windowsVersionInfo(version)
+            const next = fs
+              .readFileSync(templatePath, 'utf8')
+              .replaceAll('mita_productname', 'Mita')
+              .replaceAll('mita_mainbinaryname', 'mita')
+              .replaceAll('mita_version', fileVersion)
+              .replaceAll('mita_build', productVersion)
+              .replace(/^!define UNINSTALLERSIGNCOMMAND .*$/m, '!define UNINSTALLERSIGNCOMMAND ""')
+            fs.writeFileSync(templatePath, next)
+          }
+
+          console.log(`Stamped release version ${version}`)
+          NODE
+
+      - name: Build app
+        shell: bash
+        env:
+          APP_PATH: "."
+        run: make build
+
+      - name: Upload Windows artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: mita-windows-x64-${{ steps.version.outputs.version }}
+          if-no-files-found: error
+          path: |
+            src-tauri/target/release/bundle/nsis/*.exe
+            src-tauri/target/release/bundle/msi/*.msi
+
+  release:
+    name: Create draft release
+    runs-on: ubuntu-latest
+    needs:
+      - build-macos
+      - build-windows-x64
+    steps:
+      - name: Download artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: dist
+
+      - name: Show release files
+        shell: bash
+        run: find dist -maxdepth 3 -type f -print | sort
+
+      - name: Create draft release
+        uses: softprops/action-gh-release@v2
+        with:
+          name: Mita ${{ github.ref_name }}
+          draft: true
+          prerelease: false
+          generate_release_notes: true
+          fail_on_unmatched_files: true
+          files: |
+            dist/**/*.dmg
+            dist/**/*.exe
+            dist/**/*.msi

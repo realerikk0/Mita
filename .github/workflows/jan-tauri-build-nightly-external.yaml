@@ -3,7 +3,7 @@ name: Tauri Builder - Nightly / External PRs
 on:
   pull_request:
     branches:
-      - main
+      - mita-main
     paths:
       - '.github/workflows/mita-tauri-build-nightly-external.yaml'
       - '.github/workflows/template-tauri-build-*-external.yml'

@@ -14,7 +14,7 @@ The product goal is: "幂塔会安安静静地完成主人交代的工作". The 
 - Upstream branch: `main`
 - Upstream commit: `17771a60b8dc89e8fdfcb486d7292e6c4b22cb9a`
 - Local workspace: `/Volumes/Data/CodexProjects/silence`
-- Current branch: `silence-main`
+- Current branch: `mita-main`
 - Desktop stack: Tauri, Rust, React, TypeScript, Vite, Yarn 4
 - Storage model: Jan-compatible `thread.json` plus `messages.jsonl`
 - Primary API shape: OpenAI-compatible `/v1/models` and `/v1/chat/completions`

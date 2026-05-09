@@ -6,7 +6,7 @@ Mita（幂塔）is a quiet desktop AI client built from a lean Jan fork. It keep
 
 ## Status
 
-Mita is under active development. The current local workspace is `/Volumes/Data/CodexProjects/silence`, and the active branch is `silence-main`, based on upstream Jan commit `17771a60b8dc89e8fdfcb486d7292e6c4b22cb9a`.
+Mita is under active development. The current local workspace is `/Volumes/Data/CodexProjects/silence`, and the active branch is `mita-main`, based on upstream Jan commit `17771a60b8dc89e8fdfcb486d7292e6c4b22cb9a`.
 
 See [DEVELOPMENT_PLAN.md](DEVELOPMENT_PLAN.md) for the implementation plan, progress, migration notes, and verification history.
 

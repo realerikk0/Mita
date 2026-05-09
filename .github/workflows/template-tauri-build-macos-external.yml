@@ -5,7 +5,7 @@ on:
       ref:
         required: true
         type: string
-        default: 'refs/heads/main'
+        default: 'refs/heads/mita-main'
       new_version:
         required: true
         type: string

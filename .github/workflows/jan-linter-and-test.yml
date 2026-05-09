@@ -3,7 +3,7 @@ on:
   workflow_dispatch:
   push:
     branches:
-      - main
+      - mita-main
     paths:
       - .github/workflows/mita-linter-and-test.yml
       - 'web/**'
@@ -18,7 +18,7 @@ on:
 
   pull_request:
     branches:
-      - main
+      - mita-main
       - release/**
     paths:
       - .github/workflows/mita-linter-and-test.yml

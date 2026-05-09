@@ -5,7 +5,7 @@ on:
       ref:
         required: true
         type: string
-        default: 'refs/heads/main'
+        default: 'refs/heads/mita-main'
       build_reason:
         required: true
         type: string
@@ -13,7 +13,7 @@ on:
       push_to_branch:
         required: true
         type: string
-        default: 'main'
+        default: 'mita-main'
       new_version:
         required: true
         type: string

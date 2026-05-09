@@ -3,7 +3,7 @@ name: Mita Docs
 on:
   push:
     branches:
-      - main
+      - mita-main
     paths:
       - 'docs/**'
       - '.github/workflows/mita-docs.yml'
@@ -86,13 +86,13 @@ jobs:
               Preview URL: ${{ steps.deployCloudflarePages.outputs.url }}
 
       - name: Publish to Cloudflare Pages Production
-        if: (github.event_name == 'push' && github.ref == 'refs/heads/main') || (github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main') || (github.event_name == 'workflow_dispatch' && startsWith(github.ref, 'refs/heads/release/'))
+        if: (github.event_name == 'push' && github.ref == 'refs/heads/mita-main') || (github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/mita-main') || (github.event_name == 'workflow_dispatch' && startsWith(github.ref, 'refs/heads/release/'))
         uses: cloudflare/pages-action@v1
         with:
           apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
           projectName: ${{ env.CLOUDFLARE_PROJECT_NAME }}
           directory: ./docs/out
-          branch: main
+          branch: mita-main
           # Optional: Enable this if you want to have GitHub Deployments triggered
           gitHubToken: ${{ secrets.GITHUB_TOKEN }}
