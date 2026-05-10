@@ -19,7 +19,16 @@ export default function ToolApproval() {
     return null
   }
 
-  const { toolName, toolParameters, onApprove, onDeny } = modalProps
+  const {
+    toolName,
+    toolParameters,
+    alwaysConfirm,
+    riskSummary,
+    affectedPaths,
+    commandPreview,
+    onApprove,
+    onDeny,
+  } = modalProps
 
   const handleAllowOnce = () => {
     onApprove(true) // true = allow once only
@@ -74,9 +83,45 @@ export default function ToolApproval() {
           </div>
         )}
 
+        {(riskSummary || commandPreview || (affectedPaths && affectedPaths.length > 0)) && (
+          <div className="bg-background p-2 border rounded-lg space-y-2">
+            {riskSummary && (
+              <div>
+                <h4 className="text-sm font-medium mb-1">Risk</h4>
+                <p className="text-sm text-muted-foreground">{riskSummary}</p>
+              </div>
+            )}
+            {affectedPaths && affectedPaths.length > 0 && (
+              <div>
+                <h4 className="text-sm font-medium mb-1">Affected paths</h4>
+                <div className="space-y-1">
+                  {affectedPaths.map((path) => (
+                    <div
+                      key={path}
+                      className="rounded-md border bg-secondary px-2 py-1 font-mono text-xs break-all"
+                    >
+                      {path}
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+            {commandPreview && (
+              <div>
+                <h4 className="text-sm font-medium mb-1">Command</h4>
+                <pre className="rounded-md border bg-secondary p-2 text-xs font-mono whitespace-pre-wrap break-all">
+                  {commandPreview}
+                </pre>
+              </div>
+            )}
+          </div>
+        )}
+
         <div className="p-2 border bg-secondary rounded-lg">
           <p className="text-xs text-muted-foreground leading-relaxed">
-            {t('tools:toolApproval.securityNotice')}
+            {alwaysConfirm
+              ? 'Computer Use actions can modify files or run local commands. Review the exact paths and command before allowing this one-time action.'
+              : t('tools:toolApproval.securityNotice')}
           </p>
         </div>
 
@@ -97,15 +142,17 @@ export default function ToolApproval() {
             >
               {t('tools:toolApproval.allowOnce')}
             </Button>
-            <Button
-              variant="default"
-              size="sm"
-              onClick={handleAllow}
-              autoFocus
-              className="capitalize"
-            >
-              {t('tools:toolApproval.alwaysAllow')}
-            </Button>
+            {!alwaysConfirm && (
+              <Button
+                variant="default"
+                size="sm"
+                onClick={handleAllow}
+                autoFocus
+                className="capitalize"
+              >
+                {t('tools:toolApproval.alwaysAllow')}
+              </Button>
+            )}
           </div>
         </DialogFooter>
       </DialogContent>

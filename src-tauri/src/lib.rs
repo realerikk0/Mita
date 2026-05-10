@@ -38,6 +38,9 @@ macro_rules! invoke_commands_with_extras {
         core::filesystem::commands::decompress,
         core::filesystem::commands::open_dialog,
         core::filesystem::commands::save_dialog,
+        // Computer Use commands
+        core::computer::commands::get_computer_shell_status,
+        core::computer::commands::get_computer_workspace_path,
         // App configuration commands
         core::app::commands::get_app_configurations,
         core::app::commands::get_user_home_path,

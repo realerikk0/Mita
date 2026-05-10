@@ -642,6 +642,9 @@ fn test_mcp_settings_default_matches_constants() {
     assert!(!s.use_lightweight_router_model);
     assert!(s.router_model_provider.is_empty());
     assert!(s.router_model_id.is_empty());
+    assert!(!s.computer_use_enabled);
+    assert!(s.computer_allowed_roots.is_empty());
+    assert!(!s.computer_shell_enabled);
 }
 
 #[test]
@@ -681,6 +684,9 @@ impl PartialEq for super::models::McpSettings {
             && self.use_lightweight_router_model == other.use_lightweight_router_model
             && self.router_model_provider == other.router_model_provider
             && self.router_model_id == other.router_model_id
+            && self.computer_use_enabled == other.computer_use_enabled
+            && self.computer_allowed_roots == other.computer_allowed_roots
+            && self.computer_shell_enabled == other.computer_shell_enabled
     }
 }
 
@@ -692,10 +698,13 @@ fn test_mcp_settings_round_trip_camel_case() {
     s.router_model_provider = "openai".into();
     s.router_model_id = "gpt-4".into();
     s.use_lightweight_router_model = true;
+    s.computer_use_enabled = true;
+    s.computer_allowed_roots = vec!["/tmp/mita".into()];
     let json = serde_json::to_string(&s).unwrap();
     assert!(json.contains("\"toolCallTimeoutSeconds\":42"));
     assert!(json.contains("\"routerModelProvider\":\"openai\""));
     assert!(json.contains("\"useLightweightRouterModel\":true"));
+    assert!(json.contains("\"computerUseEnabled\":true"));
     let parsed: McpSettings = serde_json::from_str(&json).unwrap();
     assert_eq!(parsed, s);
 }

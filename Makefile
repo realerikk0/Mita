@@ -210,7 +210,8 @@ ifeq ($(DETECTED_OS),Darwin)
 	cp src-tauri/resources/bin/mita-cli src-tauri/target/universal-apple-darwin/release/mita-cli
 else ifeq ($(DETECTED_OS),Windows)
 	cd src-tauri && cargo build --release --features cli --bin mita-cli
-	cp src-tauri/target/release/mita-cli.exe src-tauri/resources/bin/mita-cli.exe
+	$(call MKDIR,src-tauri\resources\bin)
+	copy /Y src-tauri\target\release\mita-cli.exe src-tauri\resources\bin\mita-cli.exe
 else
 	cd src-tauri && cargo build --release --features cli --bin mita-cli
 	cp src-tauri/target/release/mita-cli src-tauri/resources/bin/mita-cli
@@ -218,10 +219,10 @@ endif
 
 # Debug build for local dev (faster, native arch only)
 build-cli-dev:
-	$(call MKDIR,'src-tauri/resources/bin')	
+	$(call MKDIR,src-tauri\resources\bin)
 	cd src-tauri && cargo build --features cli --bin mita-cli
 ifeq ($(DETECTED_OS),Windows)
-	copy src-tauri\target\debug\mita-cli.exe src-tauri\resources\bin\mita-cli.exe
+	copy /Y src-tauri\target\debug\mita-cli.exe src-tauri\resources\bin\mita-cli.exe
 else
 	install -m755 src-tauri/target/debug/mita-cli src-tauri/resources/bin/mita-cli
 endif

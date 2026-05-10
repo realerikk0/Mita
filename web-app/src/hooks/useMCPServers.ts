@@ -33,6 +33,9 @@ export type MCPSettings = {
   useLightweightRouterModel: boolean
   routerModelProvider: string
   routerModelId: string
+  computerUseEnabled: boolean
+  computerAllowedRoots: string[]
+  computerShellEnabled: boolean
 }
 
 export const DEFAULT_MCP_SETTINGS: MCPSettings = {
@@ -44,6 +47,9 @@ export const DEFAULT_MCP_SETTINGS: MCPSettings = {
   useLightweightRouterModel: false,
   routerModelProvider: '',
   routerModelId: '',
+  computerUseEnabled: false,
+  computerAllowedRoots: [],
+  computerShellEnabled: false,
 }
 
 type MCPServerStoreState = {

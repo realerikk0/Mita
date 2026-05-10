@@ -74,6 +74,9 @@ src-tauri/resources/
 !src-tauri/resources/bin/
 src-tauri/resources/bin/*
 !src-tauri/resources/bin/mita-web-research-mcp.mjs
+!src-tauri/resources/computer-runner/
+src-tauri/resources/computer-runner/*
+!src-tauri/resources/computer-runner/.gitkeep
 !src-tauri/resources/ms-playwright/
 src-tauri/resources/ms-playwright/*
 !src-tauri/resources/ms-playwright/.gitkeep

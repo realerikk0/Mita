@@ -14,6 +14,11 @@ use super::{
 };
 use crate::core::{
     app::commands::get_mita_data_folder_path,
+    computer::{
+        handlers::handle_computer_tool,
+        shell::shell_status,
+        tools::{computer_summary, computer_tools, is_computer_tool, COMPUTER_SERVER_NAME},
+    },
     mcp::models::{McpSettings, ServerSummary},
     state::AppState,
 };
@@ -323,7 +328,10 @@ pub async fn get_tools<R: Runtime>(
     app: AppHandle<R>,
     state: State<'_, AppState>,
 ) -> Result<Vec<ToolWithServer>, String> {
-    collect_mcp_tools(&app, &*state, None).await
+    let mut tools = collect_mcp_tools(&app, &*state, None).await?;
+    let settings = state.mcp_settings.lock().await.clone();
+    tools.extend(computer_tools(&settings, shell_status().available));
+    Ok(tools)
 }
 
 /// Retrieves tools from a specific subset of MCP servers by name.
@@ -341,11 +349,24 @@ pub async fn get_tools_for_servers<R: Runtime>(
             unique.push(n);
         }
     }
-    let filter: HashSet<String> = unique.into_iter().collect();
+    let mut filter: HashSet<String> = unique.into_iter().collect();
     if filter.is_empty() {
         return Ok(Vec::new());
     }
-    collect_mcp_tools(&app, &state, Some(filter)).await
+
+    let include_computer = filter.remove(COMPUTER_SERVER_NAME);
+    let mut tools = if filter.is_empty() {
+        Vec::new()
+    } else {
+        collect_mcp_tools(&app, &state, Some(filter)).await?
+    };
+
+    if include_computer {
+        let settings = state.mcp_settings.lock().await.clone();
+        tools.extend(computer_tools(&settings, shell_status().available));
+    }
+
+    Ok(tools)
 }
 
 /// Returns name, capability tags, and description for all connected MCP servers
@@ -387,6 +408,11 @@ pub async fn get_server_summaries(
         });
     }
 
+    let settings = state.mcp_settings.lock().await.clone();
+    if let Some(summary) = computer_summary(&settings) {
+        summaries.push(summary);
+    }
+
     Ok(summaries)
 }
 
@@ -410,13 +436,20 @@ pub async fn get_server_summaries(
 /// 5. Supports cancellation via cancellation_token
 /// 6. Returns error if no server has the requested tool or if specified server not found
 #[tauri::command]
-pub async fn call_tool(
+pub async fn call_tool<R: Runtime>(
+    app: AppHandle<R>,
     state: State<'_, AppState>,
     tool_name: String,
     server_name: Option<String>,
     arguments: Option<Map<String, Value>>,
     cancellation_token: Option<String>,
 ) -> Result<CallToolResult, String> {
+    if is_computer_tool(&tool_name) {
+        let settings = state.mcp_settings.lock().await.clone();
+        let data_folder = get_mita_data_folder_path(app);
+        return handle_computer_tool(data_folder, settings, &tool_name, arguments).await;
+    }
+
     let timeout_duration = tool_call_timeout(&*state).await;
     // Set up cancellation if token is provided
     let (cancel_tx, cancel_rx) = oneshot::channel::<()>();

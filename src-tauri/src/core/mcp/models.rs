@@ -47,6 +47,18 @@ fn default_router_model_id() -> String {
     String::new()
 }
 
+fn default_computer_use_enabled() -> bool {
+    false
+}
+
+fn default_computer_allowed_roots() -> Vec<String> {
+    Vec::new()
+}
+
+fn default_computer_shell_enabled() -> bool {
+    false
+}
+
 /// Runtime MCP settings that can be adjusted via UI
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -67,6 +79,12 @@ pub struct McpSettings {
     pub router_model_provider: String,
     #[serde(default = "default_router_model_id")]
     pub router_model_id: String,
+    #[serde(default = "default_computer_use_enabled")]
+    pub computer_use_enabled: bool,
+    #[serde(default = "default_computer_allowed_roots")]
+    pub computer_allowed_roots: Vec<String>,
+    #[serde(default = "default_computer_shell_enabled")]
+    pub computer_shell_enabled: bool,
 }
 
 impl Default for McpSettings {
@@ -80,6 +98,9 @@ impl Default for McpSettings {
             use_lightweight_router_model: false,
             router_model_provider: String::new(),
             router_model_id: String::new(),
+            computer_use_enabled: false,
+            computer_allowed_roots: Vec::new(),
+            computer_shell_enabled: false,
         }
     }
 }

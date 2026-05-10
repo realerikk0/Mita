@@ -33,6 +33,7 @@
     "resources": [
       "resources/LICENSE",
       "resources/bin/mita-cli.exe",
+      "resources/computer-runner/**/*",
       "resources/bin/mita-web-research-mcp.mjs",
       "resources/ms-playwright/**/*",
       "resources/node_modules/playwright/**/*",

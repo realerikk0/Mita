@@ -106,6 +106,15 @@ const h = vi.hoisted(() => {
   const useToolAvailableMock: any = (selector: any) => selector(toolAvailableState)
   useToolAvailableMock.getState = () => toolAvailableState
 
+  const mcpServersState: any = {
+    settings: {
+      computerUseEnabled: false,
+      computerShellEnabled: false,
+    },
+  }
+  const useMCPServersMock: any = (selector: any) => selector(mcpServersState)
+  useMCPServersMock.getState = () => mcpServersState
+
   const toolApprovalState: any = {
     showApprovalModal: vi.fn().mockResolvedValue(true),
     approveToolForThread: vi.fn(),
@@ -150,6 +159,8 @@ const h = vi.hoisted(() => {
     useAttachmentsMock,
     toolAvailableState,
     useToolAvailableMock,
+    mcpServersState,
+    useMCPServersMock,
     toolApprovalState,
     useToolApprovalMock,
     agentModeState,
@@ -341,6 +352,7 @@ vi.mock('@/hooks/useChatAttachments', () => ({
 }))
 vi.mock('@/hooks/useAttachments', () => ({ useAttachments: h.useAttachmentsMock }))
 vi.mock('@/hooks/useToolAvailable', () => ({ useToolAvailable: h.useToolAvailableMock }))
+vi.mock('@/hooks/useMCPServers', () => ({ useMCPServers: h.useMCPServersMock }))
 vi.mock('@/hooks/useToolApproval', () => ({ useToolApproval: h.useToolApprovalMock }))
 vi.mock('@/hooks/useAgentMode', () => ({ useAgentMode: h.useAgentModeMock }))
 vi.mock('@/stores/message-queue-store', () => ({ useMessageQueue: h.useMessageQueueMock }))

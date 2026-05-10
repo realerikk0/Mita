@@ -309,6 +309,57 @@ describe('useToolApproval', () => {
       expect(result.current.isToolApproved('thread-1', 'tool-a')).toBe(true)
     })
 
+    it('should force modal when alwaysConfirm is true even with global auto approval', async () => {
+      const { result } = renderHook(() => useToolApproval())
+
+      act(() => {
+        result.current.setAllowAllMCPPermissions(true)
+      })
+
+      let approvalPromise: Promise<boolean>
+      act(() => {
+        approvalPromise = result.current.showApprovalModal(
+          'computer_create_text_file',
+          'thread-1',
+          { content: 'hello' },
+          { alwaysConfirm: true, riskSummary: 'Writes a file.' }
+        )
+      })
+
+      expect(result.current.isModalOpen).toBe(true)
+      expect(result.current.modalProps?.alwaysConfirm).toBe(true)
+      expect(result.current.modalProps?.riskSummary).toBe('Writes a file.')
+
+      act(() => {
+        result.current.modalProps?.onApprove(true)
+      })
+
+      expect(await approvalPromise!).toBe(true)
+    })
+
+    it('should not remember alwaysConfirm approvals', async () => {
+      const { result } = renderHook(() => useToolApproval())
+
+      let approvalPromise: Promise<boolean>
+      act(() => {
+        approvalPromise = result.current.showApprovalModal(
+          'computer_create_text_file',
+          'thread-1',
+          {},
+          { alwaysConfirm: true }
+        )
+      })
+
+      expect(result.current.isModalOpen).toBe(true)
+
+      act(() => {
+        result.current.modalProps?.onApprove(false)
+      })
+
+      expect(await approvalPromise!).toBe(true)
+      expect(result.current.approvedTools['thread-1']).toBeUndefined()
+    })
+
     it('should resolve with false when onDeny is called', async () => {
       const { result } = renderHook(() => useToolApproval())
 

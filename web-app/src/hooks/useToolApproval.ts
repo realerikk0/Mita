@@ -6,8 +6,19 @@ export type ToolApprovalModalProps = {
   toolName: string
   threadId: string
   toolParameters?: object
+  alwaysConfirm?: boolean
+  riskSummary?: string
+  affectedPaths?: string[]
+  commandPreview?: string
   onApprove: (allowOnce: boolean) => void
   onDeny: () => void
+}
+
+export type ToolApprovalOptions = {
+  alwaysConfirm?: boolean
+  riskSummary?: string
+  affectedPaths?: string[]
+  commandPreview?: string
 }
 
 type ToolApprovalState = {
@@ -22,7 +33,12 @@ type ToolApprovalState = {
   // Actions
   approveToolForThread: (threadId: string, toolName: string) => void
   isToolApproved: (threadId: string, toolName: string) => boolean
-  showApprovalModal: (toolName: string, threadId: string, toolParameters?: object) => Promise<boolean>
+  showApprovalModal: (
+    toolName: string,
+    threadId: string,
+    toolParameters?: object,
+    options?: ToolApprovalOptions
+  ) => Promise<boolean>
   closeModal: () => void
   setModalOpen: (open: boolean) => void
   setAllowAllMCPPermissions: (allow: boolean) => void
@@ -53,18 +69,24 @@ export const useToolApproval = create<ToolApprovalState>()(
         return state.approvedTools[threadId]?.includes(toolName) || false
       },
 
-      showApprovalModal: (toolName: string, threadId: string, toolParameters?: object) => {
+      showApprovalModal: (
+        toolName: string,
+        threadId: string,
+        toolParameters?: object,
+        options?: ToolApprovalOptions
+      ) => {
         return new Promise<boolean>((resolve) => {
           const state = get()
+          const alwaysConfirm = options?.alwaysConfirm === true
 
           // Auto-approve if the user has enabled auto-approval setting
-          if (state.allowAllMCPPermissions) {
+          if (!alwaysConfirm && state.allowAllMCPPermissions) {
             resolve(true)
             return
           }
 
           // Check if tool is already approved for this thread
-          if (state.isToolApproved(threadId, toolName)) {
+          if (!alwaysConfirm && state.isToolApproved(threadId, toolName)) {
             resolve(true)
             return
           }
@@ -75,8 +97,12 @@ export const useToolApproval = create<ToolApprovalState>()(
               toolName,
               threadId,
               toolParameters,
+              alwaysConfirm,
+              riskSummary: options?.riskSummary,
+              affectedPaths: options?.affectedPaths,
+              commandPreview: options?.commandPreview,
               onApprove: (allowOnce: boolean) => {
-                if (!allowOnce) {
+                if (!allowOnce && !alwaysConfirm) {
                   // If not "allow once", add to approved tools for this thread
                   get().approveToolForThread(threadId, toolName)
                 }

@@ -28,6 +28,7 @@ import { toast } from 'sonner'
 import { useTranslation } from '@/i18n/react-i18next-compat'
 import { useAppState } from '@/hooks/useAppState'
 import { listen } from '@tauri-apps/api/event'
+import { invoke } from '@tauri-apps/api/core'
 import { SystemEvent } from '@/types/events'
 import { Button } from '@/components/ui/button'
 import { cn } from '@/lib/utils'
@@ -41,6 +42,34 @@ import {
   LEGACY_SILENCE_WEB_RESEARCH_MCP_NAME,
   MITA_WEB_RESEARCH_MCP_NAME,
 } from '@/constants/mcp'
+
+type ComputerShellStatus = {
+  platform: string
+  available: boolean
+  reason?: string
+  sandboxKind?: string
+  phase?: string
+  blockers?: string[]
+}
+
+const formatComputerShellStatus = (status: ComputerShellStatus | null) => {
+  if (!status) return 'Shell sandbox status is not available.'
+
+  const runner = status.sandboxKind ? `${status.sandboxKind}` : status.platform
+  if (status.available) {
+    return `Sandbox available on ${status.platform} via ${runner}. Shell is still limited to allowed roots.`
+  }
+
+  const details = [
+    status.reason,
+    status.phase ? `Phase: ${status.phase}.` : undefined,
+    status.blockers?.length
+      ? `Blockers: ${status.blockers.slice(0, 2).join('; ')}.`
+      : undefined,
+  ].filter(Boolean)
+
+  return details.join(' ') || 'Shell sandbox status is not available.'
+}
 
 // Function to mask sensitive URL parameters
 const maskSensitiveUrl = (url: string) => {
@@ -143,6 +172,9 @@ function MCPServersDesktop() {
   const [loadingServers, setLoadingServers] = useState<{
     [key: string]: boolean
   }>({})
+  const [computerRootInput, setComputerRootInput] = useState('')
+  const [computerShellStatus, setComputerShellStatus] =
+    useState<ComputerShellStatus | null>(null)
   const setErrorMessage = useAppState((state) => state.setErrorMessage)
 
   const updateToolCallTimeout = (rawValue: string) => {
@@ -163,6 +195,30 @@ function MCPServersDesktop() {
 
   const routerPickerDisabled =
     !settings.enableSmartToolRouting || !settings.useLightweightRouterModel
+
+  const addComputerAllowedRoot = () => {
+    const root = computerRootInput.trim()
+    if (!root) return
+
+    const roots = settings.computerAllowedRoots ?? []
+    if (roots.some((value) => value.toLowerCase() === root.toLowerCase())) {
+      setComputerRootInput('')
+      return
+    }
+
+    updateSettings({ computerAllowedRoots: [...roots, root] })
+    setComputerRootInput('')
+    void syncServers()
+  }
+
+  const removeComputerAllowedRoot = (root: string) => {
+    updateSettings({
+      computerAllowedRoots: (settings.computerAllowedRoots ?? []).filter(
+        (value) => value !== root
+      ),
+    })
+    void syncServers()
+  }
 
   useEffect(() => {
     if (
@@ -193,6 +249,18 @@ function MCPServersDesktop() {
     modelProviders,
     updateSettings,
   ])
+
+  useEffect(() => {
+    invoke<ComputerShellStatus>('get_computer_shell_status')
+      .then(setComputerShellStatus)
+      .catch(() => {
+        setComputerShellStatus({
+          platform: 'unknown',
+          available: false,
+          reason: 'Unable to inspect shell sandbox status.',
+        })
+      })
+  }, [])
 
   const handleOpenDialog = (serverKey?: string) => {
     if (serverKey) {
@@ -470,6 +538,109 @@ function MCPServersDesktop() {
                         checked={allowAllMCPPermissions}
                         onCheckedChange={setAllowAllMCPPermissions}
                       />
+                    </div>
+                  }
+                />
+                <CardItem
+                  title="Computer Use"
+                  description="Expose Mita's built-in local computer tools to application chats. Real actions always require one-time confirmation."
+                  actions={
+                    <div className="shrink-0 ml-4">
+                      <Switch
+                        checked={settings.computerUseEnabled}
+                        onCheckedChange={(checked) => {
+                          updateSettings(
+                            checked
+                              ? { computerUseEnabled: true }
+                              : {
+                                  computerUseEnabled: false,
+                                  computerShellEnabled: false,
+                                }
+                          )
+                          void syncServers()
+                        }}
+                      />
+                    </div>
+                  }
+                />
+                <CardItem
+                  title="Computer Shell"
+                  description={formatComputerShellStatus(computerShellStatus)}
+                  actions={
+                    <div className="shrink-0 ml-4">
+                      <Switch
+                        checked={
+                          settings.computerShellEnabled &&
+                          computerShellStatus?.available === true
+                        }
+                        disabled={
+                          !settings.computerUseEnabled ||
+                          computerShellStatus?.available !== true
+                        }
+                        onCheckedChange={(checked) => {
+                          updateSettings({ computerShellEnabled: checked })
+                          void syncServers()
+                        }}
+                      />
+                    </div>
+                  }
+                />
+                <CardItem
+                  title="Allowed Computer Roots"
+                  description="Optional folders outside the private thread workspace that Computer Use can access after approval."
+                  column
+                  actions={
+                    <div className="w-full space-y-2">
+                      <div className="flex gap-2">
+                        <Input
+                          value={computerRootInput}
+                          onChange={(event) =>
+                            setComputerRootInput(event.target.value)
+                          }
+                          onKeyDown={(event) => {
+                            if (event.key === 'Enter') {
+                              event.preventDefault()
+                              addComputerAllowedRoot()
+                            }
+                          }}
+                          placeholder="Absolute folder path"
+                          disabled={!settings.computerUseEnabled}
+                        />
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          disabled={
+                            !settings.computerUseEnabled ||
+                            !computerRootInput.trim()
+                          }
+                          onClick={addComputerAllowedRoot}
+                        >
+                          Add
+                        </Button>
+                      </div>
+                      {(settings.computerAllowedRoots ?? []).length > 0 && (
+                        <div className="space-y-1">
+                          {(settings.computerAllowedRoots ?? []).map((root) => (
+                            <div
+                              key={root}
+                              className="flex items-center justify-between gap-2 rounded-md border bg-background px-2 py-1 text-xs"
+                            >
+                              <span className="break-all">{root}</span>
+                              <Button
+                                variant="ghost"
+                                size="icon-xs"
+                                onClick={() => removeComputerAllowedRoot(root)}
+                                title="Remove allowed root"
+                              >
+                                <IconTrash
+                                  size={14}
+                                  className="text-muted-foreground"
+                                />
+                              </Button>
+                            </div>
+                          ))}
+                        </div>
+                      )}
                     </div>
                   }
                 />

@@ -1,0 +1,41 @@
+//! Experimental Windows Computer Use runner.
+//!
+//! The native execution path is still behind
+//! `MITA_EXPERIMENTAL_WINDOWS_COMPUTER_RUNNER_EXECUTE=1`, and the desktop app
+//! does not expose it to chats yet.
+
+use std::io::{self, Read};
+
+use app_lib::core::computer::windows_runner::{
+    error_response, execute_runner_request, preflight_response, RunnerRequest,
+};
+
+fn main() {
+    let response = match std::env::args().nth(1).as_deref() {
+        Some("--self-test") | Some("self-test") | Some("preflight") => preflight_response(),
+        Some("--run") | Some("run") | None => run_from_stdin(),
+        Some(other) => error_response(format!("Unknown runner argument '{other}'")),
+    };
+
+    match serde_json::to_string_pretty(&response) {
+        Ok(json) => println!("{json}"),
+        Err(error) => {
+            eprintln!("Failed to serialize runner response: {error}");
+            std::process::exit(1);
+        }
+    }
+}
+
+fn run_from_stdin() -> app_lib::core::computer::windows_runner::RunnerResponse {
+    let mut input = String::new();
+    if let Err(error) = io::stdin().read_to_string(&mut input) {
+        return error_response(format!("Failed to read runner request: {error}"));
+    }
+
+    let request: RunnerRequest = match serde_json::from_str(&input) {
+        Ok(request) => request,
+        Err(error) => return error_response(format!("Invalid runner request JSON: {error}")),
+    };
+
+    execute_runner_request(request)
+}

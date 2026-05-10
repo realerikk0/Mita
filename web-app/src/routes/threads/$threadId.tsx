@@ -47,6 +47,7 @@ import { processAttachmentsForSend } from '@/lib/attachmentProcessing'
 import { useAttachments } from '@/hooks/useAttachments'
 import { PromptProgress } from '@/components/PromptProgress'
 import { useToolAvailable } from '@/hooks/useToolAvailable'
+import { useMCPServers } from '@/hooks/useMCPServers'
 import { OUT_OF_CONTEXT_SIZE } from '@/utils/error'
 import { Button } from '@/components/ui/button'
 import { IconAlertCircle, IconRefresh } from '@tabler/icons-react'
@@ -111,6 +112,57 @@ function getConfiguredMaxContextTokens(
 
 const createAutoRunPrompt = (round: number, maxRounds: number) =>
   `继续执行主人交代的任务，给出下一步结果；当前为第 ${round} / ${maxRounds} 轮。保持安静、直接、可执行。`
+
+const COMPUTER_TOOL_PREFIX = 'computer_'
+const COMPUTER_THREAD_ID_ARG = '_mitaThreadId'
+
+function isComputerToolName(toolName: string) {
+  return toolName.startsWith(COMPUTER_TOOL_PREFIX)
+}
+
+function asToolInput(value: unknown): Record<string, unknown> {
+  return value && typeof value === 'object' && !Array.isArray(value)
+    ? (value as Record<string, unknown>)
+    : {}
+}
+
+function stringValue(value: unknown): string | undefined {
+  return typeof value === 'string' && value.trim() ? value.trim() : undefined
+}
+
+function computerApprovalDetails(
+  toolName: string,
+  input: Record<string, unknown>
+) {
+  const affectedPaths = [
+    stringValue(input.path),
+    stringValue(input.directory),
+    stringValue(input.cwd),
+    stringValue(input.from),
+    stringValue(input.to),
+  ].filter(Boolean) as string[]
+
+  const commandPreview =
+    toolName === 'computer_run_shell'
+      ? stringValue(input.command)
+      : undefined
+
+  const riskSummary =
+    toolName === 'computer_run_shell'
+      ? 'Runs a local shell command in Mita sandbox limits.'
+      : toolName === 'computer_trash_path'
+        ? 'Moves a local file or folder to the system trash.'
+        : toolName === 'computer_open_path'
+          ? 'Opens a local path with the operating system.'
+          : 'Reads or modifies files inside Mita Computer Use roots.'
+
+  return {
+    alwaysConfirm: true,
+    riskSummary,
+    affectedPaths,
+    commandPreview,
+  }
+}
 
 type ThreadModel = {
   id: string
@@ -191,6 +243,12 @@ function ThreadDetail() {
   const selectedModel = useModelProvider((state) => state.selectedModel)
   const selectedProvider = useModelProvider((state) => state.selectedProvider)
   const getProviderByName = useModelProvider((state) => state.getProviderByName)
+  const computerUseEnabled = useMCPServers(
+    (state) => state.settings.computerUseEnabled
+  )
+  const computerShellEnabled = useMCPServers(
+    (state) => state.settings.computerShellEnabled
+  )
   const threadRef = useRef(thread)
   const projectId = threadRef.current?.metadata?.project?.id
 
@@ -198,7 +256,19 @@ function ThreadDetail() {
   // personas do not leak when a thread has no assigned assistant.
   const threadAssistant = thread?.assistants?.[0]
   const systemMessage = renderInstructions(
-    ensureMitaIdentityGuard(threadAssistant?.instructions)
+    `${ensureMitaIdentityGuard(threadAssistant?.instructions)}${
+      computerUseEnabled
+        ? `\n\nComputer Use guidance:
+- Prefer structured computer tools for file and folder work.
+- If the user asks to create a file without a path, omit the directory so Mita uses the private thread workspace.
+- Do not invent absolute paths. Ask for a folder or use the thread workspace when the user gives no path.
+- Every computer action requires user approval, so keep tool arguments precise and minimal.${
+            computerShellEnabled
+              ? '\n- Use computer_run_shell only when structured computer tools are insufficient.'
+              : ''
+          }`
+        : ''
+    }`
   )
 
   useEffect(() => {
@@ -386,13 +456,22 @@ function ThreadDetail() {
 
           try {
             const toolName = toolCall.toolName
+            const toolInput = asToolInput(toolCall.input)
+            const isComputerTool = isComputerToolName(toolName)
 
             // Built-in RAG tools are internal and should not require approval.
             const approved = ragToolNames.has(toolName)
               ? true
               : await useToolApproval
                   .getState()
-                  .showApprovalModal(toolName, threadId, toolCall.input)
+                  .showApprovalModal(
+                    toolName,
+                    threadId,
+                    toolInput,
+                    isComputerTool
+                      ? computerApprovalDetails(toolName, toolInput)
+                      : undefined
+                  )
 
             if (!approved) {
               // User denied the tool call
@@ -411,15 +490,17 @@ function ThreadDetail() {
             if (ragToolNames.has(toolName)) {
               result = await serviceHub.rag().callTool({
                 toolName,
-                arguments: toolCall.input,
+                arguments: toolInput,
                 threadId,
                 projectId: projectId,
                 scope: projectId ? 'project' : 'thread',
               })
-            } else if (mcpToolNames.has(toolName)) {
+            } else if (isComputerTool || mcpToolNames.has(toolName)) {
               result = await serviceHub.mcp().callTool({
                 toolName,
-                arguments: toolCall.input,
+                arguments: isComputerTool
+                  ? { ...toolInput, [COMPUTER_THREAD_ID_ARG]: threadId }
+                  : toolInput,
               })
             } else {
               // Tool not found in either service
