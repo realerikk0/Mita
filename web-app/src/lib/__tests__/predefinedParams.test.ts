@@ -14,6 +14,7 @@ describe('predefinedParams', () => {
     expect(keys).toContain('max_output_tokens')
     expect(keys).toContain('max_context_tokens')
     expect(keys).toContain('auto_compact')
+    expect(keys).toContain('auto_compact_threshold')
     expect(keys).toContain('frequency_penalty')
     expect(keys).toContain('presence_penalty')
     expect(keys).toContain('top_p')
@@ -43,6 +44,10 @@ describe('predefinedParams', () => {
 
   it('auto_compact defaults to false', () => {
     expect(paramsSettings.auto_compact.value).toBe(false)
+  })
+
+  it('auto_compact_threshold defaults to 0.85', () => {
+    expect(paramsSettings.auto_compact_threshold.value).toBe(0.85)
   })
 
   it('top_p has controllerType slider', () => {

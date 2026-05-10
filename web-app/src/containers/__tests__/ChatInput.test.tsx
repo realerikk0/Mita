@@ -356,6 +356,22 @@ describe('ChatInput', () => {
     expect(setPromptMock).toHaveBeenCalledWith('')
   })
 
+  it('routes /compact to onCompact without normal submit', async () => {
+    promptState = '/compact focus on tests'
+    const onSubmit = vi.fn()
+    const onCompact = vi.fn().mockResolvedValue(undefined)
+    renderInput({ onSubmit, onCompact })
+
+    await act(async () => {
+      fireEvent.keyDown(getTextarea(), { key: 'Enter' })
+    })
+
+    expect(onCompact).toHaveBeenCalledWith('focus on tests')
+    expect(onSubmit).not.toHaveBeenCalled()
+    expect(addToHistoryMock).toHaveBeenCalledWith('/compact focus on tests')
+    expect(clearAttachmentsMock).toHaveBeenCalledWith('thread-1')
+  })
+
   it('does NOT submit on Shift+Enter (newline behavior)', () => {
     promptState = 'hello'
     const onSubmit = vi.fn()

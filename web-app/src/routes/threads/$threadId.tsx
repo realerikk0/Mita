@@ -16,6 +16,7 @@ import { useAppState } from '@/hooks/useAppState'
 import { SESSION_STORAGE_PREFIX } from '@/constants/chat'
 import { useChat } from '@/hooks/use-chat'
 import { useModelProvider } from '@/hooks/useModelProvider'
+import { useAssistant } from '@/hooks/useAssistant'
 import { renderInstructions } from '@/lib/instructionTemplate'
 import { ensureMitaIdentityGuard } from '@/lib/mita-prompt'
 import {
@@ -58,7 +59,16 @@ import { useAgentMode } from '@/hooks/useAgentMode'
 import { useAutoRunStore } from '@/stores/auto-run-store'
 import { useMessageQueue } from '@/stores/message-queue-store'
 import { generateThreadTitle } from '@/lib/thread-title-summarizer'
+import { ModelFactory } from '@/lib/model-factory'
+import {
+  DEFAULT_COMPACT_RECENT_TOKEN_LIMIT,
+  compactThreadMessages,
+  normalizeAutoCompactThreshold,
+  shouldAutoCompactThread,
+  type MitaCompactTrigger,
+} from '@/lib/compact-thread'
 import { useAutoScroll } from '@/hooks/useAutoScroll'
+import { toast } from 'sonner'
 import {
   DEFAULT_MITA_AGENTS,
   DEFAULT_MITA_AUTO_RUN,
@@ -74,6 +84,30 @@ const CHAT_STATUS = {
 // Title summarization constants
 const MAX_TITLE_SUMMARIZATION_ATTEMPTS = 3
 const TITLE_SUMMARIZATION_MIN_LENGTH = 50
+
+function numericParam(value: unknown): number | undefined {
+  const parsed = typeof value === 'number' ? value : Number(value)
+  return Number.isFinite(parsed) && parsed > 0 ? parsed : undefined
+}
+
+function booleanParam(value: unknown, defaultValue: boolean): boolean {
+  if (value === undefined || value === null) return defaultValue
+  return value === true || value === 'true'
+}
+
+function getConfiguredMaxContextTokens(
+  parameters: Record<string, unknown>,
+  model?: Model | null
+): number {
+  const explicit = numericParam(parameters.max_context_tokens)
+  if (explicit) return explicit
+
+  const settings = model?.settings as
+    | Record<string, { controller_props?: { value?: unknown } }>
+    | undefined
+  const modelContext = numericParam(settings?.ctx_len?.controller_props?.value)
+  return modelContext ?? 0
+}
 
 const createAutoRunPrompt = (round: number, maxRounds: number) =>
   `继续执行主人交代的任务，给出下一步结果；当前为第 ${round} / ${maxRounds} 轮。保持安静、直接、可执行。`
@@ -490,6 +524,134 @@ function ThreadDetail() {
     sendAutomaticallyWhen: followUpMessage,
   })
 
+  const createCompactionModel = useCallback(async () => {
+    const modelId = useModelProvider.getState().selectedModel?.id
+    const providerId = useModelProvider.getState().selectedProvider
+    const provider = useModelProvider.getState().getProviderByName(providerId)
+    if (!modelId || !provider) {
+      throw new Error('Select a model before compacting context.')
+    }
+
+    const inferenceParams =
+      useAssistant.getState().currentAssistant?.parameters ?? {}
+    return ModelFactory.createModel(modelId, provider, inferenceParams)
+  }, [])
+
+  const persistCompactionResult = useCallback(
+    (result: Awaited<ReturnType<typeof compactThreadMessages>>) => {
+      if (!result.compacted || !result.summaryMessage) return
+
+      for (const archivedMessage of result.archivedMessages) {
+        updateMessage(archivedMessage)
+      }
+      addMessage(result.summaryMessage)
+      setMessages(threadId, result.messages)
+      setChatMessages(convertThreadMessagesToUIMessages(result.messages))
+    },
+    [addMessage, setChatMessages, setMessages, threadId, updateMessage]
+  )
+
+  const runThreadCompaction = useCallback(
+    async ({
+      trigger,
+      customInstructions,
+      maxRecentTokens,
+    }: {
+      trigger: MitaCompactTrigger
+      customInstructions?: string
+      maxRecentTokens?: number
+    }) => {
+      const sourceMessages = useMessages.getState().getMessages(threadId)
+      if (sourceMessages.length === 0) return false
+
+      const model = await createCompactionModel()
+      const result = await compactThreadMessages({
+        threadId,
+        messages: sourceMessages,
+        model,
+        trigger,
+        customInstructions,
+        maxRecentTokens,
+      })
+
+      if (!result.compacted) return false
+      persistCompactionResult(result)
+      return true
+    },
+    [createCompactionModel, persistCompactionResult, threadId]
+  )
+
+  const maybeAutoCompactBeforeSend = useCallback(
+    async (incomingText: string) => {
+      const assistantParameters =
+        useAssistant.getState().currentAssistant?.parameters ?? {}
+      if (!booleanParam(assistantParameters.auto_compact, true)) return false
+
+      const selectedModelState = useModelProvider.getState().selectedModel
+      const maxContextTokens = getConfiguredMaxContextTokens(
+        assistantParameters,
+        selectedModelState
+      )
+      if (maxContextTokens <= 0) return false
+
+      const threshold = normalizeAutoCompactThreshold(
+        assistantParameters.auto_compact_threshold
+      )
+      const sourceMessages = useMessages.getState().getMessages(threadId)
+      const check = shouldAutoCompactThread({
+        messages: sourceMessages,
+        incomingText,
+        systemPrompt: systemMessage,
+        maxContextTokens,
+        threshold,
+      })
+      if (!check.shouldCompact) return false
+
+      const maxRecentTokens = Math.min(
+        DEFAULT_COMPACT_RECENT_TOKEN_LIMIT,
+        Math.max(1_024, Math.floor(maxContextTokens * 0.35))
+      )
+
+      try {
+        const compacted = await runThreadCompaction({
+          trigger: 'auto',
+          maxRecentTokens,
+        })
+        if (compacted) {
+          console.debug(
+            `[compact] Auto compacted thread ${threadId} at ${check.tokenEstimate}/${check.tokenLimit} estimated tokens`
+          )
+        }
+        return compacted
+      } catch (error) {
+        console.warn('Auto compact failed; falling back to request-level trimming.', error)
+        return false
+      }
+    },
+    [runThreadCompaction, systemMessage, threadId]
+  )
+
+  const handleManualCompact = useCallback(
+    async (customInstructions?: string) => {
+      try {
+        const compacted = await runThreadCompaction({
+          trigger: 'manual',
+          customInstructions,
+        })
+        if (compacted) {
+          toast.success('Context compacted')
+        } else {
+          toast.info('Not enough context to compact yet')
+        }
+      } catch (error) {
+        const message =
+          error instanceof Error ? error.message : 'Failed to compact context'
+        toast.error(message)
+      }
+    },
+    [runThreadCompaction]
+  )
+
   // Get disabled tools for this thread to trigger re-render when they change
   const disabledTools = useToolAvailable((state) =>
     state.getDisabledToolsForThread(threadId)
@@ -742,6 +904,11 @@ function ThreadDetail() {
         processedAttachments,
         messageId
       )
+
+      await maybeAutoCompactBeforeSend(
+        userMessage.content[0].text?.value ?? text
+      )
+
       addMessage(userMessage)
 
       // Build parts for AI SDK (only images are sent as file parts)
@@ -782,6 +949,7 @@ function ThreadDetail() {
       clearAttachmentsForThread,
       serviceHub,
       selectedProvider,
+      maybeAutoCompactBeforeSend,
     ]
   )
 
@@ -797,6 +965,11 @@ function ThreadDetail() {
         messageId,
         metadata
       )
+
+      await maybeAutoCompactBeforeSend(
+        userMessage.content[0].text?.value ?? text
+      )
+
       addMessage(userMessage)
 
       if (metadata?.mita) {
@@ -811,7 +984,7 @@ function ThreadDetail() {
         metadata: userMessage.metadata,
       })
     },
-    [sendMessage, threadId, addMessage]
+    [sendMessage, threadId, addMessage, maybeAutoCompactBeforeSend]
   )
 
   const handleAutoRunStart = useCallback(
@@ -1356,6 +1529,7 @@ function ThreadDetail() {
           <ChatInput
             model={threadModel}
             onSubmit={handleSubmit}
+            onCompact={handleManualCompact}
             onStop={stop}
             chatStatus={status}
           />

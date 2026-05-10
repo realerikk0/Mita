@@ -27,6 +27,10 @@ import TokenSpeedIndicator from '@/containers/TokenSpeedIndicator'
 import { extractFilesFromPrompt, FileMetadata } from '@/lib/fileMetadata'
 import { useMemo } from 'react'
 import { Button } from '@/components/ui/button'
+import {
+  getMitaCompactMetadata,
+  isCompactSummaryMessage,
+} from '@/lib/compact-thread'
 
 const CHAT_STATUS = {
   STREAMING: 'streaming',
@@ -445,6 +449,36 @@ export const MessageItem = memo(
       return elements
       // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [message.parts, isStreaming, isReasoningAtBottom])
+
+    if (message.role === 'system' && isCompactSummaryMessage(message)) {
+      const compactMetadata = getMitaCompactMetadata(message)
+      const summary = getFullTextContent()
+      const sourceMessageCount =
+        compactMetadata?.kind === 'summary'
+          ? compactMetadata.sourceMessageCount
+          : 0
+
+      return (
+        <div className="w-full mb-4">
+          <details className="rounded-md border border-dashed bg-muted/30 px-3 py-2 text-sm">
+            <summary className="cursor-pointer text-muted-foreground">
+              Context compacted
+              {sourceMessageCount > 0 ? ` · ${sourceMessageCount} messages` : ''}
+              {' · '}
+              {formatDate(createdAt)}
+            </summary>
+            <div className="mt-3">
+              <RenderMarkdown
+                content={summary}
+                isStreaming={false}
+                messageId={message.id}
+                isAnimating={false}
+              />
+            </div>
+          </details>
+        </div>
+      )
+    }
 
     return (
       <div className="w-full mb-4">

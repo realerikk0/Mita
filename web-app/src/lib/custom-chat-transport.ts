@@ -30,6 +30,7 @@ import {
   estimateTokens,
   type ContextManagerConfig,
 } from './context-manager'
+import { isArchivedCompactMessage } from './compact-thread'
 import { mcpOrchestrator } from '@/lib/mcp-orchestrator'
 import { isRouterModelSelectable } from '@/lib/mcp-router-model-filter'
 import { isBrowserMCPServerName } from '@/constants/mcp'
@@ -534,6 +535,9 @@ export class CustomChatTransport implements ChatTransport<UIMessage> {
     })()
 
     const inferenceParams = useAssistant.getState().currentAssistant?.parameters ?? {}
+    const compactVisibleMessages = messagesToConvert.filter(
+      (message) => !isArchivedCompactMessage(message)
+    )
 
     const selectedModel = useModelProvider.getState().selectedModel
 
@@ -553,7 +557,7 @@ export class CustomChatTransport implements ChatTransport<UIMessage> {
       inferenceParams.auto_compact === 'true'
 
     // Auto-trim or auto-compact conversation history when max_context_tokens is configured
-    let effectiveMessages = messagesToConvert
+    let effectiveMessages = compactVisibleMessages
     if (maxContextTokens > 0) {
       const contextConfig: ContextManagerConfig = {
         maxContextTokens,
@@ -567,7 +571,7 @@ export class CustomChatTransport implements ChatTransport<UIMessage> {
 
       if (autoCompact && this.model) {
         const compactResult = await compactMessages(
-          messagesToConvert,
+          compactVisibleMessages,
           contextConfig,
           this.model,
           systemPromptTokens
@@ -581,7 +585,7 @@ export class CustomChatTransport implements ChatTransport<UIMessage> {
         }
       } else {
         const trimResult = trimMessages(
-          messagesToConvert,
+          compactVisibleMessages,
           contextConfig,
           systemPromptTokens
         )

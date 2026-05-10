@@ -89,6 +89,7 @@ import { PromptVisionModel } from '@/containers/PromptVisionModel'
 import { useAgentMode } from '@/hooks/useAgentMode'
 import { AssistantsMenu } from '@/components/AssistantsMenu'
 import { isJingxingNativeWebSearchModel } from '@/lib/models'
+import { parseCompactCommand } from '@/lib/compact-thread'
 
 type ChatInputProps = {
   className?: string
@@ -100,6 +101,7 @@ type ChatInputProps = {
     text: string,
     files?: Array<{ type: string; mediaType: string; url: string }>
   ) => void
+  onCompact?: (instructions?: string) => Promise<void>
   onStop?: () => void
   chatStatus?: ChatStatus
 }
@@ -109,6 +111,7 @@ const ChatInput = memo(function ChatInput({
   initialMessage,
   projectId,
   onSubmit,
+  onCompact,
   onStop,
   chatStatus,
 }: ChatInputProps) {
@@ -389,6 +392,28 @@ const ChatInput = memo(function ChatInput({
   const MCPToolComponent = mcpExtension?.getToolComponent?.()
 
   const handleSendMessage = async (prompt: string) => {
+    const compactCommand = parseCompactCommand(prompt)
+    if (compactCommand.isCompact) {
+      if (!onCompact) {
+        toast.info('Open a conversation before compacting context')
+        return
+      }
+      if (isStreaming) {
+        toast.info('Please wait for the current response to finish before compacting')
+        return
+      }
+      if (ingestingAny) {
+        toast.info('Please wait for attachments to finish processing')
+        return
+      }
+      setMessage('')
+      addToHistory(prompt)
+      await onCompact(compactCommand.instructions)
+      setPrompt('')
+      clearAttachmentsForThread(attachmentsKey)
+      return
+    }
+
     if (!selectedModel) {
       setMessage('Please select a model to start chatting.')
       return

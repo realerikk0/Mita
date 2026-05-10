@@ -44,6 +44,8 @@ export const defaultAssistant: Assistant = {
     top_k: 20,
     top_p: 0.8,
     repeat_penalty: 1.12,
+    auto_compact: true,
+    auto_compact_threshold: 0.85,
   },
   avatar: '👋',
   description: MITA_ASSISTANT_DESCRIPTION,

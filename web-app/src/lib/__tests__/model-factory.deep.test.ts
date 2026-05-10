@@ -178,6 +178,7 @@ describe('model-factory deep coverage', () => {
         max_output_tokens: 1024,
         ctx_len: 4096,
         auto_compact: true,
+        auto_compact_threshold: 0.85,
       })
       const opts = getOpts()
       await opts.fetch('http://x', { method: 'POST', body: JSON.stringify({ messages: [] }) })
@@ -186,6 +187,7 @@ describe('model-factory deep coverage', () => {
       expect(body.max_tokens).toBe(1024)
       expect(body.ctx_len).toBeUndefined()
       expect(body.auto_compact).toBeUndefined()
+      expect(body.auto_compact_threshold).toBeUndefined()
     })
 
     it('throws when startModel fails with Error', async () => {

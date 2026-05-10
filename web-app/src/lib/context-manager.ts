@@ -1,5 +1,6 @@
 import type { UIMessage } from '@ai-sdk/react'
 import { generateText, type LanguageModel } from 'ai'
+import type { ThreadMessage } from '@janhq/core'
 
 /**
  * Approximate token count using a character-based heuristic.
@@ -43,6 +44,139 @@ export function estimateMessageTokens(message: UIMessage): number {
   const text = messageToText(message)
   // Add a small overhead per message for role/formatting tokens
   return estimateTokens(text) + 4
+}
+
+function threadMessageToText(message: ThreadMessage): string {
+  const parts: string[] = []
+  for (const content of message.content ?? []) {
+    if (content.type === 'text' && content.text?.value) {
+      parts.push(content.text.value)
+    } else if (content.type === 'image_url' && content.image_url?.url) {
+      parts.push(`[image: ${content.image_url.url}]`)
+    } else if (content.type === 'tool_call') {
+      parts.push(
+        `[tool_call ${content.tool_name ?? 'unknown'}]\n${JSON.stringify({
+          input: content.input,
+          output: content.output,
+        })}`
+      )
+    }
+  }
+
+  return parts.join('\n')
+}
+
+export function estimateThreadMessageTokens(message: ThreadMessage): number {
+  return estimateTokens(threadMessageToText(message)) + 4
+}
+
+export const MITA_COMPACT_PROMPT_TEMPLATE = `You are performing MITA CONTEXT COMPACTION.
+
+Your job is to create a continuation handoff summary for a future assistant turn. The raw conversation before this compact point may no longer be available, so the summary must preserve everything needed to continue accurately without replaying the full transcript.
+
+Output only Markdown. Do not include private chain-of-thought. Do not mention that you are an AI summarizer.
+
+Preserve these categories, in this order:
+
+# Stable Context
+- User's goal and explicit success criteria.
+- User preferences, constraints, exclusions, and important assumptions.
+- Product, repo, platform, provider, model, or environment facts that remain relevant.
+- Durable decisions already made, including rationale when it affects future choices.
+
+# Current State
+- What work was completed.
+- What is currently in progress.
+- The exact next step that should be taken, if any.
+- Any blockers, open questions, or risks.
+
+# Technical Details
+- Important files, APIs, data shapes, settings, commands, tests, errors, and results.
+- For code work, name concrete files/symbols and summarize edits or intended edits.
+- Include short exact snippets only when the exact text is necessary to continue; otherwise paraphrase.
+
+# Recent User Intent
+- Capture the most recent user requests with extra precision.
+- Preserve custom compact instructions supplied by the user.
+- If the user changed direction, prioritize the latest direction.
+
+# Tool And Verification State
+- Summarize relevant tool calls, searches, reads, builds, tests, screenshots, or failures.
+- Note what has not been verified yet.
+
+# Continuation Instructions
+- Tell the next assistant how to resume without asking unnecessary recap questions.
+- State what should not be repeated or re-done.
+
+If an earlier Mita compact summary appears in the conversation, treat it as authoritative historical context and merge it into this new summary. Remove duplication, but do not drop durable decisions or unresolved tasks.
+
+If custom compact instructions are provided below, follow them with highest priority unless they conflict with preserving correctness:
+
+<custom_compact_instructions>
+{{customInstructions}}
+</custom_compact_instructions>`
+
+export function buildCompactPrompt(customInstructions?: string): string {
+  return MITA_COMPACT_PROMPT_TEMPLATE.replace(
+    '{{customInstructions}}',
+    customInstructions?.trim() || 'None.'
+  )
+}
+
+export interface ThreadCompactionSelectionOptions {
+  keepRecentMessages?: number
+  maxRecentTokens?: number
+  minMessagesToCompact?: number
+}
+
+export function selectMessagesForCompaction(
+  messages: ThreadMessage[],
+  options: ThreadCompactionSelectionOptions = {}
+): { toCompact: ThreadMessage[]; toKeep: ThreadMessage[] } {
+  const keepRecentMessages = options.keepRecentMessages ?? 4
+  const maxRecentTokens = options.maxRecentTokens ?? 20_000
+  const minMessagesToCompact = options.minMessagesToCompact ?? 2
+
+  if (messages.length <= keepRecentMessages) {
+    return { toCompact: [], toKeep: messages }
+  }
+
+  let recentTokens = 0
+  let keepStart = messages.length
+  for (let i = messages.length - 1; i >= 0; i--) {
+    const nextTokens = estimateThreadMessageTokens(messages[i])
+    const mustKeepForCount = messages.length - i <= keepRecentMessages
+    if (!mustKeepForCount && recentTokens + nextTokens > maxRecentTokens) {
+      break
+    }
+    recentTokens += nextTokens
+    keepStart = i
+  }
+
+  const toCompact = messages.slice(0, keepStart)
+  if (toCompact.length < minMessagesToCompact) {
+    return { toCompact: [], toKeep: messages }
+  }
+
+  return {
+    toCompact,
+    toKeep: messages.slice(keepStart),
+  }
+}
+
+export function mergeExistingSummaries(summaries: string[], newSummary: string): string {
+  const uniqueSummaries = summaries
+    .map((summary) => summary.trim())
+    .filter(Boolean)
+
+  if (uniqueSummaries.length === 0) return newSummary.trim()
+
+  return [
+    '# Previous Mita Compact Summaries',
+    uniqueSummaries.join('\n\n---\n\n'),
+    '# New Compact Summary',
+    newSummary.trim(),
+  ].join('\n\n')
 }
 
 export interface ContextManagerConfig {

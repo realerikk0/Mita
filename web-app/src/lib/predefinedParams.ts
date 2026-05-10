@@ -23,6 +23,12 @@ export const paramsSettings = {
     title: 'Auto Compact',
     description: `When enabled and context limit is reached, automatically summarize older messages instead of dropping them. Preserves conversation meaning while reducing token usage. Requires max_context_tokens to be set.`,
   },
+  auto_compact_threshold: {
+    key: 'auto_compact_threshold',
+    value: 0.85,
+    title: 'Auto Compact Threshold',
+    description: `Fraction of the configured context window that triggers automatic compaction. Values are clamped between 0.5 and 0.95.`,
+  },
   temperature: {
     key: 'temperature',
     value: 0.7,

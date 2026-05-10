@@ -36,6 +36,7 @@ export interface ModelParameters {
   max_output_tokens?: number
   max_context_tokens?: number
   auto_compact?: boolean
+  auto_compact_threshold?: number
   presence_penalty?: number
   frequency_penalty?: number
   stop_sequences?: string[]
@@ -131,6 +132,7 @@ const CLIENT_SIDE_PARAM_KEYS: ReadonlySet<string> = new Set([
   'ctx_len',
   'max_context_tokens',
   'auto_compact',
+  'auto_compact_threshold',
 ])
 
 const REMOTE_UNSUPPORTED_PARAM_KEYS: ReadonlySet<string> = new Set([

@@ -1,6 +1,7 @@
 /* eslint-disable @typescript-eslint/no-explicit-any */
 import { ThreadMessage, ContentType, MessageStatus } from '@janhq/core'
 import type { UIMessage } from '@ai-sdk/react'
+import { getVisibleThreadMessages } from './compact-thread'
 // Attachments are now handled upstream in newUserThreadContent
 
 type ThreadContent = NonNullable<ThreadMessage['content']>[number]
@@ -332,7 +333,7 @@ export function convertThreadMessageToUIMessage(
 export function convertThreadMessagesToUIMessages(
   threadMessages: ThreadMessage[]
 ): UIMessage[] {
-  return threadMessages
+  return getVisibleThreadMessages(threadMessages)
     .map(convertThreadMessageToUIMessage)
     .filter((msg): msg is UIMessage => msg !== null)
 }
