@@ -29,13 +29,10 @@ export function PromptAnalytic() {
         </h2>
       </div>
       <p className="mt-2 text-xs text-muted-foreground leading-normal">
-        We collect anonymous data to understand feature usage. Your chats and
-        personal information are never tracked. You can change this anytime
-        in&nbsp;
-        <span className="font-medium text-muted-foreground">{`Settings > Privacy.`}</span>
+        {t('helpUsImproveMitaDescription')}
       </p>
       <p className="mt-2 text-sm">
-        Would you like to help us improve Mita?
+        {t('helpUsImproveMitaQuestion')}
       </p>
       <div className="mt-4 flex justify-end space-x-2">
         <Button

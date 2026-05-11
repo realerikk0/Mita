@@ -1,4 +1,4 @@
-import { LucideIcon } from 'lucide-react'
+import { ImagePlus, LucideIcon } from 'lucide-react'
 import { route } from '@/constants/routes'
 
 import {
@@ -65,7 +65,7 @@ type NavMainItem = {
   onClick?: () => void
 }
 
-const getNavMainItems = (
+export const getNavMainItems = (
   onNewProject: () => void,
   onSearch: () => void,
   onNewChat: () => void,
@@ -81,6 +81,19 @@ const getNavMainItems = (
           <PlatformMetaKey />
         </Kbd>
         <Kbd className="bg-transparent size-3 uppercase">{PlatformShortcuts[ShortcutAction.NEW_CHAT].key}</Kbd>
+      </KbdGroup>
+    ),
+  },
+  {
+    title: 'common:newImage',
+    url: route.images,
+    icon: ImagePlus,
+    shortcut: (
+      <KbdGroup className="ml-auto scale-90 gap-0">
+        <Kbd className="bg-transparent size-3">
+          <PlatformMetaKey />
+        </Kbd>
+        <Kbd className="bg-transparent size-3 uppercase">{PlatformShortcuts[ShortcutAction.NEW_IMAGE].key}</Kbd>
       </KbdGroup>
     ),
   },

@@ -17,6 +17,7 @@ export function KeyboardShortcutsProvider() {
   // Get shortcut specs from centralized configuration
   const sidebarShortcut = PlatformShortcuts[ShortcutAction.TOGGLE_SIDEBAR]
   const newChatShortcut = PlatformShortcuts[ShortcutAction.NEW_CHAT]
+  const newImageShortcut = PlatformShortcuts[ShortcutAction.NEW_IMAGE]
   const newProjectShortcut = PlatformShortcuts[ShortcutAction.NEW_PROJECT]
   const settingsShortcut = PlatformShortcuts[ShortcutAction.GO_TO_SETTINGS]
   const searchShortcut = PlatformShortcuts[ShortcutAction.SEARCH]
@@ -35,6 +36,14 @@ export function KeyboardShortcutsProvider() {
     callback: () => {
       useAgentMode.getState().removeThread(TEMPORARY_CHAT_ID)
       router.navigate({ to: route.home })
+    },
+  })
+
+  // New Image
+  useKeyboardShortcut({
+    ...newImageShortcut,
+    callback: () => {
+      router.navigate({ to: route.images })
     },
   })
 

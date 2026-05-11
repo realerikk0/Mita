@@ -19,6 +19,9 @@ export const PlatformShortcuts: ShortcutMap = {
   // New chat - different per platform to avoid browser "new window" conflict
   [ShortcutAction.NEW_CHAT]: { key: 'n', usePlatformMetaKey: true },
 
+  // New image - opens the image generation workspace
+  [ShortcutAction.NEW_IMAGE]: { key: 'i', usePlatformMetaKey: true },
+
   // New agent chat - opens home screen with agent mode pre-enabled
   [ShortcutAction.NEW_AGENT_CHAT]: { key: 'm', usePlatformMetaKey: true },
 

@@ -5,6 +5,7 @@ pub mod computer;
 pub mod downloads;
 pub mod extensions;
 pub mod filesystem;
+pub mod image_assets;
 pub mod mcp;
 pub mod server;
 pub mod setup;

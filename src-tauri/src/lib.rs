@@ -38,6 +38,10 @@ macro_rules! invoke_commands_with_extras {
         core::filesystem::commands::decompress,
         core::filesystem::commands::open_dialog,
         core::filesystem::commands::save_dialog,
+        // Image asset library
+        core::image_assets::commands::save_image_asset,
+        core::image_assets::commands::list_image_assets,
+        core::image_assets::commands::delete_image_asset,
         // Computer Use commands
         core::computer::commands::get_computer_shell_status,
         core::computer::commands::get_computer_workspace_path,

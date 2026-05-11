@@ -86,6 +86,12 @@ const mockServiceHub = {
     getProvider: vi.fn().mockResolvedValue(null),
     fetchModelsFromProvider: vi.fn().mockResolvedValue([]),
   }),
+  imageGeneration: () => ({
+    generateImages: vi.fn().mockResolvedValue([]),
+    saveAsset: vi.fn().mockResolvedValue(null),
+    listAssets: vi.fn().mockResolvedValue([]),
+    deleteAsset: vi.fn().mockResolvedValue(undefined),
+  }),
   models: () => ({
     getModels: vi.fn().mockResolvedValue([]),
     getModel: vi.fn().mockResolvedValue(null),
@@ -130,6 +136,7 @@ const mockServiceHub = {
     startCore: vi.fn().mockResolvedValue(undefined),
     stopCore: vi.fn().mockResolvedValue(undefined),
     getCoreStatus: vi.fn().mockResolvedValue('stopped'),
+    convertFileSrc: vi.fn((path: string) => path),
   }),
   deeplink: () => ({ // cspell: disable-line
     register: vi.fn().mockResolvedValue(undefined),

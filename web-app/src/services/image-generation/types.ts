@@ -1,0 +1,66 @@
+import type {
+  ImageGenerationMode,
+  ImageQualityPreset,
+  ImageRatio,
+} from '@/lib/image-generation'
+
+export type ImageGenerationStatus =
+  | 'pending'
+  | 'running'
+  | 'succeeded'
+  | 'failed'
+
+export type ImageAssetRecord = {
+  id: string
+  prompt: string
+  mode: ImageGenerationMode
+  provider: string
+  model: string
+  ratio: ImageRatio
+  size: string
+  quality: string
+  sourceAssetIds: string[]
+  createdAt: string
+  usage?: unknown
+  revisedPrompt?: string
+  status: ImageGenerationStatus
+  path: string
+  fileName: string
+  mimeType: string
+}
+
+export type SaveImageAssetRequest = Omit<
+  ImageAssetRecord,
+  'createdAt' | 'path' | 'fileName'
+> & {
+  b64Json: string
+  extension?: string
+  createdAt?: string
+}
+
+export type ImageGenerationRequest = {
+  provider: ModelProvider
+  model: Model
+  prompt: string
+  ratio: ImageRatio
+  qualityPreset: ImageQualityPreset
+  count: number
+  mode: ImageGenerationMode
+  sourceAsset?: ImageAssetRecord | null
+  maskFile?: File | null
+  signal?: AbortSignal
+}
+
+export type ImageApiImage = {
+  b64Json: string
+  mimeType: string
+  revisedPrompt?: string
+  usage?: unknown
+}
+
+export interface ImageGenerationService {
+  generateImages(request: ImageGenerationRequest): Promise<ImageApiImage[]>
+  saveAsset(request: SaveImageAssetRequest): Promise<ImageAssetRecord>
+  listAssets(): Promise<ImageAssetRecord[]>
+  deleteAsset(assetId: string): Promise<void>
+}
