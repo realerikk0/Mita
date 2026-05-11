@@ -15,6 +15,8 @@ const cargoArgs = [
   'build',
   '--manifest-path',
   manifestPath,
+  '--features',
+  'computer-runner',
   '--bin',
   'mita-computer-runner',
 ]

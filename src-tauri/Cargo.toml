@@ -9,6 +9,11 @@ edition = "2021"
 rust-version = "1.77.2"
 resolver = "2"
 default-run = "Mita"
+autobins = false
+
+[[bin]]
+name = "Mita"
+path = "src/main.rs"
 
 [lib]
 name = "app_lib"
@@ -18,6 +23,11 @@ crate-type = ["staticlib", "cdylib", "rlib"]
 name = "mita-cli"
 path = "src/bin/mita-cli.rs"
 required-features = ["cli"]
+
+[[bin]]
+name = "mita-computer-runner"
+path = "src/bin/mita-computer-runner.rs"
+required-features = ["computer-runner"]
 
 [features]
 default = [
@@ -59,6 +69,7 @@ test-tauri = [
     "mlx",
 ]
 cli = ["dep:env_logger", "dep:dialoguer", "dep:indicatif", "dep:console"]
+computer-runner = []
 
 [build-dependencies]
 tauri-build = { version = "2.0.2", features = [] }
