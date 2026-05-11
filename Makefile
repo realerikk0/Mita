@@ -190,12 +190,19 @@ build-cli:
 ifeq ($(DETECTED_OS),Darwin)
 	cd src-tauri && cargo build --release --features cli --bin mita-cli --target aarch64-apple-darwin
 	cd src-tauri && cargo build --release --features cli --bin mita-cli --target x86_64-apple-darwin
+	cd src-tauri && cargo build --release --features computer-runner --bin mita-computer-runner --target aarch64-apple-darwin
+	cd src-tauri && cargo build --release --features computer-runner --bin mita-computer-runner --target x86_64-apple-darwin
 	lipo -create \
 		src-tauri/target/aarch64-apple-darwin/release/mita-cli \
 		src-tauri/target/x86_64-apple-darwin/release/mita-cli \
 		-output src-tauri/resources/bin/mita-cli
-	chmod +x src-tauri/resources/bin/mita-cli
 	$(call MKDIR,'src-tauri/target/universal-apple-darwin/release')
+	lipo -create \
+		src-tauri/target/aarch64-apple-darwin/release/mita-computer-runner \
+		src-tauri/target/x86_64-apple-darwin/release/mita-computer-runner \
+		-output src-tauri/target/universal-apple-darwin/release/mita-computer-runner
+	chmod +x src-tauri/resources/bin/mita-cli
+	chmod +x src-tauri/target/universal-apple-darwin/release/mita-computer-runner
 
 	echo "Checking for code signing identity..."; \
 	SIGNING_IDENTITY=$$(security find-identity -v -p codesigning | grep "Developer ID Application" | head -1 | sed 's/.*"\(.*\)".*/\1/'); \
