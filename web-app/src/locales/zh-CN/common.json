@@ -479,5 +479,12 @@
       "title": "线程已移除",
       "description": "线程已成功从\"{{projectName}}\"中移除"
     }
+  },
+  "providerQuota": {
+    "title": "令牌额度已用尽",
+    "recharge": "去充值",
+    "manageTokens": "管理令牌",
+    "linksUnavailable": "该提供商未返回充值或令牌管理链接。",
+    "refreshModelsTitle": "无法刷新模型：令牌额度已用尽"
   }
 }

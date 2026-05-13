@@ -119,6 +119,7 @@ const mockServiceHub = {
   opener: vi.fn().mockReturnValue({
     open: vi.fn().mockResolvedValue(undefined),
     revealItemInDir: vi.fn().mockResolvedValue(undefined),
+    openExternalUrl: vi.fn().mockResolvedValue(undefined),
   }),
   updater: () => ({
     checkForUpdates: vi.fn().mockResolvedValue(null),

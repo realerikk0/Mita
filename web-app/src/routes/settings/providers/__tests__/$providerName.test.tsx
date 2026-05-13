@@ -10,6 +10,7 @@ import {
 } from '@testing-library/react'
 import '@testing-library/jest-dom'
 import React from 'react'
+import { ProviderQuotaError } from '@/lib/provider-quota-error'
 
 // -----------------------------------------------------------------------------
 // Hoisted shared state + mocks
@@ -110,10 +111,15 @@ const h = vi.hoisted(() => {
   const dialogSvc = {
     open: vi.fn().mockResolvedValue(null),
   }
+  const openerSvc = {
+    openExternalUrl: vi.fn().mockResolvedValue(undefined),
+    revealItemInDir: vi.fn().mockResolvedValue(undefined),
+  }
   const serviceHub = {
     providers: vi.fn(() => providersSvc),
     models: vi.fn(() => modelsSvc),
     dialog: vi.fn(() => dialogSvc),
+    opener: vi.fn(() => openerSvc),
   }
 
   const modelLoad = {
@@ -144,6 +150,7 @@ const h = vi.hoisted(() => {
     providersSvc,
     modelsSvc,
     dialogSvc,
+    openerSvc,
     modelLoad,
     backendUpdater,
     params,
@@ -754,6 +761,29 @@ describe('ProviderDetail route', () => {
         fireEvent.click(refreshBtn)
       })
       expect(h.toastError).toHaveBeenCalled()
+    })
+
+    it('refresh shows quota recharge actions on quota exhaustion', async () => {
+      h.providersSvc.fetchModelsFromProvider = vi.fn().mockRejectedValue(
+        new ProviderQuotaError({
+          message: '该令牌额度已用尽',
+          status: 403,
+          code: 'pre_consume_token_quota_failed',
+          rechargeUrl: 'https://api.jingxing.uk/console/topup',
+          tokenUrl: 'https://api.jingxing.uk/console/token',
+          metadata: { quota_error: true },
+        })
+      )
+      renderComponent()
+      const addModel = screen.getByTestId('add-model')
+      const refreshBtn = addModel.parentElement?.querySelector('button') as HTMLButtonElement
+      await act(async () => {
+        fireEvent.click(refreshBtn)
+      })
+      expect(h.toastError).toHaveBeenCalledWith(
+        'common:providerQuota.refreshModelsTitle',
+        expect.objectContaining({ description: expect.anything() })
+      )
     })
   })
 

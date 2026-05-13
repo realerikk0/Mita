@@ -61,6 +61,7 @@ import { SessionInfo } from '@janhq/core'
 import { fetch as httpFetch } from '@tauri-apps/plugin-http'
 import { isPlatformTauri } from '@/lib/platform/utils'
 import { providerRemoteApiKeyChain } from '@/lib/provider-api-keys'
+import { parseProviderErrorResponse } from '@/lib/provider-quota-error'
 import { LLAMACPP_ONLY_PARAM_KEYS } from '@/lib/predefinedParams'
 
 /**
@@ -234,7 +235,8 @@ function createApiKeyRotatingFetch(
   apiKeys: string[],
   parameters: Record<string, unknown>,
   headerMode: ApiKeyHeaderMode,
-  modelId?: string
+  modelId?: string,
+  providerName?: string
 ): typeof globalThis.fetch {
   const inner = createCustomFetch(baseFetch, parameters, false, modelId)
   if (apiKeys.length <= 1) {
@@ -253,6 +255,8 @@ function createApiKeyRotatingFetch(
         nextHeaders.set('x-api-key', key)
       }
       const res = await inner(input, { ...init, headers: nextHeaders })
+      const quotaError = await parseProviderErrorResponse(res, providerName)
+      if (quotaError) throw quotaError
       if ([401, 403, 429].includes(res.status) && i < apiKeys.length - 1) {
         res.body?.cancel().catch(() => {})
         continue
@@ -260,6 +264,24 @@ function createApiKeyRotatingFetch(
       return res
     }
     throw new Error('API key rotation exhausted')
+  }
+}
+
+function createProviderErrorAwareFetch(
+  baseFetch: typeof globalThis.fetch,
+  parameters: Record<string, unknown>,
+  modelId?: string,
+  providerName?: string
+): typeof globalThis.fetch {
+  const inner = createCustomFetch(baseFetch, parameters, false, modelId)
+  return async (
+    input: RequestInfo | URL,
+    init?: RequestInit
+  ): Promise<Response> => {
+    const res = await inner(input, init)
+    const quotaError = await parseProviderErrorResponse(res, providerName)
+    if (quotaError) throw quotaError
+    return res
   }
 }
 
@@ -698,9 +720,15 @@ export class ModelFactory {
             keyChain,
             parameters,
             'x-api-key',
-            modelId
+            modelId,
+            provider.provider
           )
-        : createCustomFetch(getRuntimeFetch(), parameters, false, modelId)
+        : createProviderErrorAwareFetch(
+            getRuntimeFetch(),
+            parameters,
+            modelId,
+            provider.provider
+          )
 
     const anthropic = createAnthropic({
       apiKey: keyChain[0] ?? provider.api_key ?? '',
@@ -737,9 +765,15 @@ export class ModelFactory {
             keyChain,
             parameters,
             'x-api-key',
-            modelId
+            modelId,
+            provider.provider
           )
-        : createCustomFetch(getRuntimeFetch(), parameters, false, modelId)
+        : createProviderErrorAwareFetch(
+            getRuntimeFetch(),
+            parameters,
+            modelId,
+            provider.provider
+          )
 
     const google = createGoogleGenerativeAI({
       apiKey: keyChain[0] ?? provider.api_key ?? '',
@@ -776,9 +810,15 @@ export class ModelFactory {
             keyChain,
             parameters,
             'authorization-bearer',
-            modelId
+            modelId,
+            provider.provider
           )
-        : createCustomFetch(getRuntimeFetch(), parameters, false, modelId)
+        : createProviderErrorAwareFetch(
+            getRuntimeFetch(),
+            parameters,
+            modelId,
+            provider.provider
+          )
 
     const openai = createOpenAI({
       apiKey: keyChain[0] ?? provider.api_key ?? '',
@@ -815,9 +855,15 @@ export class ModelFactory {
             keyChain,
             parameters,
             'authorization-bearer',
-            modelId
+            modelId,
+            provider.provider
           )
-        : createCustomFetch(getRuntimeFetch(), parameters, false, modelId)
+        : createProviderErrorAwareFetch(
+            getRuntimeFetch(),
+            parameters,
+            modelId,
+            provider.provider
+          )
 
     const xai = createXai({
       apiKey: keyChain[0] ?? provider.api_key ?? '',
@@ -858,9 +904,15 @@ export class ModelFactory {
             keyChain,
             parameters,
             'authorization-bearer',
-            modelId
+            modelId,
+            provider.provider
           )
-        : createCustomFetch(getRuntimeFetch(), parameters, false, modelId)
+        : createProviderErrorAwareFetch(
+            getRuntimeFetch(),
+            parameters,
+            modelId,
+            provider.provider
+          )
 
     const openAICompatible = createOpenAICompatible({
       name: provider.provider,

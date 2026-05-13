@@ -18,4 +18,13 @@ describe('DefaultOpenerService', () => {
     expect(spy).toHaveBeenCalledWith('revealItemInDir called with path:', '')
     spy.mockRestore()
   })
+
+  it('openExternalUrl opens a browser window', async () => {
+    const open = vi.fn()
+    vi.stubGlobal('window', { open })
+    const svc = new DefaultOpenerService()
+    await svc.openExternalUrl('https://example.test')
+    expect(open).toHaveBeenCalledWith('https://example.test', '_blank')
+    vi.unstubAllGlobals()
+  })
 })

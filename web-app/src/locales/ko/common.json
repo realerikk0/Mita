@@ -547,5 +547,12 @@
   },
   "files": {
     "chunksCount": "청크 {{count}}개"
+  },
+  "providerQuota": {
+    "title": "Provider quota exhausted",
+    "recharge": "Recharge",
+    "manageTokens": "Manage tokens",
+    "linksUnavailable": "Recharge links are unavailable for this provider.",
+    "refreshModelsTitle": "Cannot refresh models: quota exhausted"
   }
 }

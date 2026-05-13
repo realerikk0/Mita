@@ -470,5 +470,12 @@
       "title": "スレッドが削除されました",
       "description": "スレッドは「{{projectName}}」から正常に削除されました"
     }
+  },
+  "providerQuota": {
+    "title": "Provider quota exhausted",
+    "recharge": "Recharge",
+    "manageTokens": "Manage tokens",
+    "linksUnavailable": "Recharge links are unavailable for this provider.",
+    "refreshModelsTitle": "Cannot refresh models: quota exhausted"
   }
 }

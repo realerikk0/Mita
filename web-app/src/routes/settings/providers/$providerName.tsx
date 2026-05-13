@@ -46,10 +46,15 @@ import { basenameNoExt } from '@/lib/utils'
 import { useAppState } from '@/hooks/useAppState'
 import { useShallow } from 'zustand/shallow'
 import { DialogAddModel } from '@/containers/dialogs/AddModel'
+import { ProviderQuotaActions } from '@/components/ProviderQuotaActions'
 import {
   providerHasRemoteApiKeys,
   providerRemoteApiKeyChain,
 } from '@/lib/provider-api-keys'
+import {
+  parseProviderErrorResponse,
+  providerQuotaErrorFromUnknown,
+} from '@/lib/provider-quota-error'
 import {
   mergeProviderCustomHeaders,
   parseProviderConnection,
@@ -354,6 +359,8 @@ function ProviderDetail() {
         return 'Invalid / revoked key (401)'
       case 'forbidden':
         return 'Forbidden (403)'
+      case 'quota_exhausted':
+        return t('common:providerQuota.title')
       case 'rate_limited':
         return 'Rate limited / out of credit (429)'
       case 'network_error':
@@ -361,7 +368,7 @@ function ProviderDetail() {
       default:
         return 'Failed'
     }
-  }, [])
+  }, [t])
 
   const getStatusClass = useCallback((status: string) => {
     switch (status) {
@@ -369,6 +376,7 @@ function ProviderDetail() {
         return 'text-green-600'
       case 'unauthorized':
       case 'forbidden':
+      case 'quota_exhausted':
       case 'http_error':
       case 'network_error':
       case 'rate_limited':
@@ -423,7 +431,12 @@ function ProviderDetail() {
           })
 
           let status = 'http_error'
+          const quotaError = await parseProviderErrorResponse(
+            response,
+            provider.provider
+          )
           if (response.ok) status = 'ok'
+          else if (quotaError) status = 'quota_exhausted'
           else if (response.status === 401) status = 'unauthorized'
           else if (response.status === 403) status = 'forbidden'
           else if (response.status === 429) status = 'rate_limited'
@@ -432,7 +445,8 @@ function ProviderDetail() {
             index: keyIndex,
             masked: maskApiKey(key),
             status,
-            detail: `${response.status} ${response.statusText}`,
+            detail:
+              quotaError?.message || `${response.status} ${response.statusText}`,
           })
         } catch (err) {
           results.push({
@@ -528,6 +542,15 @@ function ProviderDetail() {
         t('providers:refreshModelsFailed', { provider: provider.provider }),
         error
       )
+      const quotaError = providerQuotaErrorFromUnknown(error)
+      if (quotaError) {
+        toast.error(t('common:providerQuota.refreshModelsTitle'), {
+          description: (
+            <ProviderQuotaActions error={quotaError} showMessage />
+          ),
+        })
+        return
+      }
       toast.error(t('providers:models'), {
         description: t('providers:refreshModelsFailed', {
           provider: provider.provider,

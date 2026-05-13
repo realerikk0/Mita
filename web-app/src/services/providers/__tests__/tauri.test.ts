@@ -69,6 +69,7 @@ import { fetch as fetchTauri } from '@tauri-apps/plugin-http'
 import { EngineManager } from '@janhq/core'
 import { ExtensionManager } from '@/lib/extension'
 import { providerRemoteApiKeyChain } from '@/lib/provider-api-keys'
+import { ProviderQuotaError } from '@/lib/provider-quota-error'
 import { TauriProvidersService } from '../tauri'
 
 describe('TauriProvidersService', () => {
@@ -280,6 +281,35 @@ describe('TauriProvidersService', () => {
       const errSpy = vi.spyOn(console, 'error').mockImplementation(() => {})
       await expect(svc.fetchModelsFromProvider(baseProvider))
         .rejects.toThrow('Access forbidden')
+      errSpy.mockRestore()
+    })
+
+    it('throws quota error on quota exhaustion and does not try fallback keys', async () => {
+      vi.mocked(providerRemoteApiKeyChain).mockReturnValueOnce([
+        'primary-key',
+        'fallback-key',
+      ])
+      vi.mocked(fetchTauri).mockResolvedValueOnce(
+        new Response(
+          JSON.stringify({
+            error: {
+              message: '该令牌额度已用尽',
+              code: 'pre_consume_token_quota_failed',
+              metadata: {
+                quota_error: true,
+                recharge_url: 'https://api.jingxing.uk/console/topup',
+                token_url: 'https://api.jingxing.uk/console/token',
+              },
+            },
+          }),
+          { status: 403 }
+        ) as any
+      )
+
+      const errSpy = vi.spyOn(console, 'error').mockImplementation(() => {})
+      await expect(svc.fetchModelsFromProvider(baseProvider))
+        .rejects.toBeInstanceOf(ProviderQuotaError)
+      expect(fetchTauri).toHaveBeenCalledTimes(1)
       errSpy.mockRestore()
     })
 

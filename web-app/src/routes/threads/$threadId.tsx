@@ -3,6 +3,7 @@ import { createFileRoute, useParams, useSearch } from '@tanstack/react-router'
 import { cn } from '@/lib/utils'
 
 import HeaderPage from '@/containers/HeaderPage'
+import { ProviderQuotaActions } from '@/components/ProviderQuotaActions'
 import { useThreads } from '@/hooks/useThreads'
 import ChatInput from '@/containers/ChatInput'
 import { AutoRunPanel } from '@/containers/AutoRunPanel'
@@ -15,6 +16,7 @@ import { useTools } from '@/hooks/useTools'
 import { useAppState } from '@/hooks/useAppState'
 import { SESSION_STORAGE_PREFIX } from '@/constants/chat'
 import { useChat } from '@/hooks/use-chat'
+import { useTranslation } from '@/i18n/react-i18next-compat'
 import { useModelProvider } from '@/hooks/useModelProvider'
 import { useAssistant } from '@/hooks/useAssistant'
 import { renderInstructions } from '@/lib/instructionTemplate'
@@ -61,6 +63,7 @@ import { useAutoRunStore } from '@/stores/auto-run-store'
 import { useMessageQueue } from '@/stores/message-queue-store'
 import { generateThreadTitle } from '@/lib/thread-title-summarizer'
 import { ModelFactory } from '@/lib/model-factory'
+import { providerQuotaErrorFromUnknown } from '@/lib/provider-quota-error'
 import {
   DEFAULT_COMPACT_RECENT_TOKEN_LIMIT,
   compactThreadMessages,
@@ -184,6 +187,7 @@ export const Route = createFileRoute('/threads/$threadId')({
 })
 
 function ThreadDetail() {
+  const { t } = useTranslation()
   const serviceHub = useServiceHub()
   const { threadId } = useParams({ from: Route.id })
   const search = useSearch({ from: Route.id })
@@ -1469,6 +1473,9 @@ function ThreadDetail() {
     () => searchThreadModel ?? thread?.model,
     [searchThreadModel, thread]
   )
+  const activeError = error ?? contextLimitError
+  const quotaError = providerQuotaErrorFromUnknown(activeError)
+  const activeErrorMessage = quotaError?.message ?? activeError?.message
 
   return (
     <div className="flex flex-col h-[calc(100dvh-(env(safe-area-inset-bottom)+env(safe-area-inset-top)))]">
@@ -1538,35 +1545,42 @@ function ThreadDetail() {
                   {status === CHAT_STATUS.SUBMITTED && <PromptProgress />}
                 </div>
               )}
-              {(error || contextLimitError) && !isAutoIncreasingContext && (
+              {activeError && !isAutoIncreasingContext && (
                 <div className="px-4 py-3 mx-4 my-2 rounded-lg border border-destructive/10 bg-destructive/10">
                   <div className="flex items-start gap-3">
                     <IconAlertCircle className="size-5 text-destructive shrink-0 mt-0.5" />
                     <div className="flex-1">
                       <p className="text-sm font-medium text-destructive mb-1">
-                        Error generating response
+                        {quotaError
+                          ? t('common:providerQuota.title')
+                          : 'Error generating response'}
                       </p>
                       <div className="table table-fixed w-full">
                         <span
                           className="text-sm text-muted-foreground table-cell align-middle"
                           style={{ wordWrap: 'break-word' }}
                         >
-                          {(error ?? contextLimitError)?.message}
+                          {activeErrorMessage}
                         </span>
                       </div>
-                      {((error ?? contextLimitError)?.message
+                      {quotaError ? (
+                        <ProviderQuotaActions
+                          error={quotaError}
+                          className="mt-3"
+                        />
+                      ) : (activeError?.message
                         ?.toLowerCase()
                         .includes('context') &&
-                        ((error ?? contextLimitError)?.message
+                        (activeError?.message
                           ?.toLowerCase()
                           .includes('size') ||
-                          (error ?? contextLimitError)?.message
+                          activeError?.message
                             ?.toLowerCase()
                             .includes('length') ||
-                          (error ?? contextLimitError)?.message
+                          activeError?.message
                             ?.toLowerCase()
                             .includes('limit'))) ||
-                      (error ?? contextLimitError)?.message ===
+                      activeError?.message ===
                         OUT_OF_CONTEXT_SIZE ? (
                         <Button
                           variant="outline"

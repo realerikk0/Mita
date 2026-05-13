@@ -3,6 +3,7 @@ import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { render, screen, act, waitFor } from '@testing-library/react'
 import '@testing-library/jest-dom'
 import React from 'react'
+import { ProviderQuotaError } from '@/lib/provider-quota-error'
 
 // -----------------------------------------------------------------------------
 // Hoisted shared state + mocks (needed because vi.mock factory runs first)
@@ -15,6 +16,7 @@ const h = vi.hoisted(() => {
   const mockSetChatMessages = vi.fn()
   const mockUpdateRag = vi.fn()
   const mockSetContinueFromContent = vi.fn()
+  const openExternalUrl = vi.fn()
   const useChatArgs: any[] = []
 
   const chatState: { messages: any[]; status: string; error: Error | null } = {
@@ -141,6 +143,7 @@ const h = vi.hoisted(() => {
     mockSetChatMessages,
     mockUpdateRag,
     mockSetContinueFromContent,
+    openExternalUrl,
     useChatArgs,
     chatState,
     threadsState,
@@ -341,6 +344,30 @@ vi.mock('@/hooks/use-chat', () => ({
 }))
 
 vi.mock('@/hooks/useThreads', () => ({ useThreads: h.useThreadsMock }))
+vi.mock('@/hooks/useServiceHub', () => ({
+  useServiceHub: () => ({
+    rag: () => ({ callTool: vi.fn() }),
+    mcp: () => ({ callTool: vi.fn() }),
+    models: () => ({ stopModel: vi.fn().mockResolvedValue(undefined) }),
+    messages: () => ({
+      fetchMessages: vi.fn((threadId: string) =>
+        Promise.resolve(h.messagesState.getMessages(threadId))
+      ),
+    }),
+    opener: () => ({ openExternalUrl: h.openExternalUrl }),
+  }),
+}))
+vi.mock('@/i18n/react-i18next-compat', () => ({
+  useTranslation: () => ({
+    t: (key: string) =>
+      ({
+        'common:providerQuota.title': 'Provider quota exhausted',
+        'common:providerQuota.recharge': 'Recharge',
+        'common:providerQuota.manageTokens': 'Manage tokens',
+        'common:providerQuota.linksUnavailable': 'No links available',
+      })[key] ?? key,
+  }),
+}))
 vi.mock('@/hooks/useMessages', () => ({ useMessages: h.useMessagesMock }))
 vi.mock('@/hooks/useTools', () => ({ useTools: vi.fn() }))
 vi.mock('@/hooks/useAppState', () => ({ useAppState: h.useAppStateMock }))
@@ -429,6 +456,7 @@ describe('ThreadDetail route', () => {
     h.messageQueueState.dequeue = vi.fn(() => null)
     h.messageQueueState.clearQueue = vi.fn()
     h.agentModeState.agentThreads = {}
+    h.openExternalUrl.mockResolvedValue(undefined)
     h.useChatArgs.length = 0
     sessionStorage.clear()
   })
@@ -586,6 +614,27 @@ describe('ThreadDetail route', () => {
     expect(screen.getByText('Error generating response')).toBeInTheDocument()
     expect(screen.getByText('something broke')).toBeInTheDocument()
     expect(screen.getByText('Regenerate')).toBeInTheDocument()
+  })
+
+  it('shows provider quota actions instead of regenerate for quota errors', () => {
+    h.chatState.error = new ProviderQuotaError({
+      message: '该令牌额度已用尽',
+      status: 403,
+      code: 'pre_consume_token_quota_failed',
+      rechargeUrl: 'https://api.jingxing.uk/console/topup',
+      tokenUrl: 'https://api.jingxing.uk/console/token',
+      metadata: { quota_error: true },
+    })
+    renderComponent()
+
+    expect(screen.getByText('Provider quota exhausted')).toBeInTheDocument()
+    expect(screen.getByText('该令牌额度已用尽')).toBeInTheDocument()
+    expect(screen.queryByText('Regenerate')).not.toBeInTheDocument()
+    screen.getByText('Recharge').click()
+    expect(h.openExternalUrl).toHaveBeenCalledWith(
+      'https://api.jingxing.uk/console/topup'
+    )
+    expect(screen.getByText('Manage tokens')).toBeInTheDocument()
   })
 
   it('shows Increase Context Size button on context-length errors (agent mode)', () => {

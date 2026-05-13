@@ -4,13 +4,19 @@ vi.mock('@tauri-apps/api/core', () => ({
   invoke: vi.fn(),
 }))
 
+vi.mock('@tauri-apps/plugin-opener', () => ({
+  openUrl: vi.fn(),
+}))
+
 import { invoke } from '@tauri-apps/api/core'
+import { openUrl } from '@tauri-apps/plugin-opener'
 import { TauriOpenerService } from '../tauri'
 import { DefaultOpenerService } from '../default'
 
 describe('TauriOpenerService', () => {
   beforeEach(() => {
     vi.mocked(invoke).mockReset()
+    vi.mocked(openUrl).mockReset()
   })
 
   it('extends DefaultOpenerService', () => {
@@ -34,6 +40,13 @@ describe('TauriOpenerService', () => {
     expect(spy).toHaveBeenCalled()
     spy.mockRestore()
   })
+
+  it('openExternalUrl calls the Tauri opener plugin', async () => {
+    vi.mocked(openUrl).mockResolvedValueOnce(undefined)
+    const svc = new TauriOpenerService()
+    await svc.openExternalUrl('https://example.test')
+    expect(openUrl).toHaveBeenCalledWith('https://example.test')
+  })
 })
 
 describe('DefaultOpenerService', () => {
@@ -46,5 +59,14 @@ describe('DefaultOpenerService', () => {
       '/any/path'
     )
     spy.mockRestore()
+  })
+
+  it('openExternalUrl opens a browser window', async () => {
+    const open = vi.fn()
+    vi.stubGlobal('window', { open })
+    const svc = new DefaultOpenerService()
+    await svc.openExternalUrl('https://example.test')
+    expect(open).toHaveBeenCalledWith('https://example.test', '_blank')
+    vi.unstubAllGlobals()
   })
 })

@@ -34,7 +34,7 @@ export const Routes = [...CoreRoutes, ...APIRoutes, ...AppRoutes].map((r) => ({
 
 // Function to open an external URL in a new browser window
 export function openExternalUrl(url: string) {
-  window?.open(url, '_blank')
+  void getServiceHub().opener().openExternalUrl(url)
 }
 
 export const APIs = {

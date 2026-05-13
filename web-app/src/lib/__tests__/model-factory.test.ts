@@ -4,6 +4,7 @@ import type { ProviderObject } from '@janhq/core'
 import { invoke } from '@tauri-apps/api/core'
 import { createGoogleGenerativeAI } from '@ai-sdk/google'
 import { createOpenAICompatible } from '@ai-sdk/openai-compatible'
+import { ProviderQuotaError } from '@/lib/provider-quota-error'
 
 const mockGlobalFetch = vi.fn()
 
@@ -269,6 +270,80 @@ describe('ModelFactory', () => {
         top_p: 0.8,
         max_tokens: 128,
       })
+    })
+
+    it('stops API key rotation when provider reports quota exhaustion', async () => {
+      const provider: ProviderObject = {
+        provider: 'jingxing',
+        api_key: 'primary-key',
+        api_key_fallbacks: ['fallback-key'],
+        base_url: 'https://api.jingxing.uk/v1',
+        models: [],
+        settings: [],
+        active: true,
+      }
+
+      await ModelFactory.createModel('gpt-5.4', provider)
+
+      const config = mockedCreateOpenAICompatible.mock.calls.at(-1)?.[0] as
+        | { fetch?: typeof fetch }
+        | undefined
+      mockGlobalFetch.mockResolvedValueOnce(
+        new Response(
+          JSON.stringify({
+            error: {
+              message: '该令牌额度已用尽',
+              code: 'pre_consume_token_quota_failed',
+              metadata: {
+                quota_error: true,
+                recharge_url: 'https://api.jingxing.uk/console/topup',
+                token_url: 'https://api.jingxing.uk/console/token',
+              },
+            },
+          }),
+          { status: 403 }
+        )
+      )
+
+      await expect(
+        config!.fetch!('https://api.jingxing.uk/v1/chat/completions', {
+          method: 'POST',
+          body: JSON.stringify({ messages: [] }),
+        })
+      ).rejects.toBeInstanceOf(ProviderQuotaError)
+      expect(mockGlobalFetch).toHaveBeenCalledTimes(1)
+    })
+
+    it('continues API key rotation for ordinary auth errors', async () => {
+      const provider: ProviderObject = {
+        provider: 'jingxing',
+        api_key: 'primary-key',
+        api_key_fallbacks: ['fallback-key'],
+        base_url: 'https://api.jingxing.uk/v1',
+        models: [],
+        settings: [],
+        active: true,
+      }
+
+      await ModelFactory.createModel('gpt-5.4', provider)
+
+      const config = mockedCreateOpenAICompatible.mock.calls.at(-1)?.[0] as
+        | { fetch?: typeof fetch }
+        | undefined
+      mockGlobalFetch
+        .mockResolvedValueOnce(new Response('bad key', { status: 401 }))
+        .mockResolvedValueOnce(new Response('{}', { status: 200 }))
+
+      await expect(
+        config!.fetch!('https://api.jingxing.uk/v1/chat/completions', {
+          method: 'POST',
+          body: JSON.stringify({ messages: [] }),
+        })
+      ).resolves.toBeInstanceOf(Response)
+      expect(mockGlobalFetch).toHaveBeenCalledTimes(2)
+      expect(
+        (mockGlobalFetch.mock.calls[1]?.[1] as RequestInit | undefined)?.headers
+      ).toEqual(expect.any(Headers))
     })
 
     it('should avoid sending both temperature and top_p for Claude models', async () => {

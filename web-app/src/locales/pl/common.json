@@ -479,5 +479,12 @@
   "conversationNotAvailable": "Rozmowa niedostępna",
   "conversationNotAvailableDescription": "Rozmowa, do której próbujesz uzyskać dostęp, nie jest dostępna lub została usunięta.",
   "temporaryChat": "Tymczasowy Czat",
-  "temporaryChatTooltip": "Tymczasowy czat nie pojawi się w Twojej historii"
+  "temporaryChatTooltip": "Tymczasowy czat nie pojawi się w Twojej historii",
+  "providerQuota": {
+    "title": "Provider quota exhausted",
+    "recharge": "Recharge",
+    "manageTokens": "Manage tokens",
+    "linksUnavailable": "Recharge links are unavailable for this provider.",
+    "refreshModelsTitle": "Cannot refresh models: quota exhausted"
+  }
 }

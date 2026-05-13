@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
 
 import { DefaultImageGenerationService } from '@/services/image-generation/default'
+import { ProviderQuotaError } from '@/lib/provider-quota-error'
 import { ModelCapabilities } from '@/types/models'
 
 const provider = {
@@ -39,6 +40,23 @@ const sourceAsset = {
   fileName: 'source.png',
   mimeType: 'image/png',
 } as const
+
+const quotaResponse = () =>
+  new Response(
+    JSON.stringify({
+      error: {
+        message: '该令牌额度已用尽',
+        type: 'new_api_error',
+        code: 'pre_consume_token_quota_failed',
+        metadata: {
+          quota_error: true,
+          recharge_url: 'https://api.jingxing.uk/console/topup',
+          token_url: 'https://api.jingxing.uk/console/token',
+        },
+      },
+    }),
+    { status: 403, headers: { 'content-type': 'application/json' } }
+  )
 
 describe('DefaultImageGenerationService', () => {
   afterEach(() => {
@@ -99,6 +117,26 @@ describe('DefaultImageGenerationService', () => {
         usage: { total_tokens: 10 },
       },
     ])
+  })
+
+  it('stops generation key fallback when provider reports quota exhaustion', async () => {
+    const fetchMock = vi.fn().mockResolvedValueOnce(quotaResponse())
+
+    vi.stubGlobal('fetch', fetchMock)
+
+    const service = new DefaultImageGenerationService()
+    await expect(
+      service.generateImages({
+        provider,
+        model,
+        prompt: 'moonlit desk',
+        ratio: '1:1',
+        qualityPreset: 'hd',
+        count: 1,
+        mode: 'generate',
+      })
+    ).rejects.toBeInstanceOf(ProviderQuotaError)
+    expect(fetchMock).toHaveBeenCalledTimes(1)
   })
 
   it('uses Jingxing async image tasks and polls the task result', async () => {
@@ -407,6 +445,70 @@ describe('DefaultImageGenerationService', () => {
       'Create a fresh variation of this image.'
     )
     expect(result[0].b64Json).toBe('dmFyaWF0aW9u')
+  })
+
+  it('does not fall back from variations to edits on quota exhaustion', async () => {
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(
+        new Response(new Uint8Array([1, 2, 3]), {
+          status: 200,
+          headers: { 'content-type': 'image/png' },
+        })
+      )
+      .mockResolvedValueOnce(quotaResponse())
+
+    vi.stubGlobal('fetch', fetchMock)
+
+    const service = new DefaultImageGenerationService()
+    await expect(
+      service.generateImages({
+        provider,
+        model,
+        prompt: '',
+        ratio: '1:1',
+        qualityPreset: 'sd',
+        count: 1,
+        mode: 'variation',
+        sourceAssets: [sourceAsset],
+      })
+    ).rejects.toBeInstanceOf(ProviderQuotaError)
+    expect(fetchMock).toHaveBeenCalledTimes(2)
+  })
+
+  it('surfaces quota exhaustion while polling Jingxing async tasks', async () => {
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(
+        new Response(
+          JSON.stringify({
+            id: 'task_123',
+            object: 'image.task',
+            status: 'queued',
+          }),
+          { status: 202, headers: { 'content-type': 'application/json' } }
+        )
+      )
+      .mockResolvedValueOnce(quotaResponse())
+
+    vi.stubGlobal('fetch', fetchMock)
+
+    const service = new DefaultImageGenerationService()
+    await expect(
+      service.generateImages({
+        provider: {
+          ...provider,
+          provider: 'jingxing',
+          base_url: 'https://api.jingxing.uk/v1',
+        },
+        model,
+        prompt: 'moon',
+        ratio: '1:1',
+        qualityPreset: 'sd',
+        count: 1,
+        mode: 'generate',
+      })
+    ).rejects.toBeInstanceOf(ProviderQuotaError)
   })
 
   it('downloads url image responses and converts them to base64', async () => {

@@ -8,14 +8,12 @@ import { Button } from '@/components/ui/button'
 import { Card, CardItem } from '@/containers/Card'
 import { useTranslation } from '@/i18n/react-i18next-compat'
 import { useGeneralSetting } from '@/hooks/useGeneralSetting'
-import { useAppUpdater } from '@/hooks/useAppUpdater'
-import { useEffect, useState, useCallback } from 'react'
+import { useEffect, useState } from 'react'
 import ChangeDataFolderLocation from '@/containers/dialogs/ChangeDataFolderLocation'
 import { FactoryResetDialog } from '@/containers/dialogs'
 import type { FactoryResetOptions } from '@/services/app/types'
 import { useServiceHub } from '@/hooks/useServiceHub'
 import {
-  IconBrandDiscord,
   IconBrandGithub,
   IconExternalLink,
   IconFolder,
@@ -24,7 +22,6 @@ import {
   IconCopyCheck,
 } from '@tabler/icons-react'
 import { toast } from 'sonner'
-import { isDev } from '@/lib/utils'
 import { SystemEvent } from '@/types/events'
 import { Input } from '@/components/ui/input'
 import { useHardware } from '@/hooks/useHardware'
@@ -56,7 +53,6 @@ function General() {
       return t('settings:general.openContainingFolder')
     }
   }
-  const { checkForUpdate } = useAppUpdater()
   const { pausePolling } = useHardware()
   const [mitaDataFolder, setMitaDataFolder] = useState<
     string | undefined
@@ -64,7 +60,6 @@ function General() {
   const [isCopied, setIsCopied] = useState(false)
   const [selectedNewPath, setSelectedNewPath] = useState<string | null>(null)
   const [isDialogOpen, setIsDialogOpen] = useState(false)
-  const [isCheckingUpdate, setIsCheckingUpdate] = useState(false)
   const [isValidatingToken, setIsValidatingToken] = useState(false)
   const [cliInstalled, setCliInstalled] = useState<boolean | null>(null)
   const [cliPath, setCliPath] = useState<string | null>(null)
@@ -191,23 +186,6 @@ function General() {
     }
   }
 
-  const handleCheckForUpdate = useCallback(async () => {
-    setIsCheckingUpdate(true)
-    try {
-      if (isDev()) return toast.info(t('settings:general.devVersion'))
-      const update = await checkForUpdate(true)
-      if (!update) {
-        toast.info(t('settings:general.noUpdateAvailable'))
-      }
-      // If update is available, the AppUpdater dialog will automatically show
-    } catch (error) {
-      console.error('Failed to check for updates:', error)
-      toast.error(t('settings:general.updateError'))
-    } finally {
-      setIsCheckingUpdate(false)
-    }
-  }, [t, checkForUpdate])
-
   return (
     <div className="flex flex-col h-svh w-full">
       <HeaderPage>
@@ -230,25 +208,6 @@ function General() {
                   </span>
                 }
               />
-              {!AUTO_UPDATER_DISABLED && (
-                <CardItem
-                  title={t('settings:general.checkForUpdates')}
-                  description={t('settings:general.checkForUpdatesDesc')}
-                  className="items-center flex-row gap-y-2"
-                  actions={
-                    <Button
-                      variant="secondary"
-                      size="sm"
-                      onClick={handleCheckForUpdate}
-                      disabled={isCheckingUpdate}
-                    >
-                      {isCheckingUpdate
-                        ? t('settings:general.checkingForUpdates')
-                        : t('settings:general.checkForUpdates')}
-                    </Button>
-                  }
-                />
-              )}
               <CardItem
                 title={t('common:language')}
                 actions={<LanguageSwitcher />}
@@ -589,22 +548,6 @@ function General() {
                         size={18}
                         className="text-muted-foreground"
                       />
-                  </a>
-                }
-              />
-              <CardItem
-                title={t('settings:general.discord')}
-                description={t('settings:general.discordDesc')}
-                actions={
-                  <a
-                    href="https://discord.com/invite/FTk2MvZwJH"
-                    target="_blank"
-                    rel="noopener noreferrer"
-                  >
-                    <IconBrandDiscord
-                      size={18}
-                      className="text-muted-foreground"
-                    />
                   </a>
                 }
               />

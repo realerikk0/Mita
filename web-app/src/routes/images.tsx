@@ -26,6 +26,7 @@ import {
 import { toast } from 'sonner'
 
 import HeaderPage from '@/containers/HeaderPage'
+import { ProviderQuotaActions } from '@/components/ProviderQuotaActions'
 import { Button } from '@/components/ui/button'
 import {
   Dialog,
@@ -62,6 +63,10 @@ import { cn, getModelDisplayName, getProviderTitle } from '@/lib/utils'
 import { route } from '@/constants/routes'
 import { useModelProvider } from '@/hooks/useModelProvider'
 import { useServiceHub } from '@/hooks/useServiceHub'
+import {
+  providerQuotaErrorFromUnknown,
+  type ProviderQuotaErrorDetails,
+} from '@/lib/provider-quota-error'
 import type {
   ImageAssetRecord,
   ImageGenerationStatus,
@@ -84,6 +89,7 @@ type ImageTask = {
   status: ImageGenerationStatus
   sourceAssetIds: string[]
   message?: string
+  quotaError?: ProviderQuotaErrorDetails
   asset?: ImageAssetRecord
 }
 
@@ -821,7 +827,11 @@ function Images() {
         .filter((asset): asset is ImageAssetRecord => Boolean(asset))
       const controller = new AbortController()
       controllers.current.set(task.id, controller)
-      updateTask(task.id, { status: 'running', message: undefined })
+      updateTask(task.id, {
+        status: 'running',
+        message: undefined,
+        quotaError: undefined,
+      })
 
       try {
         const images = await serviceHub.imageGeneration().generateImages({
@@ -876,15 +886,20 @@ function Images() {
         setAssets((current) => [saved, ...current])
         updateTask(task.id, { status: 'succeeded', asset: saved })
       } catch (error) {
+        const quotaError = providerQuotaErrorFromUnknown(error)
         const message =
-          error instanceof Error
+          quotaError?.message ||
+          (error instanceof Error
             ? error.message
-            : imageT(t, 'errors.generationFailed')
+            : imageT(t, 'errors.generationFailed'))
         updateTask(task.id, {
           status: cancelledTasks.current.has(task.id) ? 'failed' : 'failed',
           message: cancelledTasks.current.has(task.id)
             ? imageT(t, 'status.canceled')
             : message,
+          quotaError: cancelledTasks.current.has(task.id)
+            ? undefined
+            : quotaError?.toJSON(),
         })
       } finally {
         controllers.current.delete(task.id)
@@ -975,6 +990,7 @@ function Images() {
         createdAt: new Date().toISOString(),
         status: 'pending',
         message: undefined,
+        quotaError: undefined,
         asset: undefined,
       }
       setTasks((current) => [retry, ...current])
@@ -994,6 +1010,7 @@ function Images() {
         createdAt,
         status: 'pending',
         message: undefined,
+        quotaError: undefined,
         asset: undefined,
       }))
       setTasks((current) => [...nextTasks, ...current])
@@ -1416,13 +1433,15 @@ function Images() {
                                 {task.status === 'running' ? (
                                   <Loader2 className="size-6 animate-spin text-muted-foreground" />
                                 ) : task.status === 'failed' ? (
-                                  <button
-                                    type="button"
-                                    className="flex max-w-[86%] flex-col items-center gap-2 text-xs text-destructive"
-                                    onClick={() => retryTask(task)}
-                                  >
-                                    <RefreshCcw className="size-5" />
-                                    {imageT(t, 'retry')}
+                                  <div className="flex max-w-[86%] flex-col items-center gap-2 text-xs text-destructive">
+                                    <button
+                                      type="button"
+                                      className="flex flex-col items-center gap-2"
+                                      onClick={() => retryTask(task)}
+                                    >
+                                      <RefreshCcw className="size-5" />
+                                      {imageT(t, 'retry')}
+                                    </button>
                                     {task.message && (
                                       <span
                                         className="line-clamp-3 text-center text-[11px] leading-4 text-destructive/75"
@@ -1431,7 +1450,11 @@ function Images() {
                                         {task.message}
                                       </span>
                                     )}
-                                  </button>
+                                    <ProviderQuotaActions
+                                      error={task.quotaError}
+                                      className="items-center"
+                                    />
+                                  </div>
                                 ) : (
                                   <ImageIcon className="size-6 text-muted-foreground" />
                                 )}

@@ -479,5 +479,12 @@
       "title": "執行緒已移除",
       "description": "執行緒已成功從「{{projectName}}」中移除"
     }
+  },
+  "providerQuota": {
+    "title": "權杖額度已用盡",
+    "recharge": "去儲值",
+    "manageTokens": "管理權杖",
+    "linksUnavailable": "此提供商未返回儲值或權杖管理連結。",
+    "refreshModelsTitle": "無法重新整理模型：權杖額度已用盡"
   }
 }

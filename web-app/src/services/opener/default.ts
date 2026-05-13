@@ -9,4 +9,8 @@ export class DefaultOpenerService implements OpenerService {
     console.log('revealItemInDir called with path:', path)
     // No-op - not implemented in default service
   }
+
+  async openExternalUrl(url: string): Promise<void> {
+    globalThis.window?.open(url, '_blank')
+  }
 }

@@ -5,6 +5,7 @@ import React, { act } from 'react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 import { ModelCapabilities } from '@/types/models'
+import { ProviderQuotaError } from '@/lib/provider-quota-error'
 
 const h = vi.hoisted(() => ({
   providers: [] as any[],
@@ -16,6 +17,7 @@ const h = vi.hoisted(() => ({
   deleteAsset: vi.fn(),
   dialogOpen: vi.fn(),
   revealItemInDir: vi.fn(),
+  openExternalUrl: vi.fn(),
   convertFileSrc: vi.fn((path: string) => `asset://${path}`),
 }))
 
@@ -43,7 +45,10 @@ vi.mock('@/hooks/useServiceHub', () => ({
     }),
     dialog: () => ({ open: h.dialogOpen }),
     core: () => ({ convertFileSrc: h.convertFileSrc }),
-    opener: () => ({ revealItemInDir: h.revealItemInDir }),
+    opener: () => ({
+      revealItemInDir: h.revealItemInDir,
+      openExternalUrl: h.openExternalUrl,
+    }),
   }),
 }))
 
@@ -116,6 +121,10 @@ const translations: Record<string, string> = {
   'common:imageGeneration.retry': 'Retry',
   'common:imageGeneration.toast.referenceLimitReached':
     'You can use up to {{count}} reference images.',
+  'common:providerQuota.title': 'Provider quota exhausted',
+  'common:providerQuota.recharge': 'Recharge',
+  'common:providerQuota.manageTokens': 'Manage tokens',
+  'common:providerQuota.linksUnavailable': 'No links available',
 }
 
 vi.mock('@/i18n/react-i18next-compat', () => ({
@@ -149,6 +158,7 @@ describe('Images route', () => {
     h.listAssets.mockResolvedValue([])
     h.dialogOpen.mockResolvedValue(null)
     h.revealItemInDir.mockResolvedValue(undefined)
+    h.openExternalUrl.mockResolvedValue(undefined)
   })
 
   it('shows the no-image-model empty state', async () => {
@@ -270,6 +280,48 @@ describe('Images route', () => {
       prompt: 'moon desk',
       sourceAssets: [],
     })
+  })
+
+  it('shows recharge actions when image generation quota is exhausted', async () => {
+    h.providers = [
+      {
+        provider: 'jingxing',
+        base_url: 'https://api.jingxing.uk/v1',
+        settings: [],
+        models: [
+          {
+            id: 'gpt-image-2',
+            capabilities: [ModelCapabilities.IMAGE_GENERATION],
+          },
+        ],
+      },
+    ]
+    h.generateImages.mockRejectedValueOnce(
+      new ProviderQuotaError({
+        message: '该令牌额度已用尽',
+        status: 403,
+        code: 'pre_consume_token_quota_failed',
+        rechargeUrl: 'https://api.jingxing.uk/console/topup',
+        tokenUrl: 'https://api.jingxing.uk/console/token',
+        metadata: { quota_error: true },
+      })
+    )
+
+    renderComponent()
+
+    await waitFor(() => expect(h.listAssets).toHaveBeenCalled())
+    fireEvent.change(
+      screen.getByPlaceholderText(/Upload a reference image/),
+      { target: { value: 'a tiny moon desk' } }
+    )
+    fireEvent.click(screen.getByRole('button', { name: 'Generate' }))
+
+    expect(await screen.findByText('该令牌额度已用尽')).toBeInTheDocument()
+    fireEvent.click(screen.getByRole('button', { name: 'Recharge' }))
+    expect(h.openExternalUrl).toHaveBeenCalledWith(
+      'https://api.jingxing.uk/console/topup'
+    )
+    expect(screen.getByRole('button', { name: 'Manage tokens' })).toBeInTheDocument()
   })
 
   it('uses selected source assets for edit and variation inference', async () => {

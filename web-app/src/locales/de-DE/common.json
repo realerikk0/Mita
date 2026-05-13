@@ -479,5 +479,12 @@
       "title": "Download abgeschlossen",
       "description": "Modell \"{{item}}\" erfolgreich heruntergeladen und verifiziert"
     }
+  },
+  "providerQuota": {
+    "title": "Provider quota exhausted",
+    "recharge": "Recharge",
+    "manageTokens": "Manage tokens",
+    "linksUnavailable": "Recharge links are unavailable for this provider.",
+    "refreshModelsTitle": "Cannot refresh models: quota exhausted"
   }
 }

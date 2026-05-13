@@ -12,6 +12,10 @@ import { fetch as fetchTauri } from '@tauri-apps/plugin-http'
 import { DefaultProvidersService } from './default'
 import { getModelCapabilities } from '@/lib/models'
 import { providerRemoteApiKeyChain } from '@/lib/provider-api-keys'
+import {
+  parseProviderErrorResponse,
+  providerQuotaErrorFromUnknown,
+} from '@/lib/provider-quota-error'
 
 export class TauriProvidersService extends DefaultProvidersService {
   fetch(): typeof fetch {
@@ -181,6 +185,12 @@ export class TauriProvidersService extends DefaultProvidersService {
         lastStatus = response.status
         lastStatusText = response.statusText
 
+        const quotaError = await parseProviderErrorResponse(
+          response,
+          provider.provider
+        )
+        if (quotaError) throw quotaError
+
         if (
           [401, 403, 429].includes(response.status) &&
           ki < keyAttempts.length - 1
@@ -239,6 +249,8 @@ export class TauriProvidersService extends DefaultProvidersService {
       )
     } catch (error) {
       console.error('Error fetching models from provider:', error)
+      const quotaError = providerQuotaErrorFromUnknown(error)
+      if (quotaError) throw quotaError
 
       // Preserve structured error messages thrown above
       const structuredErrorPrefixes = [

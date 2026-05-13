@@ -10,6 +10,11 @@ import { fetch as httpFetch } from '@tauri-apps/plugin-http'
 import { isPlatformTauri } from '@/lib/platform/utils'
 import { providerRemoteApiKeyChain } from '@/lib/provider-api-keys'
 import { isJingxingNativeWebSearchModel } from '@/lib/models'
+import {
+  encodeProviderQuotaError,
+  parseProviderErrorResponse,
+  providerQuotaErrorFromUnknown,
+} from '@/lib/provider-quota-error'
 
 type ResponseStreamEvent = {
   type?: string
@@ -205,6 +210,12 @@ async function fetchResponsesWithKeyRotation(
       signal: abortSignal,
     })
 
+    const quotaError = await parseProviderErrorResponse(
+      response,
+      provider.provider
+    )
+    if (quotaError) throw quotaError
+
     if ([401, 403, 429].includes(response.status) && i < keys.length - 1) {
       response.body?.cancel().catch(() => {})
       continue
@@ -330,7 +341,10 @@ export function streamJingxingResponsesWebSearch(
         options.onTokenUsage?.(usage, responseMessageId)
       }
     },
-    onError: (error) =>
-      error instanceof Error ? error.message : JSON.stringify(error),
+    onError: (error) => {
+      const quotaError = providerQuotaErrorFromUnknown(error)
+      if (quotaError) return encodeProviderQuotaError(quotaError)
+      return error instanceof Error ? error.message : JSON.stringify(error)
+    },
   })
 }

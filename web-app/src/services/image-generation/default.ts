@@ -10,6 +10,10 @@ import {
   parseDataUrl,
 } from '@/lib/image-generation'
 import { providerRemoteApiKeyChain } from '@/lib/provider-api-keys'
+import {
+  parseProviderErrorResponse,
+  providerQuotaErrorFromUnknown,
+} from '@/lib/provider-quota-error'
 import type {
   ImageApiImage,
   ImageAssetRecord,
@@ -199,6 +203,12 @@ export class DefaultImageGenerationService implements ImageGenerationService {
         signal: request.signal,
       })
 
+      const quotaError = await parseProviderErrorResponse(
+        response,
+        request.provider.provider
+      )
+      if (quotaError) throw quotaError
+
       if (
         RETRYABLE_KEY_STATUSES.includes(response.status) &&
         index < attempts.length - 1
@@ -238,9 +248,16 @@ export class DefaultImageGenerationService implements ImageGenerationService {
           signal: request.signal,
         })
       } catch (error) {
+        if (providerQuotaErrorFromUnknown(error)) throw error
         if (index < attempts.length - 1) continue
         throw error
       }
+
+      const quotaError = await parseProviderErrorResponse(
+        response,
+        request.provider.provider
+      )
+      if (quotaError) throw quotaError
 
       if (
         RETRYABLE_KEY_STATUSES.includes(response.status) &&
@@ -269,6 +286,7 @@ export class DefaultImageGenerationService implements ImageGenerationService {
     try {
       return await this.postFormWithKeys(endpoint, request, form)
     } catch (error) {
+      if (providerQuotaErrorFromUnknown(error)) throw error
       if (request.mode !== 'variation') throw error
       const fallback = endpoint.replace('/images/variations', '/images/edits')
       const fallbackRequest = request.prompt.trim()
@@ -337,6 +355,12 @@ export class DefaultImageGenerationService implements ImageGenerationService {
         signal: request.signal,
       })
 
+      const quotaError = await parseProviderErrorResponse(
+        response,
+        request.provider.provider
+      )
+      if (quotaError) throw quotaError
+
       if (
         RETRYABLE_KEY_STATUSES.includes(response.status) &&
         index < attempts.length - 1
@@ -404,6 +428,7 @@ export class DefaultImageGenerationService implements ImageGenerationService {
       try {
         result = await this.getJson(taskEndpoint, request, currentApiKey)
       } catch (error) {
+        if (providerQuotaErrorFromUnknown(error)) throw error
         if (this.isAbortError(error)) throw error
         await this.sleep(JINGXING_TASK_POLL_INTERVAL_MS, request.signal)
         continue
@@ -499,10 +524,17 @@ export class DefaultImageGenerationService implements ImageGenerationService {
           redirect: 'follow',
           signal: request.signal,
         })
-      } catch {
+      } catch (error) {
+        if (providerQuotaErrorFromUnknown(error)) throw error
         if (index < attempts.length - 1) continue
         return undefined
       }
+
+      const quotaError = await parseProviderErrorResponse(
+        response,
+        request.provider.provider
+      )
+      if (quotaError) throw quotaError
 
       if (
         RETRYABLE_KEY_STATUSES.includes(response.status) &&

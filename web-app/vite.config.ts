@@ -2,10 +2,26 @@ import { defineConfig, loadEnv, Plugin } from 'vite'
 import react from '@vitejs/plugin-react'
 import tailwindcss from '@tailwindcss/vite'
 import path from 'path'
+import { readFileSync } from 'node:fs'
 import { TanStackRouterVite } from '@tanstack/router-plugin/vite'
 import { nodePolyfills } from 'vite-plugin-node-polyfills'
 import packageJson from './package.json'
 const host = process.env.TAURI_DEV_HOST
+
+function getAppVersion(): string {
+  try {
+    const tauriConfigPath = path.resolve(
+      __dirname,
+      '../src-tauri/tauri.conf.json'
+    )
+    const tauriConfig = JSON.parse(readFileSync(tauriConfigPath, 'utf-8')) as {
+      version?: string
+    }
+    return tauriConfig.version || packageJson.version
+  } catch {
+    return packageJson.version
+  }
+}
 
 // Plugin to inject GA scripts in HTML
 function injectGoogleAnalytics(gaMeasurementId?: string): Plugin {
@@ -89,7 +105,7 @@ export default defineConfig(({ mode }) => {
       ),
       PLATFORM: JSON.stringify(process.env.TAURI_ENV_PLATFORM),
 
-      VERSION: JSON.stringify(packageJson.version),
+      VERSION: JSON.stringify(getAppVersion()),
 
       POSTHOG_KEY: JSON.stringify(env.POSTHOG_KEY),
       POSTHOG_HOST: JSON.stringify(env.POSTHOG_HOST),

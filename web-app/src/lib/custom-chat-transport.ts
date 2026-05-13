@@ -39,6 +39,10 @@ import {
   canUseJingxingNativeWebSearch,
   streamJingxingResponsesWebSearch,
 } from '@/lib/jingxing-responses-web-search'
+import {
+  encodeProviderQuotaError,
+  providerQuotaErrorFromUnknown,
+} from '@/lib/provider-quota-error'
 
 export type TokenUsageCallback = (
   usage: LanguageModelUsage,
@@ -705,6 +709,11 @@ export class CustomChatTransport implements ChatTransport<UIMessage> {
         return undefined
       },
       onError: (error) => {
+        const quotaError = providerQuotaErrorFromUnknown(error)
+        if (quotaError) {
+          return encodeProviderQuotaError(quotaError)
+        }
+
         const errorMessage = error == null
           ? 'Unknown error'
           : typeof error === 'string'
