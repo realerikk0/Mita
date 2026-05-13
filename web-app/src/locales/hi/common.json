@@ -38,9 +38,12 @@
     "noImageModelsFound": "कोई इमेज मॉडल नहीं मिला",
     "reference": "संदर्भ",
     "referenceImage": "संदर्भ इमेज",
+    "chooseReferenceFromComputer": "कंप्यूटर से चुनें",
+    "localReferenceImage": "स्थानीय संदर्भ इमेज",
+    "imageFiles": "इमेज फ़ाइलें",
     "clearSource": "स्रोत हटाएं",
     "mask": "मास्क",
-    "referenceEmptyState": "जनरेट किए गए एसेट यहां संदर्भ इमेज के रूप में उपयोग किए जा सकते हैं।",
+    "referenceEmptyState": "जनरेट या इंपोर्ट किए गए एसेट यहां संदर्भ इमेज के रूप में उपयोग किए जा सकते हैं।",
     "promptPlaceholder": "संदर्भ इमेज अपलोड करें, prompt लिखें या बताएं कि आप क्या बनाना चाहते हैं।",
     "sourceModelUnsupported": "स्रोत इमेज के लिए इमेज एडिटिंग समर्थित मॉडल चाहिए।",
     "imageSizeSettings": "इमेज आकार सेटिंग्स",
@@ -57,6 +60,9 @@
     "usePromptAsSource": "{{prompt}} को स्रोत के रूप में उपयोग करें",
     "useAsSource": "स्रोत के रूप में उपयोग करें",
     "openInFileManager": "Finder / Explorer में खोलें",
+    "openInFinder": "Finder में खोलें",
+    "openInExplorer": "Explorer में खोलें",
+    "openInSystemFileManager": "फ़ाइल मैनेजर में खोलें",
     "imagePreview": "इमेज पूर्वावलोकन",
     "defaultVariationPrompt": "इस इमेज का नया वैरिएशन बनाएं।",
     "defaultMaskEditPrompt": "दी गई मास्क से इस इमेज को संपादित करें।",
@@ -83,14 +89,21 @@
       "selectImageModelFirst": "पहले इमेज मॉडल चुनें",
       "describeImageFirst": "पहले इमेज का वर्णन करें",
       "selectEditCapableModel": "स्रोत इमेज समर्थित इमेज मॉडल चुनें",
+      "referenceImported": "संदर्भ इमेज इंपोर्ट हो गई",
+      "importReferenceFailed": "संदर्भ इमेज इंपोर्ट नहीं हो सकी",
       "deleteAssetFailed": "इमेज एसेट हटाया नहीं जा सका",
       "revealAssetFailed": "इमेज एसेट दिखाया नहीं जा सका",
-      "promptCopied": "Prompt कॉपी किया गया"
+      "promptCopied": "Prompt कॉपी किया गया",
+      "referenceLimitReached": "आप अधिकतम {{count}} संदर्भ छवियां इस्तेमाल कर सकते हैं।"
     },
     "errors": {
       "modelUnavailable": "इमेज मॉडल अब उपलब्ध नहीं है",
       "generationFailed": "इमेज जनरेशन विफल"
-    }
+    },
+    "addReferenceImage": "संदर्भ छवि जोड़ें",
+    "removeReferenceImage": "{{prompt}} हटाएँ",
+    "pastedReferenceImage": "पेस्ट की गई संदर्भ छवि",
+    "defaultMultiSourcePrompt": "इन संदर्भ छवियों के आधार पर एक नई छवि बनाएं।"
   },
   "newAgentChat": "एजेंट के साथ नई चैट",
   "chats": "चैट्स",

@@ -2,7 +2,7 @@
 import { fireEvent, render, screen, waitFor } from '@testing-library/react'
 import '@testing-library/jest-dom'
 import React, { act } from 'react'
-import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 import { ModelCapabilities } from '@/types/models'
 
@@ -11,8 +11,10 @@ const h = vi.hoisted(() => ({
   assets: [] as any[],
   generateImages: vi.fn(),
   saveAsset: vi.fn(),
+  importAsset: vi.fn(),
   listAssets: vi.fn(),
   deleteAsset: vi.fn(),
+  dialogOpen: vi.fn(),
   revealItemInDir: vi.fn(),
   convertFileSrc: vi.fn((path: string) => `asset://${path}`),
 }))
@@ -35,9 +37,11 @@ vi.mock('@/hooks/useServiceHub', () => ({
     imageGeneration: () => ({
       generateImages: h.generateImages,
       saveAsset: h.saveAsset,
+      importAsset: h.importAsset,
       listAssets: h.listAssets,
       deleteAsset: h.deleteAsset,
     }),
+    dialog: () => ({ open: h.dialogOpen }),
     core: () => ({ convertFileSrc: h.convertFileSrc }),
     opener: () => ({ revealItemInDir: h.revealItemInDir }),
   }),
@@ -71,6 +75,12 @@ const translations: Record<string, string> = {
   'common:imageGeneration.selectQuality': 'Select resolution',
   'common:imageGeneration.referenceImage': 'Reference image',
   'common:imageGeneration.reference': 'Reference',
+  'common:imageGeneration.chooseReferenceFromComputer': 'Choose from computer',
+  'common:imageGeneration.localReferenceImage': 'Local reference image',
+  'common:imageGeneration.pastedReferenceImage': 'Pasted reference image',
+  'common:imageGeneration.addReferenceImage': 'Add reference image',
+  'common:imageGeneration.removeReferenceImage': 'Remove {{prompt}}',
+  'common:imageGeneration.imageFiles': 'Image files',
   'common:imageGeneration.clearSource': 'Clear source',
   'common:imageGeneration.promptPlaceholder':
     'Upload a reference image, type a prompt, or describe what you want to generate.',
@@ -81,15 +91,21 @@ const translations: Record<string, string> = {
   'common:imageGeneration.usePromptAsSource': 'Use {{prompt}} as source',
   'common:imageGeneration.useAsSource': 'Use as source',
   'common:imageGeneration.openInFileManager': 'Open in Finder / Explorer',
+  'common:imageGeneration.openInFinder': 'Open in Finder',
+  'common:imageGeneration.openInExplorer': 'Open in Explorer',
+  'common:imageGeneration.openInSystemFileManager': 'Open in file manager',
   'common:imageGeneration.status.saved': 'Saved',
   'common:imageGeneration.status.pending': 'Pending',
   'common:imageGeneration.status.running': 'Running',
   'common:imageGeneration.status.succeeded': 'Succeeded',
   'common:imageGeneration.status.failed': 'Failed',
+  'common:imageGeneration.toast.referenceImported': 'Reference image imported',
+  'common:imageGeneration.toast.importReferenceFailed':
+    'Failed to import reference image',
   'common:imageGeneration.defaultVariationPrompt':
     'Create a fresh variation of this image.',
-  'common:imageGeneration.defaultMaskEditPrompt':
-    'Edit this image using the provided mask.',
+  'common:imageGeneration.defaultMultiSourcePrompt':
+    'Create a new image based on these reference images.',
   'common:imageGeneration.imageCount.one': '{{count}} image',
   'common:imageGeneration.imageCount.other': '{{count}} images',
   'common:imageGeneration.imagePreview': 'Image preview',
@@ -98,7 +114,8 @@ const translations: Record<string, string> = {
   'common:imageGeneration.reEdit': 'Re-edit',
   'common:imageGeneration.regenerate': 'Regenerate',
   'common:imageGeneration.retry': 'Retry',
-  'common:imageGeneration.mask': 'Mask',
+  'common:imageGeneration.toast.referenceLimitReached':
+    'You can use up to {{count}} reference images.',
 }
 
 vi.mock('@/i18n/react-i18next-compat', () => ({
@@ -118,13 +135,19 @@ const renderComponent = () => {
 }
 
 describe('Images route', () => {
+  afterEach(() => {
+    vi.unstubAllGlobals()
+  })
+
   beforeEach(() => {
     vi.clearAllMocks()
     h.providers = []
     h.assets = []
     h.generateImages.mockResolvedValue([])
     h.saveAsset.mockResolvedValue(null)
+    h.importAsset.mockResolvedValue(null)
     h.listAssets.mockResolvedValue([])
+    h.dialogOpen.mockResolvedValue(null)
     h.revealItemInDir.mockResolvedValue(undefined)
   })
 
@@ -245,7 +268,7 @@ describe('Images route', () => {
     expect(h.generateImages.mock.calls.at(-1)?.[0]).toMatchObject({
       mode: 'generate',
       prompt: 'moon desk',
-      sourceAsset: null,
+      sourceAssets: [],
     })
   })
 
@@ -288,11 +311,8 @@ describe('Images route', () => {
     renderComponent()
 
     await screen.findByText('moon desk')
-    await act(async () => {
-      fireEvent.click(screen.getByRole('button', { name: 'Reference image' }))
-    })
-    fireEvent.click(await screen.findByRole('button', { name: 'Use moon desk as source' }))
-    expect(screen.getByText('Mask')).toBeInTheDocument()
+    fireEvent.click(screen.getByRole('button', { name: 'Use saved asset' }))
+    expect(screen.queryByText('Mask')).not.toBeInTheDocument()
     expect(screen.getAllByText('moon desk').length).toBeGreaterThan(0)
 
     fireEvent.change(
@@ -305,7 +325,7 @@ describe('Images route', () => {
       expect(h.generateImages.mock.calls.at(-1)?.[0]).toMatchObject({
         mode: 'edit',
         prompt: 'make it glass',
-        sourceAsset: expect.objectContaining({ id: 'asset-1' }),
+        sourceAssets: [expect.objectContaining({ id: 'asset-1' })],
       })
     )
 
@@ -320,7 +340,7 @@ describe('Images route', () => {
       expect(h.generateImages.mock.calls.at(-1)?.[0]).toMatchObject({
         mode: 'variation',
         prompt: 'Create a fresh variation of this image.',
-        sourceAsset: expect.objectContaining({ id: 'asset-1' }),
+        sourceAssets: [expect.objectContaining({ id: 'asset-1' })],
       })
     )
   })
@@ -364,15 +384,18 @@ describe('Images route', () => {
     renderComponent()
 
     await screen.findByText('moon desk')
-    fireEvent.click(screen.getByRole('button', { name: 'Reference image' }))
-    fireEvent.click(await screen.findByRole('button', { name: 'Use moon desk as source' }))
-    fireEvent.click(screen.getByRole('button', { name: 'Clear source' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Use saved asset' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Remove moon desk' }))
+    fireEvent.change(
+      screen.getByPlaceholderText(/Upload a reference image/),
+      { target: { value: '' } }
+    )
     fireEvent.click(screen.getByRole('button', { name: 'Generate' }))
 
     await waitFor(() => expect(h.generateImages).not.toHaveBeenCalled())
   })
 
-  it('opens a generated image context menu for preview and Finder access', async () => {
+  it('imports computer images as references without adding them to history', async () => {
     h.providers = [
       {
         provider: 'jingxing',
@@ -381,47 +404,256 @@ describe('Images route', () => {
         models: [
           {
             id: 'gpt-image-2',
-            capabilities: [ModelCapabilities.IMAGE_GENERATION],
+            capabilities: [
+              ModelCapabilities.IMAGE_GENERATION,
+              ModelCapabilities.IMAGE_TO_IMAGE,
+            ],
           },
         ],
       },
     ]
-    h.listAssets.mockResolvedValue([
-      {
-        id: 'asset-1',
-        prompt: 'moon desk',
-        mode: 'generate',
-        provider: 'jingxing',
-        model: 'gpt-image-2',
-        ratio: '1:1',
-        size: '1024x1024',
-        quality: 'high',
-        sourceAssetIds: [],
-        createdAt: '2026-05-11T00:00:00Z',
-        status: 'succeeded',
-        path: '/tmp/asset.png',
-        fileName: 'image.png',
-        mimeType: 'image/png',
-      },
+    const referenceAsset = {
+      id: 'local-ref-1',
+      prompt: 'logo-v1',
+      mode: 'edit',
+      provider: 'local',
+      model: 'reference-image',
+      ratio: '1:1',
+      size: 'original',
+      quality: 'source',
+      sourceAssetIds: [],
+      createdAt: '2026-05-11T00:00:00Z',
+      status: 'succeeded',
+      path: '/mock/mita/image-assets/local-ref-1/image.png',
+      fileName: 'image.png',
+      mimeType: 'image/png',
+      assetKind: 'reference',
+    }
+    const secondReferenceAsset = {
+      ...referenceAsset,
+      id: 'local-ref-2',
+      prompt: 'second-logo',
+      path: '/mock/mita/image-assets/local-ref-2/image.png',
+    }
+    h.listAssets.mockResolvedValueOnce([]).mockResolvedValue([
+      referenceAsset,
+      secondReferenceAsset,
     ])
+    h.dialogOpen.mockResolvedValue([
+      '/Users/eric/Desktop/logo-v1.png',
+      '/Users/eric/Desktop/second-logo.webp',
+    ])
+    h.importAsset.mockImplementation(({ sourcePath }: { sourcePath: string }) =>
+      Promise.resolve(
+        sourcePath.endsWith('second-logo.webp')
+          ? secondReferenceAsset
+          : referenceAsset
+      )
+    )
 
     renderComponent()
 
-    const image = (await screen.findAllByAltText('moon desk'))[1]
-    fireEvent.contextMenu(image)
+    await waitFor(() => expect(h.listAssets).toHaveBeenCalled())
+    await act(async () => {
+      fireEvent.click(screen.getByRole('button', { name: 'Add reference image' }))
+      await Promise.resolve()
+    })
 
-    expect(screen.getByRole('menuitem', { name: 'Preview' })).toBeInTheDocument()
-    expect(
-      screen.getByRole('menuitem', { name: 'Open in Finder / Explorer' })
-    ).toBeInTheDocument()
-
-    fireEvent.click(
-      screen.getByRole('menuitem', { name: 'Open in Finder / Explorer' })
+    await waitFor(() =>
+      expect(h.dialogOpen).toHaveBeenCalledWith({
+        multiple: true,
+        filters: [
+          {
+            name: 'Image files',
+            extensions: ['png', 'jpg', 'jpeg', 'webp'],
+          },
+        ],
+      })
     )
-    await waitFor(() => expect(h.revealItemInDir).toHaveBeenCalledWith('/tmp/asset.png'))
+    await waitFor(() => expect(h.importAsset).toHaveBeenCalledTimes(2))
+    expect(h.importAsset).toHaveBeenCalledWith(
+      expect.objectContaining({
+        sourcePath: '/Users/eric/Desktop/logo-v1.png',
+        prompt: 'logo-v1',
+      })
+    )
+    expect(h.importAsset).toHaveBeenCalledWith(
+      expect.objectContaining({
+        sourcePath: '/Users/eric/Desktop/second-logo.webp',
+        prompt: 'second-logo',
+      })
+    )
+    expect(screen.queryByText(/reference-image/)).not.toBeInTheDocument()
+    expect((await screen.findAllByAltText('logo-v1')).length).toBeGreaterThan(0)
+    expect((await screen.findAllByAltText('second-logo')).length).toBeGreaterThan(0)
 
-    fireEvent.contextMenu(image)
-    fireEvent.click(screen.getByRole('menuitem', { name: 'Preview' }))
-    expect(screen.getByText('Image preview')).toBeInTheDocument()
+    fireEvent.click(screen.getByRole('button', { name: 'Generate' }))
+
+    await waitFor(() =>
+      expect(h.generateImages.mock.calls.at(-1)?.[0]).toMatchObject({
+        mode: 'edit',
+        prompt: 'Create a new image based on these reference images.',
+        sourceAssets: [
+          expect.objectContaining({ id: 'local-ref-1' }),
+          expect.objectContaining({ id: 'local-ref-2' }),
+        ],
+      })
+    )
+  })
+
+  it('saves pasted images as reference assets', async () => {
+    h.providers = [
+      {
+        provider: 'jingxing',
+        base_url: 'https://api.jingxing.uk/v1',
+        settings: [],
+        models: [
+          {
+            id: 'gpt-image-2',
+            capabilities: [
+              ModelCapabilities.IMAGE_GENERATION,
+              ModelCapabilities.IMAGE_TO_IMAGE,
+            ],
+          },
+        ],
+      },
+    ]
+    let savedReferencePromise: Promise<any> | undefined
+    h.saveAsset.mockImplementation((request: any) => {
+      savedReferencePromise = Promise.resolve({
+        ...request,
+        createdAt: '2026-05-11T00:00:00Z',
+        path: `/mock/mita/image-assets/${request.id}/image.png`,
+        fileName: 'image.png',
+      })
+      return savedReferencePromise
+    })
+    vi.stubGlobal(
+      'Image',
+      class {
+        naturalWidth = 0
+        naturalHeight = 0
+        onerror?: () => void
+        set src(_value: string) {
+          this.onerror?.()
+        }
+      }
+    )
+
+    renderComponent()
+
+    await waitFor(() => expect(h.listAssets).toHaveBeenCalled())
+    const pastedFile = new File([new Uint8Array([1, 2, 3])], 'paste.png', {
+      type: 'image/png',
+    })
+    await act(async () => {
+      fireEvent.paste(screen.getByPlaceholderText(/Upload a reference image/), {
+        clipboardData: {
+          items: [
+            {
+              kind: 'file',
+              getAsFile: () => pastedFile,
+            },
+          ],
+          files: [],
+        },
+      })
+      await Promise.resolve()
+      await Promise.resolve()
+    })
+
+    await waitFor(() =>
+      expect(h.saveAsset).toHaveBeenCalledWith(
+        expect.objectContaining({
+          prompt: 'paste',
+          provider: 'local',
+          model: 'reference-image',
+          assetKind: 'reference',
+          sourceAssetIds: [],
+        })
+      )
+    )
+    await act(async () => {
+      await savedReferencePromise
+      await Promise.resolve()
+      await Promise.resolve()
+      await new Promise((resolve) => setTimeout(resolve, 0))
+    })
+    expect((await screen.findAllByAltText('paste')).length).toBeGreaterThan(0)
+
+    fireEvent.click(screen.getByRole('button', { name: 'Generate' }))
+    await waitFor(() =>
+      expect(h.generateImages.mock.calls.at(-1)?.[0]).toMatchObject({
+        mode: 'variation',
+        prompt: 'Create a fresh variation of this image.',
+        sourceAssets: [expect.objectContaining({ prompt: 'paste' })],
+      })
+    )
+  })
+
+  it('opens a generated image context menu for preview and Finder access', async () => {
+    const originalUserAgent = navigator.userAgent
+    Object.defineProperty(navigator, 'userAgent', {
+      value: 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7)',
+      configurable: true,
+    })
+
+    try {
+      h.providers = [
+        {
+          provider: 'jingxing',
+          base_url: 'https://api.jingxing.uk/v1',
+          settings: [],
+          models: [
+            {
+              id: 'gpt-image-2',
+              capabilities: [ModelCapabilities.IMAGE_GENERATION],
+            },
+          ],
+        },
+      ]
+      h.listAssets.mockResolvedValue([
+        {
+          id: 'asset-1',
+          prompt: 'moon desk',
+          mode: 'generate',
+          provider: 'jingxing',
+          model: 'gpt-image-2',
+          ratio: '1:1',
+          size: '1024x1024',
+          quality: 'high',
+          sourceAssetIds: [],
+          createdAt: '2026-05-11T00:00:00Z',
+          status: 'succeeded',
+          path: '/tmp/asset.png',
+          fileName: 'image.png',
+          mimeType: 'image/png',
+        },
+      ])
+
+      renderComponent()
+
+      const image = (await screen.findAllByAltText('moon desk'))[1]
+      fireEvent.contextMenu(image)
+
+      expect(screen.getByRole('menuitem', { name: 'Preview' })).toBeInTheDocument()
+      expect(
+        screen.getByRole('menuitem', { name: 'Open in Finder' })
+      ).toBeInTheDocument()
+
+      fireEvent.click(screen.getByRole('menuitem', { name: 'Open in Finder' }))
+      await waitFor(() =>
+        expect(h.revealItemInDir).toHaveBeenCalledWith('/tmp/asset.png')
+      )
+
+      fireEvent.contextMenu(image)
+      fireEvent.click(screen.getByRole('menuitem', { name: 'Preview' }))
+      expect(screen.getByText('Image preview')).toBeInTheDocument()
+    } finally {
+      Object.defineProperty(navigator, 'userAgent', {
+        value: originalUserAgent,
+        configurable: true,
+      })
+    }
   })
 })

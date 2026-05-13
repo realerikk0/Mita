@@ -27,9 +27,12 @@
     "noImageModelsFound": "No s’han trobat models d’imatge",
     "reference": "Referència",
     "referenceImage": "Imatge de referència",
+    "chooseReferenceFromComputer": "Tria des de l’ordinador",
+    "localReferenceImage": "Imatge de referència local",
+    "imageFiles": "Fitxers d’imatge",
     "clearSource": "Esborra la font",
     "mask": "Màscara",
-    "referenceEmptyState": "Els recursos generats es poden usar aquí com a imatges de referència.",
+    "referenceEmptyState": "Els recursos generats o importats es poden usar aquí com a imatges de referència.",
     "promptPlaceholder": "Puja una imatge de referència, escriu un prompt o descriu què vols generar.",
     "sourceModelUnsupported": "La imatge font requereix un model amb edició d’imatges.",
     "imageSizeSettings": "Configuració de mida d’imatge",
@@ -46,6 +49,9 @@
     "usePromptAsSource": "Usa {{prompt}} com a font",
     "useAsSource": "Usa com a font",
     "openInFileManager": "Obre al Finder / explorador",
+    "openInFinder": "Obre al Finder",
+    "openInExplorer": "Obre a l'Explorador",
+    "openInSystemFileManager": "Obre al gestor de fitxers",
     "imagePreview": "Previsualització de la imatge",
     "defaultVariationPrompt": "Crea una nova variació d’aquesta imatge.",
     "defaultMaskEditPrompt": "Edita aquesta imatge amb la màscara proporcionada.",
@@ -72,14 +78,21 @@
       "selectImageModelFirst": "Selecciona primer un model d’imatge",
       "describeImageFirst": "Descriu primer la imatge",
       "selectEditCapableModel": "Selecciona un model d’imatge que admeti imatges font",
+      "referenceImported": "Imatge de referència importada",
+      "importReferenceFailed": "No s’ha pogut importar la imatge de referència",
       "deleteAssetFailed": "No s’ha pogut suprimir el recurs d’imatge",
       "revealAssetFailed": "No s’ha pogut mostrar la ubicació del recurs",
-      "promptCopied": "Prompt copiat"
+      "promptCopied": "Prompt copiat",
+      "referenceLimitReached": "Pots fer servir fins a {{count}} imatges de referència."
     },
     "errors": {
       "modelUnavailable": "El model d’imatge ja no està disponible",
       "generationFailed": "La generació d’imatges ha fallat"
-    }
+    },
+    "addReferenceImage": "Afegeix imatge de referència",
+    "removeReferenceImage": "Elimina {{prompt}}",
+    "pastedReferenceImage": "Imatge de referència enganxada",
+    "defaultMultiSourcePrompt": "Crea una imatge nova basada en aquestes referències."
   },
   "favorites": "Preferits",
   "recents": "Recents",

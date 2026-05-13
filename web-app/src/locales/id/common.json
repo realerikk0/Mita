@@ -32,9 +32,12 @@
     "noImageModelsFound": "Tidak ada model gambar ditemukan",
     "reference": "Referensi",
     "referenceImage": "Gambar referensi",
+    "chooseReferenceFromComputer": "Pilih dari komputer",
+    "localReferenceImage": "Gambar referensi lokal",
+    "imageFiles": "File gambar",
     "clearSource": "Hapus sumber",
     "mask": "Masker",
-    "referenceEmptyState": "Aset yang dibuat dapat digunakan di sini sebagai gambar referensi.",
+    "referenceEmptyState": "Aset yang dibuat atau diimpor dapat digunakan di sini sebagai gambar referensi.",
     "promptPlaceholder": "Unggah gambar referensi, ketik prompt, atau jelaskan gambar yang ingin dibuat.",
     "sourceModelUnsupported": "Gambar sumber memerlukan model yang mendukung edit gambar.",
     "imageSizeSettings": "Pengaturan ukuran gambar",
@@ -51,6 +54,9 @@
     "usePromptAsSource": "Gunakan {{prompt}} sebagai sumber",
     "useAsSource": "Gunakan sebagai sumber",
     "openInFileManager": "Buka di Finder / Explorer",
+    "openInFinder": "Buka di Finder",
+    "openInExplorer": "Buka di Explorer",
+    "openInSystemFileManager": "Buka di pengelola file",
     "imagePreview": "Pratinjau gambar",
     "defaultVariationPrompt": "Buat variasi baru dari gambar ini.",
     "defaultMaskEditPrompt": "Edit gambar ini dengan masker yang disediakan.",
@@ -77,14 +83,21 @@
       "selectImageModelFirst": "Pilih model gambar terlebih dahulu",
       "describeImageFirst": "Jelaskan gambar terlebih dahulu",
       "selectEditCapableModel": "Pilih model gambar yang mendukung gambar sumber",
+      "referenceImported": "Gambar referensi diimpor",
+      "importReferenceFailed": "Gagal mengimpor gambar referensi",
       "deleteAssetFailed": "Gagal menghapus aset gambar",
       "revealAssetFailed": "Gagal membuka lokasi aset gambar",
-      "promptCopied": "Prompt disalin"
+      "promptCopied": "Prompt disalin",
+      "referenceLimitReached": "Anda dapat menggunakan hingga {{count}} gambar referensi."
     },
     "errors": {
       "modelUnavailable": "Model gambar tidak lagi tersedia",
       "generationFailed": "Pembuatan gambar gagal"
-    }
+    },
+    "addReferenceImage": "Tambah gambar referensi",
+    "removeReferenceImage": "Hapus {{prompt}}",
+    "pastedReferenceImage": "Gambar referensi yang ditempel",
+    "defaultMultiSourcePrompt": "Buat gambar baru berdasarkan gambar referensi ini."
   },
   "newAgentChat": "Obrolan Agent Baru",
   "chats": "Obrolan",

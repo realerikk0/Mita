@@ -27,6 +27,7 @@ export type ImageAssetRecord = {
   path: string
   fileName: string
   mimeType: string
+  assetKind?: 'generated' | 'reference'
 }
 
 export type SaveImageAssetRequest = Omit<
@@ -38,6 +39,13 @@ export type SaveImageAssetRequest = Omit<
   createdAt?: string
 }
 
+export type ImportImageAssetRequest = {
+  id: string
+  sourcePath: string
+  prompt?: string
+  createdAt?: string
+}
+
 export type ImageGenerationRequest = {
   provider: ModelProvider
   model: Model
@@ -46,8 +54,7 @@ export type ImageGenerationRequest = {
   qualityPreset: ImageQualityPreset
   count: number
   mode: ImageGenerationMode
-  sourceAsset?: ImageAssetRecord | null
-  maskFile?: File | null
+  sourceAssets?: ImageAssetRecord[]
   signal?: AbortSignal
 }
 
@@ -61,6 +68,7 @@ export type ImageApiImage = {
 export interface ImageGenerationService {
   generateImages(request: ImageGenerationRequest): Promise<ImageApiImage[]>
   saveAsset(request: SaveImageAssetRequest): Promise<ImageAssetRecord>
+  importAsset(request: ImportImageAssetRequest): Promise<ImageAssetRecord>
   listAssets(): Promise<ImageAssetRecord[]>
   deleteAsset(assetId: string): Promise<void>
 }

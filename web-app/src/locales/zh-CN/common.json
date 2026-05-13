@@ -32,9 +32,12 @@
     "noImageModelsFound": "未找到图片模型",
     "reference": "参考",
     "referenceImage": "参考图片",
+    "chooseReferenceFromComputer": "从电脑选择",
+    "localReferenceImage": "本地参考图",
+    "imageFiles": "图片文件",
     "clearSource": "清除源图",
     "mask": "蒙版",
-    "referenceEmptyState": "生成后的资产可以在这里作为参考图使用。",
+    "referenceEmptyState": "生成或导入的资产可以在这里作为参考图使用。",
     "promptPlaceholder": "上传参考图、输入提示词，或描述你想生成的图片。",
     "sourceModelUnsupported": "源图需要支持图片编辑的模型。",
     "imageSizeSettings": "图片尺寸设置",
@@ -51,6 +54,9 @@
     "usePromptAsSource": "将 {{prompt}} 作为源图",
     "useAsSource": "用作源图",
     "openInFileManager": "在 Finder / 资源管理器中打开",
+    "openInFinder": "在 Finder 中打开",
+    "openInExplorer": "在资源管理器中打开",
+    "openInSystemFileManager": "在文件管理器中打开",
     "imagePreview": "图片预览",
     "defaultVariationPrompt": "生成这张图片的一个全新变体。",
     "defaultMaskEditPrompt": "按蒙版编辑这张图片。",
@@ -77,14 +83,21 @@
       "selectImageModelFirst": "请先选择图片模型",
       "describeImageFirst": "请先描述图片",
       "selectEditCapableModel": "请选择支持源图输入的图片模型",
+      "referenceImported": "参考图已导入",
+      "importReferenceFailed": "导入参考图失败",
       "deleteAssetFailed": "删除图片资产失败",
       "revealAssetFailed": "无法打开图片所在位置",
-      "promptCopied": "提示词已复制"
+      "promptCopied": "提示词已复制",
+      "referenceLimitReached": "最多可使用 {{count}} 张参考图。"
     },
     "errors": {
       "modelUnavailable": "图片模型已不可用",
       "generationFailed": "图片生成失败"
-    }
+    },
+    "addReferenceImage": "添加参考图",
+    "removeReferenceImage": "移除 {{prompt}}",
+    "pastedReferenceImage": "粘贴的参考图",
+    "defaultMultiSourcePrompt": "基于这些参考图生成一张新的图片。"
   },
   "newAgentChat": "新建智能体聊天",
   "chats": "聊天",

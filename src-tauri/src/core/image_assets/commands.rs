@@ -1,4 +1,4 @@
-use super::models::{ImageAssetRecord, SaveImageAssetRequest};
+use super::models::{ImageAssetRecord, ImportImageAssetRequest, SaveImageAssetRequest};
 use crate::core::app::commands::get_mita_data_folder_path;
 use base64::{engine::general_purpose, Engine as _};
 use chrono::Utc;
@@ -40,6 +40,21 @@ fn normalize_extension(value: Option<&str>, mime_type: &str) -> String {
         "jpg" | "jpeg" => "jpg".to_string(),
         "webp" => "webp".to_string(),
         _ => "png".to_string(),
+    }
+}
+
+fn supported_import_extension(path: &Path) -> Result<(&'static str, &'static str), String> {
+    let extension = path
+        .extension()
+        .and_then(|value| value.to_str())
+        .map(str::to_ascii_lowercase)
+        .ok_or_else(|| "Unsupported image file extension".to_string())?;
+
+    match extension.as_str() {
+        "png" => Ok(("png", "image/png")),
+        "jpg" | "jpeg" => Ok(("jpg", "image/jpeg")),
+        "webp" => Ok(("webp", "image/webp")),
+        _ => Err("Unsupported image file extension".to_string()),
     }
 }
 
@@ -102,6 +117,67 @@ pub fn save_image_asset<R: Runtime>(
         path: image_path.to_string_lossy().to_string(),
         file_name,
         mime_type: asset.mime_type,
+        asset_kind: asset.asset_kind.or_else(|| Some("generated".to_string())),
+    };
+
+    write_metadata(&metadata_path(&asset_dir), &record)?;
+    Ok(record)
+}
+
+#[tauri::command]
+pub fn import_image_asset<R: Runtime>(
+    app: tauri::AppHandle<R>,
+    asset: ImportImageAssetRequest,
+) -> Result<ImageAssetRecord, String> {
+    validate_asset_id(&asset.id)?;
+
+    let source_path = PathBuf::from(&asset.source_path);
+    let canonical_source = source_path
+        .canonicalize()
+        .map_err(|e| format!("Invalid source image path: {e}"))?;
+    let metadata = fs::metadata(&canonical_source).map_err(|e| e.to_string())?;
+    if !metadata.is_file() {
+        return Err("Source image must be a file".to_string());
+    }
+
+    let (extension, mime_type) = supported_import_extension(&canonical_source)?;
+    let root = assets_root(&app);
+    let asset_dir = root.join(&asset.id);
+    fs::create_dir_all(&asset_dir).map_err(|e| e.to_string())?;
+
+    let file_name = format!("image.{extension}");
+    let image_path = asset_dir.join(&file_name);
+    fs::copy(&canonical_source, &image_path).map_err(|e| e.to_string())?;
+
+    let prompt = asset
+        .prompt
+        .filter(|value| !value.trim().is_empty())
+        .or_else(|| {
+            canonical_source
+                .file_stem()
+                .and_then(|value| value.to_str())
+                .map(str::to_string)
+        })
+        .unwrap_or_else(|| "Local reference image".to_string());
+
+    let record = ImageAssetRecord {
+        id: asset.id,
+        prompt,
+        mode: "edit".to_string(),
+        provider: "local".to_string(),
+        model: "reference-image".to_string(),
+        ratio: "1:1".to_string(),
+        size: "original".to_string(),
+        quality: "source".to_string(),
+        source_asset_ids: Vec::new(),
+        created_at: asset.created_at.unwrap_or_else(|| Utc::now().to_rfc3339()),
+        usage: None,
+        revised_prompt: None,
+        status: "succeeded".to_string(),
+        path: image_path.to_string_lossy().to_string(),
+        file_name,
+        mime_type: mime_type.to_string(),
+        asset_kind: Some("reference".to_string()),
     };
 
     write_metadata(&metadata_path(&asset_dir), &record)?;

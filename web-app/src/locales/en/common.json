@@ -37,9 +37,12 @@
     "noImageModelsFound": "No image models found",
     "reference": "Reference",
     "referenceImage": "Reference image",
+    "chooseReferenceFromComputer": "Choose from computer",
+    "localReferenceImage": "Local reference image",
+    "imageFiles": "Image files",
     "clearSource": "Clear source",
     "mask": "Mask",
-    "referenceEmptyState": "Generated assets can be used as references here.",
+    "referenceEmptyState": "Generated or imported assets can be used as references here.",
     "promptPlaceholder": "Upload a reference image, type a prompt, or describe what you want to generate.",
     "sourceModelUnsupported": "Source image requires an edit-capable model.",
     "imageSizeSettings": "Image size settings",
@@ -56,6 +59,9 @@
     "usePromptAsSource": "Use {{prompt}} as source",
     "useAsSource": "Use as source",
     "openInFileManager": "Open in Finder / Explorer",
+    "openInFinder": "Open in Finder",
+    "openInExplorer": "Open in Explorer",
+    "openInSystemFileManager": "Open in file manager",
     "imagePreview": "Image preview",
     "defaultVariationPrompt": "Create a fresh variation of this image.",
     "defaultMaskEditPrompt": "Edit this image using the provided mask.",
@@ -82,14 +88,21 @@
       "selectImageModelFirst": "Select an image model first",
       "describeImageFirst": "Describe the image first",
       "selectEditCapableModel": "Select an image model that supports source images",
+      "referenceImported": "Reference image imported",
+      "importReferenceFailed": "Failed to import reference image",
       "deleteAssetFailed": "Failed to delete image asset",
       "revealAssetFailed": "Failed to reveal image asset",
-      "promptCopied": "Prompt copied"
+      "promptCopied": "Prompt copied",
+      "referenceLimitReached": "You can use up to {{count}} reference images."
     },
     "errors": {
       "modelUnavailable": "Image model is no longer available",
       "generationFailed": "Image generation failed"
-    }
+    },
+    "addReferenceImage": "Add reference image",
+    "removeReferenceImage": "Remove {{prompt}}",
+    "pastedReferenceImage": "Pasted reference image",
+    "defaultMultiSourcePrompt": "Create a new image based on these reference images."
   },
   "newAgentChat": "New Agent Chat",
   "chats": "Chats",

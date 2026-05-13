@@ -32,9 +32,12 @@
     "noImageModelsFound": "Nie znaleziono modeli obrazu",
     "reference": "Referencja",
     "referenceImage": "Obraz referencyjny",
+    "chooseReferenceFromComputer": "Wybierz z komputera",
+    "localReferenceImage": "Lokalny obraz referencyjny",
+    "imageFiles": "Pliki obrazów",
     "clearSource": "Wyczyść źródło",
     "mask": "Maska",
-    "referenceEmptyState": "Wygenerowane zasoby mogą być tutaj używane jako obrazy referencyjne.",
+    "referenceEmptyState": "Wygenerowane lub zaimportowane zasoby mogą być tutaj używane jako obrazy referencyjne.",
     "promptPlaceholder": "Prześlij obraz referencyjny, wpisz prompt lub opisz, co chcesz wygenerować.",
     "sourceModelUnsupported": "Obraz źródłowy wymaga modelu obsługującego edycję obrazów.",
     "imageSizeSettings": "Ustawienia rozmiaru obrazu",
@@ -51,6 +54,9 @@
     "usePromptAsSource": "Użyj {{prompt}} jako źródła",
     "useAsSource": "Użyj jako źródła",
     "openInFileManager": "Otwórz w Finderze / Eksploratorze",
+    "openInFinder": "Otwórz w Finderze",
+    "openInExplorer": "Otwórz w Eksploratorze",
+    "openInSystemFileManager": "Otwórz w menedżerze plików",
     "imagePreview": "Podgląd obrazu",
     "defaultVariationPrompt": "Utwórz nową wariację tego obrazu.",
     "defaultMaskEditPrompt": "Edytuj ten obraz przy użyciu podanej maski.",
@@ -77,14 +83,21 @@
       "selectImageModelFirst": "Najpierw wybierz model obrazu",
       "describeImageFirst": "Najpierw opisz obraz",
       "selectEditCapableModel": "Wybierz model obrazu obsługujący obrazy źródłowe",
+      "referenceImported": "Obraz referencyjny zaimportowany",
+      "importReferenceFailed": "Nie udało się zaimportować obrazu referencyjnego",
       "deleteAssetFailed": "Nie udało się usunąć zasobu obrazu",
       "revealAssetFailed": "Nie udało się pokazać zasobu obrazu",
-      "promptCopied": "Prompt skopiowany"
+      "promptCopied": "Prompt skopiowany",
+      "referenceLimitReached": "Możesz użyć maksymalnie {{count}} obrazów referencyjnych."
     },
     "errors": {
       "modelUnavailable": "Model obrazu nie jest już dostępny",
       "generationFailed": "Generowanie obrazu nie powiodło się"
-    }
+    },
+    "addReferenceImage": "Dodaj obraz referencyjny",
+    "removeReferenceImage": "Usuń {{prompt}}",
+    "pastedReferenceImage": "Wklejony obraz referencyjny",
+    "defaultMultiSourcePrompt": "Utwórz nowy obraz na podstawie tych referencji."
   },
   "newAgentChat": "Nowy Czat Agenta",
   "chats": "Czaty",

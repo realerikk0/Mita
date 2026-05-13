@@ -1,8 +1,10 @@
 import { describe, expect, it } from 'vitest'
 
 import {
+  apiQualityForImageEditPreset,
   apiQualityForPreset,
   getImageModels,
+  imageEditSizeForRatio,
   imageSizeForRatio,
   isImageGenerationModel,
 } from '@/lib/image-generation'
@@ -45,8 +47,9 @@ describe('image generation helpers', () => {
     )
   })
 
-  it('maps ratios to exact sizes for gpt-image-2 and fallback sizes otherwise', () => {
-    expect(imageSizeForRatio('9:16', 'gpt-image-2')).toBe('1024x1820')
+  it('maps gpt-image models to supported fixed sizes and falls back otherwise', () => {
+    expect(imageSizeForRatio('3:4', 'gpt-image-2')).toBe('1024x1536')
+    expect(imageSizeForRatio('16:9', 'gpt-image-2')).toBe('1536x1024')
     expect(imageSizeForRatio('9:16', 'gpt-image-1')).toBe('1024x1536')
     expect(imageSizeForRatio('16:9', 'custom-image-model')).toBe('1536x1024')
   })
@@ -56,5 +59,48 @@ describe('image generation helpers', () => {
     expect(apiQualityForPreset('hd', 'gpt-image-2')).toBe('high')
     expect(apiQualityForPreset('sd', 'dall-e-3')).toBe('standard')
     expect(apiQualityForPreset('hd', 'dall-e-3')).toBe('hd')
+  })
+
+  it('uses Jingxing-compatible edit params for gpt-image reference edits', () => {
+    expect(
+      imageEditSizeForRatio(
+        '3:4',
+        'gpt-image-2',
+        'jingxing',
+        'https://api.jingxing.uk/v1'
+      )
+    ).toBe('1024x1792')
+    expect(
+      imageEditSizeForRatio(
+        '16:9',
+        'gpt-image-2',
+        'jingxing',
+        'https://api.jingxing.uk/v1'
+      )
+    ).toBe('1792x1024')
+    expect(
+      apiQualityForImageEditPreset(
+        'hd',
+        'gpt-image-2',
+        'jingxing',
+        'https://api.jingxing.uk/v1'
+      )
+    ).toBe('medium')
+    expect(
+      apiQualityForImageEditPreset(
+        'sd',
+        'gpt-image-2',
+        'jingxing',
+        'https://api.jingxing.uk/v1'
+      )
+    ).toBe('medium')
+    expect(
+      apiQualityForImageEditPreset(
+        'sd',
+        'gpt-image-2',
+        'openai-compatible',
+        'https://api.example.test/v1'
+      )
+    ).toBe('medium')
   })
 })

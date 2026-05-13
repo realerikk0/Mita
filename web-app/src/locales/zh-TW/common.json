@@ -32,9 +32,12 @@
     "noImageModelsFound": "找不到圖片模型",
     "reference": "參考",
     "referenceImage": "參考圖片",
+    "chooseReferenceFromComputer": "從電腦選擇",
+    "localReferenceImage": "本機參考圖",
+    "imageFiles": "圖片檔案",
     "clearSource": "清除源圖",
     "mask": "遮罩",
-    "referenceEmptyState": "生成後的資產可以在這裡作為參考圖使用。",
+    "referenceEmptyState": "生成或匯入的資產可以在這裡作為參考圖使用。",
     "promptPlaceholder": "上傳參考圖、輸入提示詞，或描述你想生成的圖片。",
     "sourceModelUnsupported": "源圖需要支援圖片編輯的模型。",
     "imageSizeSettings": "圖片尺寸設定",
@@ -51,6 +54,9 @@
     "usePromptAsSource": "將 {{prompt}} 作為源圖",
     "useAsSource": "用作源圖",
     "openInFileManager": "在 Finder / 檔案總管中開啟",
+    "openInFinder": "在 Finder 中開啟",
+    "openInExplorer": "在檔案總管中開啟",
+    "openInSystemFileManager": "在檔案管理器中開啟",
     "imagePreview": "圖片預覽",
     "defaultVariationPrompt": "生成這張圖片的一個全新變體。",
     "defaultMaskEditPrompt": "按遮罩編輯這張圖片。",
@@ -77,14 +83,21 @@
       "selectImageModelFirst": "請先選擇圖片模型",
       "describeImageFirst": "請先描述圖片",
       "selectEditCapableModel": "請選擇支援源圖輸入的圖片模型",
+      "referenceImported": "參考圖已匯入",
+      "importReferenceFailed": "匯入參考圖失敗",
       "deleteAssetFailed": "刪除圖片資產失敗",
       "revealAssetFailed": "無法開啟圖片所在位置",
-      "promptCopied": "提示詞已複製"
+      "promptCopied": "提示詞已複製",
+      "referenceLimitReached": "最多可使用 {{count}} 張參考圖。"
     },
     "errors": {
       "modelUnavailable": "圖片模型已不可用",
       "generationFailed": "圖片生成失敗"
-    }
+    },
+    "addReferenceImage": "新增參考圖",
+    "removeReferenceImage": "移除 {{prompt}}",
+    "pastedReferenceImage": "貼上的參考圖",
+    "defaultMultiSourcePrompt": "根據這些參考圖生成一張新的圖片。"
   },
   "newAgentChat": "新智能體聊天",
   "chats": "聊天",

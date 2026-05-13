@@ -32,9 +32,12 @@
     "noImageModelsFound": "Nenalezeny žádné obrázkové modely",
     "reference": "Reference",
     "referenceImage": "Referenční obrázek",
+    "chooseReferenceFromComputer": "Vybrat z počítače",
+    "localReferenceImage": "Místní referenční obrázek",
+    "imageFiles": "Obrázkové soubory",
     "clearSource": "Vymazat zdroj",
     "mask": "Maska",
-    "referenceEmptyState": "Vygenerované položky zde můžete použít jako referenční obrázky.",
+    "referenceEmptyState": "Vygenerované nebo importované položky zde můžete použít jako referenční obrázky.",
     "promptPlaceholder": "Nahrajte referenční obrázek, zadejte prompt nebo popište, co chcete vygenerovat.",
     "sourceModelUnsupported": "Zdrojový obrázek vyžaduje model podporující úpravy obrázků.",
     "imageSizeSettings": "Nastavení velikosti obrázku",
@@ -51,6 +54,9 @@
     "usePromptAsSource": "Použít {{prompt}} jako zdroj",
     "useAsSource": "Použít jako zdroj",
     "openInFileManager": "Otevřít ve Finderu / Průzkumníku",
+    "openInFinder": "Otevřít ve Finderu",
+    "openInExplorer": "Otevřít v Průzkumníku",
+    "openInSystemFileManager": "Otevřít ve správci souborů",
     "imagePreview": "Náhled obrázku",
     "defaultVariationPrompt": "Vytvořte novou variantu tohoto obrázku.",
     "defaultMaskEditPrompt": "Upravte tento obrázek pomocí zadané masky.",
@@ -77,14 +83,21 @@
       "selectImageModelFirst": "Nejprve vyberte obrázkový model",
       "describeImageFirst": "Nejprve popište obrázek",
       "selectEditCapableModel": "Vyberte obrázkový model podporující zdrojové obrázky",
+      "referenceImported": "Referenční obrázek importován",
+      "importReferenceFailed": "Nepodařilo se importovat referenční obrázek",
       "deleteAssetFailed": "Nepodařilo se odstranit obrázkovou položku",
       "revealAssetFailed": "Nepodařilo se zobrazit obrázkovou položku",
-      "promptCopied": "Prompt zkopírován"
+      "promptCopied": "Prompt zkopírován",
+      "referenceLimitReached": "Můžete použít až {{count}} referenčních obrázků."
     },
     "errors": {
       "modelUnavailable": "Obrázkový model již není dostupný",
       "generationFailed": "Generování obrázku selhalo"
-    }
+    },
+    "addReferenceImage": "Přidat referenční obrázek",
+    "removeReferenceImage": "Odebrat {{prompt}}",
+    "pastedReferenceImage": "Vložený referenční obrázek",
+    "defaultMultiSourcePrompt": "Vytvořte nový obrázek podle těchto referencí."
   },
   "newAgentChat": "Nový chat agenta",
   "chats": "Chaty",

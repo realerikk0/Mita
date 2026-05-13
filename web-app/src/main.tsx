@@ -56,11 +56,47 @@ const preventDefaultFileDrop = () => {
   })
 }
 
+// Keep the app at 100% page zoom while still allowing normal window resizing.
+const preventWebviewZoom = () => {
+  const zoomKeys = new Set(['+', '=', '-', '_', '0'])
+
+  document.addEventListener(
+    'keydown',
+    (e) => {
+      if ((e.metaKey || e.ctrlKey) && zoomKeys.has(e.key)) {
+        e.preventDefault()
+      }
+    },
+    { capture: true }
+  )
+
+  document.addEventListener(
+    'wheel',
+    (e) => {
+      if (e.ctrlKey) {
+        e.preventDefault()
+      }
+    },
+    { passive: false }
+  )
+
+  const preventGestureZoom = (e: Event) => {
+    e.preventDefault()
+  }
+
+  document.addEventListener('gesturestart', preventGestureZoom)
+  document.addEventListener('gesturechange', preventGestureZoom)
+  document.addEventListener('gestureend', preventGestureZoom)
+}
+
 // Initialize mobile setup
 setupMobileViewport()
 
 // Prevent files from opening when dropped
 preventDefaultFileDrop()
+
+// Prevent WebView/browser page zoom shortcuts and gestures
+preventWebviewZoom()
 
 // Create a new router instance
 const router = createRouter({ routeTree })

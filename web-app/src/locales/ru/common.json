@@ -32,9 +32,12 @@
     "noImageModelsFound": "Модели изображений не найдены",
     "reference": "Референс",
     "referenceImage": "Референсное изображение",
+    "chooseReferenceFromComputer": "Выбрать с компьютера",
+    "localReferenceImage": "Локальное референсное изображение",
+    "imageFiles": "Файлы изображений",
     "clearSource": "Очистить источник",
     "mask": "Маска",
-    "referenceEmptyState": "Сгенерированные ассеты можно использовать здесь как референсные изображения.",
+    "referenceEmptyState": "Сгенерированные или импортированные ассеты можно использовать здесь как референсные изображения.",
     "promptPlaceholder": "Загрузите референс, введите prompt или опишите, что хотите сгенерировать.",
     "sourceModelUnsupported": "Для исходного изображения нужна модель с поддержкой редактирования изображений.",
     "imageSizeSettings": "Настройки размера изображения",
@@ -51,6 +54,9 @@
     "usePromptAsSource": "Использовать {{prompt}} как источник",
     "useAsSource": "Использовать как источник",
     "openInFileManager": "Открыть в Finder / Проводнике",
+    "openInFinder": "Открыть в Finder",
+    "openInExplorer": "Открыть в Проводнике",
+    "openInSystemFileManager": "Открыть в файловом менеджере",
     "imagePreview": "Предпросмотр изображения",
     "defaultVariationPrompt": "Создайте новую вариацию этого изображения.",
     "defaultMaskEditPrompt": "Отредактируйте это изображение с указанной маской.",
@@ -77,14 +83,21 @@
       "selectImageModelFirst": "Сначала выберите модель изображений",
       "describeImageFirst": "Сначала опишите изображение",
       "selectEditCapableModel": "Выберите модель изображений с поддержкой исходных изображений",
+      "referenceImported": "Референсное изображение импортировано",
+      "importReferenceFailed": "Не удалось импортировать референсное изображение",
       "deleteAssetFailed": "Не удалось удалить ассет изображения",
       "revealAssetFailed": "Не удалось открыть расположение ассета",
-      "promptCopied": "Prompt скопирован"
+      "promptCopied": "Prompt скопирован",
+      "referenceLimitReached": "Можно использовать до {{count}} референс-изображений."
     },
     "errors": {
       "modelUnavailable": "Модель изображений больше недоступна",
       "generationFailed": "Не удалось сгенерировать изображение"
-    }
+    },
+    "addReferenceImage": "Добавить референс",
+    "removeReferenceImage": "Удалить {{prompt}}",
+    "pastedReferenceImage": "Вставленное референс-изображение",
+    "defaultMultiSourcePrompt": "Создайте новое изображение на основе этих референсов."
   },
   "newAgentChat": "Новый чат агента",
   "chats": "Чаты",

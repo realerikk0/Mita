@@ -36,9 +36,12 @@
     "noImageModelsFound": "이미지 모델을 찾을 수 없음",
     "reference": "참조",
     "referenceImage": "참조 이미지",
+    "chooseReferenceFromComputer": "컴퓨터에서 선택",
+    "localReferenceImage": "로컬 참조 이미지",
+    "imageFiles": "이미지 파일",
     "clearSource": "소스 지우기",
     "mask": "마스크",
-    "referenceEmptyState": "생성된 에셋을 여기에서 참조 이미지로 사용할 수 있습니다.",
+    "referenceEmptyState": "생성하거나 가져온 에셋을 여기에서 참조 이미지로 사용할 수 있습니다.",
     "promptPlaceholder": "참조 이미지를 업로드하거나, 프롬프트를 입력하거나, 만들고 싶은 이미지를 설명하세요.",
     "sourceModelUnsupported": "소스 이미지는 이미지 편집 지원 모델이 필요합니다.",
     "imageSizeSettings": "이미지 크기 설정",
@@ -55,6 +58,9 @@
     "usePromptAsSource": "{{prompt}}을(를) 소스로 사용",
     "useAsSource": "소스로 사용",
     "openInFileManager": "Finder / Explorer에서 열기",
+    "openInFinder": "Finder에서 열기",
+    "openInExplorer": "Explorer에서 열기",
+    "openInSystemFileManager": "파일 관리자에서 열기",
     "imagePreview": "이미지 미리보기",
     "defaultVariationPrompt": "이 이미지의 새로운 변형을 만듭니다.",
     "defaultMaskEditPrompt": "제공된 마스크로 이 이미지를 편집합니다.",
@@ -81,14 +87,21 @@
       "selectImageModelFirst": "먼저 이미지 모델을 선택하세요",
       "describeImageFirst": "먼저 이미지를 설명하세요",
       "selectEditCapableModel": "소스 이미지를 지원하는 이미지 모델을 선택하세요",
+      "referenceImported": "참조 이미지를 가져왔습니다",
+      "importReferenceFailed": "참조 이미지를 가져오지 못했습니다",
       "deleteAssetFailed": "이미지 에셋 삭제 실패",
       "revealAssetFailed": "이미지 에셋 위치를 열 수 없습니다",
-      "promptCopied": "프롬프트가 복사되었습니다"
+      "promptCopied": "프롬프트가 복사되었습니다",
+      "referenceLimitReached": "참조 이미지는 최대 {{count}}장까지 사용할 수 있습니다."
     },
     "errors": {
       "modelUnavailable": "이미지 모델을 더 이상 사용할 수 없습니다",
       "generationFailed": "이미지 생성 실패"
-    }
+    },
+    "addReferenceImage": "참조 이미지 추가",
+    "removeReferenceImage": "{{prompt}} 제거",
+    "pastedReferenceImage": "붙여넣은 참조 이미지",
+    "defaultMultiSourcePrompt": "이 참조 이미지들을 기반으로 새 이미지를 생성합니다."
   },
   "newAgentChat": "새 에이전트 채팅",
   "chats": "채팅",

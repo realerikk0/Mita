@@ -20,6 +20,16 @@ pub struct SaveImageAssetRequest {
     pub b64_json: String,
     pub extension: Option<String>,
     pub created_at: Option<String>,
+    pub asset_kind: Option<String>,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ImportImageAssetRequest {
+    pub id: String,
+    pub source_path: String,
+    pub prompt: Option<String>,
+    pub created_at: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -41,4 +51,5 @@ pub struct ImageAssetRecord {
     pub path: String,
     pub file_name: String,
     pub mime_type: String,
+    pub asset_kind: Option<String>,
 }

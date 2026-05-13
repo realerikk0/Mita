@@ -32,9 +32,12 @@
     "noImageModelsFound": "画像モデルが見つかりません",
     "reference": "参照",
     "referenceImage": "参照画像",
+    "chooseReferenceFromComputer": "コンピューターから選択",
+    "localReferenceImage": "ローカル参照画像",
+    "imageFiles": "画像ファイル",
     "clearSource": "ソースをクリア",
     "mask": "マスク",
-    "referenceEmptyState": "生成されたアセットをここで参照画像として使用できます。",
+    "referenceEmptyState": "生成またはインポートしたアセットをここで参照画像として使用できます。",
     "promptPlaceholder": "参照画像をアップロードするか、プロンプトを入力するか、生成したい画像を説明してください。",
     "sourceModelUnsupported": "ソース画像には画像編集に対応したモデルが必要です。",
     "imageSizeSettings": "画像サイズ設定",
@@ -51,6 +54,9 @@
     "usePromptAsSource": "{{prompt}} をソースとして使用",
     "useAsSource": "ソースとして使用",
     "openInFileManager": "Finder / Explorer で開く",
+    "openInFinder": "Finderで開く",
+    "openInExplorer": "Explorerで開く",
+    "openInSystemFileManager": "ファイルマネージャーで開く",
     "imagePreview": "画像プレビュー",
     "defaultVariationPrompt": "この画像の新しいバリエーションを作成します。",
     "defaultMaskEditPrompt": "提供されたマスクでこの画像を編集します。",
@@ -77,14 +83,21 @@
       "selectImageModelFirst": "先に画像モデルを選択してください",
       "describeImageFirst": "先に画像を説明してください",
       "selectEditCapableModel": "ソース画像に対応した画像モデルを選択してください",
+      "referenceImported": "参照画像をインポートしました",
+      "importReferenceFailed": "参照画像のインポートに失敗しました",
       "deleteAssetFailed": "画像アセットの削除に失敗しました",
       "revealAssetFailed": "画像アセットの場所を開けませんでした",
-      "promptCopied": "プロンプトをコピーしました"
+      "promptCopied": "プロンプトをコピーしました",
+      "referenceLimitReached": "参照画像は最大 {{count}} 枚まで使用できます。"
     },
     "errors": {
       "modelUnavailable": "画像モデルは利用できなくなりました",
       "generationFailed": "画像生成に失敗しました"
-    }
+    },
+    "addReferenceImage": "参照画像を追加",
+    "removeReferenceImage": "{{prompt}} を削除",
+    "pastedReferenceImage": "貼り付けた参照画像",
+    "defaultMultiSourcePrompt": "これらの参照画像をもとに新しい画像を生成します。"
   },
   "newAgentChat": "新しいエージェントチャット",
   "chats": "チャット",

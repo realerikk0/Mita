@@ -1,5 +1,7 @@
-use super::commands::{delete_image_asset, list_image_assets, save_image_asset};
-use super::models::SaveImageAssetRequest;
+use super::commands::{
+    delete_image_asset, import_image_asset, list_image_assets, save_image_asset,
+};
+use super::models::{ImportImageAssetRequest, SaveImageAssetRequest};
 use crate::core::app::commands::get_mita_data_folder_path;
 use std::fs;
 use tauri::test::mock_app;
@@ -22,6 +24,16 @@ fn test_asset(id: &str) -> SaveImageAssetRequest {
         b64_json: "iVBORw0KGgo=".to_string(),
         extension: Some("png".to_string()),
         created_at: Some("2026-05-11T00:00:00Z".to_string()),
+        asset_kind: None,
+    }
+}
+
+fn test_import_asset(id: &str, source_path: String) -> ImportImageAssetRequest {
+    ImportImageAssetRequest {
+        id: id.to_string(),
+        source_path,
+        prompt: Some("Local logo".to_string()),
+        created_at: Some("2026-05-11T00:00:00Z".to_string()),
     }
 }
 
@@ -34,7 +46,9 @@ fn saves_lists_and_deletes_image_asset_under_data_folder() {
     let record = save_image_asset(app.handle().clone(), test_asset(id)).unwrap();
     let data_folder = get_mita_data_folder_path(app.handle().clone());
 
-    assert!(record.path.starts_with(data_folder.to_string_lossy().as_ref()));
+    assert!(record
+        .path
+        .starts_with(data_folder.to_string_lossy().as_ref()));
     assert!(record.path.ends_with("image.png"));
     assert!(fs::metadata(&record.path).unwrap().is_file());
 
@@ -60,4 +74,64 @@ fn rejects_invalid_base64() {
 
     let result = save_image_asset(app.handle().clone(), asset);
     assert!(result.is_err());
+}
+
+#[test]
+fn imports_reference_asset_under_data_folder() {
+    let app = mock_app();
+    let id = "test-image-asset-import";
+    let _ = delete_image_asset(app.handle().clone(), id.to_string());
+    let source_path = std::env::temp_dir().join("mita-test-reference.png");
+    fs::write(&source_path, b"fake image bytes").unwrap();
+
+    let record = import_image_asset(
+        app.handle().clone(),
+        test_import_asset(id, source_path.to_string_lossy().to_string()),
+    )
+    .unwrap();
+    let data_folder = get_mita_data_folder_path(app.handle().clone());
+
+    assert!(record
+        .path
+        .starts_with(data_folder.to_string_lossy().as_ref()));
+    assert!(record.path.ends_with("image.png"));
+    assert_eq!(record.asset_kind.as_deref(), Some("reference"));
+    assert_eq!(record.provider, "local");
+    assert_eq!(record.model, "reference-image");
+    assert_eq!(record.quality, "source");
+    assert_eq!(fs::read(&record.path).unwrap(), b"fake image bytes");
+
+    delete_image_asset(app.handle().clone(), id.to_string()).unwrap();
+    let _ = fs::remove_file(source_path);
+}
+
+#[test]
+fn rejects_importing_directories() {
+    let app = mock_app();
+    let result = import_image_asset(
+        app.handle().clone(),
+        test_import_asset(
+            "test-image-asset-import-directory",
+            std::env::temp_dir().to_string_lossy().to_string(),
+        ),
+    );
+    assert!(result.is_err());
+}
+
+#[test]
+fn rejects_unsupported_import_extensions() {
+    let app = mock_app();
+    let source_path = std::env::temp_dir().join("mita-test-reference.txt");
+    fs::write(&source_path, b"not an image").unwrap();
+
+    let result = import_image_asset(
+        app.handle().clone(),
+        test_import_asset(
+            "test-image-asset-import-extension",
+            source_path.to_string_lossy().to_string(),
+        ),
+    );
+
+    assert!(result.is_err());
+    let _ = fs::remove_file(source_path);
 }

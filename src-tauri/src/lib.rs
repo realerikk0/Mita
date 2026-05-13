@@ -40,6 +40,7 @@ macro_rules! invoke_commands_with_extras {
         core::filesystem::commands::save_dialog,
         // Image asset library
         core::image_assets::commands::save_image_asset,
+        core::image_assets::commands::import_image_asset,
         core::image_assets::commands::list_image_assets,
         core::image_assets::commands::delete_image_asset,
         // Computer Use commands

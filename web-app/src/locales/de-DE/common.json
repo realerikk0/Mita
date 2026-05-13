@@ -32,9 +32,12 @@
     "noImageModelsFound": "Keine Bildmodelle gefunden",
     "reference": "Referenz",
     "referenceImage": "Referenzbild",
+    "chooseReferenceFromComputer": "Vom Computer auswählen",
+    "localReferenceImage": "Lokales Referenzbild",
+    "imageFiles": "Bilddateien",
     "clearSource": "Quelle löschen",
     "mask": "Maske",
-    "referenceEmptyState": "Generierte Assets können hier als Referenzbilder verwendet werden.",
+    "referenceEmptyState": "Generierte oder importierte Assets können hier als Referenzbilder verwendet werden.",
     "promptPlaceholder": "Lade ein Referenzbild hoch, gib einen Prompt ein oder beschreibe, was du generieren möchtest.",
     "sourceModelUnsupported": "Quellbilder benötigen ein Modell mit Bildbearbeitung.",
     "imageSizeSettings": "Bildgrößen-Einstellungen",
@@ -51,6 +54,9 @@
     "usePromptAsSource": "{{prompt}} als Quelle verwenden",
     "useAsSource": "Als Quelle verwenden",
     "openInFileManager": "Im Finder / Explorer öffnen",
+    "openInFinder": "Im Finder öffnen",
+    "openInExplorer": "Im Explorer öffnen",
+    "openInSystemFileManager": "Im Dateimanager öffnen",
     "imagePreview": "Bildvorschau",
     "defaultVariationPrompt": "Erstelle eine neue Variation dieses Bildes.",
     "defaultMaskEditPrompt": "Bearbeite dieses Bild mit der bereitgestellten Maske.",
@@ -77,14 +83,21 @@
       "selectImageModelFirst": "Wähle zuerst ein Bildmodell aus",
       "describeImageFirst": "Beschreibe zuerst das Bild",
       "selectEditCapableModel": "Wähle ein Bildmodell, das Quellbilder unterstützt",
+      "referenceImported": "Referenzbild importiert",
+      "importReferenceFailed": "Referenzbild konnte nicht importiert werden",
       "deleteAssetFailed": "Bild-Asset konnte nicht gelöscht werden",
       "revealAssetFailed": "Bild-Asset konnte nicht angezeigt werden",
-      "promptCopied": "Prompt kopiert"
+      "promptCopied": "Prompt kopiert",
+      "referenceLimitReached": "Du kannst bis zu {{count}} Referenzbilder verwenden."
     },
     "errors": {
       "modelUnavailable": "Das Bildmodell ist nicht mehr verfügbar",
       "generationFailed": "Bildgenerierung fehlgeschlagen"
-    }
+    },
+    "addReferenceImage": "Referenzbild hinzufügen",
+    "removeReferenceImage": "{{prompt}} entfernen",
+    "pastedReferenceImage": "Eingefügtes Referenzbild",
+    "defaultMultiSourcePrompt": "Erstelle ein neues Bild basierend auf diesen Referenzen."
   },
   "newAgentChat": "Neuer Agent-Chat",
   "chats": "Chats",

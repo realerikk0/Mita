@@ -32,9 +32,12 @@
     "noImageModelsFound": "Aucun modèle d’image trouvé",
     "reference": "Référence",
     "referenceImage": "Image de référence",
+    "chooseReferenceFromComputer": "Choisir depuis l’ordinateur",
+    "localReferenceImage": "Image de référence locale",
+    "imageFiles": "Fichiers image",
     "clearSource": "Effacer la source",
     "mask": "Masque",
-    "referenceEmptyState": "Les ressources générées peuvent être utilisées ici comme images de référence.",
+    "referenceEmptyState": "Les ressources générées ou importées peuvent être utilisées ici comme images de référence.",
     "promptPlaceholder": "Téléversez une image de référence, saisissez un prompt ou décrivez ce que vous voulez générer.",
     "sourceModelUnsupported": "L’image source nécessite un modèle capable de modifier les images.",
     "imageSizeSettings": "Paramètres de taille d’image",
@@ -51,6 +54,9 @@
     "usePromptAsSource": "Utiliser {{prompt}} comme source",
     "useAsSource": "Utiliser comme source",
     "openInFileManager": "Ouvrir dans Finder / Explorateur",
+    "openInFinder": "Ouvrir dans Finder",
+    "openInExplorer": "Ouvrir dans l'Explorateur",
+    "openInSystemFileManager": "Ouvrir dans le gestionnaire de fichiers",
     "imagePreview": "Aperçu de l’image",
     "defaultVariationPrompt": "Créez une nouvelle variation de cette image.",
     "defaultMaskEditPrompt": "Modifiez cette image avec le masque fourni.",
@@ -77,14 +83,21 @@
       "selectImageModelFirst": "Sélectionnez d’abord un modèle d’image",
       "describeImageFirst": "Décrivez d’abord l’image",
       "selectEditCapableModel": "Sélectionnez un modèle d’image prenant en charge les images source",
+      "referenceImported": "Image de référence importée",
+      "importReferenceFailed": "Impossible d’importer l’image de référence",
       "deleteAssetFailed": "Impossible de supprimer la ressource d’image",
       "revealAssetFailed": "Impossible d’afficher la ressource d’image",
-      "promptCopied": "Prompt copié"
+      "promptCopied": "Prompt copié",
+      "referenceLimitReached": "Vous pouvez utiliser jusqu'à {{count}} images de référence."
     },
     "errors": {
       "modelUnavailable": "Le modèle d’image n’est plus disponible",
       "generationFailed": "La génération d’image a échoué"
-    }
+    },
+    "addReferenceImage": "Ajouter une image de référence",
+    "removeReferenceImage": "Supprimer {{prompt}}",
+    "pastedReferenceImage": "Image de référence collée",
+    "defaultMultiSourcePrompt": "Créez une nouvelle image à partir de ces références."
   },
   "newAgentChat": "Nouvelle discussion Agent",
   "chats": "Discussions",

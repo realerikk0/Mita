@@ -32,9 +32,12 @@
     "noImageModelsFound": "Không tìm thấy mô hình ảnh",
     "reference": "Tham chiếu",
     "referenceImage": "Ảnh tham chiếu",
+    "chooseReferenceFromComputer": "Chọn từ máy tính",
+    "localReferenceImage": "Ảnh tham chiếu cục bộ",
+    "imageFiles": "Tệp ảnh",
     "clearSource": "Xóa nguồn",
     "mask": "Mặt nạ",
-    "referenceEmptyState": "Tài nguyên đã tạo có thể dùng tại đây làm ảnh tham chiếu.",
+    "referenceEmptyState": "Tài nguyên đã tạo hoặc đã nhập có thể dùng tại đây làm ảnh tham chiếu.",
     "promptPlaceholder": "Tải lên ảnh tham chiếu, nhập prompt hoặc mô tả ảnh bạn muốn tạo.",
     "sourceModelUnsupported": "Ảnh nguồn cần mô hình hỗ trợ chỉnh sửa ảnh.",
     "imageSizeSettings": "Cài đặt kích thước ảnh",
@@ -51,6 +54,9 @@
     "usePromptAsSource": "Dùng {{prompt}} làm nguồn",
     "useAsSource": "Dùng làm nguồn",
     "openInFileManager": "Mở trong Finder / Explorer",
+    "openInFinder": "Mở trong Finder",
+    "openInExplorer": "Mở trong Explorer",
+    "openInSystemFileManager": "Mở trong trình quản lý tệp",
     "imagePreview": "Xem trước ảnh",
     "defaultVariationPrompt": "Tạo một biến thể mới của ảnh này.",
     "defaultMaskEditPrompt": "Chỉnh sửa ảnh này bằng mặt nạ đã cung cấp.",
@@ -77,14 +83,21 @@
       "selectImageModelFirst": "Chọn mô hình ảnh trước",
       "describeImageFirst": "Hãy mô tả ảnh trước",
       "selectEditCapableModel": "Chọn mô hình ảnh hỗ trợ ảnh nguồn",
+      "referenceImported": "Đã nhập ảnh tham chiếu",
+      "importReferenceFailed": "Không thể nhập ảnh tham chiếu",
       "deleteAssetFailed": "Không thể xóa tài nguyên ảnh",
       "revealAssetFailed": "Không thể mở vị trí tài nguyên ảnh",
-      "promptCopied": "Đã sao chép prompt"
+      "promptCopied": "Đã sao chép prompt",
+      "referenceLimitReached": "Bạn có thể dùng tối đa {{count}} ảnh tham chiếu."
     },
     "errors": {
       "modelUnavailable": "Mô hình ảnh không còn khả dụng",
       "generationFailed": "Tạo ảnh thất bại"
-    }
+    },
+    "addReferenceImage": "Thêm ảnh tham chiếu",
+    "removeReferenceImage": "Xóa {{prompt}}",
+    "pastedReferenceImage": "Ảnh tham chiếu đã dán",
+    "defaultMultiSourcePrompt": "Tạo một ảnh mới dựa trên các ảnh tham chiếu này."
   },
   "newAgentChat": "Trò chuyện Agent Mới",
   "chats": "Trò chuyện",

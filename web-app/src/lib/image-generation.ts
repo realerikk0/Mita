@@ -14,14 +14,14 @@ export type ImageRatio = (typeof IMAGE_RATIOS)[number]
 export type ImageQualityPreset = 'sd' | 'hd'
 export type ImageGenerationMode = 'generate' | 'edit' | 'variation'
 
-const EXACT_SIZE_BY_RATIO: Record<ImageRatio, string> = {
-  '9:16': '1024x1820',
-  '4:3': '1536x1152',
+const GPT_IMAGE_SIZE_BY_RATIO: Record<ImageRatio, string> = {
+  '9:16': '1024x1536',
+  '4:3': '1536x1024',
   '3:2': '1536x1024',
   '1:1': '1024x1024',
   '2:3': '1024x1536',
-  '3:4': '1152x1536',
-  '16:9': '1820x1024',
+  '3:4': '1024x1536',
+  '16:9': '1536x1024',
 }
 
 const LEGACY_SIZE_BY_RATIO: Record<ImageRatio, string> = {
@@ -32,6 +32,16 @@ const LEGACY_SIZE_BY_RATIO: Record<ImageRatio, string> = {
   '2:3': '1024x1536',
   '3:4': '1024x1536',
   '16:9': '1536x1024',
+}
+
+const JINGXING_EDIT_SIZE_BY_RATIO: Record<ImageRatio, string> = {
+  '9:16': '1024x1792',
+  '4:3': '1792x1024',
+  '3:2': '1792x1024',
+  '1:1': '1024x1024',
+  '2:3': '1024x1792',
+  '3:4': '1024x1792',
+  '16:9': '1792x1024',
 }
 
 export function isImageGenerationModel(model?: Pick<Model, 'capabilities'> | null) {
@@ -74,14 +84,45 @@ export function getImageModels(providers: ModelProvider[]) {
   )
 }
 
-export function shouldUseExactImageSize(modelId?: string) {
-  return modelId?.toLowerCase().startsWith('gpt-image-2') ?? false
+export function isGptImageModel(modelId?: string) {
+  return modelId?.toLowerCase().startsWith('gpt-image-') ?? false
 }
 
 export function imageSizeForRatio(ratio: ImageRatio, modelId?: string) {
-  return shouldUseExactImageSize(modelId)
-    ? EXACT_SIZE_BY_RATIO[ratio]
+  return isGptImageModel(modelId)
+    ? GPT_IMAGE_SIZE_BY_RATIO[ratio]
     : LEGACY_SIZE_BY_RATIO[ratio]
+}
+
+export function isJingxingImageProvider(
+  providerId?: string,
+  baseUrl?: string
+) {
+  const normalizedProvider = providerId?.toLowerCase() ?? ''
+  const normalizedBaseUrl = baseUrl?.toLowerCase() ?? ''
+  return (
+    normalizedProvider === 'jingxing' ||
+    normalizedBaseUrl.includes('api.jingxing.uk')
+  )
+}
+
+export function usesJingxingCompatibleImageEditParams(
+  modelId?: string,
+  providerId?: string,
+  baseUrl?: string
+) {
+  return isGptImageModel(modelId) && isJingxingImageProvider(providerId, baseUrl)
+}
+
+export function imageEditSizeForRatio(
+  ratio: ImageRatio,
+  modelId?: string,
+  providerId?: string,
+  baseUrl?: string
+) {
+  return usesJingxingCompatibleImageEditParams(modelId, providerId, baseUrl)
+    ? JINGXING_EDIT_SIZE_BY_RATIO[ratio]
+    : imageSizeForRatio(ratio, modelId)
 }
 
 export function apiQualityForPreset(
@@ -96,6 +137,24 @@ export function apiQualityForPreset(
   }
 
   return preset === 'hd' ? 'high' : 'medium'
+}
+
+export function legacyApiQualityForPreset(preset: ImageQualityPreset) {
+  return preset === 'hd' ? 'hd' : 'standard'
+}
+
+export function apiQualityForImageEditPreset(
+  preset: ImageQualityPreset,
+  modelId?: string,
+  providerId?: string,
+  baseUrl?: string
+) {
+  if (usesJingxingCompatibleImageEditParams(modelId, providerId, baseUrl)) {
+    // Jingxing gpt-image edits are synchronous today; high/auto often exceed the gateway timeout.
+    return 'medium'
+  }
+
+  return apiQualityForPreset(preset, modelId)
 }
 
 export function imageFileExtension(mimeType?: string) {

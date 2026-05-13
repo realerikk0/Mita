@@ -32,7 +32,6 @@ import {
   DialogContent,
   DialogTitle,
 } from '@/components/ui/dialog'
-import { Input } from '@/components/ui/input'
 import {
   Popover,
   PopoverContent,
@@ -47,8 +46,11 @@ import {
 import ProvidersAvatar from '@/containers/ProvidersAvatar'
 import { useTranslation } from '@/i18n/react-i18next-compat'
 import {
+  arrayBufferToBase64,
+  apiQualityForImageEditPreset,
   apiQualityForPreset,
   getImageModels,
+  imageEditSizeForRatio,
   imageFileExtension,
   imageSizeForRatio,
   isImageEditModel,
@@ -80,7 +82,7 @@ type ImageTask = {
   ratio: ImageRatio
   qualityPreset: ImageQualityPreset
   status: ImageGenerationStatus
-  sourceAssetId?: string
+  sourceAssetIds: string[]
   message?: string
   asset?: ImageAssetRecord
 }
@@ -99,7 +101,7 @@ type ImageTaskGroup = {
   modelId: string
   ratio: ImageRatio
   qualityPreset: ImageQualityPreset
-  sourceAssetId?: string
+  sourceAssetIds: string[]
   tasks: ImageTask[]
 }
 
@@ -112,6 +114,7 @@ type AssetContextMenuState = {
 type TranslationFn = (key: string, options?: Record<string, unknown>) => string
 
 const IMAGE_I18N_PREFIX = 'common:imageGeneration'
+const MAX_REFERENCE_IMAGES = 8
 const imageT = (
   t: TranslationFn,
   key: string,
@@ -186,6 +189,21 @@ function createId() {
   return globalThis.crypto?.randomUUID?.() ?? `${Date.now()}-${Math.random()}`
 }
 
+function localPromptFromPath(path: string, fallback: string) {
+  const fileName = path.split(/[\\/]/).pop()
+  const stem = fileName?.replace(/\.[^.]+$/, '').trim()
+  return stem || fallback
+}
+
+function openInSystemFileManagerKey() {
+  const userAgent =
+    typeof navigator === 'undefined' ? '' : navigator.userAgent.toLowerCase()
+
+  if (userAgent.includes('mac')) return 'openInFinder'
+  if (userAgent.includes('win')) return 'openInExplorer'
+  return 'openInSystemFileManager'
+}
+
 async function readImageSize(image: { b64Json: string; mimeType: string }) {
   return new Promise<string | undefined>((resolve) => {
     const preview = new Image()
@@ -196,6 +214,19 @@ async function readImageSize(image: { b64Json: string; mimeType: string }) {
     }
     preview.onerror = () => resolve(undefined)
     preview.src = `data:${image.mimeType};base64,${image.b64Json}`
+  })
+}
+
+async function fileToArrayBuffer(file: File) {
+  if (typeof file.arrayBuffer === 'function') {
+    return file.arrayBuffer()
+  }
+
+  return new Promise<ArrayBuffer>((resolve, reject) => {
+    const reader = new FileReader()
+    reader.onload = () => resolve(reader.result as ArrayBuffer)
+    reader.onerror = () => reject(reader.error ?? new Error('Failed to read file'))
+    reader.readAsArrayBuffer(file)
   })
 }
 
@@ -235,6 +266,170 @@ function RatioGlyph({
         style={{ width, height, borderWidth }}
       />
     </span>
+  )
+}
+
+function ReferenceThumbnail({
+  asset,
+  src,
+  expanded,
+  onRemove,
+}: {
+  asset: ImageAssetRecord
+  src: string
+  expanded: boolean
+  onRemove: (assetId: string) => void
+}) {
+  const { t } = useTranslation()
+  const [loadState, setLoadState] = useState<'loading' | 'loaded' | 'failed'>(
+    src ? 'loading' : 'failed'
+  )
+
+  useEffect(() => {
+    setLoadState(src ? 'loading' : 'failed')
+  }, [src])
+
+  return (
+    <>
+      {src && loadState !== 'failed' ? (
+        <img
+          src={src}
+          alt={asset.prompt}
+          className={cn(
+            'size-full object-cover transition-opacity duration-200',
+            loadState === 'loaded' ? 'opacity-100' : 'opacity-0'
+          )}
+          onLoad={() => setLoadState('loaded')}
+          onError={() => setLoadState('failed')}
+        />
+      ) : (
+        <div className="flex size-full items-center justify-center">
+          <ImageIcon className="size-5 text-muted-foreground" />
+        </div>
+      )}
+
+      {loadState === 'loading' && (
+        <div className="absolute inset-0 flex items-center justify-center bg-secondary">
+          <Loader2 className="size-4 animate-spin text-muted-foreground" />
+        </div>
+      )}
+
+      <button
+        type="button"
+        aria-label={imageT(t, 'removeReferenceImage', {
+          prompt: asset.prompt,
+        })}
+        className={cn(
+          'absolute right-1 top-1 z-10 flex size-5 items-center justify-center rounded-full bg-background/90 text-foreground opacity-0 shadow transition-opacity hover:bg-background',
+          expanded && 'group-hover/reference-thumb:opacity-100 focus:opacity-100'
+        )}
+        onClick={(event) => {
+          event.stopPropagation()
+          onRemove(asset.id)
+        }}
+      >
+        <X className="size-3.5" />
+      </button>
+    </>
+  )
+}
+
+function ReferenceImageStack({
+  assets,
+  assetSrc,
+  loading,
+  onAdd,
+  onRemove,
+}: {
+  assets: ImageAssetRecord[]
+  assetSrc: (asset: ImageAssetRecord) => string
+  loading: boolean
+  onAdd: () => void
+  onRemove: (assetId: string) => void
+}) {
+  const { t } = useTranslation()
+  const [expanded, setExpanded] = useState(false)
+  const hasAssets = assets.length > 0
+  const canAdd = assets.length < MAX_REFERENCE_IMAGES
+  const expandedWidth = Math.max(64, assets.length * 58 + (canAdd ? 48 : 0))
+  const collapsedWidth = canAdd ? 90 : 76
+
+  if (!hasAssets) {
+    return (
+      <button
+        type="button"
+        aria-label={imageT(t, 'addReferenceImage')}
+        className="flex size-16 shrink-0 items-center justify-center rounded-md border bg-secondary/70 text-muted-foreground transition-colors hover:text-foreground"
+        disabled={loading}
+        onClick={onAdd}
+      >
+        {loading ? (
+          <Loader2 className="size-5 animate-spin" />
+        ) : (
+          <Plus className="size-5" />
+        )}
+      </button>
+    )
+  }
+
+  return (
+    <div
+      className="relative h-16 shrink-0 transition-[width] duration-200"
+      style={{ width: expanded ? expandedWidth : collapsedWidth }}
+      onMouseEnter={() => setExpanded(true)}
+      onMouseLeave={() => setExpanded(false)}
+      onFocus={() => setExpanded(true)}
+      onBlur={(event) => {
+        if (!event.currentTarget.contains(event.relatedTarget as Node | null)) {
+          setExpanded(false)
+        }
+      }}
+    >
+      {assets.map((asset, index) => {
+        const collapsedIndex = Math.min(index, 2)
+        const left = expanded ? index * 58 : collapsedIndex * 9
+        const rotation = expanded ? 0 : [-6, 4, -2][collapsedIndex] ?? 0
+
+        return (
+          <div
+            key={asset.id}
+            className="group/reference-thumb absolute top-0 size-16 overflow-hidden rounded-md border bg-secondary shadow-sm transition-all duration-200"
+            style={{
+              left,
+              zIndex: expanded ? index + 1 : assets.length - index,
+              transform: `rotate(${rotation}deg)`,
+            }}
+          >
+            <ReferenceThumbnail
+              asset={asset}
+              src={asset.path ? assetSrc(asset) : ''}
+              expanded={expanded}
+              onRemove={onRemove}
+            />
+          </div>
+        )
+      })}
+
+      {canAdd && (
+        <button
+          type="button"
+          aria-label={imageT(t, 'addReferenceImage')}
+          className="absolute top-3 flex size-10 items-center justify-center rounded-md border bg-background text-muted-foreground shadow-sm transition-all duration-200 hover:text-foreground"
+          style={{
+            left: expanded ? assets.length * 58 : 50,
+            zIndex: assets.length + 20,
+          }}
+          disabled={loading}
+          onClick={onAdd}
+        >
+          {loading ? (
+            <Loader2 className="size-4 animate-spin" />
+          ) : (
+            <Plus className="size-4" />
+          )}
+        </button>
+      )}
+    </div>
   )
 }
 
@@ -449,9 +644,12 @@ function Images() {
     useState<ImageQualityPreset>('sd')
   const [count, setCount] = useState(1)
   const [assets, setAssets] = useState<ImageAssetRecord[]>([])
-  const [sourceAssetId, setSourceAssetId] = useState<string | undefined>()
+  const [sourceAssetIds, setSourceAssetIds] = useState<string[]>([])
+  const [sourceAssetRecords, setSourceAssetRecords] = useState<
+    ImageAssetRecord[]
+  >([])
+  const [referenceAssetsLoading, setReferenceAssetsLoading] = useState(false)
   const [tasks, setTasks] = useState<ImageTask[]>([])
-  const [maskFile, setMaskFile] = useState<File | null>(null)
   const [previewAsset, setPreviewAsset] = useState<ImageAssetRecord | null>(null)
   const [contextMenu, setContextMenu] = useState<AssetContextMenuState>(null)
   const controllers = useRef(new Map<string, AbortController>())
@@ -513,9 +711,19 @@ function Images() {
     )
   }, [imageModels, selectedModelKey])
 
-  const sourceAsset = useMemo(
-    () => assets.find((asset) => asset.id === sourceAssetId),
-    [assets, sourceAssetId]
+  const resolveAssetById = useCallback(
+    (id: string) =>
+      assets.find((asset) => asset.id === id) ??
+      sourceAssetRecords.find((asset) => asset.id === id),
+    [assets, sourceAssetRecords]
+  )
+
+  const sourceAssets = useMemo(
+    () =>
+      sourceAssetIds
+        .map((id) => resolveAssetById(id))
+        .filter((asset): asset is ImageAssetRecord => Boolean(asset)),
+    [resolveAssetById, sourceAssetIds]
   )
 
   const taskGroups = useMemo<ImageTaskGroup[]>(() => {
@@ -536,7 +744,7 @@ function Images() {
         modelId: task.modelId,
         ratio: task.ratio,
         qualityPreset: task.qualityPreset,
-        sourceAssetId: task.sourceAssetId,
+        sourceAssetIds: task.sourceAssetIds,
         tasks: [task],
       })
     })
@@ -554,7 +762,10 @@ function Images() {
   )
 
   const savedHistoryAssets = useMemo(
-    () => assets.filter((asset) => !taskAssetIds.has(asset.id)),
+    () =>
+      assets.filter(
+        (asset) => asset.assetKind !== 'reference' && !taskAssetIds.has(asset.id)
+      ),
     [assets, taskAssetIds]
   )
 
@@ -569,12 +780,14 @@ function Images() {
     : false
 
   const inferredMode = useMemo<ImageGenerationMode>(() => {
-    if (!sourceAsset) return 'generate'
-    if (maskFile || prompt.trim()) return 'edit'
-    return 'variation'
-  }, [maskFile, prompt, sourceAsset])
+    if (sourceAssets.length === 0) return 'generate'
+    if (sourceAssets.length === 1 && !prompt.trim()) return 'variation'
+    return 'edit'
+  }, [prompt, sourceAssets.length])
 
-  const sourceModelUnsupported = Boolean(sourceAsset && !selectedModelCanEdit)
+  const sourceModelUnsupported = Boolean(
+    sourceAssets.length > 0 && !selectedModelCanEdit
+  )
   const submitDisabled = !selectedModel || sourceModelUnsupported
 
   const updateTask = useCallback((id: string, patch: Partial<ImageTask>) => {
@@ -603,9 +816,9 @@ function Images() {
         return
       }
 
-      const sourceAsset = task.sourceAssetId
-        ? assets.find((asset) => asset.id === task.sourceAssetId)
-        : null
+      const sourceAssets = task.sourceAssetIds
+        .map((id) => resolveAssetById(id))
+        .filter((asset): asset is ImageAssetRecord => Boolean(asset))
       const controller = new AbortController()
       controllers.current.set(task.id, controller)
       updateTask(task.id, { status: 'running', message: undefined })
@@ -619,13 +832,20 @@ function Images() {
           qualityPreset: task.qualityPreset,
           count: 1,
           mode: task.mode,
-          sourceAsset,
-          maskFile: task.mode === 'edit' ? maskFile : null,
+          sourceAssets,
           signal: controller.signal,
         })
 
         const image = images[0]
-        const requestedSize = imageSizeForRatio(task.ratio, match.model.id)
+        const requestedSize =
+          task.mode === 'generate'
+            ? imageSizeForRatio(task.ratio, match.model.id)
+            : imageEditSizeForRatio(
+                task.ratio,
+                match.model.id,
+                match.provider.provider,
+                match.provider.base_url
+              )
         const actualSize = await readImageSize(image)
         const saved = await serviceHub.imageGeneration().saveAsset({
           id: task.id,
@@ -635,8 +855,16 @@ function Images() {
           model: match.model.id,
           ratio: task.ratio,
           size: actualSize ?? requestedSize,
-          quality: apiQualityForPreset(task.qualityPreset, match.model.id),
-          sourceAssetIds: sourceAsset ? [sourceAsset.id] : [],
+          quality:
+            task.mode === 'generate'
+              ? apiQualityForPreset(task.qualityPreset, match.model.id)
+              : apiQualityForImageEditPreset(
+                  task.qualityPreset,
+                  match.model.id,
+                  match.provider.provider,
+                  match.provider.base_url
+                ),
+          sourceAssetIds: sourceAssets.map((asset) => asset.id),
           revisedPrompt: image.revisedPrompt,
           usage: image.usage,
           status: 'succeeded',
@@ -663,7 +891,7 @@ function Images() {
         cancelledTasks.current.delete(task.id)
       }
     },
-    [assets, findTaskModel, maskFile, serviceHub, t, updateTask]
+    [findTaskModel, resolveAssetById, serviceHub, t, updateTask]
   )
 
   const runQueue = useCallback(
@@ -689,12 +917,12 @@ function Images() {
     }
 
     const cleanPrompt = prompt.trim()
-    if (!sourceAsset && !cleanPrompt) {
+    if (sourceAssets.length === 0 && !cleanPrompt) {
       toast.error(imageT(t, 'toast.describeImageFirst'))
       return
     }
 
-    if (sourceAsset && !selectedModelCanEdit) {
+    if (sourceAssets.length > 0 && !selectedModelCanEdit) {
       toast.error(imageT(t, 'toast.selectEditCapableModel'))
       return
     }
@@ -704,7 +932,7 @@ function Images() {
       cleanPrompt ||
       (nextMode === 'variation'
         ? imageT(t, 'defaultVariationPrompt')
-        : imageT(t, 'defaultMaskEditPrompt'))
+        : imageT(t, 'defaultMultiSourcePrompt'))
 
     const batchId = createId()
     const createdAt = new Date().toISOString()
@@ -718,7 +946,8 @@ function Images() {
       modelId: selectedModel.model.id,
       ratio,
       qualityPreset,
-      sourceAssetId: nextMode === 'generate' ? undefined : sourceAsset?.id,
+      sourceAssetIds:
+        nextMode === 'generate' ? [] : sourceAssets.map((asset) => asset.id),
       status: 'pending',
     }))
 
@@ -733,7 +962,7 @@ function Images() {
     runQueue,
     selectedModel,
     selectedModelCanEdit,
-    sourceAsset,
+    sourceAssets,
     t,
   ])
 
@@ -798,6 +1027,7 @@ function Images() {
         modelId: selectedModel.model.id,
         ratio,
         qualityPreset,
+        sourceAssetIds: [],
         status: 'pending',
       }))
       setTasks((current) => [...nextTasks, ...current])
@@ -819,30 +1049,195 @@ function Images() {
     try {
       await serviceHub.imageGeneration().deleteAsset(asset.id)
       setAssets((current) => current.filter((item) => item.id !== asset.id))
-      if (sourceAssetId === asset.id) {
-        setSourceAssetId(undefined)
-        setMaskFile(null)
-      }
+      setSourceAssetRecords((current) =>
+        current.filter((item) => item.id !== asset.id)
+      )
+      setSourceAssetIds((current) => current.filter((id) => id !== asset.id))
     } catch (error) {
       console.error('Failed to delete image asset:', error)
       toast.error(imageT(t, 'toast.deleteAssetFailed'))
     }
   }
 
-  const setAssetAsSource = (asset: ImageAssetRecord) => {
-    setSourceAssetId(asset.id)
-    setMaskFile(null)
-  }
+  const showReferenceLimitToast = useCallback(() => {
+    toast.error(
+      imageT(t, 'toast.referenceLimitReached', {
+        count: MAX_REFERENCE_IMAGES,
+      })
+    )
+  }, [t])
 
-  const editFromAsset = (asset: ImageAssetRecord, nextPrompt?: string) => {
-    setAssetAsSource(asset)
-    setPrompt(nextPrompt ?? asset.prompt)
-  }
+  const addSourceAssets = useCallback((nextAssets: ImageAssetRecord[]) => {
+    if (nextAssets.length === 0) return
 
-  const clearSourceAsset = () => {
-    setSourceAssetId(undefined)
-    setMaskFile(null)
-  }
+    setSourceAssetRecords((current) => [
+      ...nextAssets,
+      ...current.filter(
+        (asset) => !nextAssets.some((nextAsset) => nextAsset.id === asset.id)
+      ),
+    ])
+    setSourceAssetIds((current) => {
+      const merged = [...current]
+      nextAssets.forEach((asset) => {
+        if (!merged.includes(asset.id) && merged.length < MAX_REFERENCE_IMAGES) {
+          merged.push(asset.id)
+        }
+      })
+      return merged
+    })
+  }, [])
+
+  const removeSourceAsset = useCallback((assetId: string) => {
+    setSourceAssetIds((current) => current.filter((id) => id !== assetId))
+  }, [])
+
+  const editFromAsset = useCallback(
+    (asset: ImageAssetRecord, nextPrompt?: string) => {
+      if (
+        !sourceAssetIds.includes(asset.id) &&
+        sourceAssetIds.length >= MAX_REFERENCE_IMAGES
+      ) {
+        showReferenceLimitToast()
+        return
+      }
+
+      addSourceAssets([asset])
+      setPrompt(nextPrompt ?? asset.prompt)
+    },
+    [addSourceAssets, showReferenceLimitToast, sourceAssetIds]
+  )
+
+  const importReferenceAssets = useCallback(async () => {
+    const selected = await serviceHub.dialog().open({
+      multiple: true,
+      filters: [
+        {
+          name: imageT(t, 'imageFiles'),
+          extensions: ['png', 'jpg', 'jpeg', 'webp'],
+        },
+      ],
+    })
+    const sourcePaths = Array.isArray(selected) ? selected : selected ? [selected] : []
+    if (sourcePaths.length === 0) return
+
+    const remainingSlots = MAX_REFERENCE_IMAGES - sourceAssetIds.length
+    if (remainingSlots <= 0) {
+      showReferenceLimitToast()
+      return
+    }
+
+    const pathsToImport = sourcePaths.slice(0, remainingSlots)
+    if (sourcePaths.length > remainingSlots) {
+      showReferenceLimitToast()
+    }
+
+    setReferenceAssetsLoading(true)
+    try {
+      const imported = await Promise.all(
+        pathsToImport.map((sourcePath) =>
+          serviceHub.imageGeneration().importAsset({
+            id: createId(),
+            sourcePath,
+            prompt: localPromptFromPath(
+              sourcePath,
+              imageT(t, 'localReferenceImage')
+            ),
+          })
+        )
+      )
+      setAssets((current) => [
+        ...imported,
+        ...current.filter(
+          (asset) => !imported.some((nextAsset) => nextAsset.id === asset.id)
+        ),
+      ])
+      addSourceAssets(imported)
+      toast.success(imageT(t, 'toast.referenceImported'))
+    } catch (error) {
+      console.error('Failed to import reference image:', error)
+      toast.error(imageT(t, 'toast.importReferenceFailed'))
+    } finally {
+      setReferenceAssetsLoading(false)
+    }
+  }, [
+    addSourceAssets,
+    serviceHub,
+    showReferenceLimitToast,
+    sourceAssetIds.length,
+    t,
+  ])
+
+  const savePastedReferenceFiles = useCallback(
+    async (files: File[]) => {
+      const imageFiles = files.filter((file) => file.type.startsWith('image/'))
+      if (imageFiles.length === 0) return
+
+      const remainingSlots = MAX_REFERENCE_IMAGES - sourceAssetIds.length
+      if (remainingSlots <= 0) {
+        showReferenceLimitToast()
+        return
+      }
+
+      const filesToSave = imageFiles.slice(0, remainingSlots)
+      if (imageFiles.length > remainingSlots) {
+        showReferenceLimitToast()
+      }
+
+      setReferenceAssetsLoading(true)
+      try {
+        const savedAssets: ImageAssetRecord[] = []
+        for (const file of filesToSave) {
+          const mimeType = file.type || 'image/png'
+          const b64Json = await arrayBufferToBase64(
+            await fileToArrayBuffer(file)
+          )
+          const size = await readImageSize({ b64Json, mimeType })
+          const saved = await serviceHub.imageGeneration().saveAsset({
+            id: createId(),
+            prompt: localPromptFromPath(
+              file.name,
+              imageT(t, 'pastedReferenceImage')
+            ),
+            mode: 'edit',
+            provider: 'local',
+            model: 'reference-image',
+            ratio: '1:1',
+            size: size ?? 'original',
+            quality: 'source',
+            sourceAssetIds: [],
+            status: 'succeeded',
+            mimeType,
+            b64Json,
+            extension: imageFileExtension(mimeType),
+            assetKind: 'reference',
+          })
+          savedAssets.push(saved)
+        }
+
+        setAssets((current) => [
+          ...savedAssets,
+          ...current.filter(
+            (asset) =>
+              !savedAssets.some((nextAsset) => nextAsset.id === asset.id)
+          ),
+        ])
+        addSourceAssets(savedAssets)
+        toast.success(imageT(t, 'toast.referenceImported'))
+      } catch (error) {
+        console.error('Failed to paste reference image:', error)
+        toast.error(imageT(t, 'toast.importReferenceFailed'))
+      } finally {
+        setReferenceAssetsLoading(false)
+      }
+    },
+    [
+      addSourceAssets,
+      serviceHub,
+      showReferenceLimitToast,
+      sourceAssetIds.length,
+      t,
+    ]
+  )
 
   const openAsset = async (asset: ImageAssetRecord) => {
     try {
@@ -930,9 +1325,10 @@ function Images() {
             ) : (
               <>
                 {taskGroups.map((group) => {
-                  const source = group.sourceAssetId
-                    ? assets.find((asset) => asset.id === group.sourceAssetId)
-                    : undefined
+                  const groupSourceAssets = group.sourceAssetIds
+                    .map((id) => resolveAssetById(id))
+                    .filter((asset): asset is ImageAssetRecord => Boolean(asset))
+                  const source = groupSourceAssets[0]
                   const status = groupStatus(group)
                   const firstAsset = group.tasks.find((task) => task.asset)?.asset
                   const running = group.tasks.some(
@@ -1022,11 +1418,19 @@ function Images() {
                                 ) : task.status === 'failed' ? (
                                   <button
                                     type="button"
-                                    className="flex flex-col items-center gap-2 text-xs text-destructive"
+                                    className="flex max-w-[86%] flex-col items-center gap-2 text-xs text-destructive"
                                     onClick={() => retryTask(task)}
                                   >
                                     <RefreshCcw className="size-5" />
                                     {imageT(t, 'retry')}
+                                    {task.message && (
+                                      <span
+                                        className="line-clamp-3 text-center text-[11px] leading-4 text-destructive/75"
+                                        title={task.message}
+                                      >
+                                        {task.message}
+                                      </span>
+                                    )}
                                   </button>
                                 ) : (
                                   <ImageIcon className="size-6 text-muted-foreground" />
@@ -1180,113 +1584,43 @@ function Images() {
             }}
           >
             <div className="flex gap-4">
-              <Popover>
-                <PopoverTrigger asChild>
-                  <button
-                    type="button"
-                    aria-label={imageT(t, 'referenceImage')}
-                    className={cn(
-                      'flex size-16 shrink-0 items-center justify-center overflow-hidden rounded-md border bg-secondary/70 text-muted-foreground transition-colors hover:text-foreground',
-                      sourceAsset && 'border-primary/50'
-                    )}
-                  >
-                    {sourceAsset?.path ? (
-                      <img
-                        src={assetSrc(sourceAsset)}
-                        alt={sourceAsset.prompt}
-                        className="size-full object-cover"
-                      />
-                    ) : sourceAsset ? (
-                      <ImageIcon className="size-5" />
-                    ) : (
-                      <Plus className="size-5" />
-                    )}
-                  </button>
-                </PopoverTrigger>
-                <PopoverContent
-                  side="top"
-                  align="start"
-                  className="w-80 border bg-background/95 p-3 backdrop-blur"
-                >
-                  <div className="space-y-3">
-                    <div className="flex items-center justify-between">
-                      <span className="text-sm font-medium">
-                        {imageT(t, 'reference')}
-                      </span>
-                      {sourceAsset && (
-                        <Button
-                          variant="ghost"
-                          size="sm"
-                          className="h-7 px-2 text-xs"
-                          onClick={clearSourceAsset}
-                        >
-                          {imageT(t, 'clearSource')}
-                        </Button>
-                      )}
-                    </div>
-
-                    {sourceAsset && (
-                      <div className="space-y-2">
-                        <p className="line-clamp-2 text-xs text-muted-foreground">
-                          {sourceAsset.prompt}
-                        </p>
-                        <label className="text-xs font-medium text-muted-foreground">
-                          {imageT(t, 'mask')}
-                        </label>
-                        <Input
-                          key={sourceAsset.id}
-                          type="file"
-                          accept="image/png,image/webp,image/jpeg"
-                          onChange={(event) =>
-                            setMaskFile(event.target.files?.[0] ?? null)
-                          }
-                        />
-                      </div>
-                    )}
-
-                    {assets.length === 0 ? (
-                      <div className="rounded-md border border-dashed p-4 text-center text-xs text-muted-foreground">
-                        {imageT(t, 'referenceEmptyState')}
-                      </div>
-                    ) : (
-                      <div className="grid max-h-56 grid-cols-4 gap-2 overflow-y-auto">
-                        {assets.map((asset) => (
-                          <button
-                            key={asset.id}
-                            type="button"
-                            aria-label={imageT(t, 'usePromptAsSource', {
-                              prompt: asset.prompt,
-                            })}
-                            className={cn(
-                              'aspect-square overflow-hidden rounded-md border bg-secondary',
-                              sourceAssetId === asset.id && 'ring-2 ring-primary'
-                            )}
-                            onClick={() => setAssetAsSource(asset)}
-                          >
-                            {asset.path ? (
-                              <img
-                                src={assetSrc(asset)}
-                                alt={asset.prompt}
-                                className="size-full object-cover"
-                              />
-                            ) : (
-                              <div className="flex size-full items-center justify-center">
-                                <ImageIcon className="size-4 text-muted-foreground" />
-                              </div>
-                            )}
-                          </button>
-                        ))}
-                      </div>
-                    )}
-                  </div>
-                </PopoverContent>
-              </Popover>
+              <ReferenceImageStack
+                assets={sourceAssets}
+                assetSrc={assetSrc}
+                loading={referenceAssetsLoading}
+                onAdd={() => void importReferenceAssets()}
+                onRemove={removeSourceAsset}
+              />
 
               <Textarea
                 className="min-h-20 flex-1 resize-none border-0 bg-transparent p-0 text-sm shadow-none focus-visible:ring-0"
                 value={prompt}
                 placeholder={imageT(t, 'promptPlaceholder')}
                 onChange={(event) => setPrompt(event.target.value)}
+                onPaste={(event) => {
+                  const itemFiles = Array.from(event.clipboardData.items ?? [])
+                    .filter((item) => item.kind === 'file')
+                    .map((item) => item.getAsFile())
+                    .filter((file): file is File => Boolean(file))
+                  const clipboardFiles = Array.from(
+                    event.clipboardData.files ?? []
+                  )
+                  const imageFiles = [...itemFiles, ...clipboardFiles].filter(
+                    (file, index, allFiles) =>
+                      file.type.startsWith('image/') &&
+                      allFiles.findIndex(
+                        (candidate) =>
+                          candidate.name === file.name &&
+                          candidate.size === file.size &&
+                          candidate.type === file.type
+                      ) === index
+                  )
+
+                  if (imageFiles.length === 0) return
+
+                  event.preventDefault()
+                  void savePastedReferenceFiles(imageFiles)
+                }}
               />
             </div>
 
@@ -1476,7 +1810,7 @@ function Images() {
             }}
           >
             <FolderOpen className="size-4 text-muted-foreground" />
-            {imageT(t, 'openInFileManager')}
+            {imageT(t, openInSystemFileManagerKey())}
           </button>
         </div>
       )}

@@ -31,9 +31,12 @@
     "noImageModelsFound": "Nenhum modelo de imagem encontrado",
     "reference": "Referência",
     "referenceImage": "Imagem de referência",
+    "chooseReferenceFromComputer": "Escolher do computador",
+    "localReferenceImage": "Imagem de referência local",
+    "imageFiles": "Arquivos de imagem",
     "clearSource": "Limpar fonte",
     "mask": "Máscara",
-    "referenceEmptyState": "Os recursos gerados podem ser usados aqui como imagens de referência.",
+    "referenceEmptyState": "Os recursos gerados ou importados podem ser usados aqui como imagens de referência.",
     "promptPlaceholder": "Envie uma imagem de referência, digite um prompt ou descreva o que deseja gerar.",
     "sourceModelUnsupported": "A imagem fonte requer um modelo com edição de imagens.",
     "imageSizeSettings": "Configurações de tamanho da imagem",
@@ -50,6 +53,9 @@
     "usePromptAsSource": "Usar {{prompt}} como fonte",
     "useAsSource": "Usar como fonte",
     "openInFileManager": "Abrir no Finder / Explorer",
+    "openInFinder": "Abrir no Finder",
+    "openInExplorer": "Abrir no Explorer",
+    "openInSystemFileManager": "Abrir no gerenciador de arquivos",
     "imagePreview": "Prévia da imagem",
     "defaultVariationPrompt": "Crie uma nova variação desta imagem.",
     "defaultMaskEditPrompt": "Edite esta imagem usando a máscara fornecida.",
@@ -76,14 +82,21 @@
       "selectImageModelFirst": "Selecione um modelo de imagem primeiro",
       "describeImageFirst": "Descreva a imagem primeiro",
       "selectEditCapableModel": "Selecione um modelo de imagem compatível com imagens fonte",
+      "referenceImported": "Imagem de referência importada",
+      "importReferenceFailed": "Falha ao importar imagem de referência",
       "deleteAssetFailed": "Falha ao excluir recurso de imagem",
       "revealAssetFailed": "Falha ao revelar recurso de imagem",
-      "promptCopied": "Prompt copiado"
+      "promptCopied": "Prompt copiado",
+      "referenceLimitReached": "Você pode usar até {{count}} imagens de referência."
     },
     "errors": {
       "modelUnavailable": "O modelo de imagem não está mais disponível",
       "generationFailed": "Falha ao gerar imagem"
-    }
+    },
+    "addReferenceImage": "Adicionar imagem de referência",
+    "removeReferenceImage": "Remover {{prompt}}",
+    "pastedReferenceImage": "Imagem de referência colada",
+    "defaultMultiSourcePrompt": "Crie uma nova imagem com base nestas referências."
   },
   "newAgentChat": "Novo Chat de Agente",
   "chats": "Conversas",

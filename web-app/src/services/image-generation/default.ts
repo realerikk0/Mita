@@ -1,8 +1,12 @@
 import {
+  apiQualityForImageEditPreset,
   apiQualityForPreset,
   arrayBufferToBase64,
+  imageEditSizeForRatio,
   imageFileExtension,
   imageSizeForRatio,
+  isJingxingImageProvider,
+  isGptImageModel,
   parseDataUrl,
 } from '@/lib/image-generation'
 import { providerRemoteApiKeyChain } from '@/lib/provider-api-keys'
@@ -11,6 +15,7 @@ import type {
   ImageAssetRecord,
   ImageGenerationRequest,
   ImageGenerationService,
+  ImportImageAssetRequest,
   SaveImageAssetRequest,
 } from './types'
 
@@ -89,7 +94,14 @@ export class DefaultImageGenerationService implements ImageGenerationService {
       createdAt: request.createdAt ?? new Date().toISOString(),
       fileName: `${request.id}.${request.extension ?? imageFileExtension(request.mimeType)}`,
       path: '',
+      assetKind: request.assetKind ?? 'generated',
     }
+  }
+
+  async importAsset(
+    _request: ImportImageAssetRequest
+  ): Promise<ImageAssetRecord> {
+    throw new Error('Image asset import is only available in the desktop app')
   }
 
   async listAssets(): Promise<ImageAssetRecord[]> {
@@ -131,9 +143,7 @@ export class DefaultImageGenerationService implements ImageGenerationService {
   }
 
   private isJingxingProvider(provider: ModelProvider) {
-    const providerId = provider.provider?.toLowerCase() ?? ''
-    const baseUrl = provider.base_url?.toLowerCase() ?? ''
-    return providerId === 'jingxing' || baseUrl.includes('api.jingxing.uk')
+    return isJingxingImageProvider(provider.provider, provider.base_url)
   }
 
   private isJingxingGeminiImageModel(model: Model) {
@@ -254,37 +264,61 @@ export class DefaultImageGenerationService implements ImageGenerationService {
   }
 
   private async postForm(endpoint: string, request: ImageGenerationRequest) {
-    const form = new FormData()
-    form.append('model', request.model.id)
-    if (request.prompt.trim()) form.append('prompt', request.prompt.trim())
-    form.append('n', String(request.count))
-    form.append('size', imageSizeForRatio(request.ratio, request.model.id))
-    form.append('quality', apiQualityForPreset(request.qualityPreset, request.model.id))
-    form.append('response_format', 'b64_json')
-
-    if (request.sourceAsset) {
-      const blob = await this.assetToBlob(request.sourceAsset)
-      form.append(
-        'image',
-        blob,
-        request.sourceAsset.fileName || `source.${imageFileExtension(blob.type)}`
-      )
-    }
-
-    if (request.maskFile) {
-      form.append('mask', request.maskFile)
-    }
+    const form = await this.imageFormData(request)
 
     try {
       return await this.postFormWithKeys(endpoint, request, form)
     } catch (error) {
       if (request.mode !== 'variation') throw error
       const fallback = endpoint.replace('/images/variations', '/images/edits')
-      if (!request.prompt.trim()) {
-        form.set('prompt', 'Create a fresh variation of this image.')
-      }
-      return this.postFormWithKeys(fallback, request, form)
+      const fallbackRequest = request.prompt.trim()
+        ? request
+        : { ...request, prompt: 'Create a fresh variation of this image.' }
+      return this.postFormWithKeys(
+        fallback,
+        request,
+        await this.imageFormData(fallbackRequest)
+      )
     }
+  }
+
+  private async imageFormData(request: ImageGenerationRequest) {
+    const form = new FormData()
+    form.append('model', request.model.id)
+    if (request.prompt.trim()) form.append('prompt', request.prompt.trim())
+    form.append('n', String(request.count))
+    form.append(
+      'size',
+      imageEditSizeForRatio(
+        request.ratio,
+        request.model.id,
+        request.provider.provider,
+        request.provider.base_url
+      )
+    )
+    form.append(
+      'quality',
+      apiQualityForImageEditPreset(
+        request.qualityPreset,
+        request.model.id,
+        request.provider.provider,
+        request.provider.base_url
+      )
+    )
+    if (!isGptImageModel(request.model.id)) {
+      form.append('response_format', 'b64_json')
+    }
+
+    for (const sourceAsset of request.sourceAssets ?? []) {
+      const blob = await this.assetToBlob(sourceAsset)
+      form.append(
+        'image',
+        blob,
+        sourceAsset.fileName || `source.${imageFileExtension(blob.type)}`
+      )
+    }
+
+    return form
   }
 
   private async postFormWithKeys(

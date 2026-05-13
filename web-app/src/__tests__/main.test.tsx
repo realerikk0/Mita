@@ -76,4 +76,31 @@ describe('main.tsx', () => {
       await import('../main')
     }).rejects.toThrow()
   })
+
+  it('should prevent browser zoom keyboard shortcuts', async () => {
+    await import('../main')
+
+    const event = new KeyboardEvent('keydown', {
+      key: '=',
+      metaKey: true,
+      cancelable: true,
+    })
+
+    document.dispatchEvent(event)
+
+    expect(event.defaultPrevented).toBe(true)
+  })
+
+  it('should prevent trackpad pinch zoom wheel events', async () => {
+    await import('../main')
+
+    const event = new WheelEvent('wheel', {
+      ctrlKey: true,
+      cancelable: true,
+    })
+
+    document.dispatchEvent(event)
+
+    expect(event.defaultPrevented).toBe(true)
+  })
 })

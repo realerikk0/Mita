@@ -155,7 +155,7 @@ describe('DefaultImageGenerationService', () => {
       model: 'gpt-image-2',
       prompt: 'moonlit desk',
       n: 1,
-      size: '1820x1024',
+      size: '1536x1024',
       quality: 'medium',
     })
     expect(result).toEqual([
@@ -239,7 +239,7 @@ describe('DefaultImageGenerationService', () => {
       qualityPreset: 'sd',
       count: 1,
       mode: 'edit',
-      sourceAsset,
+      sourceAssets: [sourceAsset],
     })
 
     expect(fetchMock.mock.calls[1][0]).toBe(
@@ -248,8 +248,106 @@ describe('DefaultImageGenerationService', () => {
     const init = fetchMock.mock.calls[1][1] as RequestInit & { body: FormData }
     expect(init.body.get('model')).toBe('gpt-image-2')
     expect(init.body.get('prompt')).toBe('make it glass')
+    expect(init.body.get('size')).toBe('1024x1024')
+    expect(init.body.get('quality')).toBe('medium')
+    expect(init.body.get('response_format')).toBeNull()
     expect(init.body.get('image')).toBeTruthy()
     expect(result[0].b64Json).toBe('ZWRpdA==')
+  })
+
+  it('uses Jingxing-compatible gpt-image edit params for reference edits', async () => {
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(
+        new Response(new Uint8Array([1, 2, 3]), {
+          status: 200,
+          headers: { 'content-type': 'image/png' },
+        })
+      )
+      .mockResolvedValueOnce(
+        new Response(
+          JSON.stringify({
+            data: [{ b64_json: 'ZWRpdA==' }],
+          }),
+          { status: 200, headers: { 'content-type': 'application/json' } }
+        )
+      )
+
+    vi.stubGlobal('fetch', fetchMock)
+
+    const service = new DefaultImageGenerationService()
+    await service.generateImages({
+      provider: {
+        ...provider,
+        provider: 'jingxing',
+        base_url: 'https://api.jingxing.uk/v1',
+      },
+      model,
+      prompt: 'remove the background',
+      ratio: '3:4',
+      qualityPreset: 'hd',
+      count: 1,
+      mode: 'edit',
+      sourceAssets: [sourceAsset],
+    })
+
+    expect(fetchMock.mock.calls[1][0]).toBe(
+      'https://api.jingxing.uk/v1/images/edits'
+    )
+    const init = fetchMock.mock.calls[1][1] as RequestInit & { body: FormData }
+    expect(init.body.get('model')).toBe('gpt-image-2')
+    expect(init.body.get('size')).toBe('1024x1792')
+    expect(init.body.get('quality')).toBe('medium')
+    expect(init.body.get('response_format')).toBeNull()
+  })
+
+  it('appends every source asset as image and never appends a mask', async () => {
+    const secondSourceAsset = {
+      ...sourceAsset,
+      id: 'asset-2',
+      path: 'asset://second.png',
+      fileName: 'second.png',
+    }
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(
+        new Response(new Uint8Array([1, 2, 3]), {
+          status: 200,
+          headers: { 'content-type': 'image/png' },
+        })
+      )
+      .mockResolvedValueOnce(
+        new Response(new Uint8Array([4, 5, 6]), {
+          status: 200,
+          headers: { 'content-type': 'image/png' },
+        })
+      )
+      .mockResolvedValueOnce(
+        new Response(
+          JSON.stringify({
+            data: [{ b64_json: 'bXVsdGk=' }],
+          }),
+          { status: 200, headers: { 'content-type': 'application/json' } }
+        )
+      )
+
+    vi.stubGlobal('fetch', fetchMock)
+
+    const service = new DefaultImageGenerationService()
+    await service.generateImages({
+      provider,
+      model,
+      prompt: 'combine references',
+      ratio: '1:1',
+      qualityPreset: 'sd',
+      count: 1,
+      mode: 'edit',
+      sourceAssets: [sourceAsset, secondSourceAsset],
+    })
+
+    const init = fetchMock.mock.calls[2][1] as RequestInit & { body: FormData }
+    expect(init.body.getAll('image')).toHaveLength(2)
+    expect(init.body.get('mask')).toBeNull()
   })
 
   it('falls back from variations to edits when variations are unsupported', async () => {
@@ -265,6 +363,12 @@ describe('DefaultImageGenerationService', () => {
         new Response(JSON.stringify({ error: { message: 'unsupported' } }), {
           status: 404,
           headers: { 'content-type': 'application/json' },
+        })
+      )
+      .mockResolvedValueOnce(
+        new Response(new Uint8Array([1, 2, 3]), {
+          status: 200,
+          headers: { 'content-type': 'image/png' },
         })
       )
       .mockResolvedValueOnce(
@@ -287,16 +391,16 @@ describe('DefaultImageGenerationService', () => {
       qualityPreset: 'sd',
       count: 1,
       mode: 'variation',
-      sourceAsset,
+      sourceAssets: [sourceAsset],
     })
 
     expect(fetchMock.mock.calls[1][0]).toBe(
       'https://api.example.test/v1/images/variations'
     )
-    expect(fetchMock.mock.calls[2][0]).toBe(
+    expect(fetchMock.mock.calls[3][0]).toBe(
       'https://api.example.test/v1/images/edits'
     )
-    const fallbackInit = fetchMock.mock.calls[2][1] as RequestInit & {
+    const fallbackInit = fetchMock.mock.calls[3][1] as RequestInit & {
       body: FormData
     }
     expect(fallbackInit.body.get('prompt')).toBe(
@@ -424,5 +528,16 @@ describe('DefaultImageGenerationService', () => {
     )
     expect(result[0].mimeType).toBe('image/png')
     expect(result[0].b64Json).toBe('AQID')
+  })
+
+  it('rejects local image imports outside the desktop app', async () => {
+    const service = new DefaultImageGenerationService()
+
+    await expect(
+      service.importAsset({
+        id: 'local-ref-1',
+        sourcePath: '/tmp/ref.png',
+      })
+    ).rejects.toThrow(/desktop app/)
   })
 })
