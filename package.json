@@ -33,7 +33,7 @@
     "copy:assets:mobile": "cpx \"pre-install/*.tgz\" \"src-tauri/resources/pre-install/\" && cpx \"LICENSE\" \"src-tauri/resources/\"",
     "download:lib": "node ./scripts/download-lib.mjs",
     "download:bin": "node ./scripts/download-bin.mjs",
-    "install:web-research-browser": "cross-env PLAYWRIGHT_BROWSERS_PATH=src-tauri/resources/ms-playwright playwright install chromium",
+    "install:web-research-browser": "cross-env PLAYWRIGHT_BROWSERS_PATH=src-tauri/resources/ms-playwright playwright install --only-shell chromium",
     "prepare:web-research-runtime": "yarn install:web-research-browser && node ./scripts/prepare-web-research-runtime.mjs",
     "prepare:computer-runner": "node ./scripts/prepare-computer-runner.mjs",
     "prepare:computer-runner:release": "node ./scripts/prepare-computer-runner.mjs --release",
