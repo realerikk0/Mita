@@ -1,8 +1,7 @@
 name: Tauri Builder - Tag
 
 on:
-  push:
-    tags: ["v[0-9]+.[0-9]+.[0-9]+"]
+  workflow_dispatch:
 
 jobs:
   # Job create Update app version based on latest release tag with build number and save to output
@@ -20,7 +19,10 @@ jobs:
     steps:
       - name: Extract tag name without v prefix
         id: get_version
-        run: echo "VERSION=${GITHUB_REF#refs/tags/v}" >> $GITHUB_ENV && echo "::set-output name=version::${GITHUB_REF#refs/tags/v}"
+        run: |
+          version="${GITHUB_REF#refs/tags/v}"
+          echo "VERSION=$version" >> "$GITHUB_ENV"
+          echo "version=$version" >> "$GITHUB_OUTPUT"
         env:
           GITHUB_REF: ${{ github.ref }}
       - name: Create Draft Release
@@ -74,7 +76,7 @@ jobs:
       contents: write
     steps:
       - name: Getting the repo
-        uses: actions/checkout@v3
+        uses: actions/checkout@v4
 
       - name: create latest.json file
         run: |

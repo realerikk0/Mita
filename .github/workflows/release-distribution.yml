@@ -1,0 +1,149 @@
+name: Release Distribution
+
+on:
+  release:
+    types: [published]
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Existing GitHub release tag to distribute, for example v0.6.605"
+        required: true
+        type: string
+      dry_run:
+        description: "Render and validate only; do not upload to Baidu or send Feishu"
+        required: true
+        default: true
+        type: boolean
+
+permissions:
+  contents: read
+
+concurrency:
+  group: release-distribution-${{ github.event.release.tag_name || inputs.tag }}
+  cancel-in-progress: false
+
+env:
+  BAIDUPCS_VERSION: ${{ vars.BAIDUPCS_VERSION || 'v4.0.1' }}
+  NODE_OPTIONS: "--max-old-space-size=4096"
+
+jobs:
+  distribute:
+    name: Upload release assets and notify Feishu
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    environment: release-distribution
+    env:
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Resolve release tag
+        id: release
+        shell: bash
+        run: |
+          if [ "${{ github.event_name }}" = "release" ]; then
+            tag="${{ github.event.release.tag_name }}"
+            dry_run="false"
+          else
+            tag="${{ inputs.tag }}"
+            dry_run="${{ inputs.dry_run }}"
+          fi
+
+          if [ -z "$tag" ]; then
+            echo "Release tag is required" >&2
+            exit 1
+          fi
+
+          echo "tag=$tag" >> "$GITHUB_OUTPUT"
+          echo "dry_run=$dry_run" >> "$GITHUB_OUTPUT"
+          echo "Distributing release $tag (dry_run=$dry_run)"
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+
+      - name: Fetch release metadata
+        shell: bash
+        run: |
+          mkdir -p dist/release-assets
+          gh release view "${{ steps.release.outputs.tag }}" \
+            --json tagName,name,url,publishedAt,assets \
+            > dist/release.json
+
+      - name: Download release packages
+        shell: bash
+        run: |
+          gh release download "${{ steps.release.outputs.tag }}" \
+            --dir dist/release-assets \
+            --pattern "*.dmg" \
+            --pattern "*.exe" \
+            --pattern "*.msi" \
+            --clobber
+          find dist/release-assets -maxdepth 1 -type f -print | sort
+
+      - name: Collect and validate release assets
+        shell: bash
+        run: |
+          node scripts/release-distribution/collect-release-assets.mjs \
+            --release-json dist/release.json \
+            --assets-dir dist/release-assets \
+            --output dist/release-assets.json
+
+      - name: Install BaiduPCS-Go
+        if: steps.release.outputs.dry_run != 'true'
+        shell: bash
+        run: |
+          version="${BAIDUPCS_VERSION#v}"
+          archive="BaiduPCS-Go-${version}-linux-amd64.zip"
+          curl -fsSLO "https://github.com/qjfoidnh/BaiduPCS-Go/releases/download/${BAIDUPCS_VERSION}/${archive}"
+          unzip -q "$archive"
+          chmod +x "BaiduPCS-Go-${version}-linux-amd64/BaiduPCS-Go"
+          echo "$PWD/BaiduPCS-Go-${version}-linux-amd64" >> "$GITHUB_PATH"
+
+      - name: Upload assets to Baidu Netdisk
+        shell: bash
+        env:
+          DRY_RUN: ${{ steps.release.outputs.dry_run }}
+          RELEASE_ASSETS_JSON: dist/release-assets.json
+          RELEASE_ASSETS_DIR: dist/release-assets
+          BAIDU_SHARE_JSON: dist/baidu-share.json
+          BAIDU_REMOTE_ROOT: ${{ vars.BAIDU_REMOTE_ROOT || '/Mita/releases' }}
+          BAIDU_SHARE_PASSWORD: ${{ secrets.BAIDU_SHARE_PASSWORD || 'mita' }}
+          BAIDUPCS_GO_COOKIES: ${{ secrets.BAIDUPCS_GO_COOKIES }}
+          BAIDUPCS_GO_BDUSS: ${{ secrets.BAIDUPCS_GO_BDUSS }}
+          BAIDUPCS_GO_STOKEN: ${{ secrets.BAIDUPCS_GO_STOKEN }}
+          BAIDUPCS_GO_PTOKEN: ${{ secrets.BAIDUPCS_GO_PTOKEN }}
+        run: bash scripts/release-distribution/upload-baidu.sh
+
+      - name: Send Feishu release card
+        shell: bash
+        env:
+          DRY_RUN: ${{ steps.release.outputs.dry_run }}
+          RELEASE_ASSETS_JSON: dist/release-assets.json
+          BAIDU_SHARE_JSON: dist/baidu-share.json
+          FEISHU_RELEASE_WEBHOOK: ${{ secrets.FEISHU_RELEASE_WEBHOOK }}
+          FEISHU_RELEASE_SECRET: ${{ secrets.FEISHU_RELEASE_SECRET }}
+        run: |
+          args=(
+            --release-json "$RELEASE_ASSETS_JSON"
+            --baidu-json "$BAIDU_SHARE_JSON"
+            --output dist/feishu-card.json
+          )
+          if [ "$DRY_RUN" = "true" ]; then
+            args+=(--dry-run)
+          fi
+          node scripts/release-distribution/send-feishu-card.mjs "${args[@]}"
+
+      - name: Upload distribution metadata
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: release-distribution-${{ steps.release.outputs.tag }}
+          if-no-files-found: ignore
+          path: |
+            dist/release.json
+            dist/release-assets.json
+            dist/baidu-share.json
+            dist/feishu-card.json
