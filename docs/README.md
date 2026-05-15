@@ -64,3 +64,7 @@ If you are using GitHub pages for hosting, this command is a convenient way to b
 - When a pull request is created, the preview URL will be automatically commented on the pull request.
 
 - The documentation will then be published to [https://jan.ai/](https://jan.ai/) when the pull request is merged to `main`.
+
+### Mita Release Distribution
+
+Mita desktop release and distribution operations are documented in [`release-distribution.md`](./release-distribution.md).
