@@ -95,7 +95,7 @@ jobs:
         if: steps.release.outputs.dry_run != 'true'
         shell: bash
         run: |
-          version="${BAIDUPCS_VERSION#v}"
+          version="${BAIDUPCS_VERSION}"
           archive="BaiduPCS-Go-${version}-linux-amd64.zip"
           curl -fsSLO "https://github.com/qjfoidnh/BaiduPCS-Go/releases/download/${BAIDUPCS_VERSION}/${archive}"
           unzip -q "$archive"
