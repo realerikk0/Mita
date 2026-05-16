@@ -1,6 +1,7 @@
 import { createFileRoute } from '@tanstack/react-router'
 import { invoke } from '@tauri-apps/api/core'
 import {
+  IconAlertTriangle,
   IconCopy,
   IconFolderCog,
   IconFolderOpen,
@@ -160,6 +161,10 @@ function ComputerAgentSettings() {
     .filter(Boolean)
     .join(' ')
 
+  const approvalPolicy = settings.computerAgentApprovalPolicy ?? 'alwaysAsk'
+  const sandboxAccess = settings.computerAgentSandboxAccess ?? 'readWrite'
+  const shellBlockedByReadOnly = sandboxAccess === 'readOnly'
+
   return (
     <div className="flex flex-col h-svh w-full">
       <HeaderPage>
@@ -216,11 +221,13 @@ function ComputerAgentSettings() {
                     <Switch
                       checked={
                         settings.computerAgentShellEnabled &&
-                        shellStatus?.available === true
+                        shellStatus?.available === true &&
+                        !shellBlockedByReadOnly
                       }
                       disabled={
                         !settings.computerAgentEnabled ||
-                        shellStatus?.available !== true
+                        shellStatus?.available !== true ||
+                        shellBlockedByReadOnly
                       }
                       onCheckedChange={(checked) => {
                         persistSettings({
@@ -241,6 +248,93 @@ function ComputerAgentSettings() {
                       ))}
                     </div>
                   }
+                />
+              ) : null}
+            </Card>
+
+            <Card title={t('settings:computerAgent.policyTitle')}>
+              <CardItem
+                title={t('settings:computerAgent.approvalPolicySelectTitle')}
+                description={t(
+                  'settings:computerAgent.approvalPolicySelectDescription'
+                )}
+                actions={
+                  <select
+                    className="h-8 min-w-48 rounded-md border bg-background px-2 text-sm"
+                    value={approvalPolicy}
+                    disabled={!settings.computerAgentEnabled}
+                    onChange={(event) => {
+                      persistSettings({
+                        computerAgentApprovalPolicy: event.target
+                          .value as typeof approvalPolicy,
+                      })
+                    }}
+                  >
+                    <option value="alwaysAsk">
+                      {t('settings:computerAgent.approvalAlwaysAsk')}
+                    </option>
+                    <option value="oncePerThread">
+                      {t('settings:computerAgent.approvalOncePerThread')}
+                    </option>
+                    <option value="never">
+                      {t('settings:computerAgent.approvalNever')}
+                    </option>
+                  </select>
+                }
+              />
+              {approvalPolicy === 'never' ? (
+                <CardItem
+                  title={
+                    <span className="inline-flex items-center gap-2 text-destructive">
+                      <IconAlertTriangle size={16} />
+                      {t('settings:computerAgent.approvalNeverDangerTitle')}
+                    </span>
+                  }
+                  description={
+                    <span className="text-destructive">
+                      {t(
+                        'settings:computerAgent.approvalNeverDangerDescription'
+                      )}
+                    </span>
+                  }
+                />
+              ) : null}
+              <CardItem
+                title={t('settings:computerAgent.sandboxAccessTitle')}
+                description={t(
+                  'settings:computerAgent.sandboxAccessDescription'
+                )}
+                actions={
+                  <select
+                    className="h-8 min-w-48 rounded-md border bg-background px-2 text-sm"
+                    value={sandboxAccess}
+                    disabled={!settings.computerAgentEnabled}
+                    onChange={(event) => {
+                      const value = event.target
+                        .value as typeof sandboxAccess
+                      persistSettings({
+                        computerAgentSandboxAccess: value,
+                        ...(value === 'readOnly'
+                          ? { computerAgentShellEnabled: false }
+                          : {}),
+                      })
+                    }}
+                  >
+                    <option value="readOnly">
+                      {t('settings:computerAgent.sandboxReadOnly')}
+                    </option>
+                    <option value="readWrite">
+                      {t('settings:computerAgent.sandboxReadWrite')}
+                    </option>
+                  </select>
+                }
+              />
+              {sandboxAccess === 'readOnly' ? (
+                <CardItem
+                  title={t('settings:computerAgent.sandboxReadOnlyNoteTitle')}
+                  description={t(
+                    'settings:computerAgent.sandboxReadOnlyNoteDescription'
+                  )}
                 />
               ) : null}
             </Card>
@@ -369,10 +463,10 @@ function ComputerAgentSettings() {
                 title={
                   <span className="inline-flex items-center gap-2">
                     <IconShieldCheck size={16} />
-                    {t('settings:computerAgent.approvalPolicyTitle')}
+                    {t('settings:computerAgent.safetyBoundaryTitle')}
                   </span>
                 }
-                description={t('settings:computerAgent.approvalPolicyDescription')}
+                description={t('settings:computerAgent.safetyBoundaryDescription')}
               />
             </Card>
           </div>

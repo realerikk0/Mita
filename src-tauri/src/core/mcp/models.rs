@@ -59,6 +59,14 @@ fn default_computer_agent_shell_enabled() -> bool {
     false
 }
 
+fn default_computer_agent_approval_policy() -> String {
+    "alwaysAsk".to_string()
+}
+
+fn default_computer_agent_sandbox_access() -> String {
+    "readWrite".to_string()
+}
+
 /// Runtime MCP settings that can be adjusted via UI
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -94,6 +102,10 @@ pub struct McpSettings {
         alias = "computerShellEnabled"
     )]
     pub computer_agent_shell_enabled: bool,
+    #[serde(default = "default_computer_agent_approval_policy")]
+    pub computer_agent_approval_policy: String,
+    #[serde(default = "default_computer_agent_sandbox_access")]
+    pub computer_agent_sandbox_access: String,
 }
 
 impl Default for McpSettings {
@@ -110,6 +122,8 @@ impl Default for McpSettings {
             computer_agent_enabled: false,
             computer_agent_allowed_roots: Vec::new(),
             computer_agent_shell_enabled: false,
+            computer_agent_approval_policy: default_computer_agent_approval_policy(),
+            computer_agent_sandbox_access: default_computer_agent_sandbox_access(),
         }
     }
 }
@@ -118,6 +132,10 @@ impl McpSettings {
     /// Returns the tool call timeout duration, enforcing a minimum of 1 second to avoid zero-duration timeouts.
     pub fn tool_call_timeout_duration(&self) -> std::time::Duration {
         std::time::Duration::from_secs(self.tool_call_timeout_seconds.max(1))
+    }
+
+    pub fn computer_agent_allows_writes(&self) -> bool {
+        self.computer_agent_sandbox_access == "readWrite"
     }
 }
 

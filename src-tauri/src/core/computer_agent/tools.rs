@@ -40,20 +40,35 @@ pub fn canonical_computer_agent_tool_name(tool_name: &str) -> Option<&'static st
     }
 }
 
-pub fn computer_agent_summary(settings: &McpSettings) -> Option<ServerSummary> {
+pub fn computer_agent_summary(
+    settings: &McpSettings,
+    shell_available: bool,
+) -> Option<ServerSummary> {
     if !settings.computer_agent_enabled {
         return None;
     }
 
+    let writes_enabled = settings.computer_agent_allows_writes();
+    let shell_enabled = settings.computer_agent_shell_enabled && shell_available && writes_enabled;
+    let mut capabilities = vec![
+        "computer".to_string(),
+        "filesystem".to_string(),
+        "files".to_string(),
+    ];
+    if shell_enabled {
+        capabilities.push("shell".to_string());
+    }
+
     Some(ServerSummary {
         name: COMPUTER_AGENT_SERVER_NAME.to_string(),
-        capabilities: vec![
-            "computer".to_string(),
-            "filesystem".to_string(),
-            "files".to_string(),
-            "shell".to_string(),
-        ],
-        description: "Create, read, list, move, trash, open files, and run sandboxed shell commands inside approved Mita Computer Agent roots.".to_string(),
+        capabilities,
+        description: if shell_enabled {
+            "Create, read, list, move, trash, open files, and run sandboxed shell commands inside approved Mita Computer Agent roots.".to_string()
+        } else if writes_enabled {
+            "Create, read, list, move, trash, and open files inside approved Mita Computer Agent roots.".to_string()
+        } else {
+            "Read and list files inside approved Mita Computer Agent roots.".to_string()
+        },
     })
 }
 
@@ -63,29 +78,6 @@ pub fn computer_agent_tools(settings: &McpSettings, shell_available: bool) -> Ve
     }
 
     let mut tools = vec![
-        tool(
-            CREATE_TEXT_FILE,
-            "Create a UTF-8 .txt file. If directory is omitted, Mita creates it in this thread's private agent workspace. Use a short descriptive suggestedName without path separators.",
-            json!({
-                "type": "object",
-                "properties": {
-                    "suggestedName": {
-                        "type": "string",
-                        "description": "Short human-readable file name suggestion. Mita sanitizes it and appends .txt."
-                    },
-                    "content": {
-                        "type": "string",
-                        "description": "Text content to write."
-                    },
-                    "directory": {
-                        "type": "string",
-                        "description": "Optional destination directory. Must be inside this thread workspace or an allowed root."
-                    }
-                },
-                "required": ["suggestedName", "content"],
-                "additionalProperties": true
-            }),
-        ),
         tool(
             LIST_DIRECTORY,
             "List files and folders in a directory inside this thread workspace or an allowed root. If path is omitted, lists this thread's private agent workspace.",
@@ -116,6 +108,36 @@ pub fn computer_agent_tools(settings: &McpSettings, shell_available: bool) -> Ve
                     }
                 },
                 "required": ["path"],
+                "additionalProperties": true
+            }),
+        ),
+    ];
+
+    if !settings.computer_agent_allows_writes() {
+        return tools;
+    }
+
+    tools.extend(vec![
+        tool(
+            CREATE_TEXT_FILE,
+            "Create a UTF-8 .txt file. If directory is omitted, Mita creates it in this thread's private agent workspace. Use a short descriptive suggestedName without path separators.",
+            json!({
+                "type": "object",
+                "properties": {
+                    "suggestedName": {
+                        "type": "string",
+                        "description": "Short human-readable file name suggestion. Mita sanitizes it and appends .txt."
+                    },
+                    "content": {
+                        "type": "string",
+                        "description": "Text content to write."
+                    },
+                    "directory": {
+                        "type": "string",
+                        "description": "Optional destination directory. Must be inside this thread workspace or an allowed root."
+                    }
+                },
+                "required": ["suggestedName", "content"],
                 "additionalProperties": true
             }),
         ),
@@ -183,7 +205,7 @@ pub fn computer_agent_tools(settings: &McpSettings, shell_available: bool) -> Ve
                 "additionalProperties": true
             }),
         ),
-    ];
+    ]);
 
     if settings.computer_agent_shell_enabled && shell_available {
         tools.push(tool(

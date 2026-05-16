@@ -36,6 +36,8 @@ export type MCPSettings = {
   computerAgentEnabled: boolean
   computerAgentAllowedRoots: string[]
   computerAgentShellEnabled: boolean
+  computerAgentApprovalPolicy: 'alwaysAsk' | 'oncePerThread' | 'never'
+  computerAgentSandboxAccess: 'readOnly' | 'readWrite'
 }
 
 export const DEFAULT_MCP_SETTINGS: MCPSettings = {
@@ -50,6 +52,8 @@ export const DEFAULT_MCP_SETTINGS: MCPSettings = {
   computerAgentEnabled: false,
   computerAgentAllowedRoots: [],
   computerAgentShellEnabled: false,
+  computerAgentApprovalPolicy: 'alwaysAsk',
+  computerAgentSandboxAccess: 'readWrite',
 }
 
 type LegacyMCPSettings = Partial<MCPSettings> & {
@@ -94,6 +98,12 @@ export function normalizeMCPSettings(
       source.computerAgentShellEnabled ??
       source.computerShellEnabled ??
       DEFAULT_MCP_SETTINGS.computerAgentShellEnabled,
+    computerAgentApprovalPolicy:
+      source.computerAgentApprovalPolicy ??
+      DEFAULT_MCP_SETTINGS.computerAgentApprovalPolicy,
+    computerAgentSandboxAccess:
+      source.computerAgentSandboxAccess ??
+      DEFAULT_MCP_SETTINGS.computerAgentSandboxAccess,
   }
 }
 

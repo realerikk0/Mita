@@ -183,6 +183,12 @@ describe('useMCPServers', () => {
         'C:/Mita',
       ])
       expect(result.current.settings.computerAgentShellEnabled).toBe(true)
+      expect(result.current.settings.computerAgentApprovalPolicy).toBe(
+        'alwaysAsk'
+      )
+      expect(result.current.settings.computerAgentSandboxAccess).toBe(
+        'readWrite'
+      )
       expect('computerUseEnabled' in result.current.settings).toBe(false)
     })
   })

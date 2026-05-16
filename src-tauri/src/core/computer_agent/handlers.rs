@@ -42,6 +42,17 @@ pub async fn handle_computer_agent_tool(
 
     let canonical_tool_name = canonical_computer_agent_tool_name(tool_name)
         .ok_or_else(|| format!("Unknown Computer Agent tool '{tool_name}'"))?;
+    if !settings.computer_agent_allows_writes()
+        && !matches!(canonical_tool_name, LIST_DIRECTORY | READ_TEXT_FILE)
+    {
+        return Err(
+            "Computer Agent sandbox is read-only; this action requires read-write access"
+                .to_string(),
+        );
+    }
+    if canonical_tool_name == RUN_SHELL && !settings.computer_agent_shell_enabled {
+        return Err("Computer Agent shell is disabled in settings".to_string());
+    }
 
     let text = match canonical_tool_name {
         CREATE_TEXT_FILE => create_text_file(&scope, &args)?,

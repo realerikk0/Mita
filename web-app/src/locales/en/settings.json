@@ -335,8 +335,8 @@
   "computerAgent": {
     "title": "Computer Agent",
     "enableTitle": "Enable Computer Agent",
-    "enableDescription": "Expose Mita built-in local file and command tools to application chats. Every real action requires one-time approval.",
-    "shellTitle": "Local shell",
+    "enableDescription": "Expose Mita built-in local file tools to application chats. Enable command execution separately below. Every real action requires one-time approval.",
+    "shellTitle": "Allow AI to run local commands",
     "shellStatusUnknown": "Shell sandbox status is not available.",
     "shellStatusAvailable": "Sandbox available on {{platform}} via {{sandboxKind}}.",
     "shellStatusUnavailable": "Shell sandbox is unavailable.",
@@ -344,6 +344,20 @@
     "shellPhase": "Phase: {{phase}}.",
     "refreshShellStatus": "Refresh shell status",
     "shellBlockersTitle": "Shell blockers",
+    "policyTitle": "Policy",
+    "approvalPolicySelectTitle": "Approval prompts",
+    "approvalPolicySelectDescription": "Choose how often Mita asks before Computer Agent tools read files, modify files, or run local commands.",
+    "approvalAlwaysAsk": "Ask every time",
+    "approvalOncePerThread": "Ask once per chat",
+    "approvalNever": "Do not ask",
+    "approvalNeverDangerTitle": "Danger: approvals disabled",
+    "approvalNeverDangerDescription": "AI tool calls can read or change files and, when command execution is enabled, run local commands without a confirmation dialog. Use this only when you trust the active model and conversation.",
+    "sandboxAccessTitle": "Sandbox access",
+    "sandboxAccessDescription": "Limit Computer Agent tools to read-only access or allow read-write file and command operations inside approved roots.",
+    "sandboxReadOnly": "Read-only",
+    "sandboxReadWrite": "Read-write",
+    "sandboxReadOnlyNoteTitle": "Read-only mode disables writes and commands",
+    "sandboxReadOnlyNoteDescription": "Only directory listing and text-file reading are exposed. File creation, moving, trash, open-path actions, and local shell commands are blocked by the backend.",
     "workspaceTitle": "Private workspaces",
     "workspaceRootTitle": "Workspace root",
     "workspaceRootDescription": "Mita stores each chat private agent workspace under this folder.",
@@ -361,7 +375,7 @@
     "allowedRootInvalid": "Allowed root is invalid.",
     "windowsAllowedRootsNote": "On Windows Phase 3, shell commands may use the private thread workspace and configured allowed roots.",
     "safetyTitle": "Safety policy",
-    "approvalPolicyTitle": "Every action requires approval",
-    "approvalPolicyDescription": "Computer Agent actions cannot use global MCP auto-approval or remembered tool permissions. The approval dialog shows exact paths and commands before each action."
+    "safetyBoundaryTitle": "Backend limits still apply",
+    "safetyBoundaryDescription": "Settings only control prompting and exposed capabilities. Computer Agent tools still stay inside the private workspace or configured allowed roots, and shell commands keep sandbox, timeout, and output limits."
   }
 }

@@ -25,14 +25,14 @@ use crate::core::{
         handlers::handle_computer_agent_tool,
         permissions::{sanitize_file_stem, unique_txt_path, ComputerAgentScope},
         tools::{
-            computer_agent_tools, is_computer_agent_tool, CREATE_TEXT_FILE, READ_TEXT_FILE,
-            RUN_SHELL,
+            computer_agent_summary, computer_agent_tools, is_computer_agent_tool, CREATE_TEXT_FILE,
+            LIST_DIRECTORY, READ_TEXT_FILE, RUN_SHELL,
         },
         windows_runner::{
             cleanup_journal_path_for_test, refused_response, runner_candidate_paths_from,
-            sandbox_diagnostic_for_test, validate_runner_request, RunnerRequest, RunnerResponse,
-            RunnerResponseStatus, RUNNER_ENABLE_ENV, RUNNER_EXECUTE_ENV, RUNNER_PATH_ENV,
-            RUNNER_PROTOCOL_VERSION,
+            sandbox_diagnostic_for_test, validate_runner_request, windows_runner_status,
+            RunnerRequest, RunnerResponse, RunnerResponseStatus, RUNNER_EXECUTE_ENV,
+            RUNNER_PATH_ENV, RUNNER_PROTOCOL_VERSION,
         },
     },
     mcp::models::McpSettings,
@@ -155,6 +155,19 @@ fn computer_agent_tools_show_shell_when_enabled_and_available() {
 }
 
 #[test]
+fn computer_agent_tools_read_only_hides_write_and_shell_tools() {
+    let mut settings = settings_enabled();
+    settings.computer_agent_shell_enabled = true;
+    settings.computer_agent_sandbox_access = "readOnly".to_string();
+
+    let tools = computer_agent_tools(&settings, true);
+    assert!(tools.iter().any(|tool| tool.name == LIST_DIRECTORY));
+    assert!(tools.iter().any(|tool| tool.name == READ_TEXT_FILE));
+    assert!(!tools.iter().any(|tool| tool.name == CREATE_TEXT_FILE));
+    assert!(!tools.iter().any(|tool| tool.name == RUN_SHELL));
+}
+
+#[test]
 fn legacy_computer_tool_names_route_as_aliases_but_are_not_exposed() {
     let settings = settings_enabled();
     let tools = computer_agent_tools(&settings, true);
@@ -164,6 +177,137 @@ fn legacy_computer_tool_names_route_as_aliases_but_are_not_exposed() {
     assert!(!tools
         .iter()
         .any(|tool| tool.name == "computer_create_text_file"));
+}
+
+#[test]
+fn computer_agent_summary_reports_shell_only_when_enabled_and_available() {
+    let settings = settings_enabled();
+    let summary = computer_agent_summary(&settings, true).unwrap();
+    assert!(!summary.capabilities.iter().any(|value| value == "shell"));
+    assert!(!summary.description.contains("shell commands"));
+
+    let mut settings = settings_enabled();
+    settings.computer_agent_shell_enabled = true;
+    let unavailable = computer_agent_summary(&settings, false).unwrap();
+    assert!(!unavailable
+        .capabilities
+        .iter()
+        .any(|value| value == "shell"));
+
+    let available = computer_agent_summary(&settings, true).unwrap();
+    assert!(available.capabilities.iter().any(|value| value == "shell"));
+    assert!(available.description.contains("shell commands"));
+
+    let mut read_only = settings_enabled();
+    read_only.computer_agent_shell_enabled = true;
+    read_only.computer_agent_sandbox_access = "readOnly".to_string();
+    let read_only_summary = computer_agent_summary(&read_only, true).unwrap();
+    assert!(!read_only_summary
+        .capabilities
+        .iter()
+        .any(|value| value == "shell"));
+    assert!(read_only_summary.description.contains("Read and list"));
+}
+
+#[tokio::test]
+async fn run_shell_requires_shell_setting_for_canonical_and_legacy_names() {
+    let tmp = tempdir().unwrap();
+
+    for (tool_name, thread_id) in [
+        (RUN_SHELL, "thread-shell-disabled"),
+        ("computer_run_shell", "thread-legacy-shell-disabled"),
+    ] {
+        let result = handle_computer_agent_tool(
+            tmp.path().to_path_buf(),
+            settings_enabled(),
+            tool_name,
+            Some(args(json!({
+                "_mitaThreadId": thread_id,
+                "command": "echo should-not-run",
+                "cwd": ".",
+                "timeoutSeconds": 1,
+                "maxOutputBytes": 1024
+            }))),
+        )
+        .await;
+
+        match result {
+            Ok(_) => panic!("{tool_name} should be rejected when shell is disabled"),
+            Err(error) => assert!(
+                error.contains("Computer Agent shell is disabled in settings"),
+                "unexpected error for {tool_name}: {error}"
+            ),
+        }
+        assert!(
+            !tmp.path().join("agent-workspaces").join(thread_id).exists(),
+            "{tool_name} should not create a workspace when shell is disabled"
+        );
+    }
+}
+
+#[tokio::test]
+async fn read_only_sandbox_rejects_write_open_and_shell_tools() {
+    let tmp = tempdir().unwrap();
+    let workspace = tmp.path().join("agent-workspaces").join("thread-read-only");
+    fs::create_dir_all(&workspace).unwrap();
+    fs::write(workspace.join("notes.txt"), "hello").unwrap();
+
+    let mut settings = settings_enabled();
+    settings.computer_agent_shell_enabled = true;
+    settings.computer_agent_sandbox_access = "readOnly".to_string();
+
+    let read = handle_computer_agent_tool(
+        tmp.path().to_path_buf(),
+        settings.clone(),
+        READ_TEXT_FILE,
+        Some(args(json!({
+            "_mitaThreadId": "thread-read-only",
+            "path": "notes.txt"
+        }))),
+    )
+    .await;
+    assert!(read.is_ok());
+
+    for (tool_name, tool_args) in [
+        (
+            CREATE_TEXT_FILE,
+            args(json!({
+                "_mitaThreadId": "thread-read-only",
+                "suggestedName": "blocked",
+                "content": "nope"
+            })),
+        ),
+        (
+            "computer_open_path",
+            args(json!({
+                "_mitaThreadId": "thread-read-only",
+                "path": "notes.txt"
+            })),
+        ),
+        (
+            RUN_SHELL,
+            args(json!({
+                "_mitaThreadId": "thread-read-only",
+                "command": "echo nope",
+                "cwd": "."
+            })),
+        ),
+    ] {
+        let result = handle_computer_agent_tool(
+            tmp.path().to_path_buf(),
+            settings.clone(),
+            tool_name,
+            Some(tool_args),
+        )
+        .await;
+        match result {
+            Ok(_) => panic!("{tool_name} should be rejected in read-only mode"),
+            Err(error) => assert!(
+                error.contains("Computer Agent sandbox is read-only"),
+                "unexpected error for {tool_name}: {error}"
+            ),
+        }
+    }
 }
 
 #[test]
@@ -398,9 +542,7 @@ async fn windows_shell_runs_through_runner_when_enabled() {
     let workspace = tmp.path().join("agent-workspaces").join("thread-shell");
     fs::create_dir_all(&workspace).unwrap();
 
-    let previous_enable = env::var_os(RUNNER_ENABLE_ENV);
     let previous_path = env::var_os(RUNNER_PATH_ENV);
-    env::set_var(RUNNER_ENABLE_ENV, "1");
     env::set_var(RUNNER_PATH_ENV, &runner);
 
     let result = handle_computer_agent_tool(
@@ -421,7 +563,6 @@ async fn windows_shell_runs_through_runner_when_enabled() {
     )
     .await;
 
-    restore_env(RUNNER_ENABLE_ENV, previous_enable);
     restore_env(RUNNER_PATH_ENV, previous_path);
 
     let result = result.unwrap();
@@ -432,6 +573,29 @@ async fn windows_shell_runs_through_runner_when_enabled() {
         fs::read_to_string(tmp.path().join("agent-workspaces/thread-shell/inside.txt")).unwrap(),
         "ok\r\n"
     );
+}
+
+#[cfg(windows)]
+#[test]
+fn windows_runner_status_is_available_without_enable_env_when_runner_exists() {
+    let _guard = windows_runner_env_lock().lock().unwrap();
+    let tmp = tempdir().unwrap();
+    let runner = tmp.path().join("mita-computer-agent-runner.exe");
+    fs::write(&runner, "").unwrap();
+
+    let previous_path = env::var_os(RUNNER_PATH_ENV);
+    env::set_var(RUNNER_PATH_ENV, &runner);
+
+    let status = windows_runner_status();
+
+    restore_env(RUNNER_PATH_ENV, previous_path);
+
+    assert!(status.available);
+    assert_eq!(status.runner_path.as_deref(), Some(runner.as_path()));
+    assert!(!status
+        .blockers
+        .iter()
+        .any(|blocker| blocker.contains("EXPERIMENTAL")));
 }
 
 #[cfg(windows)]

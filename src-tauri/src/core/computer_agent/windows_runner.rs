@@ -9,11 +9,8 @@ pub const RUNNER_BINARY_NAME: &str = if cfg!(windows) {
     "mita-computer-agent-runner"
 };
 pub const RUNNER_PATH_ENV: &str = "MITA_WINDOWS_COMPUTER_AGENT_RUNNER";
-pub const RUNNER_ENABLE_ENV: &str = "MITA_EXPERIMENTAL_WINDOWS_COMPUTER_AGENT_RUNNER";
-pub const RUNNER_EXECUTE_ENV: &str = "MITA_EXPERIMENTAL_WINDOWS_COMPUTER_AGENT_RUNNER_EXECUTE";
+pub const RUNNER_EXECUTE_ENV: &str = "MITA_COMPUTER_AGENT_RUNNER_EXECUTE";
 pub const RUNNER_PHASE: &str = "phase-3-allowed-roots";
-
-const BLOCKERS: &[&str] = &["runner remains behind an explicit experimental execution gate"];
 
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -63,29 +60,22 @@ pub fn windows_runner_status() -> WindowsRunnerStatus {
     let runner_path = discover_runner_binary();
     let mut blockers = Vec::new();
 
-    let enabled = std::env::var(RUNNER_ENABLE_ENV).as_deref() == Ok("1");
-    if !enabled {
-        blockers.push(format!("{RUNNER_ENABLE_ENV}=1 is not set"));
-    }
-
     if runner_path.is_none() {
         blockers.push(format!(
             "{RUNNER_BINARY_NAME} was not found next to the app or in {RUNNER_PATH_ENV}"
         ));
     }
 
-    blockers.extend(BLOCKERS.iter().map(|blocker| blocker.to_string()));
-
-    let available = enabled && runner_path.is_some();
+    let available = runner_path.is_some();
     WindowsRunnerStatus {
         available,
         phase: RUNNER_PHASE.to_string(),
         runner_path,
         reason: if available {
-            "Windows Computer Agent shell runner is enabled with workspace and allowed-root sandboxing."
+            "Windows Computer Agent shell runner is available; chats still require the Computer Agent shell setting and per-action approval."
                 .to_string()
         } else {
-            "Windows Computer Agent shell runner is not enabled for chats.".to_string()
+            "Windows Computer Agent shell runner was not found.".to_string()
         },
         blockers,
     }
@@ -110,7 +100,7 @@ pub fn execute_runner_request(request: RunnerRequest) -> RunnerResponse {
 
     if std::env::var(RUNNER_EXECUTE_ENV).as_deref() != Ok("1") {
         return refused_response(format!(
-            "{RUNNER_EXECUTE_ENV}=1 is required to run the experimental Windows sandbox prototype"
+            "{RUNNER_EXECUTE_ENV}=1 is required; the desktop app sets it only when brokering an approved Computer Agent shell command"
         ));
     }
 

@@ -645,6 +645,9 @@ fn test_mcp_settings_default_matches_constants() {
     assert!(!s.computer_agent_enabled);
     assert!(s.computer_agent_allowed_roots.is_empty());
     assert!(!s.computer_agent_shell_enabled);
+    assert_eq!(s.computer_agent_approval_policy, "alwaysAsk");
+    assert_eq!(s.computer_agent_sandbox_access, "readWrite");
+    assert!(s.computer_agent_allows_writes());
 }
 
 #[test]
@@ -687,6 +690,8 @@ impl PartialEq for super::models::McpSettings {
             && self.computer_agent_enabled == other.computer_agent_enabled
             && self.computer_agent_allowed_roots == other.computer_agent_allowed_roots
             && self.computer_agent_shell_enabled == other.computer_agent_shell_enabled
+            && self.computer_agent_approval_policy == other.computer_agent_approval_policy
+            && self.computer_agent_sandbox_access == other.computer_agent_sandbox_access
     }
 }
 
@@ -700,11 +705,15 @@ fn test_mcp_settings_round_trip_camel_case() {
     s.use_lightweight_router_model = true;
     s.computer_agent_enabled = true;
     s.computer_agent_allowed_roots = vec!["/tmp/mita".into()];
+    s.computer_agent_approval_policy = "never".into();
+    s.computer_agent_sandbox_access = "readOnly".into();
     let json = serde_json::to_string(&s).unwrap();
     assert!(json.contains("\"toolCallTimeoutSeconds\":42"));
     assert!(json.contains("\"routerModelProvider\":\"openai\""));
     assert!(json.contains("\"useLightweightRouterModel\":true"));
     assert!(json.contains("\"computerAgentEnabled\":true"));
+    assert!(json.contains("\"computerAgentApprovalPolicy\":\"never\""));
+    assert!(json.contains("\"computerAgentSandboxAccess\":\"readOnly\""));
     let parsed: McpSettings = serde_json::from_str(&json).unwrap();
     assert_eq!(parsed, s);
 }

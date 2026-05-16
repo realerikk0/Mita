@@ -1,8 +1,8 @@
-//! Experimental Windows Computer Agent runner.
+//! Windows Computer Agent runner.
 //!
-//! The native execution path is still behind
-//! `MITA_EXPERIMENTAL_WINDOWS_COMPUTER_AGENT_RUNNER_EXECUTE=1`; the desktop app
-//! sets that variable only when it invokes the runner.
+//! The native execution path still requires an internal broker marker
+//! (`MITA_COMPUTER_AGENT_RUNNER_EXECUTE=1`); the desktop app sets that marker only
+//! when it invokes the runner for an approved shell command.
 
 use std::io::{self, Read};
 

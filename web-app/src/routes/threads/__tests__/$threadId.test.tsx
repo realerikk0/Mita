@@ -112,6 +112,8 @@ const h = vi.hoisted(() => {
     settings: {
       computerAgentEnabled: false,
       computerAgentShellEnabled: false,
+      computerAgentApprovalPolicy: 'alwaysAsk',
+      computerAgentSandboxAccess: 'readWrite',
     },
   }
   const useMCPServersMock: any = (selector: any) => selector(mcpServersState)
@@ -120,6 +122,7 @@ const h = vi.hoisted(() => {
   const toolApprovalState: any = {
     showApprovalModal: vi.fn().mockResolvedValue(true),
     approveToolForThread: vi.fn(),
+    isToolApproved: vi.fn(() => false),
   }
   const useToolApprovalMock: any = (selector: any) => selector(toolApprovalState)
   useToolApprovalMock.getState = () => toolApprovalState

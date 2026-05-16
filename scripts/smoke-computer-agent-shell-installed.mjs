@@ -801,7 +801,6 @@ function launchApp(appPath, tempRoot, cdpPort) {
 
   const env = {
     ...process.env,
-    MITA_EXPERIMENTAL_WINDOWS_COMPUTER_AGENT_RUNNER: '1',
     WEBVIEW2_USER_DATA_FOLDER: webviewUserData,
     WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS: [
       `--remote-debugging-port=${cdpPort}`,

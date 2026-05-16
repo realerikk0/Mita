@@ -118,6 +118,7 @@ const createAutoRunPrompt = (round: number, maxRounds: number) =>
 
 const COMPUTER_AGENT_TOOL_PREFIX = 'computer_agent_'
 const LEGACY_COMPUTER_TOOL_PREFIX = 'computer_'
+const COMPUTER_AGENT_THREAD_APPROVAL_TOOL = '__mita_computer_agent_thread__'
 const COMPUTER_THREAD_ID_ARG = '_mitaThreadId'
 
 function isComputerAgentToolName(toolName: string) {
@@ -172,6 +173,34 @@ function computerAgentApprovalDetails(
     riskSummary,
     affectedPaths,
     commandPreview,
+  }
+}
+
+function computerAgentApprovalOptions(
+  approvalPolicy: 'alwaysAsk' | 'oncePerThread' | 'never',
+  toolName: string,
+  input: Record<string, unknown>
+) {
+  const details = computerAgentApprovalDetails(toolName, input)
+
+  if (approvalPolicy === 'never') {
+    return null
+  }
+
+  if (approvalPolicy === 'oncePerThread') {
+    return {
+      options: {
+        ...details,
+        alwaysConfirm: false,
+        bypassGlobalAutoApproval: true,
+      },
+      rememberThreadApproval: true,
+    }
+  }
+
+  return {
+    options: details,
+    rememberThreadApproval: false,
   }
 }
 
@@ -261,6 +290,12 @@ function ThreadDetail() {
   const computerAgentShellEnabled = useMCPServers(
     (state) => state.settings.computerAgentShellEnabled
   )
+  const computerAgentApprovalPolicy = useMCPServers(
+    (state) => state.settings.computerAgentApprovalPolicy
+  )
+  const computerAgentSandboxAccess = useMCPServers(
+    (state) => state.settings.computerAgentSandboxAccess
+  )
   const threadRef = useRef(thread)
   const projectId = threadRef.current?.metadata?.project?.id
 
@@ -274,7 +309,11 @@ function ThreadDetail() {
 - Prefer structured computer tools for file and folder work.
 - If the user asks to create a file without a path, omit the directory so Mita uses the private thread workspace.
 - Do not invent absolute paths. Ask for a folder or use the thread workspace when the user gives no path.
-- Every computer action requires user approval, so keep tool arguments precise and minimal.${
+- The current Computer Agent sandbox access is ${computerAgentSandboxAccess === 'readOnly' ? 'read-only' : 'read-write'}.${
+            computerAgentApprovalPolicy === 'never'
+              ? '\n- The user has disabled Computer Agent approval prompts, so keep tool arguments especially precise and minimal.'
+              : '\n- Computer Agent actions may require user approval, so keep tool arguments precise and minimal.'
+          }${
             computerAgentShellEnabled
               ? '\n- Use computer_agent_run_shell only when structured computer tools are insufficient.'
               : ''
@@ -470,20 +509,47 @@ function ThreadDetail() {
             const toolName = toolCall.toolName
             const toolInput = asToolInput(toolCall.input)
             const isComputerAgentTool = isComputerAgentToolName(toolName)
+            const computerApproval = isComputerAgentTool
+              ? computerAgentApprovalOptions(
+                  computerAgentApprovalPolicy,
+                  toolName,
+                  toolInput
+                )
+              : undefined
+            const hasComputerThreadApproval =
+              isComputerAgentTool &&
+              computerApproval?.rememberThreadApproval === true &&
+              useToolApproval
+                .getState()
+                .isToolApproved(threadId, COMPUTER_AGENT_THREAD_APPROVAL_TOOL)
 
             // Built-in RAG tools are internal and should not require approval.
             const approved = ragToolNames.has(toolName)
               ? true
-              : await useToolApproval
-                  .getState()
-                  .showApprovalModal(
-                    toolName,
-                    threadId,
-                    toolInput,
-                    isComputerAgentTool
-                      ? computerAgentApprovalDetails(toolName, toolInput)
-                      : undefined
-                  )
+              : isComputerAgentTool && computerApproval === null
+                ? true
+                : hasComputerThreadApproval
+                  ? true
+                : await useToolApproval
+                    .getState()
+                    .showApprovalModal(
+                      toolName,
+                      threadId,
+                      toolInput,
+                      computerApproval?.options
+                    )
+
+            if (
+              approved &&
+              computerApproval?.rememberThreadApproval === true
+            ) {
+              useToolApproval
+                .getState()
+                .approveToolForThread(
+                  threadId,
+                  COMPUTER_AGENT_THREAD_APPROVAL_TOOL
+                )
+            }
 
             if (!approved) {
               // User denied the tool call

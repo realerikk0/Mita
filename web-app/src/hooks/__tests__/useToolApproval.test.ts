@@ -337,6 +337,35 @@ describe('useToolApproval', () => {
       expect(await approvalPromise!).toBe(true)
     })
 
+    it('should bypass global auto approval when requested', async () => {
+      const { result } = renderHook(() => useToolApproval())
+
+      act(() => {
+        result.current.setAllowAllMCPPermissions(true)
+      })
+
+      let approvalPromise: Promise<boolean>
+      act(() => {
+        approvalPromise = result.current.showApprovalModal(
+          'computer_agent_read_text_file',
+          'thread-1',
+          { path: 'notes.txt' },
+          { bypassGlobalAutoApproval: true }
+        )
+      })
+
+      expect(result.current.isModalOpen).toBe(true)
+      expect(result.current.modalProps?.toolName).toBe(
+        'computer_agent_read_text_file'
+      )
+
+      act(() => {
+        result.current.modalProps?.onDeny()
+      })
+
+      expect(await approvalPromise!).toBe(false)
+    })
+
     it('should not remember alwaysConfirm approvals', async () => {
       const { result } = renderHook(() => useToolApproval())
 

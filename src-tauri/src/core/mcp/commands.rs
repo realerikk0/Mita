@@ -412,7 +412,7 @@ pub async fn get_server_summaries(
     }
 
     let settings = state.mcp_settings.lock().await.clone();
-    if let Some(summary) = computer_agent_summary(&settings) {
+    if let Some(summary) = computer_agent_summary(&settings, shell_status().available) {
         summaries.push(summary);
     }
 

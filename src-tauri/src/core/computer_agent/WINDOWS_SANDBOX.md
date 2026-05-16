@@ -42,7 +42,7 @@ Exit criteria:
 
 ### Phase 1: local workspace-only prototype
 
-Status: complete behind the developer gate.
+Status: complete.
 
 - Create an AppContainer profile per command or per thread.
 - Grant the AppContainer SID access only to the thread workspace.
@@ -50,19 +50,16 @@ Status: complete behind the developer gate.
 - Attach the child process to a Job Object.
 - Kill the full Job Object on timeout.
 - Capture capped stdout and stderr.
-- Keep the feature behind a developer/experimental switch.
+- Keep the feature behind explicit user settings and per-action approval.
 
 Current implementation:
 
-- `mita-computer-agent-runner.exe` validates the runner request and refuses by
-  default.
-- Setting `MITA_EXPERIMENTAL_WINDOWS_COMPUTER_AGENT_RUNNER_EXECUTE=1` enables the
-  direct runner prototype.
-- Setting `MITA_EXPERIMENTAL_WINDOWS_COMPUTER_AGENT_RUNNER=1` lets the Mita app expose
-  `computer_agent_run_shell` when the runner binary is discoverable and the user has
-  enabled Computer Agent shell in settings. The app injects
-  `MITA_EXPERIMENTAL_WINDOWS_COMPUTER_AGENT_RUNNER_EXECUTE=1` only into the runner
-  child process.
+- `mita-computer-agent-runner.exe` validates the runner request and refuses direct
+  execution unless the desktop app supplies its internal broker marker.
+- The Mita app exposes `computer_agent_run_shell` when the runner binary is
+  discoverable and the user has enabled Computer Agent shell in settings. The app
+  injects `MITA_COMPUTER_AGENT_RUNNER_EXECUTE=1` only into the runner child
+  process after approval.
 - The prototype creates a per-command AppContainer profile.
 - It grants the AppContainer SID temporary modify access to the thread
   workspace with `icacls`.
@@ -76,9 +73,10 @@ Current implementation:
 - It removes the temporary workspace ACL grant and deletes the AppContainer
   profile when the run exits.
 
-The Mita app reports Windows shell as available only with the explicit
-`MITA_EXPERIMENTAL_WINDOWS_COMPUTER_AGENT_RUNNER=1` developer gate. Without that gate,
-the structured Computer Agent tools still work and the shell stays hidden.
+The Mita app reports Windows shell as available when the packaged runner is
+discoverable. The shell tool stays hidden unless the user enables Computer Agent
+and the explicit shell setting; structured Computer Agent file tools still work
+without enabling shell.
 
 Exit criteria:
 
@@ -229,6 +227,7 @@ Validation run on 2026-05-16:
 
 - Do not run shell commands in the main Tauri process.
 - Do not rely on `cwd` as a security boundary.
-- Do not expose Windows shell because a runner binary exists.
+- Do not expose Windows shell unless the user has enabled the Computer Agent shell
+  setting.
 - Do not support permanent deletion through shell-specific shortcuts.
 - Do not open the shell tool to the local OpenAI-compatible API in v1.

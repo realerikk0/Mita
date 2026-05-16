@@ -16,6 +16,7 @@ export type ToolApprovalModalProps = {
 
 export type ToolApprovalOptions = {
   alwaysConfirm?: boolean
+  bypassGlobalAutoApproval?: boolean
   riskSummary?: string
   affectedPaths?: string[]
   commandPreview?: string
@@ -78,9 +79,15 @@ export const useToolApproval = create<ToolApprovalState>()(
         return new Promise<boolean>((resolve) => {
           const state = get()
           const alwaysConfirm = options?.alwaysConfirm === true
+          const bypassGlobalAutoApproval =
+            options?.bypassGlobalAutoApproval === true
 
           // Auto-approve if the user has enabled auto-approval setting
-          if (!alwaysConfirm && state.allowAllMCPPermissions) {
+          if (
+            !alwaysConfirm &&
+            !bypassGlobalAutoApproval &&
+            state.allowAllMCPPermissions
+          ) {
             resolve(true)
             return
           }
