@@ -12,8 +12,10 @@ The Windows runner must enforce all of these properties before Mita exposes
 - The command runs in a separate `mita-computer-agent-runner.exe` process.
 - The Tauri app remains the broker for settings, approvals, path validation,
   and output collection.
-- The first usable phase only writes inside the current thread workspace.
-- Custom allowed roots stay disabled until ACL handling is implemented.
+- The shell writes only inside the current thread workspace and configured
+  Computer Agent allowed roots.
+- Custom allowed roots receive temporary AppContainer ACL grants and are rolled
+  back after each command.
 - The process tree is attached to a Job Object and is killed on timeout.
 - The command is non-interactive and receives no stdin.
 - stdout and stderr are capped independently.
@@ -180,15 +182,48 @@ Exit criteria:
 
 ### Phase 3: allowed roots
 
+Status: implemented and verified locally.
+
 - Add temporary ACL grants for configured allowed roots.
 - Refuse roots that cannot be canonicalized or safely ACL-managed.
 - Roll back ACL grants after command completion.
 - Keep custom roots opt-in and visible in the approval dialog.
 
+Implementation notes:
+
+- Runner protocol v2 includes `allowedRoots`.
+- The app still resolves tool `cwd` through `ComputerAgentScope`, so shell cwd
+  must be inside the private thread workspace or a configured allowed root.
+- The runner canonicalizes the workspace, cwd, and every allowed root again
+  inside the sidecar process.
+- Windows shell roots must be local drive directories, not filesystem roots or
+  UNC paths.
+- Every sandbox root is scanned for reparse points before any ACL grant.
+- The cleanup journal records every root that received an AppContainer ACL, so
+  the next run can clean stale ACL/profile state after a runner crash.
+
 Exit criteria:
 
 - Allowed roots behave like the existing structured tools.
 - ACL cleanup is verified after success, failure, and timeout.
+
+Validation run on 2026-05-16:
+
+- `cargo test --manifest-path src-tauri/Cargo.toml computer_agent --lib -- --nocapture`
+  passed with 19 tests and 19 Windows runner tests ignored.
+- `yarn prepare:computer-agent-runner` rebuilt the v2 runner binary.
+- `cargo test --manifest-path src-tauri/Cargo.toml computer_agent --lib -- --ignored --nocapture --test-threads=1`
+  passed all 19 Windows runner tests, including allowed-root write and timeout
+  ACL cleanup.
+- `yarn workspace @janhq/web-app build` passed.
+- `yarn build:tauri:win32` produced fresh NSIS and MSI bundles with the v2
+  runner packaged at `resources/computer-agent-runner/mita-computer-agent-runner.exe`.
+- `yarn smoke:computer-agent-shell:win32 --nsis` passed against the installed
+  app and wrote `allowed-root-smoke.txt` inside the configured temporary
+  allowed root.
+- `yarn smoke:computer-agent-shell:win32 --msi --msi-scope per-user` passed
+  against the installed app and verified the same runner v2 + allowed-root
+  shell path for the MSI per-user layout.
 
 ## Non-goals
 

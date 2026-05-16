@@ -2,7 +2,7 @@ use std::path::{Path, PathBuf};
 
 use serde::{Deserialize, Serialize};
 
-pub const RUNNER_PROTOCOL_VERSION: u32 = 1;
+pub const RUNNER_PROTOCOL_VERSION: u32 = 2;
 pub const RUNNER_BINARY_NAME: &str = if cfg!(windows) {
     "mita-computer-agent-runner.exe"
 } else {
@@ -11,12 +11,9 @@ pub const RUNNER_BINARY_NAME: &str = if cfg!(windows) {
 pub const RUNNER_PATH_ENV: &str = "MITA_WINDOWS_COMPUTER_AGENT_RUNNER";
 pub const RUNNER_ENABLE_ENV: &str = "MITA_EXPERIMENTAL_WINDOWS_COMPUTER_AGENT_RUNNER";
 pub const RUNNER_EXECUTE_ENV: &str = "MITA_EXPERIMENTAL_WINDOWS_COMPUTER_AGENT_RUNNER_EXECUTE";
-pub const RUNNER_PHASE: &str = "phase-1-workspace-prototype";
+pub const RUNNER_PHASE: &str = "phase-3-allowed-roots";
 
-const BLOCKERS: &[&str] = &[
-    "runner remains behind an explicit experimental execution gate",
-    "custom allowed roots are intentionally disabled",
-];
+const BLOCKERS: &[&str] = &["runner remains behind an explicit experimental execution gate"];
 
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -35,6 +32,8 @@ pub struct RunnerRequest {
     pub command: String,
     pub cwd: PathBuf,
     pub workspace_root: PathBuf,
+    #[serde(default)]
+    pub allowed_roots: Vec<PathBuf>,
     pub timeout_seconds: u64,
     pub max_output_bytes: usize,
 }
@@ -83,7 +82,7 @@ pub fn windows_runner_status() -> WindowsRunnerStatus {
         phase: RUNNER_PHASE.to_string(),
         runner_path,
         reason: if available {
-            "Windows Computer Agent shell runner is enabled as a phase-1 workspace-only prototype."
+            "Windows Computer Agent shell runner is enabled with workspace and allowed-root sandboxing."
                 .to_string()
         } else {
             "Windows Computer Agent shell runner is not enabled for chats.".to_string()
@@ -117,7 +116,7 @@ pub fn execute_runner_request(request: RunnerRequest) -> RunnerResponse {
 
     #[cfg(windows)]
     {
-        native::execute_workspace_only(request)
+        native::execute_sandboxed(request)
     }
 
     #[cfg(not(windows))]
@@ -232,9 +231,30 @@ pub fn validate_runner_request(request: &RunnerRequest) -> Result<(), String> {
     }
 
     let workspace = normalize_lexical(&request.workspace_root);
+    if !workspace.is_absolute() {
+        return Err("Runner workspace root must be an absolute path".to_string());
+    }
+
     let cwd = normalize_lexical(&request.cwd);
-    if !path_starts_with(&cwd, &workspace) {
-        return Err("Runner cwd must stay inside the thread workspace".to_string());
+    if !cwd.is_absolute() {
+        return Err("Runner cwd must be an absolute path".to_string());
+    }
+
+    let roots = runner_allowed_roots(request);
+    for root in &roots {
+        if !root.is_absolute() {
+            return Err("Runner allowed roots must be absolute paths".to_string());
+        }
+        if is_filesystem_root(root) {
+            return Err("Runner allowed roots cannot be filesystem roots".to_string());
+        }
+    }
+
+    if !roots.iter().any(|root| path_starts_with(&cwd, root)) {
+        return Err(
+            "Runner cwd must stay inside the thread workspace or configured allowed roots"
+                .to_string(),
+        );
     }
 
     Ok(())
@@ -333,6 +353,29 @@ fn push_candidate(candidates: &mut Vec<PathBuf>, candidate: PathBuf) {
     }
 }
 
+fn runner_allowed_roots(request: &RunnerRequest) -> Vec<PathBuf> {
+    let mut roots = Vec::new();
+    push_root(&mut roots, normalize_lexical(&request.workspace_root));
+    for root in &request.allowed_roots {
+        push_root(&mut roots, normalize_lexical(root));
+    }
+    roots
+}
+
+fn push_root(roots: &mut Vec<PathBuf>, root: PathBuf) {
+    if !roots.iter().any(|existing| paths_equal(existing, &root)) {
+        roots.push(root);
+    }
+}
+
+fn paths_equal(left: &Path, right: &Path) -> bool {
+    path_starts_with(left, right) && path_starts_with(right, left)
+}
+
+fn is_filesystem_root(path: &Path) -> bool {
+    path.parent().is_none()
+}
+
 fn path_starts_with(path: &Path, root: &Path) -> bool {
     #[cfg(windows)]
     {
@@ -424,14 +467,14 @@ mod native {
     const WAIT_FAILED: u32 = 0xFFFF_FFFF;
     const CLEANUP_DIR_NAME: &str = ".mita-computer-agent-runner-cleanups";
 
-    pub fn execute_workspace_only(request: RunnerRequest) -> RunnerResponse {
-        match execute_workspace_only_inner(request) {
+    pub fn execute_sandboxed(request: RunnerRequest) -> RunnerResponse {
+        match execute_sandboxed_inner(request) {
             Ok(response) => response,
             Err(error) => error_response(error),
         }
     }
 
-    fn execute_workspace_only_inner(request: RunnerRequest) -> Result<RunnerResponse, String> {
+    fn execute_sandboxed_inner(request: RunnerRequest) -> Result<RunnerResponse, String> {
         let workspace = request.workspace_root.canonicalize().map_err(|e| {
             sandbox_diagnostic(
                 "path-resolution",
@@ -442,6 +485,8 @@ mod native {
                 "Confirm the thread workspace exists and is accessible, then retry the command.",
             )
         })?;
+        let workspace_for_os = win32_path(&workspace);
+
         let cwd = request
             .cwd
             .canonicalize()
@@ -452,31 +497,45 @@ mod native {
                     "Confirm the command cwd exists inside the thread workspace, then retry the command.",
                 )
             })?;
-
-        if !super::path_starts_with(&cwd, &workspace) {
-            return Err(sandbox_diagnostic(
-                "path-validation",
-                "Runner cwd must stay inside the canonical workspace",
-                "Use a cwd inside the private thread workspace; custom roots are disabled in this phase.",
-            ));
-        }
-
-        let workspace_for_os = win32_path(&workspace);
         let cwd_for_os = win32_path(&cwd);
-        if workspace_for_os.to_string_lossy().starts_with("\\\\") {
-            return Err(sandbox_diagnostic(
-                "path-validation",
-                "Phase 1 Windows runner requires a local drive workspace; UNC paths are not supported",
-                "Move the thread workspace to a local drive before enabling Windows shell execution.",
-            ));
-        }
-        ensure_workspace_has_no_reparse_points(&workspace_for_os).map_err(|e| {
+        let allowed_roots = canonical_allowed_roots(&request, &workspace).map_err(|e| {
             sandbox_diagnostic(
-                "workspace-reparse-scan",
+                "allowed-root-resolution",
                 e,
-                "Remove junctions, symlinks, or other reparse points from the thread workspace before retrying.",
+                "Remove missing, unsafe, or inaccessible Computer Agent allowed roots from settings and retry.",
             )
         })?;
+
+        if !allowed_roots
+            .iter()
+            .any(|root| super::path_starts_with(&cwd_for_os, root))
+        {
+            return Err(sandbox_diagnostic(
+                "path-validation",
+                "Runner cwd must stay inside the canonical workspace or a canonical allowed root",
+                "Use a cwd inside the private thread workspace or a configured Computer Agent allowed root.",
+            ));
+        }
+
+        for root in &allowed_roots {
+            let is_workspace = super::path_starts_with(root, &workspace_for_os)
+                && super::path_starts_with(&workspace_for_os, root);
+            ensure_root_has_no_reparse_points(root).map_err(|e| {
+                sandbox_diagnostic(
+                    if is_workspace {
+                        "workspace-reparse-scan"
+                    } else {
+                        "allowed-root-reparse-scan"
+                    },
+                    e,
+                    if is_workspace {
+                        "Remove junctions, symlinks, or other reparse points from the thread workspace before retrying."
+                    } else {
+                        "Remove junctions, symlinks, or other reparse points from the configured allowed root before retrying."
+                    },
+                )
+            })?;
+        }
         cleanup_stale_sandbox(&workspace_for_os).map_err(|e| {
             sandbox_diagnostic(
                 "stale-sandbox-cleanup",
@@ -492,23 +551,22 @@ mod native {
                 "Confirm Windows AppContainer APIs are available for this user and retry. A reboot can clear stuck per-user AppContainer state.",
             )
         })?;
-        let _journal = SandboxCleanupJournal::write(&workspace_for_os, &app_container).map_err(|e| {
+        let _journal =
+            SandboxCleanupJournal::write(&workspace_for_os, &allowed_roots, &app_container)
+                .map_err(|e| {
+                    sandbox_diagnostic(
+                        "cleanup-journal",
+                        e,
+                        "Confirm the parent agent-workspaces directory is writable so the runner can record crash cleanup state.",
+                    )
+                })?;
+        let _acl = RootAclGrants::grant(&allowed_roots, &app_container.sid_string).map_err(|e| {
             sandbox_diagnostic(
-                "cleanup-journal",
+                "root-acl-grant",
                 e,
-                "Confirm the parent agent-workspaces directory is writable so the runner can record crash cleanup state.",
+                "Confirm each Computer Agent root is on a local NTFS drive and the current user can change its ACL.",
             )
         })?;
-        let _acl =
-            WorkspaceAclGrant::grant(&workspace_for_os, &app_container.sid_string).map_err(
-                |e| {
-                    sandbox_diagnostic(
-                        "workspace-acl-grant",
-                        e,
-                        "Confirm the workspace is on an NTFS local drive and the current user can change its ACL.",
-                    )
-                },
-            )?;
         let process_output =
             create_app_container_process(&request, &cwd_for_os, app_container.sid).map_err(|e| {
                 sandbox_diagnostic(
@@ -519,12 +577,56 @@ mod native {
             })?;
 
         Ok(completed_response(
-            "Windows sandbox prototype completed",
+            "Windows sandbox completed",
             process_output.exit_code,
             process_output.stdout,
             process_output.stderr,
             process_output.timed_out,
         ))
+    }
+
+    fn canonical_allowed_roots(
+        request: &RunnerRequest,
+        workspace: &Path,
+    ) -> Result<Vec<PathBuf>, String> {
+        let mut roots = Vec::new();
+        push_canonical_root(&mut roots, win32_path(workspace))?;
+
+        for root in &request.allowed_roots {
+            let canonical = root
+                .canonicalize()
+                .map_err(|e| format!("Failed to resolve allowed root {}: {e}", root.display()))?;
+            push_canonical_root(&mut roots, win32_path(&canonical))?;
+        }
+
+        Ok(roots)
+    }
+
+    fn push_canonical_root(roots: &mut Vec<PathBuf>, root: PathBuf) -> Result<(), String> {
+        if root.to_string_lossy().starts_with("\\\\") {
+            return Err(format!(
+                "Windows Computer Agent shell requires local drive roots; UNC path is not supported: {}",
+                root.display()
+            ));
+        }
+        if !root.is_dir() {
+            return Err(format!(
+                "Windows Computer Agent shell root is not a directory: {}",
+                root.display()
+            ));
+        }
+        if root.parent().is_none() {
+            return Err(format!(
+                "Windows Computer Agent shell cannot grant a filesystem root: {}",
+                root.display()
+            ));
+        }
+        if !roots.iter().any(|existing| {
+            super::path_starts_with(existing, &root) && super::path_starts_with(&root, existing)
+        }) {
+            roots.push(root);
+        }
+        Ok(())
     }
 
     struct ProcessOutput {
@@ -730,31 +832,45 @@ mod native {
         }
     }
 
-    struct WorkspaceAclGrant {
-        workspace: PathBuf,
+    struct RootAclGrants {
+        _grants: Vec<RootAclGrant>,
+    }
+
+    impl RootAclGrants {
+        fn grant(roots: &[PathBuf], sid_string: &str) -> Result<Self, String> {
+            let mut grants = Vec::new();
+            for root in roots {
+                grants.push(RootAclGrant::grant(root, sid_string)?);
+            }
+            Ok(Self { _grants: grants })
+        }
+    }
+
+    struct RootAclGrant {
+        root: PathBuf,
         sid_string: String,
     }
 
-    impl WorkspaceAclGrant {
-        fn grant(workspace: &Path, sid_string: &str) -> Result<Self, String> {
+    impl RootAclGrant {
+        fn grant(root: &Path, sid_string: &str) -> Result<Self, String> {
             run_icacls(
-                workspace,
+                root,
                 &["/grant", &format!("*{sid_string}:(OI)(CI)(M)"), "/T", "/C"],
-                "grant workspace ACL",
+                "grant Computer Agent root ACL",
             )?;
             Ok(Self {
-                workspace: workspace.to_path_buf(),
+                root: root.to_path_buf(),
                 sid_string: sid_string.to_string(),
             })
         }
     }
 
-    impl Drop for WorkspaceAclGrant {
+    impl Drop for RootAclGrant {
         fn drop(&mut self) {
             let _ = run_icacls(
-                &self.workspace,
+                &self.root,
                 &["/remove", &format!("*{}", self.sid_string), "/T", "/C"],
-                "remove workspace ACL",
+                "remove Computer Agent root ACL",
             );
         }
     }
@@ -764,6 +880,8 @@ mod native {
         profile_name: String,
         sid_string: String,
         workspace: String,
+        #[serde(default)]
+        roots: Vec<String>,
     }
 
     struct SandboxCleanupJournal {
@@ -771,7 +889,11 @@ mod native {
     }
 
     impl SandboxCleanupJournal {
-        fn write(workspace: &Path, app_container: &AppContainerProfile) -> Result<Self, String> {
+        fn write(
+            workspace: &Path,
+            roots: &[PathBuf],
+            app_container: &AppContainerProfile,
+        ) -> Result<Self, String> {
             let path = cleanup_journal_path(workspace);
             if let Some(parent) = path.parent() {
                 fs::create_dir_all(parent).map_err(|e| {
@@ -786,6 +908,10 @@ mod native {
                 profile_name: app_container.name.clone(),
                 sid_string: app_container.sid_string.clone(),
                 workspace: workspace.to_string_lossy().to_string(),
+                roots: roots
+                    .iter()
+                    .map(|root| root.to_string_lossy().to_string())
+                    .collect(),
             };
             let json = serde_json::to_string(&record)
                 .map_err(|e| format!("Failed to serialize cleanup journal: {e}"))?;
@@ -826,11 +952,13 @@ mod native {
         })?;
         validate_cleanup_record(&record, workspace)?;
 
-        let _ = run_icacls(
-            workspace,
-            &["/remove", &format!("*{}", record.sid_string), "/T", "/C"],
-            "remove stale workspace ACL",
-        );
+        for root in cleanup_record_roots(&record, workspace) {
+            let _ = run_icacls(
+                &root,
+                &["/remove", &format!("*{}", record.sid_string), "/T", "/C"],
+                "remove stale Computer Agent root ACL",
+            );
+        }
         delete_app_container_profile(&record.profile_name);
         fs::remove_file(&path).map_err(|e| {
             format!(
@@ -867,7 +995,26 @@ mod native {
                 "Stale Windows runner cleanup journal does not match the workspace".to_string(),
             );
         }
+        for root in cleanup_record_roots(record, workspace) {
+            let root_text = root.to_string_lossy();
+            if root_text.chars().any(char::is_control) {
+                return Err("Stale Windows runner cleanup journal has an invalid root".to_string());
+            }
+            if root.parent().is_none() {
+                return Err(
+                    "Stale Windows runner cleanup journal contains a filesystem root".to_string(),
+                );
+            }
+        }
         Ok(())
+    }
+
+    fn cleanup_record_roots(record: &SandboxCleanupRecord, workspace: &Path) -> Vec<PathBuf> {
+        if record.roots.is_empty() {
+            vec![workspace.to_path_buf()]
+        } else {
+            record.roots.iter().map(PathBuf::from).collect()
+        }
     }
 
     fn delete_app_container_profile(name: &str) {
@@ -1128,24 +1275,23 @@ mod native {
         }
     }
 
-    fn ensure_workspace_has_no_reparse_points(path: &Path) -> Result<(), String> {
+    fn ensure_root_has_no_reparse_points(path: &Path) -> Result<(), String> {
         let metadata = std::fs::symlink_metadata(path)
-            .map_err(|e| format!("Failed to inspect workspace path {}: {e}", path.display()))?;
+            .map_err(|e| format!("Failed to inspect sandbox root {}: {e}", path.display()))?;
         if metadata.file_attributes() & FILE_ATTRIBUTE_REPARSE_POINT != 0 {
             return Err(format!(
-                "Workspace contains unsupported reparse point: {}",
+                "Sandbox root contains unsupported reparse point: {}",
                 path.display()
             ));
         }
 
         if metadata.is_dir() {
             for entry in std::fs::read_dir(path)
-                .map_err(|e| format!("Failed to scan workspace path {}: {e}", path.display()))?
+                .map_err(|e| format!("Failed to scan sandbox root {}: {e}", path.display()))?
             {
-                let entry = entry.map_err(|e| {
-                    format!("Failed to scan workspace path {}: {e}", path.display())
-                })?;
-                ensure_workspace_has_no_reparse_points(&entry.path())?;
+                let entry = entry
+                    .map_err(|e| format!("Failed to scan sandbox root {}: {e}", path.display()))?;
+                ensure_root_has_no_reparse_points(&entry.path())?;
             }
         }
 

@@ -332,7 +332,7 @@ function ComputerAgentSettings() {
                       </Button>
                     </div>
                     <p className="text-xs text-muted-foreground">
-                      {t('settings:computerAgent.windowsWorkspaceOnlyNote')}
+                      {t('settings:computerAgent.windowsAllowedRootsNote')}
                     </p>
                     {(settings.computerAgentAllowedRoots ?? []).length > 0 && (
                       <div className="space-y-1">

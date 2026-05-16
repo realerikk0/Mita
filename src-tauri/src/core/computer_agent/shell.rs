@@ -219,13 +219,6 @@ async fn run_windows_runner(
 ) -> Result<String, String> {
     use tokio::io::AsyncWriteExt;
 
-    if !super::permissions::is_within_root(&request.cwd, &scope.workspace_root) {
-        return Err(
-            "Windows Computer Agent shell phase 1 only supports the private thread workspace"
-                .to_string(),
-        );
-    }
-
     let runner = discover_runner_binary()
         .ok_or_else(|| "Windows Computer Agent runner binary was not found".to_string())?;
     let runner_request = RunnerRequest {
@@ -233,6 +226,7 @@ async fn run_windows_runner(
         command: request.command,
         cwd: request.cwd.clone(),
         workspace_root: scope.workspace_root.clone(),
+        allowed_roots: scope.allowed_roots.clone(),
         timeout_seconds: request.timeout_seconds,
         max_output_bytes: request.max_output_bytes,
     };
@@ -300,7 +294,7 @@ async fn run_windows_runner(
         "cwd": request.cwd,
         "timedOut": response.timed_out,
         "sandbox": "windows-native-runner",
-        "phase": "phase-1-workspace-prototype",
+        "phase": "phase-3-allowed-roots",
     });
 
     Ok(serde_json::to_string_pretty(&tool_output).unwrap_or_else(|_| tool_output.to_string()))

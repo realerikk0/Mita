@@ -176,6 +176,7 @@ fn windows_runner_protocol_rejects_cwd_outside_workspace() {
         command: "echo hello".to_string(),
         cwd: outside,
         workspace_root: workspace,
+        allowed_roots: Vec::new(),
         timeout_seconds: 30,
         max_output_bytes: 64 * 1024,
     };
@@ -193,6 +194,45 @@ fn windows_runner_protocol_rejects_sibling_prefix_escape() {
         command: "echo hello".to_string(),
         cwd: sibling,
         workspace_root: workspace,
+        allowed_roots: Vec::new(),
+        timeout_seconds: 30,
+        max_output_bytes: 64 * 1024,
+    };
+
+    assert!(validate_runner_request(&request).is_err());
+}
+
+#[test]
+fn windows_runner_protocol_accepts_cwd_inside_allowed_root() {
+    let tmp = tempdir().unwrap();
+    let workspace = tmp.path().join("workspace");
+    let allowed = tmp.path().join("allowed");
+    let cwd = allowed.join("project");
+    let request = RunnerRequest {
+        protocol_version: RUNNER_PROTOCOL_VERSION,
+        command: "echo hello".to_string(),
+        cwd,
+        workspace_root: workspace,
+        allowed_roots: vec![allowed],
+        timeout_seconds: 30,
+        max_output_bytes: 64 * 1024,
+    };
+
+    assert!(validate_runner_request(&request).is_ok());
+}
+
+#[test]
+fn windows_runner_protocol_rejects_allowed_root_sibling_prefix_escape() {
+    let tmp = tempdir().unwrap();
+    let workspace = tmp.path().join("workspace");
+    let allowed = tmp.path().join("allowed");
+    let sibling = tmp.path().join("allowed-evil");
+    let request = RunnerRequest {
+        protocol_version: RUNNER_PROTOCOL_VERSION,
+        command: "echo hello".to_string(),
+        cwd: sibling,
+        workspace_root: workspace,
+        allowed_roots: vec![allowed],
         timeout_seconds: 30,
         max_output_bytes: 64 * 1024,
     };
@@ -209,6 +249,7 @@ fn windows_runner_protocol_validates_version_and_limits() {
         command: "echo hello".to_string(),
         cwd: workspace.clone(),
         workspace_root: workspace,
+        allowed_roots: Vec::new(),
         timeout_seconds: 30,
         max_output_bytes: 64 * 1024,
     };
@@ -435,6 +476,7 @@ fn windows_runner_refuses_direct_execution_without_gate() {
             command: "echo hello".to_string(),
             cwd: tmp.path().to_path_buf(),
             workspace_root: tmp.path().to_path_buf(),
+            allowed_roots: Vec::new(),
             timeout_seconds: 10,
             max_output_bytes: 64 * 1024,
         },
@@ -462,6 +504,7 @@ fn windows_runner_blocks_writes_outside_workspace() {
             command: format!("echo nope>\"{}\"", outside_file.display()),
             cwd: workspace.clone(),
             workspace_root: workspace,
+            allowed_roots: Vec::new(),
             timeout_seconds: 10,
             max_output_bytes: 64 * 1024,
         },
@@ -471,6 +514,82 @@ fn windows_runner_blocks_writes_outside_workspace() {
     assert_eq!(response.status, RunnerResponseStatus::Completed);
     assert_ne!(response.exit_code, Some(0));
     assert!(!outside_file.exists());
+}
+
+#[cfg(windows)]
+#[test]
+#[ignore = "requires cargo build --bin mita-computer-agent-runner and AppContainer support"]
+fn windows_runner_allows_writes_inside_allowed_root_and_cleans_acl() {
+    let tmp = tempdir().unwrap();
+    let workspace = tmp.path().join("workspace");
+    let allowed = tmp.path().join("allowed");
+    let project = allowed.join("project");
+    fs::create_dir_all(&workspace).unwrap();
+    fs::create_dir_all(&project).unwrap();
+
+    let response = run_runner_request(
+        RunnerRequest {
+            protocol_version: RUNNER_PROTOCOL_VERSION,
+            command: "echo allowed>inside-allowed-root.txt".to_string(),
+            cwd: project.clone(),
+            workspace_root: workspace.clone(),
+            allowed_roots: vec![allowed.clone()],
+            timeout_seconds: 10,
+            max_output_bytes: 64 * 1024,
+        },
+        true,
+    );
+
+    assert_eq!(response.status, RunnerResponseStatus::Completed);
+    assert_eq!(response.exit_code, Some(0));
+    assert_eq!(
+        fs::read_to_string(project.join("inside-allowed-root.txt")).unwrap(),
+        "allowed\r\n"
+    );
+    assert!(
+        !workspace_icacls(&workspace).contains("S-1-15-2-"),
+        "workspace retained an AppContainer ACL after allowed-root command"
+    );
+    assert!(
+        !workspace_icacls(&allowed).contains("S-1-15-2-"),
+        "allowed root retained an AppContainer ACL after command"
+    );
+}
+
+#[cfg(windows)]
+#[test]
+#[ignore = "requires cargo build --bin mita-computer-agent-runner and AppContainer support"]
+fn windows_runner_timeout_cleans_allowed_root_acl() {
+    let tmp = tempdir().unwrap();
+    let workspace = tmp.path().join("workspace");
+    let allowed = tmp.path().join("allowed");
+    fs::create_dir_all(&workspace).unwrap();
+    fs::create_dir_all(&allowed).unwrap();
+
+    let response = run_runner_request(
+        RunnerRequest {
+            protocol_version: RUNNER_PROTOCOL_VERSION,
+            command: "powershell -NoProfile -NonInteractive -Command \"Start-Sleep -Seconds 5\""
+                .to_string(),
+            cwd: allowed.clone(),
+            workspace_root: workspace.clone(),
+            allowed_roots: vec![allowed.clone()],
+            timeout_seconds: 1,
+            max_output_bytes: 64 * 1024,
+        },
+        true,
+    );
+
+    assert_eq!(response.status, RunnerResponseStatus::Completed);
+    assert!(response.timed_out, "expected timeout, got: {response:?}");
+    assert!(
+        !workspace_icacls(&workspace).contains("S-1-15-2-"),
+        "workspace retained an AppContainer ACL after timeout"
+    );
+    assert!(
+        !workspace_icacls(&allowed).contains("S-1-15-2-"),
+        "allowed root retained an AppContainer ACL after timeout"
+    );
 }
 
 #[cfg(windows)]
@@ -486,6 +605,7 @@ fn windows_runner_reports_local_diagnostic_for_missing_workspace() {
             command: "echo nope".to_string(),
             cwd: workspace.clone(),
             workspace_root: workspace,
+            allowed_roots: Vec::new(),
             timeout_seconds: 10,
             max_output_bytes: 64 * 1024,
         },
@@ -531,6 +651,7 @@ fn windows_runner_blocks_user_profile_read_write() {
             command: "type \"%USERPROFILE%\\secret.txt\" > profile-read.txt & echo nope>\"%APPDATA%\\escape.txt\" & echo nope>\"%LOCALAPPDATA%\\escape.txt\"".to_string(),
             cwd: workspace.clone(),
             workspace_root: workspace.clone(),
+            allowed_roots: Vec::new(),
             timeout_seconds: 10,
             max_output_bytes: 64 * 1024,
         },
@@ -571,6 +692,7 @@ fn windows_runner_blocks_real_hkcu_registry_read_write() {
             ),
             cwd: workspace.clone(),
             workspace_root: workspace.clone(),
+            allowed_roots: Vec::new(),
             timeout_seconds: 10,
             max_output_bytes: 64 * 1024,
         },
@@ -601,6 +723,7 @@ fn windows_runner_truncates_large_output() {
             command: "for /l %i in (1,1,300) do @echo 012345678901234567890123456789".to_string(),
             cwd: workspace.clone(),
             workspace_root: workspace,
+            allowed_roots: Vec::new(),
             timeout_seconds: 10,
             max_output_bytes: 1024,
         },
@@ -660,6 +783,7 @@ fn windows_runner_next_run_cleans_crashed_runner_acl_journal() {
             command: "echo started>crash-started.txt & powershell -NoProfile -NonInteractive -Command \"Start-Sleep -Seconds 20\"".to_string(),
             cwd: workspace.clone(),
             workspace_root: workspace.clone(),
+            allowed_roots: Vec::new(),
             timeout_seconds: 30,
             max_output_bytes: 64 * 1024,
         },
@@ -704,6 +828,7 @@ fn windows_runner_next_run_cleans_crashed_runner_acl_journal() {
             command: "echo recovered>recovered.txt".to_string(),
             cwd: workspace.clone(),
             workspace_root: workspace.clone(),
+            allowed_roots: Vec::new(),
             timeout_seconds: 10,
             max_output_bytes: 64 * 1024,
         },
@@ -819,6 +944,7 @@ fn windows_runner_blocks_loopback_network() {
             command,
             cwd: workspace.clone(),
             workspace_root: workspace,
+            allowed_roots: Vec::new(),
             timeout_seconds: 10,
             max_output_bytes: 64 * 1024,
         },
@@ -853,6 +979,7 @@ fn windows_runner_blocks_junction_escape() {
             command: "echo nope>outside-link\\escape.txt".to_string(),
             cwd: workspace.clone(),
             workspace_root: workspace,
+            allowed_roots: Vec::new(),
             timeout_seconds: 10,
             max_output_bytes: 64 * 1024,
         },
@@ -885,6 +1012,7 @@ fn windows_runner_blocks_directory_symlink_escape() {
             command: "echo nope>outside-symlink\\escape.txt".to_string(),
             cwd: workspace.clone(),
             workspace_root: workspace,
+            allowed_roots: Vec::new(),
             timeout_seconds: 10,
             max_output_bytes: 64 * 1024,
         },
@@ -918,6 +1046,7 @@ fn windows_runner_blocks_file_symlink_escape() {
             command: "echo nope>escape-link.txt".to_string(),
             cwd: workspace.clone(),
             workspace_root: workspace,
+            allowed_roots: Vec::new(),
             timeout_seconds: 10,
             max_output_bytes: 64 * 1024,
         },
@@ -968,6 +1097,7 @@ where
             command,
             cwd: workspace.clone(),
             workspace_root: workspace,
+            allowed_roots: Vec::new(),
             timeout_seconds: 2,
             max_output_bytes: 64 * 1024,
         },

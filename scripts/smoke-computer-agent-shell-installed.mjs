@@ -11,7 +11,8 @@ const repoRoot = resolve(__dirname, '..')
 const PROVIDER_NAME = 'mita-smoke-compatible'
 const MODEL_ID = 'gpt-4o'
 const SMOKE_MARKER = 'MITA_SHELL_SMOKE'
-const SMOKE_COMMAND = `echo ${SMOKE_MARKER}>smoke.txt && type smoke.txt`
+const SMOKE_FILE = 'allowed-root-smoke.txt'
+const SMOKE_COMMAND = `echo ${SMOKE_MARKER}>${SMOKE_FILE} && type ${SMOKE_FILE}`
 
 function log(message) {
   console.log(`[computer-smoke] ${message}`)
@@ -514,9 +515,10 @@ function snapshotAppConfig() {
   }
 }
 
-function configureIsolatedMitaData(snapshot, dataDir) {
+function configureIsolatedMitaData(snapshot, dataDir, allowedRoot) {
   mkdirSync(snapshot.appSupport, { recursive: true })
   mkdirSync(dataDir, { recursive: true })
+  mkdirSync(allowedRoot, { recursive: true })
   writeFileSync(
     snapshot.settingsPath,
     JSON.stringify({ data_folder: dataDir }),
@@ -535,7 +537,7 @@ function configureIsolatedMitaData(snapshot, dataDir) {
       routerModelProvider: '',
       routerModelId: '',
       computerAgentEnabled: true,
-      computerAgentAllowedRoots: [],
+      computerAgentAllowedRoots: [allowedRoot],
       computerAgentShellEnabled: true,
     },
   }
@@ -592,7 +594,7 @@ function listen(server, host = '127.0.0.1') {
   })
 }
 
-async function createMockOpenAiServer() {
+async function createMockOpenAiServer(allowedRoot) {
   const requests = []
 
   const server = createServer(async (req, res) => {
@@ -627,7 +629,7 @@ async function createMockOpenAiServer() {
             return
           }
 
-          sendToolCallStream(res)
+          sendToolCallStream(res, allowedRoot)
           return
         }
 
@@ -688,10 +690,10 @@ function baseChunk() {
   }
 }
 
-function sendToolCallStream(res) {
+function sendToolCallStream(res, allowedRoot) {
   const args = JSON.stringify({
     command: SMOKE_COMMAND,
-    cwd: '.',
+    cwd: allowedRoot,
     timeoutSeconds: 5,
     maxOutputBytes: 4096,
   })
@@ -929,8 +931,8 @@ async function getFirstPage(browser) {
   fail(`No app WebView page with localStorage was exposed over CDP. Saw: ${[...seenUrls].join(', ') || '(none)'}`)
 }
 
-async function runChatSmoke(appPath, tempRoot, dataDir, timeoutMs) {
-  const mock = await createMockOpenAiServer()
+async function runChatSmoke(appPath, tempRoot, dataDir, allowedRoot, timeoutMs) {
+  const mock = await createMockOpenAiServer(allowedRoot)
   const cdpPort = await getFreePort()
   const appProcess = launchApp(appPath, tempRoot, cdpPort)
   let browser
@@ -948,7 +950,7 @@ async function runChatSmoke(appPath, tempRoot, dataDir, timeoutMs) {
     })
 
     await page.locator('[data-testid="chat-input"]').fill(
-      'Run the installed Computer Agent shell smoke test. Create smoke.txt in the current thread workspace and read it back.'
+      'Run the installed Computer Agent shell smoke test. Create allowed-root-smoke.txt in the configured allowed root and read it back.'
     )
     await page.locator('[data-test-id="send-message-button"]').click()
 
@@ -960,10 +962,14 @@ async function runChatSmoke(appPath, tempRoot, dataDir, timeoutMs) {
     await dialog.waitFor({ state: 'visible', timeout: timeoutMs })
 
     const dialogText = await dialog.innerText()
-    for (const expected of ['computer_agent_run_shell', SMOKE_COMMAND, '"cwd": "."']) {
+    const escapedAllowedRoot = JSON.stringify(allowedRoot).slice(1, -1)
+    for (const expected of ['computer_agent_run_shell', SMOKE_COMMAND]) {
       if (!dialogText.includes(expected)) {
         fail(`Approval dialog did not include ${JSON.stringify(expected)}.\n${dialogText}`)
       }
+    }
+    if (!dialogText.includes(allowedRoot) && !dialogText.includes(escapedAllowedRoot)) {
+      fail(`Approval dialog did not include allowed root cwd ${JSON.stringify(allowedRoot)}.\n${dialogText}`)
     }
     if (/Allow in thread|Always Allow|在线程中允许|始终允许/.test(dialogText)) {
       fail('Computer Agent approval dialog exposed a remembered-permission button.')
@@ -976,18 +982,22 @@ async function runChatSmoke(appPath, tempRoot, dataDir, timeoutMs) {
       timeout: timeoutMs,
     })
 
-    const smokePath = join(dataDir, 'agent-workspaces', threadId, 'smoke.txt')
+    const workspaceSmokePath = join(dataDir, 'agent-workspaces', threadId, SMOKE_FILE)
+    const smokePath = join(allowedRoot, SMOKE_FILE)
     const deadline = Date.now() + 20_000
     while (!existsSync(smokePath) && Date.now() < deadline) {
       await delay(250)
     }
     if (!existsSync(smokePath)) {
-      fail(`Shell smoke did not create expected workspace file: ${smokePath}`)
+      fail(`Shell smoke did not create expected allowed-root file: ${smokePath}`)
+    }
+    if (existsSync(workspaceSmokePath)) {
+      fail(`Shell smoke wrote to workspace instead of allowed root: ${workspaceSmokePath}`)
     }
 
     const content = readFileSync(smokePath, 'utf8').trim()
     if (content !== SMOKE_MARKER) {
-      fail(`Unexpected smoke.txt content: ${JSON.stringify(content)}`)
+      fail(`Unexpected ${SMOKE_FILE} content: ${JSON.stringify(content)}`)
     }
 
     if (mock.requests.length < 2) {
@@ -1017,6 +1027,7 @@ async function main() {
   let installDir = options.installDir ? resolve(options.installDir) : join(tempRoot, 'install')
   let msiInstallerForCleanup = ''
   const dataDir = join(tempRoot, 'profile', 'data')
+  const allowedRoot = join(tempRoot, 'allowed-root')
   let caughtError
 
   try {
@@ -1042,12 +1053,12 @@ async function main() {
     }
 
     verifyRunner(appPath)
-    configureIsolatedMitaData(appConfigSnapshot, dataDir)
+    configureIsolatedMitaData(appConfigSnapshot, dataDir, allowedRoot)
 
     if (options.dryRun) {
       log('Dry run completed after installer, runner, and isolated data configuration checks.')
     } else {
-      await runChatSmoke(appPath, tempRoot, dataDir, options.timeoutMs)
+      await runChatSmoke(appPath, tempRoot, dataDir, allowedRoot, options.timeoutMs)
       log('Installed Computer Agent shell smoke passed.')
     }
   } catch (error) {
