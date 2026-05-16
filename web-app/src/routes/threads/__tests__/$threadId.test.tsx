@@ -110,8 +110,8 @@ const h = vi.hoisted(() => {
 
   const mcpServersState: any = {
     settings: {
-      computerUseEnabled: false,
-      computerShellEnabled: false,
+      computerAgentEnabled: false,
+      computerAgentShellEnabled: false,
     },
   }
   const useMCPServersMock: any = (selector: any) => selector(mcpServersState)
@@ -618,7 +618,7 @@ describe('ThreadDetail route', () => {
 
   it('shows provider quota actions instead of regenerate for quota errors', () => {
     h.chatState.error = new ProviderQuotaError({
-      message: '该令牌额度已用尽',
+      message: '璇ヤ护鐗岄搴﹀凡鐢ㄥ敖',
       status: 403,
       code: 'pre_consume_token_quota_failed',
       rechargeUrl: 'https://api.jingxing.uk/console/topup',
@@ -628,7 +628,7 @@ describe('ThreadDetail route', () => {
     renderComponent()
 
     expect(screen.getByText('Provider quota exhausted')).toBeInTheDocument()
-    expect(screen.getByText('该令牌额度已用尽')).toBeInTheDocument()
+    expect(screen.getByText('璇ヤ护鐗岄搴﹀凡鐢ㄥ敖')).toBeInTheDocument()
     expect(screen.queryByText('Regenerate')).not.toBeInTheDocument()
     screen.getByText('Recharge').click()
     expect(h.openExternalUrl).toHaveBeenCalledWith(

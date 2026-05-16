@@ -5,7 +5,7 @@ use serde::Serialize;
 use tokio::io::{AsyncRead, AsyncReadExt};
 use tokio::{process::Command, time::timeout};
 
-use super::permissions::ComputerScope;
+use super::permissions::ComputerAgentScope;
 #[cfg(windows)]
 use super::windows_runner::{
     discover_runner_binary, windows_runner_status, RunnerRequest, RunnerResponse,
@@ -73,7 +73,7 @@ pub fn shell_status() -> ShellStatus {
             reason: Some("bubblewrap (bwrap) was not found on PATH.".to_string()),
             sandbox_kind: "bubblewrap".to_string(),
             phase: Some("missing-dependency".to_string()),
-            blockers: vec!["Install bubblewrap (bwrap) to enable Computer Use shell.".to_string()],
+            blockers: vec!["Install bubblewrap (bwrap) to enable Computer Agent shell.".to_string()],
         };
     }
 
@@ -96,7 +96,7 @@ pub fn shell_status() -> ShellStatus {
             reason: Some("sandbox-exec was not found.".to_string()),
             sandbox_kind: "seatbelt".to_string(),
             phase: Some("missing-dependency".to_string()),
-            blockers: vec!["sandbox-exec is required to enable Computer Use shell.".to_string()],
+            blockers: vec!["sandbox-exec is required to enable Computer Agent shell.".to_string()],
         };
     }
 
@@ -106,7 +106,7 @@ pub fn shell_status() -> ShellStatus {
             platform,
             available: false,
             reason: Some(
-                "Computer Use shell sandbox is not supported on this platform.".to_string(),
+                "Computer Agent shell sandbox is not supported on this platform.".to_string(),
             ),
             sandbox_kind: "unsupported".to_string(),
             phase: Some("unsupported-platform".to_string()),
@@ -128,12 +128,15 @@ pub fn normalize_output_cap(value: Option<u64>) -> usize {
         .clamp(MIN_OUTPUT_BYTES, MAX_OUTPUT_BYTES)
 }
 
-pub async fn run_shell(scope: &ComputerScope, request: ShellRequest) -> Result<String, String> {
+pub async fn run_shell(
+    scope: &ComputerAgentScope,
+    request: ShellRequest,
+) -> Result<String, String> {
     let status = shell_status();
     if !status.available {
         return Err(status
             .reason
-            .unwrap_or_else(|| "Computer Use shell sandbox is not available".to_string()));
+            .unwrap_or_else(|| "Computer Agent shell sandbox is not available".to_string()));
     }
 
     if request.command.trim().is_empty() {
@@ -211,20 +214,20 @@ pub async fn run_shell(scope: &ComputerScope, request: ShellRequest) -> Result<S
 
 #[cfg(windows)]
 async fn run_windows_runner(
-    scope: &ComputerScope,
+    scope: &ComputerAgentScope,
     request: ShellRequest,
 ) -> Result<String, String> {
     use tokio::io::AsyncWriteExt;
 
     if !super::permissions::is_within_root(&request.cwd, &scope.workspace_root) {
         return Err(
-            "Windows Computer Use shell phase 1 only supports the private thread workspace"
+            "Windows Computer Agent shell phase 1 only supports the private thread workspace"
                 .to_string(),
         );
     }
 
     let runner = discover_runner_binary()
-        .ok_or_else(|| "Windows Computer Use runner binary was not found".to_string())?;
+        .ok_or_else(|| "Windows Computer Agent runner binary was not found".to_string())?;
     let runner_request = RunnerRequest {
         protocol_version: RUNNER_PROTOCOL_VERSION,
         command: request.command,
@@ -246,7 +249,7 @@ async fn run_windows_runner(
 
     let mut child = command
         .spawn()
-        .map_err(|e| format!("Failed to start Windows Computer Use runner: {e}"))?;
+        .map_err(|e| format!("Failed to start Windows Computer Agent runner: {e}"))?;
 
     let mut stdin = child
         .stdin
@@ -263,7 +266,7 @@ async fn run_windows_runner(
         .await
         .map_err(|_| {
             format!(
-                "Windows Computer Use runner timed out after {} seconds",
+                "Windows Computer Agent runner timed out after {} seconds",
                 wait_budget.as_secs()
             )
         })?
@@ -338,7 +341,10 @@ where
 }
 
 #[cfg(not(windows))]
-fn sandboxed_command(scope: &ComputerScope, request: &ShellRequest) -> Result<Command, String> {
+fn sandboxed_command(
+    scope: &ComputerAgentScope,
+    request: &ShellRequest,
+) -> Result<Command, String> {
     #[cfg(target_os = "linux")]
     {
         let bwrap = find_on_path("bwrap")
@@ -407,7 +413,7 @@ fn sandboxed_command(scope: &ComputerScope, request: &ShellRequest) -> Result<Co
     {
         let _ = scope;
         let _ = request;
-        Err("Computer Use shell sandbox is not supported on this platform.".to_string())
+        Err("Computer Agent shell sandbox is not supported on this platform.".to_string())
     }
 }
 

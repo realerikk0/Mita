@@ -25,9 +25,9 @@ path = "src/bin/mita-cli.rs"
 required-features = ["cli"]
 
 [[bin]]
-name = "mita-computer-runner"
-path = "src/bin/mita-computer-runner.rs"
-required-features = ["computer-runner"]
+name = "mita-computer-agent-runner"
+path = "src/bin/mita-computer-agent-runner.rs"
+required-features = ["computer-agent-runner"]
 
 [features]
 default = [
@@ -69,7 +69,7 @@ test-tauri = [
     "mlx",
 ]
 cli = ["dep:env_logger", "dep:dialoguer", "dep:indicatif", "dep:console"]
-computer-runner = []
+computer-agent-runner = []
 
 [build-dependencies]
 tauri-build = { version = "2.0.2", features = [] }
@@ -115,7 +115,14 @@ tauri-plugin-mlx = { path = "./plugins/tauri-plugin-mlx", optional = true }
 tauri-plugin-foundation-models = { path = "./plugins/tauri-plugin-foundation-models", optional = true }
 tauri-plugin-vector-db = { path = "./plugins/tauri-plugin-vector-db" }
 tauri-plugin-rag = { path = "./plugins/tauri-plugin-rag" }
-tauri-plugin-http = { version = "2", features = ["unsafe-headers"] }
+tauri-plugin-http = { version = "2", default-features = false, features = [
+  "charset",
+  "cookies",
+  "http2",
+  "macos-system-configuration",
+  "rustls-tls-native-roots",
+  "unsafe-headers",
+] }
 tauri-plugin-log = "2.0.0-rc"
 tauri-plugin-opener = "2.2.7"
 tauri-plugin-os = "2.2.1"

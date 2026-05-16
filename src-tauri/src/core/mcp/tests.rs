@@ -297,7 +297,7 @@ async fn test_get_server_summaries_with_capabilities_in_active_config() {
     let result = get_server_summaries(state).await;
     assert!(result.is_ok());
     let summaries = result.unwrap();
-    assert!(summaries.is_empty(), "No connected servers → no summaries");
+    assert!(summaries.is_empty(), "No connected servers -> no summaries");
 }
 
 #[tokio::test]
@@ -322,7 +322,7 @@ async fn test_get_server_summaries_missing_metadata_defaults() {
         );
     }
 
-    // No entries in mcp_servers → summaries list is empty
+    // No entries in mcp_servers -> summaries list is empty
     let result = get_server_summaries(state).await;
     assert!(result.is_ok());
     assert!(result.unwrap().is_empty());
@@ -642,9 +642,9 @@ fn test_mcp_settings_default_matches_constants() {
     assert!(!s.use_lightweight_router_model);
     assert!(s.router_model_provider.is_empty());
     assert!(s.router_model_id.is_empty());
-    assert!(!s.computer_use_enabled);
-    assert!(s.computer_allowed_roots.is_empty());
-    assert!(!s.computer_shell_enabled);
+    assert!(!s.computer_agent_enabled);
+    assert!(s.computer_agent_allowed_roots.is_empty());
+    assert!(!s.computer_agent_shell_enabled);
 }
 
 #[test]
@@ -684,9 +684,9 @@ impl PartialEq for super::models::McpSettings {
             && self.use_lightweight_router_model == other.use_lightweight_router_model
             && self.router_model_provider == other.router_model_provider
             && self.router_model_id == other.router_model_id
-            && self.computer_use_enabled == other.computer_use_enabled
-            && self.computer_allowed_roots == other.computer_allowed_roots
-            && self.computer_shell_enabled == other.computer_shell_enabled
+            && self.computer_agent_enabled == other.computer_agent_enabled
+            && self.computer_agent_allowed_roots == other.computer_agent_allowed_roots
+            && self.computer_agent_shell_enabled == other.computer_agent_shell_enabled
     }
 }
 
@@ -698,15 +698,34 @@ fn test_mcp_settings_round_trip_camel_case() {
     s.router_model_provider = "openai".into();
     s.router_model_id = "gpt-4".into();
     s.use_lightweight_router_model = true;
-    s.computer_use_enabled = true;
-    s.computer_allowed_roots = vec!["/tmp/mita".into()];
+    s.computer_agent_enabled = true;
+    s.computer_agent_allowed_roots = vec!["/tmp/mita".into()];
     let json = serde_json::to_string(&s).unwrap();
     assert!(json.contains("\"toolCallTimeoutSeconds\":42"));
     assert!(json.contains("\"routerModelProvider\":\"openai\""));
     assert!(json.contains("\"useLightweightRouterModel\":true"));
-    assert!(json.contains("\"computerUseEnabled\":true"));
+    assert!(json.contains("\"computerAgentEnabled\":true"));
     let parsed: McpSettings = serde_json::from_str(&json).unwrap();
     assert_eq!(parsed, s);
+}
+
+#[test]
+fn test_mcp_settings_deserializes_legacy_computer_fields() {
+    use super::models::McpSettings;
+    let json = r#"{
+        "computerUseEnabled": true,
+        "computerAllowedRoots": ["/tmp/mita"],
+        "computerShellEnabled": true
+    }"#;
+
+    let parsed: McpSettings = serde_json::from_str(json).unwrap();
+    assert!(parsed.computer_agent_enabled);
+    assert_eq!(parsed.computer_agent_allowed_roots, vec!["/tmp/mita"]);
+    assert!(parsed.computer_agent_shell_enabled);
+
+    let serialized = serde_json::to_string(&parsed).unwrap();
+    assert!(serialized.contains("\"computerAgentEnabled\":true"));
+    assert!(!serialized.contains("computerUseEnabled"));
 }
 
 #[test]
@@ -908,7 +927,7 @@ fn test_is_process_alive_for_almost_certainly_dead_pid() {
     use super::lockfile::is_process_alive;
     // PID 0 is the scheduler / not a real signalable process on Linux/macOS
     // and PID 999999 is extremely unlikely to exist
-    // (i32::MAX as u32) exceeds Linux pid_max → kernel returns ESRCH/EINVAL
+    // (i32::MAX as u32) exceeds Linux pid_max -> kernel returns ESRCH/EINVAL
     assert!(!is_process_alive(i32::MAX as u32));
 }
 
@@ -974,7 +993,7 @@ async fn test_check_and_cleanup_stale_lock_keeps_live_lock() {
     let port: u16 = 53_115;
     let _ = delete_lock_file(app.handle(), port);
     create_lock_file(app.handle(), port, "live").unwrap();
-    // Lock points at the current PID, which is alive → must NOT be removed
+    // Lock points at the current PID, which is alive -> must NOT be removed
     let cleaned = check_and_cleanup_stale_lock(app.handle(), port)
         .await
         .unwrap();
@@ -995,7 +1014,7 @@ async fn test_check_and_cleanup_stale_lock_removes_dead_pid_lock() {
     std::fs::create_dir_all(&app_data_dir).ok();
     let lock_path = app_data_dir.join(format!("mcp_lock_{}.json", port));
 
-    // PID above pid_max guarantees ESRCH/EINVAL on Unix → reported as not alive
+    // PID above pid_max guarantees ESRCH/EINVAL on Unix -> reported as not alive
     let dead_pid: u32 = i32::MAX as u32;
     let lock = McpLockFile {
         pid: dead_pid,
@@ -1032,7 +1051,7 @@ fn test_cleanup_own_locks_removes_only_current_pid_locks() {
     // Lock owned by us
     create_lock_file(app.handle(), own_port, "ours").unwrap();
 
-    // Lock owned by some other PID — write directly into the SAME dir lockfile uses
+    // Lock owned by some other PID - write directly into the SAME dir lockfile uses
     let app_data_dir = app.handle().path().app_data_dir().expect("app data dir");
     std::fs::create_dir_all(&app_data_dir).ok();
     let other_path = app_data_dir.join(format!("mcp_lock_{}.json", other_port));

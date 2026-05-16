@@ -33,7 +33,7 @@
     "resources": [
       "resources/LICENSE",
       "resources/bin/mita-cli.exe",
-      "resources/computer-runner/**/*",
+      "resources/computer-agent-runner/**/*",
       "resources/bin/mita-web-research-mcp.mjs",
       "resources/ms-playwright/**/*",
       "resources/node_modules/playwright/**/*",
@@ -41,6 +41,12 @@
     ],
     "externalBin": ["resources/bin/bun", "resources/bin/uv"],
     "windows": {
+      "nsis": {
+        "installMode": "currentUser"
+      },
+      "wix": {
+        "template": "windows/wix/main.wxs"
+      },
       "webviewInstallMode": {
         "silent": true,
         "type": "downloadBootstrapper"

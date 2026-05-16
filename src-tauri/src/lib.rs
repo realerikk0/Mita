@@ -43,9 +43,10 @@ macro_rules! invoke_commands_with_extras {
         core::image_assets::commands::import_image_asset,
         core::image_assets::commands::list_image_assets,
         core::image_assets::commands::delete_image_asset,
-        // Computer Use commands
-        core::computer::commands::get_computer_shell_status,
-        core::computer::commands::get_computer_workspace_path,
+        // Computer Agent commands
+        core::computer_agent::commands::get_computer_agent_shell_status,
+        core::computer_agent::commands::get_computer_agent_workspace_path,
+        core::computer_agent::commands::validate_computer_agent_allowed_root,
         // App configuration commands
         core::app::commands::get_app_configurations,
         core::app::commands::get_user_home_path,

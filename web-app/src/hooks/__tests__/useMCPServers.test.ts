@@ -165,6 +165,26 @@ describe('useMCPServers', () => {
       act(() => { result.current.updateSettings({ toolCallTimeoutSeconds: 60 }) })
       expect(result.current.settings.toolCallTimeoutSeconds).toBe(60)
     })
+
+    it('normalizes legacy computer setting names', () => {
+      const { result } = renderHook(() => useMCPServers())
+
+      act(() => {
+        result.current.setSettings({
+          toolCallTimeoutSeconds: DEFAULT_MCP_SETTINGS.toolCallTimeoutSeconds,
+          computerUseEnabled: true,
+          computerAllowedRoots: ['C:/Mita'],
+          computerShellEnabled: true,
+        })
+      })
+
+      expect(result.current.settings.computerAgentEnabled).toBe(true)
+      expect(result.current.settings.computerAgentAllowedRoots).toEqual([
+        'C:/Mita',
+      ])
+      expect(result.current.settings.computerAgentShellEnabled).toBe(true)
+      expect('computerUseEnabled' in result.current.settings).toBe(false)
+    })
   })
 
   describe('syncServers', () => {

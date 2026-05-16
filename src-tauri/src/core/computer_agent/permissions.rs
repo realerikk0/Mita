@@ -9,12 +9,12 @@ const WORKSPACE_DIR: &str = "agent-workspaces";
 const HIDDEN_THREAD_ID_ARG: &str = "_mitaThreadId";
 
 #[derive(Debug, Clone)]
-pub struct ComputerScope {
+pub struct ComputerAgentScope {
     pub workspace_root: PathBuf,
     pub allowed_roots: Vec<PathBuf>,
 }
 
-impl ComputerScope {
+impl ComputerAgentScope {
     pub fn new(
         mita_data_folder: &Path,
         thread_id: &str,
@@ -36,7 +36,7 @@ impl ComputerScope {
             }
             let path = PathBuf::from(trimmed);
             if !path.exists() {
-                log::warn!("Skipping computer-use allowed root that does not exist: {trimmed}");
+                log::warn!("Skipping computer-agent allowed root that does not exist: {trimmed}");
                 continue;
             }
             let canonical = normalize_scope_path(path.canonicalize().map_err(|e| {
@@ -123,7 +123,7 @@ impl ComputerScope {
         }
 
         Err(format!(
-            "Path '{}' is outside the approved Computer Use roots",
+            "Path '{}' is outside the approved Computer Agent roots",
             normalized.display()
         ))
     }

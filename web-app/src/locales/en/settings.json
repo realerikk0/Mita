@@ -331,5 +331,37 @@
     "updateError": "Failed to update Llamacpp"
   },
   "backendInstallSuccess": "Backend installed successfully!",
-  "backendInstallError": "Failed to install backend"
+  "backendInstallError": "Failed to install backend",
+  "computerAgent": {
+    "title": "Computer Agent",
+    "enableTitle": "Enable Computer Agent",
+    "enableDescription": "Expose Mita built-in local file and command tools to application chats. Every real action requires one-time approval.",
+    "shellTitle": "Local shell",
+    "shellStatusUnknown": "Shell sandbox status is not available.",
+    "shellStatusAvailable": "Sandbox available on {{platform}} via {{sandboxKind}}.",
+    "shellStatusUnavailable": "Shell sandbox is unavailable.",
+    "shellStatusInspectFailed": "Unable to inspect shell sandbox status.",
+    "shellPhase": "Phase: {{phase}}.",
+    "refreshShellStatus": "Refresh shell status",
+    "shellBlockersTitle": "Shell blockers",
+    "workspaceTitle": "Private workspaces",
+    "workspaceRootTitle": "Workspace root",
+    "workspaceRootDescription": "Mita stores each chat private agent workspace under this folder.",
+    "workspaceUnknown": "Workspace path unavailable",
+    "copied": "Copied",
+    "copyPath": "Copy path",
+    "showInFileExplorer": "Show in File Explorer",
+    "allowedRootsTitle": "Allowed roots",
+    "allowedRootsManageTitle": "Additional folders",
+    "allowedRootsManageDescription": "Folders outside private workspaces that structured Computer Agent file tools may access after approval.",
+    "allowedRootPlaceholder": "Absolute folder path",
+    "chooseFolder": "Choose folder",
+    "addRoot": "Add",
+    "removeRoot": "Remove allowed root",
+    "allowedRootInvalid": "Allowed root is invalid.",
+    "windowsWorkspaceOnlyNote": "On Windows Phase 1, shell commands are still limited to the private thread workspace; additional roots apply to structured file tools.",
+    "safetyTitle": "Safety policy",
+    "approvalPolicyTitle": "Every action requires approval",
+    "approvalPolicyDescription": "Computer Agent actions cannot use global MCP auto-approval or remembered tool permissions. The approval dialog shows exact paths and commands before each action."
+  }
 }

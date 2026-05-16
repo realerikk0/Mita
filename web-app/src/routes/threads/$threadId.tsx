@@ -116,11 +116,15 @@ function getConfiguredMaxContextTokens(
 const createAutoRunPrompt = (round: number, maxRounds: number) =>
   `继续执行主人交代的任务，给出下一步结果；当前为第 ${round} / ${maxRounds} 轮。保持安静、直接、可执行。`
 
-const COMPUTER_TOOL_PREFIX = 'computer_'
+const COMPUTER_AGENT_TOOL_PREFIX = 'computer_agent_'
+const LEGACY_COMPUTER_TOOL_PREFIX = 'computer_'
 const COMPUTER_THREAD_ID_ARG = '_mitaThreadId'
 
-function isComputerToolName(toolName: string) {
-  return toolName.startsWith(COMPUTER_TOOL_PREFIX)
+function isComputerAgentToolName(toolName: string) {
+  return (
+    toolName.startsWith(COMPUTER_AGENT_TOOL_PREFIX) ||
+    toolName.startsWith(LEGACY_COMPUTER_TOOL_PREFIX)
+  )
 }
 
 function asToolInput(value: unknown): Record<string, unknown> {
@@ -133,7 +137,7 @@ function stringValue(value: unknown): string | undefined {
   return typeof value === 'string' && value.trim() ? value.trim() : undefined
 }
 
-function computerApprovalDetails(
+function computerAgentApprovalDetails(
   toolName: string,
   input: Record<string, unknown>
 ) {
@@ -145,19 +149,23 @@ function computerApprovalDetails(
     stringValue(input.to),
   ].filter(Boolean) as string[]
 
-  const commandPreview =
-    toolName === 'computer_run_shell'
-      ? stringValue(input.command)
-      : undefined
+  const runsShell =
+    toolName === 'computer_agent_run_shell' || toolName === 'computer_run_shell'
+  const trashesPath =
+    toolName === 'computer_agent_trash_path' || toolName === 'computer_trash_path'
+  const opensPath =
+    toolName === 'computer_agent_open_path' || toolName === 'computer_open_path'
+
+  const commandPreview = runsShell ? stringValue(input.command) : undefined
 
   const riskSummary =
-    toolName === 'computer_run_shell'
+    runsShell
       ? 'Runs a local shell command in Mita sandbox limits.'
-      : toolName === 'computer_trash_path'
+      : trashesPath
         ? 'Moves a local file or folder to the system trash.'
-        : toolName === 'computer_open_path'
+        : opensPath
           ? 'Opens a local path with the operating system.'
-          : 'Reads or modifies files inside Mita Computer Use roots.'
+          : 'Reads or modifies files inside Mita Computer Agent roots.'
 
   return {
     alwaysConfirm: true,
@@ -247,11 +255,11 @@ function ThreadDetail() {
   const selectedModel = useModelProvider((state) => state.selectedModel)
   const selectedProvider = useModelProvider((state) => state.selectedProvider)
   const getProviderByName = useModelProvider((state) => state.getProviderByName)
-  const computerUseEnabled = useMCPServers(
-    (state) => state.settings.computerUseEnabled
+  const computerAgentEnabled = useMCPServers(
+    (state) => state.settings.computerAgentEnabled
   )
-  const computerShellEnabled = useMCPServers(
-    (state) => state.settings.computerShellEnabled
+  const computerAgentShellEnabled = useMCPServers(
+    (state) => state.settings.computerAgentShellEnabled
   )
   const threadRef = useRef(thread)
   const projectId = threadRef.current?.metadata?.project?.id
@@ -261,14 +269,14 @@ function ThreadDetail() {
   const threadAssistant = thread?.assistants?.[0]
   const systemMessage = renderInstructions(
     `${ensureMitaIdentityGuard(threadAssistant?.instructions)}${
-      computerUseEnabled
-        ? `\n\nComputer Use guidance:
+      computerAgentEnabled
+        ? `\n\nComputer Agent guidance:
 - Prefer structured computer tools for file and folder work.
 - If the user asks to create a file without a path, omit the directory so Mita uses the private thread workspace.
 - Do not invent absolute paths. Ask for a folder or use the thread workspace when the user gives no path.
 - Every computer action requires user approval, so keep tool arguments precise and minimal.${
-            computerShellEnabled
-              ? '\n- Use computer_run_shell only when structured computer tools are insufficient.'
+            computerAgentShellEnabled
+              ? '\n- Use computer_agent_run_shell only when structured computer tools are insufficient.'
               : ''
           }`
         : ''
@@ -461,7 +469,7 @@ function ThreadDetail() {
           try {
             const toolName = toolCall.toolName
             const toolInput = asToolInput(toolCall.input)
-            const isComputerTool = isComputerToolName(toolName)
+            const isComputerAgentTool = isComputerAgentToolName(toolName)
 
             // Built-in RAG tools are internal and should not require approval.
             const approved = ragToolNames.has(toolName)
@@ -472,8 +480,8 @@ function ThreadDetail() {
                     toolName,
                     threadId,
                     toolInput,
-                    isComputerTool
-                      ? computerApprovalDetails(toolName, toolInput)
+                    isComputerAgentTool
+                      ? computerAgentApprovalDetails(toolName, toolInput)
                       : undefined
                   )
 
@@ -499,10 +507,10 @@ function ThreadDetail() {
                 projectId: projectId,
                 scope: projectId ? 'project' : 'thread',
               })
-            } else if (isComputerTool || mcpToolNames.has(toolName)) {
+            } else if (isComputerAgentTool || mcpToolNames.has(toolName)) {
               result = await serviceHub.mcp().callTool({
                 toolName,
-                arguments: isComputerTool
+                arguments: isComputerAgentTool
                   ? { ...toolInput, [COMPUTER_THREAD_ID_ARG]: threadId }
                   : toolInput,
               })
@@ -592,7 +600,7 @@ function ThreadDetail() {
               titleAbortRef.current = null
             })
           } else if (titleText) {
-            // Short messages are already good titles — mark as done
+            // Short messages are already good titles - mark as done
             useThreads.getState().updateThread(threadId, {
               metadata: {
                 ...currentThread.metadata,
@@ -930,7 +938,7 @@ function ThreadDetail() {
         setChatMessages((prev) => [...prev, ...previewUI])
       }
 
-      // Clear attachment chips from the input — they are now either
+      // Clear attachment chips from the input - they are now either
       // about to be sent or visible in the preview message above.
       clearAttachmentsForThread(attachmentsKey)
 
@@ -977,7 +985,7 @@ function ThreadDetail() {
       }
 
       // Remove the preview before sendMessage adds the real user message
-      // with the same id — this prevents duplicates.
+      // with the same id - this prevents duplicates.
       if (hasDocuments) {
         setChatMessages((prev) => prev.filter((m) => m.id !== messageId))
       }
@@ -1373,7 +1381,7 @@ function ThreadDetail() {
   }, [status]) // eslint-disable-line react-hooks/exhaustive-deps
 
   // Message queue: auto-send the next queued message when the stream finishes.
-  // No reactive subscription to the queue here — ChatInput owns the UI.
+  // No reactive subscription to the queue here - ChatInput owns the UI.
   // We only read the store imperatively when status transitions to 'ready'.
   const processingQueueRef = useRef(false)
 

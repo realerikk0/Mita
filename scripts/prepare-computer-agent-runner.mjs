@@ -3,7 +3,7 @@ import { join } from 'node:path'
 import { spawnSync } from 'node:child_process'
 
 if (process.platform !== 'win32') {
-  console.log('Skipping Windows Computer Use runner build on non-Windows host.')
+  console.log('Skipping Windows Computer Agent runner build on non-Windows host.')
   process.exit(0)
 }
 
@@ -16,9 +16,9 @@ const cargoArgs = [
   '--manifest-path',
   manifestPath,
   '--features',
-  'computer-runner',
+  'computer-agent-runner',
   '--bin',
-  'mita-computer-runner',
+  'mita-computer-agent-runner',
 ]
 
 if (release) {
@@ -39,13 +39,13 @@ const source = join(
   'src-tauri',
   'target',
   profile,
-  'mita-computer-runner.exe'
+  'mita-computer-agent-runner.exe'
 )
-const destinationDir = join(root, 'src-tauri', 'resources', 'computer-runner')
-const destination = join(destinationDir, 'mita-computer-runner.exe')
+const destinationDir = join(root, 'src-tauri', 'resources', 'computer-agent-runner')
+const destination = join(destinationDir, 'mita-computer-agent-runner.exe')
 
 statSync(source)
 mkdirSync(destinationDir, { recursive: true })
 copyFileSync(source, destination)
 
-console.log(`Prepared Windows Computer Use runner: ${destination}`)
+console.log(`Prepared Windows Computer Agent runner: ${destination}`)

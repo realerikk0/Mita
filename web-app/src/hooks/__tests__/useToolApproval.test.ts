@@ -319,7 +319,7 @@ describe('useToolApproval', () => {
       let approvalPromise: Promise<boolean>
       act(() => {
         approvalPromise = result.current.showApprovalModal(
-          'computer_create_text_file',
+          'computer_agent_create_text_file',
           'thread-1',
           { content: 'hello' },
           { alwaysConfirm: true, riskSummary: 'Writes a file.' }
@@ -343,7 +343,7 @@ describe('useToolApproval', () => {
       let approvalPromise: Promise<boolean>
       act(() => {
         approvalPromise = result.current.showApprovalModal(
-          'computer_create_text_file',
+          'computer_agent_create_text_file',
           'thread-1',
           {},
           { alwaysConfirm: true }

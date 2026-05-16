@@ -2,6 +2,7 @@
   "assistants": "Assistants",
   "hardware": "Hardware",
   "mcp-servers": "MCP Servers",
+  "computerAgent": "Computer Agent",
   "connectors": "Connectors",
   "local_api_server": "Local API Server",
   "remote_access": "Remote Access",

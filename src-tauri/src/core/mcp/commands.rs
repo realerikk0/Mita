@@ -14,10 +14,13 @@ use super::{
 };
 use crate::core::{
     app::commands::get_mita_data_folder_path,
-    computer::{
-        handlers::handle_computer_tool,
+    computer_agent::{
+        handlers::handle_computer_agent_tool,
         shell::shell_status,
-        tools::{computer_summary, computer_tools, is_computer_tool, COMPUTER_SERVER_NAME},
+        tools::{
+            computer_agent_summary, computer_agent_tools, is_computer_agent_tool,
+            COMPUTER_AGENT_SERVER_NAME, LEGACY_COMPUTER_SERVER_NAME,
+        },
     },
     mcp::models::{McpSettings, ServerSummary},
     state::AppState,
@@ -34,8 +37,8 @@ async fn tool_call_timeout(state: &AppState) -> Duration {
 
 /// Shared implementation for listing MCP tools.
 ///
-/// - `server_filter: None` — every connected server (same behavior as `get_tools`).
-/// - `server_filter: Some(names)` — only connected servers in that set; unknown or
+/// - `server_filter: None` - every connected server (same behavior as `get_tools`).
+/// - `server_filter: Some(names)` - only connected servers in that set; unknown or
 ///   disconnected names are skipped (logged). Transport / list failures use the same
 ///   cleanup as `get_tools` (remove stale entry, emit `mcp-update` when needed).
 async fn collect_mcp_tools<R: Runtime>(
@@ -194,8 +197,7 @@ pub async fn deactivate_mcp_server<R: Runtime>(
     let mut servers_map = servers.lock().await;
     let resolved_name = if servers_map.contains_key(&name) {
         name.clone()
-    } else if is_browser_mcp_name(&name) && servers_map.contains_key(MITA_WEB_RESEARCH_MCP_NAME)
-    {
+    } else if is_browser_mcp_name(&name) && servers_map.contains_key(MITA_WEB_RESEARCH_MCP_NAME) {
         MITA_WEB_RESEARCH_MCP_NAME.to_string()
     } else if is_browser_mcp_name(&name)
         && servers_map.contains_key(LEGACY_SILENCE_WEB_RESEARCH_MCP_NAME)
@@ -330,7 +332,7 @@ pub async fn get_tools<R: Runtime>(
 ) -> Result<Vec<ToolWithServer>, String> {
     let mut tools = collect_mcp_tools(&app, &*state, None).await?;
     let settings = state.mcp_settings.lock().await.clone();
-    tools.extend(computer_tools(&settings, shell_status().available));
+    tools.extend(computer_agent_tools(&settings, shell_status().available));
     Ok(tools)
 }
 
@@ -354,7 +356,8 @@ pub async fn get_tools_for_servers<R: Runtime>(
         return Ok(Vec::new());
     }
 
-    let include_computer = filter.remove(COMPUTER_SERVER_NAME);
+    let include_computer =
+        filter.remove(COMPUTER_AGENT_SERVER_NAME) || filter.remove(LEGACY_COMPUTER_SERVER_NAME);
     let mut tools = if filter.is_empty() {
         Vec::new()
     } else {
@@ -363,7 +366,7 @@ pub async fn get_tools_for_servers<R: Runtime>(
 
     if include_computer {
         let settings = state.mcp_settings.lock().await.clone();
-        tools.extend(computer_tools(&settings, shell_status().available));
+        tools.extend(computer_agent_tools(&settings, shell_status().available));
     }
 
     Ok(tools)
@@ -409,7 +412,7 @@ pub async fn get_server_summaries(
     }
 
     let settings = state.mcp_settings.lock().await.clone();
-    if let Some(summary) = computer_summary(&settings) {
+    if let Some(summary) = computer_agent_summary(&settings) {
         summaries.push(summary);
     }
 
@@ -444,10 +447,10 @@ pub async fn call_tool<R: Runtime>(
     arguments: Option<Map<String, Value>>,
     cancellation_token: Option<String>,
 ) -> Result<CallToolResult, String> {
-    if is_computer_tool(&tool_name) {
+    if is_computer_agent_tool(&tool_name) {
         let settings = state.mcp_settings.lock().await.clone();
         let data_folder = get_mita_data_folder_path(app);
-        return handle_computer_tool(data_folder, settings, &tool_name, arguments).await;
+        return handle_computer_agent_tool(data_folder, settings, &tool_name, arguments).await;
     }
 
     let timeout_duration = tool_call_timeout(&*state).await;
@@ -475,7 +478,7 @@ pub async fn call_tool<R: Runtime>(
             return Err(format!("Server '{server}' not found"));
         }
         return Err(format!(
-            "Tool {tool_name} not found — no MCP servers connected"
+            "Tool {tool_name} not found - no MCP servers connected"
         ));
     }
 
@@ -553,12 +556,12 @@ pub async fn call_tool<R: Runtime>(
         return result;
     }
 
-    // No server had the tool — check if it's because of transport errors
+    // No server had the tool - check if it's because of transport errors
     if !transport_error_servers.is_empty() {
         state.mcp_reconnect_notify.notify_waiters();
         cleanup_cancellation_token(&state, &cancellation_token).await;
         return Err(format!(
-            "MCP server(s) [{}] disconnected while looking for tool '{}'. Reconnecting — please retry.",
+            "MCP server(s) [{}] disconnected while looking for tool '{}'. Reconnecting - please retry.",
             transport_error_servers.join(", "),
             tool_name
         ));
@@ -715,9 +718,7 @@ fn get_result_text(result: &rmcp::model::CallToolResult) -> Option<&str> {
 
 /// Check if Mita Web Research is connected via MCP.
 #[tauri::command]
-pub async fn check_mita_web_research_connected(
-    state: State<'_, AppState>,
-) -> Result<bool, String> {
+pub async fn check_mita_web_research_connected(state: State<'_, AppState>) -> Result<bool, String> {
     let servers = state.mcp_servers.lock().await;
     let service = match servers
         .get(MITA_WEB_RESEARCH_MCP_NAME)

@@ -17,6 +17,40 @@ import {
   providerQuotaErrorFromUnknown,
 } from '@/lib/provider-quota-error'
 
+const tlsCertificateErrorFragments = [
+  'certificate',
+  'cert',
+  'tls',
+  'ssl',
+  'unknownissuer',
+  'unknown issuer',
+  'invalid peer certificate',
+  'unable to verify',
+  'self signed',
+  'revocation',
+]
+
+const connectionErrorFragments = [
+  'fetch',
+  'network',
+  'dns',
+  'connection',
+  'connect',
+  'timeout',
+  'timed out',
+  'request error',
+  'error sending request',
+]
+
+function errorMessageFromUnknown(error: unknown) {
+  return error instanceof Error ? error.message : 'Unknown error'
+}
+
+function includesAnyFragment(message: string, fragments: string[]) {
+  const normalized = message.toLowerCase()
+  return fragments.some((fragment) => normalized.includes(fragment))
+}
+
 export class TauriProvidersService extends DefaultProvidersService {
   fetch(): typeof fetch {
     // Tauri implementation uses Tauri's fetch to avoid CORS issues
@@ -177,10 +211,13 @@ export class TauriProvidersService extends DefaultProvidersService {
           })
         }
 
-        const response = await fetchTauri(`${provider.base_url}/models`, {
-          method: 'GET',
-          headers,
-        })
+        const response = await fetchTauri(
+          `${provider.base_url.replace(/\/$/, '')}/models`,
+          {
+            method: 'GET',
+            headers,
+          }
+        )
 
         lastStatus = response.status
         lastStatusText = response.statusText
@@ -269,8 +306,16 @@ export class TauriProvidersService extends DefaultProvidersService {
         throw new Error(error.message)
       }
 
+      const errorMessage = errorMessageFromUnknown(error)
+
+      if (includesAnyFragment(errorMessage, tlsCertificateErrorFragments)) {
+        throw new Error(
+          `TLS certificate verification failed while connecting to ${provider.provider} at ${provider.base_url}. If antivirus, proxy, or corporate HTTPS inspection is enabled, trust its root certificate in the system certificate store or disable HTTPS scanning for this host.`
+        )
+      }
+
       // Provide helpful error message for any connection errors
-      if (error instanceof Error && error.message.includes('fetch')) {
+      if (includesAnyFragment(errorMessage, connectionErrorFragments)) {
         throw new Error(
           `Cannot connect to ${provider.provider} at ${provider.base_url}. Please check that the service is running and accessible.`
         )
@@ -278,7 +323,7 @@ export class TauriProvidersService extends DefaultProvidersService {
 
       // Generic fallback
       throw new Error(
-        `Unexpected error while fetching models from ${provider.provider}: ${error instanceof Error ? error.message : 'Unknown error'}`
+        `Unexpected error while fetching models from ${provider.provider}: ${errorMessage}`
       )
     }
   }

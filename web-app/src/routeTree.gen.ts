@@ -24,6 +24,7 @@ import { Route as SettingsHttpsProxyRouteImport } from './routes/settings/https-
 import { Route as SettingsHardwareRouteImport } from './routes/settings/hardware'
 import { Route as SettingsGeneralRouteImport } from './routes/settings/general'
 import { Route as SettingsExtensionsRouteImport } from './routes/settings/extensions'
+import { Route as SettingsComputerAgentRouteImport } from './routes/settings/computer-agent'
 import { Route as SettingsClaudeCodeRouteImport } from './routes/settings/claude-code'
 import { Route as SettingsAttachmentsRouteImport } from './routes/settings/attachments'
 import { Route as SettingsAssistantRouteImport } from './routes/settings/assistant'
@@ -108,6 +109,11 @@ const SettingsExtensionsRoute = SettingsExtensionsRouteImport.update({
   path: '/settings/extensions',
   getParentRoute: () => rootRouteImport,
 } as any)
+const SettingsComputerAgentRoute = SettingsComputerAgentRouteImport.update({
+  id: '/settings/computer-agent',
+  path: '/settings/computer-agent',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const SettingsClaudeCodeRoute = SettingsClaudeCodeRouteImport.update({
   id: '/settings/claude-code',
   path: '/settings/claude-code',
@@ -161,6 +167,7 @@ export interface FileRoutesByFullPath {
   '/settings/assistant': typeof SettingsAssistantRoute
   '/settings/attachments': typeof SettingsAttachmentsRoute
   '/settings/claude-code': typeof SettingsClaudeCodeRoute
+  '/settings/computer-agent': typeof SettingsComputerAgentRoute
   '/settings/extensions': typeof SettingsExtensionsRoute
   '/settings/general': typeof SettingsGeneralRoute
   '/settings/hardware': typeof SettingsHardwareRoute
@@ -186,6 +193,7 @@ export interface FileRoutesByTo {
   '/settings/assistant': typeof SettingsAssistantRoute
   '/settings/attachments': typeof SettingsAttachmentsRoute
   '/settings/claude-code': typeof SettingsClaudeCodeRoute
+  '/settings/computer-agent': typeof SettingsComputerAgentRoute
   '/settings/extensions': typeof SettingsExtensionsRoute
   '/settings/general': typeof SettingsGeneralRoute
   '/settings/hardware': typeof SettingsHardwareRoute
@@ -212,6 +220,7 @@ export interface FileRoutesById {
   '/settings/assistant': typeof SettingsAssistantRoute
   '/settings/attachments': typeof SettingsAttachmentsRoute
   '/settings/claude-code': typeof SettingsClaudeCodeRoute
+  '/settings/computer-agent': typeof SettingsComputerAgentRoute
   '/settings/extensions': typeof SettingsExtensionsRoute
   '/settings/general': typeof SettingsGeneralRoute
   '/settings/hardware': typeof SettingsHardwareRoute
@@ -239,6 +248,7 @@ export interface FileRouteTypes {
     | '/settings/assistant'
     | '/settings/attachments'
     | '/settings/claude-code'
+    | '/settings/computer-agent'
     | '/settings/extensions'
     | '/settings/general'
     | '/settings/hardware'
@@ -264,6 +274,7 @@ export interface FileRouteTypes {
     | '/settings/assistant'
     | '/settings/attachments'
     | '/settings/claude-code'
+    | '/settings/computer-agent'
     | '/settings/extensions'
     | '/settings/general'
     | '/settings/hardware'
@@ -289,6 +300,7 @@ export interface FileRouteTypes {
     | '/settings/assistant'
     | '/settings/attachments'
     | '/settings/claude-code'
+    | '/settings/computer-agent'
     | '/settings/extensions'
     | '/settings/general'
     | '/settings/hardware'
@@ -315,6 +327,7 @@ export interface RootRouteChildren {
   SettingsAssistantRoute: typeof SettingsAssistantRoute
   SettingsAttachmentsRoute: typeof SettingsAttachmentsRoute
   SettingsClaudeCodeRoute: typeof SettingsClaudeCodeRoute
+  SettingsComputerAgentRoute: typeof SettingsComputerAgentRoute
   SettingsExtensionsRoute: typeof SettingsExtensionsRoute
   SettingsGeneralRoute: typeof SettingsGeneralRoute
   SettingsHardwareRoute: typeof SettingsHardwareRoute
@@ -437,6 +450,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof SettingsExtensionsRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/settings/computer-agent': {
+      id: '/settings/computer-agent'
+      path: '/settings/computer-agent'
+      fullPath: '/settings/computer-agent'
+      preLoaderRoute: typeof SettingsComputerAgentRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/settings/claude-code': {
       id: '/settings/claude-code'
       path: '/settings/claude-code'
@@ -507,6 +527,7 @@ const rootRouteChildren: RootRouteChildren = {
   SettingsAssistantRoute: SettingsAssistantRoute,
   SettingsAttachmentsRoute: SettingsAttachmentsRoute,
   SettingsClaudeCodeRoute: SettingsClaudeCodeRoute,
+  SettingsComputerAgentRoute: SettingsComputerAgentRoute,
   SettingsExtensionsRoute: SettingsExtensionsRoute,
   SettingsGeneralRoute: SettingsGeneralRoute,
   SettingsHardwareRoute: SettingsHardwareRoute,

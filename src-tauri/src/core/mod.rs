@@ -1,7 +1,7 @@
 pub mod app;
 #[cfg(feature = "cli")]
 pub mod cli;
-pub mod computer;
+pub mod computer_agent;
 pub mod downloads;
 pub mod extensions;
 pub mod filesystem;

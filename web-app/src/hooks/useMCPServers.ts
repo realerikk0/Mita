@@ -33,9 +33,9 @@ export type MCPSettings = {
   useLightweightRouterModel: boolean
   routerModelProvider: string
   routerModelId: string
-  computerUseEnabled: boolean
-  computerAllowedRoots: string[]
-  computerShellEnabled: boolean
+  computerAgentEnabled: boolean
+  computerAgentAllowedRoots: string[]
+  computerAgentShellEnabled: boolean
 }
 
 export const DEFAULT_MCP_SETTINGS: MCPSettings = {
@@ -47,9 +47,54 @@ export const DEFAULT_MCP_SETTINGS: MCPSettings = {
   useLightweightRouterModel: false,
   routerModelProvider: '',
   routerModelId: '',
-  computerUseEnabled: false,
-  computerAllowedRoots: [],
-  computerShellEnabled: false,
+  computerAgentEnabled: false,
+  computerAgentAllowedRoots: [],
+  computerAgentShellEnabled: false,
+}
+
+type LegacyMCPSettings = Partial<MCPSettings> & {
+  computerUseEnabled?: boolean
+  computerAllowedRoots?: string[]
+  computerShellEnabled?: boolean
+}
+
+export function normalizeMCPSettings(
+  settings?: LegacyMCPSettings | null
+): MCPSettings {
+  const source = settings ?? {}
+
+  return {
+    toolCallTimeoutSeconds:
+      source.toolCallTimeoutSeconds ??
+      DEFAULT_MCP_SETTINGS.toolCallTimeoutSeconds,
+    baseRestartDelayMs:
+      source.baseRestartDelayMs ?? DEFAULT_MCP_SETTINGS.baseRestartDelayMs,
+    maxRestartDelayMs:
+      source.maxRestartDelayMs ?? DEFAULT_MCP_SETTINGS.maxRestartDelayMs,
+    backoffMultiplier:
+      source.backoffMultiplier ?? DEFAULT_MCP_SETTINGS.backoffMultiplier,
+    enableSmartToolRouting:
+      source.enableSmartToolRouting ??
+      DEFAULT_MCP_SETTINGS.enableSmartToolRouting,
+    useLightweightRouterModel:
+      source.useLightweightRouterModel ??
+      DEFAULT_MCP_SETTINGS.useLightweightRouterModel,
+    routerModelProvider:
+      source.routerModelProvider ?? DEFAULT_MCP_SETTINGS.routerModelProvider,
+    routerModelId: source.routerModelId ?? DEFAULT_MCP_SETTINGS.routerModelId,
+    computerAgentEnabled:
+      source.computerAgentEnabled ??
+      source.computerUseEnabled ??
+      DEFAULT_MCP_SETTINGS.computerAgentEnabled,
+    computerAgentAllowedRoots:
+      source.computerAgentAllowedRoots ??
+      source.computerAllowedRoots ??
+      DEFAULT_MCP_SETTINGS.computerAgentAllowedRoots,
+    computerAgentShellEnabled:
+      source.computerAgentShellEnabled ??
+      source.computerShellEnabled ??
+      DEFAULT_MCP_SETTINGS.computerAgentShellEnabled,
+  }
 }
 
 type MCPServerStoreState = {
@@ -69,7 +114,7 @@ type MCPServerStoreState = {
   ) => void
   deleteServer: (key: string) => void
   setServers: (servers: MCPServers) => void
-  setSettings: (settings: MCPSettings) => void
+  setSettings: (settings: LegacyMCPSettings) => void
   updateSettings: (partial: Partial<MCPSettings>) => void
   syncServers: () => Promise<void>
   syncServersAndRestart: () => Promise<void>
@@ -134,10 +179,7 @@ export const useMCPServers = create<MCPServerStoreState>()((set, get) => ({
     }),
   setSettings: (settings) =>
     set(() => ({
-      settings: {
-        ...DEFAULT_MCP_SETTINGS,
-        ...settings,
-      },
+      settings: normalizeMCPSettings(settings),
     })),
   updateSettings: (partial) =>
     set((state) => ({

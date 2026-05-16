@@ -348,6 +348,17 @@ describe('TauriProvidersService', () => {
       errSpy.mockRestore()
     })
 
+    it('throws certificate error on TLS verification failure', async () => {
+      vi.mocked(fetchTauri).mockRejectedValueOnce(
+        new Error('invalid peer certificate: UnknownIssuer')
+      )
+
+      const errSpy = vi.spyOn(console, 'error').mockImplementation(() => {})
+      await expect(svc.fetchModelsFromProvider(baseProvider))
+        .rejects.toThrow('TLS certificate verification failed')
+      errSpy.mockRestore()
+    })
+
     it('throws generic fallback for non-fetch errors', async () => {
       vi.mocked(fetchTauri).mockRejectedValueOnce(new Error('something else'))
 

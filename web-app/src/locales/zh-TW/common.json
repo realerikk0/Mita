@@ -2,6 +2,7 @@
   "assistants": "助理",
   "hardware": "硬體",
   "mcp-servers": "MCP 伺服器",
+  "computerAgent": "?????",
   "connectors": "MCP 伺服器",
   "local_api_server": "本地 API 伺服器",
   "https_proxy": "HTTPS 代理",

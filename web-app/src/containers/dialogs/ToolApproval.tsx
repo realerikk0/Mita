@@ -120,7 +120,7 @@ export default function ToolApproval() {
         <div className="p-2 border bg-secondary rounded-lg">
           <p className="text-xs text-muted-foreground leading-relaxed">
             {alwaysConfirm
-              ? 'Computer Use actions can modify files or run local commands. Review the exact paths and command before allowing this one-time action.'
+              ? 'Computer Agent actions can modify files or run local commands. Review the exact paths and command before allowing this one-time action.'
               : t('tools:toolApproval.securityNotice')}
           </p>
         </div>

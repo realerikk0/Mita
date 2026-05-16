@@ -47,15 +47,15 @@ fn default_router_model_id() -> String {
     String::new()
 }
 
-fn default_computer_use_enabled() -> bool {
+fn default_computer_agent_enabled() -> bool {
     false
 }
 
-fn default_computer_allowed_roots() -> Vec<String> {
+fn default_computer_agent_allowed_roots() -> Vec<String> {
     Vec::new()
 }
 
-fn default_computer_shell_enabled() -> bool {
+fn default_computer_agent_shell_enabled() -> bool {
     false
 }
 
@@ -79,12 +79,21 @@ pub struct McpSettings {
     pub router_model_provider: String,
     #[serde(default = "default_router_model_id")]
     pub router_model_id: String,
-    #[serde(default = "default_computer_use_enabled")]
-    pub computer_use_enabled: bool,
-    #[serde(default = "default_computer_allowed_roots")]
-    pub computer_allowed_roots: Vec<String>,
-    #[serde(default = "default_computer_shell_enabled")]
-    pub computer_shell_enabled: bool,
+    #[serde(
+        default = "default_computer_agent_enabled",
+        alias = "computerUseEnabled"
+    )]
+    pub computer_agent_enabled: bool,
+    #[serde(
+        default = "default_computer_agent_allowed_roots",
+        alias = "computerAllowedRoots"
+    )]
+    pub computer_agent_allowed_roots: Vec<String>,
+    #[serde(
+        default = "default_computer_agent_shell_enabled",
+        alias = "computerShellEnabled"
+    )]
+    pub computer_agent_shell_enabled: bool,
 }
 
 impl Default for McpSettings {
@@ -98,9 +107,9 @@ impl Default for McpSettings {
             use_lightweight_router_model: false,
             router_model_provider: String::new(),
             router_model_id: String::new(),
-            computer_use_enabled: false,
-            computer_allowed_roots: Vec::new(),
-            computer_shell_enabled: false,
+            computer_agent_enabled: false,
+            computer_agent_allowed_roots: Vec::new(),
+            computer_agent_shell_enabled: false,
         }
     }
 }

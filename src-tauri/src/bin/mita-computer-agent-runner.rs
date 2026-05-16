@@ -1,12 +1,12 @@
-//! Experimental Windows Computer Use runner.
+//! Experimental Windows Computer Agent runner.
 //!
 //! The native execution path is still behind
-//! `MITA_EXPERIMENTAL_WINDOWS_COMPUTER_RUNNER_EXECUTE=1`, and the desktop app
-//! does not expose it to chats yet.
+//! `MITA_EXPERIMENTAL_WINDOWS_COMPUTER_AGENT_RUNNER_EXECUTE=1`; the desktop app
+//! sets that variable only when it invokes the runner.
 
 use std::io::{self, Read};
 
-use app_lib::core::computer::windows_runner::{
+use app_lib::core::computer_agent::windows_runner::{
     error_response, execute_runner_request, preflight_response, RunnerRequest,
 };
 
@@ -26,7 +26,7 @@ fn main() {
     }
 }
 
-fn run_from_stdin() -> app_lib::core::computer::windows_runner::RunnerResponse {
+fn run_from_stdin() -> app_lib::core::computer_agent::windows_runner::RunnerResponse {
     let mut input = String::new();
     if let Err(error) = io::stdin().read_to_string(&mut input) {
         return error_response(format!("Failed to read runner request: {error}"));

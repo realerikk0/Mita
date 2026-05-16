@@ -2,49 +2,63 @@ use serde_json::json;
 
 use crate::core::mcp::models::{McpSettings, ServerSummary, ToolWithServer};
 
-pub const COMPUTER_SERVER_NAME: &str = "mita-computer";
-pub const CREATE_TEXT_FILE: &str = "computer_create_text_file";
-pub const LIST_DIRECTORY: &str = "computer_list_directory";
-pub const READ_TEXT_FILE: &str = "computer_read_text_file";
-pub const CREATE_DIRECTORY: &str = "computer_create_directory";
-pub const MOVE_PATH: &str = "computer_move_path";
-pub const TRASH_PATH: &str = "computer_trash_path";
-pub const OPEN_PATH: &str = "computer_open_path";
-pub const RUN_SHELL: &str = "computer_run_shell";
+pub const COMPUTER_AGENT_SERVER_NAME: &str = "mita-computer-agent";
+pub const LEGACY_COMPUTER_SERVER_NAME: &str = "mita-computer";
+pub const CREATE_TEXT_FILE: &str = "computer_agent_create_text_file";
+pub const LIST_DIRECTORY: &str = "computer_agent_list_directory";
+pub const READ_TEXT_FILE: &str = "computer_agent_read_text_file";
+pub const CREATE_DIRECTORY: &str = "computer_agent_create_directory";
+pub const MOVE_PATH: &str = "computer_agent_move_path";
+pub const TRASH_PATH: &str = "computer_agent_trash_path";
+pub const OPEN_PATH: &str = "computer_agent_open_path";
+pub const RUN_SHELL: &str = "computer_agent_run_shell";
 
-pub fn is_computer_tool(tool_name: &str) -> bool {
-    matches!(
-        tool_name,
-        CREATE_TEXT_FILE
-            | LIST_DIRECTORY
-            | READ_TEXT_FILE
-            | CREATE_DIRECTORY
-            | MOVE_PATH
-            | TRASH_PATH
-            | OPEN_PATH
-            | RUN_SHELL
-    )
+const LEGACY_CREATE_TEXT_FILE: &str = "computer_create_text_file";
+const LEGACY_LIST_DIRECTORY: &str = "computer_list_directory";
+const LEGACY_READ_TEXT_FILE: &str = "computer_read_text_file";
+const LEGACY_CREATE_DIRECTORY: &str = "computer_create_directory";
+const LEGACY_MOVE_PATH: &str = "computer_move_path";
+const LEGACY_TRASH_PATH: &str = "computer_trash_path";
+const LEGACY_OPEN_PATH: &str = "computer_open_path";
+const LEGACY_RUN_SHELL: &str = "computer_run_shell";
+
+pub fn is_computer_agent_tool(tool_name: &str) -> bool {
+    canonical_computer_agent_tool_name(tool_name).is_some()
 }
 
-pub fn computer_summary(settings: &McpSettings) -> Option<ServerSummary> {
-    if !settings.computer_use_enabled {
+pub fn canonical_computer_agent_tool_name(tool_name: &str) -> Option<&'static str> {
+    match tool_name {
+        CREATE_TEXT_FILE | LEGACY_CREATE_TEXT_FILE => Some(CREATE_TEXT_FILE),
+        LIST_DIRECTORY | LEGACY_LIST_DIRECTORY => Some(LIST_DIRECTORY),
+        READ_TEXT_FILE | LEGACY_READ_TEXT_FILE => Some(READ_TEXT_FILE),
+        CREATE_DIRECTORY | LEGACY_CREATE_DIRECTORY => Some(CREATE_DIRECTORY),
+        MOVE_PATH | LEGACY_MOVE_PATH => Some(MOVE_PATH),
+        TRASH_PATH | LEGACY_TRASH_PATH => Some(TRASH_PATH),
+        OPEN_PATH | LEGACY_OPEN_PATH => Some(OPEN_PATH),
+        RUN_SHELL | LEGACY_RUN_SHELL => Some(RUN_SHELL),
+        _ => None,
+    }
+}
+
+pub fn computer_agent_summary(settings: &McpSettings) -> Option<ServerSummary> {
+    if !settings.computer_agent_enabled {
         return None;
     }
 
     Some(ServerSummary {
-        name: COMPUTER_SERVER_NAME.to_string(),
+        name: COMPUTER_AGENT_SERVER_NAME.to_string(),
         capabilities: vec![
             "computer".to_string(),
             "filesystem".to_string(),
             "files".to_string(),
             "shell".to_string(),
         ],
-        description: "Create, read, list, move, trash, open files, and run sandboxed shell commands inside approved Mita computer-use roots.".to_string(),
+        description: "Create, read, list, move, trash, open files, and run sandboxed shell commands inside approved Mita Computer Agent roots.".to_string(),
     })
 }
 
-pub fn computer_tools(settings: &McpSettings, shell_available: bool) -> Vec<ToolWithServer> {
-    if !settings.computer_use_enabled {
+pub fn computer_agent_tools(settings: &McpSettings, shell_available: bool) -> Vec<ToolWithServer> {
+    if !settings.computer_agent_enabled {
         return Vec::new();
     }
 
@@ -171,7 +185,7 @@ pub fn computer_tools(settings: &McpSettings, shell_available: bool) -> Vec<Tool
         ),
     ];
 
-    if settings.computer_shell_enabled && shell_available {
+    if settings.computer_agent_shell_enabled && shell_available {
         tools.push(tool(
             RUN_SHELL,
             "Run one non-interactive shell command in a platform sandbox. Use only when structured file tools are insufficient. The cwd must be inside this thread workspace or an allowed root.",
@@ -209,6 +223,6 @@ fn tool(name: &str, description: &str, input_schema: serde_json::Value) -> ToolW
         name: name.to_string(),
         description: Some(description.to_string()),
         input_schema,
-        server: COMPUTER_SERVER_NAME.to_string(),
+        server: COMPUTER_AGENT_SERVER_NAME.to_string(),
     }
 }

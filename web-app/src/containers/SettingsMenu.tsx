@@ -7,6 +7,7 @@ import {
   IconChevronDown,
   IconChevronRight,
   IconCommand,
+  IconDeviceDesktopCog,
   IconFeather,
   IconPalette,
   IconPlus,
@@ -121,6 +122,11 @@ const SettingsMenu = () => {
   ]
 
   const integrationSettings = [
+    {
+      title: 'common:computerAgent',
+      route: route.settings.computer_agent,
+      icon: IconDeviceDesktopCog,
+    },
     {
       title: 'common:connectors',
       route: route.settings.mcp_servers,

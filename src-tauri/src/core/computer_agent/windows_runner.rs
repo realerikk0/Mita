@@ -4,20 +4,17 @@ use serde::{Deserialize, Serialize};
 
 pub const RUNNER_PROTOCOL_VERSION: u32 = 1;
 pub const RUNNER_BINARY_NAME: &str = if cfg!(windows) {
-    "mita-computer-runner.exe"
+    "mita-computer-agent-runner.exe"
 } else {
-    "mita-computer-runner"
+    "mita-computer-agent-runner"
 };
-pub const RUNNER_PATH_ENV: &str = "MITA_WINDOWS_COMPUTER_RUNNER";
-pub const RUNNER_ENABLE_ENV: &str = "MITA_EXPERIMENTAL_WINDOWS_COMPUTER_RUNNER";
-pub const RUNNER_EXECUTE_ENV: &str = "MITA_EXPERIMENTAL_WINDOWS_COMPUTER_RUNNER_EXECUTE";
+pub const RUNNER_PATH_ENV: &str = "MITA_WINDOWS_COMPUTER_AGENT_RUNNER";
+pub const RUNNER_ENABLE_ENV: &str = "MITA_EXPERIMENTAL_WINDOWS_COMPUTER_AGENT_RUNNER";
+pub const RUNNER_EXECUTE_ENV: &str = "MITA_EXPERIMENTAL_WINDOWS_COMPUTER_AGENT_RUNNER_EXECUTE";
 pub const RUNNER_PHASE: &str = "phase-1-workspace-prototype";
 
 const BLOCKERS: &[&str] = &[
     "runner remains behind an explicit experimental execution gate",
-    "network isolation still needs automated regression tests",
-    "reparse point escape tests are not implemented",
-    "PowerShell/cmd/child-process matrix tests are not implemented",
     "custom allowed roots are intentionally disabled",
 ];
 
@@ -86,10 +83,10 @@ pub fn windows_runner_status() -> WindowsRunnerStatus {
         phase: RUNNER_PHASE.to_string(),
         runner_path,
         reason: if available {
-            "Windows Computer Use shell runner is enabled as a phase-1 workspace-only prototype."
+            "Windows Computer Agent shell runner is enabled as a phase-1 workspace-only prototype."
                 .to_string()
         } else {
-            "Windows Computer Use shell runner is not enabled for chats.".to_string()
+            "Windows Computer Agent shell runner is not enabled for chats.".to_string()
         },
         blockers,
     }
@@ -126,7 +123,7 @@ pub fn execute_runner_request(request: RunnerRequest) -> RunnerResponse {
     #[cfg(not(windows))]
     {
         let _ = request;
-        refused_response("The Windows Computer Use runner only executes on Windows.")
+        refused_response("The Windows Computer Agent runner only executes on Windows.")
     }
 }
 
@@ -170,6 +167,44 @@ pub fn error_response(message: impl Into<String>) -> RunnerResponse {
         stderr: String::new(),
         timed_out: false,
     }
+}
+
+#[cfg(windows)]
+const DIAGNOSTIC_PREFIX: &str = "Windows Computer Agent sandbox diagnostic";
+
+#[cfg(windows)]
+fn sandbox_diagnostic(stage: &str, reason: impl AsRef<str>, next_step: &str) -> String {
+    let reason = reason.as_ref();
+    if reason.starts_with(DIAGNOSTIC_PREFIX) {
+        return reason.to_string();
+    }
+
+    format!(
+        "{DIAGNOSTIC_PREFIX}\n\
+Stage: {stage}\n\
+Reason: {reason}\n\
+Phase: {RUNNER_PHASE}\n\
+Next step: {next_step}\n\
+Telemetry: none; this diagnostic was generated locally."
+    )
+}
+
+#[cfg(all(windows, test))]
+pub(crate) fn sandbox_diagnostic_for_test(stage: &str, reason: &str, next_step: &str) -> String {
+    sandbox_diagnostic(stage, reason, next_step)
+}
+
+#[cfg(all(windows, test))]
+pub(crate) fn cleanup_journal_path_for_test(workspace_root: &Path) -> PathBuf {
+    let workspace = workspace_root
+        .canonicalize()
+        .unwrap_or_else(|_| workspace_root.to_path_buf());
+    native::cleanup_journal_path_for_test(&workspace)
+}
+
+#[cfg(all(not(windows), test))]
+pub(crate) fn cleanup_journal_path_for_test(workspace_root: &Path) -> PathBuf {
+    workspace_root.join(".mita-computer-agent-runner-cleanup-unused")
 }
 
 pub fn validate_runner_request(request: &RunnerRequest) -> Result<(), String> {
@@ -237,7 +272,7 @@ pub fn runner_candidate_paths_from(
             &mut candidates,
             app_dir
                 .join("resources")
-                .join("computer-runner")
+                .join("computer-agent-runner")
                 .join(RUNNER_BINARY_NAME),
         );
         if let Some(parent) = app_dir.parent() {
@@ -252,7 +287,7 @@ pub fn runner_candidate_paths_from(
                 &mut candidates,
                 parent
                     .join("resources")
-                    .join("computer-runner")
+                    .join("computer-agent-runner")
                     .join(RUNNER_BINARY_NAME),
             );
         }
@@ -270,7 +305,7 @@ pub fn runner_candidate_paths_from(
             &mut candidates,
             manifest_dir
                 .join("resources")
-                .join("computer-runner")
+                .join("computer-agent-runner")
                 .join(RUNNER_BINARY_NAME),
         );
         push_candidate(
@@ -333,8 +368,9 @@ fn normalize_lexical(path: &Path) -> PathBuf {
 mod native {
     use std::{
         ffi::{c_void, OsStr},
+        fs,
         mem::size_of,
-        os::windows::ffi::OsStrExt,
+        os::windows::{ffi::OsStrExt, fs::MetadataExt},
         path::{Path, PathBuf},
         process::Command,
         ptr::{null, null_mut},
@@ -358,7 +394,7 @@ mod native {
                 },
                 PSID, SECURITY_ATTRIBUTES, SECURITY_CAPABILITIES,
             },
-            Storage::FileSystem::ReadFile,
+            Storage::FileSystem::{ReadFile, FILE_ATTRIBUTE_REPARSE_POINT},
             System::{
                 JobObjects::{
                     AssignProcessToJobObject, CreateJobObjectW, JobObjectExtendedLimitInformation,
@@ -378,10 +414,15 @@ mod native {
         },
     };
 
-    use super::{completed_response, error_response, RunnerRequest, RunnerResponse};
+    use serde::{Deserialize, Serialize};
+
+    use super::{
+        completed_response, error_response, sandbox_diagnostic, RunnerRequest, RunnerResponse,
+    };
 
     const HRESULT_ALREADY_EXISTS: i32 = 0x800700B7_u32 as i32;
     const WAIT_FAILED: u32 = 0xFFFF_FFFF;
+    const CLEANUP_DIR_NAME: &str = ".mita-computer-agent-runner-cleanups";
 
     pub fn execute_workspace_only(request: RunnerRequest) -> RunnerResponse {
         match execute_workspace_only_inner(request) {
@@ -391,32 +432,91 @@ mod native {
     }
 
     fn execute_workspace_only_inner(request: RunnerRequest) -> Result<RunnerResponse, String> {
-        let workspace = request
-            .workspace_root
-            .canonicalize()
-            .map_err(|e| format!("Failed to resolve workspace root: {e}"))?;
+        let workspace = request.workspace_root.canonicalize().map_err(|e| {
+            sandbox_diagnostic(
+                "path-resolution",
+                format!(
+                    "Failed to resolve workspace root {}: {e}",
+                    request.workspace_root.display()
+                ),
+                "Confirm the thread workspace exists and is accessible, then retry the command.",
+            )
+        })?;
         let cwd = request
             .cwd
             .canonicalize()
-            .map_err(|e| format!("Failed to resolve cwd: {e}"))?;
+            .map_err(|e| {
+                sandbox_diagnostic(
+                    "path-resolution",
+                    format!("Failed to resolve cwd {}: {e}", request.cwd.display()),
+                    "Confirm the command cwd exists inside the thread workspace, then retry the command.",
+                )
+            })?;
 
         if !super::path_starts_with(&cwd, &workspace) {
-            return Err("Runner cwd must stay inside the canonical workspace".to_string());
+            return Err(sandbox_diagnostic(
+                "path-validation",
+                "Runner cwd must stay inside the canonical workspace",
+                "Use a cwd inside the private thread workspace; custom roots are disabled in this phase.",
+            ));
         }
 
         let workspace_for_os = win32_path(&workspace);
         let cwd_for_os = win32_path(&cwd);
         if workspace_for_os.to_string_lossy().starts_with("\\\\") {
-            return Err(
-                "Phase 1 Windows runner requires a local drive workspace; UNC paths are not supported"
-                    .to_string(),
-            );
+            return Err(sandbox_diagnostic(
+                "path-validation",
+                "Phase 1 Windows runner requires a local drive workspace; UNC paths are not supported",
+                "Move the thread workspace to a local drive before enabling Windows shell execution.",
+            ));
         }
+        ensure_workspace_has_no_reparse_points(&workspace_for_os).map_err(|e| {
+            sandbox_diagnostic(
+                "workspace-reparse-scan",
+                e,
+                "Remove junctions, symlinks, or other reparse points from the thread workspace before retrying.",
+            )
+        })?;
+        cleanup_stale_sandbox(&workspace_for_os).map_err(|e| {
+            sandbox_diagnostic(
+                "stale-sandbox-cleanup",
+                e,
+                "Close running Mita instances, verify workspace permissions, and retry so the runner can remove stale ACL/profile state.",
+            )
+        })?;
 
-        let app_container = AppContainerProfile::create()?;
-        let _acl = WorkspaceAclGrant::grant(&workspace_for_os, &app_container.sid_string)?;
+        let app_container = AppContainerProfile::create().map_err(|e| {
+            sandbox_diagnostic(
+                "app-container-profile",
+                e,
+                "Confirm Windows AppContainer APIs are available for this user and retry. A reboot can clear stuck per-user AppContainer state.",
+            )
+        })?;
+        let _journal = SandboxCleanupJournal::write(&workspace_for_os, &app_container).map_err(|e| {
+            sandbox_diagnostic(
+                "cleanup-journal",
+                e,
+                "Confirm the parent agent-workspaces directory is writable so the runner can record crash cleanup state.",
+            )
+        })?;
+        let _acl =
+            WorkspaceAclGrant::grant(&workspace_for_os, &app_container.sid_string).map_err(
+                |e| {
+                    sandbox_diagnostic(
+                        "workspace-acl-grant",
+                        e,
+                        "Confirm the workspace is on an NTFS local drive and the current user can change its ACL.",
+                    )
+                },
+            )?;
         let process_output =
-            create_app_container_process(&request, &cwd_for_os, app_container.sid)?;
+            create_app_container_process(&request, &cwd_for_os, app_container.sid).map_err(|e| {
+                sandbox_diagnostic(
+                    "sandbox-process-launch",
+                    e,
+                    "Confirm cmd.exe and core Windows process/job-object APIs are available, then retry.",
+                )
+            })?;
 
         Ok(completed_response(
             "Windows sandbox prototype completed",
@@ -568,7 +668,7 @@ mod native {
     impl AppContainerProfile {
         fn create() -> Result<Self, String> {
             let name = format!(
-                "mita-computer-runner-{}-{}",
+                "mita-computer-agent-runner-{}-{}",
                 std::process::id(),
                 SystemTime::now()
                     .duration_since(UNIX_EPOCH)
@@ -577,7 +677,7 @@ mod native {
             );
             let name_wide = wide_null(OsStr::new(&name));
             let display = wide_null(OsStr::new("Mita Computer Runner"));
-            let description = wide_null(OsStr::new("Experimental Mita Computer Use sandbox"));
+            let description = wide_null(OsStr::new("Experimental Mita Computer Agent sandbox"));
             let mut sid: PSID = null_mut();
 
             let hr = unsafe {
@@ -621,9 +721,8 @@ mod native {
 
     impl Drop for AppContainerProfile {
         fn drop(&mut self) {
-            let name = wide_null(OsStr::new(&self.name));
+            delete_app_container_profile(&self.name);
             unsafe {
-                DeleteAppContainerProfile(name.as_ptr());
                 if !self.sid.is_null() {
                     FreeSid(self.sid);
                 }
@@ -658,6 +757,147 @@ mod native {
                 "remove workspace ACL",
             );
         }
+    }
+
+    #[derive(Debug, Serialize, Deserialize)]
+    struct SandboxCleanupRecord {
+        profile_name: String,
+        sid_string: String,
+        workspace: String,
+    }
+
+    struct SandboxCleanupJournal {
+        path: PathBuf,
+    }
+
+    impl SandboxCleanupJournal {
+        fn write(workspace: &Path, app_container: &AppContainerProfile) -> Result<Self, String> {
+            let path = cleanup_journal_path(workspace);
+            if let Some(parent) = path.parent() {
+                fs::create_dir_all(parent).map_err(|e| {
+                    format!(
+                        "Failed to create Windows runner cleanup journal directory {}: {e}",
+                        parent.display()
+                    )
+                })?;
+            }
+
+            let record = SandboxCleanupRecord {
+                profile_name: app_container.name.clone(),
+                sid_string: app_container.sid_string.clone(),
+                workspace: workspace.to_string_lossy().to_string(),
+            };
+            let json = serde_json::to_string(&record)
+                .map_err(|e| format!("Failed to serialize cleanup journal: {e}"))?;
+            fs::write(&path, json).map_err(|e| {
+                format!(
+                    "Failed to write Windows runner cleanup journal {}: {e}",
+                    path.display()
+                )
+            })?;
+
+            Ok(Self { path })
+        }
+    }
+
+    impl Drop for SandboxCleanupJournal {
+        fn drop(&mut self) {
+            let _ = fs::remove_file(&self.path);
+        }
+    }
+
+    fn cleanup_stale_sandbox(workspace: &Path) -> Result<(), String> {
+        let path = cleanup_journal_path(workspace);
+        if !path.is_file() {
+            return Ok(());
+        }
+
+        let json = fs::read_to_string(&path).map_err(|e| {
+            format!(
+                "Failed to read stale Windows runner cleanup journal {}: {e}",
+                path.display()
+            )
+        })?;
+        let record: SandboxCleanupRecord = serde_json::from_str(&json).map_err(|e| {
+            format!(
+                "Failed to parse stale Windows runner cleanup journal {}: {e}",
+                path.display()
+            )
+        })?;
+        validate_cleanup_record(&record, workspace)?;
+
+        let _ = run_icacls(
+            workspace,
+            &["/remove", &format!("*{}", record.sid_string), "/T", "/C"],
+            "remove stale workspace ACL",
+        );
+        delete_app_container_profile(&record.profile_name);
+        fs::remove_file(&path).map_err(|e| {
+            format!(
+                "Failed to remove stale Windows runner cleanup journal {}: {e}",
+                path.display()
+            )
+        })?;
+
+        Ok(())
+    }
+
+    fn validate_cleanup_record(
+        record: &SandboxCleanupRecord,
+        workspace: &Path,
+    ) -> Result<(), String> {
+        if !record
+            .profile_name
+            .starts_with("mita-computer-agent-runner-")
+            || record.profile_name.chars().any(char::is_control)
+        {
+            return Err(
+                "Stale Windows runner cleanup journal has an invalid profile name".to_string(),
+            );
+        }
+        if !record.sid_string.starts_with("S-1-15-2-")
+            || record.sid_string.chars().any(char::is_control)
+        {
+            return Err(
+                "Stale Windows runner cleanup journal has an invalid AppContainer SID".to_string(),
+            );
+        }
+        if record.workspace != workspace.to_string_lossy() {
+            return Err(
+                "Stale Windows runner cleanup journal does not match the workspace".to_string(),
+            );
+        }
+        Ok(())
+    }
+
+    fn delete_app_container_profile(name: &str) {
+        let name = wide_null(OsStr::new(name));
+        unsafe {
+            DeleteAppContainerProfile(name.as_ptr());
+        }
+    }
+
+    fn cleanup_journal_path(workspace: &Path) -> PathBuf {
+        let cleanup_dir = workspace
+            .parent()
+            .map(|parent| parent.join(CLEANUP_DIR_NAME))
+            .unwrap_or_else(|| workspace.join(CLEANUP_DIR_NAME));
+        cleanup_dir.join(format!("{:016x}.json", stable_workspace_hash(workspace)))
+    }
+
+    fn stable_workspace_hash(workspace: &Path) -> u64 {
+        let text = workspace.to_string_lossy().to_ascii_lowercase();
+        let mut hash = 0xcbf29ce484222325u64;
+        for byte in text.as_bytes() {
+            hash ^= u64::from(*byte);
+            hash = hash.wrapping_mul(0x100000001b3);
+        }
+        hash
+    }
+
+    #[cfg(test)]
+    pub(super) fn cleanup_journal_path_for_test(workspace: &Path) -> PathBuf {
+        cleanup_journal_path(&win32_path(workspace))
     }
 
     struct Job {
@@ -886,6 +1126,30 @@ mod native {
                 String::from_utf8_lossy(&output.stderr)
             ))
         }
+    }
+
+    fn ensure_workspace_has_no_reparse_points(path: &Path) -> Result<(), String> {
+        let metadata = std::fs::symlink_metadata(path)
+            .map_err(|e| format!("Failed to inspect workspace path {}: {e}", path.display()))?;
+        if metadata.file_attributes() & FILE_ATTRIBUTE_REPARSE_POINT != 0 {
+            return Err(format!(
+                "Workspace contains unsupported reparse point: {}",
+                path.display()
+            ));
+        }
+
+        if metadata.is_dir() {
+            for entry in std::fs::read_dir(path)
+                .map_err(|e| format!("Failed to scan workspace path {}: {e}", path.display()))?
+            {
+                let entry = entry.map_err(|e| {
+                    format!("Failed to scan workspace path {}: {e}", path.display())
+                })?;
+                ensure_workspace_has_no_reparse_points(&entry.path())?;
+            }
+        }
+
+        Ok(())
     }
 
     fn system_cmd_exe() -> PathBuf {

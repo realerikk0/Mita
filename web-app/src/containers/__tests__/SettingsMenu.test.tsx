@@ -110,6 +110,7 @@ describe('SettingsMenu', () => {
 
   it('renders integrations links', () => {
     render(<SettingsMenu />)
+    expect(screen.getByText('common:computerAgent')).toBeInTheDocument()
     expect(screen.getByText('common:connectors')).toBeInTheDocument()
     expect(screen.queryByText('common:claude_code')).not.toBeInTheDocument()
   })

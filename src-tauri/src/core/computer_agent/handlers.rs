@@ -10,37 +10,40 @@ use serde_json::{json, Map, Value};
 use crate::core::mcp::models::McpSettings;
 
 use super::{
-    permissions::{hidden_thread_id_arg, unique_txt_path, ComputerScope},
+    permissions::{hidden_thread_id_arg, unique_txt_path, ComputerAgentScope},
     shell::{normalize_output_cap, normalize_timeout, run_shell, ShellRequest},
     tools::{
-        CREATE_DIRECTORY, CREATE_TEXT_FILE, LIST_DIRECTORY, MOVE_PATH, OPEN_PATH, READ_TEXT_FILE,
-        RUN_SHELL, TRASH_PATH,
+        canonical_computer_agent_tool_name, CREATE_DIRECTORY, CREATE_TEXT_FILE, LIST_DIRECTORY,
+        MOVE_PATH, OPEN_PATH, READ_TEXT_FILE, RUN_SHELL, TRASH_PATH,
     },
 };
 
 const DEFAULT_READ_LIMIT_BYTES: u64 = 64 * 1024;
 const MAX_READ_LIMIT_BYTES: u64 = 256 * 1024;
 
-pub async fn handle_computer_tool(
+pub async fn handle_computer_agent_tool(
     mita_data_folder: PathBuf,
     settings: McpSettings,
     tool_name: &str,
     arguments: Option<Map<String, Value>>,
 ) -> Result<CallToolResult, String> {
-    if !settings.computer_use_enabled {
-        return Err("Computer Use is disabled in settings".to_string());
+    if !settings.computer_agent_enabled {
+        return Err("Computer Agent is disabled in settings".to_string());
     }
 
     let args = arguments.unwrap_or_default();
     let thread_id = string_arg(&args, hidden_thread_id_arg())
-        .ok_or_else(|| "Computer tool call is missing the current thread id".to_string())?;
-    let scope = ComputerScope::new(
+        .ok_or_else(|| "Computer Agent tool call is missing the current thread id".to_string())?;
+    let scope = ComputerAgentScope::new(
         &mita_data_folder,
         &thread_id,
-        &settings.computer_allowed_roots,
+        &settings.computer_agent_allowed_roots,
     )?;
 
-    let text = match tool_name {
+    let canonical_tool_name = canonical_computer_agent_tool_name(tool_name)
+        .ok_or_else(|| format!("Unknown Computer Agent tool '{tool_name}'"))?;
+
+    let text = match canonical_tool_name {
         CREATE_TEXT_FILE => create_text_file(&scope, &args)?,
         LIST_DIRECTORY => list_directory(&scope, &args)?,
         READ_TEXT_FILE => read_text_file(&scope, &args)?,
@@ -49,13 +52,16 @@ pub async fn handle_computer_tool(
         TRASH_PATH => trash_path(&scope, &args)?,
         OPEN_PATH => open_path(&scope, &args)?,
         RUN_SHELL => run_shell_tool(&scope, &args).await?,
-        _ => return Err(format!("Unknown Computer Use tool '{tool_name}'")),
+        _ => unreachable!("canonical Computer Agent tool must be handled"),
     };
 
     Ok(CallToolResult::success(vec![Content::text(text)]))
 }
 
-fn create_text_file(scope: &ComputerScope, args: &Map<String, Value>) -> Result<String, String> {
+fn create_text_file(
+    scope: &ComputerAgentScope,
+    args: &Map<String, Value>,
+) -> Result<String, String> {
     let suggested_name = required_string_arg(args, "suggestedName")?;
     let content = required_raw_string_arg(args, "content")?;
     let directory = scope.resolve_directory_for_create(string_arg(args, "directory").as_deref())?;
@@ -78,7 +84,7 @@ fn create_text_file(scope: &ComputerScope, args: &Map<String, Value>) -> Result<
     }))
 }
 
-fn list_directory(scope: &ComputerScope, args: &Map<String, Value>) -> Result<String, String> {
+fn list_directory(scope: &ComputerAgentScope, args: &Map<String, Value>) -> Result<String, String> {
     let directory = scope.resolve_existing_directory(string_arg(args, "path").as_deref())?;
     let mut entries = Vec::new();
 
@@ -105,7 +111,7 @@ fn list_directory(scope: &ComputerScope, args: &Map<String, Value>) -> Result<St
     }))
 }
 
-fn read_text_file(scope: &ComputerScope, args: &Map<String, Value>) -> Result<String, String> {
+fn read_text_file(scope: &ComputerAgentScope, args: &Map<String, Value>) -> Result<String, String> {
     let path = scope.resolve_existing(Some(&required_string_arg(args, "path")?))?;
     if !path.is_file() {
         return Err(format!("Path '{}' is not a file", path.display()));
@@ -126,7 +132,10 @@ fn read_text_file(scope: &ComputerScope, args: &Map<String, Value>) -> Result<St
     }))
 }
 
-fn create_directory(scope: &ComputerScope, args: &Map<String, Value>) -> Result<String, String> {
+fn create_directory(
+    scope: &ComputerAgentScope,
+    args: &Map<String, Value>,
+) -> Result<String, String> {
     let path = scope.resolve_new_path(&required_string_arg(args, "path")?)?;
     fs::create_dir_all(&path)
         .map_err(|e| format!("Failed to create directory '{}': {}", path.display(), e))?;
@@ -137,7 +146,7 @@ fn create_directory(scope: &ComputerScope, args: &Map<String, Value>) -> Result<
     }))
 }
 
-fn move_path(scope: &ComputerScope, args: &Map<String, Value>) -> Result<String, String> {
+fn move_path(scope: &ComputerAgentScope, args: &Map<String, Value>) -> Result<String, String> {
     let from = scope.resolve_existing(Some(&required_string_arg(args, "from")?))?;
     let to = scope.resolve_new_path(&required_string_arg(args, "to")?)?;
     if let Some(parent) = to.parent() {
@@ -160,7 +169,7 @@ fn move_path(scope: &ComputerScope, args: &Map<String, Value>) -> Result<String,
     }))
 }
 
-fn trash_path(scope: &ComputerScope, args: &Map<String, Value>) -> Result<String, String> {
+fn trash_path(scope: &ComputerAgentScope, args: &Map<String, Value>) -> Result<String, String> {
     let path = scope.resolve_existing(Some(&required_string_arg(args, "path")?))?;
     move_to_trash(&path)?;
 
@@ -170,7 +179,7 @@ fn trash_path(scope: &ComputerScope, args: &Map<String, Value>) -> Result<String
     }))
 }
 
-fn open_path(scope: &ComputerScope, args: &Map<String, Value>) -> Result<String, String> {
+fn open_path(scope: &ComputerAgentScope, args: &Map<String, Value>) -> Result<String, String> {
     let path = scope.resolve_existing(Some(&required_string_arg(args, "path")?))?;
     open_with_os(&path)?;
 
@@ -181,7 +190,7 @@ fn open_path(scope: &ComputerScope, args: &Map<String, Value>) -> Result<String,
 }
 
 async fn run_shell_tool(
-    scope: &ComputerScope,
+    scope: &ComputerAgentScope,
     args: &Map<String, Value>,
 ) -> Result<String, String> {
     let command = required_string_arg(args, "command")?;
