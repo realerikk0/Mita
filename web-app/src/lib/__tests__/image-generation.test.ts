@@ -61,11 +61,19 @@ describe('image generation helpers', () => {
     expect(apiQualityForPreset('hd', 'dall-e-3')).toBe('hd')
   })
 
-  it('uses Jingxing-compatible edit params for gpt-image reference edits', () => {
+  it('uses standard gpt-image-2 edit sizes and legacy Jingxing gpt-image-1.5 sizes', () => {
+    expect(
+      imageEditSizeForRatio(
+        '2:3',
+        'gpt-image-2',
+        'jingxing',
+        'https://api.jingxing.uk/v1'
+      )
+    ).toBe('1024x1536')
     expect(
       imageEditSizeForRatio(
         '3:4',
-        'gpt-image-2',
+        'gpt-image-1.5',
         'jingxing',
         'https://api.jingxing.uk/v1'
       )
@@ -73,11 +81,19 @@ describe('image generation helpers', () => {
     expect(
       imageEditSizeForRatio(
         '16:9',
-        'gpt-image-2',
+        'gpt-image-1.5',
         'jingxing',
         'https://api.jingxing.uk/v1'
       )
     ).toBe('1792x1024')
+    expect(
+      imageEditSizeForRatio(
+        '16:9',
+        'gpt-image-2',
+        'jingxing',
+        'https://api.jingxing.uk/v1'
+      )
+    ).toBe('1536x1024')
     expect(
       apiQualityForImageEditPreset(
         'hd',

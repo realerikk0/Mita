@@ -48,6 +48,7 @@
     "increaseCount": "增加数量",
     "generate": "生成",
     "retry": "重试",
+    "retryIn": "{{seconds}} 秒后重试",
     "reEdit": "重新编辑",
     "regenerate": "再次生成",
     "useSourceImage": "使用源图",
@@ -85,15 +86,21 @@
       "describeImageFirst": "请先描述图片",
       "selectEditCapableModel": "请选择支持源图输入的图片模型",
       "referenceImported": "参考图已导入",
+      "waitForReferenceImport": "参考图正在导入，请稍后再生成",
       "importReferenceFailed": "导入参考图失败",
       "deleteAssetFailed": "删除图片资产失败",
       "revealAssetFailed": "无法打开图片所在位置",
       "promptCopied": "提示词已复制",
-      "referenceLimitReached": "最多可使用 {{count}} 张参考图。"
+      "referenceLimitReached": "最多可使用 {{count}} 张参考图。",
+      "retryCoolingDown": "图片服务正在冷却，请 {{seconds}} 秒后重试。"
     },
     "errors": {
       "modelUnavailable": "图片模型已不可用",
-      "generationFailed": "图片生成失败"
+      "generationFailed": "图片生成失败",
+      "rateLimited": "图片服务繁忙，请稍后再试。",
+      "requestTimeout": "图片生成请求超时，请稍后重试。",
+      "invalidSourceImage": "参考图无法被图片模型读取，请重新导入或换一张图片。",
+      "invalidSourceImageWithIndex": "第 {{index}} 张参考图无法被图片模型读取，请重新导入或换一张图片。"
     },
     "addReferenceImage": "添加参考图",
     "removeReferenceImage": "移除 {{prompt}}",
@@ -480,6 +487,12 @@
       "title": "线程已移除",
       "description": "线程已成功从\"{{projectName}}\"中移除"
     }
+  },
+  "chatInputActions": {
+    "addImages": "添加图片",
+    "addDocumentsOrFiles": "添加文档或文件",
+    "indexingDocuments": "正在索引文档…",
+    "useAssistant": "使用助手"
   },
   "providerQuota": {
     "title": "令牌额度已用尽",

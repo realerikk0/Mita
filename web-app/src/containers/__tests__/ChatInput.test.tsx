@@ -209,7 +209,15 @@ vi.mock('@tanstack/react-router', () => ({
 }))
 
 vi.mock('@/i18n/react-i18next-compat', () => ({
-  useTranslation: () => ({ t: (k: string) => k }),
+  useTranslation: () => ({
+    t: (k: string) =>
+      ({
+        'common:chatInputActions.addImages': '添加图片',
+        'common:chatInputActions.addDocumentsOrFiles': '添加文档或文件',
+        'common:chatInputActions.indexingDocuments': '正在索引文档…',
+        'common:chatInputActions.useAssistant': '使用助手',
+      })[k] ?? k,
+  }),
 }))
 
 vi.mock('sonner', () => ({
@@ -321,6 +329,21 @@ describe('ChatInput', () => {
     expect(ta).toHaveAttribute('placeholder', 'common:placeholder.chatInput')
     // send button is present
     expect(document.querySelector('[data-test-id="send-message-button"]')).toBeTruthy()
+  })
+
+  it('renders localized attachment menu labels', () => {
+    renderInput()
+
+    expect(screen.getByText('添加图片')).toBeInTheDocument()
+    expect(screen.getByText('添加文档或文件')).toBeInTheDocument()
+    expect(screen.getByText('使用助手')).toBeInTheDocument()
+  })
+
+  it('renders localized document indexing label', () => {
+    attachmentsList = [{ type: 'document', processing: true }]
+    renderInput()
+
+    expect(screen.getByText('正在索引文档…')).toBeInTheDocument()
   })
 
   it('disables the send button when prompt is empty', () => {

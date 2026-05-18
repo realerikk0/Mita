@@ -34,7 +34,7 @@ const LEGACY_SIZE_BY_RATIO: Record<ImageRatio, string> = {
   '16:9': '1536x1024',
 }
 
-const JINGXING_EDIT_SIZE_BY_RATIO: Record<ImageRatio, string> = {
+const JINGXING_LEGACY_EDIT_SIZE_BY_RATIO: Record<ImageRatio, string> = {
   '9:16': '1024x1792',
   '4:3': '1792x1024',
   '3:2': '1792x1024',
@@ -114,14 +114,25 @@ export function usesJingxingCompatibleImageEditParams(
   return isGptImageModel(modelId) && isJingxingImageProvider(providerId, baseUrl)
 }
 
+export function usesJingxingLegacyImageEditSize(
+  modelId?: string,
+  providerId?: string,
+  baseUrl?: string
+) {
+  return (
+    modelId?.toLowerCase() === 'gpt-image-1.5' &&
+    isJingxingImageProvider(providerId, baseUrl)
+  )
+}
+
 export function imageEditSizeForRatio(
   ratio: ImageRatio,
   modelId?: string,
   providerId?: string,
   baseUrl?: string
 ) {
-  return usesJingxingCompatibleImageEditParams(modelId, providerId, baseUrl)
-    ? JINGXING_EDIT_SIZE_BY_RATIO[ratio]
+  return usesJingxingLegacyImageEditSize(modelId, providerId, baseUrl)
+    ? JINGXING_LEGACY_EDIT_SIZE_BY_RATIO[ratio]
     : imageSizeForRatio(ratio, modelId)
 }
 

@@ -26,7 +26,11 @@ import {
   ConversationContent,
   ConversationScrollButton,
 } from '@/components/ai-elements/conversation'
-import { generateId, lastAssistantMessageIsCompleteWithToolCalls } from 'ai'
+import {
+  generateId,
+  lastAssistantMessageIsCompleteWithToolCalls,
+  type ChatStatus,
+} from 'ai'
 import type { UIMessage } from '@ai-sdk/react'
 import { useChatSessions } from '@/stores/chat-session-store'
 import {
@@ -378,6 +382,33 @@ function ThreadDetail() {
     autoIncreaseAttempts < MAX_AUTO_INCREASE_ATTEMPTS
   const [contextLimitError, setContextLimitError] = useState<Error | null>(null)
   const [processingEmbeddings, setProcessingEmbeddings] = useState(false)
+  const rawChatStatusRef = useRef<ChatStatus>('ready')
+  const [settledChatStatus, setSettledChatStatus] =
+    useState<ChatStatus | null>(null)
+  const resetSettledChatStatus = useCallback(() => {
+    setSettledChatStatus(null)
+    rawChatStatusRef.current = CHAT_STATUS.SUBMITTED
+  }, [])
+  const markChatReadyAfterFinish = useCallback(
+    (finishReason?: string, isAbort?: boolean, isError?: boolean) => {
+      if (isAbort || isError || finishReason === 'length') return
+
+      queueMicrotask(() => {
+        const rawStatus = rawChatStatusRef.current
+        if (
+          rawStatus === CHAT_STATUS.SUBMITTED ||
+          rawStatus === CHAT_STATUS.STREAMING
+        ) {
+          const updateSessionStatus = useChatSessions.getState().updateStatus
+          if (typeof updateSessionStatus === 'function') {
+            updateSessionStatus(threadId, 'ready')
+          }
+          setSettledChatStatus('ready')
+        }
+      })
+    },
+    [threadId]
+  )
 
   // Refs so onFinish (captured in closure) always calls the latest callbacks
   const handleContextSizeIncreaseRef = useRef<(() => void) | null>(null)
@@ -402,9 +433,10 @@ function ThreadDetail() {
     sessionTitle: thread?.title,
     systemMessage,
     experimental_throttle: 50,
-    onFinish: ({ message, isAbort }) => {
+    onFinish: ({ message, isAbort, isError }) => {
       const msgMeta = message.metadata as Record<string, unknown> | undefined
       const finishReason = msgMeta?.finishReason as string | undefined
+      markChatReadyAfterFinish(finishReason, isAbort, isError)
 
       // Context limit hit: send partial content as prefill so the model continues
       // from where it stopped. The stream wrapper injects it as the first text-delta
@@ -683,6 +715,15 @@ function ThreadDetail() {
     sendAutomaticallyWhen: followUpMessage,
   })
 
+  useEffect(() => {
+    rawChatStatusRef.current = status
+    if (status === 'ready' || status === 'error') {
+      setSettledChatStatus(null)
+    }
+  }, [status])
+
+  const effectiveStatus = settledChatStatus ?? status
+
   const createCompactionModel = useCallback(async () => {
     const modelId = useModelProvider.getState().selectedModel?.id
     const providerId = useModelProvider.getState().selectedProvider
@@ -953,6 +994,7 @@ function ThreadDetail() {
       text: string,
       files?: Array<{ type: string; mediaType: string; url: string }>
     ) => {
+      resetSettledChatStatus()
       // Cancel any in-flight title summarization so it doesn't compete with this request
       titleAbortRef.current?.abort()
       titleAbortRef.current = null
@@ -1109,6 +1151,7 @@ function ThreadDetail() {
       serviceHub,
       selectedProvider,
       maybeAutoCompactBeforeSend,
+      resetSettledChatStatus,
     ]
   )
 
@@ -1116,6 +1159,7 @@ function ThreadDetail() {
   // This prevents stale or new attachments from leaking into auto-sent queue items.
   const sendQueuedMessage = useCallback(
     async (text: string, metadata?: Record<string, unknown>) => {
+      resetSettledChatStatus()
       const messageId = generateId()
       const userMessage = newUserThreadContent(
         threadId,
@@ -1143,7 +1187,13 @@ function ThreadDetail() {
         metadata: userMessage.metadata,
       })
     },
-    [sendMessage, threadId, addMessage, maybeAutoCompactBeforeSend]
+    [
+      sendMessage,
+      threadId,
+      addMessage,
+      maybeAutoCompactBeforeSend,
+      resetSettledChatStatus,
+    ]
   )
 
   const handleAutoRunStart = useCallback(
@@ -1218,10 +1268,16 @@ function ThreadDetail() {
     [processAndSendMessage]
   )
 
+  const handleStop = useCallback(() => {
+    resetSettledChatStatus()
+    stop()
+  }, [resetSettledChatStatus, stop])
+
   // Handle regenerate from any message (user or assistant)
   // - For user messages: keeps the user message, deletes all after, regenerates assistant response
   // - For assistant messages: finds the closest preceding user message, deletes from there
   const handleRegenerate = useCallback((messageId?: string) => {
+    resetSettledChatStatus()
     // Cancel any in-flight title summarization before regenerating
     titleAbortRef.current?.abort()
     titleAbortRef.current = null
@@ -1265,7 +1321,7 @@ function ThreadDetail() {
     // Call the AI SDK regenerate function - it will handle truncating the UI messages
     // and generating a new response from the selected message
     regenerate(messageId ? { messageId } : undefined)
-  }, [threadId, deleteMessage, regenerate])
+  }, [threadId, deleteMessage, regenerate, resetSettledChatStatus])
 
   // Handle edit message - updates the message and regenerates from it
   const handleEditMessage = useCallback(
@@ -1452,7 +1508,7 @@ function ThreadDetail() {
   const processingQueueRef = useRef(false)
 
   useEffect(() => {
-    if (status !== 'ready' || processingQueueRef.current) return
+    if (effectiveStatus !== 'ready' || processingQueueRef.current) return
     if (sessionData.tools.length > 0) return
     if (useAutoRunStore.getState().getRun(threadId).status === 'running') {
       return
@@ -1469,10 +1525,10 @@ function ThreadDetail() {
       .finally(() => {
         processingQueueRef.current = false
       })
-  }, [status, threadId, sendQueuedMessage, sessionData.tools.length])
+  }, [effectiveStatus, threadId, sendQueuedMessage, sessionData.tools.length])
 
   useEffect(() => {
-    if (status !== 'ready' || autoRunSendingRef.current) return
+    if (effectiveStatus !== 'ready' || autoRunSendingRef.current) return
     if (sessionData.tools.length > 0) return
     const queueState = useMessageQueue.getState()
     const queuedCount =
@@ -1525,7 +1581,7 @@ function ThreadDetail() {
     persistAutoRunState,
     sendQueuedMessage,
     sessionData.tools.length,
-    status,
+    effectiveStatus,
     threadId,
   ])
 
@@ -1547,6 +1603,31 @@ function ThreadDetail() {
     () => searchThreadModel ?? thread?.model,
     [searchThreadModel, thread]
   )
+  const autoRunBlockedReason = useMemo(() => {
+    if (!threadModel) {
+      return t('chat:autoRun.blocked.noModel')
+    }
+    if (
+      effectiveStatus === CHAT_STATUS.SUBMITTED ||
+      effectiveStatus === CHAT_STATUS.STREAMING
+    ) {
+      return t('chat:autoRun.blocked.chatBusy')
+    }
+    if (sessionData.tools.length > 0) {
+      return t('chat:autoRun.blocked.toolsBusy')
+    }
+
+    const queueState = useMessageQueue.getState()
+    const queuedCount =
+      typeof queueState.getQueue === 'function'
+        ? queueState.getQueue(threadId).length
+        : 0
+    if (queuedCount > 0) {
+      return t('chat:autoRun.blocked.queueBusy')
+    }
+
+    return undefined
+  }, [effectiveStatus, sessionData.tools.length, t, threadId, threadModel])
   const activeError = error ?? contextLimitError
   const quotaError = providerQuotaErrorFromUnknown(activeError)
   const activeErrorMessage = quotaError?.message ?? activeError?.message
@@ -1574,7 +1655,7 @@ function ThreadDetail() {
                     message={message}
                     isFirstMessage={isFirstMessage}
                     isLastMessage={isLastMessage}
-                    status={status}
+                    status={effectiveStatus}
                     reasoningContainerRef={reasoningContainerRef}
                     isReasoningAtBottom={isReasoningAtBottom}
                     onReasoningScroll={handleReasoningScroll}
@@ -1587,13 +1668,13 @@ function ThreadDetail() {
                   />
                 )
               })}
-              {pendingContinueMessage && status === 'submitted' && (
+              {pendingContinueMessage && effectiveStatus === 'submitted' && (
                 <MessageItem
                   key={`continue-placeholder-${pendingContinueMessage.id}`}
                   message={pendingContinueMessage}
                   isFirstMessage={false}
                   isLastMessage={true}
-                  status={status}
+                  status={effectiveStatus}
                   reasoningContainerRef={reasoningContainerRef}
                   isReasoningAtBottom={isReasoningAtBottom}
                   onReasoningScroll={handleReasoningScroll}
@@ -1610,13 +1691,15 @@ function ThreadDetail() {
                   <Shimmer duration={1}>Processing embeddings...</Shimmer>
                 </div>
               )}
-              {(status === CHAT_STATUS.SUBMITTED ||
+              {(effectiveStatus === CHAT_STATUS.SUBMITTED ||
                 isAutoIncreasingContext) && (
                 <div className="flex flex-row items-center gap-2">
                   {(pendingContinueMessage || isAutoIncreasingContext) && (
                     <Shimmer duration={1}>Growing the Mind...</Shimmer>
                   )}
-                  {status === CHAT_STATUS.SUBMITTED && <PromptProgress />}
+                  {effectiveStatus === CHAT_STATUS.SUBMITTED && (
+                    <PromptProgress />
+                  )}
                 </div>
               )}
               {activeError && !isAutoIncreasingContext && (
@@ -1689,7 +1772,8 @@ function ThreadDetail() {
         <div className="py-4 mx-auto w-full md:w-4/5 xl:w-4/6">
           <AutoRunPanel
             threadId={threadId}
-            disabled={!threadModel}
+            disabled={Boolean(autoRunBlockedReason)}
+            blockedReason={autoRunBlockedReason}
             onStart={handleAutoRunStart}
             onPause={handleAutoRunPause}
             onResume={handleAutoRunResume}
@@ -1699,8 +1783,8 @@ function ThreadDetail() {
             model={threadModel}
             onSubmit={handleSubmit}
             onCompact={handleManualCompact}
-            onStop={stop}
-            chatStatus={status}
+            onStop={handleStop}
+            chatStatus={effectiveStatus}
           />
         </div>
       </div>

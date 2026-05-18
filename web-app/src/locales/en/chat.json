@@ -9,6 +9,28 @@
   "sendMessage": "Send Message",
   "newConversation": "New Conversation",
   "clearHistory": "Clear History",
+  "autoRun": {
+    "label": "Auto run",
+    "rounds": "Rounds",
+    "start": "Start",
+    "pause": "Pause",
+    "resume": "Resume",
+    "stop": "Stop",
+    "completed": "Completed",
+    "error": "Error",
+    "blocked": {
+      "noModel": "Select a model before starting auto run",
+      "chatBusy": "Waiting for the current reply to finish",
+      "toolsBusy": "Waiting for tool calls to finish",
+      "queueBusy": "Waiting for queued messages to finish"
+    },
+    "status": {
+      "running": "Round {{current}} / {{max}} running",
+      "paused": "Paused: {{current}} / {{max}}",
+      "stopped": "Stopped: {{current}} / {{max}}",
+      "completedWithProgress": "Completed: {{current}} / {{max}}"
+    }
+  },
   "paragraphEdit": {
     "editWithAi": "Edit with AI",
     "title": "Edit selection with AI",

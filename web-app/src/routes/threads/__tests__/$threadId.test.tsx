@@ -254,8 +254,10 @@ vi.mock('@/components/PromptProgress', () => ({
 }))
 
 vi.mock('@/components/ui/button', () => ({
-  Button: ({ children, onClick }: any) => (
-    <button onClick={onClick}>{children}</button>
+  Button: ({ children, onClick, disabled }: any) => (
+    <button onClick={onClick} disabled={disabled}>
+      {children}
+    </button>
   ),
 }))
 
@@ -362,13 +364,38 @@ vi.mock('@/hooks/useServiceHub', () => ({
 }))
 vi.mock('@/i18n/react-i18next-compat', () => ({
   useTranslation: () => ({
-    t: (key: string) =>
-      ({
+    t: (key: string, options?: Record<string, unknown>) => {
+      const template =
+        ({
         'common:providerQuota.title': 'Provider quota exhausted',
         'common:providerQuota.recharge': 'Recharge',
         'common:providerQuota.manageTokens': 'Manage tokens',
         'common:providerQuota.linksUnavailable': 'No links available',
-      })[key] ?? key,
+        'chat:autoRun.label': '自动对话',
+        'chat:autoRun.rounds': '轮数',
+        'chat:autoRun.start': '开始',
+        'chat:autoRun.pause': '暂停',
+        'chat:autoRun.resume': '继续',
+        'chat:autoRun.stop': '停止',
+        'chat:autoRun.completed': '已完成',
+        'chat:autoRun.error': '出错',
+        'chat:autoRun.blocked.noModel': '请选择模型后再开始自动对话',
+        'chat:autoRun.blocked.chatBusy': '等待当前回复结束',
+        'chat:autoRun.blocked.toolsBusy': '等待工具调用结束',
+        'chat:autoRun.blocked.queueBusy': '等待当前队列消息发送完成',
+        'chat:autoRun.status.running': '第 {{current}} / {{max}} 轮运行中',
+        'chat:autoRun.status.paused': '已暂停：{{current}} / {{max}}',
+        'chat:autoRun.status.stopped': '已停止：{{current}} / {{max}}',
+        'chat:autoRun.status.completedWithProgress':
+          '已完成：{{current}} / {{max}}',
+      })[key] ?? key
+
+      return template.replace(/\{\{(\w+)\}\}/g, (_match, variable) =>
+        options?.[variable] !== undefined
+          ? String(options[variable])
+          : `{{${variable}}}`
+      )
+    },
   }),
 }))
 vi.mock('@/hooks/useMessages', () => ({ useMessages: h.useMessagesMock }))
@@ -418,6 +445,8 @@ vi.mock('@/utils/error', () => ({
 // Import component AFTER mocks
 // -----------------------------------------------------------------------------
 import { Route } from '../$threadId'
+import { useAutoRunStore } from '@/stores/auto-run-store'
+import { DEFAULT_MITA_AUTO_RUN } from '@/types/mita-agent'
 
 const renderComponent = () => {
   const Component = Route.component as React.ComponentType
@@ -461,6 +490,7 @@ describe('ThreadDetail route', () => {
     h.agentModeState.agentThreads = {}
     h.openExternalUrl.mockResolvedValue(undefined)
     h.useChatArgs.length = 0
+    useAutoRunStore.setState({ runs: {} })
     sessionStorage.clear()
   })
 
@@ -609,6 +639,143 @@ describe('ThreadDetail route', () => {
     h.chatState.status = 'submitted'
     renderComponent()
     expect(screen.getByTestId('prompt-progress')).toBeInTheDocument()
+  })
+
+  it('falls back to ready after onFinish when the SDK status remains streaming', async () => {
+    h.chatState.status = 'streaming'
+    renderComponent()
+    expect(screen.getByTestId('chat-status')).toHaveTextContent('streaming')
+
+    await act(async () => {
+      h.useChatArgs.at(-1).onFinish({
+        message: {
+          id: 'assistant-1',
+          role: 'assistant',
+          parts: [{ type: 'text', text: 'done' }],
+          metadata: {},
+        },
+        messages: [],
+        isAbort: false,
+        isDisconnect: false,
+        isError: false,
+      })
+      await Promise.resolve()
+    })
+
+    await waitFor(() => {
+      expect(screen.getByTestId('chat-status')).toHaveTextContent('ready')
+    })
+  })
+
+  it('shows why auto-run start is blocked while a reply is active', () => {
+    h.chatState.status = 'streaming'
+    renderComponent()
+
+    expect(screen.getByText('等待当前回复结束')).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: /开始/ })).toBeDisabled()
+  })
+
+  it('starts auto-run from the panel and persists running metadata', () => {
+    renderComponent()
+
+    act(() => {
+      screen.getByRole('button', { name: /开始/ }).click()
+    })
+
+    expect(h.threadsState.updateThread).toHaveBeenCalledWith(
+      'thread-1',
+      expect.objectContaining({
+        metadata: expect.objectContaining({
+          mitaAutoRun: expect.objectContaining({
+            status: 'running',
+            enabled: true,
+            maxRounds: 3,
+            currentRound: 0,
+          }),
+        }),
+      })
+    )
+  })
+
+  it('pauses a running auto-run and persists the paused state', () => {
+    useAutoRunStore.getState().setRun('thread-1', {
+      ...DEFAULT_MITA_AUTO_RUN,
+      status: 'running',
+      enabled: true,
+      maxRounds: 3,
+      currentRound: 1,
+    })
+
+    renderComponent()
+    act(() => {
+      screen.getByRole('button', { name: /暂停/ }).click()
+    })
+
+    expect(h.threadsState.updateThread).toHaveBeenCalledWith(
+      'thread-1',
+      expect.objectContaining({
+        metadata: expect.objectContaining({
+          mitaAutoRun: expect.objectContaining({
+            status: 'paused',
+            enabled: true,
+          }),
+        }),
+      })
+    )
+  })
+
+  it('resumes a paused auto-run and persists the running state', () => {
+    useAutoRunStore.getState().setRun('thread-1', {
+      ...DEFAULT_MITA_AUTO_RUN,
+      status: 'paused',
+      enabled: true,
+      maxRounds: 3,
+      currentRound: 1,
+    })
+
+    renderComponent()
+    act(() => {
+      screen.getByRole('button', { name: /继续/ }).click()
+    })
+
+    expect(h.threadsState.updateThread).toHaveBeenCalledWith(
+      'thread-1',
+      expect.objectContaining({
+        metadata: expect.objectContaining({
+          mitaAutoRun: expect.objectContaining({
+            status: 'running',
+            enabled: true,
+          }),
+        }),
+      })
+    )
+  })
+
+  it('stops a running auto-run and persists the stopped state', () => {
+    useAutoRunStore.getState().setRun('thread-1', {
+      ...DEFAULT_MITA_AUTO_RUN,
+      status: 'running',
+      enabled: true,
+      maxRounds: 3,
+      currentRound: 1,
+    })
+
+    renderComponent()
+    act(() => {
+      screen.getByRole('button', { name: /停止/ }).click()
+    })
+
+    expect(h.threadsState.updateThread).toHaveBeenCalledWith(
+      'thread-1',
+      expect.objectContaining({
+        metadata: expect.objectContaining({
+          mitaAutoRun: expect.objectContaining({
+            status: 'stopped',
+            enabled: false,
+          }),
+        }),
+      })
+    )
   })
 
   it('shows error banner with Regenerate button for generic errors', () => {

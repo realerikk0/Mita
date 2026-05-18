@@ -6,7 +6,12 @@ import {
   PopoverTrigger,
 } from '@/components/ui/popover'
 import { useModelProvider } from '@/hooks/useModelProvider'
-import { cn, getProviderTitle, getModelDisplayName } from '@/lib/utils'
+import {
+  cn,
+  getModelDisplayName,
+  getModelLogoProvider,
+  getProviderTitle,
+} from '@/lib/utils'
 import { highlightFzfMatch } from '@/utils/highlight'
 import Capabilities from './Capabilities'
 import { IconSettings, IconX } from '@tabler/icons-react'
@@ -469,6 +474,10 @@ const DropdownModelProvider = memo(function DropdownModelProvider({
   if (!providers.length) return null
 
   const provider = getProviderByName(selectedProvider)
+  const selectedModelLogoProvider =
+    provider && selectedModel?.id
+      ? { provider: getModelLogoProvider(selectedModel.id, provider.provider) }
+      : provider
 
 
   return (
@@ -479,9 +488,9 @@ const DropdownModelProvider = memo(function DropdownModelProvider({
               type="button"
               className="font-medium cursor-pointer flex items-center gap-1.5 relative z-20 min-w-0"
             >
-              {provider && (
+              {selectedModelLogoProvider && (
                 <div className="shrink-0">
-                  <ProvidersAvatar provider={provider} />
+                  <ProvidersAvatar provider={selectedModelLogoProvider} />
                 </div>
               )}
               <Tooltip>
@@ -592,7 +601,12 @@ const DropdownModelProvider = memo(function DropdownModelProvider({
                           <div className="flex items-center gap-1 flex-1 min-w-0">
                             <div className="shrink-0 -ml-1">
                               <ProvidersAvatar
-                                provider={searchableModel.provider}
+                                provider={{
+                                  provider: getModelLogoProvider(
+                                    searchableModel.model.id,
+                                    searchableModel.provider.provider
+                                  ),
+                                }}
                               />
                             </div>
                             <Tooltip>
@@ -688,6 +702,16 @@ const DropdownModelProvider = memo(function DropdownModelProvider({
                               )}
                             >
                               <div className="flex items-center gap-2 flex-1 min-w-0">
+                                <div className="shrink-0">
+                                  <ProvidersAvatar
+                                    provider={{
+                                      provider: getModelLogoProvider(
+                                        searchableModel.model.id,
+                                        searchableModel.provider.provider
+                                      ),
+                                    }}
+                                  />
+                                </div>
                                 <Tooltip>
                                   <TooltipTrigger asChild>
                                     <span className="text-sm truncate">

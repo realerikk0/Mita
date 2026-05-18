@@ -4,11 +4,13 @@ import '@testing-library/jest-dom'
 import DropdownModelProvider from '../DropdownModelProvider'
 import { getModelDisplayName } from '@/lib/utils'
 import { useModelProvider } from '@/hooks/useModelProvider'
+import { useFavoriteModel } from '@/hooks/useFavoriteModel'
 
 // Define basic types to avoid missing declarations
 type ModelProvider = {
   provider: string
   active: boolean
+  api_key?: string
   models: Array<{
     id: string
     displayName?: string
@@ -274,5 +276,80 @@ describe('DropdownModelProvider - Display Name Integration', () => {
     expect(screen.getAllByText('Short Name').length).toBeGreaterThanOrEqual(1)
     // Custom Model 1 is also in the dropdown
     expect(screen.getAllByText('Custom Model 1').length).toBeGreaterThanOrEqual(1)
+  })
+
+  it('should show original model provider avatars for Jingxing models', () => {
+    const jingxingProviders: ModelProvider[] = [
+      {
+        provider: 'jingxing',
+        active: true,
+        api_key: 'test-token',
+        models: [
+          {
+            id: 'gpt-5.4',
+            capabilities: ['completion'],
+          },
+        ],
+        settings: [],
+      },
+    ]
+
+    vi.mocked(useModelProvider).mockReturnValue({
+      providers: jingxingProviders,
+      selectedProvider: 'jingxing',
+      selectedModel: jingxingProviders[0].models[0],
+      getProviderByName: vi.fn((name: string) =>
+        jingxingProviders.find((p: ModelProvider) => p.provider === name)
+      ),
+      selectModelProvider: vi.fn(),
+      getModelBy: vi.fn((id: string) =>
+        jingxingProviders[0].models.find((m: Model) => m.id === id)
+      ),
+      updateProvider: vi.fn(),
+    } as MockHookReturn)
+
+    render(<DropdownModelProvider />)
+
+    expect(screen.getByTestId('provider-avatar-jingxing')).toBeInTheDocument()
+    expect(screen.getAllByTestId('provider-avatar-openai')).toHaveLength(2)
+  })
+
+  it('should show original model provider avatars for favorite Jingxing models', () => {
+    const jingxingProviders: ModelProvider[] = [
+      {
+        provider: 'jingxing',
+        active: true,
+        api_key: 'test-token',
+        models: [
+          {
+            id: 'gpt-5.4',
+            capabilities: ['completion'],
+          },
+        ],
+        settings: [],
+      },
+    ]
+
+    vi.mocked(useFavoriteModel).mockReturnValue({
+      favoriteModels: [{ id: 'gpt-5.4' }],
+    } as ReturnType<typeof useFavoriteModel>)
+    vi.mocked(useModelProvider).mockReturnValue({
+      providers: jingxingProviders,
+      selectedProvider: 'jingxing',
+      selectedModel: jingxingProviders[0].models[0],
+      getProviderByName: vi.fn((name: string) =>
+        jingxingProviders.find((p: ModelProvider) => p.provider === name)
+      ),
+      selectModelProvider: vi.fn(),
+      getModelBy: vi.fn((id: string) =>
+        jingxingProviders[0].models.find((m: Model) => m.id === id)
+      ),
+      updateProvider: vi.fn(),
+    } as MockHookReturn)
+
+    render(<DropdownModelProvider />)
+
+    expect(screen.getByTestId('provider-avatar-jingxing')).toBeInTheDocument()
+    expect(screen.getAllByTestId('provider-avatar-openai')).toHaveLength(2)
   })
 })

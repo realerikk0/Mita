@@ -14,6 +14,10 @@ import {
   parseProviderErrorResponse,
   providerQuotaErrorFromUnknown,
 } from '@/lib/provider-quota-error'
+import {
+  imageGenerationRequestErrorFromUnknown,
+  parseImageGenerationErrorResponse,
+} from '@/lib/image-generation-errors'
 import type {
   ImageApiImage,
   ImageAssetRecord,
@@ -63,7 +67,7 @@ type JsonResponseResult = {
 
 const RETRYABLE_KEY_STATUSES = [401, 403, 429]
 const JINGXING_TASK_POLL_INTERVAL_MS = 2500
-const JINGXING_TASK_TIMEOUT_MS = 180_000
+const JINGXING_TASK_TIMEOUT_MS = 600_000
 
 export class DefaultImageGenerationService implements ImageGenerationService {
   protected fetch(): typeof globalThis.fetch {
@@ -88,8 +92,11 @@ export class DefaultImageGenerationService implements ImageGenerationService {
       return this.parseImageResponse(response, request, apiKey)
     }
 
-    const response = await this.postForm(endpoint, request)
-    return this.parseImageResponse(response, request)
+    const { json, apiKey } = await this.postForm(endpoint, request)
+    const response = this.shouldPollJingxingImageTask(request, json)
+      ? await this.pollJingxingImageTask(request, json, apiKey)
+      : json
+    return this.parseImageResponse(response, request, apiKey)
   }
 
   async saveAsset(request: SaveImageAssetRequest): Promise<ImageAssetRecord> {
@@ -103,8 +110,9 @@ export class DefaultImageGenerationService implements ImageGenerationService {
   }
 
   async importAsset(
-    _request: ImportImageAssetRequest
+    request: ImportImageAssetRequest
   ): Promise<ImageAssetRecord> {
+    void request
     throw new Error('Image asset import is only available in the desktop app')
   }
 
@@ -112,7 +120,8 @@ export class DefaultImageGenerationService implements ImageGenerationService {
     return []
   }
 
-  async deleteAsset(_assetId: string): Promise<void> {
+  async deleteAsset(assetId: string): Promise<void> {
+    void assetId
     return
   }
 
@@ -124,6 +133,8 @@ export class DefaultImageGenerationService implements ImageGenerationService {
         ? this.shouldUseJingxingAsyncGeneration(request)
           ? '/images/generations/async'
           : '/images/generations'
+        : this.shouldUseJingxingAsyncEdit(request)
+          ? '/images/edits/async'
         : request.mode === 'variation'
           ? '/images/variations'
           : '/images/edits'
@@ -158,6 +169,14 @@ export class DefaultImageGenerationService implements ImageGenerationService {
     return (
       this.isJingxingProvider(request.provider) &&
       !this.isJingxingGeminiImageModel(request.model)
+    )
+  }
+
+  private shouldUseJingxingAsyncEdit(request: ImageGenerationRequest) {
+    return (
+      request.mode !== 'generate' &&
+      this.isJingxingProvider(request.provider) &&
+      (request.sourceAssets?.length ?? 0) > 0
     )
   }
 
@@ -217,6 +236,10 @@ export class DefaultImageGenerationService implements ImageGenerationService {
         continue
       }
 
+      const imageRequestError =
+        await parseImageGenerationErrorResponse(response)
+      if (imageRequestError) throw imageRequestError
+
       if (!response.ok) {
         throw new Error(await this.errorMessage(response))
       }
@@ -267,6 +290,10 @@ export class DefaultImageGenerationService implements ImageGenerationService {
         continue
       }
 
+      const imageRequestError =
+        await parseImageGenerationErrorResponse(response)
+      if (imageRequestError) throw imageRequestError
+
       if (!response.ok) {
         throw new Error(await this.errorMessage(response))
       }
@@ -280,14 +307,23 @@ export class DefaultImageGenerationService implements ImageGenerationService {
     throw new Error('Image generation API key rotation exhausted')
   }
 
-  private async postForm(endpoint: string, request: ImageGenerationRequest) {
+  private async postForm(
+    endpoint: string,
+    request: ImageGenerationRequest
+  ): Promise<JsonResponseResult> {
     const form = await this.imageFormData(request)
 
     try {
       return await this.postFormWithKeys(endpoint, request, form)
     } catch (error) {
       if (providerQuotaErrorFromUnknown(error)) throw error
-      if (request.mode !== 'variation') throw error
+      if (imageGenerationRequestErrorFromUnknown(error)) throw error
+      if (
+        request.mode !== 'variation' ||
+        !endpoint.includes('/images/variations')
+      ) {
+        throw error
+      }
       const fallback = endpoint.replace('/images/variations', '/images/edits')
       const fallbackRequest = request.prompt.trim()
         ? request
@@ -303,7 +339,12 @@ export class DefaultImageGenerationService implements ImageGenerationService {
   private async imageFormData(request: ImageGenerationRequest) {
     const form = new FormData()
     form.append('model', request.model.id)
-    if (request.prompt.trim()) form.append('prompt', request.prompt.trim())
+    const prompt =
+      request.prompt.trim() ||
+      (this.shouldUseJingxingAsyncEdit(request) && request.mode === 'variation'
+        ? 'Create a fresh variation of this image.'
+        : '')
+    if (prompt) form.append('prompt', prompt)
     form.append('n', String(request.count))
     form.append(
       'size',
@@ -327,30 +368,107 @@ export class DefaultImageGenerationService implements ImageGenerationService {
       form.append('response_format', 'b64_json')
     }
 
-    for (const sourceAsset of request.sourceAssets ?? []) {
-      const blob = await this.assetToBlob(sourceAsset)
+    const sourceAssets = request.sourceAssets ?? []
+    const imageFieldName = sourceAssets.length > 1 ? 'image[]' : 'image'
+
+    for (const sourceAsset of sourceAssets) {
+      const blob = await this.uploadBlobForSourceAsset(request, sourceAsset)
       form.append(
-        'image',
+        imageFieldName,
         blob,
-        sourceAsset.fileName || `source.${imageFileExtension(blob.type)}`
+        this.uploadFileNameForSourceAsset(sourceAsset, blob)
       )
     }
 
     return form
   }
 
+  private async uploadBlobForSourceAsset(
+    request: ImageGenerationRequest,
+    asset: ImageAssetRecord
+  ) {
+    const blob = await this.assetToBlob(asset)
+    if (!this.shouldNormalizeSourceImage(request, blob)) return blob
+
+    return this.normalizeImageBlob(blob).catch(() => blob)
+  }
+
+  private uploadFileNameForSourceAsset(asset: ImageAssetRecord, blob: Blob) {
+    const extension = imageFileExtension(blob.type)
+    const fallback = `source.${extension}`
+    if (!asset.fileName) return fallback
+
+    const stem = asset.fileName.replace(/\.[^.]+$/, '')
+    const currentExtension = asset.fileName.split('.').pop()?.toLowerCase()
+    if (currentExtension === extension) return asset.fileName
+    if (currentExtension === 'jpeg' && extension === 'jpg') return asset.fileName
+    return `${stem || 'source'}.${extension}`
+  }
+
+  private shouldNormalizeSourceImage(
+    request: ImageGenerationRequest,
+    blob: Blob
+  ) {
+    return (
+      this.isJingxingProvider(request.provider) &&
+      isGptImageModel(request.model.id) &&
+      request.sourceAssets !== undefined &&
+      request.sourceAssets.length > 0 &&
+      blob.type !== 'image/png' &&
+      typeof document !== 'undefined'
+    )
+  }
+
+  private async normalizeImageBlob(blob: Blob) {
+    const imageUrl = URL.createObjectURL(blob)
+    try {
+      const image = await this.loadImage(imageUrl)
+      const maxDimension = 1536
+      const scale = Math.min(
+        1,
+        maxDimension / Math.max(image.naturalWidth, 1),
+        maxDimension / Math.max(image.naturalHeight, 1)
+      )
+      const width = Math.max(1, Math.round(image.naturalWidth * scale))
+      const height = Math.max(1, Math.round(image.naturalHeight * scale))
+      const canvas = document.createElement('canvas')
+      canvas.width = width
+      canvas.height = height
+      const context = canvas.getContext('2d')
+      if (!context) return blob
+
+      context.drawImage(image, 0, 0, width, height)
+      const normalized = await new Promise<Blob | null>((resolve) => {
+        canvas.toBlob(resolve, 'image/png')
+      })
+      return normalized ?? blob
+    } finally {
+      URL.revokeObjectURL(imageUrl)
+    }
+  }
+
+  private async loadImage(src: string) {
+    return new Promise<HTMLImageElement>((resolve, reject) => {
+      const image = new Image()
+      image.onload = () => resolve(image)
+      image.onerror = () => reject(new Error('Failed to load source image'))
+      image.src = src
+    })
+  }
+
   private async postFormWithKeys(
     endpoint: string,
     request: ImageGenerationRequest,
     body: FormData
-  ) {
+  ): Promise<JsonResponseResult> {
     const fetchImpl = this.fetch()
     const attempts = this.apiKeyAttempts(request.provider)
 
     for (let index = 0; index < attempts.length; index++) {
+      const apiKey = attempts[index]
       const response = await fetchImpl(endpoint, {
         method: 'POST',
-        headers: this.baseHeaders(request.provider, attempts[index]),
+        headers: this.baseHeaders(request.provider, apiKey),
         body,
         signal: request.signal,
       })
@@ -369,11 +487,18 @@ export class DefaultImageGenerationService implements ImageGenerationService {
         continue
       }
 
+      const imageRequestError =
+        await parseImageGenerationErrorResponse(response)
+      if (imageRequestError) throw imageRequestError
+
       if (!response.ok) {
         throw new Error(await this.errorMessage(response))
       }
 
-      return (await response.json()) as RawImageResponse
+      return {
+        json: (await response.json()) as RawImageResponse,
+        apiKey,
+      }
     }
 
     throw new Error('Image generation API key rotation exhausted')
@@ -385,7 +510,13 @@ export class DefaultImageGenerationService implements ImageGenerationService {
       throw new Error(`Unable to read source image ${asset.fileName}`)
     }
     const blob = (await response.blob()) as unknown
-    if (blob instanceof Blob) return blob
+    if (blob instanceof Blob) {
+      const mimeType = this.imageMimeTypeForAsset(asset, blob.type)
+      if (blob.type === mimeType) return blob
+      return new Blob([await this.blobArrayBuffer(blob)], {
+        type: mimeType,
+      })
+    }
 
     const foreignBlob = blob as {
       arrayBuffer: () => Promise<ArrayBuffer>
@@ -393,7 +524,31 @@ export class DefaultImageGenerationService implements ImageGenerationService {
     }
 
     return new Blob([await foreignBlob.arrayBuffer()], {
-      type: foreignBlob.type || asset.mimeType,
+      type: this.imageMimeTypeForAsset(asset, foreignBlob.type),
+    })
+  }
+
+  private imageMimeTypeForAsset(asset: ImageAssetRecord, blobType?: string) {
+    if (blobType?.startsWith('image/')) return blobType
+    if (asset.mimeType?.startsWith('image/')) return asset.mimeType
+
+    const fileName = asset.fileName || asset.path
+    const extension = fileName.split('.').pop()?.toLowerCase()
+    if (extension === 'jpg' || extension === 'jpeg') return 'image/jpeg'
+    if (extension === 'webp') return 'image/webp'
+    if (extension === 'png') return 'image/png'
+    return 'image/png'
+  }
+
+  private async blobArrayBuffer(blob: Blob) {
+    if (typeof blob.arrayBuffer === 'function') return blob.arrayBuffer()
+
+    return new Promise<ArrayBuffer>((resolve, reject) => {
+      const reader = new FileReader()
+      reader.onload = () => resolve(reader.result as ArrayBuffer)
+      reader.onerror = () =>
+        reject(reader.error ?? new Error('Failed to read image blob'))
+      reader.readAsArrayBuffer(blob)
     })
   }
 
@@ -402,7 +557,6 @@ export class DefaultImageGenerationService implements ImageGenerationService {
     response: RawImageResponse
   ) {
     return (
-      request.mode === 'generate' &&
       this.isJingxingProvider(request.provider) &&
       response.object === 'image.task' &&
       Boolean(response.id) &&
@@ -472,7 +626,7 @@ export class DefaultImageGenerationService implements ImageGenerationService {
 
   private jingxingTaskEndpoint(request: ImageGenerationRequest, taskId: string) {
     const baseUrl = request.provider.base_url || 'https://api.jingxing.uk/v1'
-    return `${baseUrl.replace(/\/$/, '')}/images/generations/tasks/${encodeURIComponent(taskId)}`
+    return `${baseUrl.replace(/\/$/, '')}/images/tasks/${encodeURIComponent(taskId)}`
   }
 
   private async fetchJingxingTaskContents(
@@ -543,6 +697,10 @@ export class DefaultImageGenerationService implements ImageGenerationService {
         await response.body?.cancel()
         continue
       }
+
+      const imageRequestError =
+        await parseImageGenerationErrorResponse(response)
+      if (imageRequestError) throw imageRequestError
 
       if (response.ok) return response
       await response.body?.cancel()

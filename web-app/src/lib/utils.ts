@@ -64,6 +64,60 @@ export function getModelDisplayName(model: Model): string {
   return model.displayName || model.id
 }
 
+export function getModelLogoProvider(
+  modelId: string | undefined,
+  fallbackProvider: string
+) {
+  if (!modelId) return fallbackProvider
+
+  const normalized = modelId.toLowerCase()
+
+  if (/^(?:openai\/)?(?:gpt-|o\d)/.test(normalized)) return 'openai'
+  if (
+    normalized.startsWith('claude-') ||
+    normalized.startsWith('anthropic/claude-') ||
+    normalized.startsWith('anthropic.claude-')
+  ) {
+    return 'anthropic'
+  }
+  if (
+    normalized.startsWith('gemini-') ||
+    normalized.startsWith('google/gemini-')
+  ) {
+    return 'gemini'
+  }
+  if (
+    normalized.startsWith('grok-') ||
+    normalized.startsWith('xai/grok-') ||
+    normalized.startsWith('x-ai/grok-')
+  ) {
+    return 'xai'
+  }
+  if (
+    normalized.startsWith('mistral') ||
+    normalized.startsWith('mistralai/') ||
+    normalized.startsWith('magistral-') ||
+    normalized.startsWith('pixtral-') ||
+    normalized.startsWith('codestral-')
+  ) {
+    return 'mistral'
+  }
+  if (
+    normalized.startsWith('cohere/') ||
+    normalized.startsWith('command-')
+  ) {
+    return 'cohere'
+  }
+  if (
+    normalized.startsWith('minimax') ||
+    normalized.startsWith('minimaxai/')
+  ) {
+    return 'minimax'
+  }
+
+  return fallbackProvider
+}
+
 export function getProviderLogo(provider: string) {
   switch (provider) {
     case 'jan':

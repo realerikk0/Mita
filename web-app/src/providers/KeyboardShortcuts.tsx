@@ -5,8 +5,7 @@ import { useProjectDialog } from '@/hooks/useProjectDialog'
 import { useRouter } from '@tanstack/react-router'
 import { route } from '@/constants/routes'
 import { PlatformShortcuts, ShortcutAction } from '@/lib/shortcuts'
-import { useAgentMode } from '@/hooks/useAgentMode'
-import { TEMPORARY_CHAT_ID } from '@/constants/chat'
+import { startNewChat } from '@/lib/new-chat'
 
 export function KeyboardShortcutsProvider() {
   const { open, setLeftPanel } = useLeftPanel()
@@ -34,8 +33,7 @@ export function KeyboardShortcutsProvider() {
   useKeyboardShortcut({
     ...newChatShortcut,
     callback: () => {
-      useAgentMode.getState().removeThread(TEMPORARY_CHAT_ID)
-      router.navigate({ to: route.home })
+      startNewChat(router.navigate)
     },
   })
 

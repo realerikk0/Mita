@@ -38,9 +38,8 @@ import { SearchDialog } from '@/containers/dialogs/SearchDialog'
 import { useThreadManagement } from '@/hooks/useThreadManagement'
 import { useSearchDialog } from '@/hooks/useSearchDialog'
 import { useProjectDialog } from '@/hooks/useProjectDialog'
-import { useAgentMode } from '@/hooks/useAgentMode'
-import { TEMPORARY_CHAT_ID } from '@/constants/chat'
 import { PlatformShortcuts, ShortcutAction } from '@/lib/shortcuts'
+import { startNewAgentChat, startNewChat } from '@/lib/new-chat'
 
 type AnimatedIconHandle =
   | SearchIconHandle
@@ -191,14 +190,8 @@ export function NavMain() {
   const navMainItems = getNavMainItems(
     () => setProjectDialogOpen(true),
     () => setSearchOpen(true),
-    () => {
-      useAgentMode.getState().removeThread(TEMPORARY_CHAT_ID)
-      navigate({ to: route.home })
-    },
-    () => {
-      useAgentMode.getState().setAgentMode(TEMPORARY_CHAT_ID, true)
-      navigate({ to: route.home })
-    }
+    () => startNewChat(navigate),
+    () => startNewAgentChat(navigate)
   ).filter(
     (item) =>
       ![

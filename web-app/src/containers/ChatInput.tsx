@@ -1715,7 +1715,7 @@ const ChatInput = memo(function ChatInput({
                     {/* Vision image attachment - always enabled, prompts to download vision model if needed */}
                     <DropdownMenuItem onClick={handleImagePickerClick}>
                       <IconPhoto size={18} className="text-muted-foreground" />
-                      <span>Add Images</span>
+                      <span>{t('common:chatInputActions.addImages')}</span>
                       <input
                         type="file"
                         ref={fileInputRef}
@@ -1742,8 +1742,8 @@ const ChatInput = memo(function ChatInput({
                       )}
                       <span>
                         {ingestingDocs
-                          ? 'Indexing documents…'
-                          : 'Add documents or files'}
+                          ? t('common:chatInputActions.indexingDocuments')
+                          : t('common:chatInputActions.addDocumentsOrFiles')}
                       </span>
                     </DropdownMenuItem>
                     {/* Use Assistant - only show when no projectId */}
@@ -1751,7 +1751,7 @@ const ChatInput = memo(function ChatInput({
                       <DropdownMenuSub>
                         <DropdownMenuSubTrigger>
                           <IconUser size={18} className="text-muted-foreground" />
-                          <span>Use Assistant</span>
+                          <span>{t('common:chatInputActions.useAssistant')}</span>
                         </DropdownMenuSubTrigger>
                         <DropdownMenuSubContent className="max-h-64 overflow-y-auto">
                           <AssistantsMenu

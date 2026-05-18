@@ -6,6 +6,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 import { ModelCapabilities } from '@/types/models'
 import { ProviderQuotaError } from '@/lib/provider-quota-error'
+import { ImageGenerationRequestError } from '@/lib/image-generation-errors'
 
 const h = vi.hoisted(() => ({
   providers: [] as any[],
@@ -105,6 +106,8 @@ const translations: Record<string, string> = {
   'common:imageGeneration.status.succeeded': 'Succeeded',
   'common:imageGeneration.status.failed': 'Failed',
   'common:imageGeneration.toast.referenceImported': 'Reference image imported',
+  'common:imageGeneration.toast.waitForReferenceImport':
+    'Reference image is still importing. Try again in a moment.',
   'common:imageGeneration.toast.importReferenceFailed':
     'Failed to import reference image',
   'common:imageGeneration.defaultVariationPrompt':
@@ -119,8 +122,15 @@ const translations: Record<string, string> = {
   'common:imageGeneration.reEdit': 'Re-edit',
   'common:imageGeneration.regenerate': 'Regenerate',
   'common:imageGeneration.retry': 'Retry',
+  'common:imageGeneration.retryIn': 'Retry in {{seconds}}s',
   'common:imageGeneration.toast.referenceLimitReached':
     'You can use up to {{count}} reference images.',
+  'common:imageGeneration.toast.retryCoolingDown':
+    'Image service is cooling down. Try again in {{seconds}}s.',
+  'common:imageGeneration.errors.rateLimited':
+    'Image service is busy. Please try again later.',
+  'common:imageGeneration.errors.requestTimeout':
+    'Image generation request timed out. Please try again later.',
   'common:providerQuota.title': 'Provider quota exhausted',
   'common:providerQuota.recharge': 'Recharge',
   'common:providerQuota.manageTokens': 'Manage tokens',
@@ -322,6 +332,45 @@ describe('Images route', () => {
       'https://api.jingxing.uk/console/topup'
     )
     expect(screen.getByRole('button', { name: 'Manage tokens' })).toBeInTheDocument()
+  })
+
+  it('shows a readable busy error and retry cooldown for image request failures', async () => {
+    h.providers = [
+      {
+        provider: 'jingxing',
+        base_url: 'https://api.jingxing.uk/v1',
+        settings: [],
+        models: [
+          {
+            id: 'gpt-image-2',
+            capabilities: [ModelCapabilities.IMAGE_GENERATION],
+          },
+        ],
+      },
+    ]
+    h.generateImages.mockRejectedValueOnce(
+      new ImageGenerationRequestError({
+        message: 'Too Many Requests',
+        status: 429,
+        statusText: 'Too Many Requests',
+        kind: 'rate_limited',
+        retryAfterMs: 5_000,
+      })
+    )
+
+    renderComponent()
+
+    await waitFor(() => expect(h.listAssets).toHaveBeenCalled())
+    fireEvent.change(
+      screen.getByPlaceholderText(/Upload a reference image/),
+      { target: { value: 'a tiny moon desk' } }
+    )
+    fireEvent.click(screen.getByRole('button', { name: 'Generate' }))
+
+    expect(
+      await screen.findByText('Image service is busy. Please try again later.')
+    ).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Retry in 5s' })).toBeDisabled()
   })
 
   it('uses selected source assets for edit and variation inference', async () => {
@@ -549,6 +598,83 @@ describe('Images route', () => {
           expect.objectContaining({ id: 'local-ref-1' }),
           expect.objectContaining({ id: 'local-ref-2' }),
         ],
+      })
+    )
+  })
+
+  it('does not submit while a reference image is still importing', async () => {
+    h.providers = [
+      {
+        provider: 'jingxing',
+        base_url: 'https://api.jingxing.uk/v1',
+        settings: [],
+        models: [
+          {
+            id: 'gpt-image-2',
+            capabilities: [
+              ModelCapabilities.IMAGE_GENERATION,
+              ModelCapabilities.IMAGE_TO_IMAGE,
+            ],
+          },
+        ],
+      },
+    ]
+    const referenceAsset = {
+      id: 'local-ref-1',
+      prompt: 'slow-ref',
+      mode: 'edit',
+      provider: 'local',
+      model: 'reference-image',
+      ratio: '1:1',
+      size: 'original',
+      quality: 'source',
+      sourceAssetIds: [],
+      createdAt: '2026-05-11T00:00:00Z',
+      status: 'succeeded',
+      path: '/mock/mita/image-assets/local-ref-1/image.webp',
+      fileName: 'image.webp',
+      mimeType: 'image/webp',
+      assetKind: 'reference',
+    }
+    let resolveImport!: (asset: typeof referenceAsset) => void
+    const importPromise = new Promise<typeof referenceAsset>((resolve) => {
+      resolveImport = resolve
+    })
+    h.dialogOpen.mockResolvedValue(['/Users/eric/Desktop/slow-ref.webp'])
+    h.importAsset.mockReturnValue(importPromise)
+
+    renderComponent()
+
+    await waitFor(() => expect(h.listAssets).toHaveBeenCalled())
+    fireEvent.change(
+      screen.getByPlaceholderText(/Upload a reference image/),
+      { target: { value: 'make it white' } }
+    )
+    await act(async () => {
+      fireEvent.click(screen.getByRole('button', { name: 'Add reference image' }))
+      await Promise.resolve()
+    })
+
+    await waitFor(() => expect(h.importAsset).toHaveBeenCalled())
+    const generateButton = screen.getByRole('button', { name: 'Generate' })
+    expect(generateButton).toBeDisabled()
+    fireEvent.click(generateButton)
+    expect(h.generateImages).not.toHaveBeenCalled()
+
+    await act(async () => {
+      resolveImport(referenceAsset)
+      await importPromise
+      await Promise.resolve()
+    })
+
+    expect((await screen.findAllByAltText('slow-ref')).length).toBeGreaterThan(0)
+    expect(screen.getByRole('button', { name: 'Generate' })).not.toBeDisabled()
+    fireEvent.click(screen.getByRole('button', { name: 'Generate' }))
+    await waitFor(() =>
+      expect(h.generateImages.mock.calls.at(-1)?.[0]).toMatchObject({
+        mode: 'edit',
+        prompt: 'make it white',
+        sourceAssets: [expect.objectContaining({ id: 'local-ref-1' })],
       })
     )
   })

@@ -10,6 +10,24 @@ const h = vi.hoisted(() => ({
   setCurrentThreadId: vi.fn(),
   useTools: vi.fn(),
   providerHasRemoteApiKeys: vi.fn(() => false),
+  greetingIndex: 1,
+  i18n: {
+    language: 'zh-CN',
+    fallbackLng: 'en',
+    resources: {
+      'zh-CN': {
+        chat: {
+          description: '需要我做什么呢？',
+          descriptionVariants: ['第一句', '第二句'],
+        },
+      },
+      en: {
+        chat: {
+          description: 'What would you like me to do?',
+        },
+      },
+    },
+  } as any,
   predefinedProviders: [
     { provider: 'openai' },
     { provider: 'llamacpp' },
@@ -23,8 +41,30 @@ vi.mock('@tanstack/react-router', () => ({
 }))
 
 vi.mock('@/i18n/react-i18next-compat', () => ({
-  useTranslation: () => ({ t: (key: string) => key }),
+  useTranslation: () => ({
+    t: (key: string) => {
+      if (key === 'chat:description') {
+        return h.i18n.resources[h.i18n.language]?.chat?.description ?? key
+      }
+      return key
+    },
+    i18n: h.i18n,
+  }),
 }))
+
+vi.mock('@/hooks/useNewChatGreeting', async () => {
+  const actual = await vi.importActual<typeof import('@/hooks/useNewChatGreeting')>(
+    '@/hooks/useNewChatGreeting'
+  )
+  return {
+    ...actual,
+    useNewChatGreeting: (selector: any) =>
+      selector({
+        greetingIndex: h.greetingIndex,
+        refreshGreeting: vi.fn(),
+      }),
+  }
+})
 
 vi.mock('@/hooks/useModelProvider', () => ({
   useModelProvider: () => ({ providers: h.providers }),
@@ -88,6 +128,24 @@ describe('Index route', () => {
     vi.clearAllMocks()
     h.providers = []
     h.search = { threadModel: undefined }
+    h.greetingIndex = 1
+    h.i18n = {
+      language: 'zh-CN',
+      fallbackLng: 'en',
+      resources: {
+        'zh-CN': {
+          chat: {
+            description: '需要我做什么呢？',
+            descriptionVariants: ['第一句', '第二句'],
+          },
+        },
+        en: {
+          chat: {
+            description: 'What would you like me to do?',
+          },
+        },
+      },
+    }
     h.providerHasRemoteApiKeys.mockReturnValue(false)
   })
 
@@ -123,7 +181,27 @@ describe('Index route', () => {
     expect(screen.getByTestId('chat-input')).toBeInTheDocument()
     expect(screen.getByTestId('header-page')).toBeInTheDocument()
     expect(screen.getByTestId('dropdown')).toBeInTheDocument()
-    expect(screen.getByText('chat:description')).toBeInTheDocument()
+    expect(screen.getByText('第二句')).toBeInTheDocument()
+  })
+
+  it('falls back to chat description when no variants are available', () => {
+    h.providers = [{ provider: 'openai', models: [] }]
+    h.providerHasRemoteApiKeys.mockReturnValue(true)
+    h.i18n = {
+      language: 'en',
+      fallbackLng: 'en',
+      resources: {
+        en: {
+          chat: {
+            description: 'What would you like me to do?',
+          },
+        },
+      },
+    }
+
+    renderComponent()
+
+    expect(screen.getByText('What would you like me to do?')).toBeInTheDocument()
   })
 
   it('renders chat UI when llamacpp provider has models', () => {

@@ -7,6 +7,7 @@ import {
   formatMegaBytes,
   formatDuration,
   getModelDisplayName,
+  getModelLogoProvider,
 } from '../utils'
 
 describe('getProviderLogo', () => {
@@ -49,6 +50,24 @@ describe('getProviderTitle', () => {
 
   it('handles empty strings', () => {
     expect(getProviderTitle('')).toBe('')
+  })
+})
+
+describe('getModelLogoProvider', () => {
+  it('infers original model providers from model IDs', () => {
+    expect(getModelLogoProvider('gpt-5.4', 'jingxing')).toBe('openai')
+    expect(getModelLogoProvider('claude-opus-4-7', 'jingxing')).toBe(
+      'anthropic'
+    )
+    expect(getModelLogoProvider('gemini-3.1-pro-preview', 'jingxing')).toBe(
+      'gemini'
+    )
+    expect(getModelLogoProvider('grok-4.3', 'jingxing')).toBe('xai')
+  })
+
+  it('falls back to the connection provider for unknown models', () => {
+    expect(getModelLogoProvider('custom-model', 'jingxing')).toBe('jingxing')
+    expect(getModelLogoProvider(undefined, 'openrouter')).toBe('openrouter')
   })
 })
 

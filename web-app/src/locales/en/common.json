@@ -53,6 +53,7 @@
     "increaseCount": "Increase count",
     "generate": "Generate",
     "retry": "Retry",
+    "retryIn": "Retry in {{seconds}}s",
     "reEdit": "Re-edit",
     "regenerate": "Regenerate",
     "useSourceImage": "Use source image",
@@ -90,15 +91,21 @@
       "describeImageFirst": "Describe the image first",
       "selectEditCapableModel": "Select an image model that supports source images",
       "referenceImported": "Reference image imported",
+      "waitForReferenceImport": "Reference image is still importing. Try again in a moment.",
       "importReferenceFailed": "Failed to import reference image",
       "deleteAssetFailed": "Failed to delete image asset",
       "revealAssetFailed": "Failed to reveal image asset",
       "promptCopied": "Prompt copied",
-      "referenceLimitReached": "You can use up to {{count}} reference images."
+      "referenceLimitReached": "You can use up to {{count}} reference images.",
+      "retryCoolingDown": "Image service is cooling down. Try again in {{seconds}}s."
     },
     "errors": {
       "modelUnavailable": "Image model is no longer available",
-      "generationFailed": "Image generation failed"
+      "generationFailed": "Image generation failed",
+      "rateLimited": "Image service is busy. Please try again later.",
+      "requestTimeout": "Image generation request timed out. Please try again later.",
+      "invalidSourceImage": "A reference image could not be read by the image model. Re-import it or choose another image.",
+      "invalidSourceImageWithIndex": "Reference image {{index}} could not be read by the image model. Re-import it or choose another image."
     },
     "addReferenceImage": "Add reference image",
     "removeReferenceImage": "Remove {{prompt}}",
@@ -433,6 +440,12 @@
     "description": "Choose whether to include these files directly in the chat or index them as embeddings instead.",
     "inline": "Inject into chat",
     "embeddings": "Use embeddings"
+  },
+  "chatInputActions": {
+    "addImages": "Add Images",
+    "addDocumentsOrFiles": "Add documents or files",
+    "indexingDocuments": "Indexing documents…",
+    "useAssistant": "Use Assistant"
   },
   "attachmentInjectedIndicator": "Injected into chat",
   "attachmentEmbeddedIndicator": "Embedded for RAG",

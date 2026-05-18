@@ -67,6 +67,10 @@ import {
   providerQuotaErrorFromUnknown,
   type ProviderQuotaErrorDetails,
 } from '@/lib/provider-quota-error'
+import {
+  imageGenerationRequestErrorFromUnknown,
+  type ImageGenerationRequestErrorDetails,
+} from '@/lib/image-generation-errors'
 import type {
   ImageAssetRecord,
   ImageGenerationStatus,
@@ -90,6 +94,8 @@ type ImageTask = {
   sourceAssetIds: string[]
   message?: string
   quotaError?: ProviderQuotaErrorDetails
+  requestError?: ImageGenerationRequestErrorDetails
+  retryAvailableAt?: number
   asset?: ImageAssetRecord
 }
 
@@ -181,6 +187,30 @@ function imageCountLabel(t: TranslationFn, count: number) {
   return imageT(t, count === 1 ? 'imageCount.one' : 'imageCount.other', {
     count,
   })
+}
+
+function imageRequestErrorMessage(
+  t: TranslationFn,
+  error: ImageGenerationRequestErrorDetails
+) {
+  return imageT(
+    t,
+    error.kind === 'rate_limited'
+      ? 'errors.rateLimited'
+      : error.kind === 'invalid_source_image'
+        ? error.sourceImageIndex
+          ? 'errors.invalidSourceImageWithIndex'
+          : 'errors.invalidSourceImage'
+        : 'errors.requestTimeout',
+    error.sourceImageIndex
+      ? { index: error.sourceImageIndex }
+      : undefined
+  )
+}
+
+function retryInSeconds(retryAvailableAt: number | undefined, nowMs: number) {
+  if (!retryAvailableAt || retryAvailableAt <= nowMs) return 0
+  return Math.ceil((retryAvailableAt - nowMs) / 1000)
 }
 
 function statusLabel(t: TranslationFn, status: ImageGenerationStatus) {
@@ -656,6 +686,7 @@ function Images() {
   >([])
   const [referenceAssetsLoading, setReferenceAssetsLoading] = useState(false)
   const [tasks, setTasks] = useState<ImageTask[]>([])
+  const [nowMs, setNowMs] = useState(() => Date.now())
   const [previewAsset, setPreviewAsset] = useState<ImageAssetRecord | null>(null)
   const [contextMenu, setContextMenu] = useState<AssetContextMenuState>(null)
   const controllers = useRef(new Map<string, AbortController>())
@@ -709,6 +740,17 @@ function Images() {
       window.removeEventListener('keydown', closeOnEscape)
     }
   }, [contextMenu])
+
+  const hasRetryCooldown = tasks.some(
+    (task) => retryInSeconds(task.retryAvailableAt, nowMs) > 0
+  )
+
+  useEffect(() => {
+    if (!hasRetryCooldown) return
+
+    const interval = window.setInterval(() => setNowMs(Date.now()), 1000)
+    return () => window.clearInterval(interval)
+  }, [hasRetryCooldown])
 
   const selectedModel = useMemo(() => {
     return imageModels.find(
@@ -794,7 +836,8 @@ function Images() {
   const sourceModelUnsupported = Boolean(
     sourceAssets.length > 0 && !selectedModelCanEdit
   )
-  const submitDisabled = !selectedModel || sourceModelUnsupported
+  const submitDisabled =
+    !selectedModel || sourceModelUnsupported || referenceAssetsLoading
 
   const updateTask = useCallback((id: string, patch: Partial<ImageTask>) => {
     setTasks((current) =>
@@ -831,6 +874,8 @@ function Images() {
         status: 'running',
         message: undefined,
         quotaError: undefined,
+        requestError: undefined,
+        retryAvailableAt: undefined,
       })
 
       try {
@@ -887,11 +932,20 @@ function Images() {
         updateTask(task.id, { status: 'succeeded', asset: saved })
       } catch (error) {
         const quotaError = providerQuotaErrorFromUnknown(error)
+        const requestError = imageGenerationRequestErrorFromUnknown(error)
         const message =
           quotaError?.message ||
+          (requestError
+            ? imageRequestErrorMessage(t, requestError.toJSON())
+            : undefined) ||
           (error instanceof Error
             ? error.message
             : imageT(t, 'errors.generationFailed'))
+        const failedAt = Date.now()
+        if (requestError) setNowMs(failedAt)
+        const retryAvailableAt = requestError
+          ? failedAt + requestError.retryAfterMs
+          : undefined
         updateTask(task.id, {
           status: cancelledTasks.current.has(task.id) ? 'failed' : 'failed',
           message: cancelledTasks.current.has(task.id)
@@ -900,6 +954,12 @@ function Images() {
           quotaError: cancelledTasks.current.has(task.id)
             ? undefined
             : quotaError?.toJSON(),
+          requestError: cancelledTasks.current.has(task.id)
+            ? undefined
+            : requestError?.toJSON(),
+          retryAvailableAt: cancelledTasks.current.has(task.id)
+            ? undefined
+            : retryAvailableAt,
         })
       } finally {
         controllers.current.delete(task.id)
@@ -926,6 +986,11 @@ function Images() {
   )
 
   const startGeneration = useCallback(() => {
+    if (referenceAssetsLoading) {
+      toast.error(imageT(t, 'toast.waitForReferenceImport'))
+      return
+    }
+
     if (!selectedModel) {
       toast.error(imageT(t, 'toast.selectImageModelFirst'))
       return
@@ -974,6 +1039,7 @@ function Images() {
     prompt,
     qualityPreset,
     ratio,
+    referenceAssetsLoading,
     runQueue,
     selectedModel,
     selectedModelCanEdit,
@@ -983,6 +1049,12 @@ function Images() {
 
   const retryTask = useCallback(
     (task: ImageTask) => {
+      const seconds = retryInSeconds(task.retryAvailableAt, Date.now())
+      if (seconds > 0) {
+        toast.error(imageT(t, 'toast.retryCoolingDown', { seconds }))
+        return
+      }
+
       const retry: ImageTask = {
         ...task,
         id: createId(),
@@ -991,12 +1063,14 @@ function Images() {
         status: 'pending',
         message: undefined,
         quotaError: undefined,
+        requestError: undefined,
+        retryAvailableAt: undefined,
         asset: undefined,
       }
       setTasks((current) => [retry, ...current])
       void runQueue([retry])
     },
-    [runQueue]
+    [runQueue, t]
   )
 
   const rerunGroup = useCallback(
@@ -1011,6 +1085,8 @@ function Images() {
         status: 'pending',
         message: undefined,
         quotaError: undefined,
+        requestError: undefined,
+        retryAvailableAt: undefined,
         asset: undefined,
       }))
       setTasks((current) => [...nextTasks, ...current])
@@ -1417,51 +1493,67 @@ function Images() {
                               : 'grid-cols-2 md:grid-cols-4'
                         )}
                       >
-                        {group.tasks.map((task) => (
-                          <div key={task.id} className="aspect-square bg-secondary">
-                            {task.asset?.path ? (
-                              <img
-                                src={assetSrc(task.asset)}
-                                alt={task.prompt}
-                                className="size-full object-cover"
-                                onContextMenu={(event) =>
-                                  showAssetContextMenu(event, task.asset!)
-                                }
-                              />
-                            ) : (
-                              <div className="flex size-full items-center justify-center bg-neutral-100 dark:bg-secondary">
-                                {task.status === 'running' ? (
-                                  <Loader2 className="size-6 animate-spin text-muted-foreground" />
-                                ) : task.status === 'failed' ? (
-                                  <div className="flex max-w-[86%] flex-col items-center gap-2 text-xs text-destructive">
-                                    <button
-                                      type="button"
-                                      className="flex flex-col items-center gap-2"
-                                      onClick={() => retryTask(task)}
-                                    >
-                                      <RefreshCcw className="size-5" />
-                                      {imageT(t, 'retry')}
-                                    </button>
-                                    {task.message && (
-                                      <span
-                                        className="line-clamp-3 text-center text-[11px] leading-4 text-destructive/75"
-                                        title={task.message}
+                        {group.tasks.map((task) => {
+                          const retrySeconds = retryInSeconds(
+                            task.retryAvailableAt,
+                            nowMs
+                          )
+
+                          return (
+                            <div key={task.id} className="aspect-square bg-secondary">
+                              {task.asset?.path ? (
+                                <img
+                                  src={assetSrc(task.asset)}
+                                  alt={task.prompt}
+                                  className="size-full object-cover"
+                                  onContextMenu={(event) =>
+                                    showAssetContextMenu(event, task.asset!)
+                                  }
+                                />
+                              ) : (
+                                <div className="flex size-full items-center justify-center bg-neutral-100 dark:bg-secondary">
+                                  {task.status === 'running' ? (
+                                    <Loader2 className="size-6 animate-spin text-muted-foreground" />
+                                  ) : task.status === 'failed' ? (
+                                    <div className="flex max-w-[86%] flex-col items-center gap-2 text-xs text-destructive">
+                                      <button
+                                        type="button"
+                                        disabled={retrySeconds > 0}
+                                        className={cn(
+                                          'flex flex-col items-center gap-2',
+                                          retrySeconds > 0 &&
+                                            'cursor-not-allowed opacity-60'
+                                        )}
+                                        onClick={() => retryTask(task)}
                                       >
-                                        {task.message}
-                                      </span>
-                                    )}
-                                    <ProviderQuotaActions
-                                      error={task.quotaError}
-                                      className="items-center"
-                                    />
-                                  </div>
-                                ) : (
-                                  <ImageIcon className="size-6 text-muted-foreground" />
-                                )}
-                              </div>
-                            )}
-                          </div>
-                        ))}
+                                        <RefreshCcw className="size-5" />
+                                        {retrySeconds > 0
+                                          ? imageT(t, 'retryIn', {
+                                              seconds: retrySeconds,
+                                            })
+                                          : imageT(t, 'retry')}
+                                      </button>
+                                      {task.message && (
+                                        <span
+                                          className="line-clamp-3 text-center text-[11px] leading-4 text-destructive/75"
+                                          title={task.message}
+                                        >
+                                          {task.message}
+                                        </span>
+                                      )}
+                                      <ProviderQuotaActions
+                                        error={task.quotaError}
+                                        className="items-center"
+                                      />
+                                    </div>
+                                  ) : (
+                                    <ImageIcon className="size-6 text-muted-foreground" />
+                                  )}
+                                </div>
+                              )}
+                            </div>
+                          )
+                        })}
                       </div>
 
                       <div className="flex flex-wrap items-center gap-2">
@@ -1782,6 +1874,11 @@ function Images() {
                   aria-label={imageT(t, 'generate')}
                   className="size-9 rounded-full"
                   disabled={submitDisabled}
+                  title={
+                    referenceAssetsLoading
+                      ? imageT(t, 'toast.waitForReferenceImport')
+                      : undefined
+                  }
                 >
                   <ArrowUp className="size-4" />
                 </Button>

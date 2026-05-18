@@ -48,6 +48,7 @@
     "increaseCount": "增加數量",
     "generate": "生成",
     "retry": "重試",
+    "retryIn": "{{seconds}} 秒後重試",
     "reEdit": "重新編輯",
     "regenerate": "再次生成",
     "useSourceImage": "使用源圖",
@@ -89,11 +90,16 @@
       "deleteAssetFailed": "刪除圖片資產失敗",
       "revealAssetFailed": "無法開啟圖片所在位置",
       "promptCopied": "提示詞已複製",
-      "referenceLimitReached": "最多可使用 {{count}} 張參考圖。"
+      "referenceLimitReached": "最多可使用 {{count}} 張參考圖。",
+      "retryCoolingDown": "圖片服務正在冷卻，請 {{seconds}} 秒後重試。"
     },
     "errors": {
       "modelUnavailable": "圖片模型已不可用",
-      "generationFailed": "圖片生成失敗"
+      "generationFailed": "圖片生成失敗",
+      "rateLimited": "圖片服務繁忙，請稍後再試。",
+      "requestTimeout": "圖片生成請求逾時，請稍後重試。",
+      "invalidSourceImage": "參考圖無法被圖片模型讀取，請重新匯入或換一張圖片。",
+      "invalidSourceImageWithIndex": "第 {{index}} 張參考圖無法被圖片模型讀取，請重新匯入或換一張圖片。"
     },
     "addReferenceImage": "新增參考圖",
     "removeReferenceImage": "移除 {{prompt}}",

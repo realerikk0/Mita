@@ -1,6 +1,6 @@
 import { getProviderLogo, getProviderTitle } from '@/lib/utils'
 
-const ProvidersAvatar = ({ provider }: { provider: ProviderObject }) => {
+const ProvidersAvatar = ({ provider }: { provider: { provider: string } }) => {
   return (
     <>
       {getProviderLogo(provider.provider) === undefined ? (

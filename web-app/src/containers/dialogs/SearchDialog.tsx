@@ -18,6 +18,7 @@ import { localStorageKey } from '@/constants/localStorage'
 import { useTranslation } from '@/i18n/react-i18next-compat'
 import { cn } from '@/lib/utils'
 import { VisuallyHidden } from '@radix-ui/react-visually-hidden'
+import { startNewChat } from '@/lib/new-chat'
 
 const MAX_RECENT_SEARCHES = 5
 
@@ -194,7 +195,7 @@ export function SearchDialog({ open, onOpenChange }: SearchDialogProps) {
 
   const handleStartNewChat = () => {
     handleClose()
-    navigate({ to: '/' })
+    startNewChat(navigate)
   }
 
   const showStartNewChat = !searchQuery

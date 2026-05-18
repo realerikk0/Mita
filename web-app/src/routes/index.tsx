@@ -11,6 +11,10 @@ import SetupScreen from '@/containers/SetupScreen'
 import { route } from '@/constants/routes'
 import { predefinedProviders } from '@/constants/providers'
 import { providerHasRemoteApiKeys } from '@/lib/provider-api-keys'
+import {
+  getNewChatGreetingText,
+  useNewChatGreeting,
+} from '@/hooks/useNewChatGreeting'
 
 type ThreadModel = {
   id: string
@@ -36,11 +40,12 @@ export const Route = createFileRoute(route.home as any)({
 })
 
 function Index() {
-  const { t } = useTranslation()
+  const { t, i18n } = useTranslation()
   const { providers } = useModelProvider()
   const search = useSearch({ from: route.home as any })
   const threadModel = search.threadModel
   const { setCurrentThreadId } = useThreads()
+  const greetingIndex = useNewChatGreeting((state) => state.greetingIndex)
   useTools()
 
   // Conditional to check if there are any valid providers
@@ -67,6 +72,12 @@ function Index() {
   useEffect(() => {
     setCurrentThreadId(undefined)
   }, [setCurrentThreadId])
+
+  const newChatGreeting = getNewChatGreetingText(
+    i18n,
+    t('chat:description'),
+    greetingIndex
+  )
 
   if (!hasValidProviders) {
     return <SetupScreen />
@@ -95,7 +106,7 @@ function Index() {
                 'text-2xl mt-2 font-studio font-medium',
               )}
             >
-              {t('chat:description')}
+              {newChatGreeting}
             </h1>
           </div>
           <div className="flex-1 shrink-0">
