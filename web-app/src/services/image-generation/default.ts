@@ -43,6 +43,20 @@ type RawImageItemContainer =
       revised_prompt?: string
     }
 
+type RawChatContentPart = {
+  type?: string
+  text?: string
+}
+
+type RawChatChoice = {
+  message?: {
+    content?: string | RawChatContentPart[] | null
+  }
+  delta?: {
+    content?: string | null
+  }
+}
+
 type RawImageResponse = {
   data?: RawImageItem[]
   images?: RawImageItem[]
@@ -58,6 +72,7 @@ type RawImageResponse = {
   progress?: string
   error?: { message?: string } | string
   message?: string
+  choices?: RawChatChoice[]
 }
 
 type JsonResponseResult = {
@@ -79,6 +94,10 @@ export class DefaultImageGenerationService implements ImageGenerationService {
   }
 
   async generateImages(request: ImageGenerationRequest): Promise<ImageApiImage[]> {
+    if (this.shouldUseJingxingGeminiChatCompletions(request)) {
+      return this.generateJingxingGeminiChatImages(request)
+    }
+
     const endpoint = this.endpointForMode(request)
     if (request.mode === 'generate') {
       const { json, apiKey } = await this.postJson(
@@ -162,7 +181,17 @@ export class DefaultImageGenerationService implements ImageGenerationService {
   }
 
   private isJingxingGeminiImageModel(model: Model) {
-    return model.id.toLowerCase().startsWith('gemini-')
+    const id = model.id.toLowerCase()
+    return id.startsWith('gemini-') && id.includes('image')
+  }
+
+  private shouldUseJingxingGeminiChatCompletions(
+    request: ImageGenerationRequest
+  ) {
+    return (
+      this.isJingxingProvider(request.provider) &&
+      this.isJingxingGeminiImageModel(request.model)
+    )
   }
 
   private shouldUseJingxingAsyncGeneration(request: ImageGenerationRequest) {
@@ -176,8 +205,90 @@ export class DefaultImageGenerationService implements ImageGenerationService {
     return (
       request.mode !== 'generate' &&
       this.isJingxingProvider(request.provider) &&
+      !this.isJingxingGeminiImageModel(request.model) &&
       (request.sourceAssets?.length ?? 0) > 0
     )
+  }
+
+  private async generateJingxingGeminiChatImages(
+    request: ImageGenerationRequest
+  ) {
+    const endpoint = this.jingxingChatCompletionsEndpoint(request)
+    const requestedCount = Math.max(1, request.count)
+    const images: ImageApiImage[] = []
+
+    for (let index = 0; index < requestedCount; index++) {
+      const { json, apiKey } = await this.postJson(
+        endpoint,
+        request,
+        await this.jingxingGeminiChatBody(request)
+      )
+      images.push(...(await this.parseImageResponse(json, request, apiKey)))
+    }
+
+    return images.slice(0, requestedCount)
+  }
+
+  private jingxingChatCompletionsEndpoint(request: ImageGenerationRequest) {
+    const baseUrl = request.provider.base_url || 'https://api.jingxing.uk/v1'
+    return `${baseUrl.replace(/\/$/, '')}/chat/completions`
+  }
+
+  private async jingxingGeminiChatBody(request: ImageGenerationRequest) {
+    const sourceAssets = request.sourceAssets ?? []
+    const prompt = this.jingxingGeminiPrompt(request)
+    const text = `${prompt}\n\nAspect ratio: ${request.ratio}. Quality: ${
+      request.qualityPreset === 'hd' ? 'HD' : 'SD'
+    }. Return the generated image directly as a Markdown data URL.`
+
+    return {
+      model: request.model.id,
+      messages: [
+        {
+          role: 'user',
+          content: sourceAssets.length
+            ? [
+                { type: 'text', text },
+                ...(await Promise.all(
+                  sourceAssets.map(async (asset) => ({
+                    type: 'image_url',
+                    image_url: {
+                      url: await this.sourceAssetDataUrl(request, asset),
+                    },
+                  }))
+                )),
+              ]
+            : text,
+        },
+      ],
+      temperature: 0.2,
+    }
+  }
+
+  private jingxingGeminiPrompt(request: ImageGenerationRequest) {
+    const prompt = request.prompt.trim()
+    if (prompt) return prompt
+
+    const sourceCount = request.sourceAssets?.length ?? 0
+    if (sourceCount > 1) {
+      return 'Create a new image based on these reference images.'
+    }
+
+    if (sourceCount === 1) {
+      return 'Create a fresh variation of this image.'
+    }
+
+    return 'Create an image.'
+  }
+
+  private async sourceAssetDataUrl(
+    request: ImageGenerationRequest,
+    asset: ImageAssetRecord
+  ) {
+    const blob = await this.uploadBlobForSourceAsset(request, asset)
+    const mimeType = blob.type || 'image/png'
+    const b64Json = await arrayBufferToBase64(await this.blobArrayBuffer(blob))
+    return `data:${mimeType};base64,${b64Json}`
   }
 
   private baseHeaders(provider: ModelProvider, apiKey?: string) {
@@ -780,11 +891,50 @@ export class DefaultImageGenerationService implements ImageGenerationService {
   private imageItemsFromResponse(response: RawImageResponse) {
     const candidates = [
       response.data,
+      this.imageItemsFromChatChoices(response),
       this.imageItemsFromContainer(response),
       this.imageItemsFromContainer(response.output),
       this.imageItemsFromContainer(response.result),
     ]
     return candidates.find((items) => items && items.length > 0) ?? []
+  }
+
+  private imageItemsFromChatChoices(response: RawImageResponse) {
+    const choices = response.choices ?? []
+    const items: RawImageItem[] = []
+    const dataImagePattern =
+      /data:(image\/[a-zA-Z0-9.+-]+);base64,([A-Za-z0-9+/=\r\n]+)/g
+
+    for (const choice of choices) {
+      for (const text of this.chatChoiceTextValues(choice)) {
+        for (const match of text.matchAll(dataImagePattern)) {
+          items.push({
+            b64_json: `data:${match[1]};base64,${match[2].replace(/\s/g, '')}`,
+          })
+        }
+      }
+    }
+
+    return items.length ? items : undefined
+  }
+
+  private chatChoiceTextValues(choice: RawChatChoice) {
+    const values: string[] = []
+    const content = choice.message?.content
+
+    if (typeof content === 'string') {
+      values.push(content)
+    } else if (Array.isArray(content)) {
+      for (const part of content) {
+        if (typeof part.text === 'string') values.push(part.text)
+      }
+    }
+
+    if (typeof choice.delta?.content === 'string') {
+      values.push(choice.delta.content)
+    }
+
+    return values
   }
 
   private imageItemsFromContainer(container?: RawImageItemContainer) {

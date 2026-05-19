@@ -211,11 +211,17 @@ describe('DefaultImageGenerationService', () => {
     ])
   })
 
-  it('uses Jingxing synchronous generations endpoint for Gemini image models', async () => {
+  it('uses Jingxing chat completions for Gemini image generation models', async () => {
     const fetchMock = vi.fn().mockResolvedValueOnce(
       new Response(
         JSON.stringify({
-          data: [{ b64_json: 'aGVsbG8=', revised_prompt: 'hello' }],
+          choices: [
+            {
+              message: {
+                content: '![image](data:image/png;base64,aGVsbG8=)',
+              },
+            },
+          ],
         }),
         { status: 200, headers: { 'content-type': 'application/json' } }
       )
@@ -239,18 +245,93 @@ describe('DefaultImageGenerationService', () => {
     })
 
     expect(fetchMock.mock.calls[0][0]).toBe(
-      'https://api.jingxing.uk/v1/images/generations'
+      'https://api.jingxing.uk/v1/chat/completions'
     )
     const init = fetchMock.mock.calls[0][1] as RequestInit & { body: string }
     expect(JSON.parse(init.body)).toMatchObject({
       model: 'gemini-2.5-flash-image',
-      prompt: 'blue square',
-      n: 1,
-      size: '1024x1024',
-      quality: 'medium',
+      messages: [
+        {
+          role: 'user',
+          content: expect.stringContaining('blue square'),
+        },
+      ],
     })
     expect(JSON.parse(init.body)).not.toHaveProperty('response_format')
     expect(result[0].b64Json).toBe('aGVsbG8=')
+  })
+
+  it('uses Jingxing chat completions with image_url parts for Gemini image edits', async () => {
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(
+        new Response(new Uint8Array([1, 2, 3]), {
+          status: 200,
+          headers: { 'content-type': 'image/png' },
+        })
+      )
+      .mockResolvedValueOnce(
+        new Response(
+          JSON.stringify({
+            choices: [
+              {
+                message: {
+                  content: '![image](data:image/jpeg;base64,ZWRpdA==)',
+                },
+              },
+            ],
+          }),
+          { status: 200, headers: { 'content-type': 'application/json' } }
+        )
+      )
+
+    vi.stubGlobal('fetch', fetchMock)
+
+    const service = new DefaultImageGenerationService()
+    const result = await service.generateImages({
+      provider: {
+        ...provider,
+        provider: 'jingxing',
+        base_url: 'https://api.jingxing.uk/v1',
+      },
+      model: geminiModel,
+      prompt: 'make it glass',
+      ratio: '1:1',
+      qualityPreset: 'hd',
+      count: 1,
+      mode: 'edit',
+      sourceAssets: [sourceAsset],
+    })
+
+    expect(fetchMock.mock.calls[1][0]).toBe(
+      'https://api.jingxing.uk/v1/chat/completions'
+    )
+    const init = fetchMock.mock.calls[1][1] as RequestInit & { body: string }
+    const body = JSON.parse(init.body)
+    expect(body).toMatchObject({
+      model: 'gemini-2.5-flash-image',
+      messages: [
+        {
+          role: 'user',
+          content: [
+            {
+              type: 'text',
+              text: expect.stringContaining('make it glass'),
+            },
+            {
+              type: 'image_url',
+              image_url: {
+                url: 'data:image/png;base64,AQID',
+              },
+            },
+          ],
+        },
+      ],
+    })
+    expect(result[0]).toMatchObject({
+      b64Json: 'ZWRpdA==',
+      mimeType: 'image/jpeg',
+    })
   })
 
   it('posts edit requests to the edits endpoint with a source asset', async () => {
