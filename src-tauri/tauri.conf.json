@@ -43,8 +43,8 @@
       "resolve": true
     },
     "updater": {
-      "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IDJFNDEzMEVCMUEzNUFENDQKUldSRXJUVWE2ekJCTGc1Mm1BVXgrWmtES3huUlBFR0lCdG5qbWFvMzgyNDhGN3VTTko5Q1NtTW0K",
-      "endpoints": ["https://updates.jingxing.uk/mita/latest.json"],
+      "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IDkxOTUzOTBBNEQ3QjYxQUMKUldTc1lYdE5Dam1Wa1ZoVk5UWTRKMTZ4dWpRWHBzcWRaU2pyV1U0T2Q3RFR0TW0rcjBpejl6QjYK",
+      "endpoints": ["https://updates.mita.so/mita/latest.json"],
       "windows": {
         "installMode": "passive"
       }

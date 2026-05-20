@@ -6,5 +6,9 @@
   "hideReleaseNotes": "Amaga les notes de llançament",
   "remindMeLater": "Recorda-m’ho més tard",
   "downloading": "S’està descarregant...",
+  "downloadUpdate": "Descarrega l'actualització",
+  "updateReadyToRestart": "Actualització descarregada. Reinicia per acabar.",
+  "restartToUpdate": "Reinicia i actualitza",
+  "installing": "S'està instal·lant...",
   "updateNow": "Actualitza ara"
 }

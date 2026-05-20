@@ -124,6 +124,8 @@ const mockServiceHub = {
   updater: () => ({
     checkForUpdates: vi.fn().mockResolvedValue(null),
     installUpdate: vi.fn().mockResolvedValue(undefined),
+    downloadUpdateWithProgress: vi.fn().mockResolvedValue(undefined),
+    installDownloadedUpdate: vi.fn().mockResolvedValue(undefined),
     downloadAndInstallWithProgress: vi.fn().mockResolvedValue(undefined),
   }),
   path: vi.fn().mockReturnValue({

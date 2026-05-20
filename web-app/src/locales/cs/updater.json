@@ -6,5 +6,9 @@
   "hideReleaseNotes": "Skrýt poznámky k vydání",
   "remindMeLater": "Připomenout později",
   "downloading": "Stahování...",
+  "downloadUpdate": "Stáhnout aktualizaci",
+  "updateReadyToRestart": "Aktualizace byla stažena. Restartujte aplikaci pro dokončení.",
+  "restartToUpdate": "Restartovat a aktualizovat",
+  "installing": "Instalace...",
   "updateNow": "Aktualizovat nyní"
 }

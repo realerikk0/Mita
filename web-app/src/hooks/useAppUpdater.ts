@@ -9,6 +9,8 @@ export interface UpdateState {
   isUpdateAvailable: boolean
   updateInfo: UpdateInfo | null
   isDownloading: boolean
+  isInstalling: boolean
+  isUpdateReadyToInstall: boolean
   downloadProgress: number
   downloadedBytes: number
   totalBytes: number
@@ -20,6 +22,8 @@ export const useAppUpdater = () => {
     isUpdateAvailable: false,
     updateInfo: null,
     isDownloading: false,
+    isInstalling: false,
+    isUpdateReadyToInstall: false,
     downloadProgress: 0,
     downloadedBytes: 0,
     totalBytes: 0,
@@ -80,6 +84,12 @@ export const useAppUpdater = () => {
 
             const newState = {
               isUpdateAvailable: true,
+              isDownloading: false,
+              isInstalling: false,
+              isUpdateReadyToInstall: false,
+              downloadProgress: 0,
+              downloadedBytes: 0,
+              totalBytes: 0,
               remindMeLater: false,
               updateInfo: update,
             }
@@ -96,6 +106,12 @@ export const useAppUpdater = () => {
             const newState = {
               isUpdateAvailable: false,
               updateInfo: null,
+              isDownloading: false,
+              isInstalling: false,
+              isUpdateReadyToInstall: false,
+              downloadProgress: 0,
+              downloadedBytes: 0,
+              totalBytes: 0,
             }
             setUpdateState((prev) => ({
               ...prev,
@@ -109,6 +125,12 @@ export const useAppUpdater = () => {
           const newState = {
             isUpdateAvailable: false,
             updateInfo: null,
+            isDownloading: false,
+            isInstalling: false,
+            isUpdateReadyToInstall: false,
+            downloadProgress: 0,
+            downloadedBytes: 0,
+            totalBytes: 0,
             ...(resetRemindMeLater && { remindMeLater: false }),
           }
           setUpdateState((prev) => ({
@@ -125,6 +147,12 @@ export const useAppUpdater = () => {
         const newState = {
           isUpdateAvailable: false,
           updateInfo: null,
+          isDownloading: false,
+          isInstalling: false,
+          isUpdateReadyToInstall: false,
+          downloadProgress: 0,
+          downloadedBytes: 0,
+          totalBytes: 0,
         }
         setUpdateState((prev) => ({
           ...prev,
@@ -153,7 +181,7 @@ export const useAppUpdater = () => {
     [syncStateToOtherInstances]
   )
 
-  const downloadAndInstallUpdate = useCallback(async () => {
+  const downloadUpdate = useCallback(async () => {
     if (AUTO_UPDATER_DISABLED) {
       console.log('Auto updater is disabled')
       return
@@ -165,15 +193,16 @@ export const useAppUpdater = () => {
       setUpdateState((prev) => ({
         ...prev,
         isDownloading: true,
+        isUpdateReadyToInstall: false,
+        downloadProgress: 0,
+        downloadedBytes: 0,
+        totalBytes: 0,
       }))
 
       let downloaded = 0
       let contentLength = 0
-      await getServiceHub().models().stopAllModels()
-      getServiceHub().events().emit(SystemEvent.KILL_SIDECAR)
-      await new Promise((resolve) => setTimeout(resolve, 1000))
 
-      await getServiceHub().updater().downloadAndInstallWithProgress((event) => {
+      await getServiceHub().updater().downloadUpdateWithProgress((event) => {
         switch (event.event) {
           case 'Started':
             contentLength = event.data?.contentLength || 0
@@ -213,8 +242,17 @@ export const useAppUpdater = () => {
             setUpdateState((prev) => ({
               ...prev,
               isDownloading: false,
+              isUpdateReadyToInstall: true,
               downloadProgress: 1,
+              downloadedBytes: contentLength || downloaded,
             }))
+            syncStateToOtherInstances({
+              isDownloading: false,
+              isUpdateReadyToInstall: true,
+              downloadProgress: 1,
+              downloadedBytes: contentLength || downloaded,
+              totalBytes: contentLength,
+            })
 
             // Emit app update download success event
             events.emit(AppEvent.onAppUpdateDownloadSuccess, {})
@@ -222,14 +260,13 @@ export const useAppUpdater = () => {
         }
       })
 
-      await window.core?.api?.relaunch()
-
-      console.log('Update installed')
+      console.log('Update downloaded')
     } catch (error) {
       console.error('Error downloading update:', error)
       setUpdateState((prev) => ({
         ...prev,
         isDownloading: false,
+        isUpdateReadyToInstall: false,
       }))
 
       // Emit app update download error event
@@ -237,12 +274,65 @@ export const useAppUpdater = () => {
         message: error instanceof Error ? error.message : 'Unknown error',
       })
     }
-  }, [updateState.updateInfo])
+  }, [syncStateToOtherInstances, updateState.updateInfo])
+
+  const installDownloadedUpdate = useCallback(async () => {
+    if (AUTO_UPDATER_DISABLED) {
+      console.log('Auto updater is disabled')
+      return
+    }
+
+    if (!updateState.updateInfo) return
+
+    try {
+      const newState = {
+        isInstalling: true,
+      }
+      setUpdateState((prev) => ({
+        ...prev,
+        ...newState,
+      }))
+      syncStateToOtherInstances(newState)
+
+      await getServiceHub().models().stopAllModels()
+      getServiceHub().events().emit(SystemEvent.KILL_SIDECAR)
+      await new Promise((resolve) => setTimeout(resolve, 1000))
+
+      await getServiceHub().updater().installDownloadedUpdate()
+      await window.core?.api?.relaunch()
+
+      console.log('Update installed')
+    } catch (error) {
+      console.error('Error installing update:', error)
+      const newState = {
+        isInstalling: false,
+      }
+      setUpdateState((prev) => ({
+        ...prev,
+        ...newState,
+      }))
+      syncStateToOtherInstances(newState)
+
+      events.emit(AppEvent.onAppUpdateDownloadError, {
+        message: error instanceof Error ? error.message : 'Unknown error',
+      })
+    }
+  }, [
+    syncStateToOtherInstances,
+    updateState.updateInfo,
+  ])
+
+  const downloadAndInstallUpdate = useCallback(async () => {
+    await downloadUpdate()
+    await installDownloadedUpdate()
+  }, [downloadUpdate, installDownloadedUpdate])
 
 
   return {
     updateState,
     checkForUpdate,
+    downloadUpdate,
+    installDownloadedUpdate,
     downloadAndInstallUpdate,
     setRemindMeLater,
   }

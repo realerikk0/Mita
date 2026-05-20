@@ -149,16 +149,19 @@ describe('TauriUpdaterService', () => {
 
   describe('installAndRestart()', () => {
     it('downloads and installs when update is available', async () => {
-      const mockDownloadAndInstall = vi.fn().mockResolvedValue(undefined)
+      const mockDownload = vi.fn().mockResolvedValue(undefined)
+      const mockInstall = vi.fn().mockResolvedValue(undefined)
       vi.mocked(check).mockResolvedValueOnce({
         version: '2.0.0',
-        downloadAndInstall: mockDownloadAndInstall,
+        download: mockDownload,
+        install: mockInstall,
       } as any)
 
       await svc.installAndRestart()
 
       expect(check).toHaveBeenCalled()
-      expect(mockDownloadAndInstall).toHaveBeenCalled()
+      expect(mockDownload).toHaveBeenCalled()
+      expect(mockInstall).toHaveBeenCalled()
     })
 
     it('does nothing when no update is available', async () => {
@@ -182,11 +185,11 @@ describe('TauriUpdaterService', () => {
       errorSpy.mockRestore()
     })
 
-    it('logs error and rethrows when downloadAndInstall fails', async () => {
+    it('logs error and rethrows when download fails', async () => {
       const err = new Error('download fail')
       vi.mocked(check).mockResolvedValueOnce({
         version: '2.0.0',
-        downloadAndInstall: vi.fn().mockRejectedValue(err),
+        download: vi.fn().mockRejectedValue(err),
       } as any)
       const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {})
 
@@ -196,22 +199,22 @@ describe('TauriUpdaterService', () => {
     })
   })
 
-  describe('downloadAndInstallWithProgress()', () => {
-    it('calls downloadAndInstall with progress callback', async () => {
-      const mockDownloadAndInstall = vi.fn().mockImplementation(async (cb) => {
+  describe('downloadUpdateWithProgress()', () => {
+    it('calls download with progress callback and stores downloaded update', async () => {
+      const mockDownload = vi.fn().mockImplementation(async (cb) => {
         cb({ event: 'Started', data: { contentLength: 1000 } })
         cb({ event: 'Progress', data: { chunkLength: 500 } })
         cb({ event: 'Finished' })
       })
       vi.mocked(check).mockResolvedValueOnce({
         version: '2.0.0',
-        downloadAndInstall: mockDownloadAndInstall,
+        download: mockDownload,
       } as any)
 
       const progressCb = vi.fn()
-      await svc.downloadAndInstallWithProgress(progressCb)
+      await svc.downloadUpdateWithProgress(progressCb)
 
-      expect(mockDownloadAndInstall).toHaveBeenCalled()
+      expect(mockDownload).toHaveBeenCalled()
       expect(progressCb).toHaveBeenCalledTimes(3)
       expect(progressCb).toHaveBeenCalledWith({ event: 'Started', data: { contentLength: 1000 } })
       expect(progressCb).toHaveBeenCalledWith({ event: 'Finished' })
@@ -221,7 +224,7 @@ describe('TauriUpdaterService', () => {
       vi.mocked(check).mockResolvedValueOnce(null as any)
       const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {})
 
-      await expect(svc.downloadAndInstallWithProgress(vi.fn())).rejects.toThrow(
+      await expect(svc.downloadUpdateWithProgress(vi.fn())).rejects.toThrow(
         'No update available'
       )
       errorSpy.mockRestore()
@@ -231,11 +234,11 @@ describe('TauriUpdaterService', () => {
       const err = new Error('download error')
       vi.mocked(check).mockResolvedValueOnce({
         version: '2.0.0',
-        downloadAndInstall: vi.fn().mockRejectedValue(err),
+        download: vi.fn().mockRejectedValue(err),
       } as any)
       const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {})
 
-      await expect(svc.downloadAndInstallWithProgress(vi.fn())).rejects.toBe(err)
+      await expect(svc.downloadUpdateWithProgress(vi.fn())).rejects.toBe(err)
       expect(errorSpy).toHaveBeenCalledWith(
         'Error downloading update with progress in Tauri:',
         err
@@ -244,12 +247,12 @@ describe('TauriUpdaterService', () => {
     })
 
     it('handles errors in progress callback gracefully', async () => {
-      const mockDownloadAndInstall = vi.fn().mockImplementation(async (cb) => {
+      const mockDownload = vi.fn().mockImplementation(async (cb) => {
         cb({ event: 'Started' })
       })
       vi.mocked(check).mockResolvedValueOnce({
         version: '2.0.0',
-        downloadAndInstall: mockDownloadAndInstall,
+        download: mockDownload,
       } as any)
 
       const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {})
@@ -257,13 +260,66 @@ describe('TauriUpdaterService', () => {
         throw new Error('callback error')
       })
 
-      await svc.downloadAndInstallWithProgress(badCallback)
+      await svc.downloadUpdateWithProgress(badCallback)
 
       expect(warnSpy).toHaveBeenCalledWith(
         'Error in download progress callback:',
         expect.any(Error)
       )
       warnSpy.mockRestore()
+    })
+  })
+
+  describe('installDownloadedUpdate()', () => {
+    it('installs a previously downloaded update', async () => {
+      const mockDownload = vi.fn().mockResolvedValue(undefined)
+      const mockInstall = vi.fn().mockResolvedValue(undefined)
+      vi.mocked(check).mockResolvedValueOnce({
+        version: '2.0.0',
+        download: mockDownload,
+        install: mockInstall,
+      } as any)
+
+      await svc.downloadUpdateWithProgress(vi.fn())
+      await svc.installDownloadedUpdate()
+
+      expect(mockInstall).toHaveBeenCalled()
+    })
+
+    it('throws when no downloaded update is available', async () => {
+      const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {})
+
+      await expect(svc.installDownloadedUpdate()).rejects.toThrow(
+        'No downloaded update available'
+      )
+
+      expect(errorSpy).toHaveBeenCalledWith(
+        'Error installing downloaded update in Tauri:',
+        expect.any(Error)
+      )
+      errorSpy.mockRestore()
+    })
+  })
+
+  describe('downloadAndInstallWithProgress()', () => {
+    it('downloads and installs with progress callback for legacy callers', async () => {
+      const mockDownload = vi.fn().mockImplementation(async (cb) => {
+        cb({ event: 'Started', data: { contentLength: 1000 } })
+        cb({ event: 'Finished' })
+      })
+      const mockInstall = vi.fn().mockResolvedValue(undefined)
+      vi.mocked(check).mockResolvedValueOnce({
+        version: '2.0.0',
+        download: mockDownload,
+        install: mockInstall,
+      } as any)
+
+      const progressCb = vi.fn()
+      await svc.downloadAndInstallWithProgress(progressCb)
+
+      expect(mockDownload).toHaveBeenCalled()
+      expect(mockInstall).toHaveBeenCalled()
+      expect(progressCb).toHaveBeenCalledTimes(2)
     })
   })
 })

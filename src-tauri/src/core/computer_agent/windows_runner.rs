@@ -183,6 +183,12 @@ pub(crate) fn sandbox_diagnostic_for_test(stage: &str, reason: &str, next_step: 
     sandbox_diagnostic(stage, reason, next_step)
 }
 
+#[cfg(all(not(windows), test))]
+#[allow(dead_code)]
+pub(crate) fn sandbox_diagnostic_for_test(stage: &str, reason: &str, next_step: &str) -> String {
+    format!("Stage: {stage}\nReason: {reason}\nNext step: {next_step}")
+}
+
 #[cfg(all(windows, test))]
 pub(crate) fn cleanup_journal_path_for_test(workspace_root: &Path) -> PathBuf {
     let workspace = workspace_root

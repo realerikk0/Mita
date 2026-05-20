@@ -8,6 +8,7 @@ import { Button } from '@/components/ui/button'
 import { Card, CardItem } from '@/containers/Card'
 import { useTranslation } from '@/i18n/react-i18next-compat'
 import { useGeneralSetting } from '@/hooks/useGeneralSetting'
+import { useAppUpdater } from '@/hooks/useAppUpdater'
 import { useEffect, useState } from 'react'
 import ChangeDataFolderLocation from '@/containers/dialogs/ChangeDataFolderLocation'
 import { FactoryResetDialog } from '@/containers/dialogs'
@@ -42,6 +43,7 @@ function General() {
     huggingfaceToken,
     setHuggingfaceToken,
   } = useGeneralSetting()
+  const { checkForUpdate } = useAppUpdater()
   const serviceHub = useServiceHub()
 
   const openFileTitle = (): string => {
@@ -64,6 +66,7 @@ function General() {
   const [cliInstalled, setCliInstalled] = useState<boolean | null>(null)
   const [cliPath, setCliPath] = useState<string | null>(null)
   const [isCliLoading, setIsCliLoading] = useState(false)
+  const [isCheckingForUpdates, setIsCheckingForUpdates] = useState(false)
 
   useEffect(() => {
     const fetchDataFolder = async () => {
@@ -123,6 +126,29 @@ function General() {
       await serviceHub.window().openLogsWindow()
     } catch (error) {
       console.error('Failed to open logs window:', error)
+    }
+  }
+
+  const handleCheckForUpdates = async () => {
+    if (isCheckingForUpdates) return
+
+    setIsCheckingForUpdates(true)
+    try {
+      const update = await checkForUpdate(true)
+      if (update) {
+        toast.success(t('updater:updateAvailable'), {
+          description: t('updater:newVersion', {
+            version: update.version,
+          }),
+        })
+      } else {
+        toast.success(t('settings:general.noUpdateAvailable'))
+      }
+    } catch (error) {
+      console.error('Failed to check for app updates:', error)
+      toast.error(t('settings:general.updateError'))
+    } finally {
+      setIsCheckingForUpdates(false)
     }
   }
 
@@ -206,6 +232,22 @@ function General() {
                   <span className="text-foreground font-medium">
                     v{VERSION}
                   </span>
+                }
+              />
+              <CardItem
+                title={t('settings:general.checkForUpdates')}
+                description={t('settings:general.checkForUpdatesDesc')}
+                actions={
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={handleCheckForUpdates}
+                    disabled={isCheckingForUpdates}
+                  >
+                    {isCheckingForUpdates
+                      ? t('settings:general.checkingForUpdates')
+                      : t('settings:general.checkForUpdates')}
+                  </Button>
                 }
               />
               <CardItem

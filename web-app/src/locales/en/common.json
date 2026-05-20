@@ -482,7 +482,7 @@
     },
     "appUpdateDownloaded": {
       "title": "App Update Downloaded",
-      "description": "The app update has been downloaded successfully."
+      "description": "Restart the app to finish updating."
     },
     "appUpdateDownloadFailed": {
       "title": "App Update Download Failed",

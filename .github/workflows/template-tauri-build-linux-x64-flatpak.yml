@@ -130,9 +130,9 @@ jobs:
           # Change app name for beta and nightly builds
           if [ "${{ inputs.channel }}" != "stable" ]; then
             if [[ "${{ inputs.channel }}" == "nightly" ]]; then
-              jq '.plugins.updater.endpoints = ["https://updates.jingxing.uk/mita/update-check", "https://updates.jingxing.uk/mita/${{ inputs.channel }}/latest.json"]' ./src-tauri/tauri.conf.json > /tmp/tauri.conf.json
+              jq '.plugins.updater.endpoints = ["https://updates.mita.so/mita/update-check", "https://updates.mita.so/mita/${{ inputs.channel }}/latest.json"]' ./src-tauri/tauri.conf.json > /tmp/tauri.conf.json
             else
-              jq '.plugins.updater.endpoints = ["https://updates.jingxing.uk/mita/${{ inputs.channel }}/latest.json"]' ./src-tauri/tauri.conf.json > /tmp/tauri.conf.json
+              jq '.plugins.updater.endpoints = ["https://updates.mita.so/mita/${{ inputs.channel }}/latest.json"]' ./src-tauri/tauri.conf.json > /tmp/tauri.conf.json
             fi
             mv /tmp/tauri.conf.json ./src-tauri/tauri.conf.json
 

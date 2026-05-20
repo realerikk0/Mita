@@ -6,5 +6,9 @@
   "hideReleaseNotes": "Скрыть примечания",
   "remindMeLater": "Отложить",
   "downloading": "Загрузка…",
+  "downloadUpdate": "Скачать обновление",
+  "updateReadyToRestart": "Обновление загружено. Перезапустите приложение для завершения.",
+  "restartToUpdate": "Перезапустить и обновить",
+  "installing": "Установка…",
   "updateNow": "Обновить"
 }

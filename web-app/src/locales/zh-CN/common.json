@@ -429,7 +429,7 @@
     },
     "appUpdateDownloaded": {
       "title": "应用更新已下载",
-      "description": "应用更新已成功下载。"
+      "description": "重启应用后将完成更新。"
     },
     "appUpdateDownloadFailed": {
       "title": "应用更新下载失败",

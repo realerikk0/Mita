@@ -7,9 +7,10 @@
  * 3. Uses Tauri's built-in updater for download/install (with signature verification)
  */
 
-import { check, Update } from '@tauri-apps/plugin-updater'
+import { check } from '@tauri-apps/plugin-updater'
 import { invoke } from '@tauri-apps/api/core'
 import { load } from '@tauri-apps/plugin-store'
+import type { Update } from '@tauri-apps/plugin-updater'
 import type { UpdateInfo, UpdateProgressEvent } from './types'
 import { DefaultUpdaterService } from './default'
 
@@ -74,6 +75,8 @@ async function getCurrentVersion(): Promise<string> {
 }
 
 export class TauriUpdaterService extends DefaultUpdaterService {
+  private downloadedUpdate: Update | null = null
+
   /**
    * Check for updates using custom signed request for primary endpoint
    * Falls back to standard Tauri updater if custom check fails
@@ -128,17 +131,17 @@ export class TauriUpdaterService extends DefaultUpdaterService {
   async installAndRestart(): Promise<void> {
     try {
       const update = await check()
-      if (update) {
-        await update.downloadAndInstall()
-        // Note: Auto-restart happens after installation
-      }
+      if (!update) return
+
+      await update.download()
+      await update.install()
     } catch (error) {
       console.error('Error installing update in Tauri:', error)
       throw error
     }
   }
 
-  async downloadAndInstallWithProgress(
+  async downloadUpdateWithProgress(
     progressCallback: (event: UpdateProgressEvent) => void
   ): Promise<void> {
     try {
@@ -147,19 +150,40 @@ export class TauriUpdaterService extends DefaultUpdaterService {
         throw new Error('No update available')
       }
 
-      // Use Tauri's downloadAndInstall with progress callback
-      await update.downloadAndInstall((event) => {
+      await update.download((event) => {
         try {
-          // Forward the event to the callback
           progressCallback(event as UpdateProgressEvent)
         } catch (callbackError) {
           console.warn('Error in download progress callback:', callbackError)
         }
       })
+
+      this.downloadedUpdate = update
     } catch (error) {
       console.error('Error downloading update with progress in Tauri:', error)
+      this.downloadedUpdate = null
       throw error
     }
   }
-}
 
+  async installDownloadedUpdate(): Promise<void> {
+    try {
+      if (!this.downloadedUpdate) {
+        throw new Error('No downloaded update available')
+      }
+
+      await this.downloadedUpdate.install()
+      this.downloadedUpdate = null
+    } catch (error) {
+      console.error('Error installing downloaded update in Tauri:', error)
+      throw error
+    }
+  }
+
+  async downloadAndInstallWithProgress(
+    progressCallback: (event: UpdateProgressEvent) => void
+  ): Promise<void> {
+    await this.downloadUpdateWithProgress(progressCallback)
+    await this.installDownloadedUpdate()
+  }
+}

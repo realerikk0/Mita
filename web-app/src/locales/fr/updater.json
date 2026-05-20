@@ -6,5 +6,9 @@
   "hideReleaseNotes": "Masquer les notes de version",
   "remindMeLater": "Me le rappeler plus tard",
   "downloading": "Téléchargement...",
+  "downloadUpdate": "Télécharger la mise à jour",
+  "updateReadyToRestart": "Mise à jour téléchargée. Redémarrez pour terminer.",
+  "restartToUpdate": "Redémarrer et mettre à jour",
+  "installing": "Installation...",
   "updateNow": "Mettre à jour maintenant"
 }

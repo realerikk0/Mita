@@ -46,10 +46,10 @@ jobs:
         with:
           args: |
             Mita App ${{ inputs.build_reason }} build artifact version {{ VERSION }}:
-            - Windows: https://updates.jingxing.uk/mita/nightly/Mita-nightly_{{ VERSION }}_x64-setup.exe
-            - macOS Universal: https://updates.jingxing.uk/mita/nightly/Mita-nightly_{{ VERSION }}_universal.dmg
-            - Linux Deb: https://updates.jingxing.uk/mita/nightly/Mita-nightly_{{ VERSION }}_amd64.deb
-            - Linux AppImage: https://updates.jingxing.uk/mita/nightly/Mita-nightly_{{ VERSION }}_amd64.AppImage
+            - Windows: https://updates.mita.so/mita/nightly/Mita-nightly_{{ VERSION }}_x64-setup.exe
+            - macOS Universal: https://updates.mita.so/mita/nightly/Mita-nightly_{{ VERSION }}_universal.dmg
+            - Linux Deb: https://updates.mita.so/mita/nightly/Mita-nightly_{{ VERSION }}_amd64.deb
+            - Linux AppImage: https://updates.mita.so/mita/nightly/Mita-nightly_{{ VERSION }}_amd64.AppImage
             - Github action run: https://github.com/realerikk0/Mita/actions/runs/{{ GITHUB_RUN_ID }}
         env:
           DISCORD_WEBHOOK: ${{ secrets.DISCORD_WEBHOOK }}

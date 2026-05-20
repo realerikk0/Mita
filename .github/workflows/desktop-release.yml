@@ -15,7 +15,6 @@ concurrency:
 env:
   NODE_OPTIONS: "--max-old-space-size=4196"
   YARN_ENABLE_IMMUTABLE_INSTALLS: "false"
-  AUTO_UPDATER_DISABLED: "true"
 
 jobs:
   build-macos:
@@ -96,7 +95,7 @@ jobs:
           writeJson('src-tauri/tauri.conf.json', (json) => {
             json.version = version
             json.bundle ??= {}
-            json.bundle.createUpdaterArtifacts = false
+            json.bundle.createUpdaterArtifacts = true
           })
 
           writeJson('web-app/package.json', (json) => {
@@ -127,6 +126,9 @@ jobs:
         shell: bash
         env:
           APP_PATH: "."
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+          MITA_SIGNING_KEY: ${{ secrets.MITA_SIGNING_KEY }}
         run: make build
 
       - name: Upload macOS artifact
@@ -134,7 +136,10 @@ jobs:
         with:
           name: mita-macos-universal-${{ steps.version.outputs.version }}
           if-no-files-found: error
-          path: src-tauri/target/universal-apple-darwin/release/bundle/dmg/*.dmg
+          path: |
+            src-tauri/target/universal-apple-darwin/release/bundle/dmg/*.dmg
+            src-tauri/target/universal-apple-darwin/release/bundle/macos/*.app.tar.gz
+            src-tauri/target/universal-apple-darwin/release/bundle/macos/*.app.tar.gz.sig
 
   build-windows-x64:
     name: Build Windows x64
@@ -179,7 +184,7 @@ jobs:
         shell: pwsh
         run: choco install make -y --no-progress
 
-      - name: Stamp release version and disable signing
+      - name: Stamp release version
         shell: bash
         env:
           VERSION: ${{ steps.version.outputs.version }}
@@ -219,7 +224,7 @@ jobs:
           writeJson('src-tauri/tauri.conf.json', (json) => {
             json.version = version
             json.bundle ??= {}
-            json.bundle.createUpdaterArtifacts = false
+            json.bundle.createUpdaterArtifacts = true
           })
 
           writeJson('src-tauri/tauri.windows.conf.json', (json) => {
@@ -273,6 +278,9 @@ jobs:
         shell: bash
         env:
           APP_PATH: "."
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+          MITA_SIGNING_KEY: ${{ secrets.MITA_SIGNING_KEY }}
         run: make build
 
       - name: Upload Windows artifacts
@@ -282,7 +290,223 @@ jobs:
           if-no-files-found: error
           path: |
             src-tauri/target/release/bundle/nsis/*.exe
+            src-tauri/target/release/bundle/nsis/*.exe.sig
             src-tauri/target/release/bundle/msi/*.msi
+
+  sync-cloudflare-updater:
+    name: Sync updater to Cloudflare CDN
+    runs-on: ubuntu-latest
+    needs:
+      - build-macos
+      - build-windows-x64
+    env:
+      CLOUDFLARE_R2_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_R2_ACCOUNT_ID }}
+      CLOUDFLARE_R2_BUCKET: ${{ secrets.CLOUDFLARE_R2_BUCKET }}
+      CLOUDFLARE_R2_ACCESS_KEY_ID: ${{ secrets.CLOUDFLARE_R2_ACCESS_KEY_ID }}
+      CLOUDFLARE_R2_SECRET_ACCESS_KEY: ${{ secrets.CLOUDFLARE_R2_SECRET_ACCESS_KEY }}
+      CLOUDFLARE_ZONE_ID: ${{ secrets.CLOUDFLARE_ZONE_ID }}
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+      UPDATES_CDN_BASE_URL: ${{ vars.UPDATES_CDN_BASE_URL || 'https://updates.mita.so' }}
+    steps:
+      - name: Derive version
+        id: version
+        shell: bash
+        run: |
+          VERSION="${GITHUB_REF_NAME#v}"
+          if [ -z "$VERSION" ] || [ "$VERSION" = "$GITHUB_REF_NAME" ]; then
+            echo "Release tags must start with v, for example v0.6.599" >&2
+            exit 1
+          fi
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+
+      - name: Download updater artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: dist
+
+      - name: Prepare updater manifest
+        id: manifest
+        shell: bash
+        env:
+          VERSION: ${{ steps.version.outputs.version }}
+        run: |
+          set -euo pipefail
+          mkdir -p dist/updater
+
+          mac_tar="$(find dist -type f -name 'Mita.app.tar.gz' -print -quit)"
+          if [ -z "$mac_tar" ]; then
+            echo "Missing macOS updater tarball (*.app.tar.gz)" >&2
+            exit 1
+          fi
+          mac_sig="${mac_tar}.sig"
+          if [ ! -f "$mac_sig" ]; then
+            echo "Missing macOS updater signature: $mac_sig" >&2
+            exit 1
+          fi
+
+          win_exe="$(find dist -type f -name 'Mita_*_x64-setup.exe' -print -quit)"
+          if [ -z "$win_exe" ]; then
+            echo "Missing Windows updater installer (*_x64-setup.exe)" >&2
+            exit 1
+          fi
+          win_sig="${win_exe}.sig"
+          if [ ! -f "$win_sig" ]; then
+            echo "Missing Windows updater signature: $win_sig" >&2
+            exit 1
+          fi
+
+          cdn_base="${UPDATES_CDN_BASE_URL%/}"
+          version_prefix="mita/stable/v${VERSION}"
+          mac_name="$(basename "$mac_tar")"
+          win_name="$(basename "$win_exe")"
+
+          MAC_SIGNATURE="$(cat "$mac_sig")" \
+          WIN_SIGNATURE="$(cat "$win_sig")" \
+          VERSION="$VERSION" \
+          MAC_URL="${cdn_base}/${version_prefix}/${mac_name}" \
+          WIN_URL="${cdn_base}/${version_prefix}/${win_name}" \
+          node <<'NODE'
+          const fs = require('node:fs')
+
+          const manifest = {
+            version: process.env.VERSION,
+            notes: '',
+            pub_date: new Date().toISOString(),
+            platforms: {
+              'darwin-aarch64': {
+                signature: process.env.MAC_SIGNATURE,
+                url: process.env.MAC_URL,
+              },
+              'darwin-x86_64': {
+                signature: process.env.MAC_SIGNATURE,
+                url: process.env.MAC_URL,
+              },
+              'windows-x86_64': {
+                signature: process.env.WIN_SIGNATURE,
+                url: process.env.WIN_URL,
+              },
+            },
+          }
+
+          fs.writeFileSync('dist/updater/latest.json', `${JSON.stringify(manifest, null, 2)}\n`)
+          NODE
+
+          {
+            echo "version_prefix=$version_prefix"
+            echo "mac_tar=$mac_tar"
+            echo "mac_sig=$mac_sig"
+            echo "mac_name=$mac_name"
+            echo "win_exe=$win_exe"
+            echo "win_sig=$win_sig"
+            echo "win_name=$win_name"
+          } >> "$GITHUB_OUTPUT"
+
+          cat dist/updater/latest.json
+
+      - name: Ensure AWS CLI for Cloudflare R2
+        shell: bash
+        run: |
+          set -euo pipefail
+          if command -v aws >/dev/null 2>&1; then
+            aws --version
+            exit 0
+          fi
+
+          python3 -m pip install --user awscli
+          echo "$HOME/.local/bin" >> "$GITHUB_PATH"
+          "$HOME/.local/bin/aws" --version
+
+      - name: Upload updater files to Cloudflare R2
+        shell: bash
+        env:
+          VERSION_PREFIX: ${{ steps.manifest.outputs.version_prefix }}
+          MAC_TAR: ${{ steps.manifest.outputs.mac_tar }}
+          MAC_SIG: ${{ steps.manifest.outputs.mac_sig }}
+          MAC_NAME: ${{ steps.manifest.outputs.mac_name }}
+          WIN_EXE: ${{ steps.manifest.outputs.win_exe }}
+          WIN_SIG: ${{ steps.manifest.outputs.win_sig }}
+          WIN_NAME: ${{ steps.manifest.outputs.win_name }}
+          AWS_ACCESS_KEY_ID: ${{ secrets.CLOUDFLARE_R2_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.CLOUDFLARE_R2_SECRET_ACCESS_KEY }}
+          AWS_DEFAULT_REGION: auto
+          AWS_EC2_METADATA_DISABLED: "true"
+        run: |
+          set -euo pipefail
+
+          required=(
+            CLOUDFLARE_R2_ACCOUNT_ID
+            CLOUDFLARE_R2_BUCKET
+            AWS_ACCESS_KEY_ID
+            AWS_SECRET_ACCESS_KEY
+          )
+          for name in "${required[@]}"; do
+            if [ -z "${!name:-}" ]; then
+              echo "$name is required for Cloudflare R2 updater sync" >&2
+              exit 1
+            fi
+          done
+
+          endpoint="https://${CLOUDFLARE_R2_ACCOUNT_ID}.r2.cloudflarestorage.com"
+          immutable_cache="public, max-age=31536000, immutable"
+          manifest_cache="public, max-age=60, must-revalidate"
+
+          aws s3 cp "$MAC_TAR" "s3://${CLOUDFLARE_R2_BUCKET}/${VERSION_PREFIX}/${MAC_NAME}" \
+            --endpoint-url "$endpoint" \
+            --cache-control "$immutable_cache" \
+            --content-type "application/gzip"
+          aws s3 cp "$MAC_SIG" "s3://${CLOUDFLARE_R2_BUCKET}/${VERSION_PREFIX}/${MAC_NAME}.sig" \
+            --endpoint-url "$endpoint" \
+            --cache-control "$immutable_cache" \
+            --content-type "text/plain"
+          aws s3 cp "$WIN_EXE" "s3://${CLOUDFLARE_R2_BUCKET}/${VERSION_PREFIX}/${WIN_NAME}" \
+            --endpoint-url "$endpoint" \
+            --cache-control "$immutable_cache" \
+            --content-type "application/octet-stream"
+          aws s3 cp "$WIN_SIG" "s3://${CLOUDFLARE_R2_BUCKET}/${VERSION_PREFIX}/${WIN_NAME}.sig" \
+            --endpoint-url "$endpoint" \
+            --cache-control "$immutable_cache" \
+            --content-type "text/plain"
+          aws s3 cp dist/updater/latest.json "s3://${CLOUDFLARE_R2_BUCKET}/mita/latest.json" \
+            --endpoint-url "$endpoint" \
+            --cache-control "$manifest_cache" \
+            --content-type "application/json"
+
+      - name: Purge Cloudflare latest manifest cache
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [ -z "${CLOUDFLARE_ZONE_ID:-}" ] || [ -z "${CLOUDFLARE_API_TOKEN:-}" ]; then
+            echo "Skipping cache purge because CLOUDFLARE_ZONE_ID or CLOUDFLARE_API_TOKEN is not configured"
+            exit 0
+          fi
+
+          latest_url="${UPDATES_CDN_BASE_URL%/}/mita/latest.json"
+          curl -fsS -X POST "https://api.cloudflare.com/client/v4/zones/${CLOUDFLARE_ZONE_ID}/purge_cache" \
+            -H "Authorization: Bearer ${CLOUDFLARE_API_TOKEN}" \
+            -H "Content-Type: application/json" \
+            --data "{\"files\":[\"${latest_url}\"]}"
+
+      - name: Verify Cloudflare CDN updater URLs
+        shell: bash
+        env:
+          VERSION_PREFIX: ${{ steps.manifest.outputs.version_prefix }}
+          MAC_NAME: ${{ steps.manifest.outputs.mac_name }}
+          WIN_NAME: ${{ steps.manifest.outputs.win_name }}
+        run: |
+          set -euo pipefail
+          cdn_base="${UPDATES_CDN_BASE_URL%/}"
+          urls=(
+            "${cdn_base}/mita/latest.json"
+            "${cdn_base}/${VERSION_PREFIX}/${MAC_NAME}"
+            "${cdn_base}/${VERSION_PREFIX}/${MAC_NAME}.sig"
+            "${cdn_base}/${VERSION_PREFIX}/${WIN_NAME}"
+            "${cdn_base}/${VERSION_PREFIX}/${WIN_NAME}.sig"
+          )
+
+          for url in "${urls[@]}"; do
+            echo "Verifying $url"
+            curl -fsSI --retry 5 --retry-delay 5 "$url"
+          done
 
   release:
     name: Create draft release
@@ -290,6 +514,7 @@ jobs:
     needs:
       - build-macos
       - build-windows-x64
+      - sync-cloudflare-updater
     steps:
       - name: Download artifacts
         uses: actions/download-artifact@v4

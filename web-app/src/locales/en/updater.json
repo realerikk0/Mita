@@ -6,5 +6,9 @@
   "hideReleaseNotes": "Hide Release Notes",
   "remindMeLater": "Remind Me Later",
   "downloading": "Downloading...",
+  "downloadUpdate": "Download Update",
+  "updateReadyToRestart": "Update downloaded. Restart to finish updating.",
+  "restartToUpdate": "Restart to Update",
+  "installing": "Installing...",
   "updateNow": "Update Now"
 }

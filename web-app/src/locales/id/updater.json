@@ -6,5 +6,9 @@
   "hideReleaseNotes": "Sembunyikan Catatan Rilis",
   "remindMeLater": "Ingatkan Saya Nanti",
   "downloading": "Mengunduh...",
+  "downloadUpdate": "Unduh Pembaruan",
+  "updateReadyToRestart": "Pembaruan telah diunduh. Mulai ulang untuk menyelesaikan.",
+  "restartToUpdate": "Mulai Ulang dan Perbarui",
+  "installing": "Menginstal...",
   "updateNow": "Perbarui Sekarang"
 }

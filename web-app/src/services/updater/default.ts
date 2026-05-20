@@ -13,6 +13,17 @@ export class DefaultUpdaterService implements UpdaterService {
     // No-op
   }
 
+  async downloadUpdateWithProgress(
+    progressCallback: (event: UpdateProgressEvent) => void
+  ): Promise<void> {
+    console.log('downloadUpdateWithProgress called with callback:', typeof progressCallback)
+    // No-op for non-Tauri platforms
+  }
+
+  async installDownloadedUpdate(): Promise<void> {
+    // No-op
+  }
+
   async downloadAndInstallWithProgress(
     progressCallback: (event: UpdateProgressEvent) => void
   ): Promise<void> {

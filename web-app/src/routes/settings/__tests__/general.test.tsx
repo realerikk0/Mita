@@ -392,14 +392,12 @@ describe('General Settings Route', () => {
       button.textContent?.includes('checkForUpdates')
     )
 
-    if (checkUpdateButton) {
-      expect(checkUpdateButton).toBeInTheDocument()
-      await act(async () => {
-        fireEvent.click(checkUpdateButton)
-      })
-      // Test that button is interactive
-      expect(checkUpdateButton).toBeInTheDocument()
-    }
+    expect(checkUpdateButton).toBeInTheDocument()
+    await act(async () => {
+      fireEvent.click(checkUpdateButton!)
+    })
+
+    expect(mockCheckForUpdate).toHaveBeenCalledWith(true)
   })
 
   it('should handle data folder display', async () => {
@@ -520,23 +518,23 @@ describe('General Settings Route', () => {
       button.textContent?.includes('checkForUpdates')
     )
 
-    if (checkUpdateButton) {
-      // Click the button but don't await it yet
-      act(() => {
-        fireEvent.click(checkUpdateButton)
-      })
+    expect(checkUpdateButton).toBeInTheDocument()
 
-      // Now the button should be disabled while checking
-      expect(checkUpdateButton).toBeDisabled()
+    // Click the button but don't await it yet
+    act(() => {
+      fireEvent.click(checkUpdateButton!)
+    })
 
-      // Resolve the promise to finish the update check
-      await act(async () => {
-        resolveUpdate!(null)
-        await updatePromise
-      })
+    // Now the button should be disabled while checking
+    expect(checkUpdateButton).toBeDisabled()
 
-      // Button should be enabled again
-      expect(checkUpdateButton).not.toBeDisabled()
-    }
+    // Resolve the promise to finish the update check
+    await act(async () => {
+      resolveUpdate!(null)
+      await updatePromise
+    })
+
+    // Button should be enabled again
+    expect(checkUpdateButton).not.toBeDisabled()
   })
 })

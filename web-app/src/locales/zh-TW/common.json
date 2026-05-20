@@ -428,7 +428,7 @@
     },
     "appUpdateDownloaded": {
       "title": "應用程式更新已下載",
-      "description": "應用程式更新已成功下載。"
+      "description": "重新啟動應用程式後將完成更新。"
     },
     "appUpdateDownloadFailed": {
       "title": "應用程式更新下載失敗",

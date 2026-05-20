@@ -12,13 +12,17 @@ import { useTranslation } from '@/i18n/react-i18next-compat'
 
 const DialogAppUpdater = () => {
   const { t } = useTranslation()
-  const { updateState, downloadAndInstallUpdate, setRemindMeLater } =
+  const { updateState, downloadUpdate, installDownloadedUpdate, setRemindMeLater } =
     useAppUpdater()
   const [showReleaseNotes, setShowReleaseNotes] = useState(false)
 
   const handleUpdate = () => {
-    downloadAndInstallUpdate()
-    setRemindMeLater(true)
+    if (updateState.isUpdateReadyToInstall) {
+      installDownloadedUpdate()
+      return
+    }
+
+    downloadUpdate()
   }
 
   const { release, fetchLatestRelease } = useReleaseNotes()
@@ -32,16 +36,20 @@ const DialogAppUpdater = () => {
   const [appUpdateState, setAppUpdateState] = useState({
     remindMeLater: false,
     isUpdateAvailable: false,
+    isUpdateReadyToInstall: false,
   })
 
   useEffect(() => {
     setAppUpdateState({
       remindMeLater: updateState.remindMeLater,
       isUpdateAvailable: updateState.isUpdateAvailable,
+      isUpdateReadyToInstall: updateState.isUpdateReadyToInstall,
     })
   }, [updateState])
 
-  if (appUpdateState.remindMeLater) return null
+  if (appUpdateState.remindMeLater && !appUpdateState.isUpdateReadyToInstall) {
+    return null
+  }
 
   return (
     <>
@@ -65,7 +73,9 @@ const DialogAppUpdater = () => {
                     })}
                   </div>
                   <div className="mt-1 text-muted-foreground font-normal mb-2">
-                    {t('updater:updateAvailable')}
+                    {appUpdateState.isUpdateReadyToInstall
+                      ? t('updater:updateReadyToRestart')
+                      : t('updater:updateAvailable')}
                   </div>
                 </div>
               </div>
@@ -118,12 +128,16 @@ const DialogAppUpdater = () => {
                   </Button>
                   <Button
                     onClick={handleUpdate}
-                    disabled={updateState.isDownloading}
+                    disabled={updateState.isDownloading || updateState.isInstalling}
                     size="sm"
                   >
-                    {updateState.isDownloading
-                      ? t('updater:downloading')
-                      : t('updater:updateNow')}
+                    {updateState.isInstalling
+                      ? t('updater:installing')
+                      : updateState.isDownloading
+                        ? t('updater:downloading')
+                        : appUpdateState.isUpdateReadyToInstall
+                          ? t('updater:restartToUpdate')
+                          : t('updater:downloadUpdate')}
                   </Button>
                 </div>
               </div>

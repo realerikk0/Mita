@@ -23,4 +23,21 @@ describe('DefaultUpdaterService', () => {
     )
     spy.mockRestore()
   })
+
+  it('downloadUpdateWithProgress() logs and resolves', async () => {
+    const spy = vi.spyOn(console, 'log').mockImplementation(() => {})
+    const svc = new DefaultUpdaterService()
+    const cb = vi.fn()
+    await expect(svc.downloadUpdateWithProgress(cb)).resolves.toBeUndefined()
+    expect(spy).toHaveBeenCalledWith(
+      'downloadUpdateWithProgress called with callback:',
+      'function'
+    )
+    spy.mockRestore()
+  })
+
+  it('installDownloadedUpdate() resolves', async () => {
+    const svc = new DefaultUpdaterService()
+    await expect(svc.installDownloadedUpdate()).resolves.toBeUndefined()
+  })
 })

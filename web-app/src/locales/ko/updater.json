@@ -6,5 +6,9 @@
   "hideReleaseNotes": "릴리스 노트 숨기기",
   "remindMeLater": "나중에 알림",
   "downloading": "다운로드 중...",
+  "downloadUpdate": "업데이트 다운로드",
+  "updateReadyToRestart": "업데이트가 다운로드되었습니다. 다시 시작하면 완료됩니다.",
+  "restartToUpdate": "다시 시작하여 업데이트",
+  "installing": "설치 중...",
   "updateNow": "지금 업데이트"
 }

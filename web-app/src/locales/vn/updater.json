@@ -6,5 +6,9 @@
   "hideReleaseNotes": "Ẩn ghi chú phát hành",
   "remindMeLater": "Nhắc tôi sau",
   "downloading": "Đang tải xuống...",
+  "downloadUpdate": "Tải bản cập nhật",
+  "updateReadyToRestart": "Bản cập nhật đã được tải xuống. Khởi động lại để hoàn tất.",
+  "restartToUpdate": "Khởi động lại và cập nhật",
+  "installing": "Đang cài đặt...",
   "updateNow": "Cập nhật ngay"
 }

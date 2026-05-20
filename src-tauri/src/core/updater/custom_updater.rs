@@ -7,7 +7,7 @@
  * 3. Remaining endpoints are FALLBACK - no signing needed
  *
  * Convention: The first endpoint in the list should be the signed endpoint
- * (e.g., https://updates.jingxing.uk/mita/latest.json)
+ * (e.g., https://updates.mita.so/mita/latest.json)
  */
 use super::hmac_client::SignedRequestHeaders;
 use reqwest::Client;

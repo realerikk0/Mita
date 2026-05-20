@@ -7,17 +7,17 @@ on:
         description: 'URL to download Mita app for Windows (.exe)'
         required: true
         type: string
-        default: 'https://updates.jingxing.uk/mita/nightly/Mita-nightly_0.6.5-758_x64-setup.exe'
+        default: 'https://updates.mita.so/mita/nightly/Mita-nightly_0.6.5-758_x64-setup.exe'
       mita_app_url_ubuntu:
         description: 'URL to download Mita app for Ubuntu (.deb)'
         required: true
         type: string
-        default: 'https://updates.jingxing.uk/mita/nightly/Mita-nightly_0.6.5-758_amd64.deb'
+        default: 'https://updates.mita.so/mita/nightly/Mita-nightly_0.6.5-758_amd64.deb'
       mita_app_url_macos:
         description: 'URL to download Mita app for macOS (.dmg)'
         required: true
         type: string
-        default: 'https://updates.jingxing.uk/mita/nightly/Mita-nightly_0.6.5-758_universal.dmg'
+        default: 'https://updates.mita.so/mita/nightly/Mita-nightly_0.6.5-758_universal.dmg'
       is_nightly:
         description: 'Is this a nightly build?'
         required: true

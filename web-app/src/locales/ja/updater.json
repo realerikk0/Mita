@@ -6,5 +6,9 @@
   "hideReleaseNotes": "リリースノートを非表示",
   "remindMeLater": "後で通知",
   "downloading": "ダウンロード中...",
+  "downloadUpdate": "アップデートをダウンロード",
+  "updateReadyToRestart": "アップデートをダウンロードしました。再起動して完了します。",
+  "restartToUpdate": "再起動して更新",
+  "installing": "インストール中...",
   "updateNow": "今すぐ更新"
 }
