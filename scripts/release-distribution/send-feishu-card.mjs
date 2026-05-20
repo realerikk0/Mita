@@ -52,6 +52,13 @@ function assetLine(label, asset) {
   return `**${label}**: [${asset.name}](${asset.downloadUrl})`
 }
 
+function mimeTypeForFile(file) {
+  const extension = path.extname(file).toLowerCase()
+  if (extension === '.jpg' || extension === '.jpeg') return 'image/jpeg'
+  if (extension === '.webp') return 'image/webp'
+  return 'image/png'
+}
+
 export function createFeishuSign(timestamp, secret) {
   const stringToSign = `${timestamp}\n${secret}`
   return createHmac('sha256', stringToSign).update('').digest('base64')
@@ -59,6 +66,7 @@ export function createFeishuSign(timestamp, secret) {
 
 export function buildFeishuCard(release, baiduShare, options = {}) {
   const runUrl = options.runUrl ?? buildRunUrl()
+  const posterImageKey = options.posterImageKey ?? options.imageKey
   const title = `Mita ${release.tagName} 发布完成`
   const baiduPassword = baiduShare.password || 'mita'
   const releaseTime = release.publishedAt || 'unknown'
@@ -91,6 +99,77 @@ export function buildFeishuCard(release, baiduShare, options = {}) {
     })
   }
 
+  const elements = []
+  if (posterImageKey) {
+    elements.push({
+      tag: 'img',
+      img_key: posterImageKey,
+      alt: {
+        tag: 'plain_text',
+        content: `Mita ${release.tagName} 新版本海报`,
+      },
+    })
+  }
+
+  elements.push(
+    {
+      tag: 'div',
+      fields,
+    },
+    {
+      tag: 'hr',
+    },
+    {
+      tag: 'div',
+      text: {
+        tag: 'lark_md',
+        content: `**GitHub Release**\n[${release.url}](${release.url})`,
+      },
+    },
+    {
+      tag: 'div',
+      text: {
+        tag: 'lark_md',
+        content: [
+          '**GitHub 安装包**',
+          assetLine('macOS DMG', release.assets.macosDmg),
+          assetLine('Windows EXE', release.assets.windowsExe),
+          assetLine('Windows MSI', release.assets.windowsMsi),
+        ].join('\n'),
+      },
+    },
+    {
+      tag: 'div',
+      text: {
+        tag: 'lark_md',
+        content: `${dryRunPrefix}**百度网盘**\n[打开百度网盘](${baiduShare.url})\n提取码: \`${baiduPassword}\``,
+      },
+    },
+    {
+      tag: 'action',
+      actions: [
+        {
+          tag: 'button',
+          text: {
+            tag: 'plain_text',
+            content: '打开 GitHub Release',
+          },
+          type: 'primary',
+          url: release.url,
+        },
+        {
+          tag: 'button',
+          text: {
+            tag: 'plain_text',
+            content: '打开百度网盘',
+          },
+          type: 'default',
+          url: baiduShare.url,
+        },
+      ],
+    },
+  )
+
   return {
     config: {
       wide_screen_mode: true,
@@ -102,64 +181,7 @@ export function buildFeishuCard(release, baiduShare, options = {}) {
         content: title,
       },
     },
-    elements: [
-      {
-        tag: 'div',
-        fields,
-      },
-      {
-        tag: 'hr',
-      },
-      {
-        tag: 'div',
-        text: {
-          tag: 'lark_md',
-          content: `**GitHub Release**\n[${release.url}](${release.url})`,
-        },
-      },
-      {
-        tag: 'div',
-        text: {
-          tag: 'lark_md',
-          content: [
-            '**GitHub 安装包**',
-            assetLine('macOS DMG', release.assets.macosDmg),
-            assetLine('Windows EXE', release.assets.windowsExe),
-            assetLine('Windows MSI', release.assets.windowsMsi),
-          ].join('\n'),
-        },
-      },
-      {
-        tag: 'div',
-        text: {
-          tag: 'lark_md',
-          content: `${dryRunPrefix}**百度网盘**\n[打开百度网盘](${baiduShare.url})\n提取码: \`${baiduPassword}\``,
-        },
-      },
-      {
-        tag: 'action',
-        actions: [
-          {
-            tag: 'button',
-            text: {
-              tag: 'plain_text',
-              content: '打开 GitHub Release',
-            },
-            type: 'primary',
-            url: release.url,
-          },
-          {
-            tag: 'button',
-            text: {
-              tag: 'plain_text',
-              content: '打开百度网盘',
-            },
-            type: 'default',
-            url: baiduShare.url,
-          },
-        ],
-      },
-    ],
+    elements,
   }
 }
 
@@ -176,6 +198,18 @@ export function buildFeishuPayload(card, options = {}) {
   }
 
   return payload
+}
+
+export function buildFeishuAppMessagePayload(card, options = {}) {
+  if (!options.chatId) {
+    throw new Error('chatId is required for Feishu app message payload')
+  }
+
+  return {
+    receive_id: options.chatId,
+    msg_type: 'interactive',
+    content: JSON.stringify(card),
+  }
 }
 
 async function postFeishuWebhook(webhook, payload) {
@@ -210,22 +244,219 @@ async function postFeishuWebhook(webhook, payload) {
   return text
 }
 
+function assertFeishuSuccess(responseText, fallbackMessage) {
+  if (!responseText) return {}
+
+  try {
+    const json = JSON.parse(responseText)
+    const code = json.code ?? json.StatusCode ?? json.status_code
+    if (code != null && Number(code) !== 0) {
+      throw new Error(json.msg || json.message || `${fallbackMessage}: ${responseText}`)
+    }
+    return json
+  } catch (error) {
+    if (error instanceof SyntaxError) return responseText
+    throw error
+  }
+}
+
+export async function getFeishuTenantAccessToken(
+  appId,
+  appSecret,
+  fetchImpl = globalThis.fetch,
+) {
+  const response = await fetchImpl(
+    'https://open.feishu.cn/open-apis/auth/v3/tenant_access_token/internal',
+    {
+      method: 'POST',
+      headers: {
+        'content-type': 'application/json; charset=utf-8',
+      },
+      body: JSON.stringify({
+        app_id: appId,
+        app_secret: appSecret,
+      }),
+    },
+  )
+
+  const text = await response.text()
+  if (!response.ok) {
+    throw new Error(`Feishu tenant token failed with HTTP ${response.status}: ${text}`)
+  }
+
+  const json = text ? JSON.parse(text) : {}
+  const code = json.code ?? json.StatusCode ?? json.status_code
+  if (code != null && Number(code) !== 0) {
+    throw new Error(json.msg || json.message || `Feishu tenant token rejected: ${text}`)
+  }
+
+  const token = json.tenant_access_token ?? json.data?.tenant_access_token
+  if (!token) {
+    throw new Error('Feishu tenant token response did not include tenant_access_token')
+  }
+
+  return token
+}
+
+export async function postFeishuAppMessage(
+  chatId,
+  card,
+  tenantAccessToken,
+  fetchImpl = globalThis.fetch,
+) {
+  const payload = buildFeishuAppMessagePayload(card, { chatId })
+  const response = await fetchImpl(
+    'https://open.feishu.cn/open-apis/im/v1/messages?receive_id_type=chat_id',
+    {
+      method: 'POST',
+      headers: {
+        authorization: `Bearer ${tenantAccessToken}`,
+        'content-type': 'application/json; charset=utf-8',
+      },
+      body: JSON.stringify(payload),
+    },
+  )
+
+  const text = await response.text()
+  if (!response.ok) {
+    throw new Error(`Feishu app message failed with HTTP ${response.status}: ${text}`)
+  }
+
+  return assertFeishuSuccess(text, 'Feishu app message rejected payload')
+}
+
+export async function uploadFeishuImage(
+  imagePath,
+  tenantAccessToken,
+  fetchImpl = globalThis.fetch,
+) {
+  const image = new Blob([fs.readFileSync(imagePath)], {
+    type: mimeTypeForFile(imagePath),
+  })
+  const form = new FormData()
+  form.append('image_type', 'message')
+  form.append('image', image, path.basename(imagePath))
+
+  const response = await fetchImpl('https://open.feishu.cn/open-apis/im/v1/images', {
+    method: 'POST',
+    headers: {
+      authorization: `Bearer ${tenantAccessToken}`,
+    },
+    body: form,
+  })
+
+  const text = await response.text()
+  if (!response.ok) {
+    throw new Error(`Feishu image upload failed with HTTP ${response.status}: ${text}`)
+  }
+
+  const json = text ? JSON.parse(text) : {}
+  const code = json.code ?? json.StatusCode ?? json.status_code
+  if (code != null && Number(code) !== 0) {
+    throw new Error(json.msg || json.message || `Feishu image upload rejected: ${text}`)
+  }
+
+  const imageKey = json.data?.image_key ?? json.data?.img_key ?? json.image_key ?? json.img_key
+  if (!imageKey) {
+    throw new Error('Feishu image upload response did not include image_key')
+  }
+
+  return imageKey
+}
+
+function readPosterMetadata(posterJson) {
+  if (!posterJson || !fs.existsSync(posterJson)) return null
+  return readJson(posterJson)
+}
+
+function writePosterMetadata(posterJson, metadata) {
+  if (!posterJson) return
+  ensureDirectory(posterJson)
+  fs.writeFileSync(posterJson, `${JSON.stringify(metadata, null, 2)}\n`)
+}
+
+export async function resolvePosterImageKey(options = {}) {
+  const metadata = readPosterMetadata(options.posterJson)
+  const posterPath = options.posterPath ?? metadata?.outputPath
+  if (!posterPath || !fs.existsSync(posterPath)) return null
+
+  if (metadata && metadata.status !== 'generated') return null
+  if (metadata?.feishuImageKey) return metadata.feishuImageKey
+
+  const appId = options.appId ?? process.env.FEISHU_APP_ID
+  const appSecret = options.appSecret ?? process.env.FEISHU_APP_SECRET
+  if (!appId || !appSecret) {
+    console.warn('Release poster exists but FEISHU_APP_ID or FEISHU_APP_SECRET is missing; sending card without poster image')
+    return null
+  }
+
+  try {
+    const fetchImpl = options.fetchImpl ?? globalThis.fetch
+    const token =
+      options.tenantAccessToken ??
+      (await getFeishuTenantAccessToken(appId, appSecret, fetchImpl))
+    const imageKey = await uploadFeishuImage(posterPath, token, fetchImpl)
+    writePosterMetadata(options.posterJson, {
+      ...(metadata ?? {}),
+      outputPath: posterPath,
+      feishuUploadStatus: 'uploaded',
+      feishuImageKey: imageKey,
+      feishuUploadedAt: new Date().toISOString(),
+    })
+    return imageKey
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error)
+    writePosterMetadata(options.posterJson, {
+      ...(metadata ?? {}),
+      outputPath: posterPath,
+      feishuUploadStatus: 'failed',
+      feishuUploadError: message,
+      feishuUploadedAt: new Date().toISOString(),
+    })
+    console.warn(`Release poster upload skipped: ${message}`)
+    if (options.strict) throw error
+    return null
+  }
+}
+
 async function main() {
   const args = parseArgs(process.argv.slice(2))
   const releaseJson = args['release-json']
   const baiduJson = args['baidu-json']
   const output = args.output ?? 'dist/feishu-card.json'
   const dryRun = args.dryRun || isTruthy(process.env.DRY_RUN)
+  const strictPoster = isTruthy(process.env.RELEASE_POSTER_STRICT)
+  const chatId = args['chat-id'] ?? process.env.FEISHU_RELEASE_CHAT_ID
 
   if (!releaseJson) throw new Error('--release-json is required')
   if (!baiduJson) throw new Error('--baidu-json is required')
 
+  const appId = process.env.FEISHU_APP_ID
+  const appSecret = process.env.FEISHU_APP_SECRET
+  let tenantAccessToken = null
+  if (chatId && !dryRun) {
+    if (!appId || !appSecret) {
+      throw new Error('FEISHU_APP_ID and FEISHU_APP_SECRET are required when FEISHU_RELEASE_CHAT_ID is set')
+    }
+    tenantAccessToken = await getFeishuTenantAccessToken(appId, appSecret)
+  }
+
   const release = readJson(releaseJson)
   const baiduShare = readJson(baiduJson)
-  const card = buildFeishuCard(release, baiduShare)
-  const payload = buildFeishuPayload(card, {
-    secret: process.env.FEISHU_RELEASE_SECRET,
+  const posterImageKey = await resolvePosterImageKey({
+    posterJson: args['poster-json'],
+    posterPath: args['poster-path'],
+    tenantAccessToken,
+    strict: strictPoster,
   })
+  const card = buildFeishuCard(release, baiduShare, {
+    posterImageKey,
+  })
+  const payload = chatId
+    ? buildFeishuAppMessagePayload(card, { chatId })
+    : buildFeishuPayload(card, {
+        secret: process.env.FEISHU_RELEASE_SECRET,
+      })
 
   ensureDirectory(output)
   fs.writeFileSync(output, `${JSON.stringify(payload, null, 2)}\n`)
@@ -235,9 +466,18 @@ async function main() {
     return
   }
 
+  if (chatId) {
+    if (!tenantAccessToken) {
+      tenantAccessToken = await getFeishuTenantAccessToken(appId, appSecret)
+    }
+    await postFeishuAppMessage(chatId, card, tenantAccessToken)
+    console.log(`Sent Feishu release card via app bot to chat ${chatId}`)
+    return
+  }
+
   const webhook = process.env.FEISHU_RELEASE_WEBHOOK
   if (!webhook) {
-    throw new Error('FEISHU_RELEASE_WEBHOOK is required when DRY_RUN is false')
+    throw new Error('FEISHU_RELEASE_CHAT_ID or FEISHU_RELEASE_WEBHOOK is required when DRY_RUN is false')
   }
 
   await postFeishuWebhook(webhook, payload)

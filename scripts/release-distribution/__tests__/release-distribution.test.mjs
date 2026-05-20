@@ -8,13 +8,22 @@ import { fileURLToPath } from 'node:url'
 
 import { collectReleaseAssets } from '../collect-release-assets.mjs'
 import {
+  extractPosterHighlights,
+  generateReleasePoster,
+} from '../generate-release-poster.mjs'
+import {
   buildFeishuCard,
+  buildFeishuAppMessagePayload,
   buildFeishuPayload,
   createFeishuSign,
+  postFeishuAppMessage,
+  resolvePosterImageKey,
 } from '../send-feishu-card.mjs'
 
 const here = path.dirname(fileURLToPath(import.meta.url))
 const uploadScript = path.resolve(here, '../upload-baidu.sh')
+const posterScript = path.resolve(here, '../generate-release-poster.mjs')
+const feishuScript = path.resolve(here, '../send-feishu-card.mjs')
 
 function sampleRelease() {
   return {
@@ -22,6 +31,16 @@ function sampleRelease() {
     name: 'Mita v1.2.3',
     url: 'https://github.com/realerikk0/Mita/releases/tag/v1.2.3',
     publishedAt: '2026-05-15T08:00:00Z',
+    body: [
+      '## Changes',
+      '',
+      '## 🚀 Features',
+      '- Added visible desktop updater @eric (#123)',
+      '- Added manual update checks',
+      '',
+      '## 🐛 Fixes',
+      '- Fixed updater CDN manifest parsing @eric (#124)',
+    ].join('\n'),
     assets: [
       {
         name: 'Mita_1.2.3_universal.dmg',
@@ -46,6 +65,7 @@ test('collectReleaseAssets requires one dmg, one exe, and one msi', () => {
   const manifest = collectReleaseAssets(sampleRelease())
 
   assert.equal(manifest.tagName, 'v1.2.3')
+  assert.match(manifest.body, /Added visible desktop updater/)
   assert.equal(manifest.assets.macosDmg.name, 'Mita_1.2.3_universal.dmg')
   assert.equal(manifest.assets.windowsExe.name, 'Mita_1.2.3_x64-setup.exe')
   assert.equal(manifest.assets.windowsMsi.name, 'Mita_1.2.3_x64_en-US.msi')
@@ -85,6 +105,24 @@ test('buildFeishuCard includes fixed release and download fields', () => {
   assert.match(body, /打开百度网盘/)
 })
 
+test('buildFeishuCard inserts poster image when image key is provided', () => {
+  const manifest = collectReleaseAssets(sampleRelease())
+  const card = buildFeishuCard(
+    manifest,
+    {
+      url: 'https://pan.baidu.com/s/example',
+      password: 'mita',
+    },
+    {
+      posterImageKey: 'img_v3_abc',
+    },
+  )
+
+  assert.equal(card.elements[0].tag, 'img')
+  assert.equal(card.elements[0].img_key, 'img_v3_abc')
+  assert.match(JSON.stringify(card), /Mita v1\.2\.3 新版本海报/)
+})
+
 test('buildFeishuPayload signs custom bot payload when secret is provided', () => {
   const card = { config: {}, elements: [] }
   const payload = buildFeishuPayload(card, {
@@ -95,6 +133,255 @@ test('buildFeishuPayload signs custom bot payload when secret is provided', () =
   assert.equal(payload.msg_type, 'interactive')
   assert.equal(payload.timestamp, '1760000000')
   assert.equal(payload.sign, createFeishuSign('1760000000', 'secret-value'))
+})
+
+test('buildFeishuAppMessagePayload targets a chat_id interactive card', () => {
+  const card = { config: {}, elements: [{ tag: 'div' }] }
+  const payload = buildFeishuAppMessagePayload(card, {
+    chatId: 'oc_release_chat',
+  })
+
+  assert.equal(payload.receive_id, 'oc_release_chat')
+  assert.equal(payload.msg_type, 'interactive')
+  assert.deepEqual(JSON.parse(payload.content), card)
+})
+
+test('postFeishuAppMessage sends interactive card through app bot API', async () => {
+  const calls = []
+  const fetchMock = async (url, init = {}) => {
+    calls.push({ url, init })
+    return new Response(
+      JSON.stringify({
+        code: 0,
+        data: { message_id: 'om_release' },
+      }),
+      { status: 200, headers: { 'content-type': 'application/json' } },
+    )
+  }
+  const card = { config: {}, elements: [{ tag: 'div' }] }
+
+  await postFeishuAppMessage('oc_release_chat', card, 'tenant-token', fetchMock)
+
+  assert.equal(
+    calls[0].url,
+    'https://open.feishu.cn/open-apis/im/v1/messages?receive_id_type=chat_id',
+  )
+  assert.equal(calls[0].init.headers.authorization, 'Bearer tenant-token')
+  const body = JSON.parse(calls[0].init.body)
+  assert.equal(body.receive_id, 'oc_release_chat')
+  assert.equal(body.msg_type, 'interactive')
+  assert.deepEqual(JSON.parse(body.content), card)
+})
+
+test('send-feishu-card dry run can render app bot payload without app credentials', () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'mita-feishu-card-app-dry-run-'))
+  const releasePath = path.join(dir, 'release-assets.json')
+  const baiduPath = path.join(dir, 'baidu-share.json')
+  const outputPath = path.join(dir, 'feishu-card.json')
+
+  fs.writeFileSync(
+    releasePath,
+    `${JSON.stringify(collectReleaseAssets(sampleRelease()), null, 2)}\n`,
+  )
+  fs.writeFileSync(
+    baiduPath,
+    `${JSON.stringify({ url: 'https://pan.baidu.com/s/example', password: 'mita' }, null, 2)}\n`,
+  )
+
+  const result = spawnSync(
+    process.execPath,
+    [
+      feishuScript,
+      '--release-json',
+      releasePath,
+      '--baidu-json',
+      baiduPath,
+      '--output',
+      outputPath,
+      '--dry-run',
+    ],
+    {
+      env: {
+        ...process.env,
+        FEISHU_RELEASE_CHAT_ID: 'oc_release_chat',
+        FEISHU_APP_ID: '',
+        FEISHU_APP_SECRET: '',
+      },
+      encoding: 'utf8',
+    },
+  )
+
+  assert.equal(result.status, 0, result.stderr)
+  const payload = JSON.parse(fs.readFileSync(outputPath, 'utf8'))
+  assert.equal(payload.receive_id, 'oc_release_chat')
+  assert.equal(payload.msg_type, 'interactive')
+  assert.match(payload.content, /Mita v1\.2\.3 发布完成/)
+})
+
+test('extractPosterHighlights separates release features and fixes', () => {
+  const manifest = collectReleaseAssets(sampleRelease())
+  const highlights = extractPosterHighlights(manifest)
+
+  assert.deepEqual(highlights.features, [
+    'Added visible desktop updater',
+    'Added manual update checks',
+  ])
+  assert.deepEqual(highlights.fixes, [
+    'Fixed updater CDN manifest parsing',
+  ])
+})
+
+test('generateReleasePoster writes image from Jingxing async task content', async () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'mita-release-poster-'))
+  const output = path.join(dir, 'poster.png')
+  const manifest = collectReleaseAssets(sampleRelease())
+  const calls = []
+  const fetchMock = async (url, init = {}) => {
+    calls.push({ url, init })
+
+    if (String(url).endsWith('/images/generations/async')) {
+      return new Response(
+        JSON.stringify({
+          object: 'image.task',
+          id: 'task_123',
+          status: 'pending',
+        }),
+        { status: 200, headers: { 'content-type': 'application/json' } },
+      )
+    }
+
+    if (String(url).endsWith('/images/tasks/task_123')) {
+      return new Response(
+        JSON.stringify({
+          object: 'image.task',
+          id: 'task_123',
+          status: 'succeeded',
+        }),
+        { status: 200, headers: { 'content-type': 'application/json' } },
+      )
+    }
+
+    if (String(url).endsWith('/images/tasks/task_123/content/0')) {
+      return new Response(new Uint8Array([1, 2, 3]), {
+        status: 200,
+        headers: { 'content-type': 'image/png' },
+      })
+    }
+
+    throw new Error(`Unexpected fetch: ${url}`)
+  }
+
+  const result = await generateReleasePoster(manifest, {
+    apiKey: 'jk-test',
+    baseUrl: 'https://api.jingxing.io/v1',
+    output,
+    fetchImpl: fetchMock,
+    pollIntervalMs: 1,
+    timeoutMs: 1000,
+  })
+
+  assert.equal(result.status, 'generated')
+  assert.equal(result.outputPath, output)
+  assert.equal(result.mimeType, 'image/png')
+  assert.equal(fs.readFileSync(output).length, 3)
+  assert.equal(calls[0].url, 'https://api.jingxing.io/v1/images/generations/async')
+  assert.equal(calls[1].url, 'https://api.jingxing.io/v1/images/tasks/task_123')
+  assert.equal(calls[2].url, 'https://api.jingxing.io/v1/images/tasks/task_123/content/0')
+
+  const body = JSON.parse(calls[0].init.body)
+  assert.equal(body.model, 'gpt-image-2')
+  assert.equal(body.size, '1024x1536')
+  assert.equal(body.quality, 'medium')
+  assert.match(body.prompt, /Mita 桌面版新版本来啦/)
+  assert.match(body.prompt, /Added visible desktop updater/)
+})
+
+test('generate-release-poster CLI degrades when Jingxing key is missing', () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'mita-release-poster-missing-key-'))
+  const manifestPath = path.join(dir, 'release-assets.json')
+  const metadataPath = path.join(dir, 'release-poster.json')
+  fs.writeFileSync(
+    manifestPath,
+    `${JSON.stringify(collectReleaseAssets(sampleRelease()), null, 2)}\n`,
+  )
+
+  const result = spawnSync(
+    process.execPath,
+    [
+      posterScript,
+      '--release-json',
+      manifestPath,
+      '--output',
+      path.join(dir, 'poster.png'),
+      '--metadata',
+      metadataPath,
+    ],
+    {
+      env: {
+        ...process.env,
+        JINGXING_API_KEY: '',
+      },
+      encoding: 'utf8',
+    },
+  )
+
+  assert.equal(result.status, 0, result.stderr)
+  const metadata = JSON.parse(fs.readFileSync(metadataPath, 'utf8'))
+  assert.equal(metadata.status, 'failed')
+  assert.match(metadata.reason, /JINGXING_API_KEY/)
+})
+
+test('resolvePosterImageKey uploads generated poster to Feishu', async () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'mita-feishu-poster-'))
+  const posterPath = path.join(dir, 'poster.png')
+  const posterJson = path.join(dir, 'release-poster.json')
+  fs.writeFileSync(posterPath, Buffer.from([1, 2, 3]))
+  fs.writeFileSync(
+    posterJson,
+    `${JSON.stringify({ status: 'generated', outputPath: posterPath }, null, 2)}\n`,
+  )
+
+  const calls = []
+  const fetchMock = async (url, init = {}) => {
+    calls.push({ url, init })
+    if (String(url).includes('/auth/v3/tenant_access_token/internal')) {
+      return new Response(
+        JSON.stringify({
+          code: 0,
+          tenant_access_token: 'tenant-token',
+        }),
+        { status: 200, headers: { 'content-type': 'application/json' } },
+      )
+    }
+
+    if (String(url).includes('/im/v1/images')) {
+      return new Response(
+        JSON.stringify({
+          code: 0,
+          data: { image_key: 'img_v3_abc' },
+        }),
+        { status: 200, headers: { 'content-type': 'application/json' } },
+      )
+    }
+
+    throw new Error(`Unexpected fetch: ${url}`)
+  }
+
+  const imageKey = await resolvePosterImageKey({
+    posterJson,
+    appId: 'cli_xxx',
+    appSecret: 'secret',
+    fetchImpl: fetchMock,
+  })
+
+  assert.equal(imageKey, 'img_v3_abc')
+  assert.equal(calls[0].url, 'https://open.feishu.cn/open-apis/auth/v3/tenant_access_token/internal')
+  assert.equal(calls[1].url, 'https://open.feishu.cn/open-apis/im/v1/images')
+  assert.equal(calls[1].init.headers.authorization, 'Bearer tenant-token')
+
+  const metadata = JSON.parse(fs.readFileSync(posterJson, 'utf8'))
+  assert.equal(metadata.feishuUploadStatus, 'uploaded')
+  assert.equal(metadata.feishuImageKey, 'img_v3_abc')
 })
 
 test('upload-baidu dry run writes a placeholder share file', () => {

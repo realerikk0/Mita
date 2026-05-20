@@ -80,7 +80,7 @@ jobs:
         run: |
           mkdir -p dist/release-assets
           gh release view "${{ steps.release.outputs.tag }}" \
-            --json tagName,name,url,publishedAt,assets \
+            --json tagName,name,url,publishedAt,body,assets \
             > dist/release.json
 
       - name: Download release packages
@@ -103,6 +103,20 @@ jobs:
             --release-json dist/release.json \
             --assets-dir dist/release-assets \
             --output dist/release-assets.json
+
+      - name: Generate release poster
+        if: steps.release.outputs.probe_only != 'true'
+        shell: bash
+        env:
+          JINGXING_API_KEY: ${{ secrets.JINGXING_API_KEY }}
+          JINGXING_BASE_URL: ${{ vars.JINGXING_BASE_URL || 'https://api.jingxing.io/v1' }}
+          RELEASE_POSTER_ENABLED: ${{ vars.RELEASE_POSTER_ENABLED || 'true' }}
+          RELEASE_POSTER_STRICT: ${{ vars.RELEASE_POSTER_STRICT || 'false' }}
+        run: |
+          node scripts/release-distribution/generate-release-poster.mjs \
+            --release-json dist/release-assets.json \
+            --output dist/release-poster.png \
+            --metadata dist/release-poster.json
 
       - name: Create Baidu credential probe payload
         if: steps.release.outputs.probe_only == 'true'
@@ -176,12 +190,18 @@ jobs:
           DRY_RUN: ${{ steps.release.outputs.dry_run }}
           RELEASE_ASSETS_JSON: dist/release-assets.json
           BAIDU_SHARE_JSON: dist/baidu-share.json
+          FEISHU_RELEASE_CHAT_ID: ${{ secrets.FEISHU_RELEASE_CHAT_ID || vars.FEISHU_RELEASE_CHAT_ID }}
           FEISHU_RELEASE_WEBHOOK: ${{ secrets.FEISHU_RELEASE_WEBHOOK }}
           FEISHU_RELEASE_SECRET: ${{ secrets.FEISHU_RELEASE_SECRET }}
+          FEISHU_APP_ID: ${{ secrets.FEISHU_APP_ID }}
+          FEISHU_APP_SECRET: ${{ secrets.FEISHU_APP_SECRET }}
+          RELEASE_POSTER_STRICT: ${{ vars.RELEASE_POSTER_STRICT || 'false' }}
         run: |
           args=(
             --release-json "$RELEASE_ASSETS_JSON"
             --baidu-json "$BAIDU_SHARE_JSON"
+            --poster-json dist/release-poster.json
+            --poster-path dist/release-poster.png
             --output dist/feishu-card.json
           )
           if [ "$DRY_RUN" = "true" ]; then
@@ -200,3 +220,4 @@ jobs:
             dist/release-assets.json
             dist/baidu-share.json
             dist/feishu-card.json
+            dist/release-poster.*

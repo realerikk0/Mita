@@ -94,6 +94,7 @@ export function collectReleaseAssets(release, options = {}) {
     name: release.name ?? tagName,
     url: releaseUrl,
     publishedAt: release.publishedAt ?? release.published_at ?? null,
+    body: release.body ?? release.description ?? '',
     assets: selected,
     allAssets: assets,
   }
