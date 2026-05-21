@@ -23,9 +23,7 @@ impl ComputerAgentScope {
         let thread_id = sanitize_thread_id(thread_id)?;
         let raw_workspace_root = mita_data_folder.join(WORKSPACE_DIR).join(&thread_id);
         let workspace_root = normalize_scope_path(
-            raw_workspace_root
-                .canonicalize()
-                .unwrap_or(raw_workspace_root),
+            canonicalize_existing_or_parent(&raw_workspace_root).unwrap_or(raw_workspace_root),
         );
 
         let mut allowed_roots = vec![workspace_root.clone()];

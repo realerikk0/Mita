@@ -1,19 +1,25 @@
 use std::fs;
 
-#[cfg(windows)]
+#[cfg(any(windows, target_os = "macos"))]
 use std::{
     env,
-    ffi::OsStr,
     io::Write,
     net::TcpListener,
-    path::{Path, PathBuf},
+    path::PathBuf,
     process::{Child, Command, Stdio},
+    thread,
+    time::Duration,
+};
+
+#[cfg(windows)]
+use std::{
+    ffi::OsStr,
+    path::Path,
     sync::{
         atomic::{AtomicBool, Ordering},
         Arc, Mutex, OnceLock,
     },
-    thread,
-    time::{Duration, Instant},
+    time::Instant,
 };
 
 use serde_json::{json, Map};
@@ -29,13 +35,22 @@ use crate::core::{
             LIST_DIRECTORY, READ_TEXT_FILE, RUN_SHELL,
         },
         windows_runner::{
-            cleanup_journal_path_for_test, refused_response, runner_candidate_paths_from,
-            sandbox_diagnostic_for_test, validate_runner_request, windows_runner_status,
-            RunnerRequest, RunnerResponse, RunnerResponseStatus, RUNNER_EXECUTE_ENV,
-            RUNNER_PATH_ENV, RUNNER_PROTOCOL_VERSION,
+            refused_response, validate_runner_request, RunnerRequest, RunnerResponseStatus,
+            RUNNER_PROTOCOL_VERSION,
         },
     },
     mcp::models::McpSettings,
+};
+
+#[cfg(windows)]
+use crate::core::computer_agent::windows_runner::{
+    cleanup_journal_path_for_test, runner_candidate_paths_from, sandbox_diagnostic_for_test,
+    windows_runner_status, RUNNER_PATH_ENV,
+};
+
+#[cfg(any(windows, target_os = "macos"))]
+use crate::core::computer_agent::windows_runner::{
+    RunnerResponse, RUNNER_BINARY_NAME, RUNNER_EXECUTE_ENV,
 };
 
 fn settings_enabled() -> McpSettings {
@@ -649,6 +664,275 @@ fn windows_runner_refuses_direct_execution_without_gate() {
 
     assert_eq!(response.status, RunnerResponseStatus::Refused);
     assert!(response.message.contains(RUNNER_EXECUTE_ENV));
+}
+
+#[cfg(target_os = "macos")]
+#[test]
+#[ignore = "requires cargo build --bin mita-computer-agent-runner --features computer-agent-runner"]
+fn macos_runner_refuses_direct_execution_without_gate() {
+    let tmp = tempdir().unwrap();
+    let response = run_runner_request(
+        RunnerRequest {
+            protocol_version: RUNNER_PROTOCOL_VERSION,
+            command: "echo hello".to_string(),
+            cwd: tmp.path().to_path_buf(),
+            workspace_root: tmp.path().to_path_buf(),
+            allowed_roots: Vec::new(),
+            timeout_seconds: 10,
+            max_output_bytes: 64 * 1024,
+        },
+        false,
+    );
+
+    assert_eq!(response.status, RunnerResponseStatus::Refused);
+    assert!(response.message.contains(RUNNER_EXECUTE_ENV));
+}
+
+#[cfg(target_os = "macos")]
+#[test]
+#[ignore = "requires cargo build --bin mita-computer-agent-runner --features computer-agent-runner"]
+fn macos_runner_allows_writes_inside_workspace_and_allowed_root() {
+    let tmp = tempdir().unwrap();
+    let workspace = tmp.path().join("workspace");
+    let allowed = tmp.path().join("allowed");
+    let project = allowed.join("project");
+    fs::create_dir_all(&workspace).unwrap();
+    fs::create_dir_all(&project).unwrap();
+
+    let response = run_runner_request(
+        RunnerRequest {
+            protocol_version: RUNNER_PROTOCOL_VERSION,
+            command: format!(
+                "printf workspace > '{}/workspace.txt'; printf allowed > allowed-root.txt; cat allowed-root.txt",
+                workspace.display()
+            ),
+            cwd: project.clone(),
+            workspace_root: workspace.clone(),
+            allowed_roots: vec![allowed.clone()],
+            timeout_seconds: 10,
+            max_output_bytes: 64 * 1024,
+        },
+        true,
+    );
+
+    assert_eq!(response.status, RunnerResponseStatus::Completed);
+    assert_eq!(response.exit_code, Some(0), "{response:?}");
+    assert_eq!(response.stdout, "allowed");
+    assert_eq!(
+        fs::read_to_string(workspace.join("workspace.txt")).unwrap(),
+        "workspace"
+    );
+    assert_eq!(
+        fs::read_to_string(project.join("allowed-root.txt")).unwrap(),
+        "allowed"
+    );
+}
+
+#[cfg(target_os = "macos")]
+#[test]
+#[ignore = "requires cargo build --bin mita-computer-agent-runner --features computer-agent-runner"]
+fn macos_runner_blocks_writes_outside_roots() {
+    let tmp = tempdir().unwrap();
+    let workspace = tmp.path().join("workspace");
+    let outside = tmp.path().join("outside");
+    fs::create_dir_all(&workspace).unwrap();
+    fs::create_dir_all(&outside).unwrap();
+    let outside_file = outside.join("escape.txt");
+
+    let response = run_runner_request(
+        RunnerRequest {
+            protocol_version: RUNNER_PROTOCOL_VERSION,
+            command: format!("printf nope > '{}'", outside_file.display()),
+            cwd: workspace.clone(),
+            workspace_root: workspace,
+            allowed_roots: Vec::new(),
+            timeout_seconds: 10,
+            max_output_bytes: 64 * 1024,
+        },
+        true,
+    );
+
+    assert_eq!(response.status, RunnerResponseStatus::Completed);
+    assert_ne!(response.exit_code, Some(0), "{response:?}");
+    assert!(!outside_file.exists());
+}
+
+#[cfg(target_os = "macos")]
+#[test]
+#[ignore = "requires cargo build --bin mita-computer-agent-runner --features computer-agent-runner"]
+fn macos_runner_blocks_loopback_network() {
+    let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+    listener.set_nonblocking(true).unwrap();
+    let port = listener.local_addr().unwrap().port();
+    let tmp = tempdir().unwrap();
+    let workspace = tmp.path().join("workspace");
+    fs::create_dir_all(&workspace).unwrap();
+
+    let response = run_runner_request(
+        RunnerRequest {
+            protocol_version: RUNNER_PROTOCOL_VERSION,
+            command: format!("/bin/bash -c 'cat < /dev/tcp/127.0.0.1/{port}'"),
+            cwd: workspace.clone(),
+            workspace_root: workspace,
+            allowed_roots: Vec::new(),
+            timeout_seconds: 10,
+            max_output_bytes: 64 * 1024,
+        },
+        true,
+    );
+
+    assert_eq!(response.status, RunnerResponseStatus::Completed);
+    assert_ne!(response.exit_code, Some(0), "{response:?}");
+    assert!(listener.accept().is_err());
+}
+
+#[cfg(target_os = "macos")]
+#[test]
+#[ignore = "requires cargo build --bin mita-computer-agent-runner --features computer-agent-runner"]
+fn macos_runner_timeout_kills_process_group() {
+    let tmp = tempdir().unwrap();
+    let workspace = tmp.path().join("workspace");
+    fs::create_dir_all(&workspace).unwrap();
+
+    let response = run_runner_request(
+        RunnerRequest {
+            protocol_version: RUNNER_PROTOCOL_VERSION,
+            command: "sh -c 'printf started > child-started.txt; sleep 5; printf finished > child-finished.txt' & sleep 5".to_string(),
+            cwd: workspace.clone(),
+            workspace_root: workspace.clone(),
+            allowed_roots: Vec::new(),
+            timeout_seconds: 1,
+            max_output_bytes: 64 * 1024,
+        },
+        true,
+    );
+
+    assert_eq!(response.status, RunnerResponseStatus::Completed);
+    assert!(response.timed_out, "{response:?}");
+    thread::sleep(Duration::from_secs(6));
+    assert!(workspace.join("child-started.txt").exists());
+    assert!(!workspace.join("child-finished.txt").exists());
+}
+
+#[cfg(target_os = "macos")]
+#[test]
+#[ignore = "requires cargo build --bin mita-computer-agent-runner --features computer-agent-runner"]
+fn macos_runner_truncates_large_output() {
+    let tmp = tempdir().unwrap();
+    let workspace = tmp.path().join("workspace");
+    fs::create_dir_all(&workspace).unwrap();
+
+    let response = run_runner_request(
+        RunnerRequest {
+            protocol_version: RUNNER_PROTOCOL_VERSION,
+            command: "yes 012345678901234567890123456789 | head -n 300".to_string(),
+            cwd: workspace.clone(),
+            workspace_root: workspace,
+            allowed_roots: Vec::new(),
+            timeout_seconds: 10,
+            max_output_bytes: 1024,
+        },
+        true,
+    );
+
+    assert_eq!(response.status, RunnerResponseStatus::Completed);
+    assert_eq!(response.exit_code, Some(0), "{response:?}");
+    assert!(response.stdout.contains("[output truncated]"));
+}
+
+#[cfg(target_os = "macos")]
+#[test]
+#[ignore = "requires cargo build --bin mita-computer-agent-runner --features computer-agent-runner"]
+fn macos_runner_allows_dev_null_and_isolated_tmpdir() {
+    let tmp = tempdir().unwrap();
+    let workspace = tmp.path().join("workspace");
+    fs::create_dir_all(&workspace).unwrap();
+
+    let response = run_runner_request(
+        RunnerRequest {
+            protocol_version: RUNNER_PROTOCOL_VERSION,
+            command:
+                "printf ok >/dev/null; printf tmp > \"$TMPDIR/tmp.txt\"; cat \"$TMPDIR/tmp.txt\""
+                    .to_string(),
+            cwd: workspace.clone(),
+            workspace_root: workspace,
+            allowed_roots: Vec::new(),
+            timeout_seconds: 10,
+            max_output_bytes: 64 * 1024,
+        },
+        true,
+    );
+
+    assert_eq!(response.status, RunnerResponseStatus::Completed);
+    assert_eq!(response.exit_code, Some(0), "{response:?}");
+    assert_eq!(response.stdout, "tmp");
+}
+
+#[cfg(target_os = "macos")]
+#[test]
+#[ignore = "requires cargo build --bin mita-computer-agent-runner --features computer-agent-runner"]
+fn macos_runner_rejects_symlink_inside_workspace() {
+    let tmp = tempdir().unwrap();
+    let workspace = tmp.path().join("workspace");
+    let outside = tmp.path().join("outside");
+    fs::create_dir_all(&workspace).unwrap();
+    fs::create_dir_all(&outside).unwrap();
+    std::os::unix::fs::symlink(&outside, workspace.join("outside-link")).unwrap();
+
+    let response = run_runner_request(
+        RunnerRequest {
+            protocol_version: RUNNER_PROTOCOL_VERSION,
+            command: "printf nope > outside-link/escape.txt".to_string(),
+            cwd: workspace.clone(),
+            workspace_root: workspace,
+            allowed_roots: Vec::new(),
+            timeout_seconds: 10,
+            max_output_bytes: 64 * 1024,
+        },
+        true,
+    );
+
+    assert_eq!(response.status, RunnerResponseStatus::Error);
+    assert!(response
+        .message
+        .contains("macOS Computer Agent sandbox diagnostic"));
+    assert!(response.message.contains("Stage: symlink-scan"));
+}
+
+#[cfg(target_os = "macos")]
+#[test]
+#[ignore = "requires cargo build --bin mita-computer-agent-runner --features computer-agent-runner"]
+fn macos_runner_scrubs_user_environment() {
+    let tmp = tempdir().unwrap();
+    let workspace = tmp.path().join("workspace");
+    fs::create_dir_all(&workspace).unwrap();
+    let canonical_workspace = workspace.canonicalize().unwrap();
+
+    let response = run_runner_request(
+        RunnerRequest {
+            protocol_version: RUNNER_PROTOCOL_VERSION,
+            command: "printf '%s\\n%s\\n%s' \"$HOME\" \"$TMPDIR\" \"${USERPROFILE-unset}\""
+                .to_string(),
+            cwd: workspace.clone(),
+            workspace_root: workspace.clone(),
+            allowed_roots: Vec::new(),
+            timeout_seconds: 10,
+            max_output_bytes: 64 * 1024,
+        },
+        true,
+    );
+
+    assert_eq!(response.status, RunnerResponseStatus::Completed);
+    assert_eq!(response.exit_code, Some(0), "{response:?}");
+    assert!(response
+        .stdout
+        .lines()
+        .any(|line| line == canonical_workspace.to_string_lossy()));
+    assert!(response
+        .stdout
+        .lines()
+        .any(|line| line.contains(".mita-computer-agent-runner-tmp")));
+    assert!(response.stdout.lines().any(|line| line == "unset"));
 }
 
 #[cfg(windows)]
@@ -1391,17 +1675,17 @@ fn windows_runner_env_lock() -> &'static Mutex<()> {
     LOCK.get_or_init(|| Mutex::new(()))
 }
 
-#[cfg(windows)]
+#[cfg(any(windows, target_os = "macos"))]
 fn run_runner_request(request: RunnerRequest, execute: bool) -> RunnerResponse {
     wait_runner_response(spawn_runner_request(request, execute))
 }
 
-#[cfg(windows)]
+#[cfg(any(windows, target_os = "macos"))]
 fn spawn_runner_request(request: RunnerRequest, execute: bool) -> Child {
     let runner = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
         .join("target")
         .join("debug")
-        .join("mita-computer-agent-runner.exe");
+        .join(RUNNER_BINARY_NAME);
     assert!(
         runner.is_file(),
         "runner binary not found at {}; run cargo build --bin mita-computer-agent-runner first",
@@ -1432,7 +1716,7 @@ fn spawn_runner_request(request: RunnerRequest, execute: bool) -> Child {
     child
 }
 
-#[cfg(windows)]
+#[cfg(any(windows, target_os = "macos"))]
 fn wait_runner_response(child: Child) -> RunnerResponse {
     let output = child.wait_with_output().unwrap();
     assert!(

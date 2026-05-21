@@ -60,9 +60,11 @@ export default function ToolApproval() {
             <div>
               <DialogTitle>{t('tools:toolApproval.title')}</DialogTitle>
               <DialogDescription className="mt-1 text-muted-foreground">
-                {t('tools:toolApproval.description')}{' '}
-                <span className="font-semibold">{toolName}</span>.&nbsp;
-                <span className="text-sm">
+                <span>
+                  {t('tools:toolApproval.description')}{' '}
+                  <span className="font-semibold">{toolName}</span>
+                </span>
+                <span className="block text-sm">
                   {t('tools:toolApproval.permissionScope')}
                 </span>
               </DialogDescription>

@@ -344,7 +344,12 @@ function ThreadDetail() {
   // personas do not leak when a thread has no assigned assistant.
   const threadAssistant = thread?.assistants?.[0]
   const systemMessage = renderInstructions(
-    `${ensureMitaIdentityGuard(threadAssistant?.instructions)}${
+    `${ensureMitaIdentityGuard(threadAssistant?.instructions)}
+
+Tool result communication:
+- Treat tool cards as raw call records only; do not rely on them as the user-facing explanation.
+- After one or more tool calls complete, write a short assistant-body summary before continuing.
+- Summarize the result in readable prose or bullets. For failures, state the error briefly and say what you will try next.${
       computerAgentEnabled
         ? `\n\nComputer Agent guidance:
 - Prefer structured computer tools for file and folder work.

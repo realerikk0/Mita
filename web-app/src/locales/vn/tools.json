@@ -5,7 +5,7 @@
     "deny": "Từ chối",
     "allowOnce": "Cho phép một lần",
     "alwaysAllow": "Cho phép trong chuỗi",
-    "description": "Trợ lý muốn sử dụng <strong>{{toolName}}</strong>",
+    "description": "Trợ lý muốn sử dụng",
     "parameters": "Tham số công cụ",
     "permissionScope": "Quyền được cấp chỉ áp dụng cho cuộc trò chuyện này."
   }

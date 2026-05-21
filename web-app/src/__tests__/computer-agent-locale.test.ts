@@ -1,3 +1,5 @@
+import { readdirSync, readFileSync } from 'node:fs'
+import { join } from 'node:path'
 import { describe, expect, it } from 'vitest'
 
 import zhCNCommon from '../locales/zh-CN/common.json'
@@ -17,6 +19,20 @@ describe('Computer Agent locale strings', () => {
     expect(zhTWSettings.computerAgent.approvalNever).toBe('不詢問')
     expect(zhCNSettings.computerAgent.sandboxReadOnly).toBe('只读')
     expect(zhTWSettings.computerAgent.sandboxReadOnly).toBe('唯讀')
+    expect(zhCNSettings.computerAgent.allowedRootsShellNote).toContain('支持的平台')
+    expect(zhTWSettings.computerAgent.allowedRootsShellNote).toContain('支援的平台')
+    expect(zhCNSettings.computerAgent.shellStatusAvailable).toContain(
+      '本地命令执行可用'
+    )
+    expect(zhTWSettings.computerAgent.shellStatusAvailable).toContain(
+      '本機命令執行可用'
+    )
+    expect(zhCNSettings.computerAgent.shellStatusAvailable).not.toMatch(
+      /phase|runner|seatbelt/i
+    )
+    expect(zhTWSettings.computerAgent.shellStatusAvailable).not.toMatch(
+      /phase|runner|seatbelt/i
+    )
   })
 
   it('does not contain replacement question-mark placeholders', () => {
@@ -29,6 +45,22 @@ describe('Computer Agent locale strings', () => {
 
     for (const value of values) {
       expect(String(value)).not.toMatch(/\?{2,}/)
+    }
+  })
+
+  it('keeps active tool approval descriptions free of interpolation markup', () => {
+    const localesDir = join(process.cwd(), 'src/locales')
+
+    for (const locale of readdirSync(localesDir)) {
+      const toolsPath = join(localesDir, locale, 'tools.json')
+      const tools = JSON.parse(readFileSync(toolsPath, 'utf8')) as {
+        toolApproval?: { description?: string }
+      }
+      const description = tools.toolApproval?.description ?? ''
+
+      expect(description, `${locale}/tools.json`).not.toMatch(
+        /<[^>]+>|{{\s*toolName\s*}}/
+      )
     }
   })
 })

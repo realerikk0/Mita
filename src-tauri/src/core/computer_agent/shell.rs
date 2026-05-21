@@ -1,15 +1,15 @@
 use std::{path::PathBuf, process::Stdio, time::Duration};
 
 use serde::Serialize;
-#[cfg(not(windows))]
+#[cfg(not(any(windows, target_os = "macos")))]
 use tokio::io::{AsyncRead, AsyncReadExt};
 use tokio::{process::Command, time::timeout};
 
 use super::permissions::ComputerAgentScope;
-#[cfg(windows)]
+#[cfg(any(windows, target_os = "macos"))]
 use super::windows_runner::{
-    discover_runner_binary, windows_runner_status, RunnerRequest, RunnerResponse,
-    RunnerResponseStatus, RUNNER_EXECUTE_ENV, RUNNER_PROTOCOL_VERSION,
+    computer_agent_runner_status, discover_runner_binary, RunnerRequest, RunnerResponse,
+    RunnerResponseStatus, RUNNER_EXECUTE_ENV, RUNNER_PHASE, RUNNER_PROTOCOL_VERSION,
 };
 
 const DEFAULT_TIMEOUT_SECS: u64 = 30;
@@ -40,7 +40,7 @@ pub fn shell_status() -> ShellStatus {
 
     #[cfg(windows)]
     {
-        let runner = windows_runner_status();
+        let runner = computer_agent_runner_status();
         return ShellStatus {
             platform,
             available: runner.available,
@@ -79,24 +79,14 @@ pub fn shell_status() -> ShellStatus {
 
     #[cfg(target_os = "macos")]
     {
-        if PathBuf::from("/usr/bin/sandbox-exec").exists() {
-            return ShellStatus {
-                platform,
-                available: true,
-                reason: None,
-                sandbox_kind: "seatbelt".to_string(),
-                phase: Some("available".to_string()),
-                blockers: Vec::new(),
-            };
-        }
-
+        let runner = computer_agent_runner_status();
         return ShellStatus {
             platform,
-            available: false,
-            reason: Some("sandbox-exec was not found.".to_string()),
-            sandbox_kind: "seatbelt".to_string(),
-            phase: Some("missing-dependency".to_string()),
-            blockers: vec!["sandbox-exec is required to enable Computer Agent shell.".to_string()],
+            available: runner.available,
+            reason: Some(runner.reason),
+            sandbox_kind: "macos-seatbelt-runner".to_string(),
+            phase: Some(runner.phase),
+            blockers: runner.blockers,
         };
     }
 
@@ -147,12 +137,12 @@ pub async fn run_shell(
         return Err("Shell command contains an invalid null byte".to_string());
     }
 
-    #[cfg(windows)]
+    #[cfg(any(windows, target_os = "macos"))]
     {
-        run_windows_runner(scope, request).await
+        run_native_runner(scope, request).await
     }
 
-    #[cfg(not(windows))]
+    #[cfg(not(any(windows, target_os = "macos")))]
     {
         let mut command = sandboxed_command(scope, &request)?;
         command.stdin(Stdio::null());
@@ -212,8 +202,8 @@ pub async fn run_shell(
     }
 }
 
-#[cfg(windows)]
-async fn run_windows_runner(
+#[cfg(any(windows, target_os = "macos"))]
+async fn run_native_runner(
     scope: &ComputerAgentScope,
     request: ShellRequest,
 ) -> Result<String, String> {
@@ -286,6 +276,11 @@ async fn run_windows_runner(
         return Err(response.message);
     }
 
+    let sandbox = if cfg!(windows) {
+        "windows-native-runner"
+    } else {
+        "macos-seatbelt-runner"
+    };
     let tool_output = serde_json::json!({
         "exitCode": response.exit_code,
         "success": response.exit_code == Some(0) && !response.timed_out,
@@ -293,14 +288,14 @@ async fn run_windows_runner(
         "stderr": response.stderr,
         "cwd": request.cwd,
         "timedOut": response.timed_out,
-        "sandbox": "windows-native-runner",
-        "phase": "phase-3-allowed-roots",
+        "sandbox": sandbox,
+        "phase": RUNNER_PHASE,
     });
 
     Ok(serde_json::to_string_pretty(&tool_output).unwrap_or_else(|_| tool_output.to_string()))
 }
 
-#[cfg(not(windows))]
+#[cfg(not(any(windows, target_os = "macos")))]
 async fn read_limited<R>(reader: &mut R, cap: usize) -> Result<String, String>
 where
     R: AsyncRead + Unpin,
@@ -334,7 +329,7 @@ where
     Ok(text)
 }
 
-#[cfg(not(windows))]
+#[cfg(not(any(windows, target_os = "macos")))]
 fn sandboxed_command(
     scope: &ComputerAgentScope,
     request: &ShellRequest,
@@ -381,29 +376,7 @@ fn sandboxed_command(
         return Ok(cmd);
     }
 
-    #[cfg(target_os = "macos")]
-    {
-        let mut profile = String::from(
-            "(version 1)\n(deny default)\n(allow process*)\n(allow file-read*)\n(allow sysctl*)\n",
-        );
-        for root in &scope.allowed_roots {
-            profile.push_str(&format!(
-                "(allow file-write* (subpath \"{}\"))\n",
-                escape_seatbelt_path(root)
-            ));
-        }
-
-        let mut cmd = Command::new("/usr/bin/sandbox-exec");
-        cmd.arg("-p")
-            .arg(profile)
-            .arg("/bin/sh")
-            .arg("-lc")
-            .arg(&request.command);
-        cmd.current_dir(&request.cwd);
-        return Ok(cmd);
-    }
-
-    #[cfg(not(any(windows, target_os = "linux", target_os = "macos")))]
+    #[cfg(not(target_os = "linux"))]
     {
         let _ = scope;
         let _ = request;
@@ -417,11 +390,4 @@ fn find_on_path(binary: &str) -> Option<PathBuf> {
     std::env::split_paths(&path)
         .map(|dir| dir.join(binary))
         .find(|candidate| candidate.is_file())
-}
-
-#[cfg(target_os = "macos")]
-fn escape_seatbelt_path(path: &PathBuf) -> String {
-    path.to_string_lossy()
-        .replace('\\', "\\\\")
-        .replace('"', "\\\"")
 }

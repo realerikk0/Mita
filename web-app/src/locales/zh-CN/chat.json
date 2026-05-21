@@ -52,5 +52,15 @@
       "stopped": "已停止：{{current}} / {{max}}",
       "completedWithProgress": "已完成：{{current}} / {{max}}"
     }
+  },
+  "toolCall": {
+    "running": "正在运行 {{toolName}}...",
+    "used": "已使用 {{toolName}}",
+    "failed": "{{toolName}} 执行失败",
+    "commandLabel": "命令",
+    "cwdLabel": "工作目录",
+    "parametersLabel": "参数",
+    "resultLabel": "结果",
+    "errorLabel": "错误"
   }
 }

@@ -8,19 +8,26 @@ pub const RUNNER_BINARY_NAME: &str = if cfg!(windows) {
 } else {
     "mita-computer-agent-runner"
 };
-pub const RUNNER_PATH_ENV: &str = "MITA_WINDOWS_COMPUTER_AGENT_RUNNER";
+pub const RUNNER_PATH_ENV: &str = "MITA_COMPUTER_AGENT_RUNNER";
+pub const LEGACY_WINDOWS_RUNNER_PATH_ENV: &str = "MITA_WINDOWS_COMPUTER_AGENT_RUNNER";
 pub const RUNNER_EXECUTE_ENV: &str = "MITA_COMPUTER_AGENT_RUNNER_EXECUTE";
-pub const RUNNER_PHASE: &str = "phase-3-allowed-roots";
+pub const RUNNER_PHASE: &str = if cfg!(target_os = "macos") {
+    "phase-4-macos-seatbelt-runner"
+} else {
+    "phase-3-allowed-roots"
+};
 
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
-pub struct WindowsRunnerStatus {
+pub struct ComputerAgentRunnerStatus {
     pub available: bool,
     pub phase: String,
     pub runner_path: Option<PathBuf>,
     pub reason: String,
     pub blockers: Vec<String>,
 }
+
+pub type WindowsRunnerStatus = ComputerAgentRunnerStatus;
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
@@ -56,7 +63,7 @@ pub enum RunnerResponseStatus {
     Error,
 }
 
-pub fn windows_runner_status() -> WindowsRunnerStatus {
+pub fn computer_agent_runner_status() -> ComputerAgentRunnerStatus {
     let runner_path = discover_runner_binary();
     let mut blockers = Vec::new();
 
@@ -66,26 +73,44 @@ pub fn windows_runner_status() -> WindowsRunnerStatus {
         ));
     }
 
-    let available = runner_path.is_some();
-    WindowsRunnerStatus {
+    #[cfg(target_os = "macos")]
+    if !Path::new("/usr/bin/sandbox-exec").is_file() {
+        blockers.push("sandbox-exec was not found at /usr/bin/sandbox-exec".to_string());
+    }
+
+    let available = blockers.is_empty();
+    ComputerAgentRunnerStatus {
         available,
         phase: RUNNER_PHASE.to_string(),
         runner_path,
         reason: if available {
-            "Windows Computer Agent shell runner is available; chats still require the Computer Agent shell setting and per-action approval."
+            format!(
+                "{} Computer Agent shell runner is available; chats still require the Computer Agent shell setting and per-action approval.",
+                runner_platform_label()
+            )
                 .to_string()
         } else {
-            "Windows Computer Agent shell runner was not found.".to_string()
+            format!(
+                "{} Computer Agent shell runner is not available.",
+                runner_platform_label()
+            )
         },
         blockers,
     }
+}
+
+pub fn windows_runner_status() -> ComputerAgentRunnerStatus {
+    computer_agent_runner_status()
 }
 
 pub fn preflight_response() -> RunnerResponse {
     RunnerResponse {
         protocol_version: RUNNER_PROTOCOL_VERSION,
         status: RunnerResponseStatus::Ready,
-        message: format!("Windows runner protocol {RUNNER_PROTOCOL_VERSION} is available"),
+        message: format!(
+            "{} runner protocol {RUNNER_PROTOCOL_VERSION} is available",
+            runner_platform_label()
+        ),
         exit_code: None,
         stdout: String::new(),
         stderr: String::new(),
@@ -109,10 +134,15 @@ pub fn execute_runner_request(request: RunnerRequest) -> RunnerResponse {
         native::execute_sandboxed(request)
     }
 
-    #[cfg(not(windows))]
+    #[cfg(target_os = "macos")]
+    {
+        macos_native::execute_sandboxed(request)
+    }
+
+    #[cfg(not(any(windows, target_os = "macos")))]
     {
         let _ = request;
-        refused_response("The Windows Computer Agent runner only executes on Windows.")
+        refused_response("The Computer Agent runner only executes on supported desktop platforms.")
     }
 }
 
@@ -158,6 +188,16 @@ pub fn error_response(message: impl Into<String>) -> RunnerResponse {
     }
 }
 
+fn runner_platform_label() -> &'static str {
+    if cfg!(windows) {
+        "Windows"
+    } else if cfg!(target_os = "macos") {
+        "macOS"
+    } else {
+        "Computer Agent"
+    }
+}
+
 #[cfg(windows)]
 const DIAGNOSTIC_PREFIX: &str = "Windows Computer Agent sandbox diagnostic";
 
@@ -198,6 +238,7 @@ pub(crate) fn cleanup_journal_path_for_test(workspace_root: &Path) -> PathBuf {
 }
 
 #[cfg(all(not(windows), test))]
+#[allow(dead_code)]
 pub(crate) fn cleanup_journal_path_for_test(workspace_root: &Path) -> PathBuf {
     workspace_root.join(".mita-computer-agent-runner-cleanup-unused")
 }
@@ -258,6 +299,11 @@ pub fn validate_runner_request(request: &RunnerRequest) -> Result<(), String> {
 
 pub fn discover_runner_binary() -> Option<PathBuf> {
     if let Some(path) = std::env::var_os(RUNNER_PATH_ENV).map(PathBuf::from) {
+        if path.is_file() {
+            return Some(path);
+        }
+    }
+    if let Some(path) = std::env::var_os(LEGACY_WINDOWS_RUNNER_PATH_ENV).map(PathBuf::from) {
         if path.is_file() {
             return Some(path);
         }
@@ -401,6 +447,381 @@ fn normalize_lexical(path: &Path) -> PathBuf {
         }
     }
     normalized
+}
+
+#[cfg(target_os = "macos")]
+mod macos_native {
+    use std::{
+        fs,
+        io::Read,
+        os::unix::process::{CommandExt, ExitStatusExt},
+        path::{Path, PathBuf},
+        process::{Command, Stdio},
+        thread,
+        time::{Duration, Instant, SystemTime, UNIX_EPOCH},
+    };
+
+    use super::{completed_response, error_response, RunnerRequest, RunnerResponse};
+
+    const DIAGNOSTIC_PREFIX: &str = "macOS Computer Agent sandbox diagnostic";
+    const TEMP_DIR_NAME: &str = ".mita-computer-agent-runner-tmp";
+
+    pub fn execute_sandboxed(request: RunnerRequest) -> RunnerResponse {
+        match execute_sandboxed_inner(request) {
+            Ok(response) => response,
+            Err(error) => error_response(error),
+        }
+    }
+
+    fn execute_sandboxed_inner(request: RunnerRequest) -> Result<RunnerResponse, String> {
+        if !Path::new("/usr/bin/sandbox-exec").is_file() {
+            return Err(sandbox_diagnostic(
+                "sandbox-runtime",
+                "sandbox-exec was not found at /usr/bin/sandbox-exec",
+                "Confirm macOS still provides sandbox-exec before enabling Computer Agent shell.",
+            ));
+        }
+
+        let workspace = canonical_directory(&request.workspace_root).map_err(|e| {
+            sandbox_diagnostic(
+                "path-resolution",
+                format!(
+                    "Failed to resolve workspace root {}: {e}",
+                    request.workspace_root.display()
+                ),
+                "Confirm the thread workspace exists and is accessible, then retry the command.",
+            )
+        })?;
+        let cwd = canonical_directory(&request.cwd).map_err(|e| {
+            sandbox_diagnostic(
+                "path-resolution",
+                format!("Failed to resolve cwd {}: {e}", request.cwd.display()),
+                "Use an existing cwd inside the private thread workspace or a configured Computer Agent allowed root.",
+            )
+        })?;
+        let allowed_roots = canonical_allowed_roots(&request, &workspace).map_err(|e| {
+            sandbox_diagnostic(
+                "allowed-root-resolution",
+                e,
+                "Remove missing, unsafe, or inaccessible Computer Agent allowed roots from settings and retry.",
+            )
+        })?;
+
+        if !allowed_roots
+            .iter()
+            .any(|root| super::path_starts_with(&cwd, root))
+        {
+            return Err(sandbox_diagnostic(
+                "path-validation",
+                "Runner cwd must stay inside the canonical workspace or a canonical allowed root",
+                "Use a cwd inside the private thread workspace or a configured Computer Agent allowed root.",
+            ));
+        }
+
+        for root in &allowed_roots {
+            reject_symlinks(root).map_err(|e| {
+                sandbox_diagnostic(
+                    "symlink-scan",
+                    e,
+                    "Remove symlinks from Computer Agent shell roots before retrying.",
+                )
+            })?;
+        }
+
+        let run_tmp = prepare_run_tmp(&workspace).map_err(|e| {
+            sandbox_diagnostic(
+                "workspace-temp",
+                e,
+                "Confirm the private thread workspace is writable so the runner can create an isolated temporary directory.",
+            )
+        })?;
+        let profile = seatbelt_profile(&allowed_roots, &run_tmp);
+        let output = run_seatbelt_command(&request, &cwd, &workspace, &run_tmp, &profile)?;
+
+        Ok(completed_response(
+            "macOS sandbox completed",
+            output.exit_code,
+            output.stdout,
+            output.stderr,
+            output.timed_out,
+        ))
+    }
+
+    struct ProcessOutput {
+        exit_code: Option<i32>,
+        stdout: String,
+        stderr: String,
+        timed_out: bool,
+    }
+
+    fn run_seatbelt_command(
+        request: &RunnerRequest,
+        cwd: &Path,
+        workspace: &Path,
+        run_tmp: &Path,
+        profile: &str,
+    ) -> Result<ProcessOutput, String> {
+        let mut command = Command::new("/usr/bin/sandbox-exec");
+        command
+            .arg("-p")
+            .arg(profile)
+            .arg("/bin/sh")
+            .arg("-lc")
+            .arg(&request.command)
+            .current_dir(cwd)
+            .stdin(Stdio::null())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped())
+            .env_clear()
+            .env(
+                "PATH",
+                "/usr/bin:/bin:/usr/sbin:/sbin:/opt/homebrew/bin:/usr/local/bin",
+            )
+            .env("HOME", workspace)
+            .env("TMPDIR", run_tmp)
+            .env("TEMP", run_tmp)
+            .env("TMP", run_tmp)
+            .env("SHELL", "/bin/sh")
+            .env("LANG", "C.UTF-8")
+            .env("LC_ALL", "C.UTF-8");
+
+        unsafe {
+            command.pre_exec(|| {
+                if libc::setpgid(0, 0) == 0 {
+                    Ok(())
+                } else {
+                    Err(std::io::Error::last_os_error())
+                }
+            });
+        }
+
+        let mut child = command
+            .spawn()
+            .map_err(|e| format!("Failed to start macOS Computer Agent runner: {e}"))?;
+        let stdout = child
+            .stdout
+            .take()
+            .ok_or_else(|| "Failed to capture runner stdout".to_string())?;
+        let stderr = child
+            .stderr
+            .take()
+            .ok_or_else(|| "Failed to capture runner stderr".to_string())?;
+        let stdout_cap = request.max_output_bytes;
+        let stderr_cap = request.max_output_bytes;
+        let stdout_thread = thread::spawn(move || read_limited(stdout, stdout_cap));
+        let stderr_thread = thread::spawn(move || read_limited(stderr, stderr_cap));
+
+        let deadline = Instant::now() + Duration::from_secs(request.timeout_seconds);
+        let mut timed_out = false;
+        let status = loop {
+            if let Some(status) = child
+                .try_wait()
+                .map_err(|e| format!("Failed while waiting for macOS sandbox: {e}"))?
+            {
+                break status;
+            }
+
+            if Instant::now() >= deadline {
+                timed_out = true;
+                kill_process_group(child.id());
+                break child
+                    .wait()
+                    .map_err(|e| format!("Failed while killing timed-out macOS sandbox: {e}"))?;
+            }
+
+            thread::sleep(Duration::from_millis(25));
+        };
+
+        let stdout = stdout_thread
+            .join()
+            .map_err(|_| "Failed to join runner stdout reader".to_string())??;
+        let stderr = stderr_thread
+            .join()
+            .map_err(|_| "Failed to join runner stderr reader".to_string())??;
+
+        Ok(ProcessOutput {
+            exit_code: status
+                .code()
+                .or_else(|| status.signal().map(|signal| -signal)),
+            stdout,
+            stderr,
+            timed_out,
+        })
+    }
+
+    fn read_limited<R: Read>(mut reader: R, cap: usize) -> Result<String, String> {
+        let mut collected = Vec::with_capacity(cap.min(8192));
+        let mut truncated = false;
+        let mut chunk = [0u8; 8192];
+
+        loop {
+            let n = reader
+                .read(&mut chunk)
+                .map_err(|e| format!("Failed to read process output: {e}"))?;
+            if n == 0 {
+                break;
+            }
+            let remaining = cap.saturating_sub(collected.len());
+            if remaining > 0 {
+                let to_copy = remaining.min(n);
+                collected.extend_from_slice(&chunk[..to_copy]);
+            }
+            if n > remaining {
+                truncated = true;
+            }
+        }
+
+        let mut text = String::from_utf8_lossy(&collected).to_string();
+        if truncated {
+            text.push_str("\n[output truncated]");
+        }
+        Ok(text)
+    }
+
+    fn kill_process_group(pid: u32) {
+        unsafe {
+            let pgid = -(pid as libc::pid_t);
+            let _ = libc::kill(pgid, libc::SIGKILL);
+        }
+    }
+
+    fn canonical_allowed_roots(
+        request: &RunnerRequest,
+        workspace: &Path,
+    ) -> Result<Vec<PathBuf>, String> {
+        let mut roots = Vec::new();
+        push_canonical_root(&mut roots, workspace.to_path_buf())?;
+
+        for root in &request.allowed_roots {
+            let canonical = canonical_directory(root)?;
+            push_canonical_root(&mut roots, canonical)?;
+        }
+
+        Ok(roots)
+    }
+
+    fn push_canonical_root(roots: &mut Vec<PathBuf>, root: PathBuf) -> Result<(), String> {
+        if !root.is_dir() {
+            return Err(format!(
+                "macOS Computer Agent shell root is not a directory: {}",
+                root.display()
+            ));
+        }
+        if root.parent().is_none() {
+            return Err(format!(
+                "macOS Computer Agent shell cannot use a filesystem root: {}",
+                root.display()
+            ));
+        }
+        if !roots.iter().any(|existing| {
+            super::path_starts_with(existing, &root) && super::path_starts_with(&root, existing)
+        }) {
+            roots.push(root);
+        }
+        Ok(())
+    }
+
+    fn canonical_directory(path: &Path) -> Result<PathBuf, String> {
+        let canonical = path
+            .canonicalize()
+            .map_err(|e| format!("Failed to resolve {}: {e}", path.display()))?;
+        if !canonical.is_dir() {
+            return Err(format!("{} is not a directory", canonical.display()));
+        }
+        Ok(super::normalize_lexical(&canonical))
+    }
+
+    fn reject_symlinks(root: &Path) -> Result<(), String> {
+        let mut stack = vec![root.to_path_buf()];
+        let mut scanned = 0usize;
+
+        while let Some(path) = stack.pop() {
+            scanned += 1;
+            if scanned > 50_000 {
+                return Err(format!(
+                    "Refusing to scan more than 50000 entries below {}",
+                    root.display()
+                ));
+            }
+
+            let metadata = fs::symlink_metadata(&path)
+                .map_err(|e| format!("Failed to inspect {}: {e}", path.display()))?;
+            if metadata.file_type().is_symlink() {
+                return Err(format!(
+                    "Symlink is not allowed inside macOS Computer Agent shell root: {}",
+                    path.display()
+                ));
+            }
+            if metadata.is_dir() {
+                for entry in fs::read_dir(&path)
+                    .map_err(|e| format!("Failed to scan {}: {e}", path.display()))?
+                {
+                    let entry =
+                        entry.map_err(|e| format!("Failed to scan directory entry: {e}"))?;
+                    stack.push(entry.path());
+                }
+            }
+        }
+
+        Ok(())
+    }
+
+    fn prepare_run_tmp(workspace: &Path) -> Result<PathBuf, String> {
+        let base = workspace.join(TEMP_DIR_NAME);
+        fs::create_dir_all(&base)
+            .map_err(|e| format!("Failed to create {}: {e}", base.display()))?;
+        let stamp = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .map(|value| value.as_millis())
+            .unwrap_or_default();
+        let run_tmp = base.join(format!("run-{}-{stamp}", std::process::id()));
+        fs::create_dir_all(&run_tmp)
+            .map_err(|e| format!("Failed to create {}: {e}", run_tmp.display()))?;
+        Ok(run_tmp)
+    }
+
+    fn seatbelt_profile(allowed_roots: &[PathBuf], run_tmp: &Path) -> String {
+        let mut profile = String::from(
+            "(version 1)\n\
+             (deny default)\n\
+             (allow process*)\n\
+             (allow sysctl*)\n\
+             (allow file-read*)\n\
+             (allow file-write* (literal \"/dev/null\"))\n",
+        );
+
+        for root in allowed_roots {
+            let path = escape_seatbelt_path(root);
+            profile.push_str(&format!("(allow file-write* (subpath \"{path}\"))\n"));
+        }
+        let tmp = escape_seatbelt_path(run_tmp);
+        profile.push_str(&format!("(allow file-write* (subpath \"{tmp}\"))\n"));
+
+        profile
+    }
+
+    fn escape_seatbelt_path(path: &Path) -> String {
+        path.to_string_lossy()
+            .replace('\\', "\\\\")
+            .replace('"', "\\\"")
+    }
+
+    fn sandbox_diagnostic(stage: &str, reason: impl AsRef<str>, next_step: &str) -> String {
+        let reason = reason.as_ref();
+        if reason.starts_with(DIAGNOSTIC_PREFIX) {
+            return reason.to_string();
+        }
+
+        format!(
+            "{DIAGNOSTIC_PREFIX}\n\
+Stage: {stage}\n\
+Reason: {reason}\n\
+Phase: {}\n\
+Next step: {next_step}\n\
+Telemetry: none; this diagnostic was generated locally.",
+            super::RUNNER_PHASE
+        )
+    }
 }
 
 #[cfg(windows)]

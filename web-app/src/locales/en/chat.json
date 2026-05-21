@@ -31,6 +31,16 @@
       "completedWithProgress": "Completed: {{current}} / {{max}}"
     }
   },
+  "toolCall": {
+    "running": "Running {{toolName}}...",
+    "used": "Used {{toolName}}",
+    "failed": "{{toolName}} failed",
+    "commandLabel": "Command",
+    "cwdLabel": "Working directory",
+    "parametersLabel": "Parameters",
+    "resultLabel": "Result",
+    "errorLabel": "Error"
+  },
   "paragraphEdit": {
     "editWithAi": "Edit with AI",
     "title": "Edit selection with AI",

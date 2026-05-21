@@ -8,5 +8,15 @@
   "newConversation": "新對話",
   "clearHistory": "清除歷史記錄",
   "temporaryChat": "臨時聊天",
-  "temporaryChatDescription": "開始一個不會儲存到聊天歷史記錄的臨時對話。"
+  "temporaryChatDescription": "開始一個不會儲存到聊天歷史記錄的臨時對話。",
+  "toolCall": {
+    "running": "正在執行 {{toolName}}...",
+    "used": "已使用 {{toolName}}",
+    "failed": "{{toolName}} 執行失敗",
+    "commandLabel": "命令",
+    "cwdLabel": "工作目錄",
+    "parametersLabel": "參數",
+    "resultLabel": "結果",
+    "errorLabel": "錯誤"
+  }
 }

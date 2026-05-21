@@ -276,6 +276,7 @@ export const MessageItem = memo(
       }
 
       const toolName = part.type.split('-').slice(1).join('-')
+      const errorText = part.error || part.errorText || 'Tool execution failed'
       return (
         <Tool
           key={`${message.id}-${partIndex}`}
@@ -290,11 +291,7 @@ export const MessageItem = memo(
           <ToolContent title={toolName}>
             {part.input && (
               <ToolInput
-                input={
-                  typeof part.input === 'string'
-                    ? part.input
-                    : JSON.stringify(part.input)
-                }
+                input={part.input}
               />
             )}
             {part.output && (
@@ -307,7 +304,7 @@ export const MessageItem = memo(
             {part.state === 'output-error' && (
               <ToolOutput
                 output={undefined}
-                errorText={part.error || part.errorText || 'Tool execution failed'}
+                errorText={errorText}
                 resolver={(input) => Promise.resolve(input)}
               />
             )}

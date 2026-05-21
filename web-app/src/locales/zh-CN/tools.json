@@ -5,7 +5,7 @@
     "deny": "拒绝",
     "allowOnce": "允许一次",
     "alwaysAllow": "在线程中允许",
-    "description": "助手想要使用 <strong>{{toolName}}</strong>",
+    "description": "助手想要使用",
     "parameters": "工具参数",
     "permissionScope": "授予的权限仅适用于此对话。"
   }

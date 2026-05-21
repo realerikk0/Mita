@@ -1,4 +1,4 @@
-//! Windows Computer Agent runner.
+//! Computer Agent shell runner.
 //!
 //! The native execution path still requires an internal broker marker
 //! (`MITA_COMPUTER_AGENT_RUNNER_EXECUTE=1`); the desktop app sets that marker only

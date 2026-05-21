@@ -565,6 +565,9 @@ describe('ThreadDetail route', () => {
     expect(h.useChatArgs.at(-1)?.systemMessage).toContain(
       'your agent identity is Mita'
     )
+    expect(h.useChatArgs.at(-1)?.systemMessage).toContain(
+      'assistant-body summary'
+    )
   })
 
   it('prepends Mita identity guard to custom assistant instructions', () => {

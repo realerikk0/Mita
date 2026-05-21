@@ -32,7 +32,6 @@ type ComputerAgentShellStatus = {
   available: boolean
   reason?: string
   sandboxKind?: string
-  phase?: string
   blockers?: string[]
 }
 
@@ -149,14 +148,8 @@ function ComputerAgentSettings() {
   }
 
   const shellDescription = [
-    t(statusSummary(shellStatus), {
-      platform: shellStatus?.platform ?? 'unknown',
-      sandboxKind: shellStatus?.sandboxKind ?? shellStatus?.platform ?? 'unknown',
-    }),
-    shellStatus?.phase
-      ? t('settings:computerAgent.shellPhase', { phase: shellStatus.phase })
-      : undefined,
-    shellStatus?.reason,
+    t(statusSummary(shellStatus)),
+    shellStatus && !shellStatus.available ? shellStatus.reason : undefined,
   ]
     .filter(Boolean)
     .join(' ')
@@ -426,7 +419,7 @@ function ComputerAgentSettings() {
                       </Button>
                     </div>
                     <p className="text-xs text-muted-foreground">
-                      {t('settings:computerAgent.windowsAllowedRootsNote')}
+                      {t('settings:computerAgent.allowedRootsShellNote')}
                     </p>
                     {(settings.computerAgentAllowedRoots ?? []).length > 0 && (
                       <div className="space-y-1">

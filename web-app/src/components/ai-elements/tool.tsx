@@ -7,7 +7,10 @@ import {
 } from '@/components/ui/collapsible'
 import { cn } from '@/lib/utils'
 import type { ToolUIPart } from 'ai'
-import { ChevronDownIcon, WrenchIcon } from 'lucide-react'
+import {
+  ChevronDownIcon,
+  WrenchIcon,
+} from 'lucide-react'
 import type { ComponentProps, ReactNode } from 'react'
 import {
   createContext,
@@ -19,6 +22,7 @@ import {
   useState,
 } from 'react'
 import { CodeBlock } from './code-block'
+import { useTranslation } from '@/i18n/react-i18next-compat'
 
 type ToolContextValue = {
   isOpen: boolean
@@ -79,6 +83,27 @@ export const Tool = memo(
   }
 )
 
+const formatToolName = (toolName: string) =>
+  toolName.replaceAll('_', ' ').replaceAll('-', ' ').trim()
+
+const isRunningToolState = (status: ToolUIPart['state']) =>
+  status === 'input-streaming' || status === 'input-available'
+
+const isErrorToolState = (status: ToolUIPart['state']) =>
+  // @ts-expect-error state only available in AI SDK v6
+  status === 'output-error' || status === 'output-denied'
+
+const tryParseJson = (value: string): unknown | undefined => {
+  const trimmed = value.trim()
+  if (!trimmed || !/^[\[{]/.test(trimmed)) return undefined
+
+  try {
+    return JSON.parse(trimmed)
+  } catch {
+    return undefined
+  }
+}
+
 export type ToolHeaderProps = {
   title?: string
   state: ToolUIPart['state']
@@ -86,34 +111,38 @@ export type ToolHeaderProps = {
   className?: string
 }
 
-const getStatusText = (status: ToolUIPart['state'], toolName: string) => {
-  const isRunning = status === 'input-streaming' || status === 'input-available'
-  // @ts-expect-error state only available in AI SDK v6
-  const hasError = status === 'output-error' || status === 'output-denied'
+const getStatusText = (
+  status: ToolUIPart['state'],
+  toolName: string,
+  t: (key: string, options?: Record<string, unknown>) => string
+) => {
+  const readableName = formatToolName(toolName)
 
-  if (isRunning) {
-    return `Running ${toolName.replaceAll('_', ' ')}...`
+  if (isRunningToolState(status)) {
+    return t('chat:toolCall.running', { toolName: readableName })
   }
-  if (hasError) {
-    return `${toolName.replaceAll('_', ' ')} failed`
+  if (isErrorToolState(status)) {
+    return t('chat:toolCall.failed', { toolName: readableName })
   }
-  return `Used ${toolName.replaceAll('_', ' ')}`
+  return t('chat:toolCall.used', { toolName: readableName })
 }
 
 export const ToolHeader = memo(
   ({ className, title, state, type }: ToolHeaderProps) => {
+    const { t } = useTranslation()
     const { isOpen } = useTool()
     const toolName = title ?? type.split('-').slice(1).join('-')
 
     return (
       <CollapsibleTrigger
         className={cn(
-          'cursor-pointer flex w-full items-center gap-2 text-muted-foreground text-sm transition-colors capitalize', !isOpen && 'hover:bg-secondary',
+          'cursor-pointer flex w-full items-center gap-2 text-muted-foreground text-sm transition-colors capitalize',
+          !isOpen && 'hover:bg-secondary',
           className
         )}
       >
         <WrenchIcon className="size-4" />
-        <span>{getStatusText(state, toolName)}</span>
+        <span>{getStatusText(state, toolName, t)}</span>
         <ChevronDownIcon
           className={cn(
             'size-4 transition-transform',
@@ -148,15 +177,52 @@ export type ToolInputProps = ComponentProps<'div'> & {
   input: ToolUIPart['input']
 }
 
+const normalizeToolInput = (input: ToolUIPart['input']) => {
+  if (typeof input !== 'string') return input
+  return tryParseJson(input) ?? input
+}
+
 export const ToolInput = memo(
   ({ className, input, ...props }: ToolInputProps) => {
+    const { t } = useTranslation()
+    const normalizedInput = normalizeToolInput(input)
+    const inputObject =
+      normalizedInput &&
+      typeof normalizedInput === 'object' &&
+      !Array.isArray(normalizedInput) &&
+      !isValidElement(normalizedInput)
+        ? (normalizedInput as Record<string, unknown>)
+        : undefined
+    const command =
+      typeof inputObject?.command === 'string' ? inputObject.command : undefined
+    const cwd = typeof inputObject?.cwd === 'string' ? inputObject.cwd : undefined
+    const code =
+      typeof normalizedInput === 'string'
+        ? normalizedInput
+        : JSON.stringify(normalizedInput, null, 2) ?? ''
+
     return (
       <div className={cn('space-y-2', className)} {...props}>
+        {command && (
+          <div className="space-y-1">
+            <h4 className="font-medium text-muted-foreground text-xs uppercase tracking-wide">
+              {t('chat:toolCall.commandLabel')}
+            </h4>
+            <pre className="rounded-md border bg-background p-2 text-xs font-mono whitespace-pre-wrap break-all text-foreground">
+              {command}
+            </pre>
+            {cwd && (
+              <div className="text-xs text-muted-foreground break-all">
+                {t('chat:toolCall.cwdLabel')}: {cwd}
+              </div>
+            )}
+          </div>
+        )}
         <h4 className="font-medium text-muted-foreground text-xs uppercase tracking-wide">
-          Parameters
+          {t('chat:toolCall.parametersLabel')}
         </h4>
         <div className="rounded-md max-h-40 overflow-auto border ">
-          <CodeBlock code={JSON.stringify(input, null, 2)} language="json" />
+          <CodeBlock code={code} language="json" />
         </div>
       </div>
     )
@@ -218,6 +284,7 @@ export type ToolOutputProps = ComponentProps<'div'> & {
 
 export const ToolOutput = memo(
   ({ className, output, errorText, resolver, ...props }: ToolOutputProps) => {
+    const { t } = useTranslation()
     const Output = useMemo(() => {
       if (!(output || errorText)) {
         return null
@@ -347,7 +414,9 @@ export const ToolOutput = memo(
     return (
       <div className={cn('space-y-2 mt-4', className)} {...props}>
         <h4 className="font-medium text-muted-foreground text-xs uppercase tracking-wide">
-          {errorText ? 'Error' : 'Result'}
+          {errorText
+            ? t('chat:toolCall.errorLabel')
+            : t('chat:toolCall.resultLabel')}
         </h4>
         <div className="rounded-md overflow-hidden">
           {errorText && (

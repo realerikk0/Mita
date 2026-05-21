@@ -43,7 +43,7 @@
     "build:cli:dev": "node ./scripts/build-cli.mjs --dev",
     "build:tauri:win32": "yarn download:bin && yarn prepare:web-research-runtime && yarn build:cli && yarn prepare:computer-agent-runner:release && yarn tauri build",
     "build:tauri:linux": "yarn download:bin && yarn prepare:web-research-runtime && yarn build:cli && NO_STRIP=1 ./src-tauri/build-utils/shim-linuxdeploy.sh yarn tauri build && ./src-tauri/build-utils/buildAppImage.sh",
-    "build:tauri:darwin": "yarn download:bin && yarn prepare:web-research-runtime && yarn build:mlx-server && yarn build:cli && yarn tauri build --target universal-apple-darwin",
+    "build:tauri:darwin": "yarn download:bin && yarn prepare:web-research-runtime && yarn build:mlx-server && yarn build:cli && yarn prepare:computer-agent-runner:release --universal-darwin && yarn tauri build --target universal-apple-darwin",
     "build:tauri": "yarn build:icon && yarn copy:assets:tauri && run-script-os",
     "build:tauri:plugin:api": "cd src-tauri/plugins && yarn install && yarn workspaces foreach -Apt run build",
     "build:icon": "tauri icon ./src-tauri/icons/icon.png",

@@ -34,7 +34,9 @@ vi.mock('@/components/ai-elements/tool', () => ({
   Tool: ({ children }: any) => <div data-testid="tool">{children}</div>,
   ToolContent: ({ children }: any) => <div>{children}</div>,
   ToolHeader: ({ title }: any) => <div data-testid="tool-header">{title}</div>,
-  ToolInput: ({ input }: any) => <div data-testid="tool-input">{String(input)}</div>,
+  ToolInput: ({ input }: any) => (
+    <div data-testid="tool-input">{JSON.stringify(input)}</div>
+  ),
   ToolOutput: ({ output, errorText }: any) => (
     <div data-testid="tool-output">{errorText ?? String(output ?? '')}</div>
   ),
@@ -320,6 +322,8 @@ describe('MessageItem', () => {
     )
     expect(screen.getByTestId('tool')).toBeInTheDocument()
     expect(screen.getByTestId('tool-header')).toHaveTextContent('search')
+    expect(screen.getByTestId('tool-input')).toHaveTextContent('"q":"x"')
+    expect(screen.queryByTestId('tool-summary')).not.toBeInTheDocument()
     expect(screen.queryByTestId('cot')).not.toBeInTheDocument()
   })
 
@@ -343,6 +347,7 @@ describe('MessageItem', () => {
       />
     )
     expect(screen.getByTestId('tool-output')).toHaveTextContent('boom')
+    expect(screen.queryByTestId('tool-summary')).not.toBeInTheDocument()
   })
 
   it('passes full text to copy button', () => {
