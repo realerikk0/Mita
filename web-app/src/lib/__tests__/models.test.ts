@@ -438,6 +438,7 @@ describe('getModelCapabilities', () => {
     expect(isJingxingNativeWebSearchModel('gpt-5.4')).toBe(true)
     expect(isJingxingNativeWebSearchModel('grok-4.3')).toBe(true)
     expect(isJingxingNativeWebSearchModel('claude-opus-4-7')).toBe(false)
+    expect(isJingxingNativeWebSearchModel('gemini-3.5-flash')).toBe(false)
     expect(isJingxingNativeWebSearchModel('gemini-3.1-pro-preview')).toBe(false)
     expect(isJingxingNativeWebSearchModel('gpt-image-2')).toBe(false)
   })

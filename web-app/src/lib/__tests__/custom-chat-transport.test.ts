@@ -1,6 +1,9 @@
 import { describe, expect, it } from 'vitest'
 
-import { normalizeToolInputSchema } from '../custom-chat-transport'
+import {
+  getProtectedMaxOutputTokens,
+  normalizeToolInputSchema,
+} from '../custom-chat-transport'
 
 describe('normalizeToolInputSchema', () => {
   it('adds empty properties for object schemas without properties', () => {
@@ -166,5 +169,21 @@ describe('normalizeToolInputSchema', () => {
         },
       ],
     })
+  })
+})
+
+describe('getProtectedMaxOutputTokens', () => {
+  it('raises Jingxing gemini-3.5-flash output tokens to 1024', () => {
+    expect(getProtectedMaxOutputTokens('gemini-3.5-flash', undefined)).toBe(
+      1024
+    )
+    expect(getProtectedMaxOutputTokens('gemini-3.5-flash', 64)).toBe(1024)
+    expect(getProtectedMaxOutputTokens('gemini-3.5-flash', 1024)).toBe(1024)
+    expect(getProtectedMaxOutputTokens('gemini-3.5-flash', 2048)).toBe(2048)
+  })
+
+  it('does not change other models', () => {
+    expect(getProtectedMaxOutputTokens('gemini-3-flash-preview', 64)).toBe(64)
+    expect(getProtectedMaxOutputTokens('gpt-5.4', undefined)).toBeUndefined()
   })
 })

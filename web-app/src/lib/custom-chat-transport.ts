@@ -76,6 +76,26 @@ export type ServiceHub = {
   }
 }
 
+export const JINGXING_GEMINI_3_5_FLASH_MIN_OUTPUT_TOKENS = 1024
+
+export function getProtectedMaxOutputTokens(
+  modelId: string | undefined,
+  configuredMaxOutputTokens: number | undefined
+): number | undefined {
+  if (modelId?.toLowerCase() !== 'gemini-3.5-flash') {
+    return configuredMaxOutputTokens
+  }
+
+  if (
+    configuredMaxOutputTokens === undefined ||
+    configuredMaxOutputTokens < JINGXING_GEMINI_3_5_FLASH_MIN_OUTPUT_TOKENS
+  ) {
+    return JINGXING_GEMINI_3_5_FLASH_MIN_OUTPUT_TOKENS
+  }
+
+  return configuredMaxOutputTokens
+}
+
 function normalizeToolInputSchemaValue(value: unknown): unknown {
   if (Array.isArray(value)) {
     return value.map(normalizeToolInputSchemaValue)
@@ -545,12 +565,16 @@ export class CustomChatTransport implements ChatTransport<UIMessage> {
 
     const selectedModel = useModelProvider.getState().selectedModel
 
-    const maxOutputTokens: number | undefined = (() => {
+    const configuredMaxOutputTokens: number | undefined = (() => {
       const raw = inferenceParams.max_output_tokens ?? inferenceParams.max_tokens
       if (raw === undefined || raw === null) return undefined
       const n = typeof raw === 'number' ? raw : Number(raw)
       return isNaN(n) ? undefined : n
     })()
+    const maxOutputTokens = getProtectedMaxOutputTokens(
+      providerId === 'jingxing' ? modelId : undefined,
+      configuredMaxOutputTokens
+    )
 
     const maxContextTokens = (() => {
       const raw = inferenceParams.max_context_tokens

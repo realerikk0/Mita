@@ -92,6 +92,7 @@ const CHAT_STATUS = {
 // Title summarization constants
 const MAX_TITLE_SUMMARIZATION_ATTEMPTS = 3
 const TITLE_SUMMARIZATION_MIN_LENGTH = 50
+export const MAX_MCP_TOOL_FOLLOW_UP_ROUNDS = 5
 
 function numericParam(value: unknown): number | undefined {
   const parsed = typeof value === 'number' ? value : Number(value)
@@ -119,6 +120,39 @@ function getConfiguredMaxContextTokens(
 
 const createAutoRunPrompt = (round: number, maxRounds: number) =>
   `继续执行主人交代的任务，给出下一步结果；当前为第 ${round} / ${maxRounds} 轮。保持安静、直接、可执行。`
+
+function messageHasToolCallPart(message: UIMessage): boolean {
+  const parts = Array.isArray(message.parts) ? message.parts : []
+
+  return parts.some((part) => {
+    if (!part || typeof part !== 'object') return false
+    const type = (part as { type?: string }).type
+    return typeof type === 'string' && type.startsWith('tool-')
+  })
+}
+
+export function countToolCallAssistantRoundsSinceLastUser(
+  messages: UIMessage[]
+): number {
+  let rounds = 0
+
+  for (let index = messages.length - 1; index >= 0; index--) {
+    const message = messages[index]
+    if (message.role === 'user') break
+    if (message.role === 'assistant' && messageHasToolCallPart(message)) {
+      rounds++
+    }
+  }
+
+  return rounds
+}
+
+export function isWithinMcpToolFollowUpLimit(
+  messages: UIMessage[],
+  maxRounds = MAX_MCP_TOOL_FOLLOW_UP_ROUNDS
+): boolean {
+  return countToolCallAssistantRoundsSinceLastUser(messages) < maxRounds
+}
 
 const COMPUTER_AGENT_TOOL_PREFIX = 'computer_agent_'
 const LEGACY_COMPUTER_TOOL_PREFIX = 'computer_'
@@ -273,7 +307,10 @@ function ThreadDetail() {
       ) {
         return false
       }
-      return lastAssistantMessageIsCompleteWithToolCalls({ messages })
+      if (!lastAssistantMessageIsCompleteWithToolCalls({ messages })) {
+        return false
+      }
+      return isWithinMcpToolFollowUpLimit(messages)
     },
     []
   )

@@ -85,6 +85,14 @@ describe('canUseJingxingNativeWebSearch', () => {
     expect(
       canUseJingxingNativeWebSearch({
         providerName: 'jingxing',
+        modelId: 'gemini-3.5-flash',
+        messages,
+      })
+    ).toBe(false)
+
+    expect(
+      canUseJingxingNativeWebSearch({
+        providerName: 'jingxing',
         modelId: 'claude-sonnet-4-6',
         messages,
       })

@@ -444,7 +444,12 @@ vi.mock('@/utils/error', () => ({
 // -----------------------------------------------------------------------------
 // Import component AFTER mocks
 // -----------------------------------------------------------------------------
-import { Route } from '../$threadId'
+import {
+  MAX_MCP_TOOL_FOLLOW_UP_ROUNDS,
+  Route,
+  countToolCallAssistantRoundsSinceLastUser,
+  isWithinMcpToolFollowUpLimit,
+} from '../$threadId'
 import { useAutoRunStore } from '@/stores/auto-run-store'
 import { DEFAULT_MITA_AUTO_RUN } from '@/types/mita-agent'
 
@@ -503,6 +508,41 @@ describe('ThreadDetail route', () => {
   it('validateSearch handles missing threadModel', () => {
     const result = (Route as any).validateSearch({})
     expect(result.threadModel).toBeUndefined()
+  })
+
+  it('limits automatic tool follow-up rounds per user message', () => {
+    const toolRound = (id: string) => ({
+      id,
+      role: 'assistant',
+      parts: [
+        {
+          type: 'tool-web_search',
+          toolCallId: id,
+          state: 'output-available',
+          output: 'ok',
+        },
+      ],
+    })
+    const messages = [
+      { id: 'u1', role: 'user', parts: [{ type: 'text', text: 'search' }] },
+      ...Array.from({ length: MAX_MCP_TOOL_FOLLOW_UP_ROUNDS - 1 }, (_, i) =>
+        toolRound(`a${i + 1}`)
+      ),
+    ] as any[]
+
+    expect(countToolCallAssistantRoundsSinceLastUser(messages)).toBe(4)
+    expect(isWithinMcpToolFollowUpLimit(messages)).toBe(true)
+
+    const cappedMessages = [...messages, toolRound('a5')] as any[]
+    expect(countToolCallAssistantRoundsSinceLastUser(cappedMessages)).toBe(5)
+    expect(isWithinMcpToolFollowUpLimit(cappedMessages)).toBe(false)
+
+    expect(
+      countToolCallAssistantRoundsSinceLastUser([
+        ...cappedMessages,
+        { id: 'u2', role: 'user', parts: [{ type: 'text', text: 'again' }] },
+      ] as any[])
+    ).toBe(0)
   })
 
   it('renders header, model dropdown, and chat input', () => {
