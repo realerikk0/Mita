@@ -1,4 +1,4 @@
-import { ImagePlus, LucideIcon } from 'lucide-react'
+import { ImagePlus, LucideIcon, UsersRound } from 'lucide-react'
 import { route } from '@/constants/routes'
 
 import {
@@ -39,7 +39,7 @@ import { useThreadManagement } from '@/hooks/useThreadManagement'
 import { useSearchDialog } from '@/hooks/useSearchDialog'
 import { useProjectDialog } from '@/hooks/useProjectDialog'
 import { PlatformShortcuts, ShortcutAction } from '@/lib/shortcuts'
-import { startNewAgentChat, startNewChat } from '@/lib/new-chat'
+import { startNewAgentChat, startNewChat, startNewMitaTeams } from '@/lib/new-chat'
 
 type AnimatedIconHandle =
   | SearchIconHandle
@@ -68,6 +68,7 @@ export const getNavMainItems = (
   onNewProject: () => void,
   onSearch: () => void,
   onNewChat: () => void,
+  onMitaTeams: () => void,
   onAgentChat: () => void
 ): NavMainItem[] => [
   {
@@ -95,6 +96,11 @@ export const getNavMainItems = (
         <Kbd className="bg-transparent size-3 uppercase">{PlatformShortcuts[ShortcutAction.NEW_IMAGE].key}</Kbd>
       </KbdGroup>
     ),
+  },
+  {
+    title: 'common:newMitaTeams',
+    icon: UsersRound,
+    onClick: onMitaTeams,
   },
   {
     title: 'common:newAgentChat',
@@ -191,6 +197,9 @@ export function NavMain() {
     () => setProjectDialogOpen(true),
     () => setSearchOpen(true),
     () => startNewChat(navigate),
+    () => {
+      void startNewMitaTeams(navigate)
+    },
     () => startNewAgentChat(navigate)
   ).filter(
     (item) =>

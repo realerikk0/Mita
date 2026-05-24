@@ -1,0 +1,220 @@
+<svg width="1440" height="900" viewBox="0 0 1440 900" fill="none" xmlns="http://www.w3.org/2000/svg">
+  <defs>
+    <style>
+      .bg { fill: #f7f7f6; }
+      .panel { fill: #ffffff; stroke: #e6e4df; stroke-width: 1; }
+      .panel-soft { fill: #fbfaf8; stroke: #e6e4df; stroke-width: 1; }
+      .sidebar { fill: #194D24; }
+      .sidebar-muted { fill: rgba(255,255,255,0.12); }
+      .text { fill: #24211f; font-family: Inter, "Microsoft YaHei", Arial, sans-serif; }
+      .muted { fill: #746f68; font-family: Inter, "Microsoft YaHei", Arial, sans-serif; }
+      .light { fill: rgba(255,255,255,0.86); font-family: Inter, "Microsoft YaHei", Arial, sans-serif; }
+      .light-muted { fill: rgba(255,255,255,0.62); font-family: Inter, "Microsoft YaHei", Arial, sans-serif; }
+      .orange { fill: #d87345; }
+      .orange-soft { fill: #fff0e8; stroke: #f1c7b0; stroke-width: 1; }
+      .green-soft { fill: #eef7ef; stroke: #cbe4cf; stroke-width: 1; }
+      .blue-soft { fill: #eef5fb; stroke: #c9dced; stroke-width: 1; }
+      .purple-soft { fill: #f4f1fb; stroke: #d9ceec; stroke-width: 1; }
+      .gray-soft { fill: #f1f0ed; stroke: #dfddd8; stroke-width: 1; }
+      .danger-soft { fill: #fff0f0; stroke: #efc4c4; stroke-width: 1; }
+      .title { font-size: 17px; font-weight: 650; }
+      .h2 { font-size: 13px; font-weight: 650; }
+      .body { font-size: 12px; font-weight: 450; }
+      .small { font-size: 10.5px; font-weight: 450; }
+      .tiny { font-size: 9.5px; font-weight: 450; }
+      .mono { font-family: "SFMono-Regular", Consolas, monospace; }
+    </style>
+    <filter id="shadow" x="-20%" y="-20%" width="140%" height="140%">
+      <feDropShadow dx="0" dy="10" stdDeviation="20" flood-color="#1e1b18" flood-opacity="0.08"/>
+    </filter>
+  </defs>
+
+  <rect class="bg" x="0" y="0" width="1440" height="900"/>
+
+  <!-- Existing Mita floating left sidebar -->
+  <rect class="sidebar" x="16" y="16" width="244" height="868" rx="16"/>
+  <text class="light title" x="36" y="50">Mita</text>
+  <circle cx="232" cy="42" r="13" fill="rgba(255,255,255,0.11)"/>
+  <path d="M226 42h12M226 37h12M226 47h12" stroke="rgba(255,255,255,0.72)" stroke-width="1.5" stroke-linecap="round"/>
+
+  <rect class="sidebar-muted" x="30" y="82" width="216" height="34" rx="8"/>
+  <text class="light body" x="48" y="104">新聊天</text>
+  <text class="light-muted small" x="205" y="104">⌘ N</text>
+
+  <rect x="30" y="124" width="216" height="34" rx="8" fill="transparent"/>
+  <text class="light body" x="48" y="146">新图片</text>
+  <rect x="30" y="166" width="216" height="34" rx="8" fill="rgba(255,255,255,0.18)"/>
+  <text class="light body" x="48" y="188">Mita Teams</text>
+  <circle cx="222" cy="183" r="5" fill="#d87345"/>
+  <rect x="30" y="208" width="216" height="34" rx="8" fill="transparent"/>
+  <text class="light body" x="48" y="230">搜索</text>
+  <rect x="30" y="250" width="216" height="34" rx="8" fill="transparent"/>
+  <text class="light body" x="48" y="272">设置</text>
+
+  <text class="light-muted small" x="36" y="322">TEAMS</text>
+  <rect x="30" y="338" width="216" height="40" rx="8" fill="rgba(255,255,255,0.13)"/>
+  <text class="light body" x="48" y="360">产品方案协作室</text>
+  <text class="light-muted tiny" x="48" y="373">6 agents · 接力模式</text>
+  <rect x="30" y="386" width="216" height="40" rx="8" fill="transparent"/>
+  <text class="light body" x="48" y="408">代码审查 War Room</text>
+  <text class="light-muted tiny" x="48" y="421">4 agents · 红队模式</text>
+
+  <text class="light-muted small" x="36" y="470">CHATS</text>
+  <text class="light-muted small" x="48" y="496">Computer Agent macOS runner</text>
+  <text class="light-muted small" x="48" y="522">Jingxing Gemini loops</text>
+
+  <!-- Main app surface -->
+  <rect x="276" y="16" width="1148" height="868" rx="18" fill="#ffffff" filter="url(#shadow)"/>
+
+  <!-- HeaderPage area -->
+  <rect x="276" y="16" width="1148" height="60" rx="18" fill="#ffffff"/>
+  <rect x="276" y="58" width="1148" height="18" fill="#ffffff"/>
+  <text class="text title" x="304" y="52">Mita Teams · 产品方案协作室</text>
+  <rect class="orange-soft" x="558" y="30" width="72" height="26" rx="13"/>
+  <text class="muted small" x="574" y="47">接力模式</text>
+  <rect class="gray-soft" x="640" y="30" width="92" height="26" rx="13"/>
+  <text class="muted small" x="657" y="47">Round 2 / 5</text>
+  <rect class="panel-soft" x="1038" y="28" width="96" height="30" rx="15"/>
+  <text class="muted small" x="1060" y="47">角色配置</text>
+  <rect class="panel-soft" x="1144" y="28" width="96" height="30" rx="15"/>
+  <text class="muted small" x="1166" y="47">预算 38%</text>
+  <rect class="orange" x="1250" y="28" width="142" height="30" rx="15"/>
+  <text class="light small" x="1274" y="47">开始执行计划</text>
+
+  <!-- Teams channel rail -->
+  <rect class="panel-soft" x="292" y="92" width="208" height="776" rx="12"/>
+  <text class="muted small" x="312" y="124">CHANNELS</text>
+  <rect class="orange-soft" x="304" y="140" width="184" height="32" rx="8"/>
+  <text class="text body" x="322" y="161"># 当前任务</text>
+  <text class="muted body" x="322" y="201"># 研究</text>
+  <text class="muted body" x="322" y="235"># 方案讨论</text>
+  <text class="muted body" x="322" y="269"># 实现日志</text>
+  <text class="muted body" x="322" y="303"># 审查</text>
+  <text class="muted body" x="322" y="337"># 最终交付</text>
+
+  <line x1="312" y1="366" x2="480" y2="366" stroke="#e6e4df"/>
+  <text class="muted small" x="312" y="394">AGENTS</text>
+
+  <circle cx="323" cy="423" r="9" fill="#d87345"/>
+  <text class="text body" x="340" y="427">主持人</text>
+  <text class="muted tiny" x="428" y="427">GPT-5</text>
+  <circle cx="323" cy="458" r="9" fill="#3b82b6"/>
+  <text class="text body" x="340" y="462">研究员</text>
+  <text class="muted tiny" x="428" y="462">Gemini</text>
+  <circle cx="323" cy="493" r="9" fill="#7c6bb0"/>
+  <text class="text body" x="340" y="497">架构师</text>
+  <text class="muted tiny" x="428" y="497">Claude</text>
+  <circle cx="323" cy="528" r="9" fill="#2f855a"/>
+  <text class="text body" x="340" y="532">Builder</text>
+  <text class="muted tiny" x="428" y="532">Codex</text>
+  <circle cx="323" cy="563" r="9" fill="#9a4d4d"/>
+  <text class="text body" x="340" y="567">Reviewer</text>
+  <text class="muted tiny" x="428" y="567">DeepSeek</text>
+  <circle cx="323" cy="598" r="9" fill="#6b7280"/>
+  <text class="text body" x="340" y="602">反方</text>
+  <text class="muted tiny" x="428" y="602">Grok</text>
+
+  <rect class="green-soft" x="304" y="642" width="184" height="92" rx="8"/>
+  <text class="text h2" x="320" y="666">本轮调度</text>
+  <text class="muted small" x="320" y="689">1. 研究员补充依据</text>
+  <text class="muted small" x="320" y="710">2. 架构师收敛方案</text>
+  <text class="muted small" x="320" y="731">3. Reviewer 找风险</text>
+
+  <!-- Conversation center -->
+  <rect x="520" y="92" width="564" height="666" rx="12" fill="#ffffff"/>
+  <text class="muted small" x="536" y="119"># 当前任务 · 围绕一个目标推进，不做无效群聊</text>
+
+  <rect class="gray-soft" x="536" y="140" width="516" height="70" rx="10"/>
+  <text class="text h2" x="554" y="164">用户</text>
+  <text class="text body" x="554" y="186">希望设计 Mita Teams：多 LLM 角色协作，界面类似 Slack，</text>
+  <text class="text body" x="554" y="203">但要贴合当前 Mita 的聊天、工具和项目工作流。</text>
+
+  <circle cx="552" cy="247" r="14" fill="#d87345"/>
+  <text class="light small" x="546" y="251">主</text>
+  <text class="text h2" x="574" y="244">主持人 · GPT-5</text>
+  <text class="muted tiny" x="574" y="260">Orchestrator</text>
+  <rect class="orange-soft" x="574" y="274" width="430" height="74" rx="10"/>
+  <text class="text body" x="592" y="299">我会按接力模式推进：研究 → 方案 → 实现 → 审查。</text>
+  <text class="text body" x="592" y="320">本轮只点名研究员和架构师，避免所有 agent 同时发言。</text>
+  <text class="muted small" x="592" y="339">下一步：确认 UI 信息架构和角色权限。</text>
+
+  <circle cx="552" cy="386" r="14" fill="#3b82b6"/>
+  <text class="light small" x="546" y="390">研</text>
+  <text class="text h2" x="574" y="383">研究员 · Gemini</text>
+  <text class="muted tiny" x="574" y="399">Researcher</text>
+  <rect class="blue-soft" x="574" y="413" width="430" height="74" rx="10"/>
+  <text class="text body" x="592" y="438">当前 Mita 已有左侧 sidebar、HeaderPage、Conversation、</text>
+  <text class="text body" x="592" y="459">ChatInput 和 AutoRunPanel。Teams 不需要重做主框架，</text>
+  <text class="muted small" x="592" y="478">应作为 thread 的一种 mode 扩展。</text>
+
+  <circle cx="552" cy="526" r="14" fill="#7c6bb0"/>
+  <text class="light small" x="546" y="530">架</text>
+  <text class="text h2" x="574" y="523">架构师 · Claude</text>
+  <text class="muted tiny" x="574" y="539">Architect</text>
+  <rect class="purple-soft" x="574" y="553" width="430" height="96" rx="10"/>
+  <text class="text body" x="592" y="578">建议把 Teams 做成三栏扩展：</text>
+  <text class="text body" x="592" y="599">左：频道和 agent roster；中：协作消息流；右：目标、</text>
+  <text class="text body" x="592" y="620">计划、争议、产物和成本。底部沿用 ChatInput，支持</text>
+  <text class="muted small" x="592" y="640">@角色 点名和 /mode 切换。</text>
+
+  <rect class="danger-soft" x="620" y="676" width="384" height="52" rx="10"/>
+  <text class="text h2" x="640" y="698">Reviewer 正在输入...</text>
+  <text class="muted small" x="640" y="717">关注：噪音、无限轮询、工具权限和最终责任归属。</text>
+
+  <!-- Bottom input area, adapted from existing ChatInput -->
+  <rect class="panel" x="520" y="776" width="564" height="92" rx="14"/>
+  <text class="muted body" x="544" y="810">@Reviewer 重点检查这个三栏方案的风险，必要时让反方加入。</text>
+  <line x1="544" y1="830" x2="1056" y2="830" stroke="#ebe9e5"/>
+  <circle cx="548" cy="849" r="13" fill="#f1f0ed" stroke="#dfddd8"/>
+  <text class="muted small" x="545" y="853">+</text>
+  <rect class="gray-soft" x="578" y="836" width="68" height="26" rx="13"/>
+  <text class="muted small" x="595" y="853">@角色</text>
+  <rect class="gray-soft" x="654" y="836" width="86" height="26" rx="13"/>
+  <text class="muted small" x="671" y="853">/mode</text>
+  <rect class="gray-soft" x="748" y="836" width="106" height="26" rx="13"/>
+  <text class="muted small" x="765" y="853">添加资料</text>
+  <circle cx="1050" cy="849" r="15" fill="#d87345"/>
+  <path d="M1045 849h10M1051 844l5 5-5 5" stroke="#fff" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/>
+
+  <!-- Right live context panel -->
+  <rect class="panel-soft" x="1104" y="92" width="296" height="776" rx="12"/>
+  <text class="text h2" x="1124" y="124">协作状态</text>
+  <rect class="green-soft" x="1124" y="144" width="252" height="92" rx="10"/>
+  <text class="text h2" x="1142" y="169">目标</text>
+  <text class="muted small" x="1142" y="191">设计 Mita Teams 的第一版 UI，</text>
+  <text class="muted small" x="1142" y="211">贴合现有聊天页与工具审批体验。</text>
+
+  <text class="muted small" x="1124" y="269">PLAN</text>
+  <rect x="1124" y="286" width="252" height="150" rx="10" fill="#ffffff" stroke="#e6e4df"/>
+  <circle cx="1144" cy="313" r="8" fill="#d87345"/>
+  <text class="text small" x="1160" y="317">定义 room / agent / task 数据模型</text>
+  <circle cx="1144" cy="346" r="8" fill="#d87345"/>
+  <text class="text small" x="1160" y="350">实现 Orchestrator 调度协议</text>
+  <circle cx="1144" cy="379" r="8" fill="#c7c3bc"/>
+  <text class="muted small" x="1160" y="383">接入消息流和右侧状态面板</text>
+  <circle cx="1144" cy="412" r="8" fill="#c7c3bc"/>
+  <text class="muted small" x="1160" y="416">补工具权限和预算限制</text>
+
+  <text class="muted small" x="1124" y="471">OPEN DECISIONS</text>
+  <rect class="orange-soft" x="1124" y="488" width="252" height="88" rx="10"/>
+  <text class="text small" x="1142" y="514">Teams 是新 route 还是 thread mode？</text>
+  <text class="muted small" x="1142" y="538">建议：先作为 thread metadata.mode</text>
+  <text class="muted small" x="1142" y="558">降低迁移和存储成本。</text>
+
+  <text class="muted small" x="1124" y="612">ARTIFACTS</text>
+  <rect x="1124" y="629" width="252" height="112" rx="10" fill="#ffffff" stroke="#e6e4df"/>
+  <text class="text small" x="1142" y="656">UI 线框图</text>
+  <text class="muted tiny" x="1318" y="656">draft</text>
+  <line x1="1142" y1="673" x2="1358" y2="673" stroke="#ebe9e5"/>
+  <text class="text small" x="1142" y="700">角色配置表</text>
+  <text class="muted tiny" x="1318" y="700">todo</text>
+  <line x1="1142" y1="717" x2="1358" y2="717" stroke="#ebe9e5"/>
+  <text class="text small" x="1142" y="732">MVP PRD</text>
+  <text class="muted tiny" x="1318" y="732">todo</text>
+
+  <text class="muted small" x="1124" y="776">BUDGET</text>
+  <rect x="1124" y="793" width="252" height="12" rx="6" fill="#e9e6df"/>
+  <rect x="1124" y="793" width="96" height="12" rx="6" fill="#d87345"/>
+  <text class="muted small" x="1124" y="831">38% used · 自动轮数上限 5</text>
+  <text class="muted tiny" x="1124" y="852">工具权限：Builder 可写，Reviewer 只读</text>
+</svg>

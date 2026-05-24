@@ -25,6 +25,7 @@
   "keyboardShortcuts": "Shortcuts",
   "newChat": "New Chat",
   "newImage": "New Image",
+  "newMitaTeams": "New Mita Teams",
   "imageGeneration": {
     "today": "Today",
     "emptyState": "Generated images will appear here.",

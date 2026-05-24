@@ -18,6 +18,7 @@ const HeaderPage = memo(function HeaderPage({ children }: HeaderPageProps) {
       className={cn(
         'h-15 flex items-center shrink-0',
         (IS_MACOS && !open) ? 'pl-24' : ' pl-4',
+        IS_WINDOWS && 'pr-28',
         children === undefined && 'border-none'
       )}
     >

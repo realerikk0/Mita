@@ -56,6 +56,7 @@ import { useToolAvailable } from '@/hooks/useToolAvailable'
 import { useMCPServers } from '@/hooks/useMCPServers'
 import { OUT_OF_CONTEXT_SIZE } from '@/utils/error'
 import { Button } from '@/components/ui/button'
+import { Input } from '@/components/ui/input'
 import { IconAlertCircle, IconRefresh } from '@tabler/icons-react'
 import { useToolApproval } from '@/hooks/useToolApproval'
 import DropdownModelProvider from '@/containers/DropdownModelProvider'
@@ -83,6 +84,12 @@ import {
   type MitaAutoRunMetadata,
   type MitaMessageMetadata,
 } from '@/types/mita-agent'
+import { MitaTeamsWorkspace } from '@/containers/MitaTeamsWorkspace'
+import {
+  normalizeMitaTeamsConfig,
+  renderMitaTeamsSystemInstructions,
+  type MitaTeamsConfig,
+} from '@/types/mita-teams'
 
 const CHAT_STATUS = {
   STREAMING: 'streaming',
@@ -268,6 +275,7 @@ function ThreadDetail() {
   const search = useSearch({ from: Route.id })
   const searchThreadModel = search.threadModel
   const setCurrentThreadId = useThreads((state) => state.setCurrentThreadId)
+  const updateThread = useThreads((state) => state.updateThread)
   const setMessages = useMessages((state) => state.setMessages)
   const addMessage = useMessages((state) => state.addMessage)
   const updateMessage = useMessages((state) => state.updateMessage)
@@ -325,6 +333,9 @@ function ThreadDetail() {
   const selectedModel = useModelProvider((state) => state.selectedModel)
   const selectedProvider = useModelProvider((state) => state.selectedProvider)
   const getProviderByName = useModelProvider((state) => state.getProviderByName)
+  const selectModelProvider = useModelProvider(
+    (state) => state.selectModelProvider
+  )
   const computerAgentEnabled = useMCPServers(
     (state) => state.settings.computerAgentEnabled
   )
@@ -339,6 +350,62 @@ function ThreadDetail() {
   )
   const threadRef = useRef(thread)
   const projectId = threadRef.current?.metadata?.project?.id
+  const threadModel = useMemo(
+    () => searchThreadModel ?? thread?.model,
+    [searchThreadModel, thread]
+  )
+  const mitaTeamsConfig = useMemo(
+    () => normalizeMitaTeamsConfig(thread?.metadata?.mitaTeams, threadModel),
+    [thread?.metadata?.mitaTeams, threadModel]
+  )
+  const activeMitaChatRole = useMemo(() => {
+    if (!mitaTeamsConfig) return undefined
+    if (mitaTeamsConfig.workspaceView === 'role-chat') {
+      return mitaTeamsConfig.roles.find(
+        (role) => role.id === mitaTeamsConfig.activeRoleId
+      )
+    }
+    return (
+      mitaTeamsConfig.roles.find((role) => role.id === 'orchestrator') ??
+      mitaTeamsConfig.roles[0]
+    )
+  }, [mitaTeamsConfig])
+  const activeMitaThreadModel = useMemo(() => {
+    if (!activeMitaChatRole?.provider || !activeMitaChatRole.modelId) {
+      return undefined
+    }
+    const provider = getProviderByName(activeMitaChatRole.provider)
+    const model = provider?.models.find(
+      (item) => item.id === activeMitaChatRole.modelId
+    )
+
+    return {
+      ...(model ?? {}),
+      id: activeMitaChatRole.modelId,
+      provider: activeMitaChatRole.provider,
+    } as ThreadModel
+  }, [activeMitaChatRole, getProviderByName])
+  const effectiveThreadModel = mitaTeamsConfig
+    ? (activeMitaThreadModel ?? threadModel)
+    : threadModel
+  const [isEditingMitaTeamsTitle, setIsEditingMitaTeamsTitle] = useState(false)
+  const [mitaTeamsTitleDraft, setMitaTeamsTitleDraft] = useState(
+    thread?.title || 'Mita Teams'
+  )
+
+  useEffect(() => {
+    if (!isEditingMitaTeamsTitle) {
+      setMitaTeamsTitleDraft(thread?.title || 'Mita Teams')
+    }
+  }, [isEditingMitaTeamsTitle, thread?.title])
+
+  const commitMitaTeamsTitle = useCallback(() => {
+    const nextTitle = mitaTeamsTitleDraft.trim() || 'Mita Teams'
+    if (nextTitle !== thread?.title) {
+      updateThread(threadId, { title: nextTitle })
+    }
+    setIsEditingMitaTeamsTitle(false)
+  }, [mitaTeamsTitleDraft, thread?.title, threadId, updateThread])
 
   // Always include the Mita identity guard so model-native Jan/Menlo
   // personas do not leak when a thread has no assigned assistant.
@@ -350,6 +417,10 @@ Tool result communication:
 - Treat tool cards as raw call records only; do not rely on them as the user-facing explanation.
 - After one or more tool calls complete, write a short assistant-body summary before continuing.
 - Summarize the result in readable prose or bullets. For failures, state the error briefly and say what you will try next.${
+      mitaTeamsConfig
+        ? `\n\n${renderMitaTeamsSystemInstructions(mitaTeamsConfig)}`
+        : ''
+    }${
       computerAgentEnabled
         ? `\n\nComputer Agent guidance:
 - Prefer structured computer tools for file and folder work.
@@ -1095,6 +1166,13 @@ Tool result communication:
       // Process attachments (ingest images, parse/index documents)
       let processedAttachments = combinedAttachments
       const projectId = thread?.metadata?.project?.id
+      const providerForSend =
+        activeMitaChatRole?.provider && activeMitaChatRole.modelId
+          ? activeMitaChatRole.provider
+          : selectedProvider
+      if (activeMitaChatRole?.provider && activeMitaChatRole.modelId) {
+        selectModelProvider(activeMitaChatRole.provider, activeMitaChatRole.modelId)
+      }
       if (combinedAttachments.length > 0) {
         if (hasEmbeddingDocuments) setProcessingEmbeddings(true)
         try {
@@ -1104,7 +1182,7 @@ Tool result communication:
             threadId,
             projectId,
             serviceHub,
-            selectedProvider,
+            selectedProvider: providerForSend,
             parsePreference,
           })
           processedAttachments = result.processedAttachments
@@ -1192,6 +1270,8 @@ Tool result communication:
       clearAttachmentsForThread,
       serviceHub,
       selectedProvider,
+      activeMitaChatRole,
+      selectModelProvider,
       maybeAutoCompactBeforeSend,
       resetSettledChatStatus,
     ]
@@ -1570,6 +1650,7 @@ Tool result communication:
   }, [effectiveStatus, threadId, sendQueuedMessage, sessionData.tools.length])
 
   useEffect(() => {
+    if (mitaTeamsConfig) return
     if (effectiveStatus !== 'ready' || autoRunSendingRef.current) return
     if (sessionData.tools.length > 0) return
     const queueState = useMessageQueue.getState()
@@ -1620,6 +1701,7 @@ Tool result communication:
     autoRun.currentRound,
     autoRun.maxRounds,
     autoRun.status,
+    mitaTeamsConfig,
     persistAutoRunState,
     sendQueuedMessage,
     sessionData.tools.length,
@@ -1641,10 +1723,6 @@ Tool result communication:
     }
   }, [threadId])
 
-  const threadModel = useMemo(
-    () => searchThreadModel ?? thread?.model,
-    [searchThreadModel, thread]
-  )
   const autoRunBlockedReason = useMemo(() => {
     if (!threadModel) {
       return t('chat:autoRun.blocked.noModel')
@@ -1673,163 +1751,220 @@ Tool result communication:
   const activeError = error ?? contextLimitError
   const quotaError = providerQuotaErrorFromUnknown(activeError)
   const activeErrorMessage = quotaError?.message ?? activeError?.message
+  const handleMitaTeamsConfigChange = useCallback(
+    (nextConfig: MitaTeamsConfig) => {
+      updateThread(threadId, {
+        metadata: {
+          mitaTeams: nextConfig,
+        },
+      })
+    },
+    [threadId, updateThread]
+  )
+
+  const messageItems = (
+    <>
+      {chatMessages.map((message, index) => {
+        const isLastMessage = index === chatMessages.length - 1
+        const isFirstMessage = index === 0
+        return (
+          <MessageItem
+            key={message.id}
+            message={message}
+            isFirstMessage={isFirstMessage}
+            isLastMessage={isLastMessage}
+            status={effectiveStatus}
+            reasoningContainerRef={reasoningContainerRef}
+            isReasoningAtBottom={isReasoningAtBottom}
+            onReasoningScroll={handleReasoningScroll}
+            onReasoningScrollToBottom={forceScrollReasoningToBottom}
+            onRegenerate={handleRegenerate}
+            onEdit={handleEditMessage}
+            onDelete={handleDeleteMessage}
+            isAnimating={!pendingContinueMessage}
+            hideActions={!!pendingContinueMessage}
+          />
+        )
+      })}
+      {pendingContinueMessage && effectiveStatus === 'submitted' && (
+        <MessageItem
+          key={`continue-placeholder-${pendingContinueMessage.id}`}
+          message={pendingContinueMessage}
+          isFirstMessage={false}
+          isLastMessage={true}
+          status={effectiveStatus}
+          reasoningContainerRef={reasoningContainerRef}
+          isReasoningAtBottom={isReasoningAtBottom}
+          onReasoningScroll={handleReasoningScroll}
+          onReasoningScrollToBottom={forceScrollReasoningToBottom}
+          onRegenerate={handleRegenerate}
+          onEdit={handleEditMessage}
+          onDelete={handleDeleteMessage}
+          hideActions
+          isAnimating={false}
+        />
+      )}
+      {processingEmbeddings && (
+        <div className="flex flex-row items-center gap-2">
+          <Shimmer duration={1}>Processing embeddings...</Shimmer>
+        </div>
+      )}
+      {(effectiveStatus === CHAT_STATUS.SUBMITTED ||
+        isAutoIncreasingContext) && (
+        <div className="flex flex-row items-center gap-2">
+          {(pendingContinueMessage || isAutoIncreasingContext) && (
+            <Shimmer duration={1}>Growing the Mind...</Shimmer>
+          )}
+          {effectiveStatus === CHAT_STATUS.SUBMITTED && <PromptProgress />}
+        </div>
+      )}
+      {activeError && !isAutoIncreasingContext && (
+        <div className="px-4 py-3 mx-4 my-2 rounded-lg border border-destructive/10 bg-destructive/10">
+          <div className="flex items-start gap-3">
+            <IconAlertCircle className="size-5 text-destructive shrink-0 mt-0.5" />
+            <div className="flex-1">
+              <p className="text-sm font-medium text-destructive mb-1">
+                {quotaError
+                  ? t('common:providerQuota.title')
+                  : 'Error generating response'}
+              </p>
+              <div className="table table-fixed w-full">
+                <span
+                  className="text-sm text-muted-foreground table-cell align-middle"
+                  style={{ wordWrap: 'break-word' }}
+                >
+                  {activeErrorMessage}
+                </span>
+              </div>
+              {quotaError ? (
+                <ProviderQuotaActions error={quotaError} className="mt-3" />
+              ) : (activeError?.message?.toLowerCase().includes('context') &&
+                  (activeError?.message?.toLowerCase().includes('size') ||
+                    activeError?.message?.toLowerCase().includes('length') ||
+                    activeError?.message?.toLowerCase().includes('limit'))) ||
+                activeError?.message === OUT_OF_CONTEXT_SIZE ? (
+                <Button
+                  variant="outline"
+                  size="sm"
+                  className="mt-3"
+                  onClick={handleContextSizeIncrease}
+                >
+                  <IconAlertCircle className="size-4 mr-2" />
+                  Increase Context Size
+                </Button>
+              ) : (
+                <Button
+                  variant="outline"
+                  size="sm"
+                  className="mt-3"
+                  onClick={() => handleRegenerate()}
+                >
+                  <IconRefresh className="size-4 mr-2" />
+                  Regenerate
+                </Button>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
+    </>
+  )
+
+  const inputArea = (
+    <>
+      {!mitaTeamsConfig && (
+        <AutoRunPanel
+          threadId={threadId}
+          disabled={Boolean(autoRunBlockedReason)}
+          blockedReason={autoRunBlockedReason}
+          onStart={handleAutoRunStart}
+          onPause={handleAutoRunPause}
+          onResume={handleAutoRunResume}
+          onStop={handleAutoRunStop}
+        />
+      )}
+      <ChatInput
+        model={effectiveThreadModel}
+        onSubmit={handleSubmit}
+        onCompact={handleManualCompact}
+        onStop={handleStop}
+        chatStatus={effectiveStatus}
+      />
+    </>
+  )
 
   return (
     <div className="flex flex-col h-[calc(100dvh-(env(safe-area-inset-bottom)+env(safe-area-inset-top)))]">
       <HeaderPage>
-        <div className="flex items-center justify-between w-full pr-2">
-          <DropdownModelProvider model={threadModel} />
-        </div>
+        {mitaTeamsConfig ? (
+          <div className="relative z-30 flex w-full items-center pr-2">
+            {isEditingMitaTeamsTitle ? (
+              <Input
+                autoFocus
+                value={mitaTeamsTitleDraft}
+                className="h-8 max-w-72 rounded-full bg-background text-sm font-medium"
+                onChange={(event) =>
+                  setMitaTeamsTitleDraft(event.target.value)
+                }
+                onBlur={commitMitaTeamsTitle}
+                onKeyDown={(event) => {
+                  if (event.key === 'Enter') {
+                    event.currentTarget.blur()
+                  }
+                  if (event.key === 'Escape') {
+                    setMitaTeamsTitleDraft(thread?.title || 'Mita Teams')
+                    setIsEditingMitaTeamsTitle(false)
+                  }
+                }}
+              />
+            ) : (
+              <Button
+                type="button"
+                variant="ghost"
+                size="sm"
+                className="h-8 max-w-72 justify-start rounded-full px-3 text-sm font-medium"
+                onClick={() => setIsEditingMitaTeamsTitle(true)}
+                title={t('mita-teams:editActivityTitle')}
+              >
+                <span className="truncate">{thread?.title || 'Mita Teams'}</span>
+              </Button>
+            )}
+          </div>
+        ) : (
+          <div className="flex items-center w-full pr-2">
+            <DropdownModelProvider model={threadModel} />
+          </div>
+        )}
       </HeaderPage>
-      <div className="flex flex-1 flex-col h-full overflow-hidden">
-        {/* Messages Area */}
-        <div className="flex-1 relative">
-          <Conversation className="absolute inset-0 text-start">
-            <ConversationContent
-              className={cn('mx-auto w-full md:w-4/5 xl:w-4/6')}
-            >
-              {chatMessages.map((message, index) => {
-                const isLastMessage = index === chatMessages.length - 1
-                const isFirstMessage = index === 0
-                return (
-                  <MessageItem
-                    key={message.id}
-                    message={message}
-                    isFirstMessage={isFirstMessage}
-                    isLastMessage={isLastMessage}
-                    status={effectiveStatus}
-                    reasoningContainerRef={reasoningContainerRef}
-                    isReasoningAtBottom={isReasoningAtBottom}
-                    onReasoningScroll={handleReasoningScroll}
-                    onReasoningScrollToBottom={forceScrollReasoningToBottom}
-                    onRegenerate={handleRegenerate}
-                    onEdit={handleEditMessage}
-                    onDelete={handleDeleteMessage}
-                    isAnimating={!pendingContinueMessage}
-                    hideActions={!!pendingContinueMessage}
-                  />
-                )
-              })}
-              {pendingContinueMessage && effectiveStatus === 'submitted' && (
-                <MessageItem
-                  key={`continue-placeholder-${pendingContinueMessage.id}`}
-                  message={pendingContinueMessage}
-                  isFirstMessage={false}
-                  isLastMessage={true}
-                  status={effectiveStatus}
-                  reasoningContainerRef={reasoningContainerRef}
-                  isReasoningAtBottom={isReasoningAtBottom}
-                  onReasoningScroll={handleReasoningScroll}
-                  onReasoningScrollToBottom={forceScrollReasoningToBottom}
-                  onRegenerate={handleRegenerate}
-                  onEdit={handleEditMessage}
-                  onDelete={handleDeleteMessage}
-                  hideActions
-                  isAnimating={false}
-                />
-              )}
-              {processingEmbeddings && (
-                <div className="flex flex-row items-center gap-2">
-                  <Shimmer duration={1}>Processing embeddings...</Shimmer>
-                </div>
-              )}
-              {(effectiveStatus === CHAT_STATUS.SUBMITTED ||
-                isAutoIncreasingContext) && (
-                <div className="flex flex-row items-center gap-2">
-                  {(pendingContinueMessage || isAutoIncreasingContext) && (
-                    <Shimmer duration={1}>Growing the Mind...</Shimmer>
-                  )}
-                  {effectiveStatus === CHAT_STATUS.SUBMITTED && (
-                    <PromptProgress />
-                  )}
-                </div>
-              )}
-              {activeError && !isAutoIncreasingContext && (
-                <div className="px-4 py-3 mx-4 my-2 rounded-lg border border-destructive/10 bg-destructive/10">
-                  <div className="flex items-start gap-3">
-                    <IconAlertCircle className="size-5 text-destructive shrink-0 mt-0.5" />
-                    <div className="flex-1">
-                      <p className="text-sm font-medium text-destructive mb-1">
-                        {quotaError
-                          ? t('common:providerQuota.title')
-                          : 'Error generating response'}
-                      </p>
-                      <div className="table table-fixed w-full">
-                        <span
-                          className="text-sm text-muted-foreground table-cell align-middle"
-                          style={{ wordWrap: 'break-word' }}
-                        >
-                          {activeErrorMessage}
-                        </span>
-                      </div>
-                      {quotaError ? (
-                        <ProviderQuotaActions
-                          error={quotaError}
-                          className="mt-3"
-                        />
-                      ) : (activeError?.message
-                        ?.toLowerCase()
-                        .includes('context') &&
-                        (activeError?.message
-                          ?.toLowerCase()
-                          .includes('size') ||
-                          activeError?.message
-                            ?.toLowerCase()
-                            .includes('length') ||
-                          activeError?.message
-                            ?.toLowerCase()
-                            .includes('limit'))) ||
-                      activeError?.message ===
-                        OUT_OF_CONTEXT_SIZE ? (
-                        <Button
-                          variant="outline"
-                          size="sm"
-                          className="mt-3"
-                          onClick={handleContextSizeIncrease}
-                        >
-                          <IconAlertCircle className="size-4 mr-2" />
-                          Increase Context Size
-                        </Button>
-                      ) : (
-                        <Button
-                          variant="outline"
-                          size="sm"
-                          className="mt-3"
-                          onClick={() => handleRegenerate()}
-                        >
-                          <IconRefresh className="size-4 mr-2" />
-                          Regenerate
-                        </Button>
-                      )}
-                    </div>
-                  </div>
-                </div>
-              )}
-            </ConversationContent>
-            <ConversationScrollButton />
-          </Conversation>
-        </div>
+      {mitaTeamsConfig ? (
+        <MitaTeamsWorkspace
+          thread={thread}
+          config={mitaTeamsConfig}
+          messages={chatMessages}
+          messageItems={messageItems}
+          inputArea={inputArea}
+          onConfigChange={handleMitaTeamsConfigChange}
+        />
+      ) : (
+        <div className="flex flex-1 flex-col h-full overflow-hidden">
+          {/* Messages Area */}
+          <div className="flex-1 relative">
+            <Conversation className="absolute inset-0 text-start">
+              <ConversationContent
+                className={cn('mx-auto w-full md:w-4/5 xl:w-4/6')}
+              >
+                {messageItems}
+              </ConversationContent>
+              <ConversationScrollButton />
+            </Conversation>
+          </div>
 
-        {/* Chat Input - Fixed at bottom */}
-        <div className="py-4 mx-auto w-full md:w-4/5 xl:w-4/6">
-          <AutoRunPanel
-            threadId={threadId}
-            disabled={Boolean(autoRunBlockedReason)}
-            blockedReason={autoRunBlockedReason}
-            onStart={handleAutoRunStart}
-            onPause={handleAutoRunPause}
-            onResume={handleAutoRunResume}
-            onStop={handleAutoRunStop}
-          />
-          <ChatInput
-            model={threadModel}
-            onSubmit={handleSubmit}
-            onCompact={handleManualCompact}
-            onStop={handleStop}
-            chatStatus={effectiveStatus}
-          />
+          {/* Chat Input - Fixed at bottom */}
+          <div className="py-4 mx-auto w-full md:w-4/5 xl:w-4/6">
+            {inputArea}
+          </div>
         </div>
-      </div>
+      )}
     </div>
   )
 }
