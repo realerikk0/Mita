@@ -183,7 +183,7 @@ jobs:
           BAIDUPCS_GO_PTOKEN: ${{ secrets.BAIDUPCS_GO_PTOKEN }}
         run: bash scripts/release-distribution/upload-baidu.sh
 
-      - name: Send Feishu release card
+      - name: Send Feishu release messages
         if: steps.release.outputs.probe_only != 'true'
         shell: bash
         env:

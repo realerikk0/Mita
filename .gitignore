@@ -16,6 +16,7 @@ core/lib/**
 test_results.html
 pre-install
 .build
+output/
 
 # docs
 docs/yarn.lock
@@ -50,6 +51,7 @@ website/src/content/config.ts.timestamp-*
 # Nextra specific
 docs/out/
 docs/.next/
+web-app/.tanstack/
 
 # General Node.js
 **/node_modules
@@ -86,6 +88,8 @@ src-tauri/resources/node_modules/*
 
 ## test
 test-data
+src-tauri/test-data-ThreadId*/
+src-tauriresourcesbin/
 llm-docs
 .claude/agents
 .claude

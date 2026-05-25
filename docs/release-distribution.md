@@ -16,7 +16,7 @@
    - 分发内容：下载 GitHub Release 中的 `.dmg`、`.exe`、`.msi`。
    - 发布海报：基于 GitHub Release notes 调用井陉 `gpt-image-2` 生成新版本宣传海报。
    - 百度网盘：上传到 `/Mita/releases/<tag>/`，创建长期公开分享链接。
-   - 飞书通知：飞书应用机器人主动发送固定格式消息卡片到指定群；如果海报生成和上传成功，卡片顶部会展示海报图片。
+   - 飞书通知：飞书应用机器人主动发送到指定群；第一条是固定格式消息卡片，第二条是“宣传图：”文本，第三条是单独的新版本宣传海报图片。如果海报生成或上传失败，降级为只发送第一条无图卡片。
 
 旧的 `Tauri Builder - Tag` 已改为仅手动触发，不再响应 tag push，避免与 `Desktop Release` 双重构建。
 
@@ -65,7 +65,7 @@ RELEASE_POSTER_STRICT=false
 ```
 
 `BAIDUPCS_GO_COOKIES` 是百度网盘网页登录态，可能过期。更新时不要包含最外层引号。
-`FEISHU_RELEASE_CHAT_ID` 是目标飞书群会话 ID，通常形如 `oc_...`；也可以放在 environment variable 中。`FEISHU_APP_ID` 和 `FEISHU_APP_SECRET` 用于获取租户 token、上传海报图片以及由应用机器人主动发送卡片。`JINGXING_API_KEY` 用于生成飞书发布海报；如果缺失或接口失败，流程会降级发送无图卡片。`FEISHU_RELEASE_WEBHOOK` 和 `FEISHU_RELEASE_SECRET` 仅保留为旧 webhook 兜底。
+`FEISHU_RELEASE_CHAT_ID` 是目标飞书群会话 ID，通常形如 `oc_...`；也可以放在 environment variable 中。`FEISHU_APP_ID` 和 `FEISHU_APP_SECRET` 用于获取租户 token、上传海报图片以及由应用机器人主动发送卡片、文本和图片消息。`JINGXING_API_KEY` 用于生成飞书发布海报；如果缺失或接口失败，流程会降级发送无图卡片。`FEISHU_RELEASE_WEBHOOK` 和 `FEISHU_RELEASE_SECRET` 仅保留为旧 webhook 兜底。
 
 ## 正式发布步骤
 
@@ -98,7 +98,7 @@ gh run watch --repo realerikk0/Mita <run-id> --exit-status
 
 ```text
 Upload assets to Baidu Netdisk
-Send Feishu release card
+Send Feishu release messages
 ```
 
 两个步骤均为 success。
@@ -126,6 +126,8 @@ gh workflow run "Release Distribution" \
   -f dry_run=true \
   -f probe_only=false
 ```
+
+dry-run 产物里的 `feishu-card.json` 是待发送消息 payload 数组；海报上传成功时应包含三项：互动卡片、`宣传图：` 文本、图片消息。
 
 ## 百度凭据探针
 
@@ -157,7 +159,7 @@ shareID
 - 百度网盘目录 `/Mita/releases/<tag>/` 下包含同一批安装包。
 - 百度分享链接可打开，提取码可用。
 - 指定 `FEISHU_RELEASE_CHAT_ID` 的飞书群收到应用机器人发送的固定格式卡片，卡片中包含 GitHub Release 地址和百度网盘地址。
-- 如果海报凭据已配置，分发 artifact 中应包含 `release-poster.png`、`release-poster.json`，且飞书卡片顶部显示新版本海报。
+- 如果海报凭据已配置，分发 artifact 中应包含 `release-poster.png`、`release-poster.json`；飞书群随后收到“宣传图：”文本和一条单独的新版本海报图片消息。
 
 ## 故障处理
 
@@ -165,4 +167,4 @@ shareID
 - BaiduPCS-Go 下载 404：检查 `BAIDUPCS_VERSION` 是否与 GitHub Release 文件名一致，例如 `v4.0.1`。
 - 大包上传时间过长：先用 `probe_only=true` 验证凭据，再重跑正式分发。
 - 飞书未收到消息：检查 `FEISHU_RELEASE_CHAT_ID` 是否为目标群 `chat_id`，并确认飞书应用机器人已加入该群且拥有发送消息权限；如果使用旧 webhook 兜底，再检查 `FEISHU_RELEASE_WEBHOOK` 和 `FEISHU_RELEASE_SECRET`。
-- 飞书卡片无海报：检查 `release-poster.json` 中的 `status`、`feishuUploadStatus` 和错误信息；常见原因是缺少 `JINGXING_API_KEY`，或井陉/飞书图片接口暂时失败。
+- 飞书没有收到第三条海报图片：检查 `release-poster.json` 中的 `status`、`feishuUploadStatus` 和错误信息；常见原因是缺少 `JINGXING_API_KEY`，或井陉/飞书图片接口暂时失败。

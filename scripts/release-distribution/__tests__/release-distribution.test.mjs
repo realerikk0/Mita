@@ -15,6 +15,7 @@ import {
   buildFeishuCard,
   buildFeishuAppMessagePayload,
   buildFeishuPayload,
+  buildFeishuReleasePayloads,
   createFeishuSign,
   postFeishuAppMessage,
   resolvePosterImageKey,
@@ -105,7 +106,7 @@ test('buildFeishuCard includes fixed release and download fields', () => {
   assert.match(body, /打开百度网盘/)
 })
 
-test('buildFeishuCard inserts poster image when image key is provided', () => {
+test('buildFeishuReleasePayloads keeps card image-free and appends poster messages', () => {
   const manifest = collectReleaseAssets(sampleRelease())
   const card = buildFeishuCard(
     manifest,
@@ -113,14 +114,22 @@ test('buildFeishuCard inserts poster image when image key is provided', () => {
       url: 'https://pan.baidu.com/s/example',
       password: 'mita',
     },
-    {
-      posterImageKey: 'img_v3_abc',
-    },
   )
 
-  assert.equal(card.elements[0].tag, 'img')
-  assert.equal(card.elements[0].img_key, 'img_v3_abc')
-  assert.match(JSON.stringify(card), /Mita v1\.2\.3 新版本海报/)
+  assert.notEqual(card.elements[0].tag, 'img')
+  assert.doesNotMatch(JSON.stringify(card), /img_v3_abc/)
+
+  const payloads = buildFeishuReleasePayloads(card, {
+    chatId: 'oc_release_chat',
+    posterImageKey: 'img_v3_abc',
+  })
+
+  assert.equal(payloads.length, 3)
+  assert.equal(payloads[0].msg_type, 'interactive')
+  assert.equal(payloads[1].msg_type, 'text')
+  assert.deepEqual(JSON.parse(payloads[1].content), { text: '宣传图：' })
+  assert.equal(payloads[2].msg_type, 'image')
+  assert.deepEqual(JSON.parse(payloads[2].content), { image_key: 'img_v3_abc' })
 })
 
 test('buildFeishuPayload signs custom bot payload when secret is provided', () => {
@@ -173,10 +182,12 @@ test('postFeishuAppMessage sends interactive card through app bot API', async ()
   assert.deepEqual(JSON.parse(body.content), card)
 })
 
-test('send-feishu-card dry run can render app bot payload without app credentials', () => {
+test('send-feishu-card dry run renders app bot card, label, and poster payloads', () => {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'mita-feishu-card-app-dry-run-'))
   const releasePath = path.join(dir, 'release-assets.json')
   const baiduPath = path.join(dir, 'baidu-share.json')
+  const posterPath = path.join(dir, 'release-poster.png')
+  const posterJsonPath = path.join(dir, 'release-poster.json')
   const outputPath = path.join(dir, 'feishu-card.json')
 
   fs.writeFileSync(
@@ -187,6 +198,20 @@ test('send-feishu-card dry run can render app bot payload without app credential
     baiduPath,
     `${JSON.stringify({ url: 'https://pan.baidu.com/s/example', password: 'mita' }, null, 2)}\n`,
   )
+  fs.writeFileSync(posterPath, Buffer.from([1, 2, 3]))
+  fs.writeFileSync(
+    posterJsonPath,
+    `${JSON.stringify(
+      {
+        status: 'generated',
+        outputPath: posterPath,
+        feishuUploadStatus: 'uploaded',
+        feishuImageKey: 'img_v3_dry_run',
+      },
+      null,
+      2,
+    )}\n`,
+  )
 
   const result = spawnSync(
     process.execPath,
@@ -196,6 +221,8 @@ test('send-feishu-card dry run can render app bot payload without app credential
       releasePath,
       '--baidu-json',
       baiduPath,
+      '--poster-json',
+      posterJsonPath,
       '--output',
       outputPath,
       '--dry-run',
@@ -212,10 +239,18 @@ test('send-feishu-card dry run can render app bot payload without app credential
   )
 
   assert.equal(result.status, 0, result.stderr)
-  const payload = JSON.parse(fs.readFileSync(outputPath, 'utf8'))
-  assert.equal(payload.receive_id, 'oc_release_chat')
-  assert.equal(payload.msg_type, 'interactive')
-  assert.match(payload.content, /Mita v1\.2\.3 发布完成/)
+  const payloads = JSON.parse(fs.readFileSync(outputPath, 'utf8'))
+  assert.equal(payloads.length, 3)
+  assert.equal(payloads[0].receive_id, 'oc_release_chat')
+  assert.equal(payloads[0].msg_type, 'interactive')
+  assert.match(payloads[0].content, /Mita v1\.2\.3 发布完成/)
+  assert.doesNotMatch(payloads[0].content, /img_v3_dry_run/)
+  assert.equal(payloads[1].msg_type, 'text')
+  assert.deepEqual(JSON.parse(payloads[1].content), { text: '宣传图：' })
+  assert.equal(payloads[2].msg_type, 'image')
+  assert.deepEqual(JSON.parse(payloads[2].content), {
+    image_key: 'img_v3_dry_run',
+  })
 })
 
 test('extractPosterHighlights separates release features and fixes', () => {

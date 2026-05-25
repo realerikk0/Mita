@@ -64,9 +64,10 @@ export function createFeishuSign(timestamp, secret) {
   return createHmac('sha256', stringToSign).update('').digest('base64')
 }
 
+export const RELEASE_POSTER_LABEL = '宣传图：'
+
 export function buildFeishuCard(release, baiduShare, options = {}) {
   const runUrl = options.runUrl ?? buildRunUrl()
-  const posterImageKey = options.posterImageKey ?? options.imageKey
   const title = `Mita ${release.tagName} 发布完成`
   const baiduPassword = baiduShare.password || 'mita'
   const releaseTime = release.publishedAt || 'unknown'
@@ -99,19 +100,7 @@ export function buildFeishuCard(release, baiduShare, options = {}) {
     })
   }
 
-  const elements = []
-  if (posterImageKey) {
-    elements.push({
-      tag: 'img',
-      img_key: posterImageKey,
-      alt: {
-        tag: 'plain_text',
-        content: `Mita ${release.tagName} 新版本海报`,
-      },
-    })
-  }
-
-  elements.push(
+  const elements = [
     {
       tag: 'div',
       fields,
@@ -168,7 +157,7 @@ export function buildFeishuCard(release, baiduShare, options = {}) {
         },
       ],
     },
-  )
+  ]
 
   return {
     config: {
@@ -185,31 +174,106 @@ export function buildFeishuCard(release, baiduShare, options = {}) {
   }
 }
 
-export function buildFeishuPayload(card, options = {}) {
-  const payload = {
-    msg_type: 'interactive',
-    card,
-  }
+function addFeishuWebhookSign(payload, options = {}) {
+  if (!options.secret) return payload
 
-  if (options.secret) {
-    const timestamp = String(options.timestamp ?? Math.floor(Date.now() / 1000))
-    payload.timestamp = timestamp
-    payload.sign = createFeishuSign(timestamp, options.secret)
+  const timestamp = String(options.timestamp ?? Math.floor(Date.now() / 1000))
+  return {
+    ...payload,
+    timestamp,
+    sign: createFeishuSign(timestamp, options.secret),
   }
-
-  return payload
 }
 
-export function buildFeishuAppMessagePayload(card, options = {}) {
+export function buildFeishuPayload(card, options = {}) {
+  return addFeishuWebhookSign(
+    {
+      msg_type: 'interactive',
+      card,
+    },
+    options,
+  )
+}
+
+export function buildFeishuTextPayload(text, options = {}) {
+  return addFeishuWebhookSign(
+    {
+      msg_type: 'text',
+      content: {
+        text,
+      },
+    },
+    options,
+  )
+}
+
+export function buildFeishuImagePayload(imageKey, options = {}) {
+  if (!imageKey) {
+    throw new Error('imageKey is required for Feishu image payload')
+  }
+
+  return addFeishuWebhookSign(
+    {
+      msg_type: 'image',
+      content: {
+        image_key: imageKey,
+      },
+    },
+    options,
+  )
+}
+
+export function buildFeishuReleasePayloads(card, options = {}) {
+  const posterImageKey = options.posterImageKey ?? options.imageKey
+  const posterLabel = options.posterLabel ?? RELEASE_POSTER_LABEL
+
+  if (options.chatId) {
+    const payloads = [buildFeishuAppMessagePayload(card, { chatId: options.chatId })]
+    if (posterImageKey) {
+      payloads.push(
+        buildFeishuAppTextMessagePayload(posterLabel, { chatId: options.chatId }),
+        buildFeishuAppImageMessagePayload(posterImageKey, { chatId: options.chatId }),
+      )
+    }
+    return payloads
+  }
+
+  const payloads = [buildFeishuPayload(card, options)]
+  if (posterImageKey) {
+    payloads.push(
+      buildFeishuTextPayload(posterLabel, options),
+      buildFeishuImagePayload(posterImageKey, options),
+    )
+  }
+  return payloads
+}
+
+export function buildFeishuAppPayload(msgType, content, options = {}) {
   if (!options.chatId) {
     throw new Error('chatId is required for Feishu app message payload')
   }
 
   return {
     receive_id: options.chatId,
-    msg_type: 'interactive',
-    content: JSON.stringify(card),
+    msg_type: msgType,
+    content: JSON.stringify(content),
   }
+}
+
+export function buildFeishuAppTextMessagePayload(text, options = {}) {
+  return buildFeishuAppPayload('text', { text }, options)
+}
+
+export function buildFeishuAppImageMessagePayload(imageKey, options = {}) {
+  if (!imageKey) {
+    throw new Error('imageKey is required for Feishu app image message payload')
+  }
+
+  return buildFeishuAppPayload('image', { image_key: imageKey }, options)
+}
+
+export function buildFeishuAppMessagePayload(card, options = {}) {
+  return buildFeishuAppPayload('interactive', card, options)
 }
 
 async function postFeishuWebhook(webhook, payload) {
@@ -305,6 +369,14 @@ export async function postFeishuAppMessage(
   fetchImpl = globalThis.fetch,
 ) {
   const payload = buildFeishuAppMessagePayload(card, { chatId })
+  return postFeishuAppPayload(payload, tenantAccessToken, fetchImpl)
+}
+
+export async function postFeishuAppPayload(
+  payload,
+  tenantAccessToken,
+  fetchImpl = globalThis.fetch,
+) {
   const response = await fetchImpl(
     'https://open.feishu.cn/open-apis/im/v1/messages?receive_id_type=chat_id',
     {
@@ -323,6 +395,18 @@ export async function postFeishuAppMessage(
   }
 
   return assertFeishuSuccess(text, 'Feishu app message rejected payload')
+}
+
+export async function postFeishuAppPayloads(
+  payloads,
+  tenantAccessToken,
+  fetchImpl = globalThis.fetch,
+) {
+  const results = []
+  for (const payload of payloads) {
+    results.push(await postFeishuAppPayload(payload, tenantAccessToken, fetchImpl))
+  }
+  return results
 }
 
 export async function uploadFeishuImage(
@@ -386,7 +470,7 @@ export async function resolvePosterImageKey(options = {}) {
   const appId = options.appId ?? process.env.FEISHU_APP_ID
   const appSecret = options.appSecret ?? process.env.FEISHU_APP_SECRET
   if (!appId || !appSecret) {
-    console.warn('Release poster exists but FEISHU_APP_ID or FEISHU_APP_SECRET is missing; sending card without poster image')
+    console.warn('Release poster exists but FEISHU_APP_ID or FEISHU_APP_SECRET is missing; sending release notification without poster image')
     return null
   }
 
@@ -450,19 +534,19 @@ async function main() {
     strict: strictPoster,
   })
   const card = buildFeishuCard(release, baiduShare, {
-    posterImageKey,
+    runUrl: buildRunUrl(),
   })
-  const payload = chatId
-    ? buildFeishuAppMessagePayload(card, { chatId })
-    : buildFeishuPayload(card, {
-        secret: process.env.FEISHU_RELEASE_SECRET,
-      })
+  const payloads = buildFeishuReleasePayloads(card, {
+    chatId,
+    posterImageKey,
+    secret: process.env.FEISHU_RELEASE_SECRET,
+  })
 
   ensureDirectory(output)
-  fs.writeFileSync(output, `${JSON.stringify(payload, null, 2)}\n`)
+  fs.writeFileSync(output, `${JSON.stringify(payloads, null, 2)}\n`)
 
   if (dryRun) {
-    console.log(`Dry run: wrote Feishu card payload to ${output}`)
+    console.log(`Dry run: wrote ${payloads.length} Feishu message payload(s) to ${output}`)
     return
   }
 
@@ -470,8 +554,8 @@ async function main() {
     if (!tenantAccessToken) {
       tenantAccessToken = await getFeishuTenantAccessToken(appId, appSecret)
     }
-    await postFeishuAppMessage(chatId, card, tenantAccessToken)
-    console.log(`Sent Feishu release card via app bot to chat ${chatId}`)
+    await postFeishuAppPayloads(payloads, tenantAccessToken)
+    console.log(`Sent ${payloads.length} Feishu release message(s) via app bot to chat ${chatId}`)
     return
   }
 
@@ -480,8 +564,10 @@ async function main() {
     throw new Error('FEISHU_RELEASE_CHAT_ID or FEISHU_RELEASE_WEBHOOK is required when DRY_RUN is false')
   }
 
-  await postFeishuWebhook(webhook, payload)
-  console.log('Sent Feishu release card')
+  for (const payload of payloads) {
+    await postFeishuWebhook(webhook, payload)
+  }
+  console.log(`Sent ${payloads.length} Feishu release message(s)`)
 }
 
 const isMain = process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)

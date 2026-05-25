@@ -1,0 +1,156 @@
+{
+  "title": "Mita Teams",
+  "channels": "頻道",
+  "agents": "角色",
+  "roles": "角色",
+  "status": "協作狀態",
+  "goal": "目標",
+  "plan": "計劃",
+  "decisions": "決策",
+  "artifacts": "產物",
+  "budget": "預算",
+  "permissions": "權限",
+  "model": "模型",
+  "mode": "模式",
+  "projectMemory": "專案記憶",
+  "roleMemory": "角色記憶",
+  "memoryEmpty": "暫無記憶",
+  "memoryVersion": "記憶 v{{version}}",
+  "events": "事件",
+  "teamTimeline": "團隊時間線",
+  "teamEventsEmpty": "暫無團隊事件",
+  "facts": "事實",
+  "factsEmpty": "暫無事實",
+  "openQuestions": "待確認問題",
+  "openQuestionsEmpty": "暫無待確認問題",
+  "statusIdle": "閒置",
+  "statusRunning": "執行中",
+  "statusWaiting": "等待中",
+  "statusCompleted": "已完成",
+  "statusFailed": "失敗",
+  "statusStopped": "已停止",
+  "waitingForOwner": "請選擇一個選項以繼續",
+  "streamEmpty": "該角色尚無獨立訊息流。",
+  "rounds": "輪次",
+  "currentTask": "目前任務",
+  "research": "調研",
+  "discussion": "討論",
+  "buildLog": "建置記錄",
+  "review": "審查",
+  "finalDelivery": "最終交付",
+  "emptyTitle": "從一個具體目標開始",
+  "emptyDescription": "主持人會先理解目標，只在有用時建立角色和頻道。",
+  "owner": "主人",
+  "teamAnswer": "團隊回答",
+  "unassigned": "未分配",
+  "selectModel": "選擇模型",
+  "addChannel": "新增頻道",
+  "addRole": "新增角色",
+  "noChannelTemplates": "所有頻道模板都已新增",
+  "noRoleTemplates": "所有角色模板都已新增",
+  "backToTeam": "返回團隊",
+  "configureRole": "設定 {{role}}",
+  "directChat": "單獨對話",
+  "roleName": "角色名稱",
+  "roleColor": "角色顏色",
+  "roleDescription": "角色說明",
+  "rolePrompt": "角色提示詞",
+  "roleModel": "角色模型",
+  "roleChatTitle": "與 {{role}} 對話",
+  "editActivityTitle": "編輯活動標題",
+  "roundLimit": "{{count}} 輪",
+  "threadMode": "團隊會話",
+  "rightPanelHidden": "目前寬度下已隱藏狀態面板",
+  "artifactsEmpty": "暫無產物",
+  "decisionsEmpty": "暫無決策",
+  "budgetText": "MVP 保護：自動追問最多 {{count}} 輪。",
+  "permissionRead": "讀取",
+  "permissionTools": "工具",
+  "permissionWrite": "寫入",
+  "channelsById": {
+    "task": {
+      "label": "目前任務",
+      "description": "承載主人目標和目前上下文的共享工作間。"
+    },
+    "research": {
+      "label": "調研",
+      "description": "收集證據、參考資料、程式碼發現和待確認問題。"
+    },
+    "discussion": {
+      "label": "討論",
+      "description": "比較方案、解決分歧，並讓團隊對齊。"
+    },
+    "build": {
+      "label": "建置記錄",
+      "description": "記錄具體改動、實作備註和驗證輸出。"
+    },
+    "review": {
+      "label": "審查",
+      "description": "檢查風險、回歸、缺失測試和驗收缺口。"
+    },
+    "final": {
+      "label": "最終交付",
+      "description": "整理面向使用者的回答、產物和後續行動。"
+    }
+  },
+  "modesById": {
+    "relay": {
+      "label": "接力",
+      "description": "調研、規劃、實作、審查，然後彙總。"
+    },
+    "roundtable": {
+      "label": "圓桌",
+      "description": "先收集各角色觀點，再由主持人決策。"
+    },
+    "debate": {
+      "label": "辯論",
+      "description": "透過提案和反駁比較不同方案。"
+    },
+    "red-team": {
+      "label": "紅隊",
+      "description": "壓力測試候選答案或實作方案。"
+    },
+    "silent": {
+      "label": "靜默",
+      "description": "保持內部協作安靜，只展示檢查點。"
+    }
+  },
+  "rolesById": {
+    "orchestrator": {
+      "name": "主持人",
+      "label": "主持",
+      "description": "拆解需求、選擇發言角色，並收斂結論。"
+    },
+    "researcher": {
+      "name": "調研員",
+      "label": "調研",
+      "description": "收集程式碼、文件和外部證據。"
+    },
+    "architect": {
+      "name": "架構師",
+      "label": "規劃",
+      "description": "塑造方案、邊界和權衡。"
+    },
+    "builder": {
+      "name": "執行者",
+      "label": "建置",
+      "description": "完成具體改動並進行聚焦驗證。"
+    },
+    "reviewer": {
+      "name": "審查員",
+      "label": "審查",
+      "description": "發現回歸、缺失測試和薄弱假設。"
+    },
+    "skeptic": {
+      "name": "質疑者",
+      "label": "風險",
+      "description": "挑戰方案並保留少數派擔憂。"
+    }
+  },
+  "starterPlan": {
+    "research": "理解目標",
+    "architect": "建議角色",
+    "builder": "建立頻道",
+    "reviewer": "收斂回答"
+  }
+}

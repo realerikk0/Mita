@@ -12,6 +12,25 @@
   "permissions": "Permissions",
   "model": "Model",
   "mode": "Mode",
+  "projectMemory": "Project memory",
+  "roleMemory": "Role memory",
+  "memoryEmpty": "No memory yet",
+  "memoryVersion": "Memory v{{version}}",
+  "events": "Events",
+  "teamTimeline": "Team timeline",
+  "teamEventsEmpty": "No team events yet",
+  "facts": "Facts",
+  "factsEmpty": "No facts yet",
+  "openQuestions": "Open questions",
+  "openQuestionsEmpty": "No open questions yet",
+  "statusIdle": "Idle",
+  "statusRunning": "Running",
+  "statusWaiting": "Waiting",
+  "statusCompleted": "Done",
+  "statusFailed": "Failed",
+  "statusStopped": "Stopped",
+  "waitingForOwner": "Choose one option to continue",
+  "streamEmpty": "This role has no private stream yet.",
   "rounds": "Rounds",
   "currentTask": "Current task",
   "research": "Research",
@@ -48,6 +67,86 @@
   "permissionRead": "Read",
   "permissionTools": "Tools",
   "permissionWrite": "Write",
+  "channelsById": {
+    "task": {
+      "label": "Current task",
+      "description": "The shared working room for the owner goal and current context."
+    },
+    "research": {
+      "label": "Research",
+      "description": "Collect evidence, references, code findings, and open questions."
+    },
+    "discussion": {
+      "label": "Discussion",
+      "description": "Compare options, resolve disagreements, and align the team."
+    },
+    "build": {
+      "label": "Build log",
+      "description": "Track concrete edits, implementation notes, and verification output."
+    },
+    "review": {
+      "label": "Review",
+      "description": "Inspect risks, regressions, missing tests, and acceptance gaps."
+    },
+    "final": {
+      "label": "Final delivery",
+      "description": "Assemble the user-facing answer, artifacts, and next actions."
+    }
+  },
+  "modesById": {
+    "relay": {
+      "label": "Relay",
+      "description": "Research, plan, build, review, then summarize."
+    },
+    "roundtable": {
+      "label": "Roundtable",
+      "description": "Collect role perspectives before the coordinator decides."
+    },
+    "debate": {
+      "label": "Debate",
+      "description": "Compare options through proposal and rebuttal."
+    },
+    "red-team": {
+      "label": "Red team",
+      "description": "Stress-test a candidate answer or implementation."
+    },
+    "silent": {
+      "label": "Silent",
+      "description": "Keep internal collaboration quiet and show checkpoints."
+    }
+  },
+  "rolesById": {
+    "orchestrator": {
+      "name": "Orchestrator",
+      "label": "Host",
+      "description": "Break down the request, choose speakers, and converge."
+    },
+    "researcher": {
+      "name": "Researcher",
+      "label": "Research",
+      "description": "Collect code, document, and external evidence."
+    },
+    "architect": {
+      "name": "Architect",
+      "label": "Plan",
+      "description": "Shape the solution, boundaries, and tradeoffs."
+    },
+    "builder": {
+      "name": "Builder",
+      "label": "Build",
+      "description": "Make concrete edits and run focused verification."
+    },
+    "reviewer": {
+      "name": "Reviewer",
+      "label": "Review",
+      "description": "Find regressions, missing tests, and weak assumptions."
+    },
+    "skeptic": {
+      "name": "Skeptic",
+      "label": "Risk",
+      "description": "Challenge the plan and preserve minority concerns."
+    }
+  },
   "starterPlan": {
     "research": "Understand goal",
     "architect": "Suggest roles",

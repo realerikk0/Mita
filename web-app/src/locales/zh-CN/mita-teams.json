@@ -1,0 +1,156 @@
+{
+  "title": "Mita Teams",
+  "channels": "频道",
+  "agents": "角色",
+  "roles": "角色",
+  "status": "协作状态",
+  "goal": "目标",
+  "plan": "计划",
+  "decisions": "决策",
+  "artifacts": "产物",
+  "budget": "预算",
+  "permissions": "权限",
+  "model": "模型",
+  "mode": "模式",
+  "projectMemory": "项目记忆",
+  "roleMemory": "角色记忆",
+  "memoryEmpty": "暂无记忆",
+  "memoryVersion": "记忆 v{{version}}",
+  "events": "事件",
+  "teamTimeline": "团队时间线",
+  "teamEventsEmpty": "暂无团队事件",
+  "facts": "事实",
+  "factsEmpty": "暂无事实",
+  "openQuestions": "待确认问题",
+  "openQuestionsEmpty": "暂无待确认问题",
+  "statusIdle": "空闲",
+  "statusRunning": "运行中",
+  "statusWaiting": "等待中",
+  "statusCompleted": "已完成",
+  "statusFailed": "失败",
+  "statusStopped": "已停止",
+  "waitingForOwner": "请选择一个选项以继续",
+  "streamEmpty": "该角色还没有独立消息流。",
+  "rounds": "轮次",
+  "currentTask": "当前任务",
+  "research": "调研",
+  "discussion": "讨论",
+  "buildLog": "构建日志",
+  "review": "评审",
+  "finalDelivery": "最终交付",
+  "emptyTitle": "从一个具体目标开始",
+  "emptyDescription": "主持人会先理解目标，只在有用时创建角色和频道。",
+  "owner": "主人",
+  "teamAnswer": "团队回答",
+  "unassigned": "未分配",
+  "selectModel": "选择模型",
+  "addChannel": "添加频道",
+  "addRole": "添加角色",
+  "noChannelTemplates": "所有频道模板都已添加",
+  "noRoleTemplates": "所有角色模板都已添加",
+  "backToTeam": "返回团队",
+  "configureRole": "配置 {{role}}",
+  "directChat": "单独对话",
+  "roleName": "角色名称",
+  "roleColor": "角色颜色",
+  "roleDescription": "角色说明",
+  "rolePrompt": "角色提示词",
+  "roleModel": "角色模型",
+  "roleChatTitle": "与 {{role}} 对话",
+  "editActivityTitle": "编辑活动标题",
+  "roundLimit": "{{count}} 轮",
+  "threadMode": "团队会话",
+  "rightPanelHidden": "当前宽度下已隐藏状态面板",
+  "artifactsEmpty": "暂无产物",
+  "decisionsEmpty": "暂无决策",
+  "budgetText": "MVP 保护：自动追问最多 {{count}} 轮。",
+  "permissionRead": "读取",
+  "permissionTools": "工具",
+  "permissionWrite": "写入",
+  "channelsById": {
+    "task": {
+      "label": "当前任务",
+      "description": "承载主人目标和当前上下文的共享工作间。"
+    },
+    "research": {
+      "label": "调研",
+      "description": "收集证据、参考资料、代码发现和待确认问题。"
+    },
+    "discussion": {
+      "label": "讨论",
+      "description": "比较方案、解决分歧，并让团队对齐。"
+    },
+    "build": {
+      "label": "构建日志",
+      "description": "记录具体改动、实现备注和验证输出。"
+    },
+    "review": {
+      "label": "评审",
+      "description": "检查风险、回归、缺失测试和验收缺口。"
+    },
+    "final": {
+      "label": "最终交付",
+      "description": "整理面向用户的回答、产物和后续行动。"
+    }
+  },
+  "modesById": {
+    "relay": {
+      "label": "接力",
+      "description": "调研、规划、实现、评审，然后汇总。"
+    },
+    "roundtable": {
+      "label": "圆桌",
+      "description": "先收集各角色观点，再由主持人决策。"
+    },
+    "debate": {
+      "label": "辩论",
+      "description": "通过提案和反驳比较不同方案。"
+    },
+    "red-team": {
+      "label": "红队",
+      "description": "压力测试候选答案或实现方案。"
+    },
+    "silent": {
+      "label": "静默",
+      "description": "保持内部协作安静，只展示检查点。"
+    }
+  },
+  "rolesById": {
+    "orchestrator": {
+      "name": "主持人",
+      "label": "主持",
+      "description": "拆解需求、选择发言角色，并收敛结论。"
+    },
+    "researcher": {
+      "name": "调研员",
+      "label": "调研",
+      "description": "收集代码、文档和外部证据。"
+    },
+    "architect": {
+      "name": "架构师",
+      "label": "规划",
+      "description": "塑造方案、边界和权衡。"
+    },
+    "builder": {
+      "name": "执行者",
+      "label": "构建",
+      "description": "完成具体改动并进行聚焦验证。"
+    },
+    "reviewer": {
+      "name": "评审员",
+      "label": "评审",
+      "description": "发现回归、缺失测试和薄弱假设。"
+    },
+    "skeptic": {
+      "name": "质疑者",
+      "label": "风险",
+      "description": "挑战方案并保留少数派担忧。"
+    }
+  },
+  "starterPlan": {
+    "research": "理解目标",
+    "architect": "建议角色",
+    "builder": "创建频道",
+    "reviewer": "收敛回答"
+  }
+}

@@ -35,9 +35,10 @@ import type { UIMessage } from '@ai-sdk/react'
 import { useChatSessions } from '@/stores/chat-session-store'
 import {
   convertThreadMessagesToUIMessages,
+  convertThreadMessageToUIMessage,
   extractContentPartsFromUIMessage,
 } from '@/lib/messages'
-import { newUserThreadContent } from '@/lib/completion'
+import { newAssistantThreadContent, newUserThreadContent } from '@/lib/completion'
 import {
   ThreadMessage,
   MessageStatus,
@@ -87,11 +88,17 @@ import {
 } from '@/types/mita-agent'
 import { MitaTeamsWorkspace } from '@/containers/MitaTeamsWorkspace'
 import {
+  MITA_TEAMS_ORCHESTRATOR_ROLE_ID,
   normalizeMitaTeamsConfig,
   renderMitaTeamsSystemInstructions,
   type MitaTeamsConfig,
 } from '@/types/mita-teams'
 import { trackMitaEvent } from '@/lib/analytics'
+import {
+  answerMitaTeamsChoice,
+  withMitaTeamsRuntime,
+} from '@/lib/mita-teams-memory'
+import { runMitaTeamsRuntime } from '@/lib/mita-teams-runtime'
 
 const CHAT_STATUS = {
   STREAMING: 'streaming',
@@ -377,7 +384,9 @@ function ThreadDetail() {
       )
     }
     return (
-      mitaTeamsConfig.roles.find((role) => role.id === 'orchestrator') ??
+      mitaTeamsConfig.roles.find(
+        (role) => role.id === MITA_TEAMS_ORCHESTRATOR_ROLE_ID
+      ) ??
       mitaTeamsConfig.roles[0]
     )
   }, [mitaTeamsConfig])
@@ -509,6 +518,8 @@ Tool result communication:
   const rawChatStatusRef = useRef<ChatStatus>('ready')
   const [settledChatStatus, setSettledChatStatus] =
     useState<ChatStatus | null>(null)
+  const mitaTeamsAbortRef = useRef<AbortController | null>(null)
+  const [isMitaTeamsRuntimeBusy, setIsMitaTeamsRuntimeBusy] = useState(false)
   const resetSettledChatStatus = useCallback(() => {
     setSettledChatStatus(null)
     rawChatStatusRef.current = CHAT_STATUS.SUBMITTED
@@ -879,7 +890,106 @@ Tool result communication:
     }
   }, [status])
 
-  const effectiveStatus = settledChatStatus ?? status
+  const effectiveStatus = isMitaTeamsRuntimeBusy
+    ? CHAT_STATUS.SUBMITTED
+    : (settledChatStatus ?? status)
+
+  const persistMitaTeamsConfig = useCallback(
+    (nextConfig: MitaTeamsConfig) => {
+      updateThread(threadId, {
+        metadata: {
+          mitaTeams: nextConfig,
+        },
+      })
+    },
+    [threadId, updateThread]
+  )
+
+  const appendThreadMessageToChat = useCallback(
+    (message: ThreadMessage) => {
+      const uiMessage = convertThreadMessageToUIMessage(message)
+      setChatMessages((prev) =>
+        prev.some((item) => item.id === uiMessage.id)
+          ? prev
+          : [...prev, uiMessage]
+      )
+    },
+    [setChatMessages]
+  )
+
+  const appendMitaTeamsAssistantMessage = useCallback(
+    (
+      content: string,
+      config: MitaTeamsConfig,
+      status: 'completed' | 'waiting-for-user' | 'stopped' | 'failed'
+    ) => {
+      const timestamp = Date.now()
+      const assistantMessage = {
+        ...newAssistantThreadContent(threadId, content, {
+          mitaTeams: {
+            runId: config.runtime.run?.id,
+            status,
+            projectMemoryVersion: config.runtime.projectMemory.version,
+          },
+        }),
+        created_at: timestamp,
+        completed_at: timestamp,
+      }
+
+      addMessage(assistantMessage)
+      appendThreadMessageToChat(assistantMessage)
+    },
+    [addMessage, appendThreadMessageToChat, threadId]
+  )
+
+  const startMitaTeamsRuntime = useCallback(
+    async (config: MitaTeamsConfig, userText: string) => {
+      mitaTeamsAbortRef.current?.abort()
+      const controller = new AbortController()
+      mitaTeamsAbortRef.current = controller
+      rawChatStatusRef.current = CHAT_STATUS.SUBMITTED
+      setSettledChatStatus(CHAT_STATUS.SUBMITTED)
+      setIsMitaTeamsRuntimeBusy(true)
+
+      try {
+        const result = await runMitaTeamsRuntime({
+          config,
+          userText,
+          threadTitle: threadRef.current?.title,
+          abortSignal: controller.signal,
+          onConfigChange: persistMitaTeamsConfig,
+        })
+
+        persistMitaTeamsConfig(result.config)
+        if (result.finalResponse) {
+          appendMitaTeamsAssistantMessage(
+            result.finalResponse,
+            result.config,
+            result.status
+          )
+        }
+      } catch (error) {
+        const message =
+          error instanceof Error ? error.message : 'Mita Teams failed'
+        toast.error(message)
+      } finally {
+        if (mitaTeamsAbortRef.current === controller) {
+          mitaTeamsAbortRef.current = null
+          setIsMitaTeamsRuntimeBusy(false)
+          const updateSessionStatus = useChatSessions.getState().updateStatus
+          if (typeof updateSessionStatus === 'function') {
+            updateSessionStatus(threadId, 'ready')
+          }
+          setSettledChatStatus('ready')
+        }
+      }
+    },
+    [
+      appendMitaTeamsAssistantMessage,
+      persistMitaTeamsConfig,
+      threadId,
+    ]
+  )
 
   const createCompactionModel = useCallback(async () => {
     const modelId = useModelProvider.getState().selectedModel?.id
@@ -1325,6 +1435,13 @@ Tool result communication:
         web_search_enabled: useWebSearch.getState().enabled,
       })
 
+      if (mitaTeamsConfig) {
+        const messageText = userMessage.content[0].text?.value ?? text
+        appendThreadMessageToChat(userMessage)
+        void startMitaTeamsRuntime(mitaTeamsConfig, messageText)
+        return
+      }
+
       // Build parts for AI SDK (only images are sent as file parts)
       const parts: Array<
         | { type: 'text'; text: string }
@@ -1368,6 +1485,9 @@ Tool result communication:
       selectModelProvider,
       maybeAutoCompactBeforeSend,
       resetSettledChatStatus,
+      mitaTeamsConfig,
+      appendThreadMessageToChat,
+      startMitaTeamsRuntime,
     ]
   )
 
@@ -1505,10 +1625,62 @@ Tool result communication:
     trackMitaEvent('generation_cancelled', {
       provider_id: selectedProvider,
       model_id: selectedModel?.id,
-      source: 'chat_stop',
+      source: mitaTeamsAbortRef.current ? 'mita_teams_stop' : 'chat_stop',
     })
+    if (mitaTeamsAbortRef.current) {
+      mitaTeamsAbortRef.current.abort()
+      mitaTeamsAbortRef.current = null
+      setIsMitaTeamsRuntimeBusy(false)
+      setSettledChatStatus('ready')
+      return
+    }
     stop()
   }, [resetSettledChatStatus, selectedModel?.id, selectedProvider, stop])
+
+  const handleMitaTeamsChoiceSelect = useCallback(
+    (optionId: string) => {
+      const choice = mitaTeamsConfig?.runtime.userChoiceRequest
+      if (!mitaTeamsConfig || !choice || choice.status !== 'pending') return
+
+      const option = choice.options.find((item) => item.id === optionId)
+      const nextRuntime = answerMitaTeamsChoice(
+        mitaTeamsConfig.runtime,
+        optionId
+      )
+      const nextConfig = withMitaTeamsRuntime(mitaTeamsConfig, nextRuntime)
+      const userText = [
+        `选择：${option?.label ?? optionId}`,
+        option?.description,
+      ]
+        .filter(Boolean)
+        .join('\n')
+      const userMessage = newUserThreadContent(
+        threadId,
+        userText,
+        [],
+        generateId(),
+        {
+          mitaTeams: {
+            choiceRequestId: choice.id,
+            selectedOptionId: optionId,
+          },
+        }
+      )
+
+      persistMitaTeamsConfig(nextConfig)
+      addMessage(userMessage)
+      appendThreadMessageToChat(userMessage)
+      void startMitaTeamsRuntime(nextConfig, userText)
+    },
+    [
+      addMessage,
+      appendThreadMessageToChat,
+      mitaTeamsConfig,
+      persistMitaTeamsConfig,
+      startMitaTeamsRuntime,
+      threadId,
+    ]
+  )
 
   // Handle regenerate from any message (user or assistant)
   // - For user messages: keeps the user message, deletes all after, regenerates assistant response
@@ -1890,16 +2062,6 @@ Tool result communication:
   const activeError = error ?? contextLimitError
   const quotaError = providerQuotaErrorFromUnknown(activeError)
   const activeErrorMessage = quotaError?.message ?? activeError?.message
-  const handleMitaTeamsConfigChange = useCallback(
-    (nextConfig: MitaTeamsConfig) => {
-      updateThread(threadId, {
-        metadata: {
-          mitaTeams: nextConfig,
-        },
-      })
-    },
-    [threadId, updateThread]
-  )
 
   const messageItems = (
     <>
@@ -2082,7 +2244,9 @@ Tool result communication:
           messages={chatMessages}
           messageItems={messageItems}
           inputArea={inputArea}
-          onConfigChange={handleMitaTeamsConfigChange}
+          isRuntimeBusy={isMitaTeamsRuntimeBusy}
+          onChoiceSelect={handleMitaTeamsChoiceSelect}
+          onConfigChange={persistMitaTeamsConfig}
         />
       ) : (
         <div className="flex flex-1 flex-col h-full overflow-hidden">
