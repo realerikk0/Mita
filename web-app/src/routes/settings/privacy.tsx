@@ -6,7 +6,7 @@ import { Switch } from '@/components/ui/switch'
 import { Card, CardItem } from '@/containers/Card'
 import { useTranslation } from '@/i18n/react-i18next-compat'
 import { useAnalytic } from '@/hooks/useAnalytic'
-import posthog from 'posthog-js'
+import { setMitaAnalyticsConsent } from '@/lib/analytics'
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 export const Route = createFileRoute(route.settings.privacy as any)({
@@ -38,11 +38,7 @@ function Privacy() {
                     <Switch
                       checked={productAnalytic}
                       onCheckedChange={(state) => {
-                        if (state) {
-                          posthog.opt_in_capturing()
-                        } else {
-                          posthog.opt_out_capturing()
-                        }
+                        setMitaAnalyticsConsent(state)
                         setProductAnalytic(state)
                       }}
                     />

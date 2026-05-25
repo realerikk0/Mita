@@ -33,6 +33,7 @@ import { Button } from '@/components/ui/button'
 import { cn } from '@/lib/utils'
 import { useModelProvider } from '@/hooks/useModelProvider'
 import { McpRouterModelPicker } from '@/containers/McpRouterModelPicker'
+import { trackMitaEvent } from '@/lib/analytics'
 import { isRouterModelSelectable } from '@/lib/mcp-router-model-filter'
 import { normalizeAppError } from '@/utils/appError'
 import {
@@ -226,6 +227,10 @@ function MCPServersDesktop() {
       // Add new server
       toggleServer(name, false)
       addServer(name, config)
+      trackMitaEvent('mcp_server_added', {
+        transport: config.type ?? (config.url ? 'http' : 'stdio'),
+        active: Boolean(config.active),
+      })
       toggleServer(name, true)
       syncServers()
     }
@@ -345,6 +350,10 @@ function MCPServersDesktop() {
             active,
           })
           .then(() => {
+            trackMitaEvent('mcp_server_started', {
+              status: 'succeeded',
+              transport: config.type ?? (config.url ? 'http' : 'stdio'),
+            })
             // Save single server
             editServer(serverKey, {
               ...(config ?? (mcpServers[serverKey] as MCPServerConfig)),
@@ -359,6 +368,10 @@ function MCPServersDesktop() {
             serviceHub.mcp().getConnectedServers().then(setConnectedServers)
           })
           .catch((error) => {
+            trackMitaEvent('mcp_server_started', {
+              status: 'failed',
+              transport: config.type ?? (config.url ? 'http' : 'stdio'),
+            })
             editServer(serverKey, {
               ...(config ?? (mcpServers[serverKey] as MCPServerConfig)),
               active: false,

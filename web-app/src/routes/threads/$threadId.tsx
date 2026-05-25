@@ -66,6 +66,7 @@ import { Shimmer } from '@/components/ai-elements/shimmer'
 import { useAgentMode } from '@/hooks/useAgentMode'
 import { useAutoRunStore } from '@/stores/auto-run-store'
 import { useMessageQueue } from '@/stores/message-queue-store'
+import { useWebSearch } from '@/hooks/useWebSearch'
 import { generateThreadTitle } from '@/lib/thread-title-summarizer'
 import { ModelFactory } from '@/lib/model-factory'
 import { providerQuotaErrorFromUnknown } from '@/lib/provider-quota-error'
@@ -90,6 +91,7 @@ import {
   renderMitaTeamsSystemInstructions,
   type MitaTeamsConfig,
 } from '@/types/mita-teams'
+import { trackMitaEvent } from '@/lib/analytics'
 
 const CHAT_STATUS = {
   STREAMING: 'streaming',
@@ -109,6 +111,15 @@ function numericParam(value: unknown): number | undefined {
 function booleanParam(value: unknown, defaultValue: boolean): boolean {
   if (value === undefined || value === null) return defaultValue
   return value === true || value === 'true'
+}
+
+function messageLengthBucket(text: string) {
+  const length = text.trim().length
+  if (length === 0) return 'attachments_only'
+  if (length <= 80) return 'short'
+  if (length <= 500) return 'medium'
+  if (length <= 2_000) return 'long'
+  return 'very_long'
 }
 
 function getConfiguredMaxContextTokens(
@@ -654,6 +665,14 @@ Tool result communication:
             const toolName = toolCall.toolName
             const toolInput = asToolInput(toolCall.input)
             const isComputerAgentTool = isComputerAgentToolName(toolName)
+            const toolKind = ragToolNames.has(toolName)
+              ? 'rag'
+              : isComputerAgentTool
+                ? 'computer'
+                : mcpToolNames.has(toolName)
+                  ? 'mcp'
+                  : 'unknown'
+            const toolStartedAt = performance.now()
             const computerApproval = isComputerAgentTool
               ? computerAgentApprovalOptions(
                   computerAgentApprovalPolicy,
@@ -698,6 +717,12 @@ Tool result communication:
 
             if (!approved) {
               // User denied the tool call
+              trackMitaEvent('mcp_tool_invoked', {
+                tool_name: toolName,
+                tool_kind: toolKind,
+                status: 'denied',
+                duration_ms: Math.round(performance.now() - toolStartedAt),
+              })
               addToolOutput({
                 state: 'output-error',
                 tool: toolCall.toolName,
@@ -733,6 +758,12 @@ Tool result communication:
             }
 
             if (result.error) {
+              trackMitaEvent('mcp_tool_invoked', {
+                tool_name: toolName,
+                tool_kind: toolKind,
+                status: 'failed',
+                duration_ms: Math.round(performance.now() - toolStartedAt),
+              })
               addToolOutput({
                 state: 'output-error',
                 tool: toolCall.toolName,
@@ -740,6 +771,12 @@ Tool result communication:
                 errorText: `Error: ${result.error}`,
               })
             } else {
+              trackMitaEvent('mcp_tool_invoked', {
+                tool_name: toolName,
+                tool_kind: toolKind,
+                status: 'succeeded',
+                duration_ms: Math.round(performance.now() - toolStartedAt),
+              })
               addToolOutput({
                 tool: toolCall.toolName,
                 toolCallId: toolCall.toolCallId,
@@ -750,6 +787,13 @@ Tool result communication:
             // Ignore abort errors
             if ((error as Error).name !== 'AbortError') {
               console.error('Tool call error:', error)
+              trackMitaEvent('mcp_tool_invoked', {
+                tool_name: toolCall.toolName,
+                tool_kind: isComputerAgentToolName(toolCall.toolName)
+                  ? 'computer'
+                  : 'mcp',
+                status: 'failed',
+              })
               addToolOutput({
                 state: 'output-error',
                 tool: toolCall.toolName,
@@ -934,6 +978,12 @@ Tool result communication:
           console.debug(
             `[compact] Auto compacted thread ${threadId} at ${check.tokenEstimate}/${check.tokenLimit} estimated tokens`
           )
+          trackMitaEvent('context_compacted', {
+            provider_id: selectedProvider,
+            model_id: selectedModel?.id,
+            source: 'auto',
+            status: 'succeeded',
+          })
         }
         return compacted
       } catch (error) {
@@ -941,7 +991,7 @@ Tool result communication:
         return false
       }
     },
-    [runThreadCompaction, systemMessage, threadId]
+    [runThreadCompaction, selectedModel?.id, selectedProvider, systemMessage, threadId]
   )
 
   const handleManualCompact = useCallback(
@@ -952,8 +1002,20 @@ Tool result communication:
           customInstructions,
         })
         if (compacted) {
+          trackMitaEvent('context_compacted', {
+            provider_id: selectedProvider,
+            model_id: selectedModel?.id,
+            source: 'manual',
+            status: 'succeeded',
+          })
           toast.success('Context compacted')
         } else {
+          trackMitaEvent('context_compacted', {
+            provider_id: selectedProvider,
+            model_id: selectedModel?.id,
+            source: 'manual',
+            status: 'skipped',
+          })
           toast.info('Not enough context to compact yet')
         }
       } catch (error) {
@@ -962,7 +1024,7 @@ Tool result communication:
         toast.error(message)
       }
     },
-    [runThreadCompaction]
+    [runThreadCompaction, selectedModel?.id, selectedProvider]
   )
 
   // Get disabled tools for this thread to trigger re-render when they change
@@ -1037,6 +1099,9 @@ Tool result communication:
 
   useEffect(() => {
     setCurrentThreadId(threadId)
+    trackMitaEvent('chat_selected', {
+      has_documents: Boolean(thread?.metadata?.hasDocuments),
+    })
     // Reset title summarization state for the new thread
     titleAbortRef.current?.abort()
     titleAbortRef.current = null
@@ -1200,6 +1265,17 @@ Tool result communication:
           }
         } catch (error) {
           console.error('Failed to process attachments:', error)
+          trackMitaEvent('attachment_processing_failed', {
+            provider_id: selectedProvider,
+            model_id: selectedModel?.id,
+            attachment_count: combinedAttachments.length,
+            image_count: combinedAttachments.filter((a) => a.type === 'image')
+              .length,
+            document_count: combinedAttachments.filter(
+              (a) => a.type === 'document'
+            ).length,
+            error_kind: 'processing',
+          })
           // Remove the preview message on failure
           if (hasDocuments) {
             setChatMessages((prev) =>
@@ -1231,6 +1307,23 @@ Tool result communication:
       )
 
       addMessage(userMessage)
+      trackMitaEvent('message_sent', {
+        provider_id: selectedProvider,
+        model_id: selectedModel?.id,
+        model_capabilities: selectedModel?.capabilities ?? [],
+        has_attachments: processedAttachments.length > 0,
+        attachment_count: processedAttachments.length,
+        image_count: processedAttachments.filter((a) => a.type === 'image')
+          .length,
+        document_count: processedAttachments.filter(
+          (a) => a.type === 'document'
+        ).length,
+        message_length_bucket: messageLengthBucket(
+          userMessage.content[0].text?.value ?? text
+        ),
+        source: 'composer',
+        web_search_enabled: useWebSearch.getState().enabled,
+      })
 
       // Build parts for AI SDK (only images are sent as file parts)
       const parts: Array<
@@ -1269,6 +1362,7 @@ Tool result communication:
       setChatMessages,
       clearAttachmentsForThread,
       serviceHub,
+      selectedModel,
       selectedProvider,
       activeMitaChatRole,
       selectModelProvider,
@@ -1296,6 +1390,15 @@ Tool result communication:
       )
 
       addMessage(userMessage)
+      trackMitaEvent('message_sent', {
+        provider_id: selectedProvider,
+        model_id: selectedModel?.id,
+        has_attachments: false,
+        attachment_count: 0,
+        message_length_bucket: messageLengthBucket(text),
+        source: metadata?.mita ? 'auto_run' : 'queue',
+        web_search_enabled: useWebSearch.getState().enabled,
+      })
 
       if (metadata?.mita) {
         pendingAutoRunResponseMetaRef.current = {
@@ -1315,12 +1418,19 @@ Tool result communication:
       addMessage,
       maybeAutoCompactBeforeSend,
       resetSettledChatStatus,
+      selectedModel,
+      selectedProvider,
     ]
   )
 
   const handleAutoRunStart = useCallback(
     (maxRounds: number) => {
       const now = new Date().toISOString()
+      trackMitaEvent('auto_run_started', {
+        max_rounds: maxRounds,
+        provider_id: selectedProvider,
+        model_id: selectedModel?.id,
+      })
       persistAutoRunState({
         enabled: true,
         status: 'running',
@@ -1332,7 +1442,7 @@ Tool result communication:
         lastError: undefined,
       })
     },
-    [persistAutoRunState]
+    [persistAutoRunState, selectedModel?.id, selectedProvider]
   )
 
   const handleAutoRunPause = useCallback(() => {
@@ -1392,14 +1502,24 @@ Tool result communication:
 
   const handleStop = useCallback(() => {
     resetSettledChatStatus()
+    trackMitaEvent('generation_cancelled', {
+      provider_id: selectedProvider,
+      model_id: selectedModel?.id,
+      source: 'chat_stop',
+    })
     stop()
-  }, [resetSettledChatStatus, stop])
+  }, [resetSettledChatStatus, selectedModel?.id, selectedProvider, stop])
 
   // Handle regenerate from any message (user or assistant)
   // - For user messages: keeps the user message, deletes all after, regenerates assistant response
   // - For assistant messages: finds the closest preceding user message, deletes from there
   const handleRegenerate = useCallback((messageId?: string) => {
     resetSettledChatStatus()
+    trackMitaEvent('message_regenerated', {
+      provider_id: selectedProvider,
+      model_id: selectedModel?.id,
+      source: messageId ? 'message_action' : 'latest',
+    })
     // Cancel any in-flight title summarization before regenerating
     titleAbortRef.current?.abort()
     titleAbortRef.current = null
@@ -1443,7 +1563,14 @@ Tool result communication:
     // Call the AI SDK regenerate function - it will handle truncating the UI messages
     // and generating a new response from the selected message
     regenerate(messageId ? { messageId } : undefined)
-  }, [threadId, deleteMessage, regenerate, resetSettledChatStatus])
+  }, [
+    threadId,
+    deleteMessage,
+    regenerate,
+    resetSettledChatStatus,
+    selectedModel?.id,
+    selectedProvider,
+  ])
 
   // Handle edit message - updates the message and regenerates from it
   const handleEditMessage = useCallback(
@@ -1456,6 +1583,11 @@ Tool result communication:
       if (messageIndex === -1) return
 
       const originalMessage = currentLocalMessages[messageIndex]
+      trackMitaEvent('message_edited', {
+        provider_id: selectedProvider,
+        model_id: selectedModel?.id,
+        message_length_bucket: messageLengthBucket(newText),
+      })
 
       // Update the message content
       const updatedMessage = {
@@ -1500,6 +1632,8 @@ Tool result communication:
       chatMessages,
       setChatMessages,
       regenerate,
+      selectedModel?.id,
+      selectedProvider,
     ]
   )
 
@@ -1664,6 +1798,11 @@ Tool result communication:
     if (run.status !== 'running') return
 
     if (run.currentRound >= run.maxRounds) {
+      trackMitaEvent('auto_run_completed', {
+        current_round: run.currentRound,
+        max_rounds: run.maxRounds,
+        status: 'completed',
+      })
       persistAutoRunState({ status: 'completed', enabled: false })
       return
     }

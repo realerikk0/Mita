@@ -71,6 +71,7 @@ import {
   imageGenerationRequestErrorFromUnknown,
   type ImageGenerationRequestErrorDetails,
 } from '@/lib/image-generation-errors'
+import { trackMitaEvent } from '@/lib/analytics'
 import type {
   ImageAssetRecord,
   ImageGenerationStatus,
@@ -877,6 +878,14 @@ function Images() {
         requestError: undefined,
         retryAvailableAt: undefined,
       })
+      trackMitaEvent('image_generation_started', {
+        provider_id: match.provider.provider,
+        model_id: match.model.id,
+        mode: task.mode,
+        ratio: task.ratio,
+        quality: task.qualityPreset,
+        source_asset_count: sourceAssets.length,
+      })
 
       try {
         const images = await serviceHub.imageGeneration().generateImages({
@@ -930,6 +939,23 @@ function Images() {
 
         setAssets((current) => [saved, ...current])
         updateTask(task.id, { status: 'succeeded', asset: saved })
+        trackMitaEvent('image_generation_completed', {
+          provider_id: match.provider.provider,
+          model_id: match.model.id,
+          mode: task.mode,
+          ratio: task.ratio,
+          quality: task.qualityPreset,
+          source_asset_count: sourceAssets.length,
+          status: 'succeeded',
+        })
+        trackMitaEvent('image_asset_saved', {
+          provider_id: match.provider.provider,
+          model_id: match.model.id,
+          mode: task.mode,
+          ratio: task.ratio,
+          quality: task.qualityPreset,
+          source_asset_count: sourceAssets.length,
+        })
       } catch (error) {
         const quotaError = providerQuotaErrorFromUnknown(error)
         const requestError = imageGenerationRequestErrorFromUnknown(error)
@@ -960,6 +986,19 @@ function Images() {
           retryAvailableAt: cancelledTasks.current.has(task.id)
             ? undefined
             : retryAvailableAt,
+        })
+        trackMitaEvent('image_generation_failed', {
+          provider_id: match.provider.provider,
+          model_id: match.model.id,
+          mode: task.mode,
+          ratio: task.ratio,
+          quality: task.qualityPreset,
+          source_asset_count: sourceAssets.length,
+          error_kind: cancelledTasks.current.has(task.id)
+            ? 'cancelled'
+            : quotaError
+              ? 'quota'
+              : requestError?.kind ?? 'generation',
         })
       } finally {
         controllers.current.delete(task.id)

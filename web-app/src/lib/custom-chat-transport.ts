@@ -43,6 +43,7 @@ import {
   encodeProviderQuotaError,
   providerQuotaErrorFromUnknown,
 } from '@/lib/provider-quota-error'
+import { trackMitaEvent } from '@/lib/analytics'
 
 export type TokenUsageCallback = (
   usage: LanguageModelUsage,
@@ -367,6 +368,18 @@ export class CustomChatTransport implements ChatTransport<UIMessage> {
             {
               routerModel,
               abortSignal,
+              onRoutingTelemetry: (info) => {
+                trackMitaEvent('mcp_routing_completed', {
+                  connected_server_count: info.connectedServerCount,
+                  fallback_reason: info.fallbackReason,
+                  llm_accepted: info.llmAccepted,
+                  llm_invoked: info.llmInvoked,
+                  pick_source: info.pickSource ?? 'bypassed',
+                  routing_ran: info.routingRan,
+                  selected_server_count: info.selectedServerCount,
+                  total_latency_ms: info.totalLatencyMs,
+                })
+              },
             }
           )
         } else {
@@ -627,6 +640,20 @@ export class CustomChatTransport implements ChatTransport<UIMessage> {
     }
 
     const mappedMessages = this.mapUserInlineAttachments(effectiveMessages)
+    const hasTools = Object.keys(this.tools).length > 0
+    const modelSupportsTools = selectedModel?.capabilities?.includes('tools') ?? this.modelSupportsTools
+    const shouldEnableTools = hasTools && modelSupportsTools
+
+    trackMitaEvent('assistant_response_started', {
+      provider_id: providerId,
+      model_id: modelId,
+      model_capabilities: selectedModel?.capabilities ?? [],
+      message_count: mappedMessages.length,
+      tools_enabled: shouldEnableTools,
+      tool_count: Object.keys(this.tools).length,
+      web_search_enabled: useWebSearch.getState().enabled,
+      transport: 'desktop_custom_chat_transport',
+    })
 
     if (
       useWebSearch.getState().enabled &&
@@ -658,9 +685,6 @@ export class CustomChatTransport implements ChatTransport<UIMessage> {
       : baseMessages
 
     // Include tools only if we have tools loaded AND model supports them
-    const hasTools = Object.keys(this.tools).length > 0
-    const modelSupportsTools = selectedModel?.capabilities?.includes('tools') ?? this.modelSupportsTools
-    const shouldEnableTools = hasTools && modelSupportsTools
 
     // Track stream timing and token count for token speed calculation
     let streamStartTime: number | undefined
@@ -714,6 +738,31 @@ export class CustomChatTransport implements ChatTransport<UIMessage> {
             tokenSpeed = 0
           }
 
+          trackMitaEvent('assistant_response_completed', {
+            provider_id: providerId,
+            model_id: modelId,
+            finish_reason: finishPart.finishReason,
+            input_tokens: inputTokens,
+            output_tokens: outputTokens,
+            total_tokens:
+              usage?.totalTokens ?? (inputTokens ?? 0) + outputTokens,
+            duration_ms: durationMs,
+            token_speed: Math.round(tokenSpeed * 10) / 10,
+          })
+          trackMitaEvent('token_usage_recorded', {
+            provider_id: providerId,
+            model_id: modelId,
+            input_tokens: inputTokens,
+            output_tokens: outputTokens,
+            total_tokens:
+              usage?.totalTokens ?? (inputTokens ?? 0) + outputTokens,
+          })
+          trackMitaEvent('stream_latency_recorded', {
+            provider_id: providerId,
+            model_id: modelId,
+            duration_ms: durationMs,
+          })
+
           return {
             finishReason: finishPart.finishReason,
             usage: {
@@ -734,10 +783,24 @@ export class CustomChatTransport implements ChatTransport<UIMessage> {
       },
       onError: (error) => {
         const quotaError = providerQuotaErrorFromUnknown(error)
+        trackMitaEvent('assistant_response_failed', {
+          provider_id: providerId,
+          model_id: modelId,
+          error_kind: quotaError ? 'quota' : 'stream',
+          has_tools: shouldEnableTools,
+        })
         if (quotaError) {
+          trackMitaEvent('quota_error_shown', {
+            provider_id: providerId,
+            model_id: modelId,
+          })
           return encodeProviderQuotaError(quotaError)
         }
 
+        trackMitaEvent('network_error_shown', {
+          provider_id: providerId,
+          model_id: modelId,
+        })
         const errorMessage = error == null
           ? 'Unknown error'
           : typeof error === 'string'
