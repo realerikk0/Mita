@@ -6,6 +6,7 @@ import { spawnSync } from 'node:child_process'
 import test from 'node:test'
 import { fileURLToPath } from 'node:url'
 
+import { buildReleaseNotes } from '../build-release-notes.mjs'
 import { collectReleaseAssets } from '../collect-release-assets.mjs'
 import {
   extractPosterHighlights,
@@ -25,6 +26,11 @@ const here = path.dirname(fileURLToPath(import.meta.url))
 const uploadScript = path.resolve(here, '../upload-baidu.sh')
 const posterScript = path.resolve(here, '../generate-release-poster.mjs')
 const feishuScript = path.resolve(here, '../send-feishu-card.mjs')
+
+function hasUsableBash() {
+  const result = spawnSync('bash', ['--version'], { encoding: 'utf8' })
+  return result.status === 0
+}
 
 function sampleRelease() {
   return {
@@ -82,6 +88,26 @@ test('collectReleaseAssets fails when a required asset is missing', () => {
   )
 })
 
+test('buildReleaseNotes groups commits into release sections', () => {
+  const notes = buildReleaseNotes({
+    tagName: 'v1.2.3',
+    previousTag: 'v1.2.2',
+    repoUrl: 'https://github.com/realerikk0/Mita',
+    commitSubjects: [
+      'feat: add visible desktop updater',
+      'fix(updater): repair CDN manifest parsing',
+      'perf: improve release asset validation',
+      'ci: update release distribution workflow',
+    ],
+  })
+
+  assert.match(notes, /## 新增功能\n\n- add visible desktop updater/)
+  assert.match(notes, /## 问题修复\n\n- repair CDN manifest parsing/)
+  assert.match(notes, /## 优化调整\n\n- improve release asset validation/)
+  assert.match(notes, /## 维护更新\n\n- update release distribution workflow/)
+  assert.match(notes, /https:\/\/github\.com\/realerikk0\/Mita\/compare\/v1\.2\.2\.\.\.v1\.2\.3/)
+})
+
 test('buildFeishuCard includes fixed release and download fields', () => {
   const manifest = collectReleaseAssets(sampleRelease())
   const card = buildFeishuCard(
@@ -102,6 +128,8 @@ test('buildFeishuCard includes fixed release and download fields', () => {
   assert.match(body, /Mita_1\.2\.3_x64-setup\.exe/)
   assert.match(body, /Mita_1\.2\.3_x64_en-US\.msi/)
   assert.match(body, /https:\/\/pan\.baidu\.com\/s\/example/)
+  assert.match(body, /Added visible desktop updater/)
+  assert.match(body, /Fixed updater CDN manifest parsing/)
   assert.match(body, /打开 GitHub Release/)
   assert.match(body, /打开百度网盘/)
 })
@@ -266,6 +294,22 @@ test('extractPosterHighlights separates release features and fixes', () => {
   ])
 })
 
+test('extractPosterHighlights fills update block from improvement sections', () => {
+  const highlights = extractPosterHighlights({
+    body: [
+      '## 优化调整',
+      '- 优化发布包校验逻辑',
+      '- 改进飞书通知摘要',
+    ].join('\n'),
+  })
+
+  assert.deepEqual(highlights.features, [
+    '优化发布包校验逻辑',
+    '改进飞书通知摘要',
+  ])
+  assert.deepEqual(highlights.fixes, [])
+})
+
 test('generateReleasePoster writes image from Jingxing async task content', async () => {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'mita-release-poster-'))
   const output = path.join(dir, 'poster.png')
@@ -419,7 +463,9 @@ test('resolvePosterImageKey uploads generated poster to Feishu', async () => {
   assert.equal(metadata.feishuImageKey, 'img_v3_abc')
 })
 
-test('upload-baidu dry run writes a placeholder share file', () => {
+test('upload-baidu dry run writes a placeholder share file', {
+  skip: hasUsableBash() ? false : 'bash is not usable in this environment',
+}, () => {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'mita-release-distribution-'))
   const assetsDir = path.join(dir, 'assets')
   fs.mkdirSync(assetsDir)

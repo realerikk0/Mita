@@ -522,6 +522,11 @@ jobs:
       - build-windows-x64
       - sync-cloudflare-updater
     steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
       - name: Download artifacts
         uses: actions/download-artifact@v4
         with:
@@ -531,13 +536,21 @@ jobs:
         shell: bash
         run: find dist -maxdepth 3 -type f -print | sort
 
+      - name: Generate release notes
+        shell: bash
+        run: |
+          node scripts/release-distribution/build-release-notes.mjs \
+            --tag "${GITHUB_REF_NAME}" \
+            --output dist/release-notes.md
+          cat dist/release-notes.md
+
       - name: Create draft release
         uses: softprops/action-gh-release@v2
         with:
           name: Mita ${{ github.ref_name }}
           draft: true
           prerelease: false
-          generate_release_notes: true
+          body_path: dist/release-notes.md
           fail_on_unmatched_files: true
           files: |
             dist/**/*.dmg

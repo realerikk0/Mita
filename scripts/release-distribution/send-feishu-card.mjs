@@ -3,6 +3,7 @@ import fs from 'node:fs'
 import path from 'node:path'
 import { createHmac } from 'node:crypto'
 import { fileURLToPath } from 'node:url'
+import { buildReleaseHighlightsMarkdown } from './release-highlights.mjs'
 
 function parseArgs(argv) {
   const args = { dryRun: false }
@@ -72,6 +73,11 @@ export function buildFeishuCard(release, baiduShare, options = {}) {
   const baiduPassword = baiduShare.password || 'mita'
   const releaseTime = release.publishedAt || 'unknown'
   const dryRunPrefix = baiduShare.dryRun ? '**Dry run**\n' : ''
+  const releaseHighlights = buildReleaseHighlightsMarkdown(release, {
+    maxFeatures: options.maxFeatures ?? 5,
+    maxFixes: options.maxFixes ?? 5,
+    includeEmptyMessage: true,
+  })
 
   const fields = [
     {
@@ -107,6 +113,13 @@ export function buildFeishuCard(release, baiduShare, options = {}) {
     },
     {
       tag: 'hr',
+    },
+    {
+      tag: 'div',
+      text: {
+        tag: 'lark_md',
+        content: releaseHighlights,
+      },
     },
     {
       tag: 'div',

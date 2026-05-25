@@ -9,14 +9,14 @@
 1. `Desktop Release`
    - 触发方式：推送 `v*` tag，例如 `v0.6.606`。
    - 构建内容：macOS universal `.dmg`、Windows x64 `.exe` 和 `.msi`。
-   - 输出结果：创建 GitHub Draft Release，并上传三个安装包。
+   - 输出结果：基于上一个 release tag 到当前 tag 的 commit message 生成结构化 release notes，创建 GitHub Draft Release，并上传三个安装包。
 
 2. `Release Distribution`
    - 触发方式：GitHub Release 从 Draft 发布为正式 Release 后自动触发。
    - 分发内容：下载 GitHub Release 中的 `.dmg`、`.exe`、`.msi`。
-   - 发布海报：基于 GitHub Release notes 调用井陉 `gpt-image-2` 生成新版本宣传海报。
+   - 发布海报：基于 GitHub Release notes 中的“新增功能 / 问题修复 / 优化调整”列表调用井陉 `gpt-image-2` 生成新版本宣传海报。
    - 百度网盘：上传到 `/Mita/releases/<tag>/`，创建长期公开分享链接。
-   - 飞书通知：飞书应用机器人主动发送到指定群；第一条是固定格式消息卡片，第二条是“宣传图：”文本，第三条是单独的新版本宣传海报图片。如果海报生成或上传失败，降级为只发送第一条无图卡片。
+   - 飞书通知：飞书应用机器人主动发送到指定群；第一条是固定格式消息卡片，卡片中包含本次更新和问题修复摘要；第二条是“宣传图：”文本，第三条是单独的新版本宣传海报图片。如果海报生成或上传失败，降级为只发送第一条无图卡片。
 
 旧的 `Tauri Builder - Tag` 已改为仅手动触发，不再响应 tag push，避免与 `Desktop Release` 双重构建。
 
@@ -92,9 +92,31 @@ gh run watch --repo realerikk0/Mita <run-id> --exit-status
 *.msi
 ```
 
-5. 将 Draft Release 发布为正式 Release。
+5. 检查 Draft Release 正文。自动生成的结构应包含：
 
-6. 等待 `Release Distribution` 自动完成。成功后应看到：
+```markdown
+## 新增功能
+
+- ...
+
+## 问题修复
+
+- ...
+
+## 优化调整
+
+- ...
+
+## 完整变更
+
+https://github.com/realerikk0/Mita/compare/<previous-tag>...<current-tag>
+```
+
+如果自动分类不够准确，可以在发布前手动补充或调整这些列表项；飞书卡片和宣传图都会读取这里的列表项。
+
+6. 将 Draft Release 发布为正式 Release。
+
+7. 等待 `Release Distribution` 自动完成。成功后应看到：
 
 ```text
 Upload assets to Baidu Netdisk
@@ -127,7 +149,7 @@ gh workflow run "Release Distribution" \
   -f probe_only=false
 ```
 
-dry-run 产物里的 `feishu-card.json` 是待发送消息 payload 数组；海报上传成功时应包含三项：互动卡片、`宣传图：` 文本、图片消息。
+dry-run 产物里的 `feishu-card.json` 是待发送消息 payload 数组；互动卡片应包含“本次更新 / 问题修复”摘要，海报上传成功时应包含三项：互动卡片、`宣传图：` 文本、图片消息。
 
 ## 百度凭据探针
 
@@ -155,10 +177,11 @@ shareID
 正式发布完成后，需要确认：
 
 - GitHub Release 已发布，不是 Draft。
+- GitHub Release 正文包含结构化更新列表，而不是只有 `Full Changelog` 链接。
 - Release assets 包含 macOS `.dmg`、Windows `.exe`、Windows `.msi`。
 - 百度网盘目录 `/Mita/releases/<tag>/` 下包含同一批安装包。
 - 百度分享链接可打开，提取码可用。
-- 指定 `FEISHU_RELEASE_CHAT_ID` 的飞书群收到应用机器人发送的固定格式卡片，卡片中包含 GitHub Release 地址和百度网盘地址。
+- 指定 `FEISHU_RELEASE_CHAT_ID` 的飞书群收到应用机器人发送的固定格式卡片，卡片中包含本次更新摘要、GitHub Release 地址和百度网盘地址。
 - 如果海报凭据已配置，分发 artifact 中应包含 `release-poster.png`、`release-poster.json`；飞书群随后收到“宣传图：”文本和一条单独的新版本海报图片消息。
 
 ## 故障处理

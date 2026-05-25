@@ -2,6 +2,7 @@
 import fs from 'node:fs'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
+import { extractReleaseHighlights } from './release-highlights.mjs'
 
 const DEFAULT_JINGXING_BASE_URL = 'https://api.jingxing.io/v1'
 const DEFAULT_MODEL = 'gpt-image-2'
@@ -51,69 +52,8 @@ function writeJson(file, data) {
   fs.writeFileSync(file, `${JSON.stringify(data, null, 2)}\n`)
 }
 
-function normalizeMarkdownLine(line) {
-  return line
-    .replace(/\[([^\]]+)\]\([^)]+\)/g, '$1')
-    .replace(/`([^`]+)`/g, '$1')
-    .replace(/\s+@\S+/g, '')
-    .replace(/\s+\(#\d+\)$/g, '')
-    .replace(/\s+#\d+\b/g, '')
-    .replace(/\s+/g, ' ')
-    .trim()
-}
-
-function sectionKind(heading) {
-  const normalized = heading.toLowerCase()
-  if (/feature|enhancement|新增|功能|亮点/.test(normalized)) return 'features'
-  if (/fix|bug|修复|问题/.test(normalized)) return 'fixes'
-  return 'changes'
-}
-
 export function extractPosterHighlights(release, options = {}) {
-  const maxFeatures = options.maxFeatures ?? 3
-  const maxFixes = options.maxFixes ?? 3
-  const body = String(release.body ?? '')
-  const highlights = {
-    features: [],
-    fixes: [],
-    changes: [],
-  }
-
-  let currentSection = 'changes'
-  for (const rawLine of body.split(/\r?\n/)) {
-    const heading = /^#{1,4}\s+(.+)$/.exec(rawLine)
-    if (heading) {
-      currentSection = sectionKind(heading[1])
-      continue
-    }
-
-    const listItem = /^\s*[-*]\s+(.+)$/.exec(rawLine)
-    if (!listItem) continue
-
-    const item = normalizeMarkdownLine(listItem[1])
-    if (!item) continue
-
-    if (currentSection === 'features' && highlights.features.length < maxFeatures) {
-      highlights.features.push(item)
-    } else if (currentSection === 'fixes' && highlights.fixes.length < maxFixes) {
-      highlights.fixes.push(item)
-    } else if (highlights.changes.length < maxFeatures + maxFixes) {
-      highlights.changes.push(item)
-    }
-  }
-
-  if (!highlights.features.length && highlights.changes.length) {
-    highlights.features.push(...highlights.changes.splice(0, maxFeatures))
-  }
-
-  if (!highlights.features.length && !highlights.fixes.length) {
-    highlights.features.push('新版本安装包已准备就绪，桌面端体验继续升级。')
-  }
-
-  return {
-    features: highlights.features.slice(0, maxFeatures),
-    fixes: highlights.fixes.slice(0, maxFixes),
-  }
+  return extractReleaseHighlights(release, options)
 }
 
 export function buildPosterPrompt(release, highlights = extractPosterHighlights(release)) {
