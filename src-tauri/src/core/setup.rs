@@ -42,6 +42,23 @@ pub fn install_extensions<R: Runtime>(app: tauri::AppHandle<R>, force: bool) -> 
         .join("resources")
         .join("pre-install");
 
+    if !pre_install_path.exists() {
+        let extensions_json_path = extensions_path.join("extensions.json");
+        if extensions_path.exists() {
+            log::warn!(
+                "No bundled extensions found at {pre_install_path:?}; keeping existing extensions."
+            );
+            return Ok(());
+        }
+
+        log::warn!(
+            "No bundled extensions found at {pre_install_path:?}; creating empty extensions list."
+        );
+        fs::create_dir_all(&extensions_path).map_err(|e| e.to_string())?;
+        fs::write(&extensions_json_path, "[]").map_err(|e| e.to_string())?;
+        return Ok(());
+    }
+
     let mut clean_up = force;
 
     // Check IS_CLEAN environment variable to optionally skip extension install
@@ -73,12 +90,6 @@ pub fn install_extensions<R: Runtime>(app: tauri::AppHandle<R>, force: bool) -> 
     } else {
         vec![]
     };
-
-    if !pre_install_path.exists() {
-        log::info!("No bundled extensions found, writing empty extensions list.");
-        fs::write(&extensions_json_path, "[]").map_err(|e| e.to_string())?;
-        return Ok(());
-    }
 
     for entry in fs::read_dir(&pre_install_path).map_err(|e| e.to_string())? {
         let entry = entry.map_err(|e| e.to_string())?;

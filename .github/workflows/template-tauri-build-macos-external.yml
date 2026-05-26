@@ -111,6 +111,42 @@ jobs:
           NODE_OPTIONS: "--max-old-space-size=4196"
           APP_PATH: '.'
 
+      - name: Verify bundled pre-install extensions
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          app_root="src-tauri/target/universal-apple-darwin/release/bundle/macos"
+          app_found=false
+          required_extensions=(
+            "janhq-rag-extension"
+            "janhq-conversational-extension"
+          )
+
+          while IFS= read -r app; do
+            app_found=true
+            pre_install_dir="$app/Contents/Resources/resources/pre-install"
+            if [ ! -d "$pre_install_dir" ]; then
+              echo "Missing pre-install directory: $pre_install_dir" >&2
+              exit 1
+            fi
+
+            for extension in "${required_extensions[@]}"; do
+              if ! find "$pre_install_dir" -maxdepth 1 -type f -name "${extension}-*.tgz" | grep -q .; then
+                echo "Missing required bundled extension ${extension} in $pre_install_dir" >&2
+                exit 1
+              fi
+            done
+
+            echo "Verified bundled pre-install extensions in $pre_install_dir"
+            find "$pre_install_dir" -maxdepth 1 -type f -name "*.tgz" -print | sort
+          done < <(find "$app_root" -maxdepth 1 -type d -name "*.app" | sort)
+
+          if [ "$app_found" != "true" ]; then
+            echo "No macOS app bundle found under $app_root" >&2
+            exit 1
+          fi
+
       - name: Upload Artifact
         uses: actions/upload-artifact@v4
         with:

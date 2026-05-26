@@ -64,6 +64,7 @@
     "resources": [
       "resources/LICENSE",
       "resources/bin/mita-web-research-mcp.mjs",
+      "resources/pre-install/**/*",
       "resources/ms-playwright/**/*",
       "resources/node_modules/playwright/**/*",
       "resources/node_modules/playwright-core/**/*"
