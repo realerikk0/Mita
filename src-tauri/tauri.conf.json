@@ -7,7 +7,7 @@
     "frontendDist": "../web-app/dist",
     "devUrl": "http://localhost:1420",
     "beforeDevCommand": "cross-env IS_TAURI=true IS_DEV=true yarn dev:web",
-    "beforeBuildCommand": "cross-env IS_TAURI=true yarn build:web"
+    "beforeBuildCommand": "yarn copy:assets:tauri && cross-env IS_TAURI=true yarn build:web"
   },
   "app": {
     "macOSPrivateApi": true,
@@ -61,13 +61,13 @@
       "icons/icon.icns",
       "icons/icon.ico"
     ],
-    "resources": [
-      "resources/LICENSE",
-      "resources/bin/mita-web-research-mcp.mjs",
-      "resources/pre-install/**/*",
-      "resources/ms-playwright/**/*",
-      "resources/node_modules/playwright/**/*",
-      "resources/node_modules/playwright-core/**/*"
-    ]
+    "resources": {
+      "resources/LICENSE": "resources/LICENSE",
+      "resources/bin/mita-web-research-mcp.mjs": "resources/bin/mita-web-research-mcp.mjs",
+      "resources/pre-install": "resources/pre-install",
+      "resources/ms-playwright": "resources/ms-playwright",
+      "resources/node_modules/playwright": "resources/node_modules/playwright",
+      "resources/node_modules/playwright-core": "resources/node_modules/playwright-core"
+    }
   }
 }
