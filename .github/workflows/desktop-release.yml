@@ -5,6 +5,11 @@ on:
     tags:
       - "v*"
   workflow_dispatch:
+    inputs:
+      version:
+        description: "Release tag to build, for example v0.6.619"
+        required: true
+        type: string
 
 permissions:
   contents: write
@@ -30,9 +35,11 @@ jobs:
       - name: Derive version
         id: version
         shell: bash
+        env:
+          RELEASE_VERSION: ${{ github.event.inputs.version || github.ref_name }}
         run: |
-          VERSION="${GITHUB_REF_NAME#v}"
-          if [ -z "$VERSION" ] || [ "$VERSION" = "$GITHUB_REF_NAME" ]; then
+          VERSION="${RELEASE_VERSION#v}"
+          if [ -z "$VERSION" ] || [ "$VERSION" = "$RELEASE_VERSION" ]; then
             echo "Release tags must start with v, for example v0.6.599" >&2
             exit 1
           fi
@@ -193,9 +200,11 @@ jobs:
       - name: Derive version
         id: version
         shell: bash
+        env:
+          RELEASE_VERSION: ${{ github.event.inputs.version || github.ref_name }}
         run: |
-          VERSION="${GITHUB_REF_NAME#v}"
-          if [ -z "$VERSION" ] || [ "$VERSION" = "$GITHUB_REF_NAME" ]; then
+          VERSION="${RELEASE_VERSION#v}"
+          if [ -z "$VERSION" ] || [ "$VERSION" = "$RELEASE_VERSION" ]; then
             echo "Release tags must start with v, for example v0.6.599" >&2
             exit 1
           fi
@@ -354,9 +363,11 @@ jobs:
       - name: Derive version
         id: version
         shell: bash
+        env:
+          RELEASE_VERSION: ${{ github.event.inputs.version || github.ref_name }}
         run: |
-          VERSION="${GITHUB_REF_NAME#v}"
-          if [ -z "$VERSION" ] || [ "$VERSION" = "$GITHUB_REF_NAME" ]; then
+          VERSION="${RELEASE_VERSION#v}"
+          if [ -z "$VERSION" ] || [ "$VERSION" = "$RELEASE_VERSION" ]; then
             echo "Release tags must start with v, for example v0.6.599" >&2
             exit 1
           fi
@@ -564,6 +575,20 @@ jobs:
         with:
           fetch-depth: 0
 
+      - name: Derive version
+        id: version
+        shell: bash
+        env:
+          RELEASE_VERSION: ${{ github.event.inputs.version || github.ref_name }}
+        run: |
+          VERSION="${RELEASE_VERSION#v}"
+          if [ -z "$VERSION" ] || [ "$VERSION" = "$RELEASE_VERSION" ]; then
+            echo "Release tags must start with v, for example v0.6.599" >&2
+            exit 1
+          fi
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+          echo "tag=v$VERSION" >> "$GITHUB_OUTPUT"
+
       - name: Download artifacts
         uses: actions/download-artifact@v4
         with:
@@ -577,14 +602,15 @@ jobs:
         shell: bash
         run: |
           node scripts/release-distribution/build-release-notes.mjs \
-            --tag "${GITHUB_REF_NAME}" \
+            --tag "${{ steps.version.outputs.tag }}" \
             --output dist/release-notes.md
           cat dist/release-notes.md
 
       - name: Create draft release
         uses: softprops/action-gh-release@v2
         with:
-          name: Mita ${{ github.ref_name }}
+          name: Mita ${{ steps.version.outputs.tag }}
+          tag_name: ${{ steps.version.outputs.tag }}
           draft: true
           prerelease: false
           body_path: dist/release-notes.md
