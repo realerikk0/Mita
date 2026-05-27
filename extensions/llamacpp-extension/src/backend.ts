@@ -72,11 +72,11 @@ export async function getBackendDir(
   backend: string,
   version: string
 ): Promise<string> {
-  const mitaDataFolder = await getMitaDataFolderPath()
+  const janDataFolder = await getMitaDataFolderPath()
   return invoke<string>('plugin:llamacpp|get_backend_dir', {
     backend,
     version,
-    mitaDataFolder,
+    janDataFolder,
   })
 }
 
@@ -84,11 +84,11 @@ export async function getBackendExePath(
   backend: string,
   version: string
 ): Promise<string> {
-  const mitaDataFolder = await getMitaDataFolderPath()
+  const janDataFolder = await getMitaDataFolderPath()
   return invoke<string>('plugin:llamacpp|get_backend_exe_path', {
     backend,
     version,
-    mitaDataFolder,
+    janDataFolder,
     isWindows: IS_WINDOWS,
   })
 }
@@ -97,11 +97,11 @@ export async function isBackendInstalled(
   backend: string,
   version: string
 ): Promise<boolean> {
-  const mitaDataFolder = await getMitaDataFolderPath()
+  const janDataFolder = await getMitaDataFolderPath()
   return invoke<boolean>('plugin:llamacpp|check_backend_installed', {
     backend,
     version,
-    mitaDataFolder,
+    janDataFolder,
     isWindows: IS_WINDOWS,
   })
 }
@@ -116,13 +116,13 @@ export async function verifyBackendInstallation(
   backend: string,
   version: string
 ): Promise<BackendVerificationResult> {
-  const mitaDataFolder = await getMitaDataFolderPath()
+  const janDataFolder = await getMitaDataFolderPath()
   return invoke<BackendVerificationResult>(
     'plugin:llamacpp|verify_backend_installation',
     {
       backend,
       version,
-      mitaDataFolder,
+      janDataFolder,
       isWindows: IS_WINDOWS,
     }
   )
@@ -146,7 +146,7 @@ export async function downloadBackend(
     backend,
     version,
     source,
-    mitaDataFolder: mitaDataFolderPath,
+    janDataFolder: mitaDataFolderPath,
     osType: sysInfo.os_type,
   })
 

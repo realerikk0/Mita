@@ -110,7 +110,7 @@ describe('Backend functions', () => {
       expect(invoke).toHaveBeenCalledWith('plugin:llamacpp|get_backend_dir', {
         backend: 'linux-avx2-x64',
         version: 'v1.2.3',
-        mitaDataFolder: MOCK_MITA_PATH_STRING,
+        janDataFolder: MOCK_MITA_PATH_STRING,
       })
       expect(dir).toBe(expectedDir)
     })
@@ -124,7 +124,7 @@ describe('Backend functions', () => {
       expect(invoke).toHaveBeenCalledWith('plugin:llamacpp|get_backend_dir', {
         backend: 'win-common_cpus-x64',
         version: 'v2.0.0',
-        mitaDataFolder: MOCK_MITA_PATH_STRING,
+        janDataFolder: MOCK_MITA_PATH_STRING,
       })
       expect(dir).toBe(expectedDir)
     })
@@ -143,7 +143,7 @@ describe('Backend functions', () => {
         {
           backend: 'linux-avx2-x64',
           version: 'v1.2.3',
-          mitaDataFolder: MOCK_MITA_PATH_STRING,
+          janDataFolder: MOCK_MITA_PATH_STRING,
           isWindows: false,
         }
       )
@@ -162,7 +162,7 @@ describe('Backend functions', () => {
         {
           backend: 'win-avx2-x64',
           version: 'v1.2.3',
-          mitaDataFolder: MOCK_MITA_PATH_STRING,
+          janDataFolder: MOCK_MITA_PATH_STRING,
           isWindows: true,
         }
       )
@@ -182,7 +182,7 @@ describe('Backend functions', () => {
         {
           backend: 'win-avx2-x64',
           version: 'v1.0.0',
-          mitaDataFolder: MOCK_MITA_PATH_STRING,
+          janDataFolder: MOCK_MITA_PATH_STRING,
           isWindows: false,
         }
       )
@@ -219,7 +219,7 @@ describe('Backend functions', () => {
         {
           backend: 'linux-vulkan-common_cpus-x64',
           version: 'b8795',
-          mitaDataFolder: MOCK_MITA_PATH_STRING,
+          janDataFolder: MOCK_MITA_PATH_STRING,
           isWindows: false,
         }
       )
@@ -312,7 +312,7 @@ describe('Backend functions', () => {
           backend: 'linux-avx2-x64',
           version: 'v1.0.0',
           source: 'github',
-          mitaDataFolder: MOCK_MITA_PATH_STRING,
+          janDataFolder: MOCK_MITA_PATH_STRING,
           osType: 'linux',
         }
       )
