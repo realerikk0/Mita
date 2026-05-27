@@ -1,5 +1,6 @@
 import { readdirSync, readFileSync } from 'node:fs'
-import { join } from 'node:path'
+import { dirname, join } from 'node:path'
+import { fileURLToPath } from 'node:url'
 import { describe, expect, it } from 'vitest'
 
 import zhCNCommon from '../locales/zh-CN/common.json'
@@ -49,7 +50,10 @@ describe('Computer Agent locale strings', () => {
   })
 
   it('keeps active tool approval descriptions free of interpolation markup', () => {
-    const localesDir = join(process.cwd(), 'src/locales')
+    const testFilePath = import.meta.url.startsWith('file:')
+      ? fileURLToPath(import.meta.url)
+      : import.meta.url
+    const localesDir = join(dirname(testFilePath), '../locales')
 
     for (const locale of readdirSync(localesDir)) {
       const toolsPath = join(localesDir, locale, 'tools.json')

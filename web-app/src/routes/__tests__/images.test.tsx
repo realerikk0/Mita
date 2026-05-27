@@ -278,10 +278,8 @@ describe('Images route', () => {
     renderComponent()
 
     await waitFor(() => expect(h.listAssets).toHaveBeenCalled())
-    fireEvent.change(
-      screen.getByPlaceholderText(/Upload a reference image/),
-      { target: { value: 'moon desk' } }
-    )
+    const promptInput = screen.getByPlaceholderText(/Upload a reference image/)
+    fireEvent.change(promptInput, { target: { value: 'moon desk' } })
     fireEvent.click(screen.getByRole('button', { name: 'Generate' }))
 
     await waitFor(() => expect(h.generateImages).toHaveBeenCalled())
@@ -290,6 +288,7 @@ describe('Images route', () => {
       prompt: 'moon desk',
       sourceAssets: [],
     })
+    expect(promptInput).toHaveValue('')
   })
 
   it('shows recharge actions when image generation quota is exhausted', async () => {

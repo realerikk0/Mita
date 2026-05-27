@@ -64,6 +64,7 @@
     "resources": {
       "resources/LICENSE": "resources/LICENSE",
       "resources/bin/mita-web-research-mcp.mjs": "resources/bin/mita-web-research-mcp.mjs",
+      "resources/embedding-models": "resources/embedding-models",
       "resources/pre-install": "resources/pre-install",
       "resources/ms-playwright": "resources/ms-playwright",
       "resources/node_modules/playwright": "resources/node_modules/playwright",

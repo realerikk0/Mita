@@ -171,6 +171,48 @@ describe('llamacpp_extension', () => {
     })
   })
 
+  describe('embedding model bootstrap', () => {
+    it('imports the bundled embedding model when it is available', async () => {
+      const { fs } = await import('@janhq/core')
+      const { resolveResource } = await import('@tauri-apps/api/path')
+
+      extension.list = vi.fn().mockResolvedValue([])
+      const importModel = vi.spyOn(extension, 'import').mockResolvedValue(undefined)
+
+      vi.mocked(resolveResource).mockResolvedValue(
+        '/Applications/Mita.app/Contents/Resources/resources/embedding-models/sentence-transformer-mini/model.gguf'
+      )
+      vi.mocked(fs.existsSync).mockResolvedValue(true)
+
+      await extension['ensureEmbeddingModelAvailable']()
+
+      expect(importModel).toHaveBeenCalledWith('sentence-transformer-mini', {
+        modelPath:
+          '/Applications/Mita.app/Contents/Resources/resources/embedding-models/sentence-transformer-mini/model.gguf',
+      })
+    })
+
+    it('falls back to remote download when the bundled resource is missing', async () => {
+      const { fs } = await import('@janhq/core')
+      const { resolveResource } = await import('@tauri-apps/api/path')
+
+      extension.list = vi.fn().mockResolvedValue([])
+      const importModel = vi.spyOn(extension, 'import').mockResolvedValue(undefined)
+
+      vi.mocked(resolveResource).mockResolvedValue(
+        '/missing/resources/embedding-models/sentence-transformer-mini/model.gguf'
+      )
+      vi.mocked(fs.existsSync).mockResolvedValue(false)
+
+      await extension['ensureEmbeddingModelAvailable']()
+
+      expect(importModel).toHaveBeenCalledWith('sentence-transformer-mini', {
+        modelPath:
+          'https://huggingface.co/second-state/All-MiniLM-L6-v2-Embedding-GGUF/resolve/main/all-MiniLM-L6-v2-ggml-model-f16.gguf?download=true',
+      })
+    })
+  })
+
   describe('load', () => {
     it('should throw error if model is already loaded', async () => {
       // Mock that model is already loaded

@@ -33,7 +33,14 @@ Object.defineProperty(globalThis, 'window', {
 
 vi.mock('@janhq/tauri-plugin-hardware-api', () => ({
   getSystemInfo: vi.fn(),
+  getSystemUsage: vi.fn(),
 }));
+
+vi.mock('@tauri-apps/plugin-log', () => ({
+  error: vi.fn(),
+  info: vi.fn(),
+  warn: vi.fn(),
+}))
 
 // Mock Tauri invoke function
 vi.mock('@tauri-apps/api/core', () => ({
@@ -46,6 +53,7 @@ vi.mock('@tauri-apps/api/path', () => ({
   dirname: vi.fn(),
   join: vi.fn(),
   resolve: vi.fn(),
+  resolveResource: vi.fn(),
 }))
 
 // Mock @janhq/core

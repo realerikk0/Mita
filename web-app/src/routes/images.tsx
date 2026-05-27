@@ -1071,6 +1071,7 @@ function Images() {
     }))
 
     setTasks((current) => [...nextTasks, ...current])
+    setPrompt('')
     void runQueue(nextTasks)
   }, [
     count,

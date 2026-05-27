@@ -35,6 +35,7 @@
       "resources/bin/mita-cli",
       "resources/computer-agent-runner/**/*",
       "resources/bin/mita-web-research-mcp.mjs",
+      "resources/embedding-models/**/*",
       "resources/pre-install/**/*",
       "resources/ms-playwright/**/*",
       "resources/node_modules/playwright/**/*",

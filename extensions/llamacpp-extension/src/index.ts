@@ -41,7 +41,7 @@ import {
   mergeEmbedResponses,
   type EmbedBatchResult,
 } from './util'
-import { basename } from '@tauri-apps/api/path'
+import { basename, resolveResource } from '@tauri-apps/api/path'
 import {
   loadLlamaModel,
   readGgufMetadata,
@@ -84,6 +84,12 @@ const logger = {
     error(args.map((arg) => ` ${arg}`).join(` `))
   },
 }
+
+const EMBEDDING_MODEL_ID = 'sentence-transformer-mini'
+const BUNDLED_EMBEDDING_MODEL_RESOURCE =
+  'resources/embedding-models/sentence-transformer-mini/model.gguf'
+const EMBEDDING_MODEL_DOWNLOAD_URL =
+  'https://huggingface.co/second-state/All-MiniLM-L6-v2-Embedding-GGUF/resolve/main/all-MiniLM-L6-v2-ggml-model-f16.gguf?download=true'
 
 /**
  * A class that implements the InferenceExtension interface from the @janhq/core package.
@@ -1951,6 +1957,33 @@ export default class llamacpp_extension extends AIEngine {
     })
   }
 
+  private async resolveBundledEmbeddingModelPath(): Promise<string | undefined> {
+    try {
+      const bundledPath = await resolveResource(BUNDLED_EMBEDDING_MODEL_RESOURCE)
+      if (await fs.existsSync(bundledPath)) return bundledPath
+
+      logger.warn(
+        `Bundled embedding model not found at resolved resource path: ${bundledPath}`
+      )
+    } catch (error) {
+      logger.warn('Unable to resolve bundled embedding model resource:', error)
+    }
+
+    return undefined
+  }
+
+  private async ensureEmbeddingModelAvailable(): Promise<void> {
+    const downloadedModelList = await this.list()
+    if (downloadedModelList.some((model) => model.id === EMBEDDING_MODEL_ID)) {
+      return
+    }
+
+    const bundledModelPath = await this.resolveBundledEmbeddingModelPath()
+    await this.import(EMBEDDING_MODEL_ID, {
+      modelPath: bundledModelPath ?? EMBEDDING_MODEL_DOWNLOAD_URL,
+    })
+  }
+
   override async chat(
     opts: chatCompletionRequest,
     abortController?: AbortController
@@ -2158,21 +2191,11 @@ export default class llamacpp_extension extends AIEngine {
 
   async embed(text: string[]): Promise<EmbeddingResponse> {
     // Ensure the sentence-transformer model is present
-    let sInfo = await this.findSessionByModel('sentence-transformer-mini')
+    let sInfo = await this.findSessionByModel(EMBEDDING_MODEL_ID)
     if (!sInfo) {
-      const downloadedModelList = await this.list()
-      if (
-        !downloadedModelList.some(
-          (model) => model.id === 'sentence-transformer-mini'
-        )
-      ) {
-        await this.import('sentence-transformer-mini', {
-          modelPath:
-            'https://huggingface.co/second-state/All-MiniLM-L6-v2-Embedding-GGUF/resolve/main/all-MiniLM-L6-v2-ggml-model-f16.gguf?download=true',
-        })
-      }
+      await this.ensureEmbeddingModelAvailable()
       // Load specifically in embedding mode
-      sInfo = await this.load('sentence-transformer-mini', undefined, true)
+      sInfo = await this.load(EMBEDDING_MODEL_ID, undefined, true)
     }
 
     const ubatchSize =
@@ -2209,9 +2232,9 @@ export default class llamacpp_extension extends AIEngine {
       // If embeddings endpoint is not available (501), reload with embedding mode and retry once
       if (response.status === 501) {
         try {
-          await this.unload('sentence-transformer-mini')
+          await this.unload(EMBEDDING_MODEL_ID)
         } catch {}
-        sInfo = await this.load('sentence-transformer-mini', undefined, true)
+        sInfo = await this.load(EMBEDDING_MODEL_ID, undefined, true)
         response = await attemptRequest(sInfo as SessionInfo, batchInput)
       }
 
