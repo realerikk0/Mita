@@ -1,8 +1,17 @@
 import { useModelProvider } from '@/hooks/useModelProvider'
 
+import { Button } from '@/components/ui/button'
+import {
+  Dialog,
+  DialogContent,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from '@/components/ui/dialog'
+import { openAIProviderSettings, predefinedProviders } from '@/constants/providers'
 import { useAppUpdater } from '@/hooks/useAppUpdater'
 import { useServiceHub } from '@/hooks/useServiceHub'
-import { useEffect } from 'react'
+import { useCallback, useEffect, useState } from 'react'
 import { useMCPServers, DEFAULT_MCP_SETTINGS } from '@/hooks/useMCPServers'
 import { useAssistant } from '@/hooks/useAssistant'
 import { useNavigate } from '@tanstack/react-router'
@@ -15,6 +24,15 @@ import { SystemEvent } from '@/types/events'
 import { isDev } from '@/lib/utils'
 import { invoke } from '@tauri-apps/api/core'
 import { providerHasRemoteApiKeys, providerRemoteApiKeyChain } from '@/lib/provider-api-keys'
+import {
+  applyProviderConnectionToProvider,
+  maskProviderConnectionApiKey,
+  parseProviderConnectionDeepLink,
+  type ParsedProviderConnection,
+} from '@/lib/provider-connection-import'
+import { getModelCapabilities } from '@/lib/models'
+import cloneDeep from 'lodash/cloneDeep'
+import { toast } from 'sonner'
 
 type ProviderCustomHeader = {
   header: string
@@ -89,9 +107,90 @@ const syncRemoteProviders = () => {
   registeredProviderNames = currentActive
 }
 
+const createProviderForImportedConnection = (
+  importedConnection: ParsedProviderConnection
+): ModelProvider => {
+  const predefinedProvider = predefinedProviders.find(
+    (provider) => provider.provider === importedConnection.provider
+  )
+
+  if (predefinedProvider) {
+    return cloneDeep(predefinedProvider) as ModelProvider
+  }
+
+  return {
+    active: true,
+    provider: importedConnection.provider,
+    models: [],
+    settings: cloneDeep(openAIProviderSettings) as ProviderSetting[],
+    api_key: '',
+    base_url: importedConnection.baseUrl,
+  }
+}
+
+const withImportedModels = (
+  provider: ModelProvider,
+  importedConnection: ParsedProviderConnection,
+  modelIds: string[]
+): ModelProvider => {
+  const candidateModelIds = Array.from(
+    new Set(
+      [...modelIds, importedConnection.defaultModel]
+        .map((id) => id.trim())
+        .filter(Boolean)
+    )
+  )
+  const existingIds = new Set(provider.models.map((model) => model.id))
+  const modelsToAdd = candidateModelIds
+    .filter((id) => !existingIds.has(id))
+    .map(
+      (id) =>
+        ({
+          id,
+          model: id,
+          name: id,
+          displayName: id,
+          capabilities: getModelCapabilities(provider.provider, id),
+          version: '1.0',
+        }) as Model
+    )
+
+  if (modelsToAdd.length === 0) return provider
+
+  return {
+    ...provider,
+    models: [...provider.models, ...modelsToAdd],
+  }
+}
+
+const sensitiveDeepLinkQueryParams = ['apiKey', 'api_key', 'key']
+
+const redactDeepLinkForLog = (deeplink: string) => {
+  try {
+    const url = new URL(deeplink)
+    sensitiveDeepLinkQueryParams.forEach((key) => {
+      if (url.searchParams.has(key)) {
+        url.searchParams.set(key, '***')
+      }
+    })
+    return url.toString()
+  } catch {
+    return deeplink
+  }
+}
+
 export function DataProvider() {
-  const { setProviders, getProviderByName } =
+  const {
+    addProvider,
+    getProviderByName,
+    selectModelProvider,
+    setProviders,
+    updateProvider,
+  } =
     useModelProvider()
+  const [pendingProviderImport, setPendingProviderImport] =
+    useState<ParsedProviderConnection | null>(null)
+  const [isImportingProvider, setIsImportingProvider] = useState(false)
 
   const { checkForUpdate } = useAppUpdater()
   const { setServers, setSettings } = useMCPServers()
@@ -117,6 +216,124 @@ export function DataProvider() {
     defaultModelLocalApiServer,
   } = useLocalApiServer()
   const setServerStatus = useAppState((state) => state.setServerStatus)
+
+  const handleDeepLink = useCallback(
+    (urls: string[] | null) => {
+      if (!urls) return
+      console.log('Received deeplink:', urls.map(redactDeepLinkForLog))
+
+      for (const deeplink of urls) {
+        try {
+          const importedConnection = parseProviderConnectionDeepLink(deeplink)
+          if (importedConnection) {
+            setPendingProviderImport(importedConnection)
+            return
+          }
+        } catch (error) {
+          toast.error('导入链接无效', {
+            description: error instanceof Error ? error.message : undefined,
+          })
+          return
+        }
+      }
+
+      const deeplink = urls[0]
+      if (!deeplink) return
+
+      try {
+        const url = new URL(deeplink)
+        const params = url.pathname.split('/').filter((str) => str.length > 0)
+
+        if (params.length < 3) return undefined
+        // const action = params[0]
+        // const provider = params[1]
+        const resource = params.slice(1).join('/')
+        // return { action, provider, resource }
+        navigate({
+          to: route.hub.model,
+          search: {
+            repo: resource,
+          },
+        })
+      } catch {
+        return undefined
+      }
+    },
+    [navigate]
+  )
+
+  const handleConfirmProviderImport = useCallback(async () => {
+    if (!pendingProviderImport) return
+
+    setIsImportingProvider(true)
+    let refreshFailed = false
+
+    try {
+      const existingProvider = getProviderByName(pendingProviderImport.provider)
+      const targetProvider =
+        existingProvider ?? createProviderForImportedConnection(pendingProviderImport)
+      let importedProvider = applyProviderConnectionToProvider(
+        targetProvider,
+        pendingProviderImport,
+        { active: true }
+      )
+
+      await serviceHub
+        .providers()
+        .updateSettings(importedProvider.provider, importedProvider.settings)
+
+      try {
+        const modelIds = await serviceHub
+          .providers()
+          .fetchModelsFromProvider(importedProvider)
+        importedProvider = withImportedModels(
+          importedProvider,
+          pendingProviderImport,
+          modelIds
+        )
+      } catch (error) {
+        refreshFailed = true
+        console.warn('Failed to refresh imported provider models:', error)
+        importedProvider = withImportedModels(
+          importedProvider,
+          pendingProviderImport,
+          []
+        )
+      }
+
+      if (existingProvider) {
+        updateProvider(importedProvider.provider, importedProvider)
+      } else {
+        addProvider(importedProvider)
+      }
+
+      const defaultModelId = pendingProviderImport.defaultModel
+      const selectedModelId =
+        importedProvider.models.find((model) => model.id === defaultModelId)
+          ?.id ?? importedProvider.models[0]?.id
+      if (selectedModelId) {
+        selectModelProvider(importedProvider.provider, selectedModelId)
+      }
+
+      setPendingProviderImport(null)
+      toast.success('配置已导入', {
+        description: refreshFailed ? '模型列表刷新失败，可稍后手动刷新。' : undefined,
+      })
+    } catch (error) {
+      toast.error('配置导入失败', {
+        description: error instanceof Error ? error.message : undefined,
+      })
+    } finally {
+      setIsImportingProvider(false)
+    }
+  }, [
+    addProvider,
+    getProviderByName,
+    pendingProviderImport,
+    selectModelProvider,
+    serviceHub,
+    updateProvider,
+  ])
 
   useEffect(() => {
     console.log('Initializing DataProvider...')
@@ -168,8 +385,14 @@ export function DataProvider() {
     return () => {
       unsubscribe()
     }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [serviceHub])
+  }, [
+    handleDeepLink,
+    serviceHub,
+    setAssistants,
+    setProviders,
+    setServers,
+    setSettings,
+  ])
 
   useEffect(() => {
     serviceHub
@@ -295,27 +518,68 @@ export function DataProvider() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [serviceHub])
 
-  const handleDeepLink = (urls: string[] | null) => {
-    if (!urls) return
-    console.log('Received deeplink:', urls)
-    const deeplink = urls[0]
-    if (deeplink) {
-      const url = new URL(deeplink)
-      const params = url.pathname.split('/').filter((str) => str.length > 0)
-
-      if (params.length < 3) return undefined
-      // const action = params[0]
-      // const provider = params[1]
-      const resource = params.slice(1).join('/')
-      // return { action, provider, resource }
-      navigate({
-        to: route.hub.model,
-        search: {
-          repo: resource,
-        },
-      })
-    }
-  }
-
-  return null
+  return (
+    <Dialog
+      open={pendingProviderImport !== null}
+      onOpenChange={(open) => {
+        if (!open && !isImportingProvider) {
+          setPendingProviderImport(null)
+        }
+      }}
+    >
+      <DialogContent className="sm:max-w-md">
+        <DialogHeader>
+          <DialogTitle>导入 AI 供应商配置</DialogTitle>
+        </DialogHeader>
+        {pendingProviderImport && (
+          <div className="space-y-3 text-sm">
+            <div className="rounded-md border bg-muted/30 p-3 space-y-2">
+              <div className="flex items-center justify-between gap-3">
+                <span className="text-muted-foreground">Provider</span>
+                <span className="font-medium">{pendingProviderImport.provider}</span>
+              </div>
+              <div className="flex items-center justify-between gap-3">
+                <span className="text-muted-foreground">Base URL</span>
+                <span className="font-mono text-xs break-all text-right">
+                  {pendingProviderImport.baseUrl}
+                </span>
+              </div>
+              <div className="flex items-center justify-between gap-3">
+                <span className="text-muted-foreground">API Key</span>
+                <span className="font-mono text-xs">
+                  {maskProviderConnectionApiKey(pendingProviderImport.apiKey)}
+                </span>
+              </div>
+              {pendingProviderImport.defaultModel && (
+                <div className="flex items-center justify-between gap-3">
+                  <span className="text-muted-foreground">Default Model</span>
+                  <span className="font-mono text-xs break-all text-right">
+                    {pendingProviderImport.defaultModel}
+                  </span>
+                </div>
+              )}
+            </div>
+            <p className="text-xs text-muted-foreground">
+              来自外部链接。确认后会覆盖当前供应商的 API Key 和 Base URL。
+            </p>
+          </div>
+        )}
+        <DialogFooter>
+          <Button
+            variant="outline"
+            onClick={() => setPendingProviderImport(null)}
+            disabled={isImportingProvider}
+          >
+            取消
+          </Button>
+          <Button
+            onClick={handleConfirmProviderImport}
+            disabled={isImportingProvider || pendingProviderImport === null}
+          >
+            {isImportingProvider ? '导入中...' : '确认导入'}
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+  )
 }

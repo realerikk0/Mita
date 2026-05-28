@@ -15,6 +15,8 @@ export type ImportedProviderCustomHeader = {
   value: string
 }
 
+const DEFAULT_PROVIDER_IMPORT_PROVIDER = 'jingxing'
+
 const protectedImportedHeaderNames = new Set([
   'authorization',
   'x-api-key',
@@ -51,6 +53,25 @@ const normalizeBaseUrl = (value: unknown) => {
   }
 
   return baseUrl.replace(/\/+$/, '')
+}
+
+const searchParamString = (params: URLSearchParams, ...keys: string[]) => {
+  for (const key of keys) {
+    const value = asString(params.get(key))
+    if (value) return value
+  }
+  return ''
+}
+
+const normalizeProviderName = (value: unknown) => {
+  const provider = asString(value) || DEFAULT_PROVIDER_IMPORT_PROVIDER
+  const normalized = provider.toLowerCase()
+
+  if (!/^[a-z0-9._-]{1,80}$/.test(normalized)) {
+    throw new Error('Provider 名称不正确')
+  }
+
+  return normalized
 }
 
 export function parseProviderConnection(text: string): ParsedProviderConnection {
@@ -99,6 +120,59 @@ export function parseProviderConnection(text: string): ParsedProviderConnection 
   }
 }
 
+export function parseProviderConnectionDeepLink(
+  deeplink: string
+): ParsedProviderConnection | null {
+  let url: URL
+
+  try {
+    url = new URL(deeplink)
+  } catch {
+    return null
+  }
+
+  const importPath = url.pathname.replace(/\/+$/, '')
+  if (
+    url.protocol !== 'mita:' ||
+    url.hostname !== 'provider' ||
+    importPath !== '/import'
+  ) {
+    return null
+  }
+
+  const apiKey = searchParamString(url.searchParams, 'apiKey', 'api_key', 'key')
+  if (!apiKey) {
+    throw new Error('缺少 API Key')
+  }
+
+  const baseUrl = normalizeBaseUrl(
+    searchParamString(url.searchParams, 'baseUrl', 'base_url', 'url')
+  )
+  const provider = normalizeProviderName(url.searchParams.get('provider'))
+
+  return {
+    provider,
+    name: searchParamString(url.searchParams, 'name') || provider,
+    apiKey,
+    baseUrl,
+    apiVersion: searchParamString(url.searchParams, 'apiVersion', 'api_version'),
+    deployment: searchParamString(
+      url.searchParams,
+      'deployment',
+      'deploymentName',
+      'deployment_name'
+    ),
+    defaultModel: searchParamString(
+      url.searchParams,
+      'defaultModel',
+      'default_model',
+      'model'
+    ),
+    headers: {},
+    extra: {},
+  }
+}
+
 export const providerConnectionHeadersToCustomHeaders = (
   headers: Record<string, unknown>
 ): ImportedProviderCustomHeader[] =>
@@ -140,4 +214,63 @@ export const mergeProviderCustomHeaders = (
   })
 
   return merged
+}
+
+const providerConnectionSettingMap: Record<
+  string,
+  keyof Pick<
+    ParsedProviderConnection,
+    'apiKey' | 'baseUrl' | 'apiVersion' | 'deployment' | 'defaultModel'
+  >
+> = {
+  'api-key': 'apiKey',
+  'base-url': 'baseUrl',
+  'api-version': 'apiVersion',
+  apiVersion: 'apiVersion',
+  deployment: 'deployment',
+  'deployment-name': 'deployment',
+  'default-model': 'defaultModel',
+  defaultModel: 'defaultModel',
+  model: 'defaultModel',
+}
+
+export const applyProviderConnectionToProvider = (
+  provider: ModelProvider,
+  importedConnection: ParsedProviderConnection,
+  options: { active?: boolean } = {}
+): ModelProvider => {
+  const settings = provider.settings.map((setting) => {
+    const importedField = providerConnectionSettingMap[setting.key]
+    if (!importedField) return setting
+
+    return {
+      ...setting,
+      controller_props: {
+        ...setting.controller_props,
+        value: importedConnection[importedField],
+      },
+    }
+  })
+  const importedHeaders = providerConnectionHeadersToCustomHeaders(
+    importedConnection.headers
+  )
+
+  return {
+    ...provider,
+    ...(options.active === undefined ? {} : { active: options.active }),
+    settings,
+    api_key: importedConnection.apiKey,
+    api_key_fallbacks: [],
+    base_url: importedConnection.baseUrl,
+    custom_header:
+      importedHeaders.length > 0
+        ? mergeProviderCustomHeaders(provider.custom_header, importedHeaders)
+        : provider.custom_header,
+  }
+}
+
+export const maskProviderConnectionApiKey = (apiKey: string) => {
+  const value = apiKey.trim()
+  if (value.length <= 8) return `${value.slice(0, 2)}***`
+  return `${value.slice(0, 4)}***${value.slice(-4)}`
 }

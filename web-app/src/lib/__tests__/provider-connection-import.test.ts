@@ -1,6 +1,9 @@
 import { describe, expect, it } from 'vitest'
 
-import { parseProviderConnection } from '../provider-connection-import'
+import {
+  parseProviderConnection,
+  parseProviderConnectionDeepLink,
+} from '../provider-connection-import'
 
 describe('parseProviderConnection', () => {
   it('parses the generic provider connection schema', () => {
@@ -112,5 +115,31 @@ describe('parseProviderConnection', () => {
         })
       )
     ).toThrow('Base URL 不正确')
+  })
+
+  it('parses direct provider import deep links', () => {
+    const result = parseProviderConnectionDeepLink(
+      'mita://provider/import?provider=jingxing&apiKey=sk-imported&baseUrl=https%3A%2F%2Fapi.example.com%2Fv1%2F&defaultModel=gpt-5.1'
+    )
+
+    expect(result).toMatchObject({
+      provider: 'jingxing',
+      name: 'jingxing',
+      apiKey: 'sk-imported',
+      baseUrl: 'https://api.example.com/v1',
+      defaultModel: 'gpt-5.1',
+    })
+  })
+
+  it('ignores non-provider import deep links', () => {
+    expect(parseProviderConnectionDeepLink('mita://host/action/owner/repo')).toBeNull()
+  })
+
+  it('rejects invalid direct provider import deep links', () => {
+    expect(() =>
+      parseProviderConnectionDeepLink(
+        'mita://provider/import?provider=jingxing&baseUrl=https%3A%2F%2Fapi.example.com%2Fv1'
+      )
+    ).toThrow('缺少 API Key')
   })
 })

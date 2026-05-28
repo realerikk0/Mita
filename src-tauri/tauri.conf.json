@@ -42,6 +42,11 @@
       "version": "latest",
       "resolve": true
     },
+    "deep-link": {
+      "desktop": {
+        "schemes": ["mita"]
+      }
+    },
     "updater": {
       "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IDkxOTUzOTBBNEQ3QjYxQUMKUldTc1lYdE5Dam1Wa1ZoVk5UWTRKMTZ4dWpRWHBzcWRaU2pyV1U0T2Q3RFR0TW0rcjBpejl6QjYK",
       "endpoints": ["https://updates.mita.so/mita/latest.json"],

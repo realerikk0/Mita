@@ -1,4 +1,4 @@
-import { render, waitFor, act } from '@testing-library/react'
+import { fireEvent, render, screen, waitFor, act } from '@testing-library/react'
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 
 // Stub the build-time define used by DataProvider
@@ -9,6 +9,9 @@ const h = vi.hoisted(() => {
   return {
     setProviders: vi.fn(),
     getProviderByName: vi.fn(),
+    updateProvider: vi.fn(),
+    addProvider: vi.fn(),
+    selectModelProvider: vi.fn(),
     providers: [] as Array<Record<string, unknown>>,
     checkForUpdate: vi.fn(),
     setServers: vi.fn(),
@@ -23,6 +26,9 @@ const h = vi.hoisted(() => {
     isDev: vi.fn().mockReturnValue(false),
     providerHasRemoteApiKeys: vi.fn().mockReturnValue(true),
     providerRemoteApiKeyChain: vi.fn().mockReturnValue(['key-1']),
+    toastSuccess: vi.fn(),
+    toastError: vi.fn(),
+    toastWarning: vi.fn(),
     eventsOn: vi.fn(),
     localApi: {
       enableOnStartup: false,
@@ -45,8 +51,17 @@ vi.mock('@/hooks/useModelProvider', () => {
   const useModelProvider = vi.fn(() => ({
     setProviders: h.setProviders,
     getProviderByName: h.getProviderByName,
+    updateProvider: h.updateProvider,
+    addProvider: h.addProvider,
+    selectModelProvider: h.selectModelProvider,
   })) as unknown as { (): unknown; getState: () => { providers: unknown[] } }
-  useModelProvider.getState = () => ({ providers: h.providers })
+  useModelProvider.getState = () => ({
+    providers: h.providers,
+    getProviderByName: h.getProviderByName,
+    updateProvider: h.updateProvider,
+    addProvider: h.addProvider,
+    selectModelProvider: h.selectModelProvider,
+  })
   return { useModelProvider }
 })
 
@@ -85,6 +100,8 @@ vi.mock('@tanstack/react-router', () => ({
 }))
 
 vi.mock('@/lib/utils', () => ({
+  cn: (...classes: Array<string | false | null | undefined>) =>
+    classes.filter(Boolean).join(' '),
   isDev: () => h.isDev(),
 }))
 
@@ -102,6 +119,14 @@ vi.mock('@janhq/core', () => ({
   events: { on: (...a: unknown[]) => h.eventsOn(...a) },
 }))
 
+vi.mock('sonner', () => ({
+  toast: {
+    success: (...args: unknown[]) => h.toastSuccess(...args),
+    error: (...args: unknown[]) => h.toastError(...args),
+    warning: (...args: unknown[]) => h.toastWarning(...args),
+  },
+}))
+
 vi.mock('@/types/events', () => ({
   SystemEvent: { DEEP_LINK: 'deep-link' },
 }))
@@ -117,6 +142,8 @@ const hubState = vi.hoisted(() => ({
   deeplinkOnOpenUrl: vi.fn().mockResolvedValue(undefined),
   eventsListen: vi.fn(),
   getProviders: vi.fn().mockResolvedValue([]),
+  updateSettings: vi.fn().mockResolvedValue(undefined),
+  fetchModelsFromProvider: vi.fn().mockResolvedValue([]),
   getMCPConfig: vi.fn().mockResolvedValue({ mcpServers: { a: 1 }, mcpSettings: { s: 1 } }),
   getAssistants: vi.fn().mockResolvedValue([]),
   fetchThreads: vi.fn().mockResolvedValue([]),
@@ -128,7 +155,11 @@ const hubState = vi.hoisted(() => ({
 
 vi.mock('@/hooks/useServiceHub', () => {
   const hub = {
-    providers: () => ({ getProviders: hubState.getProviders }),
+    providers: () => ({
+      getProviders: hubState.getProviders,
+      updateSettings: hubState.updateSettings,
+      fetchModelsFromProvider: hubState.fetchModelsFromProvider,
+    }),
     mcp: () => ({ getMCPConfig: hubState.getMCPConfig }),
     assistants: () => ({ getAssistants: hubState.getAssistants }),
     threads: () => ({ fetchThreads: hubState.fetchThreads }),
@@ -161,6 +192,8 @@ import { DataProvider } from '../DataProvider'
 
 const resetHubState = () => {
   hubState.getProviders.mockResolvedValue([])
+  hubState.updateSettings.mockResolvedValue(undefined)
+  hubState.fetchModelsFromProvider.mockResolvedValue([])
   hubState.getMCPConfig.mockResolvedValue({ mcpServers: { a: 1 }, mcpSettings: { s: 1 } })
   hubState.getAssistants.mockResolvedValue([])
   hubState.fetchThreads.mockResolvedValue([])
@@ -181,6 +214,13 @@ describe('DataProvider', () => {
     h.providerHasRemoteApiKeys.mockReturnValue(true)
     h.providerRemoteApiKeyChain.mockReturnValue(['key-1'])
     h.invoke.mockResolvedValue(undefined)
+    h.getProviderByName.mockReturnValue(undefined)
+    h.updateProvider.mockClear()
+    h.addProvider.mockClear()
+    h.selectModelProvider.mockClear()
+    h.toastSuccess.mockClear()
+    h.toastError.mockClear()
+    h.toastWarning.mockClear()
     h.localApi.enableOnStartup = false
     h.localApi.defaultModelLocalApiServer = null
     h.localApi.lastServerModels = []
@@ -428,6 +468,82 @@ describe('DataProvider', () => {
         search: { repo: 'owner/repo' },
       })
     })
+  })
+
+  it('opens a confirmation dialog for provider import deep links', async () => {
+    hubState.deeplinkGetCurrent.mockResolvedValue([
+      'mita://provider/import?provider=jingxing&apiKey=sk-imported-1234&baseUrl=https%3A%2F%2Fapi.example.com%2Fv1%2F&defaultModel=gpt-5.1',
+    ])
+
+    render(<DataProvider />)
+
+    expect(await screen.findByText('导入 AI 供应商配置')).toBeInTheDocument()
+    expect(screen.getByText('https://api.example.com/v1')).toBeInTheDocument()
+    expect(screen.getByText('sk-i***1234')).toBeInTheDocument()
+    expect(h.navigate).not.toHaveBeenCalled()
+  })
+
+  it('imports provider settings after confirmation', async () => {
+    hubState.deeplinkGetCurrent.mockResolvedValue([
+      'mita://provider/import?provider=jingxing&apiKey=sk-imported-1234&baseUrl=https%3A%2F%2Fapi.example.com%2Fv1&defaultModel=gpt-5.1',
+    ])
+    hubState.fetchModelsFromProvider.mockResolvedValue(['gpt-5.1', 'claude-test'])
+
+    render(<DataProvider />)
+
+    fireEvent.click(await screen.findByText('确认导入'))
+
+    await waitFor(() => {
+      expect(hubState.updateSettings).toHaveBeenCalledWith(
+        'jingxing',
+        expect.arrayContaining([
+          expect.objectContaining({
+            key: 'api-key',
+            controller_props: expect.objectContaining({
+              value: 'sk-imported-1234',
+            }),
+          }),
+          expect.objectContaining({
+            key: 'base-url',
+            controller_props: expect.objectContaining({
+              value: 'https://api.example.com/v1',
+            }),
+          }),
+        ])
+      )
+    })
+
+    expect(h.addProvider).toHaveBeenCalledWith(
+      expect.objectContaining({
+        provider: 'jingxing',
+        active: true,
+        api_key: 'sk-imported-1234',
+        base_url: 'https://api.example.com/v1',
+        models: expect.arrayContaining([
+          expect.objectContaining({ id: 'gpt-5.1' }),
+          expect.objectContaining({ id: 'claude-test' }),
+        ]),
+      })
+    )
+    expect(h.selectModelProvider).toHaveBeenCalledWith('jingxing', 'gpt-5.1')
+    expect(h.toastSuccess).toHaveBeenCalledWith('配置已导入', {
+      description: undefined,
+    })
+  })
+
+  it('shows an error for invalid provider import deep links', async () => {
+    hubState.deeplinkGetCurrent.mockResolvedValue([
+      'mita://provider/import?provider=jingxing&baseUrl=https%3A%2F%2Fapi.example.com%2Fv1',
+    ])
+
+    render(<DataProvider />)
+
+    await waitFor(() => {
+      expect(h.toastError).toHaveBeenCalledWith('导入链接无效', {
+        description: '缺少 API Key',
+      })
+    })
+    expect(screen.queryByText('导入 AI 供应商配置')).not.toBeInTheDocument()
   })
 
   it('ignores deep links with insufficient path segments', async () => {

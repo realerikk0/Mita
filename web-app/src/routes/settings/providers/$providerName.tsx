@@ -56,10 +56,8 @@ import {
   providerQuotaErrorFromUnknown,
 } from '@/lib/provider-quota-error'
 import {
-  mergeProviderCustomHeaders,
+  applyProviderConnectionToProvider,
   parseProviderConnection,
-  providerConnectionHeadersToCustomHeaders,
-  type ParsedProviderConnection,
 } from '@/lib/provider-connection-import'
 
 // as route.threadsDetail
@@ -72,24 +70,6 @@ export const Route = createFileRoute('/settings/providers/$providerName')({
     }
   },
 })
-
-const providerConnectionSettingMap: Record<
-  string,
-  keyof Pick<
-    ParsedProviderConnection,
-    'apiKey' | 'baseUrl' | 'apiVersion' | 'deployment' | 'defaultModel'
-  >
-> = {
-  'api-key': 'apiKey',
-  'base-url': 'baseUrl',
-  'api-version': 'apiVersion',
-  apiVersion: 'apiVersion',
-  deployment: 'deployment',
-  'deployment-name': 'deployment',
-  'default-model': 'defaultModel',
-  defaultModel: 'defaultModel',
-  model: 'defaultModel',
-}
 
 function ProviderDetail() {
   const { t } = useTranslation()
@@ -271,37 +251,12 @@ function ProviderDetail() {
 
     try {
       const importedConnection = parseProviderConnection(providerImportDraft)
-      const newSettings = provider.settings.map((setting) => {
-        const importedField = providerConnectionSettingMap[setting.key]
-        if (!importedField) return setting
-
-        return {
-          ...setting,
-          controller_props: {
-            ...setting.controller_props,
-            value: importedConnection[importedField],
-          },
-        }
-      })
-      const importedHeaders = providerConnectionHeadersToCustomHeaders(
-        importedConnection.headers
+      const updateObj = applyProviderConnectionToProvider(
+        provider,
+        importedConnection
       )
-      const updateObj: Partial<ModelProvider> = {
-        ...provider,
-        settings: newSettings,
-        api_key: importedConnection.apiKey,
-        api_key_fallbacks: [],
-        base_url: importedConnection.baseUrl,
-      }
 
-      if (importedHeaders.length > 0) {
-        updateObj.custom_header = mergeProviderCustomHeaders(
-          provider.custom_header,
-          importedHeaders
-        )
-      }
-
-      serviceHub.providers().updateSettings(providerName, newSettings)
+      serviceHub.providers().updateSettings(providerName, updateObj.settings)
       updateProvider(providerName, updateObj)
       setApiKeysDraft(importedConnection.apiKey)
       setKeyCheckResults([])
@@ -462,7 +417,14 @@ function ProviderDetail() {
     } finally {
       setIsTestingKeys(false)
     }
-  }, [apiKeysDraft, maskApiKey, provider?.base_url, serviceHub, t])
+  }, [
+    apiKeysDraft,
+    maskApiKey,
+    provider?.base_url,
+    provider?.provider,
+    serviceHub,
+    t,
+  ])
 
   // Auto-refresh provider settings to get updated backend configuration
   const refreshSettings = useCallback(async () => {
