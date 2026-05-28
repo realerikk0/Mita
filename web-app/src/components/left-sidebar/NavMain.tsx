@@ -101,6 +101,14 @@ export const getNavMainItems = (
     title: 'common:newMitaTeams',
     icon: UsersRound,
     onClick: onMitaTeams,
+    shortcut: (
+      <KbdGroup className="ml-auto scale-90 gap-0">
+        <Kbd className="bg-transparent size-3">
+          <PlatformMetaKey />
+        </Kbd>
+        <Kbd className="bg-transparent size-3 uppercase">{PlatformShortcuts[ShortcutAction.NEW_MITA_TEAMS].key}</Kbd>
+      </KbdGroup>
+    ),
   },
   {
     title: 'common:newAgentChat',

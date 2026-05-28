@@ -61,6 +61,8 @@
     "application": "Application",
     "newChat": "New Chat",
     "newChatDesc": "Create a new chat.",
+    "newMitaTeams": "New Mita Teams",
+    "newMitaTeamsDesc": "Create a new Mita Teams workspace.",
     "newProject": "New Project",
     "newProjectDesc": "Open the create project dialog.",
     "toggleSidebar": "Toggle Sidebar",

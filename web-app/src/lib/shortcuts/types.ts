@@ -6,6 +6,7 @@
 export enum ShortcutAction {
   NEW_CHAT = 'newChat',
   NEW_IMAGE = 'newImage',
+  NEW_MITA_TEAMS = 'newMitaTeams',
   NEW_AGENT_CHAT = 'newAgentChat',
   NEW_PROJECT = 'newProject',
   TOGGLE_SIDEBAR = 'toggleSidebar',

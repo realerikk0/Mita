@@ -4,7 +4,7 @@ import { getNavMainItems } from '../NavMain'
 
 describe('NavMain', () => {
   it('places New Image directly after New Chat', () => {
-    const items = getNavMainItems(vi.fn(), vi.fn(), vi.fn(), vi.fn())
+    const items = getNavMainItems(vi.fn(), vi.fn(), vi.fn(), vi.fn(), vi.fn())
     const titles = items.map((item) => item.title)
     const newImageItem = items.find((item) => item.title === 'common:newImage')
 
@@ -12,5 +12,14 @@ describe('NavMain', () => {
       'common:newImage'
     )
     expect(newImageItem?.shortcut).toBeTruthy()
+  })
+
+  it('shows a shortcut for New Mita Teams', () => {
+    const items = getNavMainItems(vi.fn(), vi.fn(), vi.fn(), vi.fn(), vi.fn())
+    const newMitaTeamsItem = items.find(
+      (item) => item.title === 'common:newMitaTeams'
+    )
+
+    expect(newMitaTeamsItem?.shortcut).toBeTruthy()
   })
 })

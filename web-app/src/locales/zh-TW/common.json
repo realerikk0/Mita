@@ -20,6 +20,7 @@
   "keyboardShortcuts": "快捷鍵",
   "newChat": "新聊天",
   "newImage": "新建圖片",
+  "newMitaTeams": "新建 Mita 小組",
   "imageGeneration": {
     "today": "今天",
     "emptyState": "生成的圖片會顯示在這裡。",

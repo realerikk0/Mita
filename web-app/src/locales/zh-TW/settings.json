@@ -61,6 +61,8 @@
     "application": "應用程式",
     "newChat": "新聊天",
     "newChatDesc": "建立一個新的聊天。",
+    "newMitaTeams": "新建 Mita 小組",
+    "newMitaTeamsDesc": "建立一個新的 Mita 小組工作區。",
     "toggleSidebar": "切換側邊欄",
     "toggleSidebarDesc": "顯示或隱藏側邊欄。",
     "zoomIn": "放大",
