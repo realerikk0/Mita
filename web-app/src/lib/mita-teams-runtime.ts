@@ -17,7 +17,10 @@ import {
   MITA_TEAMS_TASK_CHANNEL_ID,
   MITA_TEAMS_MODES,
   MITA_TEAMS_ROLE_COLORS,
+  MITA_TEAMS_TASK_TEMPLATES,
   normalizeMitaTeamsId,
+  type MitaTeamsArtifactType,
+  type MitaTeamsArtifactUpdate,
   type MitaTeamsChoiceOption,
   type MitaTeamsChannelConfig,
   type MitaTeamsChannelId,
@@ -29,6 +32,9 @@ import {
   type MitaTeamsRoleConfig,
   type MitaTeamsRoleId,
   type MitaTeamsRuntime,
+  type MitaTeamsStructuredUpdates,
+  type MitaTeamsTaskStatus,
+  type MitaTeamsTaskUpdate,
 } from '@/types/mita-teams'
 
 type RoleOutput = {
@@ -50,6 +56,14 @@ type GenerateDecisionText = (input: {
   model?: ThreadModel
   abortSignal?: AbortSignal
 }) => Promise<string>
+
+type MitaTeamsUserControl = {
+  mentionedRoleIds: MitaTeamsRoleId[]
+  onlyRoleIds: MitaTeamsRoleId[]
+  shouldPause: boolean
+  shouldContinue: boolean
+  shouldConverge: boolean
+}
 
 export type RunMitaTeamsRuntimeOptions = {
   config: MitaTeamsConfig
@@ -78,6 +92,79 @@ const stableId = (prefix: string) =>
 const trimText = (value: string, max = 1200) => {
   const text = value.trim()
   return text.length > max ? `${text.slice(0, max - 3)}...` : text
+}
+
+const PERMISSION_RANK: Record<MitaTeamsRoleConfig['permission'], number> = {
+  read: 0,
+  tools: 1,
+  write: 2,
+}
+
+const TASK_STATUS_ALIASES: Record<string, MitaTeamsTaskStatus> = {
+  todo: 'todo',
+  pending: 'todo',
+  待确认: 'todo',
+  待確認: 'todo',
+  researching: 'researching',
+  research: 'researching',
+  研究中: 'researching',
+  调研中: 'researching',
+  調研中: 'researching',
+  implementing: 'implementing',
+  build: 'implementing',
+  building: 'implementing',
+  实现中: 'implementing',
+  實作中: 'implementing',
+  reviewing: 'reviewing',
+  review: 'reviewing',
+  待审查: 'reviewing',
+  待審查: 'reviewing',
+  done: 'done',
+  completed: 'done',
+  已完成: 'done',
+}
+
+const ARTIFACT_TYPE_ALIASES: Record<string, MitaTeamsArtifactType> = {
+  'decision': 'decision',
+  '决策': 'decision',
+  '決策': 'decision',
+  'risk': 'risk',
+  '风险': 'risk',
+  '風險': 'risk',
+  'artifact': 'artifact',
+  'output': 'artifact',
+  '产物': 'artifact',
+  '產物': 'artifact',
+  'test': 'test_result',
+  'test result': 'test_result',
+  'test-result': 'test_result',
+  'test_result': 'test_result',
+  '测试结果': 'test_result',
+  '測試結果': 'test_result',
+  'final': 'final_draft',
+  'final-draft': 'final_draft',
+  'final_draft': 'final_draft',
+  '最终草稿': 'final_draft',
+  '最終草稿': 'final_draft',
+}
+
+const permissionMeets = (
+  actual: MitaTeamsRoleConfig['permission'],
+  required?: MitaTeamsRoleConfig['permission']
+) => !required || PERMISSION_RANK[actual] >= PERMISSION_RANK[required]
+
+const normalizeStatusAlias = (
+  value: unknown
+): MitaTeamsTaskStatus | undefined => {
+  if (typeof value !== 'string') return undefined
+  return TASK_STATUS_ALIASES[value.trim().toLowerCase()]
+}
+
+const normalizeArtifactTypeAlias = (
+  value: unknown
+): MitaTeamsArtifactType | undefined => {
+  if (typeof value !== 'string') return undefined
+  return ARTIFACT_TYPE_ALIASES[value.trim().toLowerCase()]
 }
 
 function roleById(config: MitaTeamsConfig, roleId: MitaTeamsRoleId) {
@@ -200,10 +287,73 @@ function renderChannelRoster(config: MitaTeamsConfig) {
 
   return config.channels
     .map((channel) => {
-      const roleIds = channel.roleIds.length ? channel.roleIds.join(', ') : 'none'
+      const roleIds = channel.roleIds.length
+        ? channel.roleIds.join(', ')
+        : 'none'
       return `- ${channel.id}: #${channel.label} roles=[${roleIds}] ${channel.description}`
     })
     .join('\n')
+}
+
+function parseUserControl(
+  userText: string,
+  config: MitaTeamsConfig
+): MitaTeamsUserControl {
+  const mentionTokens = [...userText.matchAll(/@([^\s@，,。:：]+)/g)].map(
+    (match) => match[1]
+  )
+  const roleMatches = new Set<MitaTeamsRoleId>()
+
+  for (const token of mentionTokens) {
+    const normalized = normalizeMitaTeamsId(token, '')
+    const lower = token.trim().toLowerCase()
+    const role = config.roles.find(
+      (item) =>
+        item.id === normalized ||
+        item.id.toLowerCase() === lower ||
+        item.name.toLowerCase() === lower ||
+        item.label.toLowerCase() === lower
+    )
+    if (role) roleMatches.add(role.id)
+  }
+
+  const mentionedRoleIds = [...roleMatches]
+  const onlyRequested =
+    mentionedRoleIds.length > 0 &&
+    /(只让|只叫|只要|仅让|僅讓|只让|only|solo)/i.test(userText)
+  const shouldContinue = /(继续|繼續|接着|接著|resume|continue)/i.test(userText)
+  const shouldPause =
+    !shouldContinue &&
+    /(暂停|暫停|先停|停一下|\/pause|\bpause\b|\bstop\b)/i.test(userText)
+  const shouldConverge =
+    /(收敛|收斂|总结|總結|给结论|給結論|converge|final)/i.test(userText)
+
+  return {
+    mentionedRoleIds,
+    onlyRoleIds: onlyRequested ? mentionedRoleIds : [],
+    shouldPause,
+    shouldContinue,
+    shouldConverge,
+  }
+}
+
+function renderUserControl(control: MitaTeamsUserControl) {
+  const parts = [
+    control.mentionedRoleIds.length
+      ? `Mentioned roles: ${control.mentionedRoleIds.join(', ')}.`
+      : undefined,
+    control.onlyRoleIds.length
+      ? `Owner requested only these roles to speak: ${control.onlyRoleIds.join(', ')}.`
+      : undefined,
+    control.shouldConverge
+      ? 'Owner requested convergence or a final answer.'
+      : undefined,
+    control.shouldContinue
+      ? 'Owner requested the team to continue.'
+      : undefined,
+  ].filter(Boolean)
+
+  return parts.length ? parts.join('\n') : 'No explicit owner controls.'
 }
 
 function buildDecisionPrompt({
@@ -212,12 +362,14 @@ function buildDecisionPrompt({
   userText,
   threadTitle,
   recentOutputs,
+  userControl,
 }: {
   config: MitaTeamsConfig
   runtime: MitaTeamsRuntime
   userText: string
   threadTitle?: string
   recentOutputs: RoleOutput[]
+  userControl: MitaTeamsUserControl
 }) {
   const roles = config.roles
     .filter((role) => role.enabled)
@@ -229,6 +381,10 @@ function buildDecisionPrompt({
   const memory = projectMemoryText(runtime.projectMemory) || 'No memory yet.'
   const maxRounds = runtime.run?.maxRounds ?? config.roundLimit
   const currentRound = runtime.run?.currentRound ?? 0
+  const taskTemplate =
+    MITA_TEAMS_TASK_TEMPLATES.find(
+      (template) => template.id === config.taskTemplateId
+    ) ?? MITA_TEAMS_TASK_TEMPLATES[0]
 
   return `You are the Orchestrator for Mita Teams.
 
@@ -237,6 +393,10 @@ Owner request or latest choice:
 ${userText}
 
 Mode: ${modeDescription(config)}
+Task template: ${taskTemplate.label}
+Template guidance: ${taskTemplate.orchestratorHint}
+Recommended role ids: ${taskTemplate.recommendedRoleIds.join(', ') || 'none'}
+Default flow: ${taskTemplate.defaultFlow.join(' -> ')}
 Round: ${currentRound} / ${maxRounds}
 
 Available enabled roles:
@@ -251,20 +411,27 @@ ${memory}
 Recent role outputs:
 ${renderRecentOutputs(recentOutputs)}
 
+Owner controls:
+${renderUserControl(userControl)}
+
 Choose exactly one next action. Output valid JSON only.
 
 Allowed shapes:
-1. {"action":"configure_team","reason":"...","roles":[{"id":"researcher","name":"Researcher","label":"Research","description":"...","prompt":"...","permission":"read"}],"channels":[{"id":"research","label":"Research","description":"...","roleIds":["researcher"]}],"mode":"parallel|serial|hybrid","calls":[{"roleId":"researcher","channelId":"research","instruction":"...","group":1}]}
-2. {"action":"call_roles","mode":"parallel|serial|hybrid","reason":"...","calls":[{"roleId":"researcher","channelId":"research","instruction":"...","group":1}]}
+1. {"action":"configure_team","reason":"...","roles":[{"id":"researcher","name":"Researcher","label":"Research","description":"...","prompt":"...","permission":"read"}],"channels":[{"id":"research","label":"Research","description":"...","roleIds":["researcher"]}],"mode":"parallel|serial|hybrid","calls":[{"roleId":"researcher","channelId":"research","instruction":"...","requiredPermission":"read","group":1}],"updates":{"tasks":[{"title":"Inspect evidence","status":"researching","roleId":"researcher","channelId":"research"}],"artifacts":[{"type":"decision","title":"Scope","summary":"..."}]}}
+2. {"action":"call_roles","mode":"parallel|serial|hybrid","reason":"...","calls":[{"roleId":"researcher","channelId":"research","instruction":"...","requiredPermission":"read","group":1}],"updates":{"tasks":[{"title":"Review answer","status":"reviewing"}],"artifacts":[{"type":"risk","title":"Main risk","summary":"..."}]}}
 3. {"action":"ask_user","reason":"...","question":"...","options":[{"id":"a","label":"Option A","description":"..."}]}
 4. {"action":"milestone","reason":"...","milestone":"..."}
-5. {"action":"stop","reason":"...","finalResponse":"..."}
+5. {"action":"stop","reason":"...","finalResponse":"...","updates":{"artifacts":[{"type":"final_draft","title":"Final answer","summary":"...","content":"..."}]}}
 
 Rules:
 - New teams start with only the Orchestrator and the main task channel.
 - If specialist work is needed, first create only the minimum useful roles and channels with configure_team.
 - Pick role calls only from enabled roles, and include the most relevant channelId for each call.
 - Each channel should include only the roleIds that should participate there.
+- Use updates.tasks for visible task-board progress and updates.artifacts for decisions, risks, test results, artifacts, and final drafts.
+- Respect permissions: read roles gather and critique, tools roles may request tool-backed work, write roles may plan concrete file edits.
+- If the owner mentioned roles, prefer those roles. If the owner requested only those roles, do not call anyone else.
+- If the owner asked to converge, prefer stop with a final_draft artifact unless one narrow role call is essential.
 - Use hybrid when useful: roles with the same group run in parallel; groups run serially.
 - Ask the owner only when a real single-choice decision is needed.
 - Stop when the team has reached a useful milestone or can give a clear answer.
@@ -289,20 +456,28 @@ function buildRolePrompt({
   const projectMemory =
     projectMemoryText(runtime.projectMemory) || 'No shared project memory yet.'
   const ownMemory =
-    roleMemoryText(runtime.roleStates[role.id]?.memory ?? {
-      roleId: role.id,
-      version: 0,
-      summary: '',
-      facts: [],
-      decisions: [],
-      openQuestions: [],
-      workingNotes: [],
-      updatedAt: nowIso(),
-    }) || 'No role memory yet.'
+    roleMemoryText(
+      runtime.roleStates[role.id]?.memory ?? {
+        roleId: role.id,
+        version: 0,
+        summary: '',
+        facts: [],
+        decisions: [],
+        openQuestions: [],
+        workingNotes: [],
+        updatedAt: nowIso(),
+      }
+    ) || 'No role memory yet.'
   const channel = channelById(config, call.channelId)
   const channelContext = call.channelId
     ? `#${channel?.label ?? call.channelId}: ${channel?.description ?? 'No channel description.'}`
     : 'Main task channel.'
+  const permissionRules =
+    role.permission === 'write'
+      ? 'You may propose concrete edits and implementation steps. Do not claim files were changed unless the host app executed those changes.'
+      : role.permission === 'tools'
+        ? 'You may request tool-backed checks or commands, but do not claim file writes.'
+        : 'Read-only role: gather, analyze, critique, and summarize. Do not claim tool use, command execution, or file edits.'
 
   return `You are ${role.name} in Mita Teams.
 
@@ -314,6 +489,9 @@ ${userText}
 
 Channel for this turn:
 ${channelContext}
+
+Permission for this turn:
+${role.permission}. ${permissionRules}
 
 Orchestrator instruction for this turn:
 ${call.instruction}
@@ -345,7 +523,9 @@ function isChannelId(value: unknown): value is MitaTeamsChannelId {
   return typeof value === 'string' && normalizeMitaTeamsId(value, '') === value
 }
 
-function isPermission(value: unknown): value is MitaTeamsRoleConfig['permission'] {
+function isPermission(
+  value: unknown
+): value is MitaTeamsRoleConfig['permission'] {
   return value === 'read' || value === 'tools' || value === 'write'
 }
 
@@ -364,7 +544,10 @@ function titleFromId(id: string) {
 }
 
 function colorForIndex(index: number) {
-  return MITA_TEAMS_ROLE_COLORS[index % MITA_TEAMS_ROLE_COLORS.length]?.value ?? 'bg-slate-500'
+  return (
+    MITA_TEAMS_ROLE_COLORS[index % MITA_TEAMS_ROLE_COLORS.length]?.value ??
+    'bg-slate-500'
+  )
 }
 
 function normalizeChoiceOptions(value: unknown): MitaTeamsChoiceOption[] {
@@ -387,24 +570,28 @@ function normalizeChoiceOptions(value: unknown): MitaTeamsChoiceOption[] {
     .slice(0, 4)
 }
 
-function channelContainsRole(channel: MitaTeamsChannelConfig, roleId: MitaTeamsRoleId) {
+function channelContainsRole(
+  channel: MitaTeamsChannelConfig,
+  roleId: MitaTeamsRoleId
+) {
   return channel.roleIds.includes(roleId)
 }
 
-function findChannelForRole(
-  config: MitaTeamsConfig,
-  roleId: MitaTeamsRoleId
-) {
+function findChannelForRole(config: MitaTeamsConfig, roleId: MitaTeamsRoleId) {
   return config.channels.find((channel) => channelContainsRole(channel, roleId))
 }
 
 function normalizeCalls(
   value: unknown,
-  config: MitaTeamsConfig
+  config: MitaTeamsConfig,
+  options: { onlyRoleIds?: MitaTeamsRoleId[] } = {}
 ): MitaTeamsRoleCallPlan[] {
   if (!Array.isArray(value)) return []
-  const enabledIds = new Set(config.roles.filter((r) => r.enabled).map((r) => r.id))
+  const enabledIds = new Set(
+    config.roles.filter((r) => r.enabled).map((r) => r.id)
+  )
   const channelIds = new Set(config.channels.map((channel) => channel.id))
+  const onlyRoleIds = new Set(options.onlyRoleIds ?? [])
 
   return value
     .map((item): MitaTeamsRoleCallPlan | undefined => {
@@ -413,6 +600,14 @@ function normalizeCalls(
       const roleId = normalizeMitaTeamsId(raw.roleId, '')
       if (!isRoleId(roleId) || !enabledIds.has(roleId)) return undefined
       if (roleId === MITA_TEAMS_ORCHESTRATOR_ROLE_ID) return undefined
+      if (onlyRoleIds.size > 0 && !onlyRoleIds.has(roleId)) return undefined
+      const role = roleById(config, roleId)
+      if (!role) return undefined
+      const requiredPermission = isPermission(raw.requiredPermission)
+        ? raw.requiredPermission
+        : undefined
+      if (!permissionMeets(role.permission, requiredPermission))
+        return undefined
       const requestedChannelId = normalizeMitaTeamsId(raw.channelId, '')
       const channelId =
         requestedChannelId && channelIds.has(requestedChannelId)
@@ -429,11 +624,14 @@ function normalizeCalls(
             ? raw.instruction
             : 'Contribute your role perspective.',
       }
+      if (requiredPermission) call.requiredPermission = requiredPermission
       if (isExecutionMode(raw.mode)) call.mode = raw.mode
       if (Array.isArray(raw.dependsOn)) {
         const dependsOn = raw.dependsOn
           .map((id) => normalizeMitaTeamsId(id, ''))
-          .filter((id): id is MitaTeamsRoleId => isRoleId(id) && enabledIds.has(id))
+          .filter(
+            (id): id is MitaTeamsRoleId => isRoleId(id) && enabledIds.has(id)
+          )
         if (dependsOn.length > 0) call.dependsOn = dependsOn
       }
       if (typeof raw.group === 'number' && Number.isFinite(raw.group)) {
@@ -466,12 +664,12 @@ function normalizeDecisionRoles(
       const name =
         typeof raw.name === 'string' && raw.name.trim()
           ? raw.name.trim()
-          : existing?.name ?? titleFromId(id)
+          : (existing?.name ?? titleFromId(id))
       const prompt =
         typeof raw.prompt === 'string' && raw.prompt.trim()
           ? raw.prompt.trim()
-          : existing?.prompt ??
-            `You are ${name}. Contribute only the perspective requested by the Orchestrator.`
+          : (existing?.prompt ??
+            `You are ${name}. Contribute only the perspective requested by the Orchestrator.`)
 
       return {
         id,
@@ -479,27 +677,27 @@ function normalizeDecisionRoles(
         label:
           typeof raw.label === 'string' && raw.label.trim()
             ? raw.label.trim()
-            : existing?.label ?? name.slice(0, 12),
+            : (existing?.label ?? name.slice(0, 12)),
         description:
           typeof raw.description === 'string' && raw.description.trim()
             ? raw.description.trim()
-            : existing?.description ?? `Specialist role for ${name}.`,
+            : (existing?.description ?? `Specialist role for ${name}.`),
         prompt,
         color:
           typeof raw.color === 'string' && raw.color.trim()
             ? raw.color.trim()
-            : existing?.color ?? colorForIndex(config.roles.length + index),
+            : (existing?.color ?? colorForIndex(config.roles.length + index)),
         permission: isPermission(raw.permission)
           ? raw.permission
-          : existing?.permission ?? 'read',
+          : (existing?.permission ?? 'read'),
         provider:
           typeof raw.provider === 'string'
             ? raw.provider
-            : existing?.provider ?? modelSource?.provider,
+            : (existing?.provider ?? modelSource?.provider),
         modelId:
           typeof raw.modelId === 'string'
             ? raw.modelId
-            : existing?.modelId ?? modelSource?.modelId,
+            : (existing?.modelId ?? modelSource?.modelId),
         enabled: raw.enabled !== false,
       }
     })
@@ -540,7 +738,7 @@ function normalizeDecisionChannels(
       const label =
         typeof raw.label === 'string' && raw.label.trim()
           ? raw.label.trim()
-          : existing?.label ?? titleFromId(id)
+          : (existing?.label ?? titleFromId(id))
       const roleIds = Array.isArray(raw.roleIds)
         ? raw.roleIds
             .map((roleId) => normalizeMitaTeamsId(roleId, ''))
@@ -562,7 +760,7 @@ function normalizeDecisionChannels(
         description:
           typeof raw.description === 'string' && raw.description.trim()
             ? raw.description.trim()
-            : existing?.description ?? `Focused room for ${label}.`,
+            : (existing?.description ?? `Focused room for ${label}.`),
         roleIds: roleIds.length ? [...new Set(roleIds)] : fallbackRoleIds,
       }
     })
@@ -610,6 +808,183 @@ function normalizeChannelMembership(
   })
 }
 
+function normalizeTaskUpdates(
+  value: unknown,
+  config: MitaTeamsConfig
+): MitaTeamsTaskUpdate[] {
+  if (!Array.isArray(value)) return []
+  const roleIds = new Set(config.roles.map((role) => role.id))
+  const channelIds = new Set(config.channels.map((channel) => channel.id))
+
+  return value
+    .map((item): MitaTeamsTaskUpdate | undefined => {
+      if (!item || typeof item !== 'object') return undefined
+      const raw = item as Partial<MitaTeamsTaskUpdate>
+      if (typeof raw.title !== 'string' || !raw.title.trim()) return undefined
+      const status = normalizeStatusAlias(raw.status) ?? 'todo'
+      const id = normalizeMitaTeamsId(raw.id, '')
+      const roleId = normalizeMitaTeamsId(raw.roleId, '')
+      const channelId = normalizeMitaTeamsId(raw.channelId, '')
+      const update: MitaTeamsTaskUpdate = {
+        title: trimText(raw.title, 120),
+        status,
+      }
+      if (id) update.id = id
+      if (roleIds.has(roleId)) update.roleId = roleId
+      if (channelIds.has(channelId)) update.channelId = channelId
+      return update
+    })
+    .filter((item): item is MitaTeamsTaskUpdate => item !== undefined)
+    .slice(0, 12)
+}
+
+function normalizeArtifactUpdates(
+  value: unknown,
+  config: MitaTeamsConfig
+): MitaTeamsArtifactUpdate[] {
+  if (!Array.isArray(value)) return []
+  const roleIds = new Set(config.roles.map((role) => role.id))
+  const channelIds = new Set(config.channels.map((channel) => channel.id))
+
+  return value
+    .map((item): MitaTeamsArtifactUpdate | undefined => {
+      if (!item || typeof item !== 'object') return undefined
+      const raw = item as Partial<MitaTeamsArtifactUpdate>
+      if (
+        typeof raw.title !== 'string' ||
+        !raw.title.trim() ||
+        typeof raw.summary !== 'string' ||
+        !raw.summary.trim()
+      ) {
+        return undefined
+      }
+      const type = normalizeArtifactTypeAlias(raw.type) ?? 'artifact'
+      const id = normalizeMitaTeamsId(raw.id, '')
+      const roleId = normalizeMitaTeamsId(raw.roleId, '')
+      const channelId = normalizeMitaTeamsId(raw.channelId, '')
+      const update: MitaTeamsArtifactUpdate = {
+        type,
+        title: trimText(raw.title, 120),
+        summary: trimText(raw.summary, 600),
+      }
+      if (id) update.id = id
+      if (typeof raw.content === 'string' && raw.content.trim()) {
+        update.content = trimText(raw.content, 3000)
+      }
+      if (roleIds.has(roleId)) update.roleId = roleId
+      if (channelIds.has(channelId)) update.channelId = channelId
+      return update
+    })
+    .filter((item): item is MitaTeamsArtifactUpdate => item !== undefined)
+    .slice(0, 12)
+}
+
+function normalizeStructuredUpdates(
+  value: unknown,
+  config: MitaTeamsConfig
+): MitaTeamsStructuredUpdates | undefined {
+  if (!value || typeof value !== 'object') return undefined
+  const raw = value as Partial<MitaTeamsStructuredUpdates>
+  const tasks = normalizeTaskUpdates(raw.tasks, config)
+  const artifacts = normalizeArtifactUpdates(raw.artifacts, config)
+  if (tasks.length === 0 && artifacts.length === 0) return undefined
+  return {
+    ...(tasks.length ? { tasks } : {}),
+    ...(artifacts.length ? { artifacts } : {}),
+  }
+}
+
+function taskIdFromUpdate(update: MitaTeamsTaskUpdate) {
+  return update.id ?? normalizeMitaTeamsId(update.title, stableId('task'))
+}
+
+function artifactIdFromUpdate(update: MitaTeamsArtifactUpdate) {
+  return (
+    update.id ??
+    normalizeMitaTeamsId(`${update.type}-${update.title}`, stableId('artifact'))
+  )
+}
+
+function applyStructuredUpdates(
+  runtime: MitaTeamsRuntime,
+  updates?: MitaTeamsStructuredUpdates,
+  source?: { roleId?: MitaTeamsRoleId; channelId?: MitaTeamsChannelId }
+): MitaTeamsRuntime {
+  if (!updates) return runtime
+  const now = nowIso()
+  let nextRuntime = runtime
+
+  if (updates.tasks?.length) {
+    const tasksById = new Map(runtime.tasks.map((task) => [task.id, task]))
+    for (const update of updates.tasks) {
+      const id = taskIdFromUpdate(update)
+      const existing = tasksById.get(id)
+      tasksById.set(id, {
+        id,
+        title: update.title,
+        status: update.status,
+        roleId: update.roleId ?? source?.roleId ?? existing?.roleId,
+        channelId: update.channelId ?? source?.channelId ?? existing?.channelId,
+        createdAt: existing?.createdAt ?? now,
+        updatedAt: now,
+      })
+    }
+    nextRuntime = appendMitaTeamsEvent(
+      {
+        ...nextRuntime,
+        tasks: Array.from(tasksById.values()).slice(-40),
+      },
+      {
+        type: 'tasks_updated',
+        title: 'Task board updated',
+        detail: updates.tasks
+          .map((task) => `${task.status}: ${task.title}`)
+          .join('\n'),
+        roleId: source?.roleId,
+        channelId: source?.channelId,
+      }
+    )
+  }
+
+  if (updates.artifacts?.length) {
+    const artifactsById = new Map(
+      nextRuntime.artifacts.map((artifact) => [artifact.id, artifact])
+    )
+    for (const update of updates.artifacts) {
+      const id = artifactIdFromUpdate(update)
+      const existing = artifactsById.get(id)
+      artifactsById.set(id, {
+        id,
+        type: update.type,
+        title: update.title,
+        summary: update.summary,
+        content: update.content ?? existing?.content,
+        roleId: update.roleId ?? source?.roleId ?? existing?.roleId,
+        channelId: update.channelId ?? source?.channelId ?? existing?.channelId,
+        createdAt: existing?.createdAt ?? now,
+        updatedAt: now,
+      })
+    }
+    nextRuntime = appendMitaTeamsEvent(
+      {
+        ...nextRuntime,
+        artifacts: Array.from(artifactsById.values()).slice(-60),
+      },
+      {
+        type: 'artifact_recorded',
+        title: 'Structured artifact recorded',
+        detail: updates.artifacts
+          .map((artifact) => `${artifact.type}: ${artifact.title}`)
+          .join('\n'),
+        roleId: source?.roleId,
+        channelId: source?.channelId,
+      }
+    )
+  }
+
+  return nextRuntime
+}
+
 function applyTeamConfiguration({
   config,
   runtime,
@@ -627,7 +1002,9 @@ function applyTeamConfiguration({
   const activeRoleId = roles.some((role) => role.id === config.activeRoleId)
     ? config.activeRoleId
     : MITA_TEAMS_ORCHESTRATOR_ROLE_ID
-  const activeChannel = channels.some((channel) => channel.id === config.activeChannel)
+  const activeChannel = channels.some(
+    (channel) => channel.id === config.activeChannel
+  )
     ? config.activeChannel
     : MITA_TEAMS_TASK_CHANNEL_ID
   const nextConfig = {
@@ -657,7 +1034,8 @@ function applyTeamConfiguration({
 
 function parseDecision(
   text: string,
-  config: MitaTeamsConfig
+  config: MitaTeamsConfig,
+  options: { onlyRoleIds?: MitaTeamsRoleId[] } = {}
 ): MitaTeamsOrchestratorDecision | undefined {
   const json = extractJsonObject(text)
   if (!json) return undefined
@@ -670,13 +1048,18 @@ function parseDecision(
     if (raw.action === 'configure_team') {
       const roles = normalizeDecisionRoles(raw.roles, config)
       const virtualRoles = mergeRoles(config.roles, roles)
-      const channels = normalizeDecisionChannels(raw.channels, config, virtualRoles)
+      const channels = normalizeDecisionChannels(
+        raw.channels,
+        config,
+        virtualRoles
+      )
       const virtualConfig = {
         ...config,
         roles: virtualRoles,
         channels: mergeChannels(config.channels, channels),
       }
-      const calls = normalizeCalls(raw.calls, virtualConfig)
+      const calls = normalizeCalls(raw.calls, virtualConfig, options)
+      const updates = normalizeStructuredUpdates(raw.updates, virtualConfig)
       if (roles.length === 0 && channels.length === 0 && calls.length === 0) {
         return undefined
       }
@@ -687,17 +1070,19 @@ function parseDecision(
         channels,
         mode: isExecutionMode(raw.mode) ? raw.mode : undefined,
         calls,
+        updates,
       }
     }
 
     if (raw.action === 'call_roles') {
-      const calls = normalizeCalls(raw.calls, config)
+      const calls = normalizeCalls(raw.calls, config, options)
       if (calls.length === 0) return undefined
       return {
         action: 'call_roles',
         mode: isExecutionMode(raw.mode) ? raw.mode : 'hybrid',
         reason,
         calls,
+        updates: normalizeStructuredUpdates(raw.updates, config),
       }
     }
 
@@ -711,6 +1096,7 @@ function parseDecision(
         reason,
         question: raw.question,
         options,
+        updates: normalizeStructuredUpdates(raw.updates, config),
       }
     }
 
@@ -720,6 +1106,7 @@ function parseDecision(
         action: 'milestone',
         reason,
         milestone: raw.milestone,
+        updates: normalizeStructuredUpdates(raw.updates, config),
       }
     }
 
@@ -729,6 +1116,7 @@ function parseDecision(
         action: 'stop',
         reason,
         finalResponse: raw.finalResponse,
+        updates: normalizeStructuredUpdates(raw.updates, config),
       }
     }
   } catch {
@@ -738,21 +1126,92 @@ function parseDecision(
   return undefined
 }
 
-function fallbackDecision(
-  config: MitaTeamsConfig,
-  runtime: MitaTeamsRuntime,
-  recentOutputs: RoleOutput[]
-): MitaTeamsOrchestratorDecision {
-  const memory = projectMemoryText(runtime.projectMemory)
+function buildDecisionRepairPrompt(
+  decisionPrompt: string,
+  invalidText: string
+) {
+  return `The previous Orchestrator response was not valid for the Mita Teams decision schema.
+
+Original decision prompt:
+${decisionPrompt}
+
+Invalid response:
+${trimText(invalidText, 2400)}
+
+Return one corrected JSON object only. Do not include Markdown or explanation.`
+}
+
+function jsonFailureDecision(): MitaTeamsOrchestratorDecision {
   return {
-    action: 'stop',
-    reason: 'Fallback completion without expanding the team.',
-    finalResponse:
-      recentOutputs.length > 0
-        ? `Mita Teams has reached a useful checkpoint.\n\n${memory || renderRecentOutputs(recentOutputs)}`
-        : config.roles.length > 1
-          ? 'Mita Teams could not parse the Orchestrator decision, so it stopped without calling extra roles.'
-          : 'Mita Teams is ready. The Orchestrator needs a clearer decision before creating specialist roles.',
+    action: 'ask_user',
+    reason:
+      'The Orchestrator response could not be parsed after one JSON repair attempt.',
+    question:
+      'Mita Teams could not parse the coordinator decision. What should happen next?',
+    options: [
+      {
+        id: 'retry',
+        label: 'Retry orchestration',
+        description:
+          'Ask the coordinator to decide again with the same context.',
+      },
+      {
+        id: 'stop',
+        label: 'Stop here',
+        description: 'Pause the team without calling extra roles.',
+      },
+    ],
+  }
+}
+
+async function generateParsedDecision({
+  decisionPrompt,
+  config,
+  userControl,
+  model,
+  generateDecisionText,
+  abortSignal,
+}: {
+  decisionPrompt: string
+  config: MitaTeamsConfig
+  userControl: MitaTeamsUserControl
+  model?: ThreadModel
+  generateDecisionText: GenerateDecisionText
+  abortSignal?: AbortSignal
+}): Promise<{
+  decision: MitaTeamsOrchestratorDecision
+  repairRequested: boolean
+  invalidText?: string
+}> {
+  const parseOptions = { onlyRoleIds: userControl.onlyRoleIds }
+  const firstText = await generateDecisionText({
+    prompt: decisionPrompt,
+    model,
+    abortSignal,
+  })
+  const firstDecision = parseDecision(firstText, config, parseOptions)
+  if (firstDecision) {
+    return { decision: firstDecision, repairRequested: false }
+  }
+
+  const repairText = await generateDecisionText({
+    prompt: buildDecisionRepairPrompt(decisionPrompt, firstText),
+    model,
+    abortSignal,
+  })
+  const repairedDecision = parseDecision(repairText, config, parseOptions)
+  if (repairedDecision) {
+    return {
+      decision: repairedDecision,
+      repairRequested: true,
+      invalidText: firstText,
+    }
+  }
+
+  return {
+    decision: jsonFailureDecision(),
+    repairRequested: true,
+    invalidText: `${firstText}\n\n${repairText}`,
   }
 }
 
@@ -808,11 +1267,21 @@ function completeRun(
   detail?: string
 ): MitaTeamsRuntime {
   const isTerminal = status !== 'waiting-for-user'
+  const completedAt = isTerminal ? nowIso() : undefined
+  const startedAt = runtime.run?.startedAt
+  const durationMs =
+    completedAt && startedAt
+      ? Math.max(
+          0,
+          new Date(completedAt).getTime() - new Date(startedAt).getTime()
+        )
+      : runtime.run?.durationMs
   return appendMitaTeamsEvent(
     updateRun(runtime, {
       status,
       activeRoleIds: [],
-      completedAt: isTerminal ? nowIso() : undefined,
+      completedAt,
+      durationMs,
       error: status === 'failed' ? detail : undefined,
     }),
     {
@@ -822,9 +1291,9 @@ function completeRun(
           ? 'Mita Teams is waiting for the owner'
           : status === 'stopped'
             ? 'Mita Teams stopped'
-          : status === 'failed'
-            ? 'Mita Teams failed'
-            : 'Mita Teams completed',
+            : status === 'failed'
+              ? 'Mita Teams failed'
+              : 'Mita Teams completed',
       detail,
     }
   )
@@ -845,6 +1314,59 @@ function groupCalls(
   return [...groups.entries()]
     .sort(([a], [b]) => a - b)
     .map(([, calls]) => calls)
+}
+
+function parseRoleStructuredUpdates(
+  outputText: string,
+  role: MitaTeamsRoleConfig,
+  channelId?: MitaTeamsChannelId
+): MitaTeamsStructuredUpdates | undefined {
+  const tasks: MitaTeamsTaskUpdate[] = []
+  const artifacts: MitaTeamsArtifactUpdate[] = []
+
+  for (const rawLine of outputText.split(/\n+/)) {
+    const line = rawLine.trim().replace(/^[-*•]\s*/, '')
+    if (!line) continue
+
+    const taskMatch = line.match(
+      /^(?:Task|任务|任務)\s*(?:\[(.+?)\]|\((.+?)\))?\s*[:：]\s*(.+)$/i
+    )
+    if (taskMatch) {
+      const status =
+        normalizeStatusAlias(taskMatch[1] ?? taskMatch[2]) ?? 'todo'
+      const title = taskMatch[3]?.trim()
+      if (title) {
+        tasks.push({
+          title,
+          status,
+          roleId: role.id,
+          channelId,
+        })
+      }
+      continue
+    }
+
+    const artifactMatch = line.match(
+      /^(Decision|Risk|Artifact|Test result|Final draft|决策|決策|风险|風險|产物|產物|测试结果|測試結果|最终草稿|最終草稿)\s*[:：]\s*(.+)$/i
+    )
+    if (!artifactMatch) continue
+    const type = normalizeArtifactTypeAlias(artifactMatch[1]) ?? 'artifact'
+    const summary = artifactMatch[2]?.trim()
+    if (!summary) continue
+    artifacts.push({
+      type,
+      title: trimText(summary, 80),
+      summary,
+      roleId: role.id,
+      channelId,
+    })
+  }
+
+  if (tasks.length === 0 && artifacts.length === 0) return undefined
+  return {
+    ...(tasks.length ? { tasks: tasks.slice(0, 6) } : {}),
+    ...(artifacts.length ? { artifacts: artifacts.slice(0, 6) } : {}),
+  }
 }
 
 async function runRoleCall({
@@ -924,6 +1446,11 @@ async function runRoleCall({
       model,
       call.channelId
     )
+    nextRuntime = applyStructuredUpdates(
+      nextRuntime,
+      parseRoleStructuredUpdates(outputText, role, call.channelId),
+      { roleId: role.id, channelId: call.channelId }
+    )
     return {
       runtime: nextRuntime,
       output: {
@@ -989,6 +1516,33 @@ function mergeBranchEvents(
   return [...current.teamEvents, ...newEvents].slice(-80)
 }
 
+function mergeBranchStructuredState(
+  current: MitaTeamsRuntime,
+  branch: MitaTeamsRuntime,
+  branchBase: MitaTeamsRuntime
+) {
+  const baseTaskIds = new Set(branchBase.tasks.map((task) => task.id))
+  const currentTaskIds = new Set(current.tasks.map((task) => task.id))
+  const newTasks = branch.tasks.filter(
+    (task) => !baseTaskIds.has(task.id) && !currentTaskIds.has(task.id)
+  )
+  const baseArtifactIds = new Set(
+    branchBase.artifacts.map((artifact) => artifact.id)
+  )
+  const currentArtifactIds = new Set(
+    current.artifacts.map((artifact) => artifact.id)
+  )
+  const newArtifacts = branch.artifacts.filter(
+    (artifact) =>
+      !baseArtifactIds.has(artifact.id) && !currentArtifactIds.has(artifact.id)
+  )
+
+  return {
+    tasks: [...current.tasks, ...newTasks].slice(-40),
+    artifacts: [...current.artifacts, ...newArtifacts].slice(-60),
+  }
+}
+
 function mergeRoleBranch({
   current,
   branch,
@@ -1001,9 +1555,15 @@ function mergeRoleBranch({
   roleId: MitaTeamsRoleId
 }) {
   const branchRoleState = branch.roleStates[roleId]
+  const structuredState = mergeBranchStructuredState(
+    current,
+    branch,
+    branchBase
+  )
 
   return {
     ...current,
+    ...structuredState,
     roleStates: branchRoleState
       ? {
           ...current.roleStates,
@@ -1078,7 +1638,16 @@ async function executeRoleCalls({
   }
 }
 
-function synthesizeFinalResponse(runtime: MitaTeamsRuntime, outputs: RoleOutput[]) {
+function synthesizeFinalResponse(
+  runtime: MitaTeamsRuntime,
+  outputs: RoleOutput[]
+) {
+  const finalDraft = [...runtime.artifacts]
+    .reverse()
+    .find((artifact) => artifact.type === 'final_draft')
+  if (finalDraft) {
+    return finalDraft.content || finalDraft.summary
+  }
   const memory = projectMemoryText(runtime.projectMemory)
   if (memory) {
     return `Mita Teams 已到达一个可交付节点。\n\n${memory}`
@@ -1100,6 +1669,7 @@ export async function runMitaTeamsRuntime({
   let workingConfig = withMitaTeamsRuntime(config, config.runtime)
   let runtime = startRuntimeRun(workingConfig.runtime, workingConfig)
   let recentOutputs: RoleOutput[] = []
+  const userControl = parseUserControl(userText, workingConfig)
 
   const notify = (nextRuntime: MitaTeamsRuntime) => {
     workingConfig = withMitaTeamsRuntime(workingConfig, nextRuntime)
@@ -1107,6 +1677,16 @@ export async function runMitaTeamsRuntime({
   }
 
   notify(runtime)
+
+  if (userControl.shouldPause) {
+    runtime = completeRun(runtime, 'stopped', 'Owner requested pause.')
+    notify(runtime)
+    return {
+      config: workingConfig,
+      finalResponse: 'Mita Teams 已暂停。你可以输入“继续”让主持人接着推进。',
+      status: 'stopped',
+    }
+  }
 
   try {
     while ((runtime.run?.currentRound ?? 0) < workingConfig.roundLimit) {
@@ -1129,15 +1709,27 @@ export async function runMitaTeamsRuntime({
         userText,
         threadTitle,
         recentOutputs,
+        userControl,
       })
-      const decisionText = await generateDecisionText({
-        prompt: decisionPrompt,
+      const decisionResolution = await generateParsedDecision({
+        decisionPrompt,
+        config: workingConfig,
+        userControl,
         model: orchestrator ? modelForRole(orchestrator) : undefined,
+        generateDecisionText,
         abortSignal,
       })
-      const decision =
-        parseDecision(decisionText, workingConfig) ??
-        fallbackDecision(workingConfig, runtime, recentOutputs)
+      const decision = decisionResolution.decision
+
+      if (decisionResolution.repairRequested) {
+        runtime = appendMitaTeamsEvent(runtime, {
+          type: 'json_repair_requested',
+          title: 'Orchestrator JSON repair requested',
+          detail: trimText(decisionResolution.invalidText ?? '', 180),
+          roleId: MITA_TEAMS_ORCHESTRATOR_ROLE_ID,
+        })
+        notify(runtime)
+      }
 
       runtime = appendMitaTeamsEvent(
         updateRun(runtime, {
@@ -1152,6 +1744,14 @@ export async function runMitaTeamsRuntime({
       )
       notify(runtime)
 
+      if (decision.updates) {
+        runtime = applyStructuredUpdates(runtime, decision.updates, {
+          roleId: MITA_TEAMS_ORCHESTRATOR_ROLE_ID,
+          channelId: MITA_TEAMS_TASK_CHANNEL_ID,
+        })
+        notify(runtime)
+      }
+
       if (decision.action === 'configure_team') {
         const applied = applyTeamConfiguration({
           config: workingConfig,
@@ -1162,7 +1762,9 @@ export async function runMitaTeamsRuntime({
         runtime = applied.runtime
         notify(runtime)
 
-        const calls = normalizeCalls(decision.calls, workingConfig)
+        const calls = normalizeCalls(decision.calls, workingConfig, {
+          onlyRoleIds: userControl.onlyRoleIds,
+        })
         if (calls.length === 0) {
           continue
         }

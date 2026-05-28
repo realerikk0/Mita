@@ -27,7 +27,9 @@ import {
   MITA_TEAMS_TASK_CHANNEL_ID,
   MITA_TEAMS_MODES,
   MITA_TEAMS_ROLE_COLORS,
+  MITA_TEAMS_TASK_TEMPLATES,
   patchMitaTeamsConfig,
+  type MitaTeamsArtifact,
   type MitaTeamsChannelConfig,
   type MitaTeamsChannelId,
   type MitaTeamsChoiceRequest,
@@ -36,6 +38,8 @@ import {
   type MitaTeamsRoleConfig,
   type MitaTeamsRoleId,
   type MitaTeamsRoleState,
+  type MitaTeamsTaskStatus,
+  type MitaTeamsTaskTemplateId,
   type MitaTeamsTeamEvent,
 } from '@/types/mita-teams'
 import type { UIMessage } from '@ai-sdk/react'
@@ -48,6 +52,7 @@ import {
   ChevronDown,
   CircleDot,
   Clock3,
+  FileText,
   GitBranch,
   Hash,
   ListChecks,
@@ -57,6 +62,8 @@ import {
   Plus,
   Radio,
   Settings2,
+  ShieldCheck,
+  Target,
   UsersRound,
 } from 'lucide-react'
 import { memo, type ReactNode, useCallback, useMemo } from 'react'
@@ -112,15 +119,14 @@ function permissionLabel(permission: MitaTeamsRoleConfig['permission']) {
 }
 
 function roleModelLabel(role: MitaTeamsRoleConfig, fallback: string) {
-  return role.modelId ? `${role.provider ?? 'provider'} / ${role.modelId}` : fallback
+  return role.modelId
+    ? `${role.provider ?? 'provider'} / ${role.modelId}`
+    : fallback
 }
 
 type Translate = (key: string, options?: Record<string, unknown>) => string
 
-function localizedChannelLabel(
-  channel: MitaTeamsChannelConfig,
-  t: Translate
-) {
+function localizedChannelLabel(channel: MitaTeamsChannelConfig, t: Translate) {
   const template = MITA_TEAMS_CHANNELS.find((item) => item.id === channel.id)
   if (!template || channel.label !== template.label) return channel.label
   return t(`mita-teams:channelsById.${channel.id}.label`)
@@ -137,8 +143,28 @@ function localizedChannelDescription(
   return t(`mita-teams:channelsById.${channel.id}.description`)
 }
 
-function localizedModeLabel(mode: MitaTeamsMode, fallback: string, t: Translate) {
+function localizedModeLabel(
+  mode: MitaTeamsMode,
+  fallback: string,
+  t: Translate
+) {
   return t(`mita-teams:modesById.${mode}.label`) || fallback
+}
+
+function localizedTaskTemplateLabel(
+  templateId: MitaTeamsTaskTemplateId,
+  fallback: string,
+  t: Translate
+) {
+  return t(`mita-teams:templatesById.${templateId}.label`) || fallback
+}
+
+function localizedTaskTemplateDescription(
+  templateId: MitaTeamsTaskTemplateId,
+  fallback: string,
+  t: Translate
+) {
+  return t(`mita-teams:templatesById.${templateId}.description`) || fallback
 }
 
 function localizedRoleName(role: MitaTeamsRoleConfig, t: Translate) {
@@ -193,6 +219,36 @@ function roleStatusLabel(status: string) {
   }
 }
 
+function taskStatusLabel(status: MitaTeamsTaskStatus) {
+  switch (status) {
+    case 'researching':
+      return 'taskStatusResearching'
+    case 'implementing':
+      return 'taskStatusImplementing'
+    case 'reviewing':
+      return 'taskStatusReviewing'
+    case 'done':
+      return 'taskStatusDone'
+    default:
+      return 'taskStatusTodo'
+  }
+}
+
+function artifactTypeLabel(type: MitaTeamsArtifact['type']) {
+  switch (type) {
+    case 'decision':
+      return 'artifactTypeDecision'
+    case 'risk':
+      return 'artifactTypeRisk'
+    case 'test_result':
+      return 'artifactTypeTestResult'
+    case 'final_draft':
+      return 'artifactTypeFinalDraft'
+    default:
+      return 'artifactTypeArtifact'
+  }
+}
+
 function displayTime(value?: string) {
   if (!value) return ''
   const date = new Date(value)
@@ -202,6 +258,14 @@ function displayTime(value?: string) {
     hour: '2-digit',
     minute: '2-digit',
   })
+}
+
+function displayDuration(value?: number) {
+  if (!value || value < 0) return '0s'
+  const seconds = Math.round(value / 1000)
+  if (seconds < 60) return `${seconds}s`
+  const minutes = Math.floor(seconds / 60)
+  return `${minutes}m ${seconds % 60}s`
 }
 
 function rolesForChannel(
@@ -255,6 +319,111 @@ function MemoryList({
           {item}
         </div>
       ))}
+    </div>
+  )
+}
+
+const TASK_STATUS_ORDER: MitaTeamsTaskStatus[] = [
+  'todo',
+  'researching',
+  'implementing',
+  'reviewing',
+  'done',
+]
+
+function TaskBoard({
+  tasks,
+  roles,
+}: {
+  tasks: MitaTeamsConfig['runtime']['tasks']
+  roles: MitaTeamsRoleConfig[]
+}) {
+  const { t } = useTranslation()
+  const roleNames = useMemo(
+    () => new Map(roles.map((role) => [role.id, localizedRoleName(role, t)])),
+    [roles, t]
+  )
+
+  if (tasks.length === 0) {
+    return (
+      <p className="text-xs text-muted-foreground">
+        {t('mita-teams:tasksEmpty')}
+      </p>
+    )
+  }
+
+  return (
+    <div className="space-y-3">
+      {TASK_STATUS_ORDER.map((status) => {
+        const items = tasks.filter((task) => task.status === status)
+        if (items.length === 0) return null
+        return (
+          <div key={status}>
+            <div className="mb-1 text-[11px] font-medium uppercase text-muted-foreground">
+              {t(`mita-teams:${taskStatusLabel(status)}`)}
+            </div>
+            <div className="space-y-1.5">
+              {items.slice(-4).map((task) => (
+                <div
+                  key={task.id}
+                  className="rounded-md border bg-muted/20 px-2 py-1.5"
+                >
+                  <div className="text-xs font-medium leading-5">
+                    {task.title}
+                  </div>
+                  {(task.roleId || task.channelId) && (
+                    <div className="mt-0.5 truncate text-[11px] text-muted-foreground">
+                      {[
+                        task.roleId
+                          ? (roleNames.get(task.roleId) ?? task.roleId)
+                          : undefined,
+                        task.channelId ? `#${task.channelId}` : undefined,
+                      ]
+                        .filter(Boolean)
+                        .join(' · ')}
+                    </div>
+                  )}
+                </div>
+              ))}
+            </div>
+          </div>
+        )
+      })}
+    </div>
+  )
+}
+
+function ArtifactsList({ artifacts }: { artifacts: MitaTeamsArtifact[] }) {
+  const { t } = useTranslation()
+
+  if (artifacts.length === 0) {
+    return (
+      <p className="text-xs text-muted-foreground">
+        {t('mita-teams:artifactsEmpty')}
+      </p>
+    )
+  }
+
+  return (
+    <div className="space-y-2">
+      {artifacts
+        .slice(-6)
+        .reverse()
+        .map((artifact) => (
+          <div key={artifact.id} className="rounded-md border bg-muted/20 p-2">
+            <div className="mb-1 flex items-center justify-between gap-2">
+              <span className="truncate text-xs font-medium">
+                {artifact.title}
+              </span>
+              <span className="shrink-0 rounded-full border bg-background px-1.5 py-0.5 text-[10px] text-muted-foreground">
+                {t(`mita-teams:${artifactTypeLabel(artifact.type)}`)}
+              </span>
+            </div>
+            <div className="line-clamp-3 text-xs leading-5 text-muted-foreground">
+              {artifact.summary}
+            </div>
+          </div>
+        ))}
     </div>
   )
 }
@@ -370,11 +539,11 @@ function RoleStreamPanel({
             message.role === 'assistant' ? 'bg-card' : 'bg-muted/30'
           )}
         >
-            <div className="mb-2 flex items-center justify-between gap-2 text-[11px] text-muted-foreground">
-              <span className="inline-flex items-center gap-1">
-                <span className={cn('size-2 rounded-full', role.color)} />
-                {message.role === 'assistant' ? roleName : t('mita-teams:owner')}
-              </span>
+          <div className="mb-2 flex items-center justify-between gap-2 text-[11px] text-muted-foreground">
+            <span className="inline-flex items-center gap-1">
+              <span className={cn('size-2 rounded-full', role.color)} />
+              {message.role === 'assistant' ? roleName : t('mita-teams:owner')}
+            </span>
             <span>{displayTime(message.createdAt)}</span>
           </div>
           <div className="whitespace-pre-wrap text-sm leading-6">
@@ -386,11 +555,7 @@ function RoleStreamPanel({
   )
 }
 
-function TeamTimeline({
-  events,
-}: {
-  events: MitaTeamsTeamEvent[]
-}) {
+function TeamTimeline({ events }: { events: MitaTeamsTeamEvent[] }) {
   const { t } = useTranslation()
   const visibleEvents = events.slice(-8).reverse()
 
@@ -457,7 +622,9 @@ function ChannelRoleStreams({
               <span className="truncate">{roleName}</span>
             </span>
             <span className="shrink-0 text-[11px] text-muted-foreground">
-              {t(`mita-teams:${roleStatusLabel(runtime.roleStates[role.id]?.status ?? 'idle')}`)}
+              {t(
+                `mita-teams:${roleStatusLabel(runtime.roleStates[role.id]?.status ?? 'idle')}`
+              )}
             </span>
           </div>
           <div className="space-y-2">
@@ -536,7 +703,10 @@ function ModelPicker({
           <ChevronDown className="size-3 shrink-0 text-muted-foreground" />
         </Button>
       </DropdownMenuTrigger>
-      <DropdownMenuContent align="end" className="max-h-80 w-72 overflow-y-auto">
+      <DropdownMenuContent
+        align="end"
+        className="max-h-80 w-72 overflow-y-auto"
+      >
         {modelOptions.length === 0 ? (
           <DropdownMenuItem disabled>{t('common:noModels')}</DropdownMenuItem>
         ) : (
@@ -549,7 +719,9 @@ function ModelPicker({
                   <>
                     {index > 0 && <DropdownMenuSeparator />}
                     <DropdownMenuItem disabled className="gap-2 text-xs">
-                      <ProvidersAvatar provider={{ provider: option.provider }} />
+                      <ProvidersAvatar
+                        provider={{ provider: option.provider }}
+                      />
                       {getProviderTitle(option.provider)}
                     </DropdownMenuItem>
                   </>
@@ -587,7 +759,10 @@ function RoleConfigPanel({
   role: MitaTeamsRoleConfig
   modelOptions: ModelOption[]
   onBack: () => void
-  onUpdate: (roleId: MitaTeamsRoleId, patch: Partial<MitaTeamsRoleConfig>) => void
+  onUpdate: (
+    roleId: MitaTeamsRoleId,
+    patch: Partial<MitaTeamsRoleConfig>
+  ) => void
   onSelectModel: (roleId: MitaTeamsRoleId, option: ModelOption) => void
 }) {
   const { t } = useTranslation()
@@ -624,7 +799,9 @@ function RoleConfigPanel({
           </label>
           <Input
             value={role.name}
-            onChange={(event) => onUpdate(role.id, { name: event.target.value })}
+            onChange={(event) =>
+              onUpdate(role.id, { name: event.target.value })
+            }
           />
         </section>
 
@@ -641,7 +818,8 @@ function RoleConfigPanel({
                 size="icon-sm"
                 className={cn(
                   'rounded-full p-0',
-                  role.color === color.value && 'ring-2 ring-primary ring-offset-2'
+                  role.color === color.value &&
+                    'ring-2 ring-primary ring-offset-2'
                 )}
                 title={color.label}
                 onClick={() => onUpdate(role.id, { color: color.value })}
@@ -688,6 +866,38 @@ function RoleConfigPanel({
             onSelect={onSelectModel}
             className="w-full"
           />
+        </section>
+
+        <section className="grid gap-2">
+          <label className="text-xs font-medium text-muted-foreground">
+            {t('mita-teams:permissions')}
+          </label>
+          <DropdownMenu>
+            <DropdownMenuTrigger asChild>
+              <Button
+                type="button"
+                variant="outline"
+                className="h-9 w-full justify-between text-xs font-normal"
+              >
+                <span>
+                  {t(`mita-teams:${permissionLabel(role.permission)}`)}
+                </span>
+                <ChevronDown className="size-3 text-muted-foreground" />
+              </Button>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent align="end" className="w-56">
+              {(['read', 'tools', 'write'] as const).map((permission) => (
+                <DropdownMenuItem
+                  key={permission}
+                  className="gap-2"
+                  onClick={() => onUpdate(role.id, { permission })}
+                >
+                  <ShieldCheck className="size-3.5 text-muted-foreground" />
+                  {t(`mita-teams:${permissionLabel(permission)}`)}
+                </DropdownMenuItem>
+              ))}
+            </DropdownMenuContent>
+          </DropdownMenu>
         </section>
       </div>
     </div>
@@ -895,6 +1105,19 @@ export const MitaTeamsWorkspace = memo(function MitaTeamsWorkspace({
     [patchConfig]
   )
 
+  const setTaskTemplate = useCallback(
+    (taskTemplateId: MitaTeamsTaskTemplateId) => {
+      const template = MITA_TEAMS_TASK_TEMPLATES.find(
+        (item) => item.id === taskTemplateId
+      )
+      patchConfig({
+        taskTemplateId,
+        mode: template?.defaultMode ?? config.mode,
+      })
+    },
+    [config.mode, patchConfig]
+  )
+
   const setChannel = useCallback(
     (activeChannel: MitaTeamsChannelId) =>
       patchConfig({ activeChannel, workspaceView: 'team-chat' }),
@@ -905,14 +1128,21 @@ export const MitaTeamsWorkspace = memo(function MitaTeamsWorkspace({
   const activeRoleDescription = localizedRoleDescription(activeRole, t)
   const activeChannelLabel = localizedChannelLabel(activeChannel, t)
   const activeChannelDescription = localizedChannelDescription(activeChannel, t)
+  const activeTemplate =
+    MITA_TEAMS_TASK_TEMPLATES.find(
+      (template) => template.id === config.taskTemplateId
+    ) ?? MITA_TEAMS_TASK_TEMPLATES[0]
   const mainTitle = isRoleConfig
     ? t('mita-teams:configureRole', { role: activeRoleName })
     : isRoleChat
       ? activeRoleName
       : activeChannelLabel
   const mainSubtitle =
-    isRoleChat || isRoleConfig ? activeRoleDescription : activeChannelDescription
-  const headerRoles = isRoleChat || isRoleConfig ? enabledRoles : channelEnabledRoles
+    isRoleChat || isRoleConfig
+      ? activeRoleDescription
+      : activeChannelDescription
+  const headerRoles =
+    isRoleChat || isRoleConfig ? enabledRoles : channelEnabledRoles
 
   return (
     <div className="flex flex-1 min-h-0 gap-3 px-3 pb-3">
@@ -1004,7 +1234,9 @@ export const MitaTeamsWorkspace = memo(function MitaTeamsWorkspace({
                       className="gap-2"
                       onClick={() => addRoleFromTemplate(role.id)}
                     >
-                      <span className={cn('size-2.5 rounded-full', role.color)} />
+                      <span
+                        className={cn('size-2.5 rounded-full', role.color)}
+                      />
                       <span>{localizedRoleName(role, t)}</span>
                     </DropdownMenuItem>
                   ))
@@ -1078,7 +1310,9 @@ export const MitaTeamsWorkspace = memo(function MitaTeamsWorkspace({
                 variant="outline"
                 size="icon-xs"
                 onClick={() =>
-                  patchConfig({ roundLimit: Math.max(1, config.roundLimit - 1) })
+                  patchConfig({
+                    roundLimit: Math.max(1, config.roundLimit - 1),
+                  })
                 }
               >
                 <Minus className="size-3" />
@@ -1128,10 +1362,7 @@ export const MitaTeamsWorkspace = memo(function MitaTeamsWorkspace({
                 </span>
               )}
               {!isRoleConfig && (
-                <RuntimeStatusBadge
-                  status={runStatus}
-                  isBusy={isRuntimeBusy}
-                />
+                <RuntimeStatusBadge status={runStatus} isBusy={isRuntimeBusy} />
               )}
             </div>
             <div className="mt-0.5 truncate text-xs text-muted-foreground">
@@ -1196,7 +1427,9 @@ export const MitaTeamsWorkspace = memo(function MitaTeamsWorkspace({
                       )}
                       onClick={() => openRoleChat(role.id)}
                     >
-                      <span className={cn('size-2.5 rounded-full', role.color)} />
+                      <span
+                        className={cn('size-2.5 rounded-full', role.color)}
+                      />
                       <span className="min-w-0 flex-1 truncate">
                         {localizedRoleName(role, t)}
                       </span>
@@ -1259,7 +1492,10 @@ export const MitaTeamsWorkspace = memo(function MitaTeamsWorkspace({
                       <div className="flex size-8 items-center justify-center rounded-full bg-primary/10 text-primary">
                         {isRoleChat ? (
                           <span
-                            className={cn('size-3 rounded-full', activeRole.color)}
+                            className={cn(
+                              'size-3 rounded-full',
+                              activeRole.color
+                            )}
                           />
                         ) : (
                           <UsersRound className="size-4" />
@@ -1325,6 +1561,60 @@ export const MitaTeamsWorkspace = memo(function MitaTeamsWorkspace({
 
         <section>
           <div className="mb-2 flex items-center gap-2 text-xs font-medium uppercase text-muted-foreground">
+            <Target className="size-3.5" />
+            {t('mita-teams:template')}
+          </div>
+          <DropdownMenu>
+            <DropdownMenuTrigger asChild>
+              <Button
+                type="button"
+                variant="outline"
+                className="h-auto w-full justify-between gap-2 px-2 py-2 text-left"
+              >
+                <span className="min-w-0">
+                  <span className="block truncate text-xs font-medium">
+                    {localizedTaskTemplateLabel(
+                      activeTemplate.id,
+                      activeTemplate.label,
+                      t
+                    )}
+                  </span>
+                  <span className="mt-0.5 block line-clamp-2 whitespace-normal text-[11px] font-normal text-muted-foreground">
+                    {localizedTaskTemplateDescription(
+                      activeTemplate.id,
+                      activeTemplate.description,
+                      t
+                    )}
+                  </span>
+                </span>
+                <ChevronDown className="size-3 shrink-0 text-muted-foreground" />
+              </Button>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent align="end" className="w-64">
+              {MITA_TEAMS_TASK_TEMPLATES.map((template) => (
+                <DropdownMenuItem
+                  key={template.id}
+                  className="flex-col items-start gap-1"
+                  onClick={() => setTaskTemplate(template.id)}
+                >
+                  <span className="text-xs font-medium">
+                    {localizedTaskTemplateLabel(template.id, template.label, t)}
+                  </span>
+                  <span className="line-clamp-2 text-[11px] text-muted-foreground">
+                    {localizedTaskTemplateDescription(
+                      template.id,
+                      template.description,
+                      t
+                    )}
+                  </span>
+                </DropdownMenuItem>
+              ))}
+            </DropdownMenuContent>
+          </DropdownMenu>
+        </section>
+
+        <section>
+          <div className="mb-2 flex items-center gap-2 text-xs font-medium uppercase text-muted-foreground">
             <Boxes className="size-3.5" />
             {t('mita-teams:mode')}
           </div>
@@ -1364,11 +1654,14 @@ export const MitaTeamsWorkspace = memo(function MitaTeamsWorkspace({
             {channelRoles.map((role) => {
               const state = runtime.roleStates[role.id]
               return (
-                <div key={role.id} className="rounded-lg border bg-background p-3">
+                <div
+                  key={role.id}
+                  className="rounded-lg border bg-background p-3"
+                >
                   <div className="mb-2 flex items-start gap-2">
                     <span
                       className={cn('mt-1 size-2.5 rounded-full', role.color)}
-                      />
+                    />
                     <div className="min-w-0 flex-1">
                       <div className="truncate text-sm font-medium">
                         {localizedRoleName(role, t)}
@@ -1388,7 +1681,9 @@ export const MitaTeamsWorkspace = memo(function MitaTeamsWorkspace({
                   </div>
                   <div className="flex items-center justify-between gap-2 text-[11px] text-muted-foreground">
                     <span>
-                      {t(`mita-teams:${roleStatusLabel(state?.status ?? 'idle')}`)}
+                      {t(
+                        `mita-teams:${roleStatusLabel(state?.status ?? 'idle')}`
+                      )}
                     </span>
                     <span>
                       {t('mita-teams:memoryVersion', {
@@ -1400,6 +1695,22 @@ export const MitaTeamsWorkspace = memo(function MitaTeamsWorkspace({
               )
             })}
           </div>
+        </section>
+
+        <section className="rounded-lg border bg-background p-3">
+          <div className="mb-2 flex items-center gap-2 text-xs font-medium uppercase text-muted-foreground">
+            <ListChecks className="size-3.5" />
+            {t('mita-teams:taskBoard')}
+          </div>
+          <TaskBoard tasks={runtime.tasks} roles={config.roles} />
+        </section>
+
+        <section className="rounded-lg border bg-background p-3">
+          <div className="mb-2 flex items-center gap-2 text-xs font-medium uppercase text-muted-foreground">
+            <FileText className="size-3.5" />
+            {t('mita-teams:artifacts')}
+          </div>
+          <ArtifactsList artifacts={runtime.artifacts} />
         </section>
 
         <section className="rounded-lg border bg-background p-3">
@@ -1473,6 +1784,32 @@ export const MitaTeamsWorkspace = memo(function MitaTeamsWorkspace({
           <p className="text-xs text-muted-foreground">
             {t('mita-teams:budgetText', { count: config.roundLimit })}
           </p>
+          <div className="mt-2 grid grid-cols-2 gap-2 text-[11px] text-muted-foreground">
+            <div className="rounded-md bg-muted/30 px-2 py-1.5">
+              <div>{t('mita-teams:roundsUsed')}</div>
+              <div className="text-xs font-medium text-foreground">
+                {runtime.run?.currentRound ?? 0}
+              </div>
+            </div>
+            <div className="rounded-md bg-muted/30 px-2 py-1.5">
+              <div>{t('mita-teams:roleCalls')}</div>
+              <div className="text-xs font-medium text-foreground">
+                {runtime.run?.callCount ?? 0}
+              </div>
+            </div>
+            <div className="rounded-md bg-muted/30 px-2 py-1.5">
+              <div>{t('mita-teams:elapsed')}</div>
+              <div className="text-xs font-medium text-foreground">
+                {displayDuration(runtime.run?.durationMs)}
+              </div>
+            </div>
+            <div className="rounded-md bg-muted/30 px-2 py-1.5">
+              <div>{t('mita-teams:tokenUsage')}</div>
+              <div className="text-xs font-medium text-foreground">
+                {runtime.run?.usage?.totalTokens ?? t('mita-teams:reserved')}
+              </div>
+            </div>
+          </div>
         </section>
       </aside>
     </div>

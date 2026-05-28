@@ -12,11 +12,14 @@
   "permissions": "权限",
   "model": "模型",
   "mode": "模式",
+  "template": "模板",
   "projectMemory": "项目记忆",
   "roleMemory": "角色记忆",
   "memoryEmpty": "暂无记忆",
   "memoryVersion": "记忆 v{{version}}",
   "events": "事件",
+  "taskBoard": "任务看板",
+  "tasksEmpty": "暂无任务",
   "teamTimeline": "团队时间线",
   "teamEventsEmpty": "暂无团队事件",
   "facts": "事实",
@@ -67,6 +70,43 @@
   "permissionRead": "读取",
   "permissionTools": "工具",
   "permissionWrite": "写入",
+  "taskStatusTodo": "待确认",
+  "taskStatusResearching": "研究中",
+  "taskStatusImplementing": "实现中",
+  "taskStatusReviewing": "待审查",
+  "taskStatusDone": "已完成",
+  "artifactTypeDecision": "决策",
+  "artifactTypeRisk": "风险",
+  "artifactTypeArtifact": "产物",
+  "artifactTypeTestResult": "测试",
+  "artifactTypeFinalDraft": "草稿",
+  "roundsUsed": "轮次",
+  "roleCalls": "调用",
+  "elapsed": "耗时",
+  "tokenUsage": "Token",
+  "reserved": "预留",
+  "templatesById": {
+    "code": {
+      "label": "代码",
+      "description": "规划、实现、评审并验证软件改动。"
+    },
+    "research": {
+      "label": "研究",
+      "description": "收集证据、比较来源，并交付有依据的回答。"
+    },
+    "product": {
+      "label": "产品",
+      "description": "澄清用户、排列优先级，并形成产品决策。"
+    },
+    "writing": {
+      "label": "写作",
+      "description": "起草、编辑、挑错，并打磨可交付文本。"
+    },
+    "debugging": {
+      "label": "调试",
+      "description": "复现、定位、修复并验证缺陷。"
+    }
+  },
   "channelsById": {
     "task": {
       "label": "当前任务",

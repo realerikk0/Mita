@@ -16,6 +16,7 @@ describe('mita teams metadata', () => {
 
     expect(config.enabled).toBe(true)
     expect(config.mode).toBe('relay')
+    expect(config.taskTemplateId).toBe('code')
     expect(config.workspaceView).toBe('team-chat')
     expect(config.activeRoleId).toBe('orchestrator')
     expect(config.channels).toHaveLength(1)
@@ -29,7 +30,24 @@ describe('mita teams metadata', () => {
     )
     expect(config.roles.every((role) => role.modelId === 'gpt-5')).toBe(true)
     expect(config.runtime.projectMemory.version).toBe(0)
+    expect(config.runtime.tasks).toEqual([])
+    expect(config.runtime.artifacts).toEqual([])
     expect(Object.keys(config.runtime.roleStates)).toHaveLength(1)
+  })
+
+  it('uses the selected task template without pre-creating its recommended roles', () => {
+    const config = createDefaultMitaTeamsConfig(
+      {
+        provider: 'openai',
+        id: 'gpt-5',
+      },
+      'research'
+    )
+
+    expect(config.taskTemplateId).toBe('research')
+    expect(config.mode).toBe('roundtable')
+    expect(config.roles.map((role) => role.id)).toEqual(['orchestrator'])
+    expect(config.channels.map((channel) => channel.id)).toEqual(['task'])
   })
 
   it('normalizes unknown saved values back to safe defaults', () => {
@@ -41,12 +59,14 @@ describe('mita teams metadata', () => {
         workspaceView: 'bad-view',
         activeRoleId: 'bad-role',
         roundLimit: 999,
+        taskTemplateId: 'debugging',
         roles: [{ id: 'reviewer', enabled: false, modelId: 'claude' }],
       },
       { provider: 'openai', id: 'gpt-5' }
     )
 
     expect(config?.mode).toBe('relay')
+    expect(config?.taskTemplateId).toBe('debugging')
     expect(config?.activeChannel).toBe('task')
     expect(config?.workspaceView).toBe('team-chat')
     expect(config?.activeRoleId).toBe('reviewer')
@@ -86,6 +106,32 @@ describe('mita teams metadata', () => {
             roleIds: ['market-strategist', 'missing-role'],
           },
         ],
+        runtime: {
+          version: 1,
+          tasks: [
+            {
+              id: 'investigate',
+              title: 'Investigate positioning',
+              status: 'researching',
+              roleId: 'market-strategist',
+              channelId: 'strategy-room',
+              createdAt: '2026-05-26T00:00:00.000Z',
+              updatedAt: '2026-05-26T00:00:00.000Z',
+            },
+          ],
+          artifacts: [
+            {
+              id: 'risk-positioning',
+              type: 'risk',
+              title: 'Positioning risk',
+              summary: 'Audience may be too broad.',
+              roleId: 'market-strategist',
+              channelId: 'strategy-room',
+              createdAt: '2026-05-26T00:00:00.000Z',
+              updatedAt: '2026-05-26T00:00:00.000Z',
+            },
+          ],
+        },
       },
       { provider: 'openai', id: 'gpt-5' }
     )
@@ -96,6 +142,8 @@ describe('mita teams metadata', () => {
     expect(config?.runtime.roleStates['market-strategist']?.roleId).toBe(
       'market-strategist'
     )
+    expect(config?.runtime.tasks[0].status).toBe('researching')
+    expect(config?.runtime.artifacts[0].type).toBe('risk')
   })
 
   it('renders orchestration instructions without claiming private model calls', () => {
@@ -106,6 +154,7 @@ describe('mita teams metadata', () => {
     const instructions = renderMitaTeamsSystemInstructions(config)
 
     expect(instructions).toContain('Mita Teams mode is active')
+    expect(instructions).toContain('Task template: Code')
     expect(instructions).toContain('Act as the Coordinator')
     expect(instructions).toContain('suggest specific roles or channels')
     expect(instructions).toContain('Teams runtime scheduled role calls')
@@ -117,9 +166,7 @@ describe('mita teams metadata', () => {
         provider: 'openai',
         id: 'gpt-5',
       }),
-      roles: [
-        DEFAULT_MITA_TEAMS_ROLES.find((role) => role.id === 'reviewer')!,
-      ],
+      roles: [DEFAULT_MITA_TEAMS_ROLES.find((role) => role.id === 'reviewer')!],
       activeRoleId: 'reviewer' as const,
       workspaceView: 'role-chat' as const,
     }

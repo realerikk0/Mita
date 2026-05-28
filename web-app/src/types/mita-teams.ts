@@ -13,6 +13,27 @@ export type MitaTeamsPermission = 'read' | 'tools' | 'write'
 
 export type MitaTeamsWorkspaceView = 'team-chat' | 'role-chat' | 'role-config'
 
+export type MitaTeamsTaskTemplateId =
+  | 'code'
+  | 'research'
+  | 'product'
+  | 'writing'
+  | 'debugging'
+
+export type MitaTeamsTaskStatus =
+  | 'todo'
+  | 'researching'
+  | 'implementing'
+  | 'reviewing'
+  | 'done'
+
+export type MitaTeamsArtifactType =
+  | 'decision'
+  | 'risk'
+  | 'artifact'
+  | 'test_result'
+  | 'final_draft'
+
 export type MitaTeamsRunStatus =
   | 'idle'
   | 'running'
@@ -80,6 +101,13 @@ export type MitaTeamsMilestone = {
   sourceRoleId?: MitaTeamsRoleId
 }
 
+export type MitaTeamsTokenUsage = {
+  promptTokens?: number
+  completionTokens?: number
+  totalTokens?: number
+  estimatedCostUsd?: number
+}
+
 export type MitaTeamsChoiceOption = {
   id: string
   label: string
@@ -103,40 +131,90 @@ export type MitaTeamsRoleCallPlan = {
   mode?: MitaTeamsExecutionMode
   dependsOn?: MitaTeamsRoleId[]
   group?: number
+  requiredPermission?: MitaTeamsPermission
+}
+
+export type MitaTeamsTask = {
+  id: string
+  title: string
+  status: MitaTeamsTaskStatus
+  roleId?: MitaTeamsRoleId
+  channelId?: MitaTeamsChannelId
+  createdAt: string
+  updatedAt: string
+}
+
+export type MitaTeamsTaskUpdate = {
+  id?: string
+  title: string
+  status: MitaTeamsTaskStatus
+  roleId?: MitaTeamsRoleId
+  channelId?: MitaTeamsChannelId
+}
+
+export type MitaTeamsArtifact = {
+  id: string
+  type: MitaTeamsArtifactType
+  title: string
+  summary: string
+  content?: string
+  roleId?: MitaTeamsRoleId
+  channelId?: MitaTeamsChannelId
+  createdAt: string
+  updatedAt: string
+}
+
+export type MitaTeamsArtifactUpdate = {
+  id?: string
+  type: MitaTeamsArtifactType
+  title: string
+  summary: string
+  content?: string
+  roleId?: MitaTeamsRoleId
+  channelId?: MitaTeamsChannelId
+}
+
+export type MitaTeamsStructuredUpdates = {
+  tasks?: MitaTeamsTaskUpdate[]
+  artifacts?: MitaTeamsArtifactUpdate[]
+}
+
+type MitaTeamsDecisionUpdates = {
+  updates?: MitaTeamsStructuredUpdates
 }
 
 export type MitaTeamsOrchestratorDecision =
-  | {
+  | ({
       action: 'configure_team'
       reason: string
       roles: MitaTeamsRoleConfig[]
       channels: MitaTeamsChannelConfig[]
       mode?: MitaTeamsExecutionMode
       calls?: MitaTeamsRoleCallPlan[]
-    }
-  | {
+    } & MitaTeamsDecisionUpdates)
+  | ({
       action: 'call_roles'
       mode: MitaTeamsExecutionMode
       reason: string
       calls: MitaTeamsRoleCallPlan[]
-    }
-  | {
+    } & MitaTeamsDecisionUpdates)
+  | ({
       action: 'ask_user'
       reason: string
       question: string
       options: MitaTeamsChoiceOption[]
-    }
-  | {
+    } & MitaTeamsDecisionUpdates)
+  | ({
       action: 'milestone'
       reason: string
       milestone: string
       next?: MitaTeamsOrchestratorDecision
-    }
-  | {
+    } & MitaTeamsDecisionUpdates)
+  | ({
       action: 'stop'
       reason: string
       finalResponse: string
-    }
+    } & MitaTeamsDecisionUpdates)
 
 export type MitaTeamsTeamEvent = {
   id: string
@@ -150,6 +228,9 @@ export type MitaTeamsTeamEvent = {
     | 'milestone'
     | 'choice_requested'
     | 'choice_answered'
+    | 'tasks_updated'
+    | 'artifact_recorded'
+    | 'json_repair_requested'
     | 'run_completed'
     | 'run_failed'
   title: string
@@ -171,6 +252,8 @@ export type MitaTeamsRun = {
   startedAt: string
   updatedAt: string
   completedAt?: string
+  durationMs?: number
+  usage?: MitaTeamsTokenUsage
   error?: string
 }
 
@@ -179,6 +262,8 @@ export type MitaTeamsRuntime = {
   run?: MitaTeamsRun
   projectMemory: MitaTeamsProjectMemory
   roleStates: Partial<Record<MitaTeamsRoleId, MitaTeamsRoleState>>
+  tasks: MitaTeamsTask[]
+  artifacts: MitaTeamsArtifact[]
   milestones: MitaTeamsMilestone[]
   teamEvents: MitaTeamsTeamEvent[]
   userChoiceRequest?: MitaTeamsChoiceRequest
@@ -207,6 +292,7 @@ export type MitaTeamsRoleConfig = {
 export type MitaTeamsConfig = {
   enabled: boolean
   mode: MitaTeamsMode
+  taskTemplateId: MitaTeamsTaskTemplateId
   activeChannel: MitaTeamsChannelId
   activeRoleId: MitaTeamsRoleId
   workspaceView: MitaTeamsWorkspaceView
@@ -249,13 +335,15 @@ export const MITA_TEAMS_CHANNELS: Array<{
   {
     id: MITA_TEAMS_TASK_CHANNEL_ID,
     label: 'Current task',
-    description: 'The shared working room for the owner goal and current context.',
+    description:
+      'The shared working room for the owner goal and current context.',
     roleIds: [MITA_TEAMS_ORCHESTRATOR_ROLE_ID],
   },
   {
     id: 'research',
     label: 'Research',
-    description: 'Collect evidence, references, code findings, and open questions.',
+    description:
+      'Collect evidence, references, code findings, and open questions.',
     roleIds: ['researcher'],
   },
   {
@@ -267,19 +355,22 @@ export const MITA_TEAMS_CHANNELS: Array<{
   {
     id: 'build',
     label: 'Build log',
-    description: 'Track concrete edits, implementation notes, and verification output.',
+    description:
+      'Track concrete edits, implementation notes, and verification output.',
     roleIds: ['builder'],
   },
   {
     id: 'review',
     label: 'Review',
-    description: 'Inspect risks, regressions, missing tests, and acceptance gaps.',
+    description:
+      'Inspect risks, regressions, missing tests, and acceptance gaps.',
     roleIds: ['reviewer', 'skeptic'],
   },
   {
     id: 'final',
     label: 'Final delivery',
-    description: 'Assemble the user-facing answer, artifacts, and next actions.',
+    description:
+      'Assemble the user-facing answer, artifacts, and next actions.',
     roleIds: ['orchestrator', 'reviewer'],
   },
 ]
@@ -313,6 +404,69 @@ export const MITA_TEAMS_MODES: Array<{
     id: 'silent',
     label: 'Silent',
     description: 'Keep internal collaboration quiet and show checkpoints.',
+  },
+]
+
+export const MITA_TEAMS_TASK_TEMPLATES: Array<{
+  id: MitaTeamsTaskTemplateId
+  label: string
+  description: string
+  defaultMode: MitaTeamsMode
+  recommendedRoleIds: MitaTeamsRoleId[]
+  orchestratorHint: string
+  defaultFlow: string[]
+}> = [
+  {
+    id: 'code',
+    label: 'Code',
+    description: 'Plan, implement, review, and verify software changes.',
+    defaultMode: 'relay',
+    recommendedRoleIds: ['architect', 'builder', 'reviewer', 'qa'],
+    orchestratorHint:
+      'For code work, prefer a relay flow: clarify scope, inspect relevant files, design the smallest safe change, implement, review, and verify.',
+    defaultFlow: ['Scope', 'Inspect', 'Build', 'Review', 'Verify'],
+  },
+  {
+    id: 'research',
+    label: 'Research',
+    description:
+      'Gather evidence, compare sources, and deliver a sourced answer.',
+    defaultMode: 'roundtable',
+    recommendedRoleIds: ['researcher', 'skeptic', 'editor'],
+    orchestratorHint:
+      'For research work, separate evidence from inference, ask for missing constraints, and converge into a cited summary.',
+    defaultFlow: ['Question', 'Evidence', 'Compare', 'Synthesize'],
+  },
+  {
+    id: 'product',
+    label: 'Product',
+    description:
+      'Clarify users, prioritize scope, and shape product decisions.',
+    defaultMode: 'debate',
+    recommendedRoleIds: ['pm', 'architect', 'skeptic', 'editor'],
+    orchestratorHint:
+      'For product work, make the user journey explicit, compare tradeoffs, and convert discussion into decisions and next steps.',
+    defaultFlow: ['User', 'Options', 'Tradeoffs', 'Decision'],
+  },
+  {
+    id: 'writing',
+    label: 'Writing',
+    description: 'Draft, edit, critique, and polish a deliverable text.',
+    defaultMode: 'roundtable',
+    recommendedRoleIds: ['editor', 'skeptic', 'pm'],
+    orchestratorHint:
+      'For writing work, identify audience and purpose, produce a draft, critique it, then polish the final version.',
+    defaultFlow: ['Audience', 'Draft', 'Critique', 'Polish'],
+  },
+  {
+    id: 'debugging',
+    label: 'Debugging',
+    description: 'Reproduce, isolate, fix, and verify defects.',
+    defaultMode: 'relay',
+    recommendedRoleIds: ['researcher', 'builder', 'reviewer', 'qa'],
+    orchestratorHint:
+      'For debugging work, reproduce symptoms, isolate the likely cause, apply the narrow fix, then verify the failure mode is gone.',
+    defaultFlow: ['Reproduce', 'Isolate', 'Fix', 'Verify'],
   },
 ]
 
@@ -419,9 +573,7 @@ const isMitaTeamsWorkspaceView = (
 ): value is MitaTeamsWorkspaceView =>
   value === 'team-chat' || value === 'role-chat' || value === 'role-config'
 
-const isMitaTeamsPermission = (
-  value: unknown
-): value is MitaTeamsPermission =>
+const isMitaTeamsPermission = (value: unknown): value is MitaTeamsPermission =>
   value === 'read' || value === 'tools' || value === 'write'
 
 const titleFromId = (id: string) =>
@@ -437,8 +589,9 @@ const defaultCoordinatorRole = (model?: ThreadModel): MitaTeamsRoleConfig => ({
   modelId: model?.id,
 })
 
-const defaultRoles = (model?: ThreadModel): MitaTeamsRoleConfig[] =>
-  [defaultCoordinatorRole(model)]
+const defaultRoles = (model?: ThreadModel): MitaTeamsRoleConfig[] => [
+  defaultCoordinatorRole(model),
+]
 
 const defaultTaskChannel = (): MitaTeamsChannelConfig => ({
   ...MITA_TEAMS_CHANNELS[0],
@@ -523,6 +676,33 @@ const isRoleStatus = (value: unknown): value is MitaTeamsRoleStatus =>
 
 const isExecutionMode = (value: unknown): value is MitaTeamsExecutionMode =>
   value === 'parallel' || value === 'serial' || value === 'hybrid'
+
+const isTaskTemplateId = (value: unknown): value is MitaTeamsTaskTemplateId =>
+  MITA_TEAMS_TASK_TEMPLATES.some((template) => template.id === value)
+
+const isTaskStatus = (value: unknown): value is MitaTeamsTaskStatus =>
+  value === 'todo' ||
+  value === 'researching' ||
+  value === 'implementing' ||
+  value === 'reviewing' ||
+  value === 'done'
+
+const isArtifactType = (value: unknown): value is MitaTeamsArtifactType =>
+  value === 'decision' ||
+  value === 'risk' ||
+  value === 'artifact' ||
+  value === 'test_result' ||
+  value === 'final_draft'
+
+const defaultTaskTemplate = (value?: unknown) =>
+  MITA_TEAMS_TASK_TEMPLATES.find((template) => template.id === value) ??
+  MITA_TEAMS_TASK_TEMPLATES[0]
+
+const safeOptionalRoleId = (value: unknown) =>
+  isMitaTeamsRoleId(value) ? value : undefined
+
+const safeOptionalChannelId = (value: unknown) =>
+  isMitaTeamsChannelId(value) ? value : undefined
 
 const normalizeStream = (
   value: unknown,
@@ -632,9 +812,7 @@ const normalizeChoiceRequest = (
       }
       return normalized
     })
-    .filter(
-      (option): option is MitaTeamsChoiceOption => option !== undefined
-    )
+    .filter((option): option is MitaTeamsChoiceOption => option !== undefined)
     .slice(0, 4)
 
   if (options.length === 0) return undefined
@@ -650,6 +828,90 @@ const normalizeChoiceRequest = (
   }
 }
 
+const normalizeTaskList = (value: unknown): MitaTeamsTask[] =>
+  Array.isArray(value)
+    ? value
+        .map((task): MitaTeamsTask | undefined => {
+          if (!task || typeof task !== 'object') return undefined
+          const raw = task as Partial<MitaTeamsTask>
+          if (typeof raw.title !== 'string' || !raw.title.trim()) {
+            return undefined
+          }
+          const id =
+            normalizeMitaTeamsId(raw.id, '') ||
+            normalizeMitaTeamsId(raw.title, `task-${Date.now()}`)
+          const now = nowIso()
+          return {
+            id,
+            title: raw.title.trim(),
+            status: isTaskStatus(raw.status) ? raw.status : 'todo',
+            roleId: safeOptionalRoleId(raw.roleId),
+            channelId: safeOptionalChannelId(raw.channelId),
+            createdAt: raw.createdAt || now,
+            updatedAt: raw.updatedAt || now,
+          }
+        })
+        .filter((task): task is MitaTeamsTask => task !== undefined)
+        .slice(-40)
+    : []
+
+const normalizeArtifactList = (value: unknown): MitaTeamsArtifact[] =>
+  Array.isArray(value)
+    ? value
+        .map((artifact): MitaTeamsArtifact | undefined => {
+          if (!artifact || typeof artifact !== 'object') return undefined
+          const raw = artifact as Partial<MitaTeamsArtifact>
+          if (
+            typeof raw.title !== 'string' ||
+            !raw.title.trim() ||
+            typeof raw.summary !== 'string' ||
+            !raw.summary.trim()
+          ) {
+            return undefined
+          }
+          const id =
+            normalizeMitaTeamsId(raw.id, '') ||
+            normalizeMitaTeamsId(raw.title, `artifact-${Date.now()}`)
+          const now = nowIso()
+          const normalized: MitaTeamsArtifact = {
+            id,
+            type: isArtifactType(raw.type) ? raw.type : 'artifact',
+            title: raw.title.trim(),
+            summary: raw.summary.trim(),
+            roleId: safeOptionalRoleId(raw.roleId),
+            channelId: safeOptionalChannelId(raw.channelId),
+            createdAt: raw.createdAt || now,
+            updatedAt: raw.updatedAt || now,
+          }
+          if (typeof raw.content === 'string' && raw.content.trim()) {
+            normalized.content = raw.content.trim()
+          }
+          return normalized
+        })
+        .filter(
+          (artifact): artifact is MitaTeamsArtifact => artifact !== undefined
+        )
+        .slice(-60)
+    : []
+
+const normalizeTokenUsage = (
+  value: unknown
+): MitaTeamsTokenUsage | undefined => {
+  if (!value || typeof value !== 'object') return undefined
+  const raw = value as MitaTeamsTokenUsage
+  const usage: MitaTeamsTokenUsage = {}
+  if (typeof raw.promptTokens === 'number')
+    usage.promptTokens = raw.promptTokens
+  if (typeof raw.completionTokens === 'number') {
+    usage.completionTokens = raw.completionTokens
+  }
+  if (typeof raw.totalTokens === 'number') usage.totalTokens = raw.totalTokens
+  if (typeof raw.estimatedCostUsd === 'number') {
+    usage.estimatedCostUsd = raw.estimatedCostUsd
+  }
+  return Object.keys(usage).length ? usage : undefined
+}
+
 export function createDefaultMitaTeamsRuntime(
   roles: MitaTeamsRoleConfig[] = defaultRoles(),
   timestamp = nowIso()
@@ -660,6 +922,8 @@ export function createDefaultMitaTeamsRuntime(
     roleStates: Object.fromEntries(
       roles.map((role) => [role.id, createRoleState(role, timestamp)])
     ),
+    tasks: [],
+    artifacts: [],
     milestones: [],
     teamEvents: [],
   }
@@ -673,9 +937,7 @@ export function normalizeMitaTeamsRuntime(
   if (!value || typeof value !== 'object') return fallback
   const raw = value as Partial<MitaTeamsRuntime>
   const rawRoleStates =
-    raw.roleStates && typeof raw.roleStates === 'object'
-      ? raw.roleStates
-      : {}
+    raw.roleStates && typeof raw.roleStates === 'object' ? raw.roleStates : {}
 
   const roleStates = Object.fromEntries(
     roles.map((role) => {
@@ -689,9 +951,7 @@ export function normalizeMitaTeamsRuntime(
         role.id,
         {
           roleId: role.id,
-          status: isRoleStatus(savedState?.status)
-            ? savedState.status
-            : 'idle',
+          status: isRoleStatus(savedState?.status) ? savedState.status : 'idle',
           stream: normalizeStream(savedState?.stream, role.id),
           memory,
           lastTurnId: savedState?.lastTurnId,
@@ -712,7 +972,8 @@ export function normalizeMitaTeamsRuntime(
               typeof saved.currentRound === 'number' ? saved.currentRound : 0,
             maxRounds:
               typeof saved.maxRounds === 'number' ? saved.maxRounds : 5,
-            callCount: typeof saved.callCount === 'number' ? saved.callCount : 0,
+            callCount:
+              typeof saved.callCount === 'number' ? saved.callCount : 0,
             executionMode: isExecutionMode(saved.executionMode)
               ? saved.executionMode
               : undefined,
@@ -723,6 +984,11 @@ export function normalizeMitaTeamsRuntime(
             startedAt: saved.startedAt || nowIso(),
             updatedAt: saved.updatedAt || nowIso(),
             completedAt: saved.completedAt,
+            durationMs:
+              typeof saved.durationMs === 'number'
+                ? saved.durationMs
+                : undefined,
+            usage: normalizeTokenUsage(saved.usage),
             error: saved.error,
           } satisfies MitaTeamsRun
         })()
@@ -733,27 +999,27 @@ export function normalizeMitaTeamsRuntime(
     run,
     projectMemory: normalizeProjectMemory(raw.projectMemory),
     roleStates,
+    tasks: normalizeTaskList(raw.tasks),
+    artifacts: normalizeArtifactList(raw.artifacts),
     milestones: Array.isArray(raw.milestones)
       ? raw.milestones
-          .filter(
-            (milestone): milestone is MitaTeamsMilestone =>
-              Boolean(
-                milestone &&
-                  typeof milestone === 'object' &&
-                  typeof milestone.title === 'string'
-              )
+          .filter((milestone): milestone is MitaTeamsMilestone =>
+            Boolean(
+              milestone &&
+                typeof milestone === 'object' &&
+                typeof milestone.title === 'string'
+            )
           )
           .slice(-20)
       : [],
     teamEvents: Array.isArray(raw.teamEvents)
       ? raw.teamEvents
-          .filter(
-            (event): event is MitaTeamsTeamEvent =>
-              Boolean(
-                event &&
-                  typeof event === 'object' &&
-                  typeof event.title === 'string'
-              )
+          .filter((event): event is MitaTeamsTeamEvent =>
+            Boolean(
+              event &&
+                typeof event === 'object' &&
+                typeof event.title === 'string'
+            )
           )
           .slice(-60)
       : [],
@@ -762,14 +1028,17 @@ export function normalizeMitaTeamsRuntime(
 }
 
 export function createDefaultMitaTeamsConfig(
-  model?: ThreadModel
+  model?: ThreadModel,
+  taskTemplateId: MitaTeamsTaskTemplateId = 'code'
 ): MitaTeamsConfig {
   const now = nowIso()
   const roles = defaultRoles(model)
   const channels = [defaultTaskChannel()]
+  const taskTemplate = defaultTaskTemplate(taskTemplateId)
   return {
     enabled: true,
-    mode: 'relay',
+    mode: taskTemplate.defaultMode,
+    taskTemplateId: taskTemplate.id,
     activeChannel: MITA_TEAMS_TASK_CHANNEL_ID,
     activeRoleId: MITA_TEAMS_ORCHESTRATOR_ROLE_ID,
     workspaceView: 'team-chat',
@@ -791,7 +1060,10 @@ export function normalizeMitaTeamsConfig(
   const raw = value as Partial<MitaTeamsConfig>
   if (raw.enabled !== true) return undefined
 
-  const fallback = createDefaultMitaTeamsConfig(model)
+  const taskTemplateId = isTaskTemplateId(raw.taskTemplateId)
+    ? raw.taskTemplateId
+    : 'code'
+  const fallback = createDefaultMitaTeamsConfig(model, taskTemplateId)
   const rawRoles = Array.isArray(raw.roles) ? raw.roles : []
   const rawChannels = Array.isArray(raw.channels) ? raw.channels : []
   const roleTemplates = DEFAULT_MITA_TEAMS_ROLES.map((role) => ({
@@ -808,19 +1080,20 @@ export function normalizeMitaTeamsConfig(
           const id = normalizeMitaTeamsId(saved.id, '')
           if (!id) return undefined
 
-          const template =
-            roleTemplates.find((defaultRole) => defaultRole.id === id) ?? {
-              id,
-              name: titleFromId(id),
-              label: titleFromId(id).slice(0, 12),
-              description: '',
-              prompt: '',
-              color: 'bg-slate-500',
-              permission: 'read' as const,
-              provider: model?.provider,
-              modelId: model?.id,
-              enabled: true,
-            }
+          const template = roleTemplates.find(
+            (defaultRole) => defaultRole.id === id
+          ) ?? {
+            id,
+            name: titleFromId(id),
+            label: titleFromId(id).slice(0, 12),
+            description: '',
+            prompt: '',
+            color: 'bg-slate-500',
+            permission: 'read' as const,
+            provider: model?.provider,
+            modelId: model?.id,
+            enabled: true,
+          }
 
           return {
             ...template,
@@ -851,13 +1124,14 @@ export function normalizeMitaTeamsConfig(
           const id = normalizeMitaTeamsId(saved.id, '')
           if (!id) return undefined
 
-          const template =
-            MITA_TEAMS_CHANNELS.find((item) => item.id === id) ?? {
-              id,
-              label: titleFromId(id),
-              description: '',
-              roleIds: [],
-            }
+          const template = MITA_TEAMS_CHANNELS.find(
+            (item) => item.id === id
+          ) ?? {
+            id,
+            label: titleFromId(id),
+            description: '',
+            roleIds: [],
+          }
           const roleIds = uniqueIds(
             Array.isArray(saved.roleIds) && saved.roleIds.length
               ? saved.roleIds
@@ -886,7 +1160,9 @@ export function normalizeMitaTeamsConfig(
 
   const safeChannels = (channels.length ? channels : fallback.channels).map(
     (channel) => {
-      const roleIds = channel.roleIds.filter((roleId) => safeRoleIds.has(roleId))
+      const roleIds = channel.roleIds.filter((roleId) =>
+        safeRoleIds.has(roleId)
+      )
       const fallbackRoleId =
         channel.id === MITA_TEAMS_TASK_CHANNEL_ID &&
         safeRoleIds.has(MITA_TEAMS_ORCHESTRATOR_ROLE_ID)
@@ -909,17 +1185,18 @@ export function normalizeMitaTeamsConfig(
   const activeRoleId =
     normalizedActiveRoleId && safeRoleIds.has(normalizedActiveRoleId)
       ? normalizedActiveRoleId
-      : safeRoles[0]?.id ?? MITA_TEAMS_ORCHESTRATOR_ROLE_ID
+      : (safeRoles[0]?.id ?? MITA_TEAMS_ORCHESTRATOR_ROLE_ID)
   const activeChannel =
     normalizedActiveChannel && safeChannelIds.has(normalizedActiveChannel)
       ? normalizedActiveChannel
-      : safeChannels[0]?.id ?? MITA_TEAMS_TASK_CHANNEL_ID
+      : (safeChannels[0]?.id ?? MITA_TEAMS_TASK_CHANNEL_ID)
 
   return {
     ...fallback,
     ...raw,
     enabled: true,
     mode: isMitaTeamsMode(raw.mode) ? raw.mode : fallback.mode,
+    taskTemplateId,
     activeChannel,
     activeRoleId,
     workspaceView: isMitaTeamsWorkspaceView(raw.workspaceView)
@@ -953,7 +1230,10 @@ export function renderMitaTeamsSystemInstructions(
   config: MitaTeamsConfig
 ): string {
   const mode = MITA_TEAMS_MODES.find((item) => item.id === config.mode)
-  const activeRole = config.roles.find((role) => role.id === config.activeRoleId)
+  const taskTemplate = defaultTaskTemplate(config.taskTemplateId)
+  const activeRole = config.roles.find(
+    (role) => role.id === config.activeRoleId
+  )
   const roles = config.roles
     .filter((role) => role.enabled)
     .map((role) => {
@@ -966,7 +1246,9 @@ export function renderMitaTeamsSystemInstructions(
     .join('\n')
   const channels = config.channels
     .map((channel) => {
-      const members = channel.roleIds.length ? channel.roleIds.join(', ') : 'none'
+      const members = channel.roleIds.length
+        ? channel.roleIds.join(', ')
+        : 'none'
       return `- #${channel.label} (${channel.id}, roles: ${members}): ${channel.description}`
     })
     .join('\n')
@@ -981,6 +1263,8 @@ export function renderMitaTeamsSystemInstructions(
   return `Mita Teams mode is active.
 Goal: solve the owner request through role-based collaboration.
 Mode: ${mode?.label ?? config.mode} - ${mode?.description ?? ''}
+Task template: ${taskTemplate.label} - ${taskTemplate.orchestratorHint}
+Recommended roles for this template: ${taskTemplate.recommendedRoleIds.join(', ') || 'none'}.
 Round limit: ${config.roundLimit}.
 Roles:
 ${roles}

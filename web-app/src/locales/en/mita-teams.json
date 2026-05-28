@@ -12,11 +12,14 @@
   "permissions": "Permissions",
   "model": "Model",
   "mode": "Mode",
+  "template": "Template",
   "projectMemory": "Project memory",
   "roleMemory": "Role memory",
   "memoryEmpty": "No memory yet",
   "memoryVersion": "Memory v{{version}}",
   "events": "Events",
+  "taskBoard": "Task board",
+  "tasksEmpty": "No tasks yet",
   "teamTimeline": "Team timeline",
   "teamEventsEmpty": "No team events yet",
   "facts": "Facts",
@@ -67,6 +70,43 @@
   "permissionRead": "Read",
   "permissionTools": "Tools",
   "permissionWrite": "Write",
+  "taskStatusTodo": "To confirm",
+  "taskStatusResearching": "Researching",
+  "taskStatusImplementing": "Implementing",
+  "taskStatusReviewing": "To review",
+  "taskStatusDone": "Done",
+  "artifactTypeDecision": "Decision",
+  "artifactTypeRisk": "Risk",
+  "artifactTypeArtifact": "Artifact",
+  "artifactTypeTestResult": "Test",
+  "artifactTypeFinalDraft": "Draft",
+  "roundsUsed": "Rounds",
+  "roleCalls": "Calls",
+  "elapsed": "Elapsed",
+  "tokenUsage": "Tokens",
+  "reserved": "Reserved",
+  "templatesById": {
+    "code": {
+      "label": "Code",
+      "description": "Plan, implement, review, and verify software changes."
+    },
+    "research": {
+      "label": "Research",
+      "description": "Gather evidence, compare sources, and deliver a sourced answer."
+    },
+    "product": {
+      "label": "Product",
+      "description": "Clarify users, prioritize scope, and shape product decisions."
+    },
+    "writing": {
+      "label": "Writing",
+      "description": "Draft, edit, critique, and polish a deliverable text."
+    },
+    "debugging": {
+      "label": "Debugging",
+      "description": "Reproduce, isolate, fix, and verify defects."
+    }
+  },
   "channelsById": {
     "task": {
       "label": "Current task",

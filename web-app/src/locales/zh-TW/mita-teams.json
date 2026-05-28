@@ -12,11 +12,14 @@
   "permissions": "權限",
   "model": "模型",
   "mode": "模式",
+  "template": "模板",
   "projectMemory": "專案記憶",
   "roleMemory": "角色記憶",
   "memoryEmpty": "暫無記憶",
   "memoryVersion": "記憶 v{{version}}",
   "events": "事件",
+  "taskBoard": "任務看板",
+  "tasksEmpty": "暫無任務",
   "teamTimeline": "團隊時間線",
   "teamEventsEmpty": "暫無團隊事件",
   "facts": "事實",
@@ -67,6 +70,43 @@
   "permissionRead": "讀取",
   "permissionTools": "工具",
   "permissionWrite": "寫入",
+  "taskStatusTodo": "待確認",
+  "taskStatusResearching": "研究中",
+  "taskStatusImplementing": "實作中",
+  "taskStatusReviewing": "待審查",
+  "taskStatusDone": "已完成",
+  "artifactTypeDecision": "決策",
+  "artifactTypeRisk": "風險",
+  "artifactTypeArtifact": "產物",
+  "artifactTypeTestResult": "測試",
+  "artifactTypeFinalDraft": "草稿",
+  "roundsUsed": "輪次",
+  "roleCalls": "呼叫",
+  "elapsed": "耗時",
+  "tokenUsage": "Token",
+  "reserved": "預留",
+  "templatesById": {
+    "code": {
+      "label": "程式碼",
+      "description": "規劃、實作、審查並驗證軟體改動。"
+    },
+    "research": {
+      "label": "研究",
+      "description": "收集證據、比較來源，並交付有依據的回答。"
+    },
+    "product": {
+      "label": "產品",
+      "description": "釐清使用者、排列優先級，並形成產品決策。"
+    },
+    "writing": {
+      "label": "寫作",
+      "description": "起草、編輯、挑錯，並打磨可交付文字。"
+    },
+    "debugging": {
+      "label": "除錯",
+      "description": "重現、定位、修復並驗證缺陷。"
+    }
+  },
   "channelsById": {
     "task": {
       "label": "目前任務",
