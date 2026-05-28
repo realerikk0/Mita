@@ -254,7 +254,9 @@ describe('migrateLegacyModels', () => {
       vi.mocked(joinPath).mockImplementation((paths) =>
         Promise.resolve(paths.join('/'))
       )
-      vi.mocked(fs.existsSync).mockResolvedValue(true)
+      vi.mocked(fs.existsSync)
+        .mockResolvedValueOnce(true) // models directory exists
+        .mockResolvedValueOnce(false) // no model.yml at the models root
       vi.mocked(fs.readdirSync).mockResolvedValue([])
       vi.mocked(fs.fileStat).mockResolvedValue({
         isDirectory: false,

@@ -77,5 +77,17 @@ vi.mock('@janhq/core', () => ({
   events: {
     emit: vi.fn(),
   },
+  AppEvent: {
+    onModelImported: 'onModelImported',
+    onBackendVerificationFailed: 'onBackendVerificationFailed',
+  },
+  DownloadEvent: {
+    onFileDownloadUpdate: 'onFileDownloadUpdate',
+    onFileDownloadStopped: 'onFileDownloadStopped',
+    onModelValidationFailed: 'onModelValidationFailed',
+    onFileDownloadError: 'onFileDownloadError',
+    onFileDownloadAndVerificationSuccess: 'onFileDownloadAndVerificationSuccess',
+    onModelValidationStarted: 'onModelValidationStarted',
+  },
   AIEngine: vi.fn(),
 }))

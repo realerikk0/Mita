@@ -1,7 +1,12 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import llamacpp_extension from '../index'
 
-import { normalizeLlamacppConfig } from '@janhq/tauri-plugin-llamacpp-api'
+import {
+  loadLlamaModel,
+  normalizeLlamacppConfig,
+  readGgufMetadata,
+  unloadLlamaModel,
+} from '@janhq/tauri-plugin-llamacpp-api'
 
 // Mock fetch globally
 global.fetch = vi.fn()
@@ -121,7 +126,9 @@ describe('llamacpp_extension', () => {
           quant_type: undefined,
           providerId: 'llamacpp',
           port: 0,
-          sizeBytes: 1000000
+          sizeBytes: 1000000,
+          embedding: false,
+          capabilities: undefined,
         }
       ])
     })
@@ -160,6 +167,13 @@ describe('llamacpp_extension', () => {
       vi.mocked(fs.fileStat).mockResolvedValue({ size: 1000000 })
       vi.mocked(fs.mkdir).mockResolvedValue(undefined)
       vi.mocked(invoke).mockResolvedValue(undefined)
+      vi.mocked(readGgufMetadata).mockResolvedValue({
+        version: 3,
+        tensor_count: 42,
+        metadata: {
+          'general.architecture': 'llama',
+        },
+      })
 
       await extension.import('test-model', { 
         modelPath: 'https://example.com/model.gguf' 
@@ -215,26 +229,42 @@ describe('llamacpp_extension', () => {
 
   describe('load', () => {
     it('should throw error if model is already loaded', async () => {
-      // Mock that model is already loaded
-      extension['activeSessions'].set(123, {
-        model_id: 'test-model',
-        pid: 123,
-        port: 3000,
-        api_key: 'test-key'
+      const { invoke } = await import('@tauri-apps/api/core')
+
+      vi.mocked(invoke).mockImplementation(async (command: string) => {
+        if (command === 'plugin:llamacpp|find_session_by_model') {
+          return {
+            model_id: 'test-model',
+            pid: 123,
+            port: 3000,
+            api_key: 'test-key',
+            is_embedding: false,
+          }
+        }
+        return undefined
       })
 
+      // Mock that model is already loaded by the Tauri session registry
       await expect(extension.load('test-model')).rejects.toThrow('Model already loaded!!')
     })
 
     it('should load model successfully', async () => {
       const { getMitaDataFolderPath, joinPath, fs } = await import('@janhq/core')
       const { invoke } = await import('@tauri-apps/api/core')
-      
+
+      const sessionInfo = {
+        model_id: 'test-model',
+        pid: 123,
+        port: 3000,
+        api_key: 'test-api-key',
+        is_embedding: false,
+      }
+
       // Mock system info for getBackendExePath
       const getSystemInfo = vi.fn().mockResolvedValue({
         os_type: 'linux'
       })
-      
+
       // Mock backend functions to avoid download
       const backendModule = await import('../backend')
       vi.mocked(backendModule.isBackendInstalled).mockResolvedValue(true)
@@ -280,20 +310,23 @@ describe('llamacpp_extension', () => {
       vi.mocked(getMitaDataFolderPath).mockResolvedValue('/path/to/jan')
       vi.mocked(joinPath).mockImplementation((paths) => Promise.resolve(paths.join('/')))
       
-      // Mock model config
-      vi.mocked(invoke)
-        .mockResolvedValueOnce({ // read_yaml
+      vi.mocked(invoke).mockImplementation(async (command: string) => {
+        if (command === 'plugin:llamacpp|find_session_by_model') return null
+        if (command === 'plugin:llamacpp|get_loaded_models') return []
+        if (command === 'plugin:llamacpp|get_random_port') return 3000
+        if (command === 'read_yaml') {
+          return {
           model_path: 'test-model/model.gguf',
           name: 'Test Model',
           size_bytes: 1000000
-        })
-        .mockResolvedValueOnce('test-api-key') // generate_api_key
-        .mockResolvedValueOnce({ // load_llama_model
-          model_id: 'test-model',
-          pid: 123,
-          port: 3000,
-          api_key: 'test-api-key'
-        })
+          }
+        }
+        if (command === 'plugin:llamacpp|generate_api_key') {
+          return 'test-api-key'
+        }
+        return undefined
+      })
+      vi.mocked(loadLlamaModel).mockResolvedValue(sessionInfo)
 
       // Mock successful health check
       global.fetch = vi.fn().mockResolvedValue({
@@ -303,19 +336,18 @@ describe('llamacpp_extension', () => {
 
       const result = await extension.load('test-model')
       
-      expect(result).toEqual({
-        model_id: 'test-model',
-        pid: 123,
-        port: 3000,
-        api_key: 'test-api-key'
-      })
-      
-      expect(extension['activeSessions'].get(123)).toEqual({
-        model_id: 'test-model',
-        pid: 123,
-        port: 3000,
-        api_key: 'test-api-key'
-      })
+      expect(result).toEqual(sessionInfo)
+      expect(loadLlamaModel).toHaveBeenCalledWith(
+        '/path/to/backend/executable',
+        'test-model',
+        '/path/to/jan/test-model/model.gguf',
+        expect.any(Number),
+        expect.objectContaining({ version_backend: 'v1.0.0/win-avx2-x64' }),
+        expect.objectContaining({ LLAMA_API_KEY: 'test-api-key' }),
+        undefined,
+        false,
+        expect.any(Number)
+      )
     })
   })
 
@@ -327,15 +359,20 @@ describe('llamacpp_extension', () => {
     it('should unload model successfully', async () => {
       const { invoke } = await import('@tauri-apps/api/core')
       
-      // Set up active session
-      extension['activeSessions'].set(123, {
-        model_id: 'test-model',
-        pid: 123,
-        port: 3000,
-        api_key: 'test-key'
+      vi.mocked(invoke).mockImplementation(async (command: string) => {
+        if (command === 'plugin:llamacpp|find_session_by_model') {
+          return {
+            model_id: 'test-model',
+            pid: 123,
+            port: 3000,
+            api_key: 'test-key',
+            is_embedding: false,
+          }
+        }
+        return undefined
       })
 
-      vi.mocked(invoke).mockResolvedValue({
+      vi.mocked(unloadLlamaModel).mockResolvedValue({
         success: true,
         error: null
       })
@@ -346,13 +383,17 @@ describe('llamacpp_extension', () => {
         success: true,
         error: null
       })
-      
-      expect(extension['activeSessions'].has(123)).toBe(false)
+      expect(unloadLlamaModel).toHaveBeenCalledWith(123)
     })
   })
 
   describe('chat', () => {
     it('should throw error if no active session found', async () => {
+      const { invoke } = await import('@tauri-apps/api/core')
+      vi.mocked(invoke).mockRejectedValue(
+        new Error('No active session found for model: nonexistent-model')
+      )
+
       const request = {
         model: 'nonexistent-model',
         messages: [{ role: 'user', content: 'Hello' }]
@@ -364,15 +405,18 @@ describe('llamacpp_extension', () => {
     it('should handle non-streaming chat request', async () => {
       const { invoke } = await import('@tauri-apps/api/core')
       
-      // Set up active session
-      extension['activeSessions'].set(123, {
-        model_id: 'test-model',
-        pid: 123,
-        port: 3000,
-        api_key: 'test-key'
+      vi.mocked(invoke).mockImplementation(async (command: string) => {
+        if (command === 'plugin:llamacpp|ensure_session_ready') {
+          return {
+            model_id: 'test-model',
+            pid: 123,
+            port: 3000,
+            api_key: 'test-key',
+            is_embedding: false,
+          }
+        }
+        return undefined
       })
-
-      vi.mocked(invoke).mockResolvedValue(true) // is_process_running
 
       const mockResponse = {
         id: 'test-id',
@@ -590,19 +634,8 @@ describe('llamacpp_extension', () => {
 
   describe('getLoadedModels', () => {
     it('should return list of loaded models', async () => {
-      extension['activeSessions'].set(123, {
-        model_id: 'model1',
-        pid: 123,
-        port: 3000,
-        api_key: 'key1'
-      })
-      
-      extension['activeSessions'].set(456, {
-        model_id: 'model2',
-        pid: 456,
-        port: 3001,
-        api_key: 'key2'
-      })
+      const { invoke } = await import('@tauri-apps/api/core')
+      vi.mocked(invoke).mockResolvedValue(['model1', 'model2'])
 
       const result = await extension.getLoadedModels()
       
