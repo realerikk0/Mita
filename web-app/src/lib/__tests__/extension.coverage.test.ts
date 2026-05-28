@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, beforeEach } from 'vitest'
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import { Extension, ExtensionManager } from '../extension'
 import { ExtensionTypeEnum } from '@janhq/core'
 
@@ -41,11 +41,17 @@ Object.defineProperty(window, 'core', {
 
 describe('ExtensionManager - coverage', () => {
   let manager: ExtensionManager
+  let consoleErrorSpy: ReturnType<typeof vi.spyOn>
 
   beforeEach(() => {
     vi.clearAllMocks()
+    consoleErrorSpy = vi.spyOn(console, 'error').mockImplementation(() => {})
     window.core.extensionManager = null
     manager = ExtensionManager.getInstance()
+  })
+
+  afterEach(() => {
+    consoleErrorSpy.mockRestore()
   })
 
   describe('register and retrieval', () => {
@@ -102,6 +108,23 @@ describe('ExtensionManager - coverage', () => {
       manager.register('ext', ext)
       await manager.load()
       expect(onLoad).toHaveBeenCalled()
+    })
+
+    it('load logs extension failures without rejecting', async () => {
+      const error = new Error('load failed')
+      const ext = {
+        type: () => 'a',
+        onLoad: vi.fn().mockRejectedValue(error),
+        onUnload: vi.fn(),
+      } as any
+
+      manager.register('bad-ext', ext)
+
+      await expect(manager.load()).resolves.toBeUndefined()
+      expect(consoleErrorSpy).toHaveBeenCalledWith(
+        "Failed to load extension 'bad-ext'",
+        error
+      )
     })
 
     it('unload calls onUnload for all extensions', () => {
@@ -164,6 +187,32 @@ describe('ExtensionManager - coverage', () => {
       ])
       await manager.registerActive()
       expect(manager.getByName('test')).toBe(instance)
+    })
+
+    it('continues activating extensions when one extension import fails', async () => {
+      const instance = {
+        type: () => 'a',
+        onLoad: vi.fn(),
+        onUnload: vi.fn(),
+      } as any
+      mockGetActiveExtensions.mockResolvedValue([
+        { url: 'http://bad-ext.js', name: 'bad', active: true },
+        {
+          url: 'http://good-ext.js',
+          name: 'good',
+          active: true,
+          extensionInstance: instance,
+        },
+      ])
+      mockConvertFileSrc.mockImplementation((p: string) => `asset://${p}`)
+
+      await expect(manager.registerActive()).resolves.toBeUndefined()
+
+      expect(manager.getByName('good')).toBe(instance)
+      expect(consoleErrorSpy).toHaveBeenCalledWith(
+        "Failed to activate extension 'bad'",
+        expect.any(Error)
+      )
     })
   })
 

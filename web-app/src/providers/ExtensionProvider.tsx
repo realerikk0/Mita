@@ -17,11 +17,14 @@ export function ExtensionProvider({ children }: PropsWithChildren) {
     window.core.engineManager = new EngineManager()
     window.core.modelManager = new ModelManager()
 
-    // Register extensions - same pattern for both platforms
-    await ExtensionManager.getInstance()
-      .registerActive()
-      .then(() => ExtensionManager.getInstance().load())
-      .then(() => setFinishedSetup(true))
+    try {
+      await ExtensionManager.getInstance().registerActive()
+      await ExtensionManager.getInstance().load()
+    } catch (error) {
+      console.error('[ExtensionProvider] Failed to initialize extensions', error)
+    } finally {
+      setFinishedSetup(true)
+    }
   }, [])
 
   useEffect(() => {

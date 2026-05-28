@@ -72,7 +72,9 @@ fn analyze(lib_dir: &Path, targets: &[PathBuf]) -> AnalyzeOutput {
         for (name, lib) in &tree.libraries {
             if lib.found() {
                 resolved.insert(name.clone());
-            } else if !is_virtual_windows_dll(name) {
+            } else if !is_virtual_windows_dll(name)
+                && !(cfg!(target_os = "macos") && is_macos_dyld_shared_cache_library(name))
+            {
                 missing.insert(name.clone());
             }
         }
@@ -90,6 +92,15 @@ fn analyze(lib_dir: &Path, targets: &[PathBuf]) -> AnalyzeOutput {
 pub(crate) fn is_virtual_windows_dll(name: &str) -> bool {
     let lower = name.to_lowercase();
     lower.starts_with("api-ms-win-") || lower.starts_with("ext-ms-win-")
+}
+
+// Modern macOS keeps many Apple system libraries in the dyld shared cache.
+// They can be absent as normal filesystem files while still resolving at runtime.
+pub(crate) fn is_macos_dyld_shared_cache_library(name: &str) -> bool {
+    let lower = name.to_ascii_lowercase();
+    lower.starts_with("/system/library/frameworks/")
+        || lower.starts_with("/system/library/privateframeworks/")
+        || (lower.starts_with("/usr/lib/") && lower.ends_with(".dylib"))
 }
 
 pub fn analyze_out_of_process(lib_dir: &Path, targets: &[PathBuf]) -> AnalyzeOutput {
@@ -137,5 +148,52 @@ pub fn analyze_out_of_process(lib_dir: &Path, targets: &[PathBuf]) -> AnalyzeOut
             );
             AnalyzeOutput::default()
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    #[test]
+    fn recognizes_virtual_windows_dlls() {
+        assert!(super::is_virtual_windows_dll(
+            "api-ms-win-core-memory-l1-1-0.dll"
+        ));
+        assert!(super::is_virtual_windows_dll(
+            "EXT-MS-WIN-NTUSER-DRAW-L1-1-0.DLL"
+        ));
+        assert!(!super::is_virtual_windows_dll("KERNEL32.dll"));
+        assert!(!super::is_virtual_windows_dll("libcuda.so.1"));
+    }
+
+    #[test]
+    fn recognizes_macos_dyld_shared_cache_libraries() {
+        assert!(super::is_macos_dyld_shared_cache_library(
+            "/System/Library/Frameworks/Accelerate.framework/Versions/A/Accelerate"
+        ));
+        assert!(super::is_macos_dyld_shared_cache_library(
+            "/System/Library/PrivateFrameworks/SkyLight.framework/Versions/A/SkyLight"
+        ));
+        assert!(super::is_macos_dyld_shared_cache_library(
+            "/usr/lib/libSystem.B.dylib"
+        ));
+        assert!(super::is_macos_dyld_shared_cache_library(
+            "/usr/lib/libobjc.A.dylib"
+        ));
+
+        assert!(!super::is_macos_dyld_shared_cache_library(
+            "@rpath/libggml.dylib"
+        ));
+        assert!(!super::is_macos_dyld_shared_cache_library(
+            "@loader_path/libllama.dylib"
+        ));
+        assert!(!super::is_macos_dyld_shared_cache_library(
+            "/opt/homebrew/opt/libomp/lib/libomp.dylib"
+        ));
+        assert!(!super::is_macos_dyld_shared_cache_library(
+            "/usr/local/lib/libomp.dylib"
+        ));
+        assert!(!super::is_macos_dyld_shared_cache_library(
+            "/usr/lib/libcuda.so.1"
+        ));
     }
 }

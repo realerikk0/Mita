@@ -134,6 +134,7 @@ export default class llamacpp_extension extends AIEngine {
   private isConfiguringBackends: boolean = false
   private isUpdatingBackend: boolean = false
   private loadingModels = new Map<string, Promise<SessionInfo>>() // Track loading promises
+  private reportedBackendVerificationFailures = new Set<string>()
   private unlistenValidationStarted?: () => void
 
   override async onLoad(): Promise<void> {
@@ -1788,10 +1789,20 @@ export default class llamacpp_extension extends AIEngine {
     try {
       const verification = await verifyBackendInstallation(backend, version)
       if (verification.verified) {
+        this.clearBackendVerificationFailures(backendKey)
         logger.info(
           `Backend ${backendKey} dependency verification passed (${verification.resolved_libraries.length} libraries resolved)`
         )
       } else {
+        const failureKey = `${backendKey}:${verification.missing_libraries.join('|')}`
+        if (this.reportedBackendVerificationFailures.has(failureKey)) {
+          logger.warn(
+            `Backend ${backendKey} missing libraries already reported; skipping duplicate dialog`
+          )
+          return
+        }
+
+        this.reportedBackendVerificationFailures.add(failureKey)
         logger.warn(
           `Backend ${backendKey} is missing libraries: ${verification.missing_libraries.join(', ')}`
         )
@@ -1806,6 +1817,14 @@ export default class llamacpp_extension extends AIEngine {
       // error here means the exe disappeared between install and startup — the
       // backend will fail naturally when first used, which is surfaced elsewhere.
       logger.warn(`Backend ${backendKey} dependency verification failed: ${verifyErr}`)
+    }
+  }
+
+  private clearBackendVerificationFailures(backendKey: string): void {
+    for (const key of this.reportedBackendVerificationFailures) {
+      if (key.startsWith(`${backendKey}:`)) {
+        this.reportedBackendVerificationFailures.delete(key)
+      }
     }
   }
 

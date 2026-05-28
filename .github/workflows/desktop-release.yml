@@ -23,9 +23,41 @@ env:
   YARN_ENABLE_IMMUTABLE_INSTALLS: "false"
 
 jobs:
+  preflight-version:
+    name: Check release version
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+
+      - name: Derive version
+        id: version
+        shell: bash
+        env:
+          RELEASE_VERSION: ${{ github.event.inputs.version || github.ref_name }}
+        run: |
+          VERSION="${RELEASE_VERSION#v}"
+          if [ -z "$VERSION" ] || [ "$VERSION" = "$RELEASE_VERSION" ]; then
+            echo "Release tags must start with v, for example v0.6.599" >&2
+            exit 1
+          fi
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+
+      - name: Check source release version
+        shell: bash
+        env:
+          VERSION: ${{ steps.version.outputs.version }}
+        run: node scripts/release-version.mjs check "$VERSION"
+
   build-macos:
     name: Build macOS Universal
     runs-on: macos-latest
+    needs: preflight-version
     environment: release-distribution
     timeout-minutes: 180
     steps:
@@ -78,58 +110,7 @@ jobs:
         shell: bash
         env:
           VERSION: ${{ steps.version.outputs.version }}
-        run: |
-          node <<'NODE'
-          const fs = require('node:fs')
-
-          const version = process.env.VERSION
-          if (!version) {
-            throw new Error('VERSION is required')
-          }
-
-          function writeJson(file, update) {
-            if (!fs.existsSync(file)) return
-            const value = JSON.parse(fs.readFileSync(file, 'utf8'))
-            update(value)
-            fs.writeFileSync(file, `${JSON.stringify(value, null, 2)}\n`)
-          }
-
-          function stampCargoVersion(file) {
-            if (!fs.existsSync(file)) return
-            const source = fs.readFileSync(file, 'utf8')
-            const next = source.replace(/^version\s*=\s*"[^"]+"/m, `version = "${version}"`)
-            fs.writeFileSync(file, next)
-          }
-
-          writeJson('src-tauri/tauri.conf.json', (json) => {
-            json.version = version
-            json.bundle ??= {}
-            json.bundle.createUpdaterArtifacts = true
-          })
-
-          writeJson('web-app/package.json', (json) => {
-            json.version = version
-          })
-
-          const pluginDirs = [
-            'tauri-plugin-foundation-models',
-            'tauri-plugin-hardware',
-            'tauri-plugin-llamacpp',
-            'tauri-plugin-mlx',
-            'tauri-plugin-rag',
-            'tauri-plugin-vector-db',
-          ]
-
-          for (const dir of pluginDirs) {
-            writeJson(`src-tauri/plugins/${dir}/package.json`, (json) => {
-              json.version = version
-            })
-            stampCargoVersion(`src-tauri/plugins/${dir}/Cargo.toml`)
-          }
-
-          stampCargoVersion('src-tauri/Cargo.toml')
-          console.log(`Stamped release version ${version}`)
-          NODE
+        run: node scripts/release-version.mjs stamp "$VERSION"
 
       - name: Build app
         shell: bash
@@ -191,6 +172,7 @@ jobs:
   build-windows-x64:
     name: Build Windows x64
     runs-on: windows-latest
+    needs: preflight-version
     environment: release-distribution
     timeout-minutes: 180
     steps:
@@ -238,91 +220,7 @@ jobs:
         shell: bash
         env:
           VERSION: ${{ steps.version.outputs.version }}
-        run: |
-          node <<'NODE'
-          const fs = require('node:fs')
-
-          const version = process.env.VERSION
-          if (!version) {
-            throw new Error('VERSION is required')
-          }
-
-          function writeJson(file, update) {
-            if (!fs.existsSync(file)) return
-            const value = JSON.parse(fs.readFileSync(file, 'utf8'))
-            update(value)
-            fs.writeFileSync(file, `${JSON.stringify(value, null, 2)}\n`)
-          }
-
-          function stampCargoVersion(file) {
-            if (!fs.existsSync(file)) return
-            const source = fs.readFileSync(file, 'utf8')
-            const next = source.replace(/^version\s*=\s*"[^"]+"/m, `version = "${version}"`)
-            fs.writeFileSync(file, next)
-          }
-
-          function windowsVersionInfo(appVersion) {
-            const [base] = appVersion.split('+')
-            const [numericBase, suffix = '0'] = base.split('-', 2)
-            const suffixNumber = suffix.match(/\d+$/)?.[0] ?? '0'
-            return {
-              fileVersion: numericBase,
-              productVersion: `${numericBase}.${suffixNumber}`,
-            }
-          }
-
-          writeJson('src-tauri/tauri.conf.json', (json) => {
-            json.version = version
-            json.bundle ??= {}
-            json.bundle.createUpdaterArtifacts = true
-          })
-
-          writeJson('src-tauri/tauri.windows.conf.json', (json) => {
-            json.bundle ??= {}
-            json.bundle.windows ??= {}
-            delete json.bundle.windows.signCommand
-            if (json.bundle.windows.nsis) {
-              delete json.bundle.windows.nsis.template
-            }
-          })
-
-          writeJson('web-app/package.json', (json) => {
-            json.version = version
-          })
-
-          const pluginDirs = [
-            'tauri-plugin-foundation-models',
-            'tauri-plugin-hardware',
-            'tauri-plugin-llamacpp',
-            'tauri-plugin-mlx',
-            'tauri-plugin-rag',
-            'tauri-plugin-vector-db',
-          ]
-
-          for (const dir of pluginDirs) {
-            writeJson(`src-tauri/plugins/${dir}/package.json`, (json) => {
-              json.version = version
-            })
-            stampCargoVersion(`src-tauri/plugins/${dir}/Cargo.toml`)
-          }
-
-          stampCargoVersion('src-tauri/Cargo.toml')
-
-          const templatePath = 'src-tauri/tauri.bundle.windows.nsis.template'
-          if (fs.existsSync(templatePath)) {
-            const { fileVersion, productVersion } = windowsVersionInfo(version)
-            const next = fs
-              .readFileSync(templatePath, 'utf8')
-              .replaceAll('mita_productname', 'Mita')
-              .replaceAll('mita_mainbinaryname', 'mita')
-              .replaceAll('mita_version', fileVersion)
-              .replaceAll('mita_build', productVersion)
-              .replace(/^!define UNINSTALLERSIGNCOMMAND .*$/m, '!define UNINSTALLERSIGNCOMMAND ""')
-            fs.writeFileSync(templatePath, next)
-          }
-
-          console.log(`Stamped release version ${version}`)
-          NODE
+        run: node scripts/release-version.mjs stamp "$VERSION" --windows
 
       - name: Build app
         shell: bash

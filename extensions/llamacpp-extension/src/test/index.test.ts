@@ -1,5 +1,6 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import llamacpp_extension from '../index'
+import { verifyBackendInstallation } from '../backend'
 
 import {
   loadLlamaModel,
@@ -18,6 +19,7 @@ vi.mock('../backend', () => ({
   downloadBackend: vi.fn(),
   listSupportedBackends: vi.fn(),
   getBackendDir: vi.fn(),
+  verifyBackendInstallation: vi.fn(),
 }))
 
 // Mock tauri-plugin-llamacpp-api (partial mock)
@@ -640,6 +642,59 @@ describe('llamacpp_extension', () => {
       const result = await extension.getLoadedModels()
       
       expect(result).toEqual(['model1', 'model2'])
+    })
+  })
+
+  describe('verifyBackendDeps', () => {
+    it('should emit one missing-dependency event for repeated identical failures', async () => {
+      const { events, AppEvent } = await import('@janhq/core')
+
+      vi.mocked(verifyBackendInstallation).mockResolvedValue({
+        verified: false,
+        missing_libraries: [
+          '/System/Library/Frameworks/Metal.framework/Versions/A/Metal',
+        ],
+        resolved_libraries: [],
+      })
+
+      await extension['verifyBackendDeps']('macos-arm64', 'b9244')
+      await extension['verifyBackendDeps']('macos-arm64', 'b9244')
+
+      expect(events.emit).toHaveBeenCalledTimes(1)
+      expect(events.emit).toHaveBeenCalledWith(
+        AppEvent.onBackendVerificationFailed,
+        {
+          backend: 'macos-arm64',
+          version: 'b9244',
+          missingLibraries: [
+            '/System/Library/Frameworks/Metal.framework/Versions/A/Metal',
+          ],
+        }
+      )
+    })
+
+    it('should allow reporting a dependency failure again after a verified check', async () => {
+      const { events } = await import('@janhq/core')
+      const failure = {
+        verified: false,
+        missing_libraries: ['libvulkan.so.1'],
+        resolved_libraries: [],
+      }
+
+      vi.mocked(verifyBackendInstallation)
+        .mockResolvedValueOnce(failure)
+        .mockResolvedValueOnce({
+          verified: true,
+          missing_libraries: [],
+          resolved_libraries: ['libvulkan.so.1'],
+        })
+        .mockResolvedValueOnce(failure)
+
+      await extension['verifyBackendDeps']('linux-vulkan-common_cpus-x64', 'b9244')
+      await extension['verifyBackendDeps']('linux-vulkan-common_cpus-x64', 'b9244')
+      await extension['verifyBackendDeps']('linux-vulkan-common_cpus-x64', 'b9244')
+
+      expect(events.emit).toHaveBeenCalledTimes(2)
     })
   })
 

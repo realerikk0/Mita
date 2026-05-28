@@ -124,7 +124,20 @@ export class ExtensionManager {
    * Loads all registered extension.
    */
   async load() {
-    await Promise.all(this.listExtensions().map((ext) => ext.onLoad()))
+    const extensions = Array.from(this.extensions.entries())
+    const results = await Promise.allSettled(
+      extensions.map(([, ext]) => ext.onLoad())
+    )
+
+    results.forEach((result, index) => {
+      if (result.status === 'rejected') {
+        const extensionName = extensions[index]?.[0] ?? 'unknown'
+        console.error(
+          `Failed to load extension '${extensionName}'`,
+          result.reason
+        )
+      }
+    })
   }
 
   /**
@@ -213,9 +226,18 @@ export class ExtensionManager {
     // Get active extensions
     const activeExtensions = (await this.getActive()) ?? []
     // Activate all
-    await Promise.all(
+    const results = await Promise.allSettled(
       activeExtensions.map((ext: Extension) => this.activateExtension(ext))
     )
+
+    results.forEach((result, index) => {
+      if (result.status === 'rejected') {
+        console.error(
+          `Failed to activate extension '${activeExtensions[index]?.name ?? 'unknown'}'`,
+          result.reason
+        )
+      }
+    })
   }
 
   /**
@@ -228,11 +250,39 @@ export class ExtensionManager {
       return
     }
     const res = await getServiceHub().core().installExtension(extensions)
-    return res.map(async (ext: ExtensionManifest) => {
-      const extension = new Extension(ext.name, ext.url)
-      await this.activateExtension(extension)
-      return extension
+    if (!Array.isArray(res)) return []
+
+    const results = await Promise.allSettled(
+      res.map(async (ext: ExtensionManifest) => {
+        const extension = new Extension(
+          ext.url,
+          ext.name,
+          ext.productName,
+          ext.active,
+          ext.description,
+          ext.version,
+          ext.extensionInstance
+        )
+        await this.activateExtension(extension)
+        return extension
+      })
+    )
+
+    results.forEach((result, index) => {
+      if (result.status === 'rejected') {
+        console.error(
+          `Failed to activate installed extension '${res[index]?.name ?? 'unknown'}'`,
+          result.reason
+        )
+      }
     })
+
+    return results
+      .filter(
+        (result): result is PromiseFulfilledResult<Extension> =>
+          result.status === 'fulfilled'
+      )
+      .map((result) => result.value)
   }
 
   /**

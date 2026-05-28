@@ -8,6 +8,7 @@
 
 1. `Desktop Release`
    - 触发方式：推送 `v*` tag，例如 `v0.6.606`。
+   - 发布前检查：tag 版本必须与 `src-tauri/tauri.conf.json` 和 `src-tauri/Cargo.toml` 中的产品版本一致，否则流水线直接失败。
    - 构建内容：macOS universal `.dmg`、Windows x64 `.exe` 和 `.msi`。
    - 输出结果：基于上一个 release tag 到当前 tag 的 commit message 生成结构化 release notes，创建 GitHub Draft Release，并上传三个安装包。
 
@@ -69,22 +70,32 @@ RELEASE_POSTER_STRICT=false
 
 ## 正式发布步骤
 
-1. 确认本地要发布的改动已经提交并推送到 `mita-main`。
+1. 确认本地要发布的改动已经提交，并选择下一个版本号，例如 `0.6.617`。
 
-2. 创建并推送新 tag：
+2. 更新产品版本号，检查通过后提交并推送到 `mita-main`：
 
 ```bash
-git tag v0.6.606
-git push origin v0.6.606
+yarn release:version 0.6.617
+yarn release:check-version 0.6.617
+git add src-tauri/tauri.conf.json src-tauri/Cargo.toml
+git commit -m "chore: bump desktop release version to 0.6.617"
+git push origin mita-main
 ```
 
-3. 等待 `Desktop Release` 完成：
+3. 创建并推送同版本 tag：
+
+```bash
+git tag v0.6.617
+git push origin v0.6.617
+```
+
+4. 等待 `Desktop Release` 完成：
 
 ```bash
 gh run watch --repo realerikk0/Mita <run-id> --exit-status
 ```
 
-4. 打开 GitHub Draft Release，确认包含以下三个包：
+5. 打开 GitHub Draft Release，确认包含以下三个包：
 
 ```text
 *.dmg
@@ -92,7 +103,7 @@ gh run watch --repo realerikk0/Mita <run-id> --exit-status
 *.msi
 ```
 
-5. 检查 Draft Release 正文。自动生成的结构应包含：
+6. 检查 Draft Release 正文。自动生成的结构应包含：
 
 ```markdown
 ## 新增功能
@@ -114,9 +125,9 @@ https://github.com/realerikk0/Mita/compare/<previous-tag>...<current-tag>
 
 如果自动分类不够准确，可以在发布前手动补充或调整这些列表项；飞书卡片和宣传图都会读取这里的列表项。
 
-6. 将 Draft Release 发布为正式 Release。
+7. 将 Draft Release 发布为正式 Release。
 
-7. 等待 `Release Distribution` 自动完成。成功后应看到：
+8. 等待 `Release Distribution` 自动完成。成功后应看到：
 
 ```text
 Upload assets to Baidu Netdisk

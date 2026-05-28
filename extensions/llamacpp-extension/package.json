@@ -3,6 +3,7 @@
   "productName": "llama.cpp Inference Engine",
   "version": "1.0.1",
   "description": "This extension enables llama.cpp chat completion API calls",
+  "type": "module",
   "main": "dist/index.js",
   "module": "dist/module.js",
   "engine": "llama.cpp",
