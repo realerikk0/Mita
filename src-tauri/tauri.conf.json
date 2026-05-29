@@ -1,7 +1,7 @@
 {
   "$schema": "https://schema.tauri.app/config/2",
   "productName": "Mita",
-  "version": "0.6.599",
+  "version": "0.6.617",
   "identifier": "uk.jingxing.mita",
   "build": {
     "frontendDist": "../web-app/dist",
