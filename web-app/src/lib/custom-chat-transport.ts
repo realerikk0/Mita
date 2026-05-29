@@ -37,7 +37,7 @@ import { isBrowserMCPServerName } from '@/constants/mcp'
 import { useWebSearch } from '@/hooks/useWebSearch'
 import {
   canUseJingxingNativeWebSearch,
-  streamJingxingResponsesWebSearch,
+  streamJingxingNativeWebSearch,
 } from '@/lib/jingxing-responses-web-search'
 import { getToolAwareSystemMessage } from '@/lib/mita-prompt'
 import {
@@ -668,7 +668,7 @@ export class CustomChatTransport implements ChatTransport<UIMessage> {
     })
 
     if (nativeWebSearchEnabled) {
-      return streamJingxingResponsesWebSearch({
+      return streamJingxingNativeWebSearch({
         modelId,
         provider: effectiveProvider,
         messages: mappedMessages,

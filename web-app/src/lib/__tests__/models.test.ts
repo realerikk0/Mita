@@ -335,11 +335,19 @@ describe('getModelCapabilities', () => {
         ModelCapabilities.COMPLETION,
         ModelCapabilities.TOOLS,
         ModelCapabilities.VISION,
+        ModelCapabilities.WEB_SEARCH,
       ],
       'gemini-3.1-pro-preview': [
         ModelCapabilities.COMPLETION,
         ModelCapabilities.TOOLS,
         ModelCapabilities.VISION,
+        ModelCapabilities.WEB_SEARCH,
+      ],
+      'gemini-3.5-flash': [
+        ModelCapabilities.COMPLETION,
+        ModelCapabilities.TOOLS,
+        ModelCapabilities.VISION,
+        ModelCapabilities.WEB_SEARCH,
       ],
       'gpt-4o-mini': [
         ModelCapabilities.COMPLETION,
@@ -434,12 +442,13 @@ describe('getModelCapabilities', () => {
     }
   })
 
-  it('only marks probed Jingxing GPT and Grok chat models as native web search capable', () => {
+  it('marks probed Jingxing GPT, Grok, and Gemini chat models as native web search capable', () => {
     expect(isJingxingNativeWebSearchModel('gpt-5.4')).toBe(true)
     expect(isJingxingNativeWebSearchModel('grok-4.3')).toBe(true)
+    expect(isJingxingNativeWebSearchModel('gemini-3.5-flash')).toBe(true)
+    expect(isJingxingNativeWebSearchModel('gemini-3.1-pro-preview')).toBe(true)
+    expect(isJingxingNativeWebSearchModel('gemini-3-flash-preview')).toBe(true)
     expect(isJingxingNativeWebSearchModel('claude-opus-4-7')).toBe(false)
-    expect(isJingxingNativeWebSearchModel('gemini-3.5-flash')).toBe(false)
-    expect(isJingxingNativeWebSearchModel('gemini-3.1-pro-preview')).toBe(false)
     expect(isJingxingNativeWebSearchModel('gpt-image-2')).toBe(false)
   })
 

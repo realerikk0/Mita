@@ -44,6 +44,31 @@ type ResponseStreamEvent = {
 }
 type ResponsesUsage = NonNullable<ResponseStreamEvent['response']>['usage']
 
+type GeminiGenerateContentResponse = {
+  candidates?: Array<{
+    content?: {
+      parts?: Array<{
+        text?: string
+      }>
+    }
+    finishReason?: string
+    groundingMetadata?: {
+      groundingChunks?: Array<{
+        web?: {
+          uri?: string
+          url?: string
+          title?: string
+        }
+      }>
+    }
+  }>
+  usageMetadata?: {
+    promptTokenCount?: number
+    candidatesTokenCount?: number
+    totalTokenCount?: number
+  }
+}
+
 type JingxingResponsesWebSearchOptions = {
   modelId: string
   provider: ProviderObject
@@ -54,9 +79,32 @@ type JingxingResponsesWebSearchOptions = {
   onTokenUsage?: (usage: LanguageModelUsage, messageId: string) => void
 }
 
+type JingxingNativeWebSearchRequest = {
+  transport: 'responses' | 'gemini-generate-content'
+  endpoint: string
+  body: Record<string, unknown>
+}
+
+type GeminiNativeWebSearchOutput = {
+  text: string
+  sources: Array<{ url: string; title?: string }>
+  usage?: LanguageModelUsage
+  finishReason: FinishReason
+}
+
 const JSON_HEADERS = {
   'Content-Type': 'application/json',
 }
+
+export const JINGXING_WEB_SEARCH_OPTIONS = {
+  search_context_size: 'low',
+} as const
+
+const JINGXING_GEMINI_NATIVE_WEB_SEARCH_MODELS = new Set([
+  'gemini-3.5-flash',
+  'gemini-3.1-pro-preview',
+  'gemini-3-flash-preview',
+])
 
 function getRuntimeFetch(): typeof globalThis.fetch {
   const maybeWindow = globalThis as typeof globalThis & {
@@ -121,15 +169,88 @@ function messagesToResponsesInput(messages: UIMessage[]) {
     .filter((message) => message.content.length > 0)
 }
 
-function webSearchToolForModel(modelId: string): Record<string, unknown> {
+function messagesToGeminiContents(messages: UIMessage[]) {
+  return messages
+    .filter(
+      (message) => message.role === 'user' || message.role === 'assistant'
+    )
+    .map((message) => {
+      const content = (message.parts ?? [])
+        .map(textFromPart)
+        .filter(Boolean)
+        .join('\n')
+        .trim()
+
+      return {
+        role: message.role === 'assistant' ? 'model' : 'user',
+        parts: [{ text: content }],
+      }
+    })
+    .filter((message) => message.parts[0].text.length > 0)
+}
+
+export function isJingxingGeminiNativeWebSearchModel(modelId?: string): boolean {
+  return Boolean(
+    modelId &&
+      JINGXING_GEMINI_NATIVE_WEB_SEARCH_MODELS.has(modelId.toLowerCase())
+  )
+}
+
+function isJingxingResponsesNativeWebSearchModel(modelId?: string): boolean {
+  if (!modelId) return false
   const normalized = modelId.toLowerCase()
-  if (normalized.startsWith('grok-')) {
-    return { type: 'web_search' }
+  return (
+    !isJingxingGeminiNativeWebSearchModel(normalized) &&
+    isJingxingNativeWebSearchModel(normalized)
+  )
+}
+
+function trimTrailingSlashes(value: string): string {
+  return value.replace(/\/+$/, '')
+}
+
+function responsesEndpointFromBaseUrl(baseUrl?: string): string {
+  return `${trimTrailingSlashes(baseUrl || 'https://api.jingxing.uk/v1')}/responses`
+}
+
+export function geminiGenerateContentEndpointFromBaseUrl(
+  baseUrl: string | undefined,
+  modelId: string
+): string {
+  const rawBaseUrl = trimTrailingSlashes(baseUrl || 'https://api.jingxing.uk/v1')
+
+  try {
+    const url = new URL(rawBaseUrl)
+    const path = trimTrailingSlashes(url.pathname || '')
+    url.pathname = path.endsWith('/v1')
+      ? `${path.slice(0, -3)}/v1beta`
+      : path.endsWith('/v1beta')
+        ? path
+        : `${path}/v1beta`
+    return `${trimTrailingSlashes(url.toString())}/models/${encodeURIComponent(
+      modelId
+    )}:generateContent`
+  } catch {
+    const base = rawBaseUrl.endsWith('/v1')
+      ? `${rawBaseUrl.slice(0, -3)}/v1beta`
+      : rawBaseUrl.endsWith('/v1beta')
+        ? rawBaseUrl
+        : `${rawBaseUrl}/v1beta`
+    return `${base}/models/${encodeURIComponent(modelId)}:generateContent`
   }
-  return {
-    type: 'web_search',
-    search_context_size: 'low',
+}
+
+function protectedResponsesMaxOutputTokens(
+  modelId: string,
+  maxOutputTokens?: number
+): number | undefined {
+  if (
+    modelId.toLowerCase().startsWith('gpt-5.4-pro') &&
+    (!maxOutputTokens || maxOutputTokens < 1024)
+  ) {
+    return 1024
   }
+  return maxOutputTokens
 }
 
 function responseUsageToLanguageModelUsage(
@@ -146,6 +267,60 @@ function responseUsageToLanguageModelUsage(
 
 function finishReasonFromStatus(status?: string): FinishReason {
   return status === 'incomplete' ? 'length' : 'stop'
+}
+
+function finishReasonFromGemini(reason?: string): FinishReason {
+  const normalized = reason?.toUpperCase()
+  if (normalized === 'MAX_TOKENS') return 'length'
+  if (
+    normalized === 'SAFETY' ||
+    normalized === 'RECITATION' ||
+    normalized === 'BLOCKLIST' ||
+    normalized === 'PROHIBITED_CONTENT' ||
+    normalized === 'SPII'
+  ) {
+    return 'content-filter'
+  }
+  return 'stop'
+}
+
+function geminiUsageToLanguageModelUsage(
+  usage?: GeminiGenerateContentResponse['usageMetadata']
+): LanguageModelUsage | undefined {
+  if (!usage) return undefined
+  const inputTokens = usage.promptTokenCount ?? 0
+  const outputTokens = usage.candidatesTokenCount ?? 0
+  return {
+    inputTokens,
+    outputTokens,
+    totalTokens: usage.totalTokenCount ?? inputTokens + outputTokens,
+  }
+}
+
+export function geminiGenerateContentResponseToOutput(
+  value: GeminiGenerateContentResponse
+): GeminiNativeWebSearchOutput {
+  const candidate = value.candidates?.[0]
+  const text =
+    candidate?.content?.parts
+      ?.map((part) => part.text)
+      .filter((text): text is string => Boolean(text))
+      .join('') ?? ''
+  const sources =
+    candidate?.groundingMetadata?.groundingChunks
+      ?.flatMap((chunk) => {
+        const url = chunk.web?.uri || chunk.web?.url
+        if (!url) return []
+        const title = chunk.web?.title
+        return [title ? { url, title } : { url }]
+      }) ?? []
+
+  return {
+    text,
+    sources,
+    usage: geminiUsageToLanguageModelUsage(value.usageMetadata),
+    finishReason: finishReasonFromGemini(candidate?.finishReason),
+  }
 }
 
 async function readResponsesSse(
@@ -186,8 +361,9 @@ async function readResponsesSse(
   }
 }
 
-async function fetchResponsesWithKeyRotation(
+async function fetchJingxingNativeWebSearchWithKeyRotation(
   provider: ProviderObject,
+  endpoint: string,
   body: Record<string, unknown>,
   abortSignal?: AbortSignal
 ) {
@@ -197,7 +373,6 @@ async function fetchResponsesWithKeyRotation(
   }
 
   const runtimeFetch = getRuntimeFetch()
-  const endpoint = `${provider.base_url || 'https://api.jingxing.uk/v1'}/responses`
 
   for (let i = 0; i < keys.length; i++) {
     const response = await runtimeFetch(endpoint, {
@@ -244,7 +419,76 @@ export function canUseJingxingNativeWebSearch(options: {
   )
 }
 
-export function streamJingxingResponsesWebSearch(
+export function buildJingxingNativeWebSearchRequest(options: {
+  modelId: string
+  baseUrl?: string
+  messages: UIMessage[]
+  system?: string
+  maxOutputTokens?: number
+}): JingxingNativeWebSearchRequest {
+  if (isJingxingGeminiNativeWebSearchModel(options.modelId)) {
+    const body: Record<string, unknown> = {
+      contents: messagesToGeminiContents(options.messages),
+      web_search_options: JINGXING_WEB_SEARCH_OPTIONS,
+    }
+
+    if (options.system) {
+      body.systemInstruction = {
+        parts: [{ text: options.system }],
+      }
+    }
+    if (options.maxOutputTokens !== undefined) {
+      body.generationConfig = {
+        maxOutputTokens: options.maxOutputTokens,
+      }
+    }
+
+    return {
+      transport: 'gemini-generate-content',
+      endpoint: geminiGenerateContentEndpointFromBaseUrl(
+        options.baseUrl,
+        options.modelId
+      ),
+      body,
+    }
+  }
+
+  if (!isJingxingResponsesNativeWebSearchModel(options.modelId)) {
+    throw new Error(
+      `Model ${options.modelId} does not support Jingxing native web search.`
+    )
+  }
+
+  const maxOutputTokens = protectedResponsesMaxOutputTokens(
+    options.modelId,
+    options.maxOutputTokens
+  )
+
+  const body: Record<string, unknown> = {
+    model: options.modelId,
+    input: messagesToResponsesInput(options.messages),
+    stream: true,
+    web_search_options: JINGXING_WEB_SEARCH_OPTIONS,
+  }
+
+  if (options.system) {
+    body.instructions = options.system
+  }
+  if (maxOutputTokens !== undefined) {
+    body.max_output_tokens = maxOutputTokens
+  }
+  if (options.modelId.toLowerCase().startsWith('gpt-5.4-pro')) {
+    body.reasoning = { effort: 'medium' }
+  }
+
+  return {
+    transport: 'responses',
+    endpoint: responsesEndpointFromBaseUrl(options.baseUrl),
+    body,
+  }
+}
+
+export function streamJingxingNativeWebSearch(
   options: JingxingResponsesWebSearchOptions
 ): ReadableStream<UIMessageChunk> {
   const responseMessageId = generateId()
@@ -259,67 +503,73 @@ export function streamJingxingResponsesWebSearch(
       let usage: LanguageModelUsage | undefined
       let finishReason: FinishReason = 'stop'
 
-      const maxOutputTokens =
-        options.modelId.toLowerCase().startsWith('gpt-5.4-pro') &&
-        (!options.maxOutputTokens || options.maxOutputTokens < 1024)
-          ? 1024
-          : options.maxOutputTokens
+      const request = buildJingxingNativeWebSearchRequest({
+        modelId: options.modelId,
+        baseUrl: options.provider.base_url,
+        messages: options.messages,
+        system: options.system,
+        maxOutputTokens: options.maxOutputTokens,
+      })
 
-      const body: Record<string, unknown> = {
-        model: options.modelId,
-        input: messagesToResponsesInput(options.messages),
-        tools: [webSearchToolForModel(options.modelId)],
-        stream: true,
-      }
-
-      if (options.system) {
-        body.instructions = options.system
-      }
-      if (maxOutputTokens !== undefined) {
-        body.max_output_tokens = maxOutputTokens
-      }
-      if (options.modelId.toLowerCase().startsWith('gpt-')) {
-        body.tool_choice = 'required'
-      }
-      if (options.modelId.toLowerCase().startsWith('gpt-5.4-pro')) {
-        body.reasoning = { effort: 'medium' }
-      }
-
-      const response = await fetchResponsesWithKeyRotation(
+      const response = await fetchJingxingNativeWebSearchWithKeyRotation(
         options.provider,
-        body,
+        request.endpoint,
+        request.body,
         options.abortSignal
       )
 
-      await readResponsesSse(response, (event) => {
-        if (event.type === 'response.output_text.delta' && event.delta) {
-          writer.write({ type: 'text-delta', id: textId, delta: event.delta })
-          return
+      if (request.transport === 'gemini-generate-content') {
+        const output = geminiGenerateContentResponseToOutput(
+          (await response.json()) as GeminiGenerateContentResponse
+        )
+        usage = output.usage
+        finishReason = output.finishReason
+
+        if (output.text) {
+          writer.write({ type: 'text-delta', id: textId, delta: output.text })
         }
 
-        if (event.type === 'response.output_text.annotation.added') {
-          const url = event.annotation?.url
-          if (url && !emittedSources.has(url)) {
-            emittedSources.add(url)
-            writer.write({
-              type: 'source-url',
-              sourceId: `web-${emittedSources.size}`,
-              url,
-              title: event.annotation?.title,
-            })
+        output.sources.forEach((source) => {
+          if (emittedSources.has(source.url)) return
+          emittedSources.add(source.url)
+          writer.write({
+            type: 'source-url',
+            sourceId: `web-${emittedSources.size}`,
+            url: source.url,
+            title: source.title,
+          })
+        })
+      } else {
+        await readResponsesSse(response, (event) => {
+          if (event.type === 'response.output_text.delta' && event.delta) {
+            writer.write({ type: 'text-delta', id: textId, delta: event.delta })
+            return
           }
-          return
-        }
 
-        if (event.type === 'response.completed') {
-          usage = responseUsageToLanguageModelUsage(event.response?.usage)
-          finishReason = finishReasonFromStatus(event.response?.status)
-        }
+          if (event.type === 'response.output_text.annotation.added') {
+            const url = event.annotation?.url
+            if (url && !emittedSources.has(url)) {
+              emittedSources.add(url)
+              writer.write({
+                type: 'source-url',
+                sourceId: `web-${emittedSources.size}`,
+                url,
+                title: event.annotation?.title,
+              })
+            }
+            return
+          }
 
-        if (event.type === 'error') {
-          throw new Error(event.error?.message || 'Jingxing web search failed.')
-        }
-      })
+          if (event.type === 'response.completed') {
+            usage = responseUsageToLanguageModelUsage(event.response?.usage)
+            finishReason = finishReasonFromStatus(event.response?.status)
+          }
+
+          if (event.type === 'error') {
+            throw new Error(event.error?.message || 'Jingxing web search failed.')
+          }
+        })
+      }
 
       writer.write({ type: 'text-end', id: textId })
       writer.write({
@@ -348,3 +598,5 @@ export function streamJingxingResponsesWebSearch(
     },
   })
 }
+
+export const streamJingxingResponsesWebSearch = streamJingxingNativeWebSearch
