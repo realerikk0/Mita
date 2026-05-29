@@ -35,6 +35,7 @@ import {
   type MitaTeamsStructuredUpdates,
   type MitaTeamsTaskStatus,
   type MitaTeamsTaskUpdate,
+  type MitaTeamsTokenUsage,
 } from '@/types/mita-teams'
 
 type RoleOutput = {
@@ -44,18 +45,25 @@ type RoleOutput = {
   output: string
 }
 
+type GeneratedTextResult =
+  | string
+  | {
+      text: string
+      usage?: unknown
+    }
+
 type GenerateRoleText = (input: {
   role: MitaTeamsRoleConfig
   prompt: string
   model?: ThreadModel
   abortSignal?: AbortSignal
-}) => Promise<string>
+}) => Promise<GeneratedTextResult>
 
 type GenerateDecisionText = (input: {
   prompt: string
   model?: ThreadModel
   abortSignal?: AbortSignal
-}) => Promise<string>
+}) => Promise<GeneratedTextResult>
 
 type MitaTeamsUserControl = {
   mentionedRoleIds: MitaTeamsRoleId[]
@@ -92,6 +100,70 @@ const stableId = (prefix: string) =>
 const trimText = (value: string, max = 1200) => {
   const text = value.trim()
   return text.length > max ? `${text.slice(0, max - 3)}...` : text
+}
+
+const numberFromUsage = (value: unknown) =>
+  typeof value === 'number' && Number.isFinite(value) ? value : undefined
+
+const usageFromUnknown = (value: unknown): MitaTeamsTokenUsage | undefined => {
+  if (!value || typeof value !== 'object') return undefined
+  const raw = value as Record<string, unknown>
+  const promptTokens = numberFromUsage(
+    raw.promptTokens ?? raw.inputTokens ?? raw.prompt_tokens ?? raw.input_tokens
+  )
+  const completionTokens = numberFromUsage(
+    raw.completionTokens ??
+      raw.outputTokens ??
+      raw.completion_tokens ??
+      raw.output_tokens
+  )
+  const totalTokens =
+    numberFromUsage(raw.totalTokens ?? raw.total_tokens) ??
+    (promptTokens !== undefined || completionTokens !== undefined
+      ? (promptTokens ?? 0) + (completionTokens ?? 0)
+      : undefined)
+  const estimatedCostUsd = numberFromUsage(
+    raw.estimatedCostUsd ?? raw.estimated_cost_usd
+  )
+  const usage: MitaTeamsTokenUsage = {}
+
+  if (promptTokens !== undefined) usage.promptTokens = promptTokens
+  if (completionTokens !== undefined) usage.completionTokens = completionTokens
+  if (totalTokens !== undefined) usage.totalTokens = totalTokens
+  if (estimatedCostUsd !== undefined) usage.estimatedCostUsd = estimatedCostUsd
+
+  return Object.keys(usage).length ? usage : undefined
+}
+
+const normalizeGeneratedText = (
+  result: GeneratedTextResult
+): { text: string; usage?: MitaTeamsTokenUsage } =>
+  typeof result === 'string'
+    ? { text: result }
+    : {
+        text: result.text,
+        usage: usageFromUnknown(result.usage),
+      }
+
+const addUsage = (
+  current?: MitaTeamsTokenUsage,
+  incoming?: MitaTeamsTokenUsage
+): MitaTeamsTokenUsage | undefined => {
+  if (!current && !incoming) return undefined
+  const usage: MitaTeamsTokenUsage = {}
+  const fields: Array<keyof MitaTeamsTokenUsage> = [
+    'promptTokens',
+    'completionTokens',
+    'totalTokens',
+    'estimatedCostUsd',
+  ]
+
+  for (const field of fields) {
+    const value = (current?.[field] ?? 0) + (incoming?.[field] ?? 0)
+    if (value > 0) usage[field] = value
+  }
+
+  return Object.keys(usage).length ? usage : undefined
 }
 
 const PERMISSION_RANK: Record<MitaTeamsRoleConfig['permission'], number> = {
@@ -233,7 +305,10 @@ async function defaultGenerateRoleText({
     system: role.prompt,
   })
 
-  return result.text
+  return {
+    text: result.text,
+    usage: result.usage,
+  }
 }
 
 async function defaultGenerateDecisionText({
@@ -267,7 +342,10 @@ async function defaultGenerateDecisionText({
       'You are the Mita Teams Orchestrator. Decide the next execution step. Output valid JSON only.',
   })
 
-  return result.text
+  return {
+    text: result.text,
+    usage: result.usage,
+  }
 }
 
 function renderRecentOutputs(outputs: RoleOutput[]) {
@@ -552,17 +630,32 @@ function colorForIndex(index: number) {
 
 function normalizeChoiceOptions(value: unknown): MitaTeamsChoiceOption[] {
   if (!Array.isArray(value)) return []
+  const seenOptionIds = new Set<string>()
   return value
-    .map((item): MitaTeamsChoiceOption | undefined => {
+    .map((item, index): MitaTeamsChoiceOption | undefined => {
       if (!item || typeof item !== 'object') return undefined
       const raw = item as Partial<MitaTeamsChoiceOption>
       if (typeof raw.label !== 'string') return undefined
+      const label = raw.label.trim()
+      if (!label) return undefined
+      const fallback = `option-${index + 1}`
+      const base =
+        normalizeMitaTeamsId(raw.id, '') ||
+        normalizeMitaTeamsId(label, '') ||
+        fallback
+      let id = base
+      let suffix = 2
+      while (seenOptionIds.has(id)) {
+        id = `${base}-${suffix}`
+        suffix += 1
+      }
+      seenOptionIds.add(id)
       const option: MitaTeamsChoiceOption = {
-        id: raw.id || raw.label,
-        label: raw.label,
+        id,
+        label,
       }
       if (typeof raw.description === 'string') {
-        option.description = raw.description
+        option.description = raw.description.trim()
       }
       return option
     })
@@ -790,8 +883,14 @@ function normalizeChannelMembership(
 
   return channels.map((channel) => {
     const roleIds = channel.roleIds.filter((roleId) => validRoleIds.has(roleId))
+    const taskRoleIds =
+      channel.id === MITA_TEAMS_TASK_CHANNEL_ID &&
+      validRoleIds.has(MITA_TEAMS_ORCHESTRATOR_ROLE_ID) &&
+      !roleIds.includes(MITA_TEAMS_ORCHESTRATOR_ROLE_ID)
+        ? [MITA_TEAMS_ORCHESTRATOR_ROLE_ID, ...roleIds]
+        : roleIds
     if (
-      roleIds.length === 0 &&
+      taskRoleIds.length === 0 &&
       channel.id === MITA_TEAMS_TASK_CHANNEL_ID &&
       validRoleIds.has(MITA_TEAMS_ORCHESTRATOR_ROLE_ID)
     ) {
@@ -803,7 +902,7 @@ function normalizeChannelMembership(
 
     return {
       ...channel,
-      roleIds,
+      roleIds: taskRoleIds,
     }
   })
 }
@@ -1182,36 +1281,47 @@ async function generateParsedDecision({
   decision: MitaTeamsOrchestratorDecision
   repairRequested: boolean
   invalidText?: string
+  usage?: MitaTeamsTokenUsage
 }> {
   const parseOptions = { onlyRoleIds: userControl.onlyRoleIds }
-  const firstText = await generateDecisionText({
-    prompt: decisionPrompt,
-    model,
-    abortSignal,
-  })
-  const firstDecision = parseDecision(firstText, config, parseOptions)
+  const firstResult = normalizeGeneratedText(
+    await generateDecisionText({
+      prompt: decisionPrompt,
+      model,
+      abortSignal,
+    })
+  )
+  const firstDecision = parseDecision(firstResult.text, config, parseOptions)
   if (firstDecision) {
-    return { decision: firstDecision, repairRequested: false }
+    return {
+      decision: firstDecision,
+      repairRequested: false,
+      usage: firstResult.usage,
+    }
   }
 
-  const repairText = await generateDecisionText({
-    prompt: buildDecisionRepairPrompt(decisionPrompt, firstText),
-    model,
-    abortSignal,
-  })
-  const repairedDecision = parseDecision(repairText, config, parseOptions)
+  const repairResult = normalizeGeneratedText(
+    await generateDecisionText({
+      prompt: buildDecisionRepairPrompt(decisionPrompt, firstResult.text),
+      model,
+      abortSignal,
+    })
+  )
+  const repairedDecision = parseDecision(repairResult.text, config, parseOptions)
   if (repairedDecision) {
     return {
       decision: repairedDecision,
       repairRequested: true,
-      invalidText: firstText,
+      invalidText: firstResult.text,
+      usage: addUsage(firstResult.usage, repairResult.usage),
     }
   }
 
   return {
     decision: jsonFailureDecision(),
     repairRequested: true,
-    invalidText: `${firstText}\n\n${repairText}`,
+    invalidText: `${firstResult.text}\n\n${repairResult.text}`,
+    usage: addUsage(firstResult.usage, repairResult.usage),
   }
 }
 
@@ -1223,10 +1333,7 @@ function startRuntimeRun(
   return appendMitaTeamsEvent(
     {
       ...runtime,
-      userChoiceRequest:
-        runtime.userChoiceRequest?.status === 'pending'
-          ? runtime.userChoiceRequest
-          : undefined,
+      userChoiceRequest: undefined,
       run: {
         id: stableId('teams-run'),
         status: 'running',
@@ -1259,6 +1366,23 @@ function updateRun(
       updatedAt: nowIso(),
     },
   }
+}
+
+function addRunUsage(
+  runtime: MitaTeamsRuntime,
+  usage?: MitaTeamsTokenUsage
+): MitaTeamsRuntime {
+  if (!usage) return runtime
+  return updateRun(runtime, {
+    usage: addUsage(runtime.run?.usage, usage),
+  })
+}
+
+function advanceRunRound(runtime: MitaTeamsRuntime): MitaTeamsRuntime {
+  return updateRun(runtime, {
+    currentRound: (runtime.run?.currentRound ?? 0) + 1,
+    activeRoleIds: [],
+  })
 }
 
 function completeRun(
@@ -1385,7 +1509,11 @@ async function runRoleCall({
   recentOutputs: RoleOutput[]
   generateRoleText: GenerateRoleText
   abortSignal?: AbortSignal
-}): Promise<{ runtime: MitaTeamsRuntime; output?: RoleOutput }> {
+}): Promise<{
+  runtime: MitaTeamsRuntime
+  output?: RoleOutput
+  usage?: MitaTeamsTokenUsage
+}> {
   const role = roleById(config, call.roleId)
   if (!role) return { runtime }
 
@@ -1429,15 +1557,15 @@ async function runRoleCall({
       call,
       recentOutputs,
     })
-    const outputText = trimText(
+    const roleResult = normalizeGeneratedText(
       await generateRoleText({
         role,
         prompt,
         model,
         abortSignal,
-      }),
-      4000
+      })
     )
+    const outputText = trimText(roleResult.text, 4000)
     nextRuntime = recordRoleTurnMemory(
       nextRuntime,
       role,
@@ -1459,8 +1587,11 @@ async function runRoleCall({
         channelId: call.channelId,
         output: outputText,
       },
+      usage: roleResult.usage,
     }
   } catch (error) {
+    if (abortSignal?.aborted) throw error
+
     const message =
       error instanceof Error ? error.message : 'Role call failed unexpectedly'
     const current = nextRuntime.roleStates[role.id]
@@ -1521,25 +1652,47 @@ function mergeBranchStructuredState(
   branch: MitaTeamsRuntime,
   branchBase: MitaTeamsRuntime
 ) {
-  const baseTaskIds = new Set(branchBase.tasks.map((task) => task.id))
-  const currentTaskIds = new Set(current.tasks.map((task) => task.id))
-  const newTasks = branch.tasks.filter(
-    (task) => !baseTaskIds.has(task.id) && !currentTaskIds.has(task.id)
+  const baseTasks = new Map(branchBase.tasks.map((task) => [task.id, task]))
+  const changedTasks = branch.tasks.filter((task) => {
+    const base = baseTasks.get(task.id)
+    return (
+      !base ||
+      task.title !== base.title ||
+      task.status !== base.status ||
+      task.roleId !== base.roleId ||
+      task.channelId !== base.channelId
+    )
+  })
+  const tasksById = new Map(current.tasks.map((task) => [task.id, task]))
+  for (const task of changedTasks) {
+    tasksById.set(task.id, task)
+  }
+
+  const baseArtifacts = new Map(
+    branchBase.artifacts.map((artifact) => [artifact.id, artifact])
   )
-  const baseArtifactIds = new Set(
-    branchBase.artifacts.map((artifact) => artifact.id)
+  const changedArtifacts = branch.artifacts.filter((artifact) => {
+    const base = baseArtifacts.get(artifact.id)
+    return (
+      !base ||
+      artifact.type !== base.type ||
+      artifact.title !== base.title ||
+      artifact.summary !== base.summary ||
+      artifact.content !== base.content ||
+      artifact.roleId !== base.roleId ||
+      artifact.channelId !== base.channelId
+    )
+  })
+  const artifactsById = new Map(
+    current.artifacts.map((artifact) => [artifact.id, artifact])
   )
-  const currentArtifactIds = new Set(
-    current.artifacts.map((artifact) => artifact.id)
-  )
-  const newArtifacts = branch.artifacts.filter(
-    (artifact) =>
-      !baseArtifactIds.has(artifact.id) && !currentArtifactIds.has(artifact.id)
-  )
+  for (const artifact of changedArtifacts) {
+    artifactsById.set(artifact.id, artifact)
+  }
 
   return {
-    tasks: [...current.tasks, ...newTasks].slice(-40),
-    artifacts: [...current.artifacts, ...newArtifacts].slice(-60),
+    tasks: Array.from(tasksById.values()).slice(-40),
+    artifacts: Array.from(artifactsById.values()).slice(-60),
   }
 }
 
@@ -1622,6 +1775,7 @@ async function executeRoleCalls({
         branchBase: groupBase,
         roleId: result.roleId,
       })
+      nextRuntime = addRunUsage(nextRuntime, result.usage)
       if (result.output) outputs.push(result.output)
     }
     nextRuntime = mergeProjectMemory(nextRuntime, config.roles)
@@ -1720,6 +1874,7 @@ export async function runMitaTeamsRuntime({
         abortSignal,
       })
       const decision = decisionResolution.decision
+      runtime = addRunUsage(runtime, decisionResolution.usage)
 
       if (decisionResolution.repairRequested) {
         runtime = appendMitaTeamsEvent(runtime, {
@@ -1766,6 +1921,8 @@ export async function runMitaTeamsRuntime({
           onlyRoleIds: userControl.onlyRoleIds,
         })
         if (calls.length === 0) {
+          runtime = advanceRunRound(runtime)
+          notify(runtime)
           continue
         }
 
@@ -1844,6 +2001,8 @@ export async function runMitaTeamsRuntime({
           }
         )
         notify(runtime)
+        runtime = advanceRunRound(runtime)
+        notify(runtime)
         continue
       }
 
@@ -1886,6 +2045,12 @@ export async function runMitaTeamsRuntime({
       status: 'completed',
     }
   } catch (error) {
+    if (abortSignal?.aborted) {
+      runtime = completeRun(runtime, 'stopped', 'Run aborted')
+      notify(runtime)
+      return { config: workingConfig, status: 'stopped' }
+    }
+
     const message =
       error instanceof Error ? error.message : 'Mita Teams runtime failed'
     runtime = completeRun(runtime, 'failed', message)

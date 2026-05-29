@@ -320,6 +320,8 @@ export function answerMitaTeamsChoice(
 ): MitaTeamsRuntime {
   const choice = runtime.userChoiceRequest
   if (!choice || choice.status !== 'pending') return runtime
+  const option = choice.options.find((item) => item.id === optionId)
+  if (!option) return runtime
 
   const answered = {
     ...choice,
@@ -327,7 +329,6 @@ export function answerMitaTeamsChoice(
     selectedOptionId: optionId,
     answeredAt: nowIso(),
   }
-  const option = choice.options.find((item) => item.id === optionId)
 
   return appendMitaTeamsEvent(
     {

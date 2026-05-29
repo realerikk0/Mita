@@ -571,6 +571,7 @@ Tool result communication:
   const [settledChatStatus, setSettledChatStatus] =
     useState<ChatStatus | null>(null)
   const mitaTeamsAbortRef = useRef<AbortController | null>(null)
+  const mitaTeamsAnsweredChoiceIdsRef = useRef<Set<string>>(new Set())
   const [isMitaTeamsRuntimeBusy, setIsMitaTeamsRuntimeBusy] = useState(false)
   const resetSettledChatStatus = useCallback(() => {
     setSettledChatStatus(null)
@@ -1719,9 +1720,21 @@ Tool result communication:
   const handleMitaTeamsChoiceSelect = useCallback(
     (optionId: string) => {
       const choice = mitaTeamsConfig?.runtime.userChoiceRequest
-      if (!mitaTeamsConfig || !choice || choice.status !== 'pending') return
+      const answeredChoiceKey = choice ? `${threadId}:${choice.id}` : undefined
+      if (
+        !mitaTeamsConfig ||
+        !choice ||
+        choice.status !== 'pending' ||
+        isMitaTeamsRuntimeBusy ||
+        !answeredChoiceKey ||
+        mitaTeamsAnsweredChoiceIdsRef.current.has(answeredChoiceKey)
+      ) {
+        return
+      }
 
       const option = choice.options.find((item) => item.id === optionId)
+      if (!option) return
+      mitaTeamsAnsweredChoiceIdsRef.current.add(answeredChoiceKey)
       const nextRuntime = answerMitaTeamsChoice(
         mitaTeamsConfig.runtime,
         optionId
@@ -1754,6 +1767,7 @@ Tool result communication:
     [
       addMessage,
       appendThreadMessageToChat,
+      isMitaTeamsRuntimeBusy,
       mitaTeamsConfig,
       persistMitaTeamsConfig,
       startMitaTeamsRuntime,

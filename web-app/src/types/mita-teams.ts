@@ -624,6 +624,28 @@ const uniqueIds = (values: unknown[], validIds?: Set<string>): string[] => {
   return ids
 }
 
+const uniqueChoiceOptionId = (
+  rawId: unknown,
+  label: string,
+  index: number,
+  seen: Set<string>
+) => {
+  const fallback = `option-${index + 1}`
+  const base =
+    normalizeMitaTeamsId(rawId, '') ||
+    normalizeMitaTeamsId(label, '') ||
+    fallback
+  let id = base
+  let suffix = 2
+
+  while (seen.has(id)) {
+    id = `${base}-${suffix}`
+    suffix += 1
+  }
+  seen.add(id)
+  return id
+}
+
 const createRoleMemory = (
   roleId: MitaTeamsRoleId,
   timestamp = nowIso()
@@ -798,17 +820,23 @@ const normalizeChoiceRequest = (
   if (typeof raw.question !== 'string' || !Array.isArray(raw.options)) {
     return undefined
   }
+  const seenOptionIds = new Set<string>()
   const options = raw.options
-    .map((option): MitaTeamsChoiceOption | undefined => {
+    .map((option, index): MitaTeamsChoiceOption | undefined => {
       if (!option || typeof option !== 'object') return undefined
       const item = option as Partial<MitaTeamsChoiceOption>
       if (typeof item.label !== 'string') return undefined
       const normalized: MitaTeamsChoiceOption = {
-        id: item.id || item.label,
-        label: item.label,
+        id: uniqueChoiceOptionId(
+          item.id,
+          item.label,
+          index,
+          seenOptionIds
+        ),
+        label: item.label.trim(),
       }
       if (typeof item.description === 'string') {
-        normalized.description = item.description
+        normalized.description = item.description.trim()
       }
       return normalized
     })
@@ -816,15 +844,21 @@ const normalizeChoiceRequest = (
     .slice(0, 4)
 
   if (options.length === 0) return undefined
+  const selectedOptionId = normalizeMitaTeamsId(raw.selectedOptionId, '')
+  const safeSelectedOptionId = options.find(
+    (option) => option.id === selectedOptionId
+  )?.id
 
   return {
     id: raw.id || `choice-${Date.now()}`,
     question: raw.question,
     options,
-    status: raw.status === 'answered' ? 'answered' : 'pending',
-    selectedOptionId: raw.selectedOptionId,
+    status: raw.status === 'answered' && safeSelectedOptionId
+      ? 'answered'
+      : 'pending',
+    selectedOptionId: safeSelectedOptionId,
     createdAt: raw.createdAt || nowIso(),
-    answeredAt: raw.answeredAt,
+    answeredAt: safeSelectedOptionId ? raw.answeredAt : undefined,
   }
 }
 
@@ -1113,7 +1147,12 @@ export function normalizeMitaTeamsConfig(
         .filter((role): role is MitaTeamsRoleConfig => Boolean(role))
     : fallback.roles
 
-  const safeRoles = roles.length ? roles : fallback.roles
+  const candidateRoles = roles.length ? roles : fallback.roles
+  const safeRoles = candidateRoles.some(
+    (role) => role.id === MITA_TEAMS_ORCHESTRATOR_ROLE_ID
+  )
+    ? candidateRoles
+    : [defaultCoordinatorRole(model), ...candidateRoles]
   const safeRoleIds = new Set(safeRoles.map((role) => role.id))
 
   const channels = rawChannels.length
@@ -1158,27 +1197,36 @@ export function normalizeMitaTeamsConfig(
         )
     : fallback.channels
 
-  const safeChannels = (channels.length ? channels : fallback.channels).map(
-    (channel) => {
-      const roleIds = channel.roleIds.filter((roleId) =>
-        safeRoleIds.has(roleId)
-      )
-      const fallbackRoleId =
-        channel.id === MITA_TEAMS_TASK_CHANNEL_ID &&
-        safeRoleIds.has(MITA_TEAMS_ORCHESTRATOR_ROLE_ID)
-          ? MITA_TEAMS_ORCHESTRATOR_ROLE_ID
-          : safeRoles[0]?.id
-
-      return {
-        ...channel,
-        roleIds: roleIds.length
-          ? roleIds
-          : fallbackRoleId
-            ? [fallbackRoleId]
-            : [],
-      }
-    }
+  const candidateChannels = channels.length ? channels : fallback.channels
+  const channelsWithTask = candidateChannels.some(
+    (channel) => channel.id === MITA_TEAMS_TASK_CHANNEL_ID
   )
+    ? candidateChannels
+    : [defaultTaskChannel(), ...candidateChannels]
+
+  const safeChannels = channelsWithTask.map((channel) => {
+    const roleIds = channel.roleIds.filter((roleId) => safeRoleIds.has(roleId))
+    const taskRoleIds =
+      channel.id === MITA_TEAMS_TASK_CHANNEL_ID &&
+      safeRoleIds.has(MITA_TEAMS_ORCHESTRATOR_ROLE_ID) &&
+      !roleIds.includes(MITA_TEAMS_ORCHESTRATOR_ROLE_ID)
+        ? [MITA_TEAMS_ORCHESTRATOR_ROLE_ID, ...roleIds]
+        : roleIds
+    const fallbackRoleId =
+      channel.id === MITA_TEAMS_TASK_CHANNEL_ID &&
+      safeRoleIds.has(MITA_TEAMS_ORCHESTRATOR_ROLE_ID)
+        ? MITA_TEAMS_ORCHESTRATOR_ROLE_ID
+        : safeRoles[0]?.id
+
+    return {
+      ...channel,
+      roleIds: taskRoleIds.length
+        ? taskRoleIds
+        : fallbackRoleId
+          ? [fallbackRoleId]
+          : [],
+    }
+  })
   const safeChannelIds = new Set(safeChannels.map((channel) => channel.id))
   const normalizedActiveRoleId = normalizeMitaTeamsId(raw.activeRoleId, '')
   const normalizedActiveChannel = normalizeMitaTeamsId(raw.activeChannel, '')

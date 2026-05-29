@@ -69,13 +69,16 @@ describe('mita teams metadata', () => {
     expect(config?.taskTemplateId).toBe('debugging')
     expect(config?.activeChannel).toBe('task')
     expect(config?.workspaceView).toBe('team-chat')
-    expect(config?.activeRoleId).toBe('reviewer')
+    expect(config?.activeRoleId).toBe('orchestrator')
     expect(config?.roundLimit).toBe(10)
     expect(config?.roles.find((role) => role.id === 'reviewer')?.enabled).toBe(
       false
     )
     expect(config?.roles.find((role) => role.id === 'reviewer')?.modelId).toBe(
       'claude'
+    )
+    expect(config?.runtime.roleStates.orchestrator?.roleId).toBe(
+      'orchestrator'
     )
     expect(config?.runtime.roleStates.reviewer?.roleId).toBe('reviewer')
   })
@@ -136,14 +139,55 @@ describe('mita teams metadata', () => {
       { provider: 'openai', id: 'gpt-5' }
     )
 
-    expect(config?.roles.map((role) => role.id)).toEqual(['market-strategist'])
-    expect(config?.channels[0].id).toBe('strategy-room')
-    expect(config?.channels[0].roleIds).toEqual(['market-strategist'])
+    expect(config?.roles.map((role) => role.id)).toEqual([
+      'orchestrator',
+      'market-strategist',
+    ])
+    expect(config?.channels.map((channel) => channel.id)).toEqual([
+      'task',
+      'strategy-room',
+    ])
+    expect(
+      config?.channels.find((channel) => channel.id === 'task')?.roleIds
+    ).toEqual(['orchestrator'])
+    expect(
+      config?.channels.find((channel) => channel.id === 'strategy-room')
+        ?.roleIds
+    ).toEqual(['market-strategist'])
     expect(config?.runtime.roleStates['market-strategist']?.roleId).toBe(
       'market-strategist'
     )
     expect(config?.runtime.tasks[0].status).toBe('researching')
     expect(config?.runtime.artifacts[0].type).toBe('risk')
+  })
+
+  it('normalizes pending choice option ids and answered selections', () => {
+    const config = normalizeMitaTeamsConfig({
+      enabled: true,
+      runtime: {
+        version: 1,
+        userChoiceRequest: {
+          id: 'choice-1',
+          question: 'Pick a launch path.',
+          status: 'answered',
+          selectedOptionId: 'Fast Launch',
+          createdAt: '2026-05-29T00:00:00.000Z',
+          answeredAt: '2026-05-29T00:01:00.000Z',
+          options: [
+            { id: 'Fast Launch', label: 'Fast Launch' },
+            { id: 'Fast Launch', label: 'Fast Launch again' },
+          ],
+        },
+      },
+    })
+
+    expect(
+      config?.runtime.userChoiceRequest?.options.map((option) => option.id)
+    ).toEqual(['fast-launch', 'fast-launch-2'])
+    expect(config?.runtime.userChoiceRequest).toMatchObject({
+      status: 'answered',
+      selectedOptionId: 'fast-launch',
+    })
   })
 
   it('renders orchestration instructions without claiming private model calls', () => {

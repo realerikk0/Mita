@@ -180,6 +180,332 @@ describe('mita teams runtime', () => {
     ).toBe(true)
   })
 
+  it('advances rounds for non-calling decisions so orchestration cannot spin forever', async () => {
+    const config = {
+      ...createDefaultMitaTeamsConfig({
+        provider: 'openai',
+        id: 'gpt-5',
+      }),
+      roundLimit: 2,
+    }
+    let decisionCalls = 0
+
+    const result = await runMitaTeamsRuntime({
+      config,
+      userText: 'Keep configuring only.',
+      generateDecisionText: async () => {
+        decisionCalls += 1
+        return JSON.stringify({
+          action: 'configure_team',
+          reason: 'Create or refresh a planning role without calling it yet.',
+          roles: [
+            {
+              id: 'planner',
+              name: 'Planner',
+              label: 'Plan',
+              description: 'Plans the work.',
+              prompt: 'Plan only.',
+              permission: 'read',
+            },
+          ],
+          channels: [
+            {
+              id: 'planning',
+              label: 'Planning',
+              description: 'Planning room.',
+              roleIds: ['planner'],
+            },
+          ],
+          calls: [],
+        })
+      },
+      generateRoleText: async () => 'unused',
+    })
+
+    expect(result.status).toBe('completed')
+    expect(decisionCalls).toBe(2)
+    expect(result.config.runtime.run?.currentRound).toBe(2)
+    expect(result.config.roles.some((role) => role.id === 'planner')).toBe(
+      true
+    )
+  })
+
+  it('aggregates orchestrator and role token usage across a run', async () => {
+    const config = createDefaultMitaTeamsConfig({
+      provider: 'openai',
+      id: 'gpt-5',
+    })
+    let decisionCount = 0
+
+    const result = await runMitaTeamsRuntime({
+      config,
+      userText: 'Plan and review usage.',
+      generateDecisionText: async () => {
+        decisionCount += 1
+        if (decisionCount === 1) {
+          return {
+            text: JSON.stringify({
+              action: 'configure_team',
+              mode: 'serial',
+              reason: 'Create reviewer and call it.',
+              roles: [
+                {
+                  id: 'reviewer',
+                  name: 'Reviewer',
+                  label: 'Review',
+                  description: 'Reviews the plan.',
+                  prompt: 'Review carefully.',
+                  permission: 'read',
+                },
+              ],
+              channels: [
+                {
+                  id: 'review',
+                  label: 'Review',
+                  description: 'Review room.',
+                  roleIds: ['reviewer'],
+                },
+              ],
+              calls: [
+                {
+                  roleId: 'reviewer',
+                  channelId: 'review',
+                  instruction: 'Review the plan.',
+                },
+              ],
+            }),
+            usage: {
+              promptTokens: 10,
+              completionTokens: 2,
+              totalTokens: 12,
+            },
+          }
+        }
+
+        return {
+          text: JSON.stringify({
+            action: 'stop',
+            reason: 'Usage verified.',
+            finalResponse: 'Done.',
+          }),
+          usage: {
+            promptTokens: 3,
+            completionTokens: 1,
+            totalTokens: 4,
+          },
+        }
+      },
+      generateRoleText: async () => ({
+        text: 'Decision: Reviewed.',
+        usage: {
+          inputTokens: 4,
+          outputTokens: 6,
+          totalTokens: 10,
+        },
+      }),
+    })
+
+    expect(result.status).toBe('completed')
+    expect(result.config.runtime.run?.usage).toMatchObject({
+      promptTokens: 17,
+      completionTokens: 9,
+      totalTokens: 26,
+    })
+  })
+
+  it('merges role updates to existing task board items', async () => {
+    const model = {
+      provider: 'openai',
+      id: 'gpt-5',
+    }
+    const base = createDefaultMitaTeamsConfig(model)
+    const now = '2026-05-29T00:00:00.000Z'
+    const config = normalizeMitaTeamsConfig(
+      {
+        ...base,
+        roles: [
+          ...base.roles,
+          {
+            id: 'builder',
+            name: 'Builder',
+            label: 'Build',
+            description: 'Updates tasks.',
+            prompt: 'Update task status.',
+            color: 'bg-emerald-600',
+            permission: 'read',
+            enabled: true,
+            provider: model.provider,
+            modelId: model.id,
+          },
+        ],
+        channels: [
+          {
+            id: 'task',
+            label: 'Current task',
+            description: 'Main room.',
+            roleIds: ['orchestrator', 'builder'],
+          },
+        ],
+        runtime: {
+          ...base.runtime,
+          tasks: [
+            {
+              id: 'review-launch-plan',
+              title: 'Review launch plan',
+              status: 'todo',
+              createdAt: now,
+              updatedAt: now,
+            },
+          ],
+        },
+      },
+      model
+    )!
+    let decisionCount = 0
+
+    const result = await runMitaTeamsRuntime({
+      config,
+      userText: 'Finish the task.',
+      generateDecisionText: async () => {
+        decisionCount += 1
+        if (decisionCount > 1) {
+          return JSON.stringify({
+            action: 'stop',
+            reason: 'Task update merged.',
+            finalResponse: 'Done.',
+          })
+        }
+
+        return JSON.stringify({
+          action: 'call_roles',
+          mode: 'parallel',
+          reason: 'Ask builder to update the board.',
+          calls: [
+            {
+              roleId: 'builder',
+              channelId: 'task',
+              instruction: 'Mark the task done.',
+            },
+          ],
+        })
+      },
+      generateRoleText: async () => 'Task [done]: Review launch plan',
+    })
+
+    expect(result.status).toBe('completed')
+    expect(result.config.runtime.tasks).toContainEqual(
+      expect.objectContaining({
+        id: 'review-launch-plan',
+        status: 'done',
+      })
+    )
+  })
+
+  it('clears a stale pending choice when a new owner message starts a run', async () => {
+    const base = createDefaultMitaTeamsConfig({
+      provider: 'openai',
+      id: 'gpt-5',
+    })
+    const config = {
+      ...base,
+      runtime: {
+        ...base.runtime,
+        userChoiceRequest: {
+          id: 'choice-1',
+          question: 'Pick scope.',
+          options: [{ id: 'small', label: 'Small beta' }],
+          status: 'pending' as const,
+          createdAt: '2026-05-29T00:00:00.000Z',
+        },
+      },
+    }
+
+    const result = await runMitaTeamsRuntime({
+      config,
+      userText: 'Actually, continue with the smallest scope.',
+      generateDecisionText: async () =>
+        JSON.stringify({
+          action: 'stop',
+          reason: 'Freeform owner response handled.',
+          finalResponse: 'Continuing without stale choice.',
+        }),
+      generateRoleText: async () => 'unused',
+    })
+
+    expect(result.status).toBe('completed')
+    expect(result.config.runtime.userChoiceRequest).toBeUndefined()
+  })
+
+  it('treats abort during role generation as stopped instead of failed', async () => {
+    const model = {
+      provider: 'openai',
+      id: 'gpt-5',
+    }
+    const base = createDefaultMitaTeamsConfig(model)
+    const config = normalizeMitaTeamsConfig(
+      {
+        ...base,
+        roles: [
+          ...base.roles,
+          {
+            id: 'builder',
+            name: 'Builder',
+            label: 'Build',
+            description: 'Builds work.',
+            prompt: 'Build carefully.',
+            color: 'bg-emerald-600',
+            permission: 'read',
+            enabled: true,
+            provider: model.provider,
+            modelId: model.id,
+          },
+        ],
+        channels: [
+          {
+            id: 'task',
+            label: 'Current task',
+            description: 'Main room.',
+            roleIds: ['orchestrator', 'builder'],
+          },
+        ],
+      },
+      model
+    )!
+    const controller = new AbortController()
+
+    const result = await runMitaTeamsRuntime({
+      config,
+      userText: 'Start then abort.',
+      abortSignal: controller.signal,
+      generateDecisionText: async () =>
+        JSON.stringify({
+          action: 'call_roles',
+          mode: 'parallel',
+          reason: 'Call builder.',
+          calls: [
+            {
+              roleId: 'builder',
+              channelId: 'task',
+              instruction: 'Work until aborted.',
+            },
+          ],
+        }),
+      generateRoleText: async () => {
+        controller.abort()
+        throw new Error('aborted')
+      },
+    })
+
+    expect(result.status).toBe('stopped')
+    expect(result.config.runtime.run?.status).toBe('stopped')
+    expect(result.config.runtime.run?.error).toBeUndefined()
+    expect(
+      result.config.runtime.teamEvents.some(
+        (event) => event.type === 'run_failed'
+      )
+    ).toBe(false)
+  })
+
   it('does not fallback into default worker calls when orchestrator JSON cannot be repaired', async () => {
     const config = createDefaultMitaTeamsConfig({
       provider: 'openai',
@@ -388,8 +714,8 @@ describe('mita teams runtime', () => {
           reason: 'Scope affects the next plan.',
           question: 'Which launch scope should Mita Teams use?',
           options: [
-            { id: 'small', label: 'Small beta' },
-            { id: 'full', label: 'Full launch' },
+            { id: 'Small Beta', label: 'Small beta' },
+            { id: 'Small Beta', label: 'Full launch' },
           ],
         }),
       generateRoleText: async () => 'unused',
@@ -398,6 +724,11 @@ describe('mita teams runtime', () => {
     expect(result.status).toBe('waiting-for-user')
     expect(result.config.runtime.userChoiceRequest?.status).toBe('pending')
     expect(result.config.runtime.userChoiceRequest?.options).toHaveLength(2)
+    expect(
+      result.config.runtime.userChoiceRequest?.options.map(
+        (option) => option.id
+      )
+    ).toEqual(['small-beta', 'small-beta-2'])
     expect(result.choiceRequestId).toBeTruthy()
   })
 })

@@ -461,9 +461,11 @@ function RuntimeStatusBadge({
 function ChoiceRequestCard({
   choice,
   onSelect,
+  disabled,
 }: {
   choice: MitaTeamsChoiceRequest
   onSelect?: (optionId: string) => void
+  disabled?: boolean
 }) {
   const { t } = useTranslation()
 
@@ -487,7 +489,11 @@ function ChoiceRequestCard({
             type="button"
             variant="outline"
             className="h-auto justify-start whitespace-normal px-3 py-2 text-left"
-            onClick={() => onSelect?.(option.id)}
+            disabled={disabled || choice.status !== 'pending'}
+            onClick={() => {
+              if (disabled || choice.status !== 'pending') return
+              onSelect?.(option.id)
+            }}
           >
             <span className="min-w-0">
               <span className="block text-sm font-medium">{option.label}</span>
@@ -653,6 +659,298 @@ function ChannelRoleStreams({
         </div>
       ))}
     </div>
+  )
+}
+
+function WorkspaceOverviewMenu({
+  activeTemplate,
+  availableChannelTemplates,
+  availableRoleTemplates,
+  config,
+  runtime,
+  roles,
+  taskText,
+  addChannelFromTemplate,
+  addRoleFromTemplate,
+  openRoleChat,
+  setChannel,
+  setTaskTemplate,
+  setMode,
+  setRoundLimit,
+}: {
+  activeTemplate: (typeof MITA_TEAMS_TASK_TEMPLATES)[number]
+  availableChannelTemplates: typeof MITA_TEAMS_CHANNELS
+  availableRoleTemplates: typeof DEFAULT_MITA_TEAMS_ROLES
+  config: MitaTeamsConfig
+  runtime: MitaTeamsConfig['runtime']
+  roles: MitaTeamsRoleConfig[]
+  taskText: string
+  addChannelFromTemplate: (channelId: MitaTeamsChannelId) => void
+  addRoleFromTemplate: (roleId: MitaTeamsRoleId) => void
+  openRoleChat: (roleId: MitaTeamsRoleId) => void
+  setChannel: (channelId: MitaTeamsChannelId) => void
+  setTaskTemplate: (taskTemplateId: MitaTeamsTaskTemplateId) => void
+  setMode: (mode: MitaTeamsMode) => void
+  setRoundLimit: (roundLimit: number) => void
+}) {
+  const { t } = useTranslation()
+
+  return (
+    <DropdownMenu>
+      <DropdownMenuTrigger asChild>
+        <Button
+          type="button"
+          variant="ghost"
+          size="icon-sm"
+          className="rounded-full xl:hidden"
+          aria-label={t('mita-teams:workspaceOverview')}
+        >
+          <ListChecks className="size-4" />
+        </Button>
+      </DropdownMenuTrigger>
+      <DropdownMenuContent
+        align="end"
+        className="max-h-[min(75vh,36rem)] w-80 overflow-y-auto p-3"
+      >
+        <div className="space-y-4">
+          <section>
+            <div className="mb-1 flex items-center gap-2 text-xs font-medium uppercase text-muted-foreground">
+              <CircleDot className="size-3.5" />
+              {t('mita-teams:goal')}
+            </div>
+            <p className="text-sm leading-5">{taskText}</p>
+          </section>
+
+          <section>
+            <div className="mb-1 flex items-center gap-2 text-xs font-medium uppercase text-muted-foreground">
+              <Hash className="size-3.5" />
+              {t('mita-teams:channels')}
+            </div>
+            <div className="grid gap-1">
+              {config.channels.map((channel) => (
+                <DropdownMenuItem
+                  key={channel.id}
+                  className={cn(
+                    'gap-2',
+                    config.activeChannel === channel.id &&
+                      config.workspaceView === 'team-chat' &&
+                      'bg-primary/10 text-primary'
+                  )}
+                  onClick={() => setChannel(channel.id)}
+                >
+                  <Hash className="size-3.5 text-muted-foreground" />
+                  <span className="truncate">
+                    {localizedChannelLabel(channel, t)}
+                  </span>
+                </DropdownMenuItem>
+              ))}
+              {availableChannelTemplates.length > 0 && (
+                <DropdownMenuSeparator />
+              )}
+              {availableChannelTemplates.map((channel) => (
+                <DropdownMenuItem
+                  key={channel.id}
+                  className="gap-2"
+                  onClick={() => addChannelFromTemplate(channel.id)}
+                >
+                  <Plus className="size-3.5 text-muted-foreground" />
+                  <span className="truncate">
+                    {localizedChannelLabel(channel, t)}
+                  </span>
+                </DropdownMenuItem>
+              ))}
+            </div>
+          </section>
+
+          <section>
+            <div className="mb-1 flex items-center gap-2 text-xs font-medium uppercase text-muted-foreground">
+              <UsersRound className="size-3.5" />
+              {t('mita-teams:roles')}
+            </div>
+            <div className="grid gap-1">
+              {roles.map((role) => (
+                <DropdownMenuItem
+                  key={role.id}
+                  className={cn(
+                    'gap-2',
+                    role.id === config.activeRoleId &&
+                      config.workspaceView === 'role-chat' &&
+                      'bg-primary/10 text-primary'
+                  )}
+                  onClick={() => openRoleChat(role.id)}
+                >
+                  <span className={cn('size-2.5 rounded-full', role.color)} />
+                  <span className="min-w-0 flex-1 truncate">
+                    {localizedRoleName(role, t)}
+                  </span>
+                  <span className="shrink-0 text-[11px] text-muted-foreground">
+                    {role.modelId || t('mita-teams:unassigned')}
+                  </span>
+                </DropdownMenuItem>
+              ))}
+              {availableRoleTemplates.length > 0 && <DropdownMenuSeparator />}
+              {availableRoleTemplates.map((role) => (
+                <DropdownMenuItem
+                  key={role.id}
+                  className="gap-2"
+                  onClick={() => addRoleFromTemplate(role.id)}
+                >
+                  <Plus className="size-3.5 text-muted-foreground" />
+                  <span className={cn('size-2.5 rounded-full', role.color)} />
+                  <span>{localizedRoleName(role, t)}</span>
+                </DropdownMenuItem>
+              ))}
+            </div>
+          </section>
+
+          <section>
+            <div className="mb-1 flex items-center gap-2 text-xs font-medium uppercase text-muted-foreground">
+              <Target className="size-3.5" />
+              {t('mita-teams:template')}
+            </div>
+            <div className="grid gap-1">
+              {MITA_TEAMS_TASK_TEMPLATES.map((template) => (
+                <DropdownMenuItem
+                  key={template.id}
+                  className={cn(
+                    'flex-col items-start gap-0.5',
+                    activeTemplate.id === template.id &&
+                      'bg-primary/10 text-primary'
+                  )}
+                  onClick={() => setTaskTemplate(template.id)}
+                >
+                  <span className="text-xs font-medium">
+                    {localizedTaskTemplateLabel(template.id, template.label, t)}
+                  </span>
+                  <span className="line-clamp-2 text-[11px] text-muted-foreground">
+                    {localizedTaskTemplateDescription(
+                      template.id,
+                      template.description,
+                      t
+                    )}
+                  </span>
+                </DropdownMenuItem>
+              ))}
+            </div>
+          </section>
+
+          <section>
+            <div className="mb-1 flex items-center gap-2 text-xs font-medium uppercase text-muted-foreground">
+              <Boxes className="size-3.5" />
+              {t('mita-teams:mode')}
+            </div>
+            <div className="grid gap-1">
+              {MITA_TEAMS_MODES.map((mode) => (
+                <DropdownMenuItem
+                  key={mode.id}
+                  className={cn(
+                    'flex-col items-start gap-0.5',
+                    config.mode === mode.id && 'bg-primary/10 text-primary'
+                  )}
+                  onClick={() => setMode(mode.id)}
+                >
+                  <span className="text-xs font-medium">
+                    {localizedModeLabel(mode.id, mode.label, t)}
+                  </span>
+                  <span className="line-clamp-2 text-[11px] text-muted-foreground">
+                    {t(`mita-teams:modesById.${mode.id}.description`)}
+                  </span>
+                </DropdownMenuItem>
+              ))}
+            </div>
+          </section>
+
+          <section className="rounded-lg border bg-background p-3">
+            <div className="mb-2 flex items-center gap-2 text-xs font-medium uppercase text-muted-foreground">
+              <ListChecks className="size-3.5" />
+              {t('mita-teams:taskBoard')}
+            </div>
+            <TaskBoard tasks={runtime.tasks} roles={roles} />
+          </section>
+
+          <section className="rounded-lg border bg-background p-3">
+            <div className="mb-2 flex items-center gap-2 text-xs font-medium uppercase text-muted-foreground">
+              <FileText className="size-3.5" />
+              {t('mita-teams:artifacts')}
+            </div>
+            <ArtifactsList artifacts={runtime.artifacts} />
+          </section>
+
+          <section className="rounded-lg border bg-background p-3">
+            <div className="mb-2 flex items-center gap-2 text-xs font-medium uppercase text-muted-foreground">
+              <Brain className="size-3.5" />
+              {t('mita-teams:projectMemory')}
+            </div>
+            <MemoryList
+              items={[
+                runtime.projectMemory.summary,
+                ...runtime.projectMemory.milestones,
+              ].filter(Boolean)}
+              emptyText={t('mita-teams:memoryEmpty')}
+            />
+          </section>
+
+          <section className="rounded-lg border bg-background p-3">
+            <div className="mb-2 text-xs font-medium uppercase text-muted-foreground">
+              {t('mita-teams:budget')}
+            </div>
+            <div className="mb-2 flex items-center justify-between gap-2 rounded-md bg-muted/30 px-2 py-1.5">
+              <Button
+                type="button"
+                variant="outline"
+                size="icon-xs"
+                aria-label={t('mita-teams:decreaseRounds')}
+                onClick={() =>
+                  setRoundLimit(Math.max(1, config.roundLimit - 1))
+                }
+              >
+                <Minus className="size-3" />
+              </Button>
+              <span className="text-xs text-muted-foreground">
+                {t('mita-teams:roundLimit', { count: config.roundLimit })}
+              </span>
+              <Button
+                type="button"
+                variant="outline"
+                size="icon-xs"
+                aria-label={t('mita-teams:increaseRounds')}
+                onClick={() =>
+                  setRoundLimit(Math.min(10, config.roundLimit + 1))
+                }
+              >
+                <Plus className="size-3" />
+              </Button>
+            </div>
+            <div className="grid grid-cols-2 gap-2 text-[11px] text-muted-foreground">
+              <div className="rounded-md bg-muted/30 px-2 py-1.5">
+                <div>{t('mita-teams:roundsUsed')}</div>
+                <div className="text-xs font-medium text-foreground">
+                  {runtime.run?.currentRound ?? 0}
+                </div>
+              </div>
+              <div className="rounded-md bg-muted/30 px-2 py-1.5">
+                <div>{t('mita-teams:roleCalls')}</div>
+                <div className="text-xs font-medium text-foreground">
+                  {runtime.run?.callCount ?? 0}
+                </div>
+              </div>
+              <div className="rounded-md bg-muted/30 px-2 py-1.5">
+                <div>{t('mita-teams:elapsed')}</div>
+                <div className="text-xs font-medium text-foreground">
+                  {displayDuration(runtime.run?.durationMs)}
+                </div>
+              </div>
+              <div className="rounded-md bg-muted/30 px-2 py-1.5">
+                <div>{t('mita-teams:tokenUsage')}</div>
+                <div className="text-xs font-medium text-foreground">
+                  {runtime.run?.usage?.totalTokens ?? t('mita-teams:reserved')}
+                </div>
+              </div>
+            </div>
+          </section>
+        </div>
+      </DropdownMenuContent>
+    </DropdownMenu>
   )
 }
 
@@ -1105,6 +1403,11 @@ export const MitaTeamsWorkspace = memo(function MitaTeamsWorkspace({
     [patchConfig]
   )
 
+  const setRoundLimit = useCallback(
+    (roundLimit: number) => patchConfig({ roundLimit }),
+    [patchConfig]
+  )
+
   const setTaskTemplate = useCallback(
     (taskTemplateId: MitaTeamsTaskTemplateId) => {
       const template = MITA_TEAMS_TASK_TEMPLATES.find(
@@ -1309,10 +1612,9 @@ export const MitaTeamsWorkspace = memo(function MitaTeamsWorkspace({
                 type="button"
                 variant="outline"
                 size="icon-xs"
+                aria-label={t('mita-teams:decreaseRounds')}
                 onClick={() =>
-                  patchConfig({
-                    roundLimit: Math.max(1, config.roundLimit - 1),
-                  })
+                  setRoundLimit(Math.max(1, config.roundLimit - 1))
                 }
               >
                 <Minus className="size-3" />
@@ -1324,10 +1626,9 @@ export const MitaTeamsWorkspace = memo(function MitaTeamsWorkspace({
                 type="button"
                 variant="outline"
                 size="icon-xs"
+                aria-label={t('mita-teams:increaseRounds')}
                 onClick={() =>
-                  patchConfig({
-                    roundLimit: Math.min(10, config.roundLimit + 1),
-                  })
+                  setRoundLimit(Math.min(10, config.roundLimit + 1))
                 }
               >
                 <Plus className="size-3" />
@@ -1457,6 +1758,24 @@ export const MitaTeamsWorkspace = memo(function MitaTeamsWorkspace({
             </div>
           )}
           {!isRoleConfig && (
+            <WorkspaceOverviewMenu
+              activeTemplate={activeTemplate}
+              availableChannelTemplates={availableChannelTemplates}
+              availableRoleTemplates={availableRoleTemplates}
+              config={config}
+              runtime={runtime}
+              roles={config.roles}
+              taskText={taskText}
+              addChannelFromTemplate={addChannelFromTemplate}
+              addRoleFromTemplate={addRoleFromTemplate}
+              openRoleChat={openRoleChat}
+              setChannel={setChannel}
+              setTaskTemplate={setTaskTemplate}
+              setMode={setMode}
+              setRoundLimit={setRoundLimit}
+            />
+          )}
+          {!isRoleConfig && (
             <div className="hidden shrink-0 items-center gap-1 md:flex">
               {headerRoles.slice(0, 5).map((role) => (
                 <span
@@ -1521,6 +1840,7 @@ export const MitaTeamsWorkspace = memo(function MitaTeamsWorkspace({
                 {pendingChoice && !isRoleChat && (
                   <ChoiceRequestCard
                     choice={pendingChoice}
+                    disabled={isRuntimeBusy}
                     onSelect={onChoiceSelect}
                   />
                 )}

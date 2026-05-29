@@ -18,6 +18,7 @@ const h = vi.hoisted(() => {
   const mockSetContinueFromContent = vi.fn()
   const mockRagCallTool = vi.fn()
   const mockMcpCallTool = vi.fn()
+  const mockRunMitaTeamsRuntime = vi.fn()
   const openExternalUrl = vi.fn()
   const useChatArgs: any[] = []
 
@@ -150,6 +151,7 @@ const h = vi.hoisted(() => {
     mockSetContinueFromContent,
     mockRagCallTool,
     mockMcpCallTool,
+    mockRunMitaTeamsRuntime,
     openExternalUrl,
     useChatArgs,
     chatState,
@@ -243,6 +245,29 @@ vi.mock('@/containers/MessageItem', () => ({
   ),
 }))
 
+vi.mock('@/containers/MitaTeamsWorkspace', () => ({
+  MitaTeamsWorkspace: ({
+    config,
+    isRuntimeBusy,
+    onChoiceSelect,
+  }: any) => (
+    <div data-testid="mita-teams-workspace">
+      {config.runtime.userChoiceRequest?.options.map(
+        (option: { id: string; label: string }) => (
+          <button
+            key={option.id}
+            data-testid={`choice-${option.id}`}
+            disabled={isRuntimeBusy}
+            onClick={() => onChoiceSelect(option.id)}
+          >
+            {option.label}
+          </button>
+        )
+      )}
+    </div>
+  ),
+}))
+
 vi.mock('@/components/ai-elements/conversation', () => ({
   Conversation: ({ children }: any) => <div>{children}</div>,
   ConversationContent: ({ children }: any) => <div>{children}</div>,
@@ -289,6 +314,11 @@ vi.mock('@/lib/extension', () => ({
 }))
 
 vi.mock('@/lib/messages', () => ({
+  convertThreadMessageToUIMessage: (m: any) => ({
+    id: m.id,
+    role: m.role,
+    parts: [{ type: 'text', text: m.content?.[0]?.text?.value ?? '' }],
+  }),
   convertThreadMessagesToUIMessages: (msgs: any[]) =>
     msgs.map((m) => ({
       id: m.id,
@@ -323,6 +353,10 @@ vi.mock('@/lib/thread-title-summarizer', () => ({
 
 vi.mock('@/types/attachment', () => ({
   createImageAttachment: (x: any) => ({ type: 'image', ...x }),
+}))
+
+vi.mock('@/lib/mita-teams-runtime', () => ({
+  runMitaTeamsRuntime: (options: any) => h.mockRunMitaTeamsRuntime(options),
 }))
 
 vi.mock('ai', () => ({
@@ -456,6 +490,7 @@ import {
 } from '../$threadId'
 import { useAutoRunStore } from '@/stores/auto-run-store'
 import { DEFAULT_MITA_AUTO_RUN } from '@/types/mita-agent'
+import { createDefaultMitaTeamsConfig } from '@/types/mita-teams'
 
 const renderComponent = () => {
   const Component = Route.component as React.ComponentType
@@ -830,6 +865,51 @@ describe('ThreadDetail route', () => {
         }),
       })
     )
+  })
+
+  it('answers a pending Mita Teams choice only once on rapid duplicate clicks', async () => {
+    const baseConfig = createDefaultMitaTeamsConfig({
+      provider: 'openai',
+      id: 'gpt-x',
+    })
+    const now = '2026-05-29T00:00:00.000Z'
+    const mitaTeams = {
+      ...baseConfig,
+      runtime: {
+        ...baseConfig.runtime,
+        userChoiceRequest: {
+          id: 'choice-1',
+          question: 'Pick launch scope.',
+          options: [
+            { id: 'small', label: 'Small beta' },
+            { id: 'full', label: 'Full launch' },
+          ],
+          status: 'pending' as const,
+          createdAt: now,
+        },
+      },
+    }
+    h.threadsState.threads['thread-1'] = {
+      ...h.threadsState.threads['thread-1'],
+      metadata: { mitaTeams },
+    }
+    h.mockRunMitaTeamsRuntime.mockImplementation(async ({ config }: any) => ({
+      config,
+      status: 'waiting-for-user',
+    }))
+
+    renderComponent()
+    const choiceButton = await screen.findByTestId('choice-small')
+
+    await act(async () => {
+      choiceButton.click()
+      choiceButton.click()
+      await Promise.resolve()
+      await Promise.resolve()
+    })
+
+    expect(h.messagesState.addMessage).toHaveBeenCalledTimes(1)
+    expect(h.mockRunMitaTeamsRuntime).toHaveBeenCalledTimes(1)
   })
 
   it('pauses a running auto-run and persists the paused state', () => {
