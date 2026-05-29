@@ -130,6 +130,61 @@ describe('MessageItem', () => {
     expect(screen.getByTestId('render-markdown')).toHaveTextContent('Hello assistant')
   })
 
+  it('renders pseudo tool transcripts as collapsed status cards instead of markdown', () => {
+    const { container } = render(
+      <MessageItem
+        message={
+          makeMsg({
+            parts: [
+              {
+                type: 'text',
+                text:
+                  'I will search. <tool_call>{"name":"web_search","arguments":{"query":"杭州 市长"}}</tool_call> Done.',
+              },
+            ],
+          }) as any
+        }
+        isFirstMessage
+        isLastMessage
+        status={'ready' as any}
+      />
+    )
+
+    expect(screen.getByText('模型输出了未执行的工具指令')).toBeInTheDocument()
+    expect(screen.getByText('web_search')).toBeInTheDocument()
+    const markdownText = screen
+      .getAllByTestId('render-markdown')
+      .map((node) => node.textContent)
+      .join('\n')
+    expect(markdownText).not.toContain('<tool_call>')
+    expect(
+      container.querySelector('[data-pseudo-tool-transcript]')
+    ).not.toHaveAttribute('open')
+  })
+
+  it('labels malformed pseudo tool transcripts without retry controls', () => {
+    render(
+      <MessageItem
+        message={
+          makeMsg({
+            parts: [
+              {
+                type: 'text',
+                text: '<tool_call>{"name":"web_search","arguments":</tool_call>',
+              },
+            ],
+          }) as any
+        }
+        isFirstMessage
+        isLastMessage
+        status={'ready' as any}
+      />
+    )
+
+    expect(screen.getByText('工具调用格式异常')).toBeInTheDocument()
+    expect(screen.queryByText(/重新搜索/)).not.toBeInTheDocument()
+  })
+
   it('renders user message in a bubble (no markdown renderer)', () => {
     render(
       <MessageItem

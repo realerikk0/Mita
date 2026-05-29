@@ -161,7 +161,7 @@ describe('useAssistant', () => {
       'your agent identity is Mita'
     )
     expect(result.current.currentAssistant.instructions).toContain(
-      'Use tools when they are needed'
+      'Use structured tools only when they are available'
     )
     expect(typeof result.current.currentAssistant.created_at).toBe('number')
     expect(typeof result.current.currentAssistant.parameters).toBe('object')

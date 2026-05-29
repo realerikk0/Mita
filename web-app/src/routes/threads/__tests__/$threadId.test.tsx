@@ -16,6 +16,8 @@ const h = vi.hoisted(() => {
   const mockSetChatMessages = vi.fn()
   const mockUpdateRag = vi.fn()
   const mockSetContinueFromContent = vi.fn()
+  const mockRagCallTool = vi.fn()
+  const mockMcpCallTool = vi.fn()
   const openExternalUrl = vi.fn()
   const useChatArgs: any[] = []
 
@@ -146,6 +148,8 @@ const h = vi.hoisted(() => {
     mockSetChatMessages,
     mockUpdateRag,
     mockSetContinueFromContent,
+    mockRagCallTool,
+    mockMcpCallTool,
     openExternalUrl,
     useChatArgs,
     chatState,
@@ -351,8 +355,8 @@ vi.mock('@/hooks/use-chat', () => ({
 vi.mock('@/hooks/useThreads', () => ({ useThreads: h.useThreadsMock }))
 vi.mock('@/hooks/useServiceHub', () => ({
   useServiceHub: () => ({
-    rag: () => ({ callTool: vi.fn() }),
-    mcp: () => ({ callTool: vi.fn() }),
+    rag: () => ({ callTool: h.mockRagCallTool }),
+    mcp: () => ({ callTool: h.mockMcpCallTool }),
     models: () => ({ stopModel: vi.fn().mockResolvedValue(undefined) }),
     messages: () => ({
       fetchMessages: vi.fn((threadId: string) =>
@@ -489,6 +493,14 @@ describe('ThreadDetail route', () => {
     h.messagesState.updateMessage = vi.fn()
     h.messagesState.deleteMessage = vi.fn()
     h.messagesState.setMessages = vi.fn()
+    h.appStateState.ragToolNames = new Set()
+    h.appStateState.mcpToolNames = new Set()
+    h.mockRagCallTool.mockResolvedValue({
+      content: [{ type: 'text', text: 'rag result' }],
+    })
+    h.mockMcpCallTool.mockResolvedValue({
+      content: [{ type: 'text', text: 'mcp result' }],
+    })
     h.chatSessionsState.getSessionData = vi.fn(() => ({ tools: [] }))
     h.messageQueueState.dequeue = vi.fn(() => null)
     h.messageQueueState.clearQueue = vi.fn()
@@ -567,6 +579,12 @@ describe('ThreadDetail route', () => {
     )
     expect(h.useChatArgs.at(-1)?.systemMessage).toContain(
       'assistant-body summary'
+    )
+    expect(h.useChatArgs.at(-1)?.systemMessage).toContain(
+      'Never write pseudo tool transcripts'
+    )
+    expect(h.useChatArgs.at(-1)?.systemMessage).toContain(
+      'instead of simulating a tool call or result'
     )
   })
 
@@ -708,6 +726,80 @@ describe('ThreadDetail route', () => {
     await waitFor(() => {
       expect(screen.getByTestId('chat-status')).toHaveTextContent('ready')
     })
+  })
+
+  it('converts parseable pseudo tool transcripts into real MCP tool outputs', async () => {
+    h.appStateState.mcpToolNames = new Set(['web_search'])
+    renderComponent()
+
+    await act(async () => {
+      h.useChatArgs.at(-1).onFinish({
+        message: {
+          id: 'assistant-pseudo',
+          role: 'assistant',
+          parts: [
+            {
+              type: 'text',
+              text:
+                '<tool_call>{"name":"web_search","arguments":{"query":"杭州 市长"}}</tool_call>',
+            },
+          ],
+          metadata: {},
+        },
+        messages: [],
+        isAbort: false,
+        isDisconnect: false,
+        isError: false,
+      })
+      await Promise.resolve()
+    })
+
+    await waitFor(() => {
+      expect(h.mockMcpCallTool).toHaveBeenCalledWith({
+        toolName: 'web_search',
+        arguments: { query: '杭州 市长' },
+      })
+    })
+    expect(h.mockAddToolOutput).toHaveBeenCalledWith(
+      expect.objectContaining({
+        tool: 'web_search',
+        toolCallId: 'pseudo-assistant-pseudo-0-0',
+        output: [{ type: 'text', text: 'mcp result' }],
+      })
+    )
+    expect(h.mockSetChatMessages).toHaveBeenCalledWith(expect.any(Function))
+  })
+
+  it('does not execute malformed pseudo tool transcripts', async () => {
+    h.appStateState.mcpToolNames = new Set(['web_search'])
+    renderComponent()
+
+    await act(async () => {
+      h.useChatArgs.at(-1).onFinish({
+        message: {
+          id: 'assistant-bad-pseudo',
+          role: 'assistant',
+          parts: [
+            {
+              type: 'text',
+              text: '<tool_call>{"name":"web_search","arguments":</tool_call>',
+            },
+          ],
+          metadata: {},
+        },
+        messages: [],
+        isAbort: false,
+        isDisconnect: false,
+        isError: false,
+      })
+      await Promise.resolve()
+    })
+
+    await waitFor(() => {
+      expect(h.messagesState.addMessage).toHaveBeenCalled()
+    })
+    expect(h.mockMcpCallTool).not.toHaveBeenCalled()
+    expect(h.mockAddToolOutput).not.toHaveBeenCalled()
   })
 
   it('shows why auto-run start is blocked while a reply is active', () => {

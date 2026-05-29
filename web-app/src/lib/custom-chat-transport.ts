@@ -39,6 +39,7 @@ import {
   canUseJingxingNativeWebSearch,
   streamJingxingResponsesWebSearch,
 } from '@/lib/jingxing-responses-web-search'
+import { getToolAwareSystemMessage } from '@/lib/mita-prompt'
 import {
   encodeProviderQuotaError,
   providerQuotaErrorFromUnknown,
@@ -643,6 +644,17 @@ export class CustomChatTransport implements ChatTransport<UIMessage> {
     const hasTools = Object.keys(this.tools).length > 0
     const modelSupportsTools = selectedModel?.capabilities?.includes('tools') ?? this.modelSupportsTools
     const shouldEnableTools = hasTools && modelSupportsTools
+    const nativeWebSearchEnabled =
+      useWebSearch.getState().enabled &&
+      canUseJingxingNativeWebSearch({
+        providerName: providerId,
+        modelId,
+        messages: mappedMessages,
+      })
+    const systemMessage = getToolAwareSystemMessage(this.systemMessage ?? '', {
+      structuredToolsEnabled: shouldEnableTools,
+      nativeWebSearchEnabled,
+    })
 
     trackMitaEvent('assistant_response_started', {
       provider_id: providerId,
@@ -655,19 +667,12 @@ export class CustomChatTransport implements ChatTransport<UIMessage> {
       transport: 'desktop_custom_chat_transport',
     })
 
-    if (
-      useWebSearch.getState().enabled &&
-      canUseJingxingNativeWebSearch({
-        providerName: providerId,
-        modelId,
-        messages: mappedMessages,
-      })
-    ) {
+    if (nativeWebSearchEnabled) {
       return streamJingxingResponsesWebSearch({
         modelId,
         provider: effectiveProvider,
         messages: mappedMessages,
-        system: this.systemMessage,
+        system: systemMessage,
         maxOutputTokens,
         abortSignal: options.abortSignal,
         onTokenUsage: this.onTokenUsage,
@@ -695,7 +700,7 @@ export class CustomChatTransport implements ChatTransport<UIMessage> {
       abortSignal: options.abortSignal,
       tools: shouldEnableTools ? this.tools : undefined,
       toolChoice: shouldEnableTools ? 'auto' : undefined,
-      system: this.systemMessage,
+      system: systemMessage,
       ...(maxOutputTokens !== undefined ? { maxTokens: maxOutputTokens } : {}),
     })
 

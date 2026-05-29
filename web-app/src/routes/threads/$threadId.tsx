@@ -38,6 +38,10 @@ import {
   convertThreadMessageToUIMessage,
   extractContentPartsFromUIMessage,
 } from '@/lib/messages'
+import {
+  extractPseudoToolTranscripts,
+  isPseudoToolTranscriptExecutable,
+} from '@/lib/pseudo-tool-transcript'
 import { newAssistantThreadContent, newUserThreadContent } from '@/lib/completion'
 import {
   ThreadMessage,
@@ -189,6 +193,51 @@ function isComputerAgentToolName(toolName: string) {
     toolName.startsWith(COMPUTER_AGENT_TOOL_PREFIX) ||
     toolName.startsWith(LEGACY_COMPUTER_TOOL_PREFIX)
   )
+}
+
+type PendingToolCall = {
+  toolCallId: string
+  toolName: string
+  input: unknown
+}
+
+function getExecutablePseudoToolCalls(
+  message: UIMessage,
+  options: {
+    ragToolNames: Set<string>
+    mcpToolNames: Set<string>
+  }
+): PendingToolCall[] {
+  if (message.role !== 'assistant') return []
+
+  const calls: PendingToolCall[] = []
+  const parts = Array.isArray(message.parts) ? message.parts : []
+
+  for (const [partIndex, part] of parts.entries()) {
+    if (part.type !== 'text') continue
+    const text = (part as { type: 'text'; text?: string }).text
+    if (!text) continue
+
+    for (const [callIndex, transcript] of extractPseudoToolTranscripts(
+      text
+    ).entries()) {
+      if (!isPseudoToolTranscriptExecutable(transcript)) continue
+      const toolName = transcript.toolName
+      const toolIsAvailable =
+        options.ragToolNames.has(toolName) ||
+        options.mcpToolNames.has(toolName) ||
+        isComputerAgentToolName(toolName)
+      if (!toolIsAvailable) continue
+
+      calls.push({
+        toolCallId: `pseudo-${message.id}-${partIndex}-${callIndex}`,
+        toolName,
+        input: transcript.input,
+      })
+    }
+  }
+
+  return calls
 }
 
 function asToolInput(value: unknown): Record<string, unknown> {
@@ -436,7 +485,10 @@ function ThreadDetail() {
 Tool result communication:
 - Treat tool cards as raw call records only; do not rely on them as the user-facing explanation.
 - After one or more tool calls complete, write a short assistant-body summary before continuing.
-- Summarize the result in readable prose or bullets. For failures, state the error briefly and say what you will try next.${
+- Summarize the result in readable prose or bullets. For failures, state the error briefly and say what you will try next.
+- Use the structured tool-calling channel only. Never write pseudo tool transcripts such as <tool_call>, <tool_response>, or web_search({...}) in normal assistant text.
+- If the structured tool channel is unavailable, say that you cannot use that tool right now instead of simulating a tool call or result.
+- If Mita converts a pseudo tool transcript into a real tool call, summarize only the real tool output that Mita provides.${
       mitaTeamsConfig
         ? `\n\n${renderMitaTeamsSystemInstructions(mitaTeamsConfig)}`
         : ''
@@ -569,6 +621,35 @@ Tool result communication:
     systemMessage,
     experimental_throttle: 50,
     onFinish: ({ message, isAbort, isError }) => {
+      const structuredToolCalls = [...sessionData.tools] as PendingToolCall[]
+      const ragToolNames = useAppState.getState().ragToolNames
+      const mcpToolNames = useAppState.getState().mcpToolNames
+      const pseudoToolCalls =
+        !isAbort && structuredToolCalls.length === 0
+          ? getExecutablePseudoToolCalls(message, {
+              ragToolNames,
+              mcpToolNames,
+            })
+          : []
+
+      if (pseudoToolCalls.length > 0) {
+        message = {
+          ...message,
+          parts: [
+            ...(message.parts ?? []),
+            ...pseudoToolCalls.map((toolCall) => ({
+              type: `tool-${toolCall.toolName}` as `tool-${string}`,
+              toolCallId: toolCall.toolCallId,
+              input: toolCall.input,
+              state: 'input-available' as const,
+            })),
+          ],
+        }
+        setChatMessages((prev) =>
+          prev.map((item) => (item.id === message.id ? message : item))
+        )
+      }
+
       const msgMeta = message.metadata as Record<string, unknown> | undefined
       const finishReason = msgMeta?.finishReason as string | undefined
       markChatReadyAfterFinish(finishReason, isAbort, isError)
@@ -660,13 +741,11 @@ Tool result communication:
       toolCallAbortController.current = new AbortController()
       const signal = toolCallAbortController.current.signal
 
-      // Get cached tool names from store (initialized in useTools hook)
-      const ragToolNames = useAppState.getState().ragToolNames
-      const mcpToolNames = useAppState.getState().mcpToolNames
+      const toolCallsToProcess = [...structuredToolCalls, ...pseudoToolCalls]
 
       // Process tool calls sequentially, requesting approval for each if needed
       ;(async () => {
-        for (const toolCall of sessionData.tools) {
+        for (const toolCall of toolCallsToProcess) {
           // Check if already aborted before starting
           if (signal.aborted) {
             break

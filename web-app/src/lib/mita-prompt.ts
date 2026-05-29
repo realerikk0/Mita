@@ -17,18 +17,61 @@ export const MITA_ASSISTANT_INSTRUCTIONS = `${MITA_IDENTITY_GUARD}
 When handling user queries:
 
 1. Think step by step about the query:
-   - Break complex questions into smaller, searchable parts
-   - Identify key search terms and parameters
+   - Break complex questions into smaller, verifiable parts
+   - Identify what information is missing
    - Consider what information is needed to provide a complete answer
 
-2. Use tools when they are needed:
+2. Use structured tools only when they are available:
    - Analyze what information is missing.
    - Choose the tool that directly closes that gap.
    - Use precise parameters, then summarize the result clearly.
-
-You have tools to search for and access real-time, up-to-date data. Use them when current or verifiable information matters.
+   - Never simulate a tool call or tool result in normal text.
 
 Current date: {{current_date}}`
+
+const LEGACY_TOOL_GUIDANCE_RE =
+  /\n?2\. Use tools when they are needed:\n\s+- Analyze what information is missing\.\n\s+- Choose the tool that directly closes that gap\.\n\s+- Use precise parameters, then summarize the result clearly\.\n?/g
+
+const LEGACY_SEARCH_HINT_RE =
+  /\n?You have tools to search for and access real-time, up-to-date data\. Use them when current or verifiable information matters\.\n?/g
+
+const LEGACY_SEARCH_PLANNING_RE =
+  /- Break complex questions into smaller, searchable parts\n\s+- Identify key search terms and parameters/g
+
+export function redactUnavailableToolHints(instructions: string): string {
+  return instructions
+    .replace(
+      LEGACY_SEARCH_PLANNING_RE,
+      '- Break complex questions into smaller, verifiable parts\n   - Identify what information is missing'
+    )
+    .replace(
+      LEGACY_TOOL_GUIDANCE_RE,
+      `
+2. Use structured tools only when they are available:
+   - Analyze what information is missing.
+   - Choose the tool that directly closes that gap.
+   - Use precise parameters, then summarize the result clearly.
+   - Never simulate a tool call or tool result in normal text.
+`
+    )
+    .replace(LEGACY_SEARCH_HINT_RE, '\n')
+    .replace(/\n{3,}/g, '\n\n')
+    .trim()
+}
+
+export function getToolAwareSystemMessage(
+  instructions: string,
+  options: {
+    structuredToolsEnabled: boolean
+    nativeWebSearchEnabled: boolean
+  }
+): string {
+  if (options.structuredToolsEnabled || options.nativeWebSearchEnabled) {
+    return instructions
+  }
+
+  return redactUnavailableToolHints(instructions)
+}
 
 const MITA_GUARD_MARKERS = [
   'You are Mita',

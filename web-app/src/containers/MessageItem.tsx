@@ -17,10 +17,12 @@ import {
   ToolInput,
   ToolOutput,
 } from '@/components/ai-elements/tool'
+import { splitTextByPseudoToolTranscripts } from '@/lib/pseudo-tool-transcript'
 import { CopyButton } from './CopyButton'
 import { formatDate } from '@/utils/formatDate'
 import { useModelProvider } from '@/hooks/useModelProvider'
 import { IconRefresh, IconPaperclip, IconArrowDown } from '@tabler/icons-react'
+import { AlertTriangleIcon, WrenchIcon } from 'lucide-react'
 import { EditMessageDialog } from '@/containers/dialogs/EditMessageDialog'
 import { DeleteMessageDialog } from '@/containers/dialogs/DeleteMessageDialog'
 import TokenSpeedIndicator from '@/containers/TokenSpeedIndicator'
@@ -198,25 +200,101 @@ export const MessageItem = memo(
               </div>
             </div>
           ) : (
-            <>
-              <RenderMarkdown
-                content={part.text}
-                isStreaming={isStreaming && isLastPart}
-                messageId={message.id}
-                isAnimating={isAnimating}
-                onApplyContentEdit={
-                  onEdit && !hideActions
-                    ? (newContent) => onEdit(message.id, newContent)
-                    : undefined
-                }
-                paragraphEditDisabled={
-                  hideActions || (isStreaming && isLastPart)
-                }
-              />
-            </>
+            renderAssistantTextPart(part.text, partIndex, isLastPart)
           )}
         </div>
       )
+    }
+
+    const renderPseudoToolTranscriptCard = (
+      segment: Extract<
+        ReturnType<typeof splitTextByPseudoToolTranscripts>[number],
+        { type: 'pseudo-tool-transcript' }
+      >,
+      key: string
+    ) => {
+      const hasError = Boolean(segment.transcript.parseError)
+      const title = hasError
+        ? '工具调用格式异常'
+        : '模型输出了未执行的工具指令'
+
+      return (
+        <details
+          key={key}
+          className={cn(
+            'not-prose my-2 rounded-md border bg-muted/40 px-3 py-2 text-sm',
+            hasError
+              ? 'border-destructive/25 bg-destructive/5'
+              : 'border-amber-300/40 bg-amber-50/60 dark:bg-amber-950/15'
+          )}
+          data-pseudo-tool-transcript
+        >
+          <summary className="flex cursor-pointer list-none items-center gap-2 text-muted-foreground">
+            {hasError ? (
+              <AlertTriangleIcon className="size-4 text-destructive" />
+            ) : (
+              <WrenchIcon className="size-4 text-amber-600 dark:text-amber-400" />
+            )}
+            <span className="font-medium text-foreground">{title}</span>
+            {segment.transcript.toolName && (
+              <span className="rounded-sm bg-background/70 px-1.5 py-0.5 font-mono text-xs">
+                {segment.transcript.toolName}
+              </span>
+            )}
+          </summary>
+          <div className="mt-2 space-y-2 pl-6">
+            {segment.transcript.parseError && (
+              <div className="text-xs text-destructive">
+                {segment.transcript.parseError}
+              </div>
+            )}
+            <pre className="max-h-48 overflow-auto rounded-md border bg-background p-2 text-xs whitespace-pre-wrap break-words text-foreground">
+              {segment.transcript.raw}
+            </pre>
+          </div>
+        </details>
+      )
+    }
+
+    const renderAssistantTextPart = (
+      text: string,
+      partIndex: number,
+      isLastPart: boolean
+    ) => {
+      const segments = splitTextByPseudoToolTranscripts(text)
+      const markdownCount = segments.filter((segment) => segment.type === 'text')
+        .length
+      let markdownIndex = 0
+
+      return segments.map((segment, segmentIndex) => {
+        if (segment.type === 'pseudo-tool-transcript') {
+          return renderPseudoToolTranscriptCard(
+            segment,
+            `${message.id}-${partIndex}-pseudo-tool-${segmentIndex}`
+          )
+        }
+
+        if (!segment.text.trim()) return null
+        markdownIndex++
+
+        return (
+          <RenderMarkdown
+            key={`${message.id}-${partIndex}-text-${segmentIndex}`}
+            content={segment.text}
+            isStreaming={
+              isStreaming && isLastPart && markdownIndex === markdownCount
+            }
+            messageId={message.id}
+            isAnimating={isAnimating}
+            onApplyContentEdit={
+              onEdit && !hideActions
+                ? (newContent) => onEdit(message.id, newContent)
+                : undefined
+            }
+            paragraphEditDisabled={hideActions || (isStreaming && isLastPart)}
+          />
+        )
+      })
     }
 
     const renderFilePart = (
