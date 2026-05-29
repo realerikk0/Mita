@@ -95,7 +95,9 @@ const isErrorToolState = (status: ToolUIPart['state']) =>
 
 const tryParseJson = (value: string): unknown | undefined => {
   const trimmed = value.trim()
-  if (!trimmed || !/^[\[{]/.test(trimmed)) return undefined
+  if (!trimmed || !(trimmed.startsWith('{') || trimmed.startsWith('['))) {
+    return undefined
+  }
 
   try {
     return JSON.parse(trimmed)
