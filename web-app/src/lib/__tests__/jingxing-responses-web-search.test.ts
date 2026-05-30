@@ -156,7 +156,7 @@ describe('canUseJingxingNativeWebSearch', () => {
     expect(proRequest.body).toMatchObject({
       model: 'gpt-5.4-pro',
       stream: true,
-      max_output_tokens: 1024,
+      max_output_tokens: 4096,
       web_search_options: JINGXING_WEB_SEARCH_OPTIONS,
     })
     expect(codexRequest.transport).toBe('responses')

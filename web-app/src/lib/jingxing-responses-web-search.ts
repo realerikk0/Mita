@@ -246,9 +246,9 @@ function protectedResponsesMaxOutputTokens(
 ): number | undefined {
   if (
     modelId.toLowerCase().startsWith('gpt-5.4-pro') &&
-    (!maxOutputTokens || maxOutputTokens < 1024)
+    (!maxOutputTokens || maxOutputTokens < 4096)
   ) {
-    return 1024
+    return 4096
   }
   return maxOutputTokens
 }
