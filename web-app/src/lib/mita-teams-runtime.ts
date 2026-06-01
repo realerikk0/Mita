@@ -1,6 +1,7 @@
 import { generateText, type LanguageModel } from 'ai'
 import { useAssistant } from '@/hooks/useAssistant'
 import { useModelProvider } from '@/hooks/useModelProvider'
+import { configuredChatModels } from '@/lib/configured-model-providers'
 import { defaultModel } from '@/lib/models'
 import { ModelFactory } from '@/lib/model-factory'
 import { providerQuotaErrorFromUnknown } from '@/lib/provider-quota-error'
@@ -74,6 +75,20 @@ type MitaTeamsUserControl = {
   shouldConverge: boolean
 }
 
+type MitaTeamsModelFamily =
+  | 'chatgpt'
+  | 'claude'
+  | 'gemini'
+  | 'grok'
+  | 'general'
+
+type MitaTeamsModelOption = {
+  provider: string
+  modelId: string
+  label: string
+  family: MitaTeamsModelFamily
+}
+
 export type RunMitaTeamsRuntimeOptions = {
   config: MitaTeamsConfig
   userText: string
@@ -89,6 +104,21 @@ export type MitaTeamsRuntimeResult = {
   finalResponse?: string
   choiceRequestId?: string
   status: 'completed' | 'waiting-for-user' | 'stopped' | 'failed'
+}
+
+export type RunMitaTeamsPrivateRoleChatOptions = {
+  config: MitaTeamsConfig
+  roleId: MitaTeamsRoleId
+  userText: string
+  abortSignal?: AbortSignal
+  onConfigChange?: (config: MitaTeamsConfig) => void
+  generateRoleText?: GenerateRoleText
+}
+
+export type MitaTeamsPrivateRoleChatResult = {
+  config: MitaTeamsConfig
+  finalResponse?: string
+  status: 'completed' | 'stopped' | 'failed'
 }
 
 const MAX_ROLE_CALLS_PER_RUN = 16
@@ -318,6 +348,216 @@ function modelForRole(role: MitaTeamsRoleConfig): ThreadModel | undefined {
   }
 }
 
+const MODEL_FAMILY_LABELS: Record<MitaTeamsModelFamily, string> = {
+  chatgpt: 'ChatGPT/OpenAI/GPT',
+  claude: 'Claude/Anthropic',
+  gemini: 'Gemini/Google',
+  grok: 'Grok/xAI',
+  general: 'General',
+}
+
+const MODEL_FAMILY_GUIDANCE: Record<MitaTeamsModelFamily, string> = {
+  chatgpt: 'code development, implementation, debugging, and direct problem solving',
+  claude: 'complex research, architecture, long-form reasoning, and hard problem solving',
+  gemini: 'UI/UX design, multimodal/interface thinking, and broad information retrieval',
+  grok: 'information retrieval, fact checking, skepticism, and separating signal from noise',
+  general: 'fallback work when no specialized family is available',
+}
+
+const familyFallbacks: Record<MitaTeamsModelFamily, MitaTeamsModelFamily[]> = {
+  chatgpt: ['chatgpt', 'claude', 'gemini', 'grok', 'general'],
+  claude: ['claude', 'chatgpt', 'gemini', 'grok', 'general'],
+  gemini: ['gemini', 'grok', 'claude', 'chatgpt', 'general'],
+  grok: ['grok', 'gemini', 'claude', 'chatgpt', 'general'],
+  general: ['general', 'chatgpt', 'claude', 'gemini', 'grok'],
+}
+
+function modelFamilyFromText(
+  providerName: string,
+  modelId: string,
+  label?: string
+): MitaTeamsModelFamily {
+  const text = `${providerName} ${modelId} ${label ?? ''}`.toLowerCase()
+  if (/(claude|anthropic)/.test(text)) return 'claude'
+  if (/(gemini|google)/.test(text)) return 'gemini'
+  if (/(grok|xai|\bx\.ai\b)/.test(text)) return 'grok'
+  if (/(chatgpt|gpt-|gpt_|gpt\d|openai|\bo[1-9]\b)/.test(text)) {
+    return 'chatgpt'
+  }
+  return 'general'
+}
+
+function buildAvailableModelOptions(): MitaTeamsModelOption[] {
+  const state = useModelProvider.getState()
+  const options: MitaTeamsModelOption[] = []
+  const seen = new Set<string>()
+
+  for (const provider of state.providers) {
+    for (const model of configuredChatModels(provider)) {
+      const key = `${provider.provider}:${model.id}`
+      if (seen.has(key)) continue
+      seen.add(key)
+      options.push({
+        provider: provider.provider,
+        modelId: model.id,
+        label: model.displayName || model.name || model.model || model.id,
+        family: modelFamilyFromText(
+          provider.provider,
+          model.id,
+          model.displayName || model.name || model.model
+        ),
+      })
+    }
+  }
+
+  const selectedProvider = state.selectedProvider
+  const selectedModelId = state.selectedModel?.id
+  if (selectedProvider && selectedModelId) {
+    const selectedKey = `${selectedProvider}:${selectedModelId}`
+    const index = options.findIndex(
+      (option) =>
+        option.provider === selectedProvider && option.modelId === selectedModelId
+    )
+    if (index > 0) {
+      options.unshift(...options.splice(index, 1))
+    } else if (!seen.has(selectedKey)) {
+      options.unshift({
+        provider: selectedProvider,
+        modelId: selectedModelId,
+        label:
+          state.selectedModel?.displayName ||
+          state.selectedModel?.name ||
+          state.selectedModel?.model ||
+          selectedModelId,
+        family: modelFamilyFromText(
+          selectedProvider,
+          selectedModelId,
+          state.selectedModel?.displayName ||
+            state.selectedModel?.name ||
+            state.selectedModel?.model
+        ),
+      })
+    }
+  }
+
+  return options.slice(0, 32)
+}
+
+function renderModelAssignmentGuide(options: MitaTeamsModelOption[]) {
+  const familyGuide = (
+    ['chatgpt', 'claude', 'gemini', 'grok'] as MitaTeamsModelFamily[]
+  )
+    .map(
+      (family) =>
+        `- ${MODEL_FAMILY_LABELS[family]}: best for ${MODEL_FAMILY_GUIDANCE[family]}.`
+    )
+    .join('\n')
+
+  if (options.length === 0) {
+    return `${familyGuide}
+
+Available configured chat models:
+- No configured alternate chat models found. Keep the current role model unless the owner configures more providers.`
+  }
+
+  const groupedModels = (
+    ['chatgpt', 'claude', 'gemini', 'grok', 'general'] as MitaTeamsModelFamily[]
+  )
+    .map((family) => {
+      const models = options.filter((option) => option.family === family)
+      if (models.length === 0) return undefined
+      return `- ${MODEL_FAMILY_LABELS[family]}: ${models
+        .slice(0, 6)
+        .map(
+          (model) =>
+            `{provider:"${model.provider}", modelId:"${model.modelId}", label:"${model.label}"}`
+        )
+        .join('; ')}`
+    })
+    .filter(Boolean)
+    .join('\n')
+
+  return `${familyGuide}
+
+Available configured chat models. When creating roles, include provider and modelId exactly from this list:
+${groupedModels}`
+}
+
+function desiredModelFamilyForRole(
+  role: Pick<
+    MitaTeamsRoleConfig,
+    'id' | 'name' | 'label' | 'description' | 'prompt'
+  >
+): MitaTeamsModelFamily {
+  const text = [
+    role.id,
+    role.name,
+    role.label,
+    role.description,
+    role.prompt,
+  ]
+    .join(' ')
+    .toLowerCase()
+
+  if (
+    /(\bui\b|\bux\b|designer?|visual|interface|frontend|prototype|design|界面|体验|視覺|视觉|设计|設計|前端)/.test(
+      text
+    )
+  ) {
+    return 'gemini'
+  }
+  if (
+    /(fact|truth|verify|verifier|skeptic|red[-\s]?team|source|web|news|anti[-\s]?hallucination|去伪|去偽|事实|事實|核验|查证|查證|辟谣|闢謠|来源|信源)/.test(
+      text
+    )
+  ) {
+    return 'grok'
+  }
+  if (
+    /(code|coder|developer|engineer|builder|implement|debug|fix|qa|test|program|代码|代碼|开发|開發|工程|编程|編程|实现|實作|修复|修復|调试|調試|测试|測試)/.test(
+      text
+    )
+  ) {
+    return 'chatgpt'
+  }
+  if (
+    /(research|analyst|architect|planner|strategy|complex|reason|solve|investigate|研究|调研|調研|分析|复杂|複雜|架构|架構|规划|規劃|策略|方案|推理)/.test(
+      text
+    )
+  ) {
+    return 'claude'
+  }
+  if (/(search|retrieval|检索|檢索|搜索|搜尋)/.test(text)) return 'gemini'
+
+  return 'general'
+}
+
+function findAvailableModel(
+  options: MitaTeamsModelOption[],
+  provider?: string,
+  modelId?: string
+) {
+  if (!provider || !modelId) return undefined
+  return options.find(
+    (option) => option.provider === provider && option.modelId === modelId
+  )
+}
+
+function recommendedModelForRole(
+  role: Pick<
+    MitaTeamsRoleConfig,
+    'id' | 'name' | 'label' | 'description' | 'prompt'
+  >,
+  options: MitaTeamsModelOption[]
+) {
+  const desiredFamily = desiredModelFamilyForRole(role)
+  for (const family of familyFallbacks[desiredFamily]) {
+    const match = options.find((option) => option.family === family)
+    if (match) return match
+  }
+  return options[0]
+}
+
 async function createLanguageModelForRole(
   role: MitaTeamsRoleConfig
 ): Promise<{ model: LanguageModel; threadModel: ThreadModel }> {
@@ -498,6 +738,7 @@ function buildDecisionPrompt({
   threadTitle,
   recentOutputs,
   userControl,
+  modelOptions,
 }: {
   config: MitaTeamsConfig
   runtime: MitaTeamsRuntime
@@ -505,12 +746,13 @@ function buildDecisionPrompt({
   threadTitle?: string
   recentOutputs: RoleOutput[]
   userControl: MitaTeamsUserControl
+  modelOptions: MitaTeamsModelOption[]
 }) {
   const roles = config.roles
     .filter((role) => role.enabled)
     .map(
       (role) =>
-        `- ${role.id}: ${role.name} (${role.permission}) ${role.description}`
+        `- ${role.id}: ${role.name} (${role.permission}) model=${role.provider ?? 'unset'}/${role.modelId ?? 'unset'} ${role.description}`
     )
     .join('\n')
   const memory = projectMemoryText(runtime.projectMemory) || 'No memory yet.'
@@ -549,10 +791,13 @@ ${renderRecentOutputs(recentOutputs)}
 Owner controls:
 ${renderUserControl(userControl)}
 
+Model assignment guide:
+${renderModelAssignmentGuide(modelOptions)}
+
 Choose exactly one next action. Output valid JSON only.
 
 Allowed shapes:
-1. {"action":"configure_team","reason":"...","roles":[{"id":"researcher","name":"Researcher","label":"Research","description":"...","prompt":"...","permission":"read"}],"channels":[{"id":"research","label":"Research","description":"...","roleIds":["researcher"]}],"mode":"parallel|serial|hybrid","calls":[{"roleId":"researcher","channelId":"research","instruction":"...","requiredPermission":"read","group":1}],"updates":{"tasks":[{"title":"Inspect evidence","status":"researching","roleId":"researcher","channelId":"research"}],"artifacts":[{"type":"decision","title":"Scope","summary":"..."}]}}
+1. {"action":"configure_team","reason":"...","roles":[{"id":"researcher","name":"Researcher","label":"Research","description":"...","prompt":"...","permission":"read","provider":"anthropic","modelId":"claude-..."}],"channels":[{"id":"research","label":"Research","description":"...","roleIds":["researcher"]}],"mode":"parallel|serial|hybrid","calls":[{"roleId":"researcher","channelId":"research","instruction":"...","requiredPermission":"read","group":1}],"updates":{"tasks":[{"title":"Inspect evidence","status":"researching","roleId":"researcher","channelId":"research"}],"artifacts":[{"type":"decision","title":"Scope","summary":"..."}]}}
 2. {"action":"call_roles","mode":"parallel|serial|hybrid","reason":"...","calls":[{"roleId":"researcher","channelId":"research","instruction":"...","requiredPermission":"read","group":1}],"updates":{"tasks":[{"title":"Review answer","status":"reviewing"}],"artifacts":[{"type":"risk","title":"Main risk","summary":"..."}]}}
 3. {"action":"ask_user","reason":"...","question":"...","options":[{"id":"a","label":"Option A","description":"..."}]}
 4. {"action":"milestone","reason":"...","milestone":"..."}
@@ -561,7 +806,11 @@ Allowed shapes:
 Rules:
 - New teams start with only the Orchestrator and the main task channel.
 - If specialist work is needed, first create only the minimum useful roles and channels with configure_team.
+- Assign each newly created role a provider/modelId from the model assignment guide when a suitable configured model exists.
+- Prefer model diversity by role strength: GPT for code/build/debug, Claude for complex research/reasoning, Gemini for UI/UX or broad retrieval, Grok for fact-checking/skepticism.
+- If no suitable configured model exists for a role, reuse the current model instead of inventing unavailable provider/modelId values.
 - Pick role calls only from enabled roles, and include the most relevant channelId for each call.
+- Orchestrator-hosted discussion must stay in channels. Every role call from a team run needs a channelId; direct role chats are separate private records.
 - Each channel should include only the roleIds that should participate there.
 - Use updates.tasks for visible task-board progress and updates.artifacts for decisions, risks, test results, artifacts, and final drafts.
 - Respect permissions: read roles gather and critique, tools roles may request tool-backed work, write roles may plan concrete file edits.
@@ -641,6 +890,55 @@ Recent upstream role outputs:
 ${renderRecentOutputs(recentOutputs)}
 
 Respond as ${role.name}. Be concise, concrete, and useful. End with any facts, decisions, risks, or open questions that should be remembered.`
+}
+
+function buildPrivateRoleChatPrompt({
+  role,
+  runtime,
+  userText,
+}: {
+  role: MitaTeamsRoleConfig
+  runtime: MitaTeamsRuntime
+  userText: string
+}) {
+  const projectMemory =
+    projectMemoryText(runtime.projectMemory) || 'No shared project memory yet.'
+  const privateHistory =
+    runtime.roleStates[role.id]?.stream
+      .filter((message) => !message.channelId)
+      .slice(-8)
+      .map((message) => {
+        const speaker = message.role === 'assistant' ? role.name : 'Owner'
+        return `${speaker}: ${trimText(message.content, 800)}`
+      })
+      .join('\n') || 'No previous private messages.'
+  const permissionRules =
+    role.permission === 'write'
+      ? 'You may propose concrete edits and implementation steps. Do not claim files were changed unless the host app executed those changes.'
+      : role.permission === 'tools'
+        ? 'You may suggest tool-backed checks, but do not claim tool execution.'
+        : 'Read-only role: gather, analyze, critique, and summarize. Do not claim tool use, command execution, or file edits.'
+
+  return `You are ${role.name} in a private Mita Teams role chat.
+
+This is a direct chat between the owner and ${role.name}. It is separate from channel-hosted team discussion. Do not simulate the Orchestrator, other roles, or a team run.
+
+Role prompt:
+${role.prompt}
+
+Owner private message:
+${userText}
+
+Permission:
+${role.permission}. ${permissionRules}
+
+Shared project memory for background only:
+${projectMemory}
+
+Recent private chat history:
+${privateHistory}
+
+Respond as ${role.name}. Keep the answer concise, concrete, and useful.`
 }
 
 function extractJsonObject(text: string) {
@@ -795,7 +1093,8 @@ function normalizeCalls(
 
 function normalizeDecisionRoles(
   value: unknown,
-  config: MitaTeamsConfig
+  config: MitaTeamsConfig,
+  modelOptions: MitaTeamsModelOption[] = []
 ): MitaTeamsRoleConfig[] {
   if (!Array.isArray(value)) return []
   const orchestrator = roleById(config, MITA_TEAMS_ORCHESTRATOR_ROLE_ID)
@@ -820,6 +1119,27 @@ function normalizeDecisionRoles(
           ? raw.prompt.trim()
           : (existing?.prompt ??
             `You are ${name}. Contribute only the perspective requested by the Orchestrator.`)
+      const recommendedModel = recommendedModelForRole(
+        {
+          id,
+          name,
+          label:
+            typeof raw.label === 'string' && raw.label.trim()
+              ? raw.label.trim()
+              : (existing?.label ?? name.slice(0, 12)),
+          description:
+            typeof raw.description === 'string' && raw.description.trim()
+              ? raw.description.trim()
+              : (existing?.description ?? `Specialist role for ${name}.`),
+          prompt,
+        },
+        modelOptions
+      )
+      const explicitModel = findAvailableModel(
+        modelOptions,
+        typeof raw.provider === 'string' ? raw.provider : undefined,
+        typeof raw.modelId === 'string' ? raw.modelId : undefined
+      )
 
       return {
         id,
@@ -841,13 +1161,15 @@ function normalizeDecisionRoles(
           ? raw.permission
           : (existing?.permission ?? 'read'),
         provider:
-          typeof raw.provider === 'string'
-            ? raw.provider
-            : (existing?.provider ?? modelSource?.provider),
+          explicitModel?.provider ??
+          existing?.provider ??
+          recommendedModel?.provider ??
+          modelSource?.provider,
         modelId:
-          typeof raw.modelId === 'string'
-            ? raw.modelId
-            : (existing?.modelId ?? modelSource?.modelId),
+          explicitModel?.modelId ??
+          existing?.modelId ??
+          recommendedModel?.modelId ??
+          modelSource?.modelId,
         enabled: raw.enabled !== false,
       }
     })
@@ -1191,7 +1513,10 @@ function applyTeamConfiguration({
 function parseDecision(
   text: string,
   config: MitaTeamsConfig,
-  options: { onlyRoleIds?: MitaTeamsRoleId[] } = {}
+  options: {
+    onlyRoleIds?: MitaTeamsRoleId[]
+    modelOptions?: MitaTeamsModelOption[]
+  } = {}
 ): MitaTeamsOrchestratorDecision | undefined {
   const json = extractJsonObject(text)
   if (!json) return undefined
@@ -1202,7 +1527,11 @@ function parseDecision(
       typeof raw.reason === 'string' ? raw.reason : 'Orchestrator decision.'
 
     if (raw.action === 'configure_team') {
-      const roles = normalizeDecisionRoles(raw.roles, config)
+      const roles = normalizeDecisionRoles(
+        raw.roles,
+        config,
+        options.modelOptions
+      )
       const virtualRoles = mergeRoles(config.roles, roles)
       const channels = normalizeDecisionChannels(
         raw.channels,
@@ -1324,6 +1653,7 @@ async function generateParsedDecision({
   decisionPrompt,
   config,
   userControl,
+  modelOptions,
   model,
   generateDecisionText,
   abortSignal,
@@ -1331,6 +1661,7 @@ async function generateParsedDecision({
   decisionPrompt: string
   config: MitaTeamsConfig
   userControl: MitaTeamsUserControl
+  modelOptions: MitaTeamsModelOption[]
   model?: ThreadModel
   generateDecisionText: GenerateDecisionText
   abortSignal?: AbortSignal
@@ -1340,7 +1671,10 @@ async function generateParsedDecision({
   invalidText?: string
   usage?: MitaTeamsTokenUsage
 }> {
-  const parseOptions = { onlyRoleIds: userControl.onlyRoleIds }
+  const parseOptions = {
+    onlyRoleIds: userControl.onlyRoleIds,
+    modelOptions,
+  }
   const firstResult = normalizeGeneratedText(
     await generateDecisionText({
       prompt: decisionPrompt,
@@ -1870,6 +2204,183 @@ function synthesizeFinalResponse(
     : 'Mita Teams 已准备好继续，但当前没有可合成的角色输出。'
 }
 
+export async function runMitaTeamsPrivateRoleChat({
+  config,
+  roleId,
+  userText,
+  abortSignal,
+  onConfigChange,
+  generateRoleText = defaultGenerateRoleText,
+}: RunMitaTeamsPrivateRoleChatOptions): Promise<MitaTeamsPrivateRoleChatResult> {
+  let workingConfig = withMitaTeamsRuntime(config, config.runtime)
+  const role = roleById(workingConfig, roleId)
+
+  if (!role) {
+    return {
+      config: workingConfig,
+      finalResponse: '未找到这个 Mita Teams 角色。',
+      status: 'failed',
+    }
+  }
+
+  const notify = (nextRuntime: MitaTeamsRuntime) => {
+    workingConfig = withMitaTeamsRuntime(workingConfig, nextRuntime)
+    onConfigChange?.(workingConfig)
+  }
+  const turnId = stableId(`private-${role.id}`)
+  const model = modelForRole(role)
+  const promptRuntime = workingConfig.runtime
+  let runtime = appendRoleStreamMessage(workingConfig.runtime, role, {
+    turnId,
+    role: 'user',
+    content: userText,
+    model,
+  })
+  const currentAfterUserMessage = runtime.roleStates[role.id]
+
+  if (currentAfterUserMessage) {
+    runtime = {
+      ...runtime,
+      roleStates: {
+        ...runtime.roleStates,
+        [role.id]: {
+          ...currentAfterUserMessage,
+          status: 'running',
+          lastError: undefined,
+        },
+      },
+    }
+  }
+  notify(runtime)
+
+  try {
+    if (abortSignal?.aborted) {
+      const stoppedState = runtime.roleStates[role.id]
+      if (stoppedState) {
+        runtime = {
+          ...runtime,
+          roleStates: {
+            ...runtime.roleStates,
+            [role.id]: {
+              ...stoppedState,
+              status: 'blocked',
+            },
+          },
+        }
+        notify(runtime)
+      }
+      return { config: workingConfig, status: 'stopped' }
+    }
+
+    const result = normalizeGeneratedText(
+      await generateRoleText({
+        role,
+        prompt: buildPrivateRoleChatPrompt({
+          role,
+          runtime: promptRuntime,
+          userText,
+        }),
+        model,
+        abortSignal,
+      })
+    )
+    const outputText = trimText(result.text, 4000)
+    runtime = appendRoleStreamMessage(runtime, role, {
+      turnId,
+      role: 'assistant',
+      content: outputText,
+      model,
+    })
+    const completedState = runtime.roleStates[role.id]
+    if (completedState) {
+      runtime = {
+        ...runtime,
+        roleStates: {
+          ...runtime.roleStates,
+          [role.id]: {
+            ...completedState,
+            status: 'done',
+            lastTurnId: turnId,
+            lastError: undefined,
+          },
+        },
+      }
+    }
+    notify(runtime)
+
+    return {
+      config: workingConfig,
+      finalResponse: outputText,
+      status: 'completed',
+    }
+  } catch (error) {
+    if (abortSignal?.aborted) {
+      const stoppedState = runtime.roleStates[role.id]
+      if (stoppedState) {
+        runtime = {
+          ...runtime,
+          roleStates: {
+            ...runtime.roleStates,
+            [role.id]: {
+              ...stoppedState,
+              status: 'blocked',
+            },
+          },
+        }
+        notify(runtime)
+      }
+      return { config: workingConfig, status: 'stopped' }
+    }
+
+    const message = errorMessageFromUnknown(
+      error,
+      'Mita Teams role chat failed'
+    )
+    const current = runtime.roleStates[role.id]
+    runtime = appendRoleStreamMessage(
+      {
+        ...runtime,
+        roleStates: {
+          ...runtime.roleStates,
+          [role.id]: {
+            ...(current ?? {
+              roleId: role.id,
+              status: 'failed' as const,
+              stream: [],
+              memory: {
+                roleId: role.id,
+                version: 0,
+                summary: '',
+                facts: [],
+                decisions: [],
+                openQuestions: [],
+                workingNotes: [],
+                updatedAt: nowIso(),
+              },
+            }),
+            status: 'failed',
+            lastError: message,
+          },
+        },
+      },
+      role,
+      {
+        turnId,
+        role: 'assistant',
+        content: `Mita Teams 角色私聊失败：${message}`,
+        model,
+      }
+    )
+    notify(runtime)
+
+    return {
+      config: workingConfig,
+      finalResponse: message,
+      status: 'failed',
+    }
+  }
+}
+
 export async function runMitaTeamsRuntime({
   config,
   userText,
@@ -1916,6 +2427,7 @@ export async function runMitaTeamsRuntime({
         workingConfig,
         MITA_TEAMS_ORCHESTRATOR_ROLE_ID
       )
+      const modelOptions = buildAvailableModelOptions()
       const decisionPrompt = buildDecisionPrompt({
         config: workingConfig,
         runtime,
@@ -1923,11 +2435,13 @@ export async function runMitaTeamsRuntime({
         threadTitle,
         recentOutputs,
         userControl,
+        modelOptions,
       })
       const decisionResolution = await generateParsedDecision({
         decisionPrompt,
         config: workingConfig,
         userControl,
+        modelOptions,
         model: orchestrator ? modelForRole(orchestrator) : undefined,
         generateDecisionText,
         abortSignal,

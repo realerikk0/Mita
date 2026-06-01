@@ -1,6 +1,10 @@
 import { describe, expect, it } from 'vitest'
 
-import { runMitaTeamsRuntime } from '@/lib/mita-teams-runtime'
+import { useModelProvider } from '@/hooks/useModelProvider'
+import {
+  runMitaTeamsPrivateRoleChat,
+  runMitaTeamsRuntime,
+} from '@/lib/mita-teams-runtime'
 import { ProviderQuotaError } from '@/lib/provider-quota-error'
 import {
   createDefaultMitaTeamsConfig,
@@ -147,6 +151,200 @@ describe('mita teams runtime', () => {
     ).toEqual(
       expect.arrayContaining(['decision', 'risk', 'test_result', 'final_draft'])
     )
+  })
+
+  it('stores direct role chat as private role stream instead of team events', async () => {
+    const config = createDefaultMitaTeamsConfig({
+      provider: 'openai',
+      id: 'gpt-5',
+    })
+    const role = config.roles[0]
+    let capturedPrompt = ''
+
+    const result = await runMitaTeamsPrivateRoleChat({
+      config,
+      roleId: role.id,
+      userText: 'Private question for this role.',
+      generateRoleText: async ({ prompt }) => {
+        capturedPrompt = prompt
+        return 'Private role answer.'
+      },
+    })
+
+    const stream = result.config.runtime.roleStates[role.id]?.stream ?? []
+    expect(result.status).toBe('completed')
+    expect(capturedPrompt).toContain('private Mita Teams role chat')
+    expect(capturedPrompt).toContain(
+      'separate from channel-hosted team discussion'
+    )
+    expect(stream).toHaveLength(2)
+    expect(stream.map((message) => message.content)).toEqual([
+      'Private question for this role.',
+      'Private role answer.',
+    ])
+    expect(stream.every((message) => message.channelId === undefined)).toBe(true)
+    expect(result.config.runtime.teamEvents).toHaveLength(0)
+    expect(result.config.runtime.roleStates[role.id]?.memory.version).toBe(0)
+  })
+
+  it('guides the orchestrator with available models and assigns role-specific fallbacks', async () => {
+    const previousModelState = useModelProvider.getState()
+    useModelProvider.setState({
+      providers: [
+        {
+          active: true,
+          provider: 'openai',
+          api_key: 'sk-openai',
+          settings: [],
+          models: [{ id: 'gpt-5', displayName: 'GPT-5' }],
+        },
+        {
+          active: true,
+          provider: 'anthropic',
+          api_key: 'sk-anthropic',
+          settings: [],
+          models: [{ id: 'claude-opus-4-7', displayName: 'Claude Opus' }],
+        },
+        {
+          active: true,
+          provider: 'gemini',
+          api_key: 'sk-gemini',
+          settings: [],
+          models: [{ id: 'gemini-3.5-pro', displayName: 'Gemini Pro' }],
+        },
+        {
+          active: true,
+          provider: 'xai',
+          api_key: 'sk-xai',
+          settings: [],
+          models: [{ id: 'grok-4', displayName: 'Grok 4' }],
+        },
+      ],
+      selectedProvider: 'openai',
+      selectedModel: { id: 'gpt-5', displayName: 'GPT-5' },
+    })
+
+    try {
+      const config = createDefaultMitaTeamsConfig({
+        provider: 'openai',
+        id: 'gpt-5',
+      })
+      let decisionCount = 0
+      let capturedPrompt = ''
+
+      const result = await runMitaTeamsRuntime({
+        config,
+        userText:
+          'Create a team for coding, complex research, UI design, and fact checking.',
+        generateDecisionText: async ({ prompt }) => {
+          decisionCount += 1
+          capturedPrompt = prompt
+          if (decisionCount > 1) {
+            return JSON.stringify({
+              action: 'stop',
+              reason: 'Model assignment checked.',
+              finalResponse: 'Done.',
+            })
+          }
+
+          return JSON.stringify({
+            action: 'configure_team',
+            reason: 'Create specialist roles without explicit models.',
+            roles: [
+              {
+                id: 'builder',
+                name: 'Builder',
+                label: 'Build',
+                description: 'Implement code changes and debug issues.',
+                prompt: 'Write and debug implementation work.',
+                permission: 'write',
+              },
+              {
+                id: 'research-architect',
+                name: 'Research Architect',
+                label: 'Research',
+                description: 'Research complex tradeoffs and architecture.',
+                prompt: 'Analyze hard tradeoffs and propose a plan.',
+                permission: 'read',
+              },
+              {
+                id: 'ux-designer',
+                name: 'UX Designer',
+                label: 'UX',
+                description: 'Design UI and interaction details.',
+                prompt: 'Improve UI and UX decisions.',
+                permission: 'read',
+              },
+              {
+                id: 'fact-checker',
+                name: 'Fact Checker',
+                label: 'Truth',
+                description: 'Verify facts and separate signal from noise.',
+                prompt: 'Check facts and call out uncertainty.',
+                permission: 'read',
+              },
+            ],
+            channels: [
+              {
+                id: 'task',
+                label: 'Current task',
+                description: 'Main room.',
+                roleIds: [
+                  'orchestrator',
+                  'builder',
+                  'research-architect',
+                  'ux-designer',
+                  'fact-checker',
+                ],
+              },
+            ],
+            calls: [],
+          })
+        },
+        generateRoleText: async () => 'unused',
+      })
+
+      expect(capturedPrompt).toContain('Model assignment guide:')
+      expect(capturedPrompt).toContain('{provider:"openai", modelId:"gpt-5"')
+      expect(capturedPrompt).toContain(
+        '{provider:"anthropic", modelId:"claude-opus-4-7"'
+      )
+      expect(capturedPrompt).toContain(
+        '{provider:"gemini", modelId:"gemini-3.5-pro"'
+      )
+      expect(capturedPrompt).toContain('{provider:"xai", modelId:"grok-4"')
+      expect(result.config.roles.find((role) => role.id === 'builder')).toMatchObject(
+        {
+          provider: 'openai',
+          modelId: 'gpt-5',
+        }
+      )
+      expect(
+        result.config.roles.find((role) => role.id === 'research-architect')
+      ).toMatchObject({
+        provider: 'anthropic',
+        modelId: 'claude-opus-4-7',
+      })
+      expect(
+        result.config.roles.find((role) => role.id === 'ux-designer')
+      ).toMatchObject({
+        provider: 'gemini',
+        modelId: 'gemini-3.5-pro',
+      })
+      expect(
+        result.config.roles.find((role) => role.id === 'fact-checker')
+      ).toMatchObject({
+        provider: 'xai',
+        modelId: 'grok-4',
+      })
+    } finally {
+      useModelProvider.setState({
+        providers: previousModelState.providers,
+        selectedProvider: previousModelState.selectedProvider,
+        selectedModel: previousModelState.selectedModel,
+        deletedModels: previousModelState.deletedModels,
+      })
+    }
   })
 
   it('repairs invalid orchestrator JSON once before continuing', async () => {

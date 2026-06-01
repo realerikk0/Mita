@@ -19,6 +19,7 @@ const h = vi.hoisted(() => {
   const mockRagCallTool = vi.fn()
   const mockMcpCallTool = vi.fn()
   const mockRunMitaTeamsRuntime = vi.fn()
+  const mockRunMitaTeamsPrivateRoleChat = vi.fn()
   const openExternalUrl = vi.fn()
   const useChatArgs: any[] = []
 
@@ -83,6 +84,7 @@ const h = vi.hoisted(() => {
       ],
     })),
     updateProvider: vi.fn(),
+    selectModelProvider: vi.fn(),
   }
   const useModelProviderMock: any = (selector: any) => selector(modelProviderState)
   useModelProviderMock.getState = () => modelProviderState
@@ -152,6 +154,7 @@ const h = vi.hoisted(() => {
     mockRagCallTool,
     mockMcpCallTool,
     mockRunMitaTeamsRuntime,
+    mockRunMitaTeamsPrivateRoleChat,
     openExternalUrl,
     useChatArgs,
     chatState,
@@ -248,10 +251,12 @@ vi.mock('@/containers/MessageItem', () => ({
 vi.mock('@/containers/MitaTeamsWorkspace', () => ({
   MitaTeamsWorkspace: ({
     config,
+    inputArea,
     isRuntimeBusy,
     onChoiceSelect,
   }: any) => (
     <div data-testid="mita-teams-workspace">
+      {inputArea}
       {config.runtime.userChoiceRequest?.options.map(
         (option: { id: string; label: string }) => (
           <button
@@ -339,6 +344,17 @@ vi.mock('@/lib/completion', () => ({
     content: [{ type: 'text', text: { value: text, annotations: [] } }],
     metadata: {},
   }),
+  newAssistantThreadContent: (
+    threadId: string,
+    text: string,
+    metadata?: Record<string, unknown>
+  ) => ({
+    id: 'assistant-gen-id',
+    thread_id: threadId,
+    role: 'assistant',
+    content: [{ type: 'text', text: { value: text, annotations: [] } }],
+    metadata: metadata ?? {},
+  }),
 }))
 
 vi.mock('@/lib/attachmentProcessing', () => ({
@@ -357,6 +373,8 @@ vi.mock('@/types/attachment', () => ({
 
 vi.mock('@/lib/mita-teams-runtime', () => ({
   runMitaTeamsRuntime: (options: any) => h.mockRunMitaTeamsRuntime(options),
+  runMitaTeamsPrivateRoleChat: (options: any) =>
+    h.mockRunMitaTeamsPrivateRoleChat(options),
 }))
 
 vi.mock('ai', () => ({
@@ -541,6 +559,7 @@ describe('ThreadDetail route', () => {
     h.messageQueueState.clearQueue = vi.fn()
     h.agentModeState.agentThreads = {}
     h.openExternalUrl.mockResolvedValue(undefined)
+    h.mockRunMitaTeamsPrivateRoleChat.mockReset()
     h.useChatArgs.length = 0
     useAutoRunStore.setState({ runs: {} })
     sessionStorage.clear()
@@ -910,6 +929,47 @@ describe('ThreadDetail route', () => {
 
     expect(h.messagesState.addMessage).toHaveBeenCalledTimes(1)
     expect(h.mockRunMitaTeamsRuntime).toHaveBeenCalledTimes(1)
+  })
+
+  it('routes role chat input to private Mita Teams role history', async () => {
+    const baseConfig = createDefaultMitaTeamsConfig({
+      provider: 'openai',
+      id: 'gpt-x',
+    })
+    const mitaTeams = {
+      ...baseConfig,
+      workspaceView: 'role-chat' as const,
+      activeRoleId: 'orchestrator',
+    }
+    h.threadsState.threads['thread-1'] = {
+      ...h.threadsState.threads['thread-1'],
+      metadata: { mitaTeams },
+    }
+    h.mockRunMitaTeamsPrivateRoleChat.mockImplementation(
+      async ({ config }: any) => ({
+        config,
+        status: 'completed',
+      })
+    )
+
+    renderComponent()
+
+    await act(async () => {
+      screen.getByTestId('chat-send').click()
+      await Promise.resolve()
+      await Promise.resolve()
+    })
+
+    expect(h.mockRunMitaTeamsPrivateRoleChat).toHaveBeenCalledWith(
+      expect.objectContaining({
+        config: expect.objectContaining({ workspaceView: 'role-chat' }),
+        roleId: 'orchestrator',
+        userText: 'hello world',
+      })
+    )
+    expect(h.mockRunMitaTeamsRuntime).not.toHaveBeenCalled()
+    expect(h.mockSendMessage).not.toHaveBeenCalled()
+    expect(h.messagesState.addMessage).not.toHaveBeenCalled()
   })
 
   it('pauses a running auto-run and persists the paused state', () => {

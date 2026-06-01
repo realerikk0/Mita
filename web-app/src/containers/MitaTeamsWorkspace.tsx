@@ -297,8 +297,20 @@ function streamBelongsToChannel(
   message: MitaTeamsRoleState['stream'][number],
   channelId: MitaTeamsChannelId
 ) {
-  if (message.channelId) return message.channelId === channelId
-  return channelId === MITA_TEAMS_TASK_CHANNEL_ID
+  return Boolean(message.channelId && message.channelId === channelId)
+}
+
+function isSetupLocked(config: MitaTeamsConfig, messages: UIMessage[]) {
+  const runtime = config.runtime
+  return (
+    messages.length > 0 ||
+    Boolean(runtime.run) ||
+    runtime.teamEvents.length > 0 ||
+    runtime.tasks.length > 0 ||
+    runtime.artifacts.length > 0 ||
+    runtime.milestones.length > 0 ||
+    runtime.projectMemory.version > 0
+  )
 }
 
 function MemoryList({
@@ -669,6 +681,7 @@ function WorkspaceOverviewMenu({
   config,
   runtime,
   roles,
+  setupLocked,
   taskText,
   addChannelFromTemplate,
   addRoleFromTemplate,
@@ -684,6 +697,7 @@ function WorkspaceOverviewMenu({
   config: MitaTeamsConfig
   runtime: MitaTeamsConfig['runtime']
   roles: MitaTeamsRoleConfig[]
+  setupLocked: boolean
   taskText: string
   addChannelFromTemplate: (channelId: MitaTeamsChannelId) => void
   addRoleFromTemplate: (roleId: MitaTeamsRoleId) => void
@@ -817,7 +831,11 @@ function WorkspaceOverviewMenu({
                     activeTemplate.id === template.id &&
                       'bg-primary/10 text-primary'
                   )}
-                  onClick={() => setTaskTemplate(template.id)}
+                  disabled={setupLocked}
+                  onClick={() => {
+                    if (setupLocked) return
+                    setTaskTemplate(template.id)
+                  }}
                 >
                   <span className="text-xs font-medium">
                     {localizedTaskTemplateLabel(template.id, template.label, t)}
@@ -847,7 +865,11 @@ function WorkspaceOverviewMenu({
                     'flex-col items-start gap-0.5',
                     config.mode === mode.id && 'bg-primary/10 text-primary'
                   )}
-                  onClick={() => setMode(mode.id)}
+                  disabled={setupLocked}
+                  onClick={() => {
+                    if (setupLocked) return
+                    setMode(mode.id)
+                  }}
                 >
                   <span className="text-xs font-medium">
                     {localizedModeLabel(mode.id, mode.label, t)}
@@ -1221,6 +1243,15 @@ export const MitaTeamsWorkspace = memo(function MitaTeamsWorkspace({
   const runtime = config.runtime
   const runStatus = runtime.run?.status ?? 'idle'
   const activeRoleState = runtime.roleStates[activeRole.id]
+  const isRoleConfig = config.workspaceView === 'role-config'
+  const isRoleChat = config.workspaceView === 'role-chat'
+  const activePrivateRoleState = activeRoleState
+    ? {
+        ...activeRoleState,
+        stream: activeRoleState.stream.filter((message) => !message.channelId),
+      }
+    : undefined
+  const setupLocked = isSetupLocked(config, messages)
   const pendingChoice =
     runtime.userChoiceRequest?.status === 'pending'
       ? runtime.userChoiceRequest
@@ -1242,13 +1273,10 @@ export const MitaTeamsWorkspace = memo(function MitaTeamsWorkspace({
     [activeChannel.id, runtime.teamEvents]
   )
   const hasMessages =
-    messages.length > 0 ||
-    channelEvents.length > 0 ||
-    (activeRoleState?.stream.length ?? 0) > 0 ||
-    Boolean(pendingChoice)
+    isRoleChat
+      ? (activePrivateRoleState?.stream.length ?? 0) > 0
+      : messages.length > 0 || channelEvents.length > 0 || Boolean(pendingChoice)
   const taskText = compactTaskText(messages, thread?.title)
-  const isRoleConfig = config.workspaceView === 'role-config'
-  const isRoleChat = config.workspaceView === 'role-chat'
   const availableChannelTemplates = useMemo(
     () =>
       MITA_TEAMS_CHANNELS.filter(
@@ -1399,8 +1427,11 @@ export const MitaTeamsWorkspace = memo(function MitaTeamsWorkspace({
   )
 
   const setMode = useCallback(
-    (mode: MitaTeamsMode) => patchConfig({ mode }),
-    [patchConfig]
+    (mode: MitaTeamsMode) => {
+      if (setupLocked) return
+      patchConfig({ mode })
+    },
+    [patchConfig, setupLocked]
   )
 
   const setRoundLimit = useCallback(
@@ -1410,6 +1441,7 @@ export const MitaTeamsWorkspace = memo(function MitaTeamsWorkspace({
 
   const setTaskTemplate = useCallback(
     (taskTemplateId: MitaTeamsTaskTemplateId) => {
+      if (setupLocked) return
       const template = MITA_TEAMS_TASK_TEMPLATES.find(
         (item) => item.id === taskTemplateId
       )
@@ -1418,7 +1450,7 @@ export const MitaTeamsWorkspace = memo(function MitaTeamsWorkspace({
         mode: template?.defaultMode ?? config.mode,
       })
     },
-    [config.mode, patchConfig]
+    [config.mode, patchConfig, setupLocked]
   )
 
   const setChannel = useCallback(
@@ -1765,6 +1797,7 @@ export const MitaTeamsWorkspace = memo(function MitaTeamsWorkspace({
               config={config}
               runtime={runtime}
               roles={config.roles}
+              setupLocked={setupLocked}
               taskText={taskText}
               addChannelFromTemplate={addChannelFromTemplate}
               addRoleFromTemplate={addRoleFromTemplate}
@@ -1845,7 +1878,10 @@ export const MitaTeamsWorkspace = memo(function MitaTeamsWorkspace({
                   />
                 )}
                 {isRoleChat ? (
-                  <RoleStreamPanel role={activeRole} state={activeRoleState} />
+                  <RoleStreamPanel
+                    role={activeRole}
+                    state={activePrivateRoleState}
+                  />
                 ) : (
                   <>
                     <TeamTimeline events={channelEvents} />
@@ -1890,6 +1926,7 @@ export const MitaTeamsWorkspace = memo(function MitaTeamsWorkspace({
                 type="button"
                 variant="outline"
                 className="h-auto w-full justify-between gap-2 px-2 py-2 text-left"
+                disabled={setupLocked}
               >
                 <span className="min-w-0">
                   <span className="block truncate text-xs font-medium">
@@ -1915,7 +1952,11 @@ export const MitaTeamsWorkspace = memo(function MitaTeamsWorkspace({
                 <DropdownMenuItem
                   key={template.id}
                   className="flex-col items-start gap-1"
-                  onClick={() => setTaskTemplate(template.id)}
+                  disabled={setupLocked}
+                  onClick={() => {
+                    if (setupLocked) return
+                    setTaskTemplate(template.id)
+                  }}
                 >
                   <span className="text-xs font-medium">
                     {localizedTaskTemplateLabel(template.id, template.label, t)}
@@ -1950,7 +1991,11 @@ export const MitaTeamsWorkspace = memo(function MitaTeamsWorkspace({
                   config.mode === mode.id &&
                     'bg-primary/10 text-primary hover:bg-primary/10'
                 )}
-                onClick={() => setMode(mode.id)}
+                disabled={setupLocked}
+                onClick={() => {
+                  if (setupLocked) return
+                  setMode(mode.id)
+                }}
               >
                 <div className="min-w-0 flex-1 overflow-hidden">
                   <div className="text-xs font-medium">

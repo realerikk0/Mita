@@ -102,7 +102,10 @@ import {
   answerMitaTeamsChoice,
   withMitaTeamsRuntime,
 } from '@/lib/mita-teams-memory'
-import { runMitaTeamsRuntime } from '@/lib/mita-teams-runtime'
+import {
+  runMitaTeamsPrivateRoleChat,
+  runMitaTeamsRuntime,
+} from '@/lib/mita-teams-runtime'
 
 const CHAT_STATUS = {
   STREAMING: 'streaming',
@@ -1071,6 +1074,51 @@ Tool result communication:
     ]
   )
 
+  const startMitaTeamsPrivateRoleChat = useCallback(
+    async (
+      config: MitaTeamsConfig,
+      roleId: string,
+      userText: string
+    ) => {
+      mitaTeamsAbortRef.current?.abort()
+      const controller = new AbortController()
+      mitaTeamsAbortRef.current = controller
+      rawChatStatusRef.current = CHAT_STATUS.SUBMITTED
+      setSettledChatStatus(CHAT_STATUS.SUBMITTED)
+      setIsMitaTeamsRuntimeBusy(true)
+
+      try {
+        const result = await runMitaTeamsPrivateRoleChat({
+          config,
+          roleId,
+          userText,
+          abortSignal: controller.signal,
+          onConfigChange: persistMitaTeamsConfig,
+        })
+
+        persistMitaTeamsConfig(result.config)
+        if (result.status === 'failed' && result.finalResponse) {
+          toast.error(result.finalResponse)
+        }
+      } catch (error) {
+        const message =
+          error instanceof Error ? error.message : 'Mita Teams role chat failed'
+        toast.error(message)
+      } finally {
+        if (mitaTeamsAbortRef.current === controller) {
+          mitaTeamsAbortRef.current = null
+          setIsMitaTeamsRuntimeBusy(false)
+          const updateSessionStatus = useChatSessions.getState().updateStatus
+          if (typeof updateSessionStatus === 'function') {
+            updateSessionStatus(threadId, 'ready')
+          }
+          setSettledChatStatus('ready')
+        }
+      }
+    },
+    [persistMitaTeamsConfig, threadId]
+  )
+
   const createCompactionModel = useCallback(async () => {
     const modelId = useModelProvider.getState().selectedModel?.id
     const providerId = useModelProvider.getState().selectedProvider
@@ -1491,10 +1539,36 @@ Tool result communication:
         processedAttachments,
         messageId
       )
+      const messageText = userMessage.content[0].text?.value ?? text
 
-      await maybeAutoCompactBeforeSend(
-        userMessage.content[0].text?.value ?? text
-      )
+      if (
+        mitaTeamsConfig?.workspaceView === 'role-chat' &&
+        activeMitaChatRole
+      ) {
+        trackMitaEvent('message_sent', {
+          provider_id: selectedProvider,
+          model_id: selectedModel?.id,
+          model_capabilities: selectedModel?.capabilities ?? [],
+          has_attachments: processedAttachments.length > 0,
+          attachment_count: processedAttachments.length,
+          image_count: processedAttachments.filter((a) => a.type === 'image')
+            .length,
+          document_count: processedAttachments.filter(
+            (a) => a.type === 'document'
+          ).length,
+          message_length_bucket: messageLengthBucket(messageText),
+          source: 'mita_teams_role_chat',
+          web_search_enabled: useWebSearch.getState().enabled,
+        })
+        void startMitaTeamsPrivateRoleChat(
+          mitaTeamsConfig,
+          activeMitaChatRole.id,
+          messageText
+        )
+        return
+      }
+
+      await maybeAutoCompactBeforeSend(messageText)
 
       addMessage(userMessage)
       trackMitaEvent('message_sent', {
@@ -1508,15 +1582,12 @@ Tool result communication:
         document_count: processedAttachments.filter(
           (a) => a.type === 'document'
         ).length,
-        message_length_bucket: messageLengthBucket(
-          userMessage.content[0].text?.value ?? text
-        ),
+        message_length_bucket: messageLengthBucket(messageText),
         source: 'composer',
         web_search_enabled: useWebSearch.getState().enabled,
       })
 
       if (mitaTeamsConfig) {
-        const messageText = userMessage.content[0].text?.value ?? text
         appendThreadMessageToChat(userMessage)
         void startMitaTeamsRuntime(mitaTeamsConfig, messageText)
         return
@@ -1568,6 +1639,7 @@ Tool result communication:
       mitaTeamsConfig,
       appendThreadMessageToChat,
       startMitaTeamsRuntime,
+      startMitaTeamsPrivateRoleChat,
     ]
   )
 

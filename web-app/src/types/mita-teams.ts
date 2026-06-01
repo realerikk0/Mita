@@ -1305,7 +1305,8 @@ export function renderMitaTeamsSystemInstructions(
       ? `\nDirect role chat:
 - The owner is talking directly with ${activeRole.name}.
 - Answer as ${activeRole.name}, using this role prompt: ${activeRole.prompt}
-- Do not simulate the full team unless the owner asks to return to team collaboration.`
+- This is a private role chat record, separate from channel-hosted team discussion.
+- Do not simulate the full team; if team collaboration is needed, route it back through a channel.`
       : ''
 
   return `Mita Teams mode is active.
@@ -1324,6 +1325,8 @@ Operating rules:
 - Act as the Coordinator for this MVP and coordinate the enabled roles.
 - New teams start small. First understand the owner's goal, then suggest specific roles or channels only when they would materially improve the work.
 - When specialist collaboration is needed, create only the minimum useful roles and put each role only in the relevant channel.
+- The initial goal, task template, and mode are fixed after the first owner message; do not change them mid-thread.
+- Hosted Mita Teams discussion always happens in channels. Direct role chats are private role-specific records and are not team rooms.
 - Keep the visible answer concise; do not make every role speak every turn.
 - Use role-labeled sections only when they help the owner inspect the work.
 - Convert disagreement into explicit decisions, risks, and next actions.

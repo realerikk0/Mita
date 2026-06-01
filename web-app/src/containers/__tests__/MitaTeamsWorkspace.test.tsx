@@ -2,7 +2,7 @@ import { fireEvent, render, screen, waitFor, within } from '@testing-library/rea
 import '@testing-library/jest-dom'
 import userEvent from '@testing-library/user-event'
 import { describe, expect, it, vi } from 'vitest'
-import type { ReactNode } from 'react'
+import type { ComponentProps, ReactNode } from 'react'
 
 import { MitaTeamsWorkspace } from '@/containers/MitaTeamsWorkspace'
 import {
@@ -214,10 +214,18 @@ function createConfig(): MitaTeamsConfig {
   }
 }
 
+function createUnlockedConfig(): MitaTeamsConfig {
+  return createDefaultMitaTeamsConfig({
+    provider: 'jingxing',
+    id: 'claude-sonnet-4-6',
+  })
+}
+
 function renderWorkspace({
   config = createConfig(),
   inputArea = <button type="button">Composer</button>,
   messageItems = <div>Messages</div>,
+  messages = [],
   isRuntimeBusy = false,
   onChoiceSelect = vi.fn(),
   onConfigChange = vi.fn(),
@@ -225,6 +233,7 @@ function renderWorkspace({
   config?: MitaTeamsConfig
   inputArea?: ReactNode
   messageItems?: ReactNode
+  messages?: ComponentProps<typeof MitaTeamsWorkspace>['messages']
   isRuntimeBusy?: boolean
   onChoiceSelect?: (optionId: string) => void
   onConfigChange?: (config: MitaTeamsConfig) => void
@@ -233,7 +242,7 @@ function renderWorkspace({
     <MitaTeamsWorkspace
       thread={{ id: 'thread-1', title: 'Launch plan' } as Thread}
       config={config}
-      messages={[]}
+      messages={messages}
       messageItems={messageItems}
       inputArea={inputArea}
       isRuntimeBusy={isRuntimeBusy}
@@ -264,6 +273,24 @@ describe('MitaTeamsWorkspace', () => {
     expect(
       within(menu).getByRole('button', { name: 'Increase rounds' })
     ).toBeInTheDocument()
+
+    await user.click(within(menu).getByText('Debate'))
+    expect(onConfigChange).not.toHaveBeenCalledWith(
+      expect.objectContaining({ mode: 'debate' })
+    )
+  })
+
+  it('allows choosing template and mode before the first team run starts', async () => {
+    const user = userEvent.setup()
+    const onConfigChange = vi.fn()
+    renderWorkspace({ config: createUnlockedConfig(), onConfigChange })
+
+    await user.click(
+      screen.getByRole('button', {
+        name: 'Workspace overview',
+      })
+    )
+    const menu = await screen.findByRole('menu')
 
     await user.click(within(menu).getByText('Debate'))
     await waitFor(() =>
@@ -337,5 +364,56 @@ describe('MitaTeamsWorkspace', () => {
         workspaceView: 'role-config',
       })
     )
+  })
+
+  it('keeps role private chat separate from channel role streams', () => {
+    const now = '2026-05-29T00:00:00.000Z'
+    const base = createConfig()
+    const role = base.roles[0]
+    const config: MitaTeamsConfig = {
+      ...base,
+      activeRoleId: role.id,
+      workspaceView: 'role-chat',
+      runtime: {
+        ...base.runtime,
+        roleStates: {
+          ...base.runtime.roleStates,
+          [role.id]: {
+            ...base.runtime.roleStates[role.id]!,
+            stream: [
+              {
+                id: 'private-user',
+                turnId: 'private',
+                roleId: role.id,
+                role: 'user',
+                content: 'private question',
+                createdAt: now,
+              },
+              {
+                id: 'private-assistant',
+                turnId: 'private',
+                roleId: role.id,
+                role: 'assistant',
+                content: 'private answer',
+                createdAt: now,
+              },
+              {
+                id: 'channel-assistant',
+                turnId: 'channel',
+                roleId: role.id,
+                channelId: 'task',
+                role: 'assistant',
+                content: 'channel answer',
+                createdAt: now,
+              },
+            ],
+          },
+        },
+      },
+    }
+
+    renderWorkspace({ config })
+    expect(screen.getByText('private answer')).toBeInTheDocument()
+    expect(screen.queryByText('channel answer')).not.toBeInTheDocument()
   })
 })
