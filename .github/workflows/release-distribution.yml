@@ -183,6 +183,101 @@ jobs:
           BAIDUPCS_GO_PTOKEN: ${{ secrets.BAIDUPCS_GO_PTOKEN }}
         run: bash scripts/release-distribution/upload-baidu.sh
 
+      - name: Ensure AWS CLI for Cloudflare R2
+        if: steps.release.outputs.dry_run != 'true' && steps.release.outputs.probe_only != 'true'
+        shell: bash
+        run: |
+          set -euo pipefail
+          if command -v aws >/dev/null 2>&1; then
+            aws --version
+            exit 0
+          fi
+
+          python3 -m pip install --user awscli
+          echo "$HOME/.local/bin" >> "$GITHUB_PATH"
+          "$HOME/.local/bin/aws" --version
+
+      - name: Publish Baidu download manifest to Cloudflare R2
+        if: steps.release.outputs.dry_run != 'true' && steps.release.outputs.probe_only != 'true'
+        shell: bash
+        env:
+          AWS_ACCESS_KEY_ID: ${{ secrets.CLOUDFLARE_R2_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.CLOUDFLARE_R2_SECRET_ACCESS_KEY }}
+          AWS_DEFAULT_REGION: auto
+          AWS_EC2_METADATA_DISABLED: "true"
+          CLOUDFLARE_R2_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_R2_ACCOUNT_ID }}
+          CLOUDFLARE_R2_BUCKET: ${{ secrets.CLOUDFLARE_R2_BUCKET }}
+          CLOUDFLARE_ZONE_ID: ${{ secrets.CLOUDFLARE_ZONE_ID }}
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          UPDATES_CDN_BASE_URL: ${{ vars.UPDATES_CDN_BASE_URL || 'https://updates.mita.so' }}
+          MITA_DOWNLOAD_MANIFEST_KEY: ${{ vars.MITA_DOWNLOAD_MANIFEST_KEY || 'mita/download/latest.json' }}
+          MITA_DOWNLOAD_PAGE_KEY: ${{ vars.MITA_DOWNLOAD_PAGE_KEY || 'mita/download' }}
+          MITA_DOWNLOAD_VERSION_ROOT: ${{ vars.MITA_DOWNLOAD_VERSION_ROOT || 'mita/download/releases' }}
+        run: |
+          set -euo pipefail
+
+          required=(
+            CLOUDFLARE_R2_ACCOUNT_ID
+            CLOUDFLARE_R2_BUCKET
+            AWS_ACCESS_KEY_ID
+            AWS_SECRET_ACCESS_KEY
+          )
+          for name in "${required[@]}"; do
+            if [ -z "${!name:-}" ]; then
+              echo "$name is required for publishing the Mita download manifest" >&2
+              exit 1
+            fi
+          done
+
+          node scripts/release-distribution/build-download-manifest.mjs \
+            --release-json dist/release-assets.json \
+            --baidu-json dist/baidu-share.json \
+            --manifest-output dist/mita-download/latest.json \
+            --page-output dist/mita-download/index.html
+
+          endpoint="https://${CLOUDFLARE_R2_ACCOUNT_ID}.r2.cloudflarestorage.com"
+          manifest_key="${MITA_DOWNLOAD_MANIFEST_KEY#/}"
+          page_key="${MITA_DOWNLOAD_PAGE_KEY#/}"
+          version_root="${MITA_DOWNLOAD_VERSION_ROOT%/}/${{ steps.release.outputs.tag }}"
+          manifest_cache="public, max-age=60, must-revalidate"
+          page_cache="public, max-age=60, must-revalidate"
+          immutable_cache="public, max-age=31536000, immutable"
+
+          aws s3 cp dist/mita-download/latest.json "s3://${CLOUDFLARE_R2_BUCKET}/${manifest_key}" \
+            --endpoint-url "$endpoint" \
+            --cache-control "$manifest_cache" \
+            --content-type "application/json"
+          aws s3 cp dist/mita-download/index.html "s3://${CLOUDFLARE_R2_BUCKET}/${page_key}" \
+            --endpoint-url "$endpoint" \
+            --cache-control "$page_cache" \
+            --content-type "text/html; charset=utf-8"
+          aws s3 cp dist/mita-download/latest.json "s3://${CLOUDFLARE_R2_BUCKET}/${version_root}/download.json" \
+            --endpoint-url "$endpoint" \
+            --cache-control "$immutable_cache" \
+            --content-type "application/json"
+          aws s3 cp dist/mita-download/index.html "s3://${CLOUDFLARE_R2_BUCKET}/${version_root}/index.html" \
+            --endpoint-url "$endpoint" \
+            --cache-control "$immutable_cache" \
+            --content-type "text/html; charset=utf-8"
+
+          cdn_base="${UPDATES_CDN_BASE_URL%/}"
+          echo "Published Mita Baidu manifest: ${cdn_base}/${manifest_key}"
+          echo "Published Mita Baidu download page: ${cdn_base}/${page_key}"
+
+          if [ -z "${CLOUDFLARE_ZONE_ID:-}" ] || [ -z "${CLOUDFLARE_API_TOKEN:-}" ]; then
+            echo "Skipping cache purge because CLOUDFLARE_ZONE_ID or CLOUDFLARE_API_TOKEN is not configured"
+            exit 0
+          fi
+
+          node -e "console.log(JSON.stringify({ files: process.argv.slice(1) }))" \
+            "${cdn_base}/${manifest_key}" \
+            "${cdn_base}/${page_key}" \
+            > dist/mita-download/purge-cache.json
+          curl -fsS -X POST "https://api.cloudflare.com/client/v4/zones/${CLOUDFLARE_ZONE_ID}/purge_cache" \
+            -H "Authorization: Bearer ${CLOUDFLARE_API_TOKEN}" \
+            -H "Content-Type: application/json" \
+            --data @dist/mita-download/purge-cache.json
+
       - name: Send Feishu release messages
         if: steps.release.outputs.probe_only != 'true'
         shell: bash
@@ -221,3 +316,4 @@ jobs:
             dist/baidu-share.json
             dist/feishu-card.json
             dist/release-poster.*
+            dist/mita-download/*

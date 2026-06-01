@@ -9,6 +9,11 @@ import { fileURLToPath } from 'node:url'
 import { buildReleaseNotes } from '../build-release-notes.mjs'
 import { collectReleaseAssets } from '../collect-release-assets.mjs'
 import {
+  baiduUrlWithPassword,
+  buildDownloadManifest,
+  buildDownloadPage,
+} from '../build-download-manifest.mjs'
+import {
   extractPosterHighlights,
   generateReleasePoster,
 } from '../generate-release-poster.mjs'
@@ -132,6 +137,50 @@ test('buildFeishuCard includes fixed release and download fields', () => {
   assert.match(body, /Fixed updater CDN manifest parsing/)
   assert.match(body, /打开 GitHub Release/)
   assert.match(body, /打开百度网盘/)
+})
+
+test('buildDownloadManifest exposes Baidu share as public CDN metadata', () => {
+  const manifest = buildDownloadManifest(
+    collectReleaseAssets(sampleRelease()),
+    {
+      url: 'https://pan.baidu.com/s/example',
+      password: 'mita',
+      remotePath: '/Mita/releases/v1.2.3',
+    },
+    { generatedAt: '2026-05-15T09:00:00.000Z' },
+  )
+
+  assert.equal(manifest.schemaVersion, 1)
+  assert.equal(manifest.product, 'Mita')
+  assert.equal(manifest.tagName, 'v1.2.3')
+  assert.equal(manifest.version, '1.2.3')
+  assert.equal(manifest.generatedAt, '2026-05-15T09:00:00.000Z')
+  assert.equal(manifest.primaryDownload.type, 'baidu-netdisk')
+  assert.equal(manifest.primaryDownload.url, 'https://pan.baidu.com/s/example?pwd=mita')
+  assert.equal(manifest.primaryDownload.password, 'mita')
+  assert.equal(manifest.baidu.remotePath, '/Mita/releases/v1.2.3')
+  assert.equal(manifest.github.macosDmg.name, 'Mita_1.2.3_universal.dmg')
+  assert.equal(manifest.github.windowsExe.name, 'Mita_1.2.3_x64-setup.exe')
+})
+
+test('buildDownloadPage redirects to Baidu and shows extraction code fallback', () => {
+  const page = buildDownloadPage({
+    primaryDownload: {
+      url: 'https://pan.baidu.com/s/example?pwd=mita',
+      password: 'mita',
+    },
+  })
+
+  assert.match(page, /http-equiv="refresh"/)
+  assert.match(page, /https:\/\/pan\.baidu\.com\/s\/example\?pwd=mita/)
+  assert.match(page, /Extraction code: <code>mita<\/code>/)
+})
+
+test('baiduUrlWithPassword preserves existing password parameter', () => {
+  assert.equal(
+    baiduUrlWithPassword('https://pan.baidu.com/s/example?pwd=abcd', 'mita'),
+    'https://pan.baidu.com/s/example?pwd=abcd',
+  )
 })
 
 test('buildFeishuReleasePayloads keeps card image-free and appends poster messages', () => {
