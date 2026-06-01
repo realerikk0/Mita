@@ -3,6 +3,7 @@ import { useAssistant } from '@/hooks/useAssistant'
 import { useModelProvider } from '@/hooks/useModelProvider'
 import { defaultModel } from '@/lib/models'
 import { ModelFactory } from '@/lib/model-factory'
+import { providerQuotaErrorFromUnknown } from '@/lib/provider-quota-error'
 import {
   appendMitaTeamsEvent,
   appendRoleStreamMessage,
@@ -100,6 +101,62 @@ const stableId = (prefix: string) =>
 const trimText = (value: string, max = 1200) => {
   const text = value.trim()
   return text.length > max ? `${text.slice(0, max - 3)}...` : text
+}
+
+const asRecord = (value: unknown): Record<string, unknown> | undefined =>
+  value && typeof value === 'object'
+    ? (value as Record<string, unknown>)
+    : undefined
+
+const asNonEmptyString = (value: unknown): string | undefined =>
+  typeof value === 'string' && value.trim().length > 0
+    ? value.trim()
+    : undefined
+
+const errorMessageFromUnknown = (
+  error: unknown,
+  fallback: string
+): string => {
+  const quotaError = providerQuotaErrorFromUnknown(error)
+  if (quotaError) {
+    const details = [
+      quotaError.providerName ? `provider=${quotaError.providerName}` : '',
+      quotaError.code ? `code=${quotaError.code}` : '',
+      quotaError.rechargeUrl ? `recharge=${quotaError.rechargeUrl}` : '',
+    ].filter(Boolean)
+    return details.length
+      ? `${quotaError.message} (${details.join(', ')})`
+      : quotaError.message
+  }
+
+  if (error instanceof Error) {
+    return error.message || error.name || fallback
+  }
+
+  const directText = asNonEmptyString(error)
+  if (directText) return directText
+
+  const record = asRecord(error)
+  if (!record) return fallback
+
+  const nestedError = asRecord(record.error)
+  const nestedCause = asRecord(record.cause)
+  const message =
+    asNonEmptyString(record.message) ??
+    asNonEmptyString(nestedError?.message) ??
+    asNonEmptyString(nestedCause?.message) ??
+    fallback
+  const qualifiers = [
+    asNonEmptyString(record.name),
+    asNonEmptyString(record.code) ?? asNonEmptyString(nestedError?.code),
+    typeof record.status === 'number' || typeof record.status === 'string'
+      ? `status=${record.status}`
+      : undefined,
+    asNonEmptyString(record.statusText),
+    asNonEmptyString(record.type) ?? asNonEmptyString(nestedError?.type),
+  ].filter((item): item is string => Boolean(item))
+
+  return qualifiers.length ? `${message} (${qualifiers.join(', ')})` : message
 }
 
 const numberFromUsage = (value: unknown) =>
@@ -1592,8 +1649,10 @@ async function runRoleCall({
   } catch (error) {
     if (abortSignal?.aborted) throw error
 
-    const message =
-      error instanceof Error ? error.message : 'Role call failed unexpectedly'
+    const message = errorMessageFromUnknown(
+      error,
+      'Role call failed unexpectedly'
+    )
     const current = nextRuntime.roleStates[role.id]
     nextRuntime = appendMitaTeamsEvent(
       {
@@ -2051,8 +2110,10 @@ export async function runMitaTeamsRuntime({
       return { config: workingConfig, status: 'stopped' }
     }
 
-    const message =
-      error instanceof Error ? error.message : 'Mita Teams runtime failed'
+    const message = errorMessageFromUnknown(
+      error,
+      'Mita Teams runtime failed'
+    )
     runtime = completeRun(runtime, 'failed', message)
     notify(runtime)
     return {

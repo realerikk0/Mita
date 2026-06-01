@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest'
 
 import { runMitaTeamsRuntime } from '@/lib/mita-teams-runtime'
+import { ProviderQuotaError } from '@/lib/provider-quota-error'
 import {
   createDefaultMitaTeamsConfig,
   normalizeMitaTeamsConfig,
@@ -178,6 +179,68 @@ describe('mita teams runtime', () => {
         (event) => event.type === 'json_repair_requested'
       )
     ).toBe(true)
+  })
+
+  it('surfaces non-Error runtime failures instead of the generic fallback', async () => {
+    const config = createDefaultMitaTeamsConfig({
+      provider: 'jingxing',
+      id: 'gemini-3.5-flash',
+    })
+
+    const result = await runMitaTeamsRuntime({
+      config,
+      userText: 'Start a team run.',
+      generateDecisionText: async () => {
+        throw {
+          error: {
+            message: 'Provider request timed out',
+            code: 'upstream_timeout',
+          },
+          status: 504,
+          statusText: 'Gateway Timeout',
+        }
+      },
+      generateRoleText: async () => 'unused',
+    })
+
+    expect(result.status).toBe('failed')
+    expect(result.finalResponse).toContain('Provider request timed out')
+    expect(result.finalResponse).toContain('status=504')
+    expect(result.finalResponse).not.toBe(
+      'Mita Teams 运行失败：Mita Teams runtime failed'
+    )
+    expect(result.config.runtime.run?.error).toContain(
+      'Provider request timed out'
+    )
+  })
+
+  it('keeps provider quota details visible in runtime failures', async () => {
+    const config = createDefaultMitaTeamsConfig({
+      provider: 'jingxing',
+      id: 'gemini-3.5-flash',
+    })
+
+    const result = await runMitaTeamsRuntime({
+      config,
+      userText: 'Start a team run.',
+      generateDecisionText: async () => {
+        throw new ProviderQuotaError({
+          message: '该令牌额度已用尽，请充值后继续使用。',
+          status: 403,
+          code: 'pre_consume_token_quota_failed',
+          providerName: 'jingxing',
+          rechargeUrl: 'https://api.jingxing.uk/console/topup',
+        })
+      },
+      generateRoleText: async () => 'unused',
+    })
+
+    expect(result.status).toBe('failed')
+    expect(result.finalResponse).toContain('该令牌额度已用尽')
+    expect(result.finalResponse).toContain('provider=jingxing')
+    expect(result.finalResponse).toContain(
+      'https://api.jingxing.uk/console/topup'
+    )
   })
 
   it('advances rounds for non-calling decisions so orchestration cannot spin forever', async () => {
