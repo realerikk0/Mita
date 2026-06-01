@@ -255,26 +255,24 @@ function renderWorkspace({
 }
 
 describe('MitaTeamsWorkspace', () => {
-  it('exposes workspace overview controls for widths below the xl side panel', async () => {
+  it('opens the workspace overview sheet from the small-screen header button', async () => {
     const user = userEvent.setup()
     const { onConfigChange } = renderWorkspace()
 
-    const overviewButton = screen.getByRole('button', {
-      name: 'Workspace overview',
-    })
-    expect(overviewButton).toHaveClass('xl:hidden')
+    const overviewButton = screen
+      .getAllByRole('button', { name: 'Workspace overview' })
+      .find((button) => button.classList.contains('lg:hidden'))
+    expect(overviewButton).toBeDefined()
+    expect(overviewButton).toHaveClass('lg:hidden')
 
-    await user.click(overviewButton)
-    const menu = await screen.findByRole('menu')
-    expect(within(menu).getByText('Task board')).toBeInTheDocument()
-    expect(within(menu).getByText('Review launch plan')).toBeInTheDocument()
-    expect(within(menu).getByText('Launch scope')).toBeInTheDocument()
-    expect(within(menu).getByText('15')).toBeInTheDocument()
-    expect(
-      within(menu).getByRole('button', { name: 'Increase rounds' })
-    ).toBeInTheDocument()
+    await user.click(overviewButton!)
+    const dialog = await screen.findByRole('dialog')
+    expect(within(dialog).getByText('Task board')).toBeInTheDocument()
+    expect(within(dialog).getByText('Review launch plan')).toBeInTheDocument()
+    expect(within(dialog).getByText('Launch scope')).toBeInTheDocument()
+    expect(within(dialog).getByText('15')).toBeInTheDocument()
 
-    await user.click(within(menu).getByText('Debate'))
+    await user.click(within(dialog).getByText('Debate'))
     expect(onConfigChange).not.toHaveBeenCalledWith(
       expect.objectContaining({ mode: 'debate' })
     )
@@ -285,14 +283,15 @@ describe('MitaTeamsWorkspace', () => {
     const onConfigChange = vi.fn()
     renderWorkspace({ config: createUnlockedConfig(), onConfigChange })
 
-    await user.click(
-      screen.getByRole('button', {
-        name: 'Workspace overview',
-      })
-    )
-    const menu = await screen.findByRole('menu')
+    const overviewButton = screen
+      .getAllByRole('button', { name: 'Workspace overview' })
+      .find((button) => button.classList.contains('lg:hidden'))
+    expect(overviewButton).toBeDefined()
 
-    await user.click(within(menu).getByText('Debate'))
+    await user.click(overviewButton!)
+    const dialog = await screen.findByRole('dialog')
+
+    await user.click(within(dialog).getByText('Debate'))
     await waitFor(() =>
       expect(onConfigChange).toHaveBeenCalledWith(
         expect.objectContaining({ mode: 'debate' })
@@ -300,43 +299,24 @@ describe('MitaTeamsWorkspace', () => {
     )
   })
 
-  it('keeps setup actions reachable from the responsive overview menu', async () => {
+  it('exposes a slim inspector rail for middle-width layouts', async () => {
     const user = userEvent.setup()
-    const onConfigChange = vi.fn()
-    renderWorkspace({ onConfigChange })
+    renderWorkspace()
 
-    await user.click(
-      screen.getByRole('button', {
-        name: 'Workspace overview',
-      })
-    )
-    const menu = await screen.findByRole('menu')
-
-    await user.click(within(menu).getByText('Researcher'))
-    await waitFor(() =>
-      expect(onConfigChange).toHaveBeenCalledWith(
-        expect.objectContaining({
-          activeRoleId: 'researcher',
-          workspaceView: 'role-config',
-        })
-      )
+    const railButton = screen
+      .getAllByRole('button', { name: 'Workspace overview' })
+      .find((button) => button.closest('aside')?.classList.contains('lg:flex'))
+    expect(railButton).toBeDefined()
+    expect(railButton!.closest('aside')).toHaveClass('lg:flex')
+    expect(railButton!.closest('aside')).toHaveClass('xl:hidden')
+    expect(railButton!.closest('aside')?.querySelectorAll('button')).toHaveLength(
+      1
     )
 
-    onConfigChange.mockClear()
-    await user.click(
-      screen.getByRole('button', {
-        name: 'Workspace overview',
-      })
-    )
-    const reopenedMenu = await screen.findByRole('menu')
-    await user.click(
-      within(reopenedMenu).getByRole('button', { name: 'Increase rounds' })
-    )
-    await waitFor(() =>
-      expect(onConfigChange).toHaveBeenCalledWith(
-        expect.objectContaining({ roundLimit: 6 })
-      )
-    )
+    await user.click(railButton!)
+    const dialog = await screen.findByRole('dialog')
+    expect(within(dialog).getByText('Project memory')).toBeInTheDocument()
+    expect(within(dialog).getByText('Scope accepted')).toBeInTheDocument()
   })
 
   it('disables owner choice actions while the runtime is busy', () => {
