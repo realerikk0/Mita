@@ -106,6 +106,16 @@ type ChatInputProps = {
   chatStatus?: ChatStatus
 }
 
+type DocumentFileInput = {
+  path: string
+  name?: string
+  size?: number
+}
+
+type DroppedFileWithPath = File & {
+  path?: string
+}
+
 const ChatInput = memo(function ChatInput({
   className,
   initialMessage,
@@ -330,6 +340,7 @@ const ChatInput = memo(function ChatInput({
     (a) => a.type === 'document' && a.processing
   )
   const ingestingAny = attachments.some((a) => a.processing)
+  const canDropFiles = hasMmproj || attachmentsEnabled
 
   const [, setFileIngestProgress] = useState<{
     completed: number
@@ -694,6 +705,98 @@ const ChatInput = memo(function ChatInput({
     ]
   )
 
+  const attachDocumentFiles = useCallback(
+    async (files: DocumentFileInput[]) => {
+      if (!files.length) return
+
+      const preparedAttachments: Attachment[] = []
+      for (const file of files) {
+        const name = file.name ?? file.path.split(/[\\/]/).pop() ?? file.path
+        const fileType = name.split('.').pop()?.toLowerCase()
+        let size: number | undefined =
+          typeof file.size === 'number' ? file.size : undefined
+        if (size === undefined) {
+          try {
+            const stat = await fs.fileStat(file.path)
+            size = stat?.size ? Number(stat.size) : undefined
+          } catch (e) {
+            console.warn('Failed to read file size for', file.path, e)
+          }
+        }
+
+        preparedAttachments.push(
+          createDocumentAttachment({
+            name,
+            path: file.path,
+            fileType,
+            size,
+            parseMode: parsePreference,
+          })
+        )
+      }
+
+      const maxFileSizeBytes =
+        typeof maxFileSizeMB === 'number' && maxFileSizeMB > 0
+          ? maxFileSizeMB * 1024 * 1024
+          : undefined
+
+      if (maxFileSizeBytes !== undefined) {
+        const hasOversized = preparedAttachments.some(
+          (att) => typeof att.size === 'number' && att.size > maxFileSizeBytes
+        )
+        if (hasOversized) {
+          toast.error('File too large', {
+            description: `One or more files exceed the ${maxFileSizeMB}MB limit`,
+          })
+          return
+        }
+      }
+
+      let duplicates: string[] = []
+      let newDocAttachments: Attachment[] = []
+
+      setAttachmentsForThread(attachmentsKey, (currentAttachments) => {
+        const existingPaths = new Set(
+          currentAttachments
+            .filter((a) => a.type === 'document' && a.path)
+            .map((a) => a.path)
+        )
+
+        duplicates = []
+        newDocAttachments = []
+
+        for (const att of preparedAttachments) {
+          if (existingPaths.has(att.path)) {
+            duplicates.push(att.name)
+            continue
+          }
+          newDocAttachments.push(att)
+        }
+
+        return newDocAttachments.length > 0
+          ? [...currentAttachments, ...newDocAttachments]
+          : currentAttachments
+      })
+
+      if (duplicates.length > 0) {
+        toast.warning('Files already attached', {
+          description: `${duplicates.join(', ')} ${duplicates.length === 1 ? 'is' : 'are'} already in the list`,
+        })
+      }
+
+      if (newDocAttachments.length > 0) {
+        await processNewDocumentAttachments(newDocAttachments)
+      }
+    },
+    [
+      attachmentsKey,
+      maxFileSizeMB,
+      parsePreference,
+      processNewDocumentAttachments,
+      setAttachmentsForThread,
+    ]
+  )
+
   const handleAttachDocsIngest = async () => {
     try {
       if (!attachmentsEnabled) {
@@ -853,81 +956,7 @@ const ChatInput = memo(function ChatInput({
       const paths = Array.isArray(selection) ? selection : [selection]
       if (!paths.length) return
 
-      // Prepare attachments with file sizes
-      const preparedAttachments: Attachment[] = []
-      for (const p of paths) {
-        const name = p.split(/[\\/]/).pop() || p
-        const fileType = name.split('.').pop()?.toLowerCase()
-        let size: number | undefined = undefined
-        try {
-          const stat = await fs.fileStat(p)
-          size = stat?.size ? Number(stat.size) : undefined
-        } catch (e) {
-          console.warn('Failed to read file size for', p, e)
-        }
-        preparedAttachments.push(
-          createDocumentAttachment({
-            name,
-            path: p,
-            fileType,
-            size,
-            parseMode: parsePreference,
-          })
-        )
-      }
-
-      const maxFileSizeBytes =
-        typeof maxFileSizeMB === 'number' && maxFileSizeMB > 0
-          ? maxFileSizeMB * 1024 * 1024
-          : undefined
-
-      if (maxFileSizeBytes !== undefined) {
-        const hasOversized = preparedAttachments.some(
-          (att) => typeof att.size === 'number' && att.size > maxFileSizeBytes
-        )
-        if (hasOversized) {
-          toast.error('File too large', {
-            description: `One or more files exceed the ${maxFileSizeMB}MB limit`,
-          })
-          return
-        }
-      }
-
-      let duplicates: string[] = []
-      let newDocAttachments: Attachment[] = []
-
-      setAttachmentsForThread(attachmentsKey, (currentAttachments) => {
-        const existingPaths = new Set(
-          currentAttachments
-            .filter((a) => a.type === 'document' && a.path)
-            .map((a) => a.path)
-        )
-
-        duplicates = []
-        newDocAttachments = []
-
-        for (const att of preparedAttachments) {
-          if (existingPaths.has(att.path)) {
-            duplicates.push(att.name)
-            continue
-          }
-          newDocAttachments.push(att)
-        }
-
-        return newDocAttachments.length > 0
-          ? [...currentAttachments, ...newDocAttachments]
-          : currentAttachments
-      })
-
-      if (duplicates.length > 0) {
-        toast.warning('Files already attached', {
-          description: `${duplicates.join(', ')} ${duplicates.length === 1 ? 'is' : 'are'} already in the list`,
-        })
-      }
-
-      if (newDocAttachments.length > 0) {
-        await processNewDocumentAttachments(newDocAttachments)
-      }
+      await attachDocumentFiles(paths.map((path) => ({ path })))
     } catch (e) {
       console.error('Failed to attach documents:', e)
       const desc = e instanceof Error ? e.message : JSON.stringify(e)
@@ -978,6 +1007,18 @@ const ChatInput = memo(function ChatInput({
       default:
         return ''
     }
+  }
+
+  const isImageDropFile = (file: File): boolean => {
+    const detectedType = file.type || getFileTypeFromExtension(file.name)
+    return detectedType.startsWith('image/')
+  }
+
+  const getDroppedDocumentPath = (file: File): string | undefined => {
+    const droppedFile = file as DroppedFileWithPath
+    return droppedFile.path && droppedFile.path.trim().length > 0
+      ? droppedFile.path
+      : undefined
   }
 
   const formatBytes = (bytes?: number): string => {
@@ -1338,8 +1379,7 @@ const ChatInput = memo(function ChatInput({
   const handleDragEnter = (e: React.DragEvent) => {
     e.preventDefault()
     e.stopPropagation()
-    // Only allow drag if model supports mmproj
-    if (hasMmproj) {
+    if (canDropFiles) {
       setIsDragOver(true)
     }
   }
@@ -1359,7 +1399,7 @@ const ChatInput = memo(function ChatInput({
     e.preventDefault()
     e.stopPropagation()
     // Ensure drag state is maintained during drag over
-    if (hasMmproj) {
+    if (canDropFiles) {
       setIsDragOver(true)
     }
   }
@@ -1369,8 +1409,7 @@ const ChatInput = memo(function ChatInput({
     e.stopPropagation()
     setIsDragOver(false)
 
-    // Only allow drop if model supports mmproj
-    if (!hasMmproj) {
+    if (!canDropFiles) {
       return
     }
 
@@ -1382,14 +1421,52 @@ const ChatInput = memo(function ChatInput({
 
     const files = e.dataTransfer.files
     if (files && files.length > 0) {
-      // Create a synthetic event to reuse existing file handling logic
-      const syntheticEvent = {
-        target: {
-          files: files,
-        },
-      } as React.ChangeEvent<HTMLInputElement>
+      const droppedFiles = Array.from(files)
+      const imageFiles = droppedFiles.filter(isImageDropFile)
+      const documentFiles = droppedFiles.filter((file) => !isImageDropFile(file))
 
-      handleFileChange(syntheticEvent)
+      void (async () => {
+        if (imageFiles.length > 0) {
+          if (hasMmproj) {
+            await processImageFiles(imageFiles)
+          } else {
+            setShowVisionModelPrompt(true)
+          }
+        }
+
+        if (documentFiles.length > 0) {
+          if (!attachmentsEnabled) {
+            toast.info('Attachments are disabled in Settings')
+            return
+          }
+
+          const missingPathFiles: string[] = []
+          const documentInputs: DocumentFileInput[] = []
+          for (const file of documentFiles) {
+            const path = getDroppedDocumentPath(file)
+            if (!path) {
+              missingPathFiles.push(file.name)
+              continue
+            }
+            documentInputs.push({
+              path,
+              name: file.name,
+              size: file.size,
+            })
+          }
+
+          if (missingPathFiles.length > 0) {
+            toast.error('Cannot attach dropped documents', {
+              description: `Mita needs local file paths for ${missingPathFiles.join(', ')}. Use the document picker instead.`,
+            })
+          }
+
+          if (documentInputs.length > 0) {
+            setMessage('')
+            await attachDocumentFiles(documentInputs)
+          }
+        }
+      })()
     }
   }
 
@@ -1526,11 +1603,11 @@ const ChatInput = memo(function ChatInput({
               isFocused && 'ring-1 ring-ring/50',
               isDragOver && 'ring-2 ring-ring/50 border-primary'
             )}
-            data-drop-zone={hasMmproj ? 'true' : undefined}
-            onDragEnter={hasMmproj ? handleDragEnter : undefined}
-            onDragLeave={hasMmproj ? handleDragLeave : undefined}
-            onDragOver={hasMmproj ? handleDragOver : undefined}
-            onDrop={hasMmproj ? handleDrop : undefined}
+            data-drop-zone={canDropFiles ? 'true' : undefined}
+            onDragEnter={canDropFiles ? handleDragEnter : undefined}
+            onDragLeave={canDropFiles ? handleDragLeave : undefined}
+            onDragOver={canDropFiles ? handleDragOver : undefined}
+            onDrop={canDropFiles ? handleDrop : undefined}
           >
             {attachments.length > 0 && (
               <div className="flex flex-col gap-2 p-2 pb-0">

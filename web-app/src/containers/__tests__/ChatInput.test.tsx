@@ -110,14 +110,15 @@ vi.mock('@/hooks/useTools', () => ({
 
 vi.mock('@/hooks/useAttachments', () => ({
   useAttachments: (selector: any) =>
-    selector({
-      enabled: true,
-      parseMode: 'auto',
-      maxFileSizeMB: 10,
-    }),
+    selector(attachmentsSettings),
 }))
 
 let attachmentsList: any[] = []
+let attachmentsSettings: any = {
+  enabled: true,
+  parseMode: 'auto',
+  maxFileSizeMB: 10,
+}
 const setAttachmentsMock = vi.fn()
 const clearAttachmentsMock = vi.fn()
 const transferAttachmentsMock = vi.fn()
@@ -150,8 +151,17 @@ vi.mock('@/hooks/useMitaWebResearch', () => ({
   }),
 }))
 
+const showAttachmentPromptMock = vi.fn().mockResolvedValue('embeddings')
+function useAttachmentIngestionPromptImpl(selector?: any) {
+  const state = { showPrompt: showAttachmentPromptMock }
+  if (selector) return selector(state)
+  return state
+}
+;(useAttachmentIngestionPromptImpl as any).getState = () => ({
+  showPrompt: showAttachmentPromptMock,
+})
 vi.mock('@/hooks/useAttachmentIngestionPrompt', () => ({
-  useAttachmentIngestionPrompt: vi.fn(),
+  useAttachmentIngestionPrompt: useAttachmentIngestionPromptImpl,
 }))
 
 // Message queue store — it's imported as a zustand hook and also invoked via
@@ -199,6 +209,7 @@ vi.mock('@janhq/core', () => ({
   VectorDBExtension: class {},
   fs: {
     existsSync: vi.fn().mockResolvedValue(false),
+    fileStat: vi.fn().mockResolvedValue({ size: 123 }),
     readFile: vi.fn().mockResolvedValue(''),
     writeFile: vi.fn().mockResolvedValue(undefined),
   },
@@ -295,6 +306,11 @@ const resetAll = () => {
   promptState = ''
   appStateOverrides = {}
   attachmentsList = []
+  attachmentsSettings = {
+    enabled: true,
+    parseMode: 'auto',
+    maxFileSizeMB: 10,
+  }
   agentModeOn = false
   selectedModelOverride = {
     id: 'model-a',
@@ -302,6 +318,10 @@ const resetAll = () => {
     provider: 'llamacpp',
   }
   setPromptMock.mockClear()
+  setAttachmentsMock.mockReset()
+  clearAttachmentsMock.mockClear()
+  transferAttachmentsMock.mockClear()
+  showAttachmentPromptMock.mockClear()
   addToHistoryMock.mockClear()
   navigateHistoryMock.mockClear()
   enqueueMock.mockClear()
@@ -532,6 +552,45 @@ describe('ChatInput', () => {
       ])
     )
     expect(clearAttachmentsMock).toHaveBeenCalled()
+  })
+
+  it('attaches dropped document files instead of rejecting them as images', async () => {
+    attachmentsSettings = {
+      enabled: true,
+      parseMode: 'embeddings',
+      maxFileSizeMB: 10,
+    }
+    setAttachmentsMock.mockImplementation((_key, updater) => {
+      attachmentsList =
+        typeof updater === 'function' ? updater(attachmentsList) : updater
+    })
+    const pdf = new File(['pdf'], 'report.pdf', { type: 'application/pdf' })
+    Object.defineProperty(pdf, 'path', {
+      value: '/tmp/report.pdf',
+      configurable: true,
+    })
+    const { container } = renderInput()
+    const dropZone = container.querySelector('[data-drop-zone="true"]')
+
+    await act(async () => {
+      fireEvent.drop(dropZone!, {
+        dataTransfer: {
+          files: [pdf],
+        },
+      })
+    })
+
+    expect(attachmentsList).toEqual([
+      expect.objectContaining({
+        type: 'document',
+        name: 'report.pdf',
+        path: '/tmp/report.pdf',
+        fileType: 'pdf',
+        size: pdf.size,
+        parseMode: 'embeddings',
+      }),
+    ])
+    expect(screen.queryByText(/Invalid file type/)).not.toBeInTheDocument()
   })
 
   it('shows the queued-message chips from the message queue', () => {
