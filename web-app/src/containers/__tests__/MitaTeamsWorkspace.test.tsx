@@ -819,14 +819,174 @@ describe('MitaTeamsWorkspace', () => {
 
     renderWorkspace({ config })
 
-    const text = screen.getByText(
-      (_content, node) => node?.textContent === longAnswer
-    )
+    const toggle = screen.getByRole('button', { name: 'Show more' })
+    const messageBlock = toggle.closest('div')
+    const text = messageBlock?.querySelector('.markdown')
+    expect(text).toBeTruthy()
     expect(text).toHaveClass('line-clamp-5')
 
-    await user.click(screen.getByRole('button', { name: 'Show more' }))
-    expect(text).not.toHaveClass('line-clamp-5')
-    expect(screen.getByRole('button', { name: 'Show less' })).toBeInTheDocument()
+    await user.click(toggle)
+    await waitFor(() => {
+      expect(
+        within(messageBlock!).getByRole('button', { name: 'Show less' })
+      ).toBeInTheDocument()
+      const expandedText = messageBlock?.querySelector('.markdown')
+      expect(expandedText).not.toHaveClass('line-clamp-5')
+    })
+  })
+
+  it('renders channel role messages as markdown', async () => {
+    const now = '2026-05-29T00:00:00.000Z'
+    const base = createConfig()
+    const role = base.roles[0]
+    const markdownAnswer =
+      '**MRVL summary**\n\n### Latest quarter\n\n- Revenue: **$2.4B**\n- Source: [Marvell IR](https://investor.marvell.com)'
+    const config: MitaTeamsConfig = {
+      ...withResearchChannel(base, role),
+      runtime: {
+        ...base.runtime,
+        userChoiceRequest: undefined,
+        roleStates: {
+          ...base.runtime.roleStates,
+          [role.id]: {
+            ...base.runtime.roleStates[role.id]!,
+            stream: [
+              {
+                id: 'markdown-answer',
+                turnId: 'turn-1',
+                roleId: role.id,
+                channelId: 'research',
+                role: 'assistant',
+                content: markdownAnswer,
+                createdAt: now,
+              },
+            ],
+          },
+        },
+      },
+    }
+
+    renderWorkspace({ config })
+
+    await screen.findByText(/MRVL summary/)
+    const markdownContainer = Array.from(
+      document.querySelectorAll('.markdown')
+    ).find((node) => node.textContent?.includes('MRVL summary'))
+
+    expect(markdownContainer).toBeTruthy()
+    expect(
+      markdownContainer?.querySelector('[data-streamdown="strong"]')
+    ).toHaveTextContent('MRVL summary')
+    expect(markdownContainer?.querySelector('h3')).toHaveTextContent(
+      'Latest quarter'
+    )
+    expect(markdownContainer?.querySelector('a')).toHaveAttribute(
+      'href',
+      'https://investor.marvell.com/'
+    )
+    expect(screen.queryByText('**MRVL summary**')).not.toBeInTheDocument()
+  })
+
+  it('highlights role names in host channel messages as labels', async () => {
+    const now = '2026-05-29T00:00:00.000Z'
+    const base = createConfig()
+    const host = base.roles[0]
+    const dataScout = {
+      ...host,
+      id: 'data-scout',
+      name: 'Data Scout',
+      label: 'Data Scout',
+      description: 'Collects market facts.',
+      prompt: 'Collect market facts.',
+      color: 'bg-sky-600',
+      permission: 'read' as const,
+      enabled: true,
+    }
+    const marketAnalyst = {
+      ...host,
+      id: 'market-analyst',
+      name: 'Market Analyst',
+      label: 'Market Analyst',
+      description: 'Analyzes market data.',
+      prompt: 'Analyze market data.',
+      color: 'bg-emerald-600',
+      permission: 'read' as const,
+      enabled: true,
+    }
+    const hostInstruction =
+      '基于 Data Scout 在 #research 收集的事实，请 Market Analyst 产出结构化分析。'
+    const config: MitaTeamsConfig = {
+      ...base,
+      activeChannel: 'research',
+      roles: [host, dataScout, marketAnalyst],
+      channels: [
+        ...base.channels,
+        {
+          id: 'research',
+          label: 'Research',
+          description: 'Research room',
+          roleIds: [dataScout.id, marketAnalyst.id],
+        },
+      ],
+      runtime: {
+        ...base.runtime,
+        userChoiceRequest: undefined,
+        roleStates: {
+          ...base.runtime.roleStates,
+          [dataScout.id]: {
+            roleId: dataScout.id,
+            status: 'idle',
+            memory: {
+              roleId: dataScout.id,
+              version: 0,
+              summary: '',
+              facts: [],
+              decisions: [],
+              openQuestions: [],
+              workingNotes: [],
+              updatedAt: now,
+            },
+            stream: [
+              {
+                id: 'host-instruction',
+                turnId: 'turn-1',
+                roleId: dataScout.id,
+                channelId: 'research',
+                role: 'user',
+                content: hostInstruction,
+                createdAt: now,
+              },
+            ],
+          },
+          [marketAnalyst.id]: {
+            roleId: marketAnalyst.id,
+            status: 'idle',
+            memory: {
+              roleId: marketAnalyst.id,
+              version: 0,
+              summary: '',
+              facts: [],
+              decisions: [],
+              openQuestions: [],
+              workingNotes: [],
+              updatedAt: now,
+            },
+            stream: [],
+          },
+        },
+      },
+    }
+
+    renderWorkspace({ config })
+
+    const roleLabels = screen.getAllByTestId('mita-role-mention')
+
+    expect(roleLabels).toHaveLength(2)
+    expect(roleLabels[0]).toHaveTextContent('Data Scout')
+    expect(roleLabels[1]).toHaveTextContent('Market Analyst')
+    expect(
+      screen.queryByRole('link', { name: 'Data Scout' })
+    ).not.toBeInTheDocument()
   })
 
   it('keeps role private chat separate from channel role streams', () => {

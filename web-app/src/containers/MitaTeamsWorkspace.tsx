@@ -77,6 +77,7 @@ import {
 } from 'lucide-react'
 import {
   memo,
+  type ComponentProps,
   type ReactNode,
   useCallback,
   useEffect,
@@ -87,6 +88,7 @@ import { useModelProvider } from '@/hooks/useModelProvider'
 import { useMediaQuery } from '@/hooks/useMediaQuery'
 import ProvidersAvatar from '@/containers/ProvidersAvatar'
 import { configuredChatModels } from '@/lib/configured-model-providers'
+import { RenderMarkdown } from '@/containers/RenderMarkdown'
 
 type MitaTeamsWorkspaceProps = {
   thread?: Thread
@@ -105,6 +107,17 @@ type ModelOption = {
   label: string
   model: Model
 }
+
+type RoleMentionTarget = {
+  id: MitaTeamsRoleId
+  label: string
+  color: string
+  aliases: string[]
+}
+
+const ROLE_MENTION_LINK_PREFIX = '#mita-role-'
+const MARKDOWN_PROTECTED_SEGMENT_RE =
+  /(```[\s\S]*?```|`[^`\n]*`|\[[^\]\n]+\]\([^)]+\))/g
 
 function messageText(message: UIMessage) {
   return message.parts
@@ -202,6 +215,91 @@ function localizedRoleDescription(role: MitaTeamsRoleConfig, t: Translate) {
     return role.description
   }
   return t(`mita-teams:rolesById.${role.id}.description`)
+}
+
+function escapeRegExp(value: string) {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+}
+
+function escapeMarkdownLinkLabel(value: string) {
+  return value.replace(/\\/g, '\\\\').replace(/]/g, '\\]')
+}
+
+function roleMentionHref(roleId: MitaTeamsRoleId) {
+  return `${ROLE_MENTION_LINK_PREFIX}${encodeURIComponent(roleId)}`
+}
+
+function roleIdFromMentionHref(href?: string) {
+  if (!href?.startsWith(ROLE_MENTION_LINK_PREFIX)) return undefined
+  return decodeURIComponent(href.slice(ROLE_MENTION_LINK_PREFIX.length))
+}
+
+function uniqueTextValues(values: Array<string | undefined>) {
+  const seen = new Set<string>()
+  return values
+    .map((value) => value?.trim())
+    .filter((value): value is string => Boolean(value))
+    .filter((value) => {
+      const key = value.toLocaleLowerCase()
+      if (seen.has(key)) return false
+      seen.add(key)
+      return true
+    })
+}
+
+function buildRoleMentionTargets(
+  roles: MitaTeamsRoleConfig[],
+  t: Translate
+): RoleMentionTarget[] {
+  return roles
+    .filter((role) => role.enabled)
+    .map((role) => {
+      const name = localizedRoleName(role, t)
+      const label = localizedRoleLabel(role, t)
+      return {
+        id: role.id,
+        label: name,
+        color: role.color,
+        aliases: uniqueTextValues([name, label, role.name, role.label]),
+      }
+    })
+    .filter((role) => role.aliases.length > 0)
+}
+
+function linkifyRoleMentions(content: string, targets: RoleMentionTarget[]) {
+  if (targets.length === 0) return content
+
+  const aliases = targets
+    .flatMap((target) =>
+      target.aliases.map((alias) => ({ alias, target }))
+    )
+    .sort((a, b) => b.alias.length - a.alias.length)
+
+  if (aliases.length === 0) return content
+
+  const aliasByText = new Map(
+    aliases.map((item) => [item.alias.toLocaleLowerCase(), item.target])
+  )
+  const aliasPattern = aliases.map((item) => escapeRegExp(item.alias)).join('|')
+  const mentionRegex = new RegExp(
+    `(^|[^\\p{L}\\p{N}_])@?(${aliasPattern})(?=$|[^\\p{L}\\p{N}_])`,
+    'giu'
+  )
+
+  return content
+    .split(MARKDOWN_PROTECTED_SEGMENT_RE)
+    .map((segment, index) => {
+      if (!segment || index % 2 === 1) return segment
+
+      return segment.replace(mentionRegex, (match, prefix, roleName) => {
+        const target = aliasByText.get(roleName.toLocaleLowerCase())
+        if (!target) return match
+        return `${prefix}[${escapeMarkdownLinkLabel(roleName)}](${roleMentionHref(
+          target.id
+        )})`
+      })
+    })
+    .join('')
 }
 
 function runtimeStatusLabel(status: string) {
@@ -559,26 +657,74 @@ function isRoleFailureMessage(content: string) {
 function CollapsibleMessageText({
   content,
   className,
+  roleMentions,
 }: {
   content: string
   className?: string
+  roleMentions?: RoleMentionTarget[]
 }) {
   const { t } = useTranslation()
   const [expanded, setExpanded] = useState(false)
   const collapsible = shouldCollapseMessage(content)
   const displayContent = content.trim() || t('mita-teams:streamingMessage')
+  const mentionById = useMemo(
+    () => new Map((roleMentions ?? []).map((role) => [role.id, role])),
+    [roleMentions]
+  )
+  const renderedContent = useMemo(
+    () => linkifyRoleMentions(displayContent, roleMentions ?? []),
+    [displayContent, roleMentions]
+  )
+  const markdownComponents = useMemo<
+    ComponentProps<typeof RenderMarkdown>['components']
+  >(() => {
+    if (mentionById.size === 0) return undefined
+
+    return {
+      a: ({ href, children }) => {
+        const roleId = roleIdFromMentionHref(href)
+        if (!roleId) {
+          return (
+            <a
+              href={href}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="wrap-anywhere font-medium text-primary underline"
+            >
+              {children}
+            </a>
+          )
+        }
+
+        const role = mentionById.get(roleId)
+        return (
+          <span
+            data-testid="mita-role-mention"
+            className="inline-flex max-w-full translate-y-[-1px] items-center gap-1 rounded-full border border-primary/20 bg-primary/10 px-1.5 py-0.5 text-[11px] font-semibold leading-none text-primary align-baseline"
+            title={role?.label}
+          >
+            <span
+              className={cn('size-1.5 shrink-0 rounded-full', role?.color)}
+            />
+            <span className="min-w-0 truncate">{children}</span>
+          </span>
+        )
+      },
+    }
+  }, [mentionById])
 
   return (
     <div>
-      <div
+      <RenderMarkdown
+        content={renderedContent}
+        isAnimating={false}
+        components={markdownComponents}
         className={cn(
-          'whitespace-pre-wrap break-words text-sm leading-6',
+          'text-sm leading-6 [&_a]:break-words [&_h1]:text-base [&_h2]:text-base [&_h3]:text-sm [&_h4]:text-sm [&_h5]:text-sm [&_h6]:text-sm [&_li]:mb-1 [&_ol]:mb-2 [&_p]:mb-2 [&_ul]:mb-2',
           collapsible && !expanded && 'line-clamp-5',
           className
         )}
-      >
-        {displayContent}
-      </div>
+      />
       {collapsible && (
         <Button
           type="button"
@@ -738,6 +884,10 @@ function ChannelRoleStreams({
   channelId: MitaTeamsChannelId
 }) {
   const { t } = useTranslation()
+  const roleMentionTargets = useMemo(
+    () => buildRoleMentionTargets(roles, t),
+    [roles, t]
+  )
   const roleMessages = roles
     .flatMap((role) => {
       const roleName = localizedRoleName(role, t)
@@ -785,6 +935,7 @@ function ChannelRoleStreams({
               <CollapsibleMessageText
                 content={message.content}
                 className={cn(isFailure && 'text-destructive')}
+                roleMentions={isHostMessage ? roleMentionTargets : undefined}
               />
             </div>
           </div>
