@@ -20,6 +20,7 @@ const h = vi.hoisted(() => {
   const mockMcpCallTool = vi.fn()
   const mockRunMitaTeamsRuntime = vi.fn()
   const mockRunMitaTeamsPrivateRoleChat = vi.fn()
+  const mockRouterNavigate = vi.fn()
   const openExternalUrl = vi.fn()
   const useChatArgs: any[] = []
 
@@ -41,6 +42,7 @@ const h = vi.hoisted(() => {
     },
     setCurrentThreadId: vi.fn(),
     updateThread: vi.fn(),
+    deleteThread: vi.fn(),
   }
   const useThreadsMock: any = (selector: any) => selector(threadsState)
   useThreadsMock.getState = () => threadsState
@@ -98,6 +100,7 @@ const h = vi.hoisted(() => {
 
   const attachmentsState: any = {
     getAttachments: vi.fn(() => []),
+    setAttachments: vi.fn(),
     clearAttachments: vi.fn(),
   }
   const useChatAttachmentsMock: any = (selector: any) => selector(attachmentsState)
@@ -155,6 +158,7 @@ const h = vi.hoisted(() => {
     mockMcpCallTool,
     mockRunMitaTeamsRuntime,
     mockRunMitaTeamsPrivateRoleChat,
+    mockRouterNavigate,
     openExternalUrl,
     useChatArgs,
     chatState,
@@ -193,6 +197,7 @@ vi.mock('@tanstack/react-router', () => ({
   createFileRoute: () => (config: any) => ({ ...config, id: '/threads/$threadId' }),
   useParams: () => ({ threadId: 'thread-1' }),
   useSearch: () => ({ threadModel: undefined }),
+  useRouter: () => ({ navigate: h.mockRouterNavigate }),
 }))
 
 vi.mock('@/containers/HeaderPage', () => ({
@@ -512,6 +517,7 @@ import { useAutoRunStore } from '@/stores/auto-run-store'
 import { DEFAULT_MITA_AUTO_RUN } from '@/types/mita-agent'
 import { createDefaultMitaTeamsConfig } from '@/types/mita-teams'
 import { generateThreadTitle } from '@/lib/thread-title-summarizer'
+import { processAttachmentsForSend } from '@/lib/attachmentProcessing'
 
 const renderComponent = () => {
   const Component = Route.component as React.ComponentType
@@ -533,6 +539,7 @@ describe('ThreadDetail route', () => {
     }
     h.threadsState.setCurrentThreadId = vi.fn()
     h.threadsState.updateThread = vi.fn()
+    h.threadsState.deleteThread = vi.fn()
     h.messagesState.getMessages = vi.fn(() => [
       {
         id: 'u1',
@@ -558,6 +565,9 @@ describe('ThreadDetail route', () => {
       content: [{ type: 'text', text: 'mcp result' }],
     })
     h.chatSessionsState.getSessionData = vi.fn(() => ({ tools: [] }))
+    h.attachmentsState.getAttachments = vi.fn(() => [])
+    h.attachmentsState.setAttachments = vi.fn()
+    h.attachmentsState.clearAttachments = vi.fn()
     h.messageQueueState.dequeue = vi.fn(() => null)
     h.messageQueueState.clearQueue = vi.fn()
     h.agentModeState.agentThreads = {}
@@ -690,6 +700,46 @@ describe('ThreadDetail route', () => {
       expect(h.mockSendMessage).toHaveBeenCalled()
     })
     expect(h.messagesState.addMessage).toHaveBeenCalled()
+  })
+
+  it('deletes a new empty thread when initial attachment processing fails', async () => {
+    const scannedPdf = {
+      name: 'scan.pdf',
+      type: 'document',
+      path: '/tmp/scan.pdf',
+      fileType: 'pdf',
+    }
+    h.messagesState.getMessages = vi.fn(() => [])
+    h.attachmentsState.getAttachments = vi.fn(() => [scannedPdf])
+    const consoleErrorSpy = vi
+      .spyOn(console, 'error')
+      .mockImplementation(() => undefined)
+    vi.mocked(processAttachmentsForSend).mockRejectedValueOnce(
+      new Error('PDF appears to be image-based or scanned')
+    )
+    sessionStorage.setItem(
+      'initial-message-thread-1',
+      JSON.stringify({ text: 'read this pdf', files: [] })
+    )
+
+    try {
+      renderComponent()
+
+      await waitFor(() => {
+        expect(processAttachmentsForSend).toHaveBeenCalled()
+      })
+      await waitFor(() => {
+        expect(h.threadsState.deleteThread).toHaveBeenCalledWith('thread-1')
+      })
+      expect(h.attachmentsState.setAttachments).toHaveBeenCalledWith(
+        '__new-thread__',
+        [scannedPdf]
+      )
+      expect(h.mockRouterNavigate).toHaveBeenCalledWith({ to: '/' })
+      expect(h.mockSendMessage).not.toHaveBeenCalled()
+    } finally {
+      consoleErrorSpy.mockRestore()
+    }
   })
 
   it('invokes stop when ChatInput calls onStop', () => {

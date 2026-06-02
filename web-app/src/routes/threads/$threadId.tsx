@@ -1,5 +1,10 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { createFileRoute, useParams, useSearch } from '@tanstack/react-router'
+import {
+  createFileRoute,
+  useParams,
+  useRouter,
+  useSearch,
+} from '@tanstack/react-router'
 import { cn } from '@/lib/utils'
 
 import HeaderPage from '@/containers/HeaderPage'
@@ -15,6 +20,7 @@ import { useServiceHub } from '@/hooks/useServiceHub'
 import { useTools } from '@/hooks/useTools'
 import { useAppState } from '@/hooks/useAppState'
 import { SESSION_STORAGE_PREFIX } from '@/constants/chat'
+import { route } from '@/constants/routes'
 import { useChat } from '@/hooks/use-chat'
 import { useTranslation } from '@/i18n/react-i18next-compat'
 import { useModelProvider } from '@/hooks/useModelProvider'
@@ -328,6 +334,10 @@ type SearchParams = {
   threadModel?: ThreadModel
 }
 
+type SendMessageOptions = {
+  cleanupEmptyThreadOnFailure?: boolean
+}
+
 // as route.threadsDetail
 export const Route = createFileRoute('/threads/$threadId')({
   component: ThreadDetail,
@@ -342,10 +352,12 @@ function ThreadDetail() {
   const { t } = useTranslation()
   const serviceHub = useServiceHub()
   const { threadId } = useParams({ from: Route.id })
+  const router = useRouter()
   const search = useSearch({ from: Route.id })
   const searchThreadModel = search.threadModel
   const setCurrentThreadId = useThreads((state) => state.setCurrentThreadId)
   const updateThread = useThreads((state) => state.updateThread)
+  const deleteThread = useThreads((state) => state.deleteThread)
   const setMessages = useMessages((state) => state.setMessages)
   const addMessage = useMessages((state) => state.addMessage)
   const updateMessage = useMessages((state) => state.updateMessage)
@@ -357,6 +369,9 @@ function ThreadDetail() {
   // Get attachments for this thread
   const attachmentsKey = threadId ?? NEW_THREAD_ATTACHMENT_KEY
   const getAttachments = useChatAttachments((state) => state.getAttachments)
+  const setAttachmentsForThread = useChatAttachments(
+    (state) => state.setAttachments
+  )
   const clearAttachmentsForThread = useChatAttachments(
     (state) => state.clearAttachments
   )
@@ -1434,7 +1449,8 @@ Tool result communication:
   const processAndSendMessage = useCallback(
     async (
       text: string,
-      files?: Array<{ type: string; mediaType: string; url: string }>
+      files?: Array<{ type: string; mediaType: string; url: string }>,
+      options: SendMessageOptions = {}
     ) => {
       resetSettledChatStatus()
       // Cancel any in-flight title summarization so it doesn't compete with this request
@@ -1546,6 +1562,17 @@ Tool result communication:
               prev.filter((m) => m.id !== messageId)
             )
           }
+          const shouldCleanupEmptyThread =
+            options.cleanupEmptyThreadOnFailure &&
+            useMessages.getState().getMessages(threadId).length === 0
+          const restoreAttachmentsKey = shouldCleanupEmptyThread
+            ? NEW_THREAD_ATTACHMENT_KEY
+            : attachmentsKey
+          setAttachmentsForThread(restoreAttachmentsKey, combinedAttachments)
+          if (shouldCleanupEmptyThread) {
+            deleteThread(threadId)
+            void router.navigate({ to: route.home })
+          }
           return
         } finally {
           setProcessingEmbeddings(false)
@@ -1654,6 +1681,7 @@ Tool result communication:
       getAttachments,
       attachmentsKey,
       setChatMessages,
+      setAttachmentsForThread,
       clearAttachmentsForThread,
       serviceHub,
       selectedModel,
@@ -1662,6 +1690,8 @@ Tool result communication:
       selectModelProvider,
       maybeAutoCompactBeforeSend,
       resetSettledChatStatus,
+      deleteThread,
+      router,
       mitaTeamsConfig,
       appendThreadMessageToChat,
       startMitaTeamsRuntime,
@@ -1779,7 +1809,9 @@ Tool result communication:
             files?: Array<{ type: string; mediaType: string; url: string }>
           }
 
-          await processAndSendMessage(message.text, message.files)
+          await processAndSendMessage(message.text, message.files, {
+            cleanupEmptyThreadOnFailure: true,
+          })
         } catch (error) {
           console.error('Failed to parse initial message:', error)
         }
