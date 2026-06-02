@@ -1,9 +1,55 @@
-import { Minus, Square, X } from 'lucide-react'
+import { useCallback, useEffect, useMemo, useState } from 'react'
+import { Copy, Minus, Square, X } from 'lucide-react'
 import { getCurrentWebviewWindow } from '@tauri-apps/api/webviewWindow'
 import { Button } from '@/components/ui/button'
 
 export const WindowControls = () => {
-  const appWindow = getCurrentWebviewWindow()
+  const appWindow = useMemo(() => getCurrentWebviewWindow(), [])
+  const [isMaximized, setIsMaximized] = useState(false)
+
+  const syncMaximizedState = useCallback(async () => {
+    try {
+      setIsMaximized(await appWindow.isMaximized())
+    } catch (error) {
+      console.error('Failed to sync window maximized state:', error)
+    }
+  }, [appWindow])
+
+  useEffect(() => {
+    let mounted = true
+    let unlisten: (() => void) | undefined
+
+    const syncIfMounted = async () => {
+      try {
+        const maximized = await appWindow.isMaximized()
+        if (mounted) {
+          setIsMaximized(maximized)
+        }
+      } catch (error) {
+        console.error('Failed to sync window maximized state:', error)
+      }
+    }
+
+    void syncIfMounted()
+
+    void appWindow
+      .onResized(syncIfMounted)
+      .then((cleanup) => {
+        if (mounted) {
+          unlisten = cleanup
+        } else {
+          cleanup()
+        }
+      })
+      .catch((error) => {
+        console.error('Failed to listen for window resize:', error)
+      })
+
+    return () => {
+      mounted = false
+      unlisten?.()
+    }
+  }, [appWindow])
 
   const handleMinimize = async () => {
     await appWindow.minimize()
@@ -11,6 +57,7 @@ export const WindowControls = () => {
 
   const handleMaximize = async () => {
     await appWindow.toggleMaximize()
+    await syncMaximizedState()
   }
 
   const handleClose = async () => {
@@ -32,9 +79,13 @@ export const WindowControls = () => {
           onClick={handleMaximize}
           variant="ghost"
           size="icon-sm"
-          aria-label="Maximize"
+          aria-label={isMaximized ? 'Restore' : 'Maximize'}
         >
-          <Square className="size-3" />
+          {isMaximized ? (
+            <Copy className="size-3.5" />
+          ) : (
+            <Square className="size-3" />
+          )}
         </Button>
         <Button
           onClick={handleClose}

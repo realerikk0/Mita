@@ -298,6 +298,8 @@ vi.mock('@/components/ui/switch', () => ({
 }))
 
 vi.mock('@tabler/icons-react', () => ({
+  IconEye: () => <span data-testid="icon-eye" />,
+  IconEyeOff: () => <span data-testid="icon-eye-off" />,
   IconFolderPlus: () => <span />,
   IconLoader: () => <span />,
   IconRefresh: () => <span />,
@@ -594,6 +596,20 @@ describe('ProviderDetail route', () => {
       renderComponent()
       const primary = screen.getByPlaceholderText('providers:apiKeys.primaryPlaceholder') as HTMLInputElement
       expect(primary.value).toBe('sk-primary')
+    })
+
+    it('masks the primary key by default and reveals it only on demand', () => {
+      renderComponent()
+      const primary = screen.getByPlaceholderText(
+        'providers:apiKeys.primaryPlaceholder'
+      ) as HTMLInputElement
+      expect(primary.type).toBe('password')
+
+      fireEvent.click(screen.getByLabelText('Show API key'))
+      expect(primary.type).toBe('text')
+
+      fireEvent.click(screen.getByLabelText('Hide API key'))
+      expect(primary.type).toBe('password')
     })
 
     it('commits a changed primary key on blur', () => {

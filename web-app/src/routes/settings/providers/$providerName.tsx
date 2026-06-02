@@ -31,6 +31,8 @@ import { Input } from '@/components/ui/input'
 import { Switch } from '@/components/ui/switch'
 import { Textarea } from '@/components/ui/textarea'
 import {
+  IconEye,
+  IconEyeOff,
   IconFolderPlus,
   IconLoader,
   IconRefresh,
@@ -87,6 +89,7 @@ function ProviderDetail() {
   const [isProviderImportOpen, setIsProviderImportOpen] = useState(false)
   const [providerImportDraft, setProviderImportDraft] = useState('')
   const [showAdvancedApiKeys, setShowAdvancedApiKeys] = useState(false)
+  const [showPrimaryApiKey, setShowPrimaryApiKey] = useState(false)
   const [isTestingKeys, setIsTestingKeys] = useState(false)
   const [keyCheckResults, setKeyCheckResults] = useState<
     { index: number; masked: string; status: string; detail: string }[]
@@ -929,15 +932,42 @@ function ProviderDetail() {
                       </div>
                       {!showAdvancedApiKeys && (
                         <div className="flex flex-col gap-2">
-                          <Input
-                            className="font-mono"
-                            placeholder={t('providers:apiKeys.primaryPlaceholder')}
-                            value={primaryKeyDraft}
-                            onChange={(e) => setPrimaryKeyDraft(e.target.value)}
-                            onBlur={() => commitApiKeysDraft()}
-                            spellCheck={false}
-                            autoComplete="off"
-                          />
+                          <div className="flex items-center gap-2">
+                            <Input
+                              type={showPrimaryApiKey ? 'text' : 'password'}
+                              className="font-mono"
+                              placeholder={t('providers:apiKeys.primaryPlaceholder')}
+                              value={primaryKeyDraft}
+                              onChange={(e) => setPrimaryKeyDraft(e.target.value)}
+                              onBlur={() => commitApiKeysDraft()}
+                              spellCheck={false}
+                              autoComplete="off"
+                            />
+                            <Button
+                              type="button"
+                              size="icon-sm"
+                              variant="outline"
+                              aria-label={
+                                showPrimaryApiKey
+                                  ? 'Hide API key'
+                                  : 'Show API key'
+                              }
+                              title={
+                                showPrimaryApiKey
+                                  ? 'Hide API key'
+                                  : 'Show API key'
+                              }
+                              onClick={() =>
+                                setShowPrimaryApiKey((current) => !current)
+                              }
+                            >
+                              {showPrimaryApiKey ? (
+                                <IconEyeOff size={16} />
+                              ) : (
+                                <IconEye size={16} />
+                              )}
+                            </Button>
+                          </div>
 
                           <div className="flex items-center justify-between gap-2">
                             <Button

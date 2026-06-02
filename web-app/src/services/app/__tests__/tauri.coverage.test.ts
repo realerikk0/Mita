@@ -1,5 +1,6 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { TauriAppService } from '../tauri'
+import { localStorageKey } from '@/constants/localStorage'
 
 vi.mock('@tauri-apps/api/core', () => ({
   invoke: vi.fn(),
@@ -38,6 +39,7 @@ describe('TauriAppService – coverage', () => {
 
   beforeEach(() => {
     svc = new TauriAppService()
+    localStorage.clear()
     vi.clearAllMocks()
   })
 
@@ -82,6 +84,38 @@ describe('TauriAppService – coverage', () => {
         keepAppData: false,
         keepModelsAndConfigs: true,
       })
+    })
+
+    it('clears persisted projects when app data is wiped', async () => {
+      const { invoke } = await import('@tauri-apps/api/core')
+      vi.mocked(invoke).mockResolvedValue(undefined)
+      localStorage.setItem(
+        localStorageKey.threadManagement,
+        JSON.stringify({
+          state: { folders: [{ id: 'p1', name: 'Project 1' }] },
+          version: 0,
+        })
+      )
+
+      await svc.factoryReset({ keepAppData: false, keepModelsAndConfigs: true })
+
+      expect(localStorage.getItem(localStorageKey.threadManagement)).toBeNull()
+    })
+
+    it('keeps persisted projects when app data is preserved', async () => {
+      const { invoke } = await import('@tauri-apps/api/core')
+      vi.mocked(invoke).mockResolvedValue(undefined)
+      localStorage.setItem(
+        localStorageKey.threadManagement,
+        JSON.stringify({
+          state: { folders: [{ id: 'p1', name: 'Project 1' }] },
+          version: 0,
+        })
+      )
+
+      await svc.factoryReset({ keepAppData: true, keepModelsAndConfigs: false })
+
+      expect(localStorage.getItem(localStorageKey.threadManagement)).not.toBeNull()
     })
 
     it('handles engine with no active models', async () => {

@@ -1,9 +1,30 @@
 import { create } from 'zustand'
 
 const MAX_HISTORY_SIZE = 100
+const DEFAULT_PROMPT_KEY = '__default__'
+
+const normalizePromptKey = (key?: string) =>
+  key && key.trim() ? key : DEFAULT_PROMPT_KEY
+
+const setPromptForKey = (
+  promptsByKey: Record<string, string>,
+  key: string,
+  value: string
+) => {
+  const next = { ...promptsByKey }
+  if (value) {
+    next[key] = value
+  } else {
+    delete next[key]
+  }
+  return next
+}
 
 type PromptStoreState = {
   prompt: string
+  promptsByKey: Record<string, string>
+  activePromptKey: string
+  setActivePromptKey: (key?: string) => void
   setPrompt: (value: string) => void
   resetPrompt: () => void
 
@@ -18,14 +39,40 @@ type PromptStoreState = {
 
 export const usePrompt = create<PromptStoreState>((set, get) => ({
   prompt: '',
+  promptsByKey: {},
+  activePromptKey: DEFAULT_PROMPT_KEY,
+  setActivePromptKey: (key) => {
+    const activePromptKey = normalizePromptKey(key)
+    set((state) => ({
+      activePromptKey,
+      prompt: state.promptsByKey[activePromptKey] ?? '',
+      historyIndex: -1,
+      draftPrompt: '',
+    }))
+  },
   setPrompt: (value) => {
-    set({ prompt: value })
+    set((state) => ({
+      prompt: value,
+      promptsByKey: setPromptForKey(
+        state.promptsByKey,
+        state.activePromptKey,
+        value
+      ),
+    }))
     // Reset history navigation when user types manually
     if (get().historyIndex !== -1) {
       set({ historyIndex: -1 })
     }
   },
-  resetPrompt: () => set({ prompt: '' }),
+  resetPrompt: () =>
+    set((state) => ({
+      prompt: '',
+      promptsByKey: setPromptForKey(
+        state.promptsByKey,
+        state.activePromptKey,
+        ''
+      ),
+    })),
 
   // History state
   promptHistory: [],
@@ -57,6 +104,11 @@ export const usePrompt = create<PromptStoreState>((set, get) => ({
         historyIndex: nextIndex,
         draftPrompt: newDraft,
         prompt: promptHistory[nextIndex],
+        promptsByKey: setPromptForKey(
+          get().promptsByKey,
+          get().activePromptKey,
+          promptHistory[nextIndex]
+        ),
       })
     } else {
       // direction === 'down'
@@ -67,11 +119,21 @@ export const usePrompt = create<PromptStoreState>((set, get) => ({
         set({
           historyIndex: -1,
           prompt: draftPrompt,
+          promptsByKey: setPromptForKey(
+            get().promptsByKey,
+            get().activePromptKey,
+            draftPrompt
+          ),
         })
       } else {
         set({
           historyIndex: nextIndex,
           prompt: promptHistory[nextIndex],
+          promptsByKey: setPromptForKey(
+            get().promptsByKey,
+            get().activePromptKey,
+            promptHistory[nextIndex]
+          ),
         })
       }
     }

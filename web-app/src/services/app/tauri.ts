@@ -6,6 +6,7 @@ import { invoke } from '@tauri-apps/api/core'
 import { AppConfiguration } from '@janhq/core'
 import type { FactoryResetOptions, LogEntry } from './types'
 import { DefaultAppService } from './default'
+import { localStorageKey } from '@/constants/localStorage'
 
 export class TauriAppService extends DefaultAppService {
   /**
@@ -28,6 +29,14 @@ export class TauriAppService extends DefaultAppService {
 
     const keepAppData = options?.keepAppData ?? false
     const keepModelsAndConfigs = options?.keepModelsAndConfigs ?? false
+
+    if (!keepAppData) {
+      try {
+        localStorage.removeItem?.(localStorageKey.threadManagement)
+      } catch (error) {
+        console.error('Failed to clear persisted project state:', error)
+      }
+    }
 
     if (!keepAppData && !keepModelsAndConfigs) {
       await invoke('factory_reset')

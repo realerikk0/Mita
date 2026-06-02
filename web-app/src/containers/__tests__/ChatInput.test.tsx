@@ -6,8 +6,20 @@ import '@testing-library/jest-dom'
 
 // Store backing state for usePrompt (settable by tests)
 let promptState = ''
+let activePromptKey = 'thread-1'
+let promptStateByKey: Record<string, string> = {}
+let currentThreadIdState = 'thread-1'
+const setActivePromptKeyMock = vi.fn((key = '__default__') => {
+  activePromptKey = key
+  promptState = promptStateByKey[key] ?? ''
+})
 const setPromptMock = vi.fn((val: string) => {
   promptState = val
+  if (val) {
+    promptStateByKey[activePromptKey] = val
+  } else {
+    delete promptStateByKey[activePromptKey]
+  }
 })
 const addToHistoryMock = vi.fn()
 const navigateHistoryMock = vi.fn()
@@ -16,6 +28,9 @@ vi.mock('@/hooks/usePrompt', () => ({
   usePrompt: (selector: any) =>
     selector({
       prompt: promptState,
+      promptsByKey: promptStateByKey,
+      activePromptKey,
+      setActivePromptKey: setActivePromptKeyMock,
       setPrompt: setPromptMock,
       addToHistory: addToHistoryMock,
       navigateHistory: navigateHistoryMock,
@@ -30,7 +45,7 @@ const getCurrentThreadMock = vi.fn(() => undefined)
 vi.mock('@/hooks/useThreads', () => ({
   useThreads: (selector: any) =>
     selector({
-      currentThreadId: 'thread-1',
+      currentThreadId: currentThreadIdState,
       getCurrentThread: getCurrentThreadMock,
       updateCurrentThreadAssistant: updateCurrentThreadAssistantMock,
       updateCurrentThreadModel: updateCurrentThreadModelMock,
@@ -304,6 +319,9 @@ import ChatInput from '../ChatInput'
 
 const resetAll = () => {
   promptState = ''
+  activePromptKey = 'thread-1'
+  promptStateByKey = {}
+  currentThreadIdState = 'thread-1'
   appStateOverrides = {}
   attachmentsList = []
   attachmentsSettings = {
@@ -328,6 +346,7 @@ const resetAll = () => {
   clearQueueMock.mockClear()
   for (const k of Object.keys(queueState)) delete queueState[k]
   getCurrentThreadMock.mockReturnValue(undefined)
+  setActivePromptKeyMock.mockClear()
 }
 
 const getTextarea = () =>
@@ -387,6 +406,18 @@ describe('ChatInput', () => {
     renderInput()
     fireEvent.change(getTextarea(), { target: { value: 'abc' } })
     expect(setPromptMock).toHaveBeenCalledWith('abc')
+  })
+
+  it('binds the input draft to the current thread key', () => {
+    renderInput()
+
+    expect(setActivePromptKeyMock).toHaveBeenCalledWith('thread-1')
+  })
+
+  it('uses a project-scoped draft key for project chat starters', () => {
+    renderInput({ projectId: 'project-1' })
+
+    expect(setActivePromptKeyMock).toHaveBeenCalledWith('project:project-1')
   })
 
   it('submits via onSubmit prop when Enter is pressed', () => {

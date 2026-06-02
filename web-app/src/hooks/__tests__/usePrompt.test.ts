@@ -5,7 +5,14 @@ import { usePrompt } from '../usePrompt'
 describe('usePrompt', () => {
   beforeEach(() => {
     act(() => {
-      usePrompt.setState({ prompt: '', promptHistory: [], historyIndex: -1, draftPrompt: '' })
+      usePrompt.setState({
+        prompt: '',
+        promptsByKey: {},
+        activePromptKey: '__default__',
+        promptHistory: [],
+        historyIndex: -1,
+        draftPrompt: '',
+      })
     })
   })
 
@@ -17,6 +24,23 @@ describe('usePrompt', () => {
 
     act(() => result.current.resetPrompt())
     expect(result.current.prompt).toBe('')
+  })
+
+  it('keeps drafts bound to the active conversation key', () => {
+    const { result } = renderHook(() => usePrompt())
+
+    act(() => result.current.setActivePromptKey('thread-1'))
+    act(() => result.current.setPrompt('draft for one'))
+    expect(result.current.prompt).toBe('draft for one')
+
+    act(() => result.current.setActivePromptKey('thread-2'))
+    expect(result.current.prompt).toBe('')
+
+    act(() => result.current.setPrompt('draft for two'))
+    expect(result.current.prompt).toBe('draft for two')
+
+    act(() => result.current.setActivePromptKey('thread-1'))
+    expect(result.current.prompt).toBe('draft for one')
   })
 
   describe('prompt history', () => {

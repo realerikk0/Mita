@@ -2,7 +2,15 @@ import TextareaAutosize from 'react-textarea-autosize'
 import { cn } from '@/lib/utils'
 import { usePrompt } from '@/hooks/usePrompt'
 import { useThreads } from '@/hooks/useThreads'
-import { useCallback, useEffect, useMemo, useRef, useState, memo } from 'react'
+import {
+  useCallback,
+  useEffect,
+  useLayoutEffect,
+  useMemo,
+  useRef,
+  useState,
+  memo,
+} from 'react'
 import { Button } from '@/components/ui/button'
 import {
   Tooltip,
@@ -132,11 +140,19 @@ const ChatInput = memo(function ChatInput({
   const abortControllers = useAppState((state) => state.abortControllers)
   const tools = useAppState((state) => state.tools)
   const cancelToolCall = useAppState((state) => state.cancelToolCall)
+  const currentThreadId = useThreads((state) => state.currentThreadId)
+  const promptKey = useMemo(
+    () => (projectId ? `project:${projectId}` : currentThreadId ?? TEMPORARY_CHAT_ID),
+    [currentThreadId, projectId]
+  )
+  const setActivePromptKey = usePrompt((state) => state.setActivePromptKey)
+  useLayoutEffect(() => {
+    setActivePromptKey(promptKey)
+  }, [promptKey, setActivePromptKey])
   const prompt = usePrompt((state) => state.prompt)
   const setPrompt = usePrompt((state) => state.setPrompt)
   const addToHistory = usePrompt((state) => state.addToHistory)
   const navigateHistory = usePrompt((state) => state.navigateHistory)
-  const currentThreadId = useThreads((state) => state.currentThreadId)
   const currentThread = useThreads((state) => state.getCurrentThread())
   const updateCurrentThreadAssistant = useThreads(
     (state) => state.updateCurrentThreadAssistant
@@ -184,6 +200,11 @@ const ChatInput = memo(function ChatInput({
 
   const maxRows = 10
   const ATTACHMENT_AUTO_INLINE_FALLBACK_BYTES = 512 * 1024
+
+  useEffect(() => {
+    const nextRows = (prompt.match(/\n/g) || []).length + 1
+    setRows(Math.min(nextRows, maxRows))
+  }, [maxRows, prompt])
 
   const selectedModel = useModelProvider((state) => state.selectedModel)
   const selectedProvider = useModelProvider((state) => state.selectedProvider)
