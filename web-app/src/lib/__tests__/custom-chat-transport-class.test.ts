@@ -1,9 +1,17 @@
 import { describe, expect, it, vi, beforeEach } from 'vitest'
 import { CustomChatTransport, normalizeToolInputSchema } from '../custom-chat-transport'
 
+const h = vi.hoisted(() => ({
+  serviceHub: null as any,
+  mcpSettings: {} as any,
+  selectedModel: null as any,
+  getRelevantTools: vi.fn(),
+  invalidateCache: vi.fn(),
+}))
+
 // Mock all the heavy dependencies
 vi.mock('@/hooks/useServiceHub', () => ({
-  useServiceStore: { getState: () => ({ serviceHub: null }) },
+  useServiceStore: { getState: () => ({ serviceHub: h.serviceHub }) },
 }))
 
 vi.mock('@/hooks/useToolAvailable', () => ({
@@ -11,7 +19,7 @@ vi.mock('@/hooks/useToolAvailable', () => ({
 }))
 
 vi.mock('@/hooks/useModelProvider', () => ({
-  useModelProvider: { getState: () => ({ selectedModel: null, selectedProvider: '', getProviderByName: () => null }) },
+  useModelProvider: { getState: () => ({ selectedModel: h.selectedModel, selectedProvider: '', getProviderByName: () => null }) },
 }))
 
 vi.mock('@/hooks/useAssistant', () => ({
@@ -27,7 +35,7 @@ vi.mock('@/hooks/useAttachments', () => ({
 }))
 
 vi.mock('@/hooks/useMCPServers', () => ({
-  useMCPServers: { getState: () => ({ settings: {} }) },
+  useMCPServers: { getState: () => ({ settings: h.mcpSettings }) },
 }))
 
 vi.mock('@/lib/extension', () => ({
@@ -35,7 +43,10 @@ vi.mock('@/lib/extension', () => ({
 }))
 
 vi.mock('@/lib/mcp-orchestrator', () => ({
-  mcpOrchestrator: { getRelevantTools: vi.fn() },
+  mcpOrchestrator: {
+    getRelevantTools: h.getRelevantTools,
+    invalidateCache: h.invalidateCache,
+  },
 }))
 
 vi.mock('@/lib/mcp-router-model-filter', () => ({
@@ -50,6 +61,11 @@ describe('CustomChatTransport', () => {
   let transport: CustomChatTransport
 
   beforeEach(() => {
+    h.serviceHub = null
+    h.mcpSettings = {}
+    h.selectedModel = null
+    h.getRelevantTools.mockReset()
+    h.invalidateCache.mockReset()
     transport = new CustomChatTransport('You are helpful', 'thread-1')
   })
 
@@ -83,6 +99,74 @@ describe('CustomChatTransport', () => {
   it('setLastUserMessage sets the message', () => {
     transport.setLastUserMessage('hello')
     expect(true).toBe(true)
+  })
+
+  it('pins the built-in computer agent server when smart routing is enabled', async () => {
+    h.selectedModel = { capabilities: ['tools'] }
+    h.mcpSettings = {
+      enableSmartToolRouting: true,
+      useLightweightRouterModel: false,
+      routerModelProvider: '',
+      routerModelId: '',
+      computerAgentEnabled: true,
+    }
+    h.serviceHub = {
+      rag: () => ({ getTools: vi.fn().mockResolvedValue([]) }),
+      mcp: () => ({
+        getTools: vi.fn().mockResolvedValue([]),
+        getToolsForServers: vi.fn().mockResolvedValue([]),
+        getServerSummaries: vi.fn().mockResolvedValue([]),
+      }),
+    }
+    h.getRelevantTools.mockResolvedValue([
+      {
+        name: 'computer_agent_create_directory',
+        description: 'Create a directory',
+        inputSchema: { type: 'object' },
+        server: 'mita-computer-agent',
+      },
+    ])
+    const routedTransport = new CustomChatTransport('You are helpful', 'thread-1')
+    routedTransport.setLastUserMessage('create a folder')
+
+    await routedTransport.updateRagToolsAvailability(false, true, false)
+
+    expect(h.getRelevantTools).toHaveBeenCalledWith(
+      'create a folder',
+      expect.any(Object),
+      [],
+      expect.objectContaining({
+        pinnedServerNames: ['mita-computer-agent'],
+      })
+    )
+    expect(routedTransport.getTools()).toHaveProperty(
+      'computer_agent_create_directory'
+    )
+  })
+
+  it('refreshes the built-in computer agent cache before smart routing', async () => {
+    h.selectedModel = { capabilities: ['tools'] }
+    h.mcpSettings = {
+      enableSmartToolRouting: true,
+      useLightweightRouterModel: false,
+      routerModelProvider: '',
+      routerModelId: '',
+      computerAgentEnabled: true,
+    }
+    h.serviceHub = {
+      rag: () => ({ getTools: vi.fn().mockResolvedValue([]) }),
+      mcp: () => ({
+        getTools: vi.fn().mockResolvedValue([]),
+        getToolsForServers: vi.fn().mockResolvedValue([]),
+        getServerSummaries: vi.fn().mockResolvedValue([]),
+      }),
+    }
+    h.getRelevantTools.mockResolvedValue([])
+
+    const routedTransport = new CustomChatTransport('You are helpful', 'thread-1')
+    await routedTransport.updateRagToolsAvailability(false, true, false)
+
+    expect(h.invalidateCache).toHaveBeenCalledWith('mita-computer-agent')
   })
 
   it('reconnectToStream returns null', async () => {

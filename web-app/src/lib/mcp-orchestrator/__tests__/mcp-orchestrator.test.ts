@@ -99,6 +99,25 @@ describe('MCPOrchestrator', () => {
       expect(calledWith).not.toContain('calendar')
     })
 
+    it('keeps pinned built-in servers available even when routing selects another server', async () => {
+      const mockTools = [
+        { name: 'send_email', description: 'sends email', inputSchema: {}, server: 'email' },
+        { name: 'computer_agent_create_directory', description: 'creates a folder', inputSchema: {}, server: 'mita-computer-agent' },
+      ]
+      const service = makeService({
+        getServerSummaries: vi.fn().mockResolvedValue(manySummaries),
+        getToolsForServers: vi.fn().mockResolvedValue(mockTools),
+      })
+
+      await orchestrator.getRelevantTools('send an email', service, [], {
+        pinnedServerNames: ['mita-computer-agent'],
+      } as any)
+
+      const calledWith = (service.getToolsForServers as ReturnType<typeof vi.fn>).mock.calls[0][0] as string[]
+      expect(calledWith).toContain('email')
+      expect(calledWith).toContain('mita-computer-agent')
+    })
+
     it('falls back to all servers when intent yields no match', async () => {
       const service = makeService({
         getServerSummaries: vi.fn().mockResolvedValue(manySummaries),

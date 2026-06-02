@@ -99,6 +99,15 @@ export const Route = createFileRoute(route.settings.mcp_servers as any)({
   component: MCPServersDesktop,
 })
 
+type McpUpdatePayload = {
+  server?: string
+  active?: boolean
+}
+
+function isMcpUpdatePayload(value: unknown): value is McpUpdatePayload {
+  return typeof value === 'object' && value !== null
+}
+
 function MCPServersDesktop() {
   const { t } = useTranslation()
   const serviceHub = useServiceHub()
@@ -406,16 +415,29 @@ function MCPServersDesktop() {
 
     let unlisten: (() => void) | undefined
     const setupListener = async () => {
-      unlisten = await listen(SystemEvent.MCP_UPDATE, () => {
-        serviceHub.mcp().getConnectedServers().then(setConnectedServers)
-      })
+      unlisten = await listen<McpUpdatePayload>(
+        SystemEvent.MCP_UPDATE,
+        (event) => {
+          serviceHub.mcp().getConnectedServers().then(setConnectedServers)
+          if (
+            isMcpUpdatePayload(event.payload) &&
+            event.payload.active === false &&
+            typeof event.payload.server === 'string'
+          ) {
+            const config = getServerConfig(event.payload.server)
+            if (config?.active) {
+              editServer(event.payload.server, { ...config, active: false })
+            }
+          }
+        }
+      )
     }
     setupListener()
 
     return () => {
       unlisten?.()
     }
-  }, [serviceHub, setConnectedServers])
+  }, [editServer, getServerConfig, serviceHub, setConnectedServers])
 
   return (
     <Fragment>

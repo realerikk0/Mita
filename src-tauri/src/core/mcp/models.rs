@@ -31,6 +31,10 @@ fn default_backoff_multiplier() -> f64 {
     super::constants::DEFAULT_MCP_BACKOFF_MULTIPLIER
 }
 
+fn default_max_reconnect_attempts() -> u32 {
+    super::constants::DEFAULT_MCP_MAX_RECONNECT_ATTEMPTS
+}
+
 fn default_enable_smart_tool_routing() -> bool {
     true
 }
@@ -79,6 +83,8 @@ pub struct McpSettings {
     pub max_restart_delay_ms: u64,
     #[serde(default = "default_backoff_multiplier")]
     pub backoff_multiplier: f64,
+    #[serde(default = "default_max_reconnect_attempts")]
+    pub max_reconnect_attempts: u32,
     #[serde(default = "default_enable_smart_tool_routing")]
     pub enable_smart_tool_routing: bool,
     #[serde(default = "default_use_lightweight_router_model")]
@@ -115,6 +121,7 @@ impl Default for McpSettings {
             base_restart_delay_ms: super::constants::DEFAULT_MCP_BASE_RESTART_DELAY_MS,
             max_restart_delay_ms: super::constants::DEFAULT_MCP_MAX_RESTART_DELAY_MS,
             backoff_multiplier: super::constants::DEFAULT_MCP_BACKOFF_MULTIPLIER,
+            max_reconnect_attempts: super::constants::DEFAULT_MCP_MAX_RECONNECT_ATTEMPTS,
             enable_smart_tool_routing: true,
             use_lightweight_router_model: false,
             router_model_provider: String::new(),
@@ -136,6 +143,10 @@ impl McpSettings {
 
     pub fn computer_agent_allows_writes(&self) -> bool {
         self.computer_agent_sandbox_access == "readWrite"
+    }
+
+    pub fn mcp_reconnect_attempts_exceeded(&self, consecutive_failures: u32) -> bool {
+        consecutive_failures >= self.max_reconnect_attempts
     }
 }
 

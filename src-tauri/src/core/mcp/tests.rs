@@ -3,7 +3,10 @@ use super::constants::{
     normalize_browser_mcp_server_key, LEGACY_JAN_BROWSER_MCP_NAME, LEGACY_SILENCE_BROWSER_MCP_NAME,
     LEGACY_SILENCE_WEB_RESEARCH_MCP_NAME, MITA_WEB_RESEARCH_MCP_NAME,
 };
-use super::helpers::{add_server_config, add_server_config_with_path, run_mcp_commands};
+use super::helpers::{
+    add_server_config, add_server_config_with_path, run_mcp_commands,
+    set_mcp_server_active_in_config_with_path,
+};
 use crate::core::app::commands::get_mita_data_folder_path;
 use crate::core::state::{AppState, SharedMcpServers};
 use std::collections::HashMap;
@@ -97,6 +100,52 @@ fn test_add_server_config_new_file() {
     );
 
     // Clean up
+    std::fs::remove_file(&config_path).expect("Failed to remove config file");
+}
+
+#[test]
+fn test_set_mcp_server_active_in_config_updates_only_target_server() {
+    let app = mock_app();
+    let app_path = get_mita_data_folder_path(app.handle().clone());
+    let config_path = app_path.join("mcp_config_test_active_update.json");
+
+    if let Some(parent) = config_path.parent() {
+        std::fs::create_dir_all(parent).expect("Failed to create parent directory");
+    }
+
+    let initial_config = serde_json::json!({
+        "mcpServers": {
+            "filesystem": {
+                "command": "npx",
+                "args": ["-y", "@modelcontextprotocol/server-filesystem"],
+                "active": true
+            },
+            "fetch": {
+                "command": "uvx",
+                "args": ["mcp-server-fetch"],
+                "active": true
+            }
+        }
+    });
+    std::fs::write(
+        &config_path,
+        serde_json::to_string_pretty(&initial_config).unwrap(),
+    )
+    .expect("Failed to write config file");
+
+    let changed =
+        set_mcp_server_active_in_config_with_path(&config_path, "filesystem", false).unwrap();
+    assert!(changed);
+
+    let updated: serde_json::Value =
+        serde_json::from_str(&std::fs::read_to_string(&config_path).unwrap()).unwrap();
+    assert_eq!(updated["mcpServers"]["filesystem"]["active"], false);
+    assert_eq!(updated["mcpServers"]["fetch"]["active"], true);
+
+    let missing =
+        set_mcp_server_active_in_config_with_path(&config_path, "missing", false).unwrap();
+    assert!(!missing);
+
     std::fs::remove_file(&config_path).expect("Failed to remove config file");
 }
 
@@ -638,6 +687,10 @@ fn test_mcp_settings_default_matches_constants() {
     assert!(
         (s.backoff_multiplier - constants::DEFAULT_MCP_BACKOFF_MULTIPLIER).abs() < f64::EPSILON
     );
+    assert_eq!(
+        s.max_reconnect_attempts,
+        constants::DEFAULT_MCP_MAX_RECONNECT_ATTEMPTS
+    );
     assert!(s.enable_smart_tool_routing);
     assert!(!s.use_lightweight_router_model);
     assert!(s.router_model_provider.is_empty());
@@ -648,6 +701,20 @@ fn test_mcp_settings_default_matches_constants() {
     assert_eq!(s.computer_agent_approval_policy, "alwaysAsk");
     assert_eq!(s.computer_agent_sandbox_access, "readWrite");
     assert!(s.computer_agent_allows_writes());
+}
+
+#[test]
+fn test_mcp_settings_reconnect_attempt_limit() {
+    use super::models::McpSettings;
+
+    let mut s = McpSettings::default();
+    s.max_reconnect_attempts = 2;
+
+    assert!(!s.mcp_reconnect_attempts_exceeded(1));
+    assert!(s.mcp_reconnect_attempts_exceeded(2));
+
+    s.max_reconnect_attempts = 0;
+    assert!(s.mcp_reconnect_attempts_exceeded(1));
 }
 
 #[test]
@@ -683,6 +750,7 @@ impl PartialEq for super::models::McpSettings {
             && self.base_restart_delay_ms == other.base_restart_delay_ms
             && self.max_restart_delay_ms == other.max_restart_delay_ms
             && (self.backoff_multiplier - other.backoff_multiplier).abs() < f64::EPSILON
+            && self.max_reconnect_attempts == other.max_reconnect_attempts
             && self.enable_smart_tool_routing == other.enable_smart_tool_routing
             && self.use_lightweight_router_model == other.use_lightweight_router_model
             && self.router_model_provider == other.router_model_provider
@@ -703,6 +771,7 @@ fn test_mcp_settings_round_trip_camel_case() {
     s.router_model_provider = "openai".into();
     s.router_model_id = "gpt-4".into();
     s.use_lightweight_router_model = true;
+    s.max_reconnect_attempts = 4;
     s.computer_agent_enabled = true;
     s.computer_agent_allowed_roots = vec!["/tmp/mita".into()];
     s.computer_agent_approval_policy = "never".into();
@@ -711,6 +780,7 @@ fn test_mcp_settings_round_trip_camel_case() {
     assert!(json.contains("\"toolCallTimeoutSeconds\":42"));
     assert!(json.contains("\"routerModelProvider\":\"openai\""));
     assert!(json.contains("\"useLightweightRouterModel\":true"));
+    assert!(json.contains("\"maxReconnectAttempts\":4"));
     assert!(json.contains("\"computerAgentEnabled\":true"));
     assert!(json.contains("\"computerAgentApprovalPolicy\":\"never\""));
     assert!(json.contains("\"computerAgentSandboxAccess\":\"readOnly\""));
@@ -740,10 +810,12 @@ fn test_mcp_settings_deserializes_legacy_computer_fields() {
 #[test]
 fn test_mcp_settings_partial_deserialize_preserves_provided_values() {
     use super::models::McpSettings;
-    let json = r#"{"toolCallTimeoutSeconds": 90, "backoffMultiplier": 3.5}"#;
+    let json =
+        r#"{"toolCallTimeoutSeconds": 90, "backoffMultiplier": 3.5, "maxReconnectAttempts": 5}"#;
     let s: McpSettings = serde_json::from_str(json).unwrap();
     assert_eq!(s.tool_call_timeout_seconds, 90);
     assert!((s.backoff_multiplier - 3.5).abs() < f64::EPSILON);
+    assert_eq!(s.max_reconnect_attempts, 5);
     // Other fields must fall back to defaults
     let d = McpSettings::default();
     assert_eq!(s.base_restart_delay_ms, d.base_restart_delay_ms);

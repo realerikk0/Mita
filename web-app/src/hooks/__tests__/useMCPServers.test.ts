@@ -166,6 +166,18 @@ describe('useMCPServers', () => {
       expect(result.current.settings.toolCallTimeoutSeconds).toBe(60)
     })
 
+    it('includes max reconnect attempts in default and normalized settings', () => {
+      const { result } = renderHook(() => useMCPServers())
+
+      expect(DEFAULT_MCP_SETTINGS.maxReconnectAttempts).toBe(3)
+
+      act(() => {
+        result.current.setSettings({ toolCallTimeoutSeconds: 45 })
+      })
+
+      expect(result.current.settings.maxReconnectAttempts).toBe(3)
+    })
+
     it('normalizes legacy computer setting names', () => {
       const { result } = renderHook(() => useMCPServers())
 

@@ -7,7 +7,14 @@ use rmcp::{
     ServiceExt,
 };
 use serde_json::Value;
-use std::{collections::HashMap, env, path::PathBuf, process::Stdio, sync::Arc, time::Duration};
+use std::{
+    collections::HashMap,
+    env,
+    path::{Path, PathBuf},
+    process::Stdio,
+    sync::Arc,
+    time::Duration,
+};
 use tauri::{AppHandle, Emitter, Manager, Runtime, State};
 use tauri_plugin_http::reqwest;
 use tokio::{
@@ -277,6 +284,25 @@ pub async fn monitor_mcp_server_handle<R: Runtime>(
             let guard = app_state.mcp_settings.lock().await;
             guard.clone()
         };
+        if settings.mcp_reconnect_attempts_exceeded(consecutive_failures) {
+            log::error!(
+                "MCP server {name} reached reconnect failure limit ({consecutive_failures}/{}), disabling auto-reconnect",
+                settings.max_reconnect_attempts
+            );
+            let app_state = app.state::<AppState>();
+            {
+                let mut active_servers = app_state.mcp_active_servers.lock().await;
+                active_servers.remove(&name);
+            }
+            if let Err(e) = set_mcp_server_active_in_config(&app, &name, false) {
+                log::warn!(
+                    "Failed to persist MCP server {name} inactive after reconnect limit: {e}"
+                );
+            }
+            emit_mcp_deactivated_event(&app, &name, "reconnect-limit");
+            return;
+        }
+
         let base_delay_ms = settings.base_restart_delay_ms;
         let max_delay_ms = settings.max_restart_delay_ms;
         let multiplier = settings.backoff_multiplier;
@@ -395,6 +421,16 @@ pub async fn start_mcp_server<R: Runtime>(
         }
         Err(e) => {
             log::error!("Failed to start MCP server {name} on first attempt: {e}");
+            {
+                let mut active_servers = active_servers_state.lock().await;
+                active_servers.remove(&name);
+            }
+            if let Err(err) = set_mcp_server_active_in_config(&app, &name, false) {
+                log::warn!(
+                    "Failed to persist MCP server {name} inactive after startup failure: {err}"
+                );
+            }
+            emit_mcp_deactivated_event(&app, &name, "startup-failed");
             Err(e)
         }
     }
@@ -725,6 +761,7 @@ async fn schedule_mcp_start_task<R: Runtime>(
         const TOOL_VERIFY_TIMEOUT_SECS: u64 = 2;
         const TOOL_VERIFY_BACKOFF_MS: u64 = 1000;
 
+        let mut tools_list_verified = false;
         for attempt in 1..=MAX_TOOL_VERIFY_ATTEMPTS {
             let verify_result = {
                 let servers_map = servers.lock().await;
@@ -752,6 +789,7 @@ async fn schedule_mcp_start_task<R: Runtime>(
                 }
                 Some(Ok(Ok(_tools))) => {
                     log::info!("MCP server {name} tools/list verified on attempt {attempt}");
+                    tools_list_verified = true;
                     break;
                 }
                 Some(Ok(Err(e))) => {
@@ -772,8 +810,38 @@ async fn schedule_mcp_start_task<R: Runtime>(
                 }
             }
         }
-        // If all attempts failed, we still proceed to emit the event.
-        // The health monitor will handle ongoing reconnection.
+
+        if !tools_list_verified {
+            {
+                let mut servers_map = servers.lock().await;
+                if let Some(service) = servers_map.remove(&name) {
+                    match service {
+                        RunningServiceEnum::NoInit(service) => {
+                            let _ = service.cancel().await;
+                        }
+                        RunningServiceEnum::WithInit(service) => {
+                            let _ = service.cancel().await;
+                        }
+                    }
+                }
+            }
+            {
+                let app_state = app.state::<AppState>();
+                let mut pids = app_state.mcp_server_pids.lock().await;
+                pids.remove(&name);
+                let mut active_servers = app_state.mcp_active_servers.lock().await;
+                active_servers.remove(&name);
+            }
+            if let Err(e) = set_mcp_server_active_in_config(&app, &name, false) {
+                log::warn!(
+                    "Failed to persist MCP server {name} inactive after tools/list failure: {e}"
+                );
+            }
+            emit_mcp_deactivated_event(&app, &name, "tools-list-failed");
+            return Err(format!(
+                "MCP server {name} did not respond to tools/list after {MAX_TOOL_VERIFY_ATTEMPTS} attempts"
+            ));
+        }
 
         // Create lock file for Mita Web Research and legacy browser MCP servers.
         if is_browser_mcp_name(&name) {
@@ -881,6 +949,19 @@ fn emit_mcp_update_event<R: Runtime>(app: &AppHandle<R>, name: &str) {
         "mcp-update",
         serde_json::json!({
             "server": name
+        }),
+    ) {
+        log::error!("Failed to emit mcp-update event: {e}");
+    }
+}
+
+fn emit_mcp_deactivated_event<R: Runtime>(app: &AppHandle<R>, name: &str, reason: &str) {
+    if let Err(e) = app.emit(
+        "mcp-update",
+        serde_json::json!({
+            "server": name,
+            "active": false,
+            "reason": reason,
         }),
     ) {
         log::error!("Failed to emit mcp-update event: {e}");
@@ -1287,6 +1368,46 @@ pub async fn store_active_server_config(
 ) {
     let mut active_servers = active_servers_state.lock().await;
     active_servers.insert(name.to_string(), config.clone());
+}
+
+pub fn set_mcp_server_active_in_config<R: Runtime>(
+    app: &AppHandle<R>,
+    server_name: &str,
+    active: bool,
+) -> Result<bool, String> {
+    let config_path = get_mita_data_folder_path(app.clone()).join("mcp_config.json");
+    set_mcp_server_active_in_config_with_path(&config_path, server_name, active)
+}
+
+pub fn set_mcp_server_active_in_config_with_path(
+    config_path: &Path,
+    server_name: &str,
+    active: bool,
+) -> Result<bool, String> {
+    let config_string = std::fs::read_to_string(config_path)
+        .map_err(|e| format!("Failed to read MCP config: {e}"))?;
+    let mut config_value: Value = serde_json::from_str(&config_string)
+        .map_err(|e| format!("Failed to parse MCP config: {e}"))?;
+
+    let server = config_value
+        .get_mut("mcpServers")
+        .and_then(Value::as_object_mut)
+        .and_then(|servers| servers.get_mut(server_name))
+        .and_then(Value::as_object_mut);
+
+    let Some(server) = server else {
+        return Ok(false);
+    };
+
+    server.insert("active".to_string(), Value::Bool(active));
+    std::fs::write(
+        config_path,
+        serde_json::to_string_pretty(&config_value)
+            .map_err(|e| format!("Failed to serialize MCP config: {e}"))?,
+    )
+    .map_err(|e| format!("Failed to write MCP config: {e}"))?;
+
+    Ok(true)
 }
 
 // Add a new server configuration to the MCP config file

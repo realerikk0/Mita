@@ -28,6 +28,7 @@ export type MCPSettings = {
   baseRestartDelayMs: number
   maxRestartDelayMs: number
   backoffMultiplier: number
+  maxReconnectAttempts: number
   enableSmartToolRouting: boolean
   /** When smart routing is on, use a dedicated (e.g. smaller) model for routing instead of the chat model. */
   useLightweightRouterModel: boolean
@@ -45,6 +46,7 @@ export const DEFAULT_MCP_SETTINGS: MCPSettings = {
   baseRestartDelayMs: 1000,
   maxRestartDelayMs: 30000,
   backoffMultiplier: 2,
+  maxReconnectAttempts: 3,
   enableSmartToolRouting: true,
   useLightweightRouterModel: false,
   routerModelProvider: '',
@@ -77,6 +79,9 @@ export function normalizeMCPSettings(
       source.maxRestartDelayMs ?? DEFAULT_MCP_SETTINGS.maxRestartDelayMs,
     backoffMultiplier:
       source.backoffMultiplier ?? DEFAULT_MCP_SETTINGS.backoffMultiplier,
+    maxReconnectAttempts:
+      source.maxReconnectAttempts ??
+      DEFAULT_MCP_SETTINGS.maxReconnectAttempts,
     enableSmartToolRouting:
       source.enableSmartToolRouting ??
       DEFAULT_MCP_SETTINGS.enableSmartToolRouting,

@@ -66,6 +66,8 @@ export interface GetRelevantToolsOptions {
   routerModel?: LanguageModel | null
   abortSignal?: AbortSignal
   onRoutingTelemetry?: (info: McpRoutingTelemetry) => void
+  /** Server names that should remain available even when selective routing narrows the list. */
+  pinnedServerNames?: string[]
 }
 
 interface CacheEntry {
@@ -154,6 +156,11 @@ export class MCPOrchestrator {
         llmFailure = 'llm_error'
       }
     }
+
+    selectedNames = mergePinnedServerNames(
+      selectedNames,
+      options?.pinnedServerNames ?? []
+    )
 
     const { tools: routedTools, requestFailed } =
       await this.fetchToolsForServersWithStatus(selectedNames, service)
@@ -285,3 +292,19 @@ export class MCPOrchestrator {
 
 // Shared across all CustomChatTransport instances within the same session.
 export const mcpOrchestrator = new MCPOrchestrator()
+
+function mergePinnedServerNames(
+  selectedNames: string[],
+  pinnedServerNames: string[]
+): string[] {
+  if (pinnedServerNames.length === 0) return selectedNames
+
+  const seen = new Set(selectedNames)
+  const merged = [...selectedNames]
+  for (const name of pinnedServerNames) {
+    if (!name || seen.has(name)) continue
+    seen.add(name)
+    merged.push(name)
+  }
+  return merged
+}

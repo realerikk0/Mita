@@ -46,6 +46,8 @@ import {
 } from '@/lib/provider-quota-error'
 import { trackMitaEvent } from '@/lib/analytics'
 
+const COMPUTER_AGENT_SERVER_NAME = 'mita-computer-agent'
+
 export type TokenUsageCallback = (
   usage: LanguageModelUsage,
   messageId: string
@@ -344,6 +346,7 @@ export class CustomChatTransport implements ChatTransport<UIMessage> {
         const mcpService = this.serviceHub.mcp()
         let mcpTools: MCPTool[]
         const mcpSettings = useMCPServers.getState().settings
+        mcpOrchestrator.invalidateCache(COMPUTER_AGENT_SERVER_NAME)
         const routingEnabled = mcpSettings.enableSmartToolRouting
 
         if (
@@ -381,6 +384,9 @@ export class CustomChatTransport implements ChatTransport<UIMessage> {
                   total_latency_ms: info.totalLatencyMs,
                 })
               },
+              pinnedServerNames: mcpSettings.computerAgentEnabled
+                ? [COMPUTER_AGENT_SERVER_NAME]
+                : [],
             }
           )
         } else {
