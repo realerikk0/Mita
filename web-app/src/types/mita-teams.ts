@@ -20,6 +20,8 @@ export type MitaTeamsTaskTemplateId =
   | 'writing'
   | 'debugging'
 
+export type MitaTeamsScenarioId = 'market_research'
+
 export type MitaTeamsTaskStatus =
   | 'todo'
   | 'researching'
@@ -291,6 +293,7 @@ export type MitaTeamsRoleConfig = {
 
 export type MitaTeamsConfig = {
   enabled: boolean
+  scenarioId?: MitaTeamsScenarioId
   mode: MitaTeamsMode
   taskTemplateId: MitaTeamsTaskTemplateId
   activeChannel: MitaTeamsChannelId
@@ -1243,6 +1246,7 @@ export function normalizeMitaTeamsConfig(
     ...fallback,
     ...raw,
     enabled: true,
+    scenarioId: raw.scenarioId === 'market_research' ? raw.scenarioId : undefined,
     mode: isMitaTeamsMode(raw.mode) ? raw.mode : fallback.mode,
     taskTemplateId,
     activeChannel,

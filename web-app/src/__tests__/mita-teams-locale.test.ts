@@ -8,11 +8,15 @@ describe('Mita Teams locale strings', () => {
   it('adds readable Chinese labels for the team workspace', () => {
     expect(zhCN.channels).toBe('频道')
     expect(zhCN.roles).toBe('角色')
+    expect(zhCN.host).toBe('主持人')
+    expect(zhCN.you).toBe('你')
+    expect(zhCN.runtimeThinking).toBe('思考中...')
     expect(zhCN.rolesById.orchestrator.name).toBe('主持人')
     expect(zhCN.channelsById.task.label).toBe('当前任务')
     expect(zhCN.modesById.relay.label).toBe('接力')
 
     expect(zhTW.channels).toBe('頻道')
+    expect(zhTW.host).toBe('主持人')
     expect(zhTW.rolesById.orchestrator.name).toBe('主持人')
     expect(zhTW.channelsById.task.label).toBe('目前任務')
     expect(zhTW.modesById.relay.label).toBe('接力')

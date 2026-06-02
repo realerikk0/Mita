@@ -64,6 +64,7 @@ import {
   GitBranch,
   Hash,
   ListChecks,
+  Loader2,
   MessageSquare,
   Minus,
   MoreVertical,
@@ -74,8 +75,16 @@ import {
   Target,
   UsersRound,
 } from 'lucide-react'
-import { memo, type ReactNode, useCallback, useMemo } from 'react'
+import {
+  memo,
+  type ReactNode,
+  useCallback,
+  useEffect,
+  useMemo,
+  useState,
+} from 'react'
 import { useModelProvider } from '@/hooks/useModelProvider'
+import { useMediaQuery } from '@/hooks/useMediaQuery'
 import ProvidersAvatar from '@/containers/ProvidersAvatar'
 import { configuredChatModels } from '@/lib/configured-model-providers'
 
@@ -274,6 +283,12 @@ function displayDuration(value?: number) {
   if (seconds < 60) return `${seconds}s`
   const minutes = Math.floor(seconds / 60)
   return `${minutes}m ${seconds % 60}s`
+}
+
+function timeValue(value?: string) {
+  if (!value) return 0
+  const time = new Date(value).getTime()
+  return Number.isNaN(time) ? 0 : time
 }
 
 function rolesForChannel(
@@ -530,6 +545,57 @@ function ChoiceRequestCard({
   )
 }
 
+function shouldCollapseMessage(content: string) {
+  const text = content.trim()
+  return text.split('\n').length > 5 || text.length > 360
+}
+
+function isRoleFailureMessage(content: string) {
+  return /(?:角色(?:运行|私聊)?失败|role .*failed|runtime failed|No output generated|stream for errors)/i.test(
+    content
+  )
+}
+
+function CollapsibleMessageText({
+  content,
+  className,
+}: {
+  content: string
+  className?: string
+}) {
+  const { t } = useTranslation()
+  const [expanded, setExpanded] = useState(false)
+  const collapsible = shouldCollapseMessage(content)
+  const displayContent = content.trim() || t('mita-teams:streamingMessage')
+
+  return (
+    <div>
+      <div
+        className={cn(
+          'whitespace-pre-wrap break-words text-sm leading-6',
+          collapsible && !expanded && 'line-clamp-5',
+          className
+        )}
+      >
+        {displayContent}
+      </div>
+      {collapsible && (
+        <Button
+          type="button"
+          variant="ghost"
+          size="sm"
+          className="mt-1 h-7 px-2 text-xs text-muted-foreground"
+          onClick={() => setExpanded((value) => !value)}
+        >
+          {expanded
+            ? t('mita-teams:collapseMessage')
+            : t('mita-teams:expandMessage')}
+        </Button>
+      )}
+    </div>
+  )
+}
+
 function RoleStreamPanel({
   role,
   state,
@@ -557,33 +623,58 @@ function RoleStreamPanel({
 
   return (
     <div className="space-y-3">
-      {stream.map((message) => (
-        <div
-          key={message.id}
-          className={cn(
-            'rounded-lg border p-3',
-            message.role === 'assistant' ? 'bg-card' : 'bg-muted/30'
-          )}
-        >
-          <div className="mb-2 flex items-center justify-between gap-2 text-[11px] text-muted-foreground">
-            <span className="inline-flex items-center gap-1">
-              <span className={cn('size-2 rounded-full', role.color)} />
-              {message.role === 'assistant' ? roleName : t('mita-teams:owner')}
-            </span>
-            <span>{displayTime(message.createdAt)}</span>
+      {stream.map((message) => {
+        const isUserMessage = message.role !== 'assistant'
+        const isFailure = isRoleFailureMessage(message.content)
+
+        return (
+          <div
+            key={message.id}
+            className={cn('flex', isUserMessage ? 'justify-end' : 'justify-start')}
+          >
+            <div
+              className={cn(
+                'max-w-[min(44rem,92%)] rounded-lg border px-3 py-2',
+                isUserMessage ? 'bg-primary/10' : 'bg-card',
+                isFailure && 'border-destructive/30 bg-destructive/5'
+              )}
+            >
+              <div className="mb-1.5 flex items-center justify-between gap-3 text-[11px] text-muted-foreground">
+                <span className="inline-flex min-w-0 items-center gap-1">
+                  <span
+                    className={cn(
+                      'size-2 rounded-full',
+                      isUserMessage ? 'bg-primary' : role.color
+                    )}
+                  />
+                  <span className="truncate">
+                    {isUserMessage ? t('mita-teams:you') : roleName}
+                  </span>
+                </span>
+                <span className="shrink-0">{displayTime(message.createdAt)}</span>
+              </div>
+              <CollapsibleMessageText
+                content={message.content}
+                className={cn(isFailure && 'text-destructive')}
+              />
+            </div>
           </div>
-          <div className="whitespace-pre-wrap text-sm leading-6">
-            {message.content}
-          </div>
-        </div>
-      ))}
+        )
+      })}
     </div>
   )
 }
 
 function TeamTimeline({ events }: { events: MitaTeamsTeamEvent[] }) {
   const { t } = useTranslation()
-  const visibleEvents = events.slice(-8).reverse()
+  const [expanded, setExpanded] = useState(false)
+  const visibleEvents = [...events]
+    .sort((a, b) => timeValue(a.createdAt) - timeValue(b.createdAt))
+    .slice(-40)
+  const shouldFold = visibleEvents.length > 5
+  const olderCount = Math.max(visibleEvents.length - 5, 0)
+  const renderedEvents =
+    shouldFold && !expanded ? visibleEvents.slice(-5) : visibleEvents
 
   if (visibleEvents.length === 0) return null
 
@@ -594,8 +685,28 @@ function TeamTimeline({ events }: { events: MitaTeamsTeamEvent[] }) {
         {t('mita-teams:teamTimeline')}
       </div>
       <div className="space-y-2">
-        {visibleEvents.map((event) => (
-          <div key={event.id} className="flex gap-2 text-xs leading-5">
+        {shouldFold && (
+          <Button
+            type="button"
+            variant="ghost"
+            size="sm"
+            className="h-7 px-2 text-xs text-muted-foreground"
+            onClick={() => setExpanded((value) => !value)}
+          >
+            {expanded
+              ? t('mita-teams:timelineHideOlder')
+              : t('mita-teams:timelineShowOlder', { count: olderCount })}
+          </Button>
+        )}
+        {renderedEvents.map((event, index) => (
+          <div
+            key={event.id}
+            className="flex gap-2 text-xs leading-5 motion-safe:animate-in motion-safe:fade-in-0 motion-safe:slide-in-from-bottom-1"
+            style={{
+              animationDelay: `${index * 110}ms`,
+              animationFillMode: 'both',
+            }}
+          >
             <span className="mt-2 size-1.5 shrink-0 rounded-full bg-primary" />
             <div className="min-w-0 flex-1">
               <div className="flex items-center justify-between gap-2">
@@ -627,57 +738,97 @@ function ChannelRoleStreams({
   channelId: MitaTeamsChannelId
 }) {
   const { t } = useTranslation()
-  const roleStreams = roles
-    .map((role) => {
-      const messages = (runtime.roleStates[role.id]?.stream ?? [])
+  const roleMessages = roles
+    .flatMap((role) => {
+      const roleName = localizedRoleName(role, t)
+      return (runtime.roleStates[role.id]?.stream ?? [])
         .filter((message) => streamBelongsToChannel(message, channelId))
-        .slice(-2)
-      return { role, roleName: localizedRoleName(role, t), messages }
+        .map((message) => ({ role, roleName, message }))
     })
-    .filter((item) => item.messages.length > 0)
+    .sort(
+      (a, b) =>
+        new Date(a.message.createdAt).getTime() -
+        new Date(b.message.createdAt).getTime()
+    )
+    .slice(-32)
 
-  if (roleStreams.length === 0) return null
+  if (roleMessages.length === 0) return null
 
   return (
-    <div className="mb-4 grid gap-3">
-      {roleStreams.map(({ role, roleName, messages }) => (
-        <div key={role.id} className="rounded-lg border bg-card p-3">
-          <div className="mb-2 flex items-center justify-between gap-2 text-xs">
-            <span className="inline-flex min-w-0 items-center gap-2 font-medium">
-              <span className={cn('size-2.5 rounded-full', role.color)} />
-              <span className="truncate">{roleName}</span>
-            </span>
-            <span className="shrink-0 text-[11px] text-muted-foreground">
-              {t(
-                `mita-teams:${roleStatusLabel(runtime.roleStates[role.id]?.status ?? 'idle')}`
+    <div className="mb-4 space-y-3">
+      {roleMessages.map(({ role, roleName, message }) => {
+        const isHostMessage = message.role !== 'assistant'
+        const isFailure = isRoleFailureMessage(message.content)
+        const speakerName = isHostMessage ? t('mita-teams:host') : roleName
+
+        return (
+          <div key={message.id} className="flex justify-start">
+            <div
+              className={cn(
+                'max-w-[min(44rem,92%)] rounded-lg border px-3 py-2',
+                isHostMessage ? 'bg-muted/35' : 'bg-card',
+                isFailure && 'border-destructive/30 bg-destructive/5'
               )}
-            </span>
-          </div>
-          <div className="space-y-2">
-            {messages.map((message) => (
-              <div
-                key={message.id}
-                className={cn(
-                  'rounded-md px-2 py-1.5 text-xs leading-5',
-                  message.role === 'assistant' ? 'bg-background' : 'bg-muted/40'
-                )}
-              >
-                <div className="mb-1 flex items-center justify-between gap-2 text-[11px] text-muted-foreground">
-                  <span>
-                    {message.role === 'assistant'
-                      ? roleName
-                      : t('mita-teams:owner')}
-                  </span>
-                  <span>{displayTime(message.createdAt)}</span>
-                </div>
-                <div className="line-clamp-4 whitespace-pre-wrap">
-                  {message.content}
-                </div>
+            >
+              <div className="mb-1.5 flex items-center justify-between gap-3 text-[11px] text-muted-foreground">
+                <span className="inline-flex min-w-0 items-center gap-1.5 font-medium">
+                  <span
+                    className={cn(
+                      'size-2 rounded-full',
+                      isHostMessage ? 'bg-primary' : role.color
+                    )}
+                  />
+                  <span className="truncate">{speakerName}</span>
+                </span>
+                <span className="shrink-0">{displayTime(message.createdAt)}</span>
               </div>
-            ))}
+              <CollapsibleMessageText
+                content={message.content}
+                className={cn(isFailure && 'text-destructive')}
+              />
+            </div>
           </div>
-        </div>
-      ))}
+        )
+      })}
+    </div>
+  )
+}
+
+function RuntimeActivityIndicator({
+  roles,
+  runtime,
+  isRuntimeBusy,
+}: {
+  roles: MitaTeamsRoleConfig[]
+  runtime: MitaTeamsConfig['runtime']
+  isRuntimeBusy?: boolean
+}) {
+  const { t } = useTranslation()
+  const activeRoleIds = runtime.run?.activeRoleIds ?? []
+  const activeRoleNames = activeRoleIds
+    .map((roleId) => {
+      const role = roles.find((item) => item.id === roleId)
+      return role ? localizedRoleName(role, t) : roleId
+    })
+    .filter(Boolean)
+  const shouldShow = isRuntimeBusy || runtime.run?.status === 'running'
+
+  if (!shouldShow) return null
+
+  const label = activeRoleNames.length
+    ? t('mita-teams:runtimeRunningRole', {
+        role: activeRoleNames.slice(0, 2).join(', '),
+      })
+    : runtime.run?.status === 'running'
+      ? t('mita-teams:runtimeThinking')
+      : t('mita-teams:runtimeRunning')
+
+  return (
+    <div className="mb-4 flex justify-start">
+      <div className="inline-flex max-w-[min(44rem,92%)] items-center gap-2 rounded-lg border bg-muted/30 px-3 py-2 text-sm text-muted-foreground">
+        <Loader2 className="size-4 animate-spin text-primary" />
+        <span>{label}</span>
+      </div>
     </div>
   )
 }
@@ -691,6 +842,19 @@ type WorkspaceInspectorContentProps = {
   taskText: string
   setTaskTemplate: (taskTemplateId: MitaTeamsTaskTemplateId) => void
   setMode: (mode: MitaTeamsMode) => void
+}
+
+function useResponsiveInspectorSheetState() {
+  const [open, setOpen] = useState(false)
+  const hasPersistentInspector = useMediaQuery('(min-width: 1280px)')
+
+  useEffect(() => {
+    if (hasPersistentInspector) {
+      setOpen(false)
+    }
+  }, [hasPersistentInspector])
+
+  return { open, setOpen }
 }
 
 function WorkspaceInspectorContent({
@@ -980,9 +1144,10 @@ function WorkspaceInspectorSheet({
   ...contentProps
 }: WorkspaceInspectorContentProps & { trigger: ReactNode }) {
   const { t } = useTranslation()
+  const { open, setOpen } = useResponsiveInspectorSheetState()
 
   return (
-    <Sheet>
+    <Sheet open={open} onOpenChange={setOpen}>
       <SheetTrigger asChild>{trigger}</SheetTrigger>
       <SheetContent side="right" className="w-[min(26rem,92vw)] gap-0 p-0 sm:max-w-md">
         <SheetHeader className="shrink-0 border-b p-4">
@@ -1002,9 +1167,10 @@ function WorkspaceInspectorSheet({
 function WorkspaceInspectorRail(props: WorkspaceInspectorContentProps) {
   const { t } = useTranslation()
   const label = t('mita-teams:workspaceOverview')
+  const { open, setOpen } = useResponsiveInspectorSheetState()
 
   return (
-    <Sheet>
+    <Sheet open={open} onOpenChange={setOpen}>
       <aside className="hidden w-12 shrink-0 flex-col items-center rounded-lg border bg-card px-1.5 py-2 lg:flex xl:hidden">
         <SheetTrigger asChild>
           <Button
@@ -1318,6 +1484,8 @@ export const MitaTeamsWorkspace = memo(function MitaTeamsWorkspace({
     config.channels.find((channel) => channel.id === config.activeChannel) ??
     config.channels[0] ??
     MITA_TEAMS_CHANNELS[0]
+  const showThreadMessages = activeChannel.id === MITA_TEAMS_TASK_CHANNEL_ID
+  const showChannelDiscussion = !showThreadMessages
   const channelRoles = useMemo(
     () => rolesForChannel(activeChannel, config.roles),
     [activeChannel, config.roles]
@@ -1330,10 +1498,24 @@ export const MitaTeamsWorkspace = memo(function MitaTeamsWorkspace({
       ),
     [activeChannel.id, runtime.teamEvents]
   )
+  const channelHasRoleMessages = useMemo(
+    () =>
+      channelRoles.some(
+        (role) =>
+          role.enabled &&
+          (runtime.roleStates[role.id]?.stream ?? []).some((message) =>
+            streamBelongsToChannel(message, activeChannel.id)
+          )
+      ),
+    [activeChannel.id, channelRoles, runtime.roleStates]
+  )
   const hasMessages =
     isRoleChat
       ? (activePrivateRoleState?.stream.length ?? 0) > 0
-      : messages.length > 0 || channelEvents.length > 0 || Boolean(pendingChoice)
+      : (showThreadMessages && messages.length > 0) ||
+        (showChannelDiscussion && channelEvents.length > 0) ||
+        (showChannelDiscussion && channelHasRoleMessages) ||
+        (showThreadMessages && Boolean(pendingChoice))
   const taskText = compactTaskText(messages, thread?.title)
   const availableChannelTemplates = useMemo(
     () =>
@@ -1935,7 +2117,7 @@ export const MitaTeamsWorkspace = memo(function MitaTeamsWorkspace({
                     </div>
                   </div>
                 )}
-                {pendingChoice && !isRoleChat && (
+                {showThreadMessages && pendingChoice && !isRoleChat && (
                   <ChoiceRequestCard
                     choice={pendingChoice}
                     disabled={isRuntimeBusy}
@@ -1949,13 +2131,22 @@ export const MitaTeamsWorkspace = memo(function MitaTeamsWorkspace({
                   />
                 ) : (
                   <>
-                    <TeamTimeline events={channelEvents} />
-                    <ChannelRoleStreams
-                      roles={channelEnabledRoles}
+                    {showChannelDiscussion && (
+                      <TeamTimeline events={channelEvents} />
+                    )}
+                    {showThreadMessages && messageItems}
+                    {showChannelDiscussion && (
+                      <ChannelRoleStreams
+                        roles={channelEnabledRoles}
+                        runtime={runtime}
+                        channelId={activeChannel.id}
+                      />
+                    )}
+                    <RuntimeActivityIndicator
+                      roles={config.roles}
                       runtime={runtime}
-                      channelId={activeChannel.id}
+                      isRuntimeBusy={isRuntimeBusy}
                     />
-                    {messageItems}
                   </>
                 )}
               </ConversationContent>

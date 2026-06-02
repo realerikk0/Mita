@@ -253,9 +253,11 @@ vi.mock('@/containers/MitaTeamsWorkspace', () => ({
     config,
     inputArea,
     isRuntimeBusy,
+    messageItems,
     onChoiceSelect,
   }: any) => (
     <div data-testid="mita-teams-workspace">
+      {messageItems}
       {inputArea}
       {config.runtime.userChoiceRequest?.options.map(
         (option: { id: string; label: string }) => (
@@ -509,6 +511,7 @@ import {
 import { useAutoRunStore } from '@/stores/auto-run-store'
 import { DEFAULT_MITA_AUTO_RUN } from '@/types/mita-agent'
 import { createDefaultMitaTeamsConfig } from '@/types/mita-teams'
+import { generateThreadTitle } from '@/lib/thread-title-summarizer'
 
 const renderComponent = () => {
   const Component = Route.component as React.ComponentType
@@ -756,6 +759,23 @@ describe('ThreadDetail route', () => {
     expect(screen.getByTestId('prompt-progress')).toBeInTheDocument()
   })
 
+  it('does not inject normal chat PromptProgress into Mita Teams while submitted', () => {
+    const baseConfig = createDefaultMitaTeamsConfig({
+      provider: 'openai',
+      id: 'gpt-x',
+    })
+    h.chatState.status = 'submitted'
+    h.threadsState.threads['thread-1'] = {
+      ...h.threadsState.threads['thread-1'],
+      metadata: { mitaTeams: baseConfig },
+    }
+
+    renderComponent()
+
+    expect(screen.getByTestId('mita-teams-workspace')).toBeInTheDocument()
+    expect(screen.queryByTestId('prompt-progress')).not.toBeInTheDocument()
+  })
+
   it('falls back to ready after onFinish when the SDK status remains streaming', async () => {
     h.chatState.status = 'streaming'
     renderComponent()
@@ -929,6 +949,47 @@ describe('ThreadDetail route', () => {
 
     expect(h.messagesState.addMessage).toHaveBeenCalledTimes(1)
     expect(h.mockRunMitaTeamsRuntime).toHaveBeenCalledTimes(1)
+  })
+
+  it('updates the thread title after a completed Mita Teams round', async () => {
+    const baseConfig = createDefaultMitaTeamsConfig({
+      provider: 'openai',
+      id: 'gpt-x',
+    })
+    h.threadsState.threads['thread-1'] = {
+      ...h.threadsState.threads['thread-1'],
+      title: 'Mita Teams',
+      metadata: { mitaTeams: baseConfig },
+    }
+    h.mockRunMitaTeamsRuntime.mockImplementation(async ({ config }: any) => ({
+      config,
+      status: 'completed',
+      finalResponse: '给 API 中转站写一句面向开发者的 slogan。',
+    }))
+
+    renderComponent()
+
+    await act(async () => {
+      screen.getByTestId('chat-send').click()
+      await Promise.resolve()
+      await Promise.resolve()
+    })
+
+    await waitFor(() => {
+      expect(generateThreadTitle).toHaveBeenCalledWith(
+        'hello world\n\n给 API 中转站写一句面向开发者的 slogan。',
+        expect.any(AbortSignal)
+      )
+    })
+    await waitFor(() => {
+      expect(h.threadsState.updateThread).toHaveBeenCalledWith('thread-1', {
+        title: 'Short title',
+        metadata: expect.objectContaining({
+          mitaTeams: expect.any(Object),
+          titleSummarized: true,
+        }),
+      })
+    })
   })
 
   it('routes role chat input to private Mita Teams role history', async () => {

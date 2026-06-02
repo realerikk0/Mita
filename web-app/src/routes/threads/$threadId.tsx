@@ -601,6 +601,59 @@ Tool result communication:
     [threadId]
   )
 
+  const summarizeThreadTitleFromText = useCallback(
+    (titleText: string, options: { forceGenerate?: boolean } = {}) => {
+      const currentThread =
+        useThreads.getState().threads[threadId] ?? threadRef.current
+      if (
+        !currentThread ||
+        currentThread.metadata?.titleSummarized ||
+        titleAttemptsRef.current >= MAX_TITLE_SUMMARIZATION_ATTEMPTS
+      ) {
+        return
+      }
+
+      const trimmedTitleText = titleText.trim()
+      if (!trimmedTitleText) return
+
+      if (
+        !options.forceGenerate &&
+        trimmedTitleText.length < TITLE_SUMMARIZATION_MIN_LENGTH
+      ) {
+        useThreads.getState().updateThread(threadId, {
+          metadata: {
+            ...currentThread.metadata,
+            titleSummarized: true,
+          },
+        })
+        return
+      }
+
+      titleAbortRef.current?.abort()
+      const controller = new AbortController()
+      titleAbortRef.current = controller
+      titleAttemptsRef.current++
+      const originalTitle = currentThread.title
+
+      generateThreadTitle(trimmedTitleText, controller.signal).then((title) => {
+        if (!title || controller.signal.aborted) return
+        const latestThread =
+          useThreads.getState().threads[threadId] ?? threadRef.current
+        if (!latestThread || latestThread.title !== originalTitle) return
+
+        useThreads.getState().updateThread(threadId, {
+          title,
+          metadata: {
+            ...latestThread.metadata,
+            titleSummarized: true,
+          },
+        })
+        titleAbortRef.current = null
+      })
+    },
+    [threadId]
+  )
+
   // Refs so onFinish (captured in closure) always calls the latest callbacks
   const handleContextSizeIncreaseRef = useRef<(() => void) | null>(null)
   const setContinueFromContentRef = useRef<((content: string) => void) | null>(
@@ -925,38 +978,7 @@ Tool result communication:
         ) {
           const titleText = currentThread.title
           console.log('[ThreadTitle] titleText length:', titleText?.length, 'threshold:', TITLE_SUMMARIZATION_MIN_LENGTH)
-
-          if (titleText && titleText.length >= TITLE_SUMMARIZATION_MIN_LENGTH) {
-            // Cancel any previous in-flight summarization
-            titleAbortRef.current?.abort()
-            const controller = new AbortController()
-            titleAbortRef.current = controller
-            titleAttemptsRef.current++
-            const originalTitle = titleText
-
-            console.log('[ThreadTitle] calling generateThreadTitle...')
-            generateThreadTitle(titleText, controller.signal).then((title) => {
-              console.log('[ThreadTitle] result:', title, 'aborted:', controller.signal.aborted)
-              if (!title || controller.signal.aborted) return
-              // Don't overwrite if the user manually renamed while we were generating
-              const thread = useThreads.getState().threads[threadId]
-              if (!thread || thread.title !== originalTitle) return
-
-              useThreads.getState().updateThread(threadId, {
-                title,
-                metadata: { ...thread.metadata, titleSummarized: true },
-              })
-              titleAbortRef.current = null
-            })
-          } else if (titleText) {
-            // Short messages are already good titles - mark as done
-            useThreads.getState().updateThread(threadId, {
-              metadata: {
-                ...currentThread.metadata,
-                titleSummarized: true,
-              },
-            })
-          }
+          summarizeThreadTitleFromText(titleText)
         }
       }
     },
@@ -1050,6 +1072,9 @@ Tool result communication:
             result.config,
             result.status
           )
+          summarizeThreadTitleFromText(`${userText}\n\n${result.finalResponse}`, {
+            forceGenerate: true,
+          })
         }
       } catch (error) {
         const message =
@@ -1070,6 +1095,7 @@ Tool result communication:
     [
       appendMitaTeamsAssistantMessage,
       persistMitaTeamsConfig,
+      summarizeThreadTitleFromText,
       threadId,
     ]
   )
@@ -2275,15 +2301,16 @@ Tool result communication:
           <Shimmer duration={1}>Processing embeddings...</Shimmer>
         </div>
       )}
-      {(effectiveStatus === CHAT_STATUS.SUBMITTED ||
+      {(!mitaTeamsConfig &&
+        (effectiveStatus === CHAT_STATUS.SUBMITTED ||
         isAutoIncreasingContext) && (
-        <div className="flex flex-row items-center gap-2">
-          {(pendingContinueMessage || isAutoIncreasingContext) && (
-            <Shimmer duration={1}>Growing the Mind...</Shimmer>
-          )}
-          {effectiveStatus === CHAT_STATUS.SUBMITTED && <PromptProgress />}
-        </div>
-      )}
+          <div className="flex flex-row items-center gap-2">
+            {(pendingContinueMessage || isAutoIncreasingContext) && (
+              <Shimmer duration={1}>Growing the Mind...</Shimmer>
+            )}
+            {effectiveStatus === CHAT_STATUS.SUBMITTED && <PromptProgress />}
+          </div>
+        ))}
       {activeError && !isAutoIncreasingContext && (
         <div className="px-4 py-3 mx-4 my-2 rounded-lg border border-destructive/10 bg-destructive/10">
           <div className="flex items-start gap-3">

@@ -180,6 +180,53 @@ export function appendRoleStreamMessage(
   }
 }
 
+export function updateRoleStreamMessageContent(
+  runtime: MitaTeamsRuntime,
+  role: MitaTeamsRoleConfig,
+  message: Pick<MitaTeamsRoleStreamMessage, 'turnId' | 'role' | 'content'> &
+    Partial<Pick<MitaTeamsRoleStreamMessage, 'channelId' | 'model'>>
+): MitaTeamsRuntime {
+  const current = runtime.roleStates[role.id]
+
+  if (!current) {
+    return appendRoleStreamMessage(runtime, role, message)
+  }
+
+  let updated = false
+  const stream = current.stream.map((item) => {
+    if (
+      item.turnId !== message.turnId ||
+      item.role !== message.role ||
+      item.roleId !== role.id
+    ) {
+      return item
+    }
+
+    updated = true
+    return {
+      ...item,
+      content: message.content,
+      channelId: message.channelId ?? item.channelId,
+      model: message.model ?? item.model,
+    }
+  })
+
+  if (!updated) {
+    return appendRoleStreamMessage(runtime, role, message)
+  }
+
+  return {
+    ...runtime,
+    roleStates: {
+      ...runtime.roleStates,
+      [role.id]: {
+        ...current,
+        stream,
+      },
+    },
+  }
+}
+
 export function recordRoleTurnMemory(
   runtime: MitaTeamsRuntime,
   role: MitaTeamsRoleConfig,
@@ -216,22 +263,44 @@ export function recordRoleTurnMemory(
     workingNotes: uniqueAppend(previousMemory.workingNotes, signals.workingNotes),
     updatedAt: nowIso(),
   }
+  let updatedExistingAssistant = false
+  const updatedStream = (current?.stream ?? []).map((message) => {
+    if (
+      message.turnId !== turnId ||
+      message.role !== 'assistant' ||
+      message.roleId !== role.id
+    ) {
+      return message
+    }
+
+    updatedExistingAssistant = true
+    return {
+      ...message,
+      channelId: channelId ?? message.channelId,
+      content: output,
+      model: model ?? message.model,
+    }
+  })
   const state: MitaTeamsRoleState = {
     roleId: role.id,
     status: 'done',
-    stream: [
-      ...(current?.stream ?? []),
-      {
-        id: stableId(`role-${role.id}`),
-        turnId,
-        roleId: role.id,
-        channelId,
-        role: 'assistant' as const,
-        content: output,
-        createdAt: nowIso(),
-        model,
-      },
-    ].slice(-STREAM_LIMIT),
+    stream: (
+      updatedExistingAssistant
+        ? updatedStream
+        : [
+            ...(current?.stream ?? []),
+            {
+              id: stableId(`role-${role.id}`),
+              turnId,
+              roleId: role.id,
+              channelId,
+              role: 'assistant' as const,
+              content: output,
+              createdAt: nowIso(),
+              model,
+            },
+          ]
+    ).slice(-STREAM_LIMIT),
     memory,
     lastTurnId: turnId,
   }

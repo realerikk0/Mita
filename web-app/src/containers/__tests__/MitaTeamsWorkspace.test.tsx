@@ -1,4 +1,11 @@
-import { fireEvent, render, screen, waitFor, within } from '@testing-library/react'
+import {
+  act,
+  fireEvent,
+  render,
+  screen,
+  waitFor,
+  within,
+} from '@testing-library/react'
 import '@testing-library/jest-dom'
 import userEvent from '@testing-library/user-event'
 import { describe, expect, it, vi } from 'vitest'
@@ -41,6 +48,8 @@ const h = vi.hoisted(() => {
     'mita-teams:artifactsEmpty': 'No artifacts yet',
     'mita-teams:memoryEmpty': 'No memory yet',
     'mita-teams:teamTimeline': 'Team timeline',
+    'mita-teams:timelineShowOlder': 'Show {{count}} older events',
+    'mita-teams:timelineHideOlder': 'Hide older events',
     'mita-teams:emptyTitle': 'Start with one concrete goal',
     'mita-teams:emptyDescription': 'Describe the goal.',
     'mita-teams:addChannel': 'Add channel',
@@ -54,6 +63,14 @@ const h = vi.hoisted(() => {
     'mita-teams:memoryVersion': 'Memory v{{version}}',
     'mita-teams:roleChatTitle': 'Chat with {{role}}',
     'mita-teams:owner': 'Owner',
+    'mita-teams:host': 'Host',
+    'mita-teams:you': 'You',
+    'mita-teams:expandMessage': 'Show more',
+    'mita-teams:collapseMessage': 'Show less',
+    'mita-teams:streamingMessage': 'Generating...',
+    'mita-teams:runtimeThinking': 'Thinking...',
+    'mita-teams:runtimeRunning': 'Running...',
+    'mita-teams:runtimeRunningRole': 'Running {{role}}...',
     'mita-teams:streamEmpty': 'No stream yet.',
     'mita-teams:backToTeam': 'Back to team',
     'mita-teams:roleName': 'Role name',
@@ -147,6 +164,72 @@ class ResizeObserverMock {
 }
 
 globalThis.ResizeObserver = ResizeObserverMock
+
+type TestMediaQueryListener = (event: { matches: boolean; media: string }) => void
+
+function installMatchMediaController() {
+  const originalMatchMedia = window.matchMedia
+  const matchesByQuery = new Map<string, boolean>()
+  const listenersByQuery = new Map<string, Set<TestMediaQueryListener>>()
+
+  const getListeners = (query: string) => {
+    let listeners = listenersByQuery.get(query)
+    if (!listeners) {
+      listeners = new Set<TestMediaQueryListener>()
+      listenersByQuery.set(query, listeners)
+    }
+    return listeners
+  }
+
+  Object.defineProperty(window, 'matchMedia', {
+    writable: true,
+    value: vi.fn().mockImplementation((query: string) => {
+      const listeners = getListeners(query)
+
+      return {
+        matches: matchesByQuery.get(query) ?? false,
+        media: query,
+        onchange: null,
+        addListener: vi.fn((listener: TestMediaQueryListener) => {
+          listeners.add(listener)
+        }),
+        removeListener: vi.fn((listener: TestMediaQueryListener) => {
+          listeners.delete(listener)
+        }),
+        addEventListener: vi.fn(
+          (event: string, listener: TestMediaQueryListener) => {
+            if (event === 'change') {
+              listeners.add(listener)
+            }
+          }
+        ),
+        removeEventListener: vi.fn(
+          (event: string, listener: TestMediaQueryListener) => {
+            if (event === 'change') {
+              listeners.delete(listener)
+            }
+          }
+        ),
+        dispatchEvent: vi.fn(),
+      }
+    }),
+  })
+
+  return {
+    restore: () => {
+      Object.defineProperty(window, 'matchMedia', {
+        writable: true,
+        value: originalMatchMedia,
+      })
+    },
+    setMatches: (query: string, matches: boolean) => {
+      matchesByQuery.set(query, matches)
+      getListeners(query).forEach((listener) =>
+        listener({ matches, media: query })
+      )
+    },
+  }
+}
 
 function createConfig(): MitaTeamsConfig {
   const config = createDefaultMitaTeamsConfig({
@@ -254,6 +337,25 @@ function renderWorkspace({
   return { config, onChoiceSelect, onConfigChange }
 }
 
+function withResearchChannel(
+  base: MitaTeamsConfig,
+  role = base.roles[0]
+): MitaTeamsConfig {
+  return {
+    ...base,
+    activeChannel: 'research',
+    channels: [
+      ...base.channels,
+      {
+        id: 'research',
+        label: 'Research',
+        description: 'Research room',
+        roleIds: [role.id],
+      },
+    ],
+  }
+}
+
 describe('MitaTeamsWorkspace', () => {
   it('opens the workspace overview sheet from the small-screen header button', async () => {
     const user = userEvent.setup()
@@ -319,6 +421,35 @@ describe('MitaTeamsWorkspace', () => {
     expect(within(dialog).getByText('Scope accepted')).toBeInTheDocument()
   })
 
+  it('closes the responsive inspector sheet once the persistent inspector is available', async () => {
+    const media = installMatchMediaController()
+    const user = userEvent.setup()
+
+    try {
+      renderWorkspace()
+
+      const railButton = screen
+        .getAllByRole('button', { name: 'Workspace overview' })
+        .find((button) =>
+          button.closest('aside')?.classList.contains('lg:flex')
+        )
+      expect(railButton).toBeDefined()
+
+      await user.click(railButton!)
+      expect(await screen.findByRole('dialog')).toBeInTheDocument()
+
+      act(() => {
+        media.setMatches('(min-width: 1280px)', true)
+      })
+
+      await waitFor(() =>
+        expect(screen.queryByRole('dialog')).not.toBeInTheDocument()
+      )
+    } finally {
+      media.restore()
+    }
+  })
+
   it('disables owner choice actions while the runtime is busy', () => {
     const onChoiceSelect = vi.fn()
     renderWorkspace({ isRuntimeBusy: true, onChoiceSelect })
@@ -344,6 +475,358 @@ describe('MitaTeamsWorkspace', () => {
         workspaceView: 'role-config',
       })
     )
+  })
+
+  it('renders the team timeline and channel discussion in readable order outside current task', () => {
+    const now = '2026-05-29T00:00:00.000Z'
+    const base = createConfig()
+    const role = base.roles[0]
+    const config: MitaTeamsConfig = {
+      ...withResearchChannel(base, role),
+      runtime: {
+        ...base.runtime,
+        userChoiceRequest: undefined,
+        teamEvents: [
+          {
+            id: 'event-1',
+            type: 'role_called',
+            title: 'Team started',
+            detail: 'Coordinator prepared the room.',
+            roleId: role.id,
+            channelId: 'research',
+            createdAt: now,
+          },
+        ],
+        roleStates: {
+          ...base.runtime.roleStates,
+          [role.id]: {
+            ...base.runtime.roleStates[role.id]!,
+            stream: [
+              {
+                id: 'host-call',
+                turnId: 'turn-1',
+                roleId: role.id,
+                channelId: 'research',
+                role: 'user',
+                content: 'Call the role with a scoped instruction.',
+                createdAt: now,
+              },
+              {
+                id: 'role-answer',
+                turnId: 'turn-1',
+                roleId: role.id,
+                channelId: 'research',
+                role: 'assistant',
+                content: 'Role answer in the channel.',
+                createdAt: '2026-05-29T00:01:00.000Z',
+              },
+            ],
+          },
+        },
+      },
+    }
+
+    renderWorkspace({
+      config,
+      messageItems: <div data-testid="owner-message">Owner query</div>,
+    })
+
+    const timeline = screen.getByText('Team timeline')
+    const roleAnswer = screen.getByText('Role answer in the channel.')
+
+    expect(
+      timeline.compareDocumentPosition(roleAnswer) &
+        Node.DOCUMENT_POSITION_FOLLOWING
+    ).toBeTruthy()
+    expect(screen.getByText('Host')).toBeInTheDocument()
+    expect(screen.queryByTestId('owner-message')).not.toBeInTheDocument()
+    expect(screen.queryByText('Owner')).not.toBeInTheDocument()
+  })
+
+  it('keeps thread messages out of non-task channel discussions', () => {
+    const now = '2026-05-29T00:00:00.000Z'
+    const base = createConfig()
+    const role = base.roles[0]
+    const config: MitaTeamsConfig = {
+      ...withResearchChannel(base, role),
+      runtime: {
+        ...base.runtime,
+        userChoiceRequest: undefined,
+        teamEvents: [
+          {
+            id: 'research-event',
+            type: 'role_called',
+            title: 'Research started',
+            detail: 'Analyst entered the research room.',
+            roleId: role.id,
+            channelId: 'research',
+            createdAt: now,
+          },
+        ],
+        roleStates: {
+          ...base.runtime.roleStates,
+          [role.id]: {
+            ...base.runtime.roleStates[role.id]!,
+            stream: [
+              {
+                id: 'research-answer',
+                turnId: 'turn-1',
+                roleId: role.id,
+                channelId: 'research',
+                role: 'assistant',
+                content: 'Research channel answer.',
+                createdAt: now,
+              },
+            ],
+          },
+        },
+      },
+    }
+
+    renderWorkspace({
+      config,
+      messageItems: <div data-testid="thread-message">Thread deliverable</div>,
+    })
+
+    expect(screen.getAllByText('Research started').length).toBeGreaterThan(0)
+    expect(screen.getByText('Research channel answer.')).toBeInTheDocument()
+    expect(screen.queryByTestId('thread-message')).not.toBeInTheDocument()
+  })
+
+  it('keeps role discussion out of the current task delivery room', () => {
+    const now = '2026-05-29T00:00:00.000Z'
+    const base = createConfig()
+    const role = base.roles[0]
+    const config: MitaTeamsConfig = {
+      ...base,
+      activeChannel: 'task',
+      runtime: {
+        ...base.runtime,
+        userChoiceRequest: undefined,
+        roleStates: {
+          ...base.runtime.roleStates,
+          [role.id]: {
+            ...base.runtime.roleStates[role.id]!,
+            stream: [
+              {
+                id: 'task-channel-discussion',
+                turnId: 'turn-1',
+                roleId: role.id,
+                channelId: 'task',
+                role: 'assistant',
+                content: 'Internal role discussion should stay out of delivery.',
+                createdAt: now,
+              },
+            ],
+          },
+        },
+      },
+    }
+
+    renderWorkspace({
+      config,
+      messageItems: <div data-testid="final-deliverable">Final deliverable</div>,
+    })
+
+    expect(screen.getByTestId('final-deliverable')).toBeInTheDocument()
+    expect(
+      screen.queryByText('Internal role discussion should stay out of delivery.')
+    ).not.toBeInTheDocument()
+  })
+
+  it('sorts team timeline events chronologically from top to bottom', () => {
+    const base = createConfig()
+    const config: MitaTeamsConfig = {
+      ...withResearchChannel(base),
+      runtime: {
+        ...base.runtime,
+        userChoiceRequest: undefined,
+        teamEvents: [
+          {
+            id: 'late',
+            type: 'role_completed',
+            title: 'Late event',
+            channelId: 'research',
+            createdAt: '2026-05-29T00:02:00.000Z',
+          },
+          {
+            id: 'early',
+            type: 'run_started',
+            title: 'Early event',
+            channelId: 'research',
+            createdAt: '2026-05-29T00:00:00.000Z',
+          },
+          {
+            id: 'middle',
+            type: 'decision',
+            title: 'Middle event',
+            channelId: 'research',
+            createdAt: '2026-05-29T00:01:00.000Z',
+          },
+        ],
+      },
+    }
+
+    renderWorkspace({ config })
+
+    const timeline = screen.getByText('Team timeline').closest('.rounded-lg')
+    expect(timeline).toBeTruthy()
+
+    const early = within(timeline as HTMLElement).getByText('Early event')
+    const middle = within(timeline as HTMLElement).getByText('Middle event')
+    const late = within(timeline as HTMLElement).getByText('Late event')
+
+    expect(
+      early.compareDocumentPosition(middle) & Node.DOCUMENT_POSITION_FOLLOWING
+    ).toBeTruthy()
+    expect(
+      middle.compareDocumentPosition(late) & Node.DOCUMENT_POSITION_FOLLOWING
+    ).toBeTruthy()
+  })
+
+  it('folds older timeline events above the latest five entries', async () => {
+    const user = userEvent.setup()
+    const base = createConfig()
+    const config: MitaTeamsConfig = {
+      ...withResearchChannel(base),
+      runtime: {
+        ...base.runtime,
+        userChoiceRequest: undefined,
+        teamEvents: Array.from({ length: 7 }, (_item, index) => ({
+          id: `event-${index + 1}`,
+          type: 'decision' as const,
+          title: `Event ${index + 1}`,
+          channelId: 'research',
+          createdAt: `2026-05-29T00:0${index}:00.000Z`,
+        })),
+      },
+    }
+
+    renderWorkspace({ config })
+
+    const timeline = screen.getByText('Team timeline').closest('.rounded-lg')
+    expect(timeline).toBeTruthy()
+
+    expect(within(timeline as HTMLElement).queryByText('Event 1')).not.toBeInTheDocument()
+    expect(within(timeline as HTMLElement).queryByText('Event 2')).not.toBeInTheDocument()
+    expect(within(timeline as HTMLElement).getByText('Event 3')).toBeInTheDocument()
+    expect(within(timeline as HTMLElement).getByText('Event 7')).toBeInTheDocument()
+
+    await user.click(
+      within(timeline as HTMLElement).getByRole('button', {
+        name: 'Show 2 older events',
+      })
+    )
+
+    const first = within(timeline as HTMLElement).getByText('Event 1')
+    const last = within(timeline as HTMLElement).getByText('Event 7')
+    expect(
+      first.compareDocumentPosition(last) & Node.DOCUMENT_POSITION_FOLLOWING
+    ).toBeTruthy()
+
+    await user.click(
+      within(timeline as HTMLElement).getByRole('button', {
+        name: 'Hide older events',
+      })
+    )
+
+    expect(within(timeline as HTMLElement).queryByText('Event 1')).not.toBeInTheDocument()
+  })
+
+  it('shows the runtime activity indicator after channel role messages', () => {
+    const now = '2026-05-29T00:00:00.000Z'
+    const base = createConfig()
+    const role = base.roles[0]
+    const config: MitaTeamsConfig = {
+      ...withResearchChannel(base, role),
+      runtime: {
+        ...base.runtime,
+        userChoiceRequest: undefined,
+        run: {
+          ...base.runtime.run!,
+          status: 'running',
+          activeRoleIds: [role.id],
+          updatedAt: now,
+        },
+        roleStates: {
+          ...base.runtime.roleStates,
+          [role.id]: {
+            ...base.runtime.roleStates[role.id]!,
+            stream: [
+              {
+                id: 'role-answer',
+                turnId: 'turn-1',
+                roleId: role.id,
+                channelId: 'research',
+                role: 'assistant',
+                content: 'Role answer before status.',
+                createdAt: now,
+              },
+            ],
+          },
+        },
+      },
+    }
+
+    renderWorkspace({ config, isRuntimeBusy: true })
+
+    const roleAnswer = screen.getByText('Role answer before status.')
+    const status = screen.getByText('Running Orchestrator...')
+
+    expect(
+      roleAnswer.compareDocumentPosition(status) &
+        Node.DOCUMENT_POSITION_FOLLOWING
+    ).toBeTruthy()
+  })
+
+  it('collapses long channel role messages and toggles them open', async () => {
+    const user = userEvent.setup()
+    const now = '2026-05-29T00:00:00.000Z'
+    const base = createConfig()
+    const role = base.roles[0]
+    const longAnswer = [
+      'line 1',
+      'line 2',
+      'line 3',
+      'line 4',
+      'line 5',
+      'line 6',
+    ].join('\n')
+    const config: MitaTeamsConfig = {
+      ...withResearchChannel(base, role),
+      runtime: {
+        ...base.runtime,
+        userChoiceRequest: undefined,
+        roleStates: {
+          ...base.runtime.roleStates,
+          [role.id]: {
+            ...base.runtime.roleStates[role.id]!,
+            stream: [
+              {
+                id: 'long-answer',
+                turnId: 'turn-1',
+                roleId: role.id,
+                channelId: 'research',
+                role: 'assistant',
+                content: longAnswer,
+                createdAt: now,
+              },
+            ],
+          },
+        },
+      },
+    }
+
+    renderWorkspace({ config })
+
+    const text = screen.getByText(
+      (_content, node) => node?.textContent === longAnswer
+    )
+    expect(text).toHaveClass('line-clamp-5')
+
+    await user.click(screen.getByRole('button', { name: 'Show more' }))
+    expect(text).not.toHaveClass('line-clamp-5')
+    expect(screen.getByRole('button', { name: 'Show less' })).toBeInTheDocument()
   })
 
   it('keeps role private chat separate from channel role streams', () => {
@@ -395,5 +878,7 @@ describe('MitaTeamsWorkspace', () => {
     renderWorkspace({ config })
     expect(screen.getByText('private answer')).toBeInTheDocument()
     expect(screen.queryByText('channel answer')).not.toBeInTheDocument()
+    expect(screen.getByText('You')).toBeInTheDocument()
+    expect(screen.queryByText('Owner')).not.toBeInTheDocument()
   })
 })

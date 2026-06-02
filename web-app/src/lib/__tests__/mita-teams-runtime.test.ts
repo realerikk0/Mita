@@ -160,13 +160,17 @@ describe('mita teams runtime', () => {
     })
     const role = config.roles[0]
     let capturedPrompt = ''
+    const updates: Array<typeof config> = []
 
     const result = await runMitaTeamsPrivateRoleChat({
       config,
       roleId: role.id,
       userText: 'Private question for this role.',
-      generateRoleText: async ({ prompt }) => {
+      onConfigChange: (next) => updates.push(next),
+      generateRoleText: async ({ prompt, onDelta }) => {
         capturedPrompt = prompt
+        onDelta?.('Private ')
+        onDelta?.('role')
         return 'Private role answer.'
       },
     })
@@ -182,9 +186,341 @@ describe('mita teams runtime', () => {
       'Private question for this role.',
       'Private role answer.',
     ])
+    expect(
+      updates.some((update) =>
+        update.runtime.roleStates[role.id]?.stream.some(
+          (message) =>
+            message.role === 'assistant' && message.content === 'Private'
+        )
+      )
+    ).toBe(true)
+    expect(
+      updates.some((update) =>
+        update.runtime.roleStates[role.id]?.stream.some(
+          (message) =>
+            message.role === 'assistant' && message.content === 'Private role'
+        )
+      )
+    ).toBe(true)
     expect(stream.every((message) => message.channelId === undefined)).toBe(true)
     expect(result.config.runtime.teamEvents).toHaveLength(0)
     expect(result.config.runtime.roleStates[role.id]?.memory.version).toBe(0)
+  })
+
+  it('streams channel role output into the active assistant turn', async () => {
+    const model = {
+      provider: 'openai',
+      id: 'gpt-5',
+    }
+    const base = createDefaultMitaTeamsConfig(model)
+    const role = {
+      id: 'streaming-worker',
+      name: 'Streaming Worker',
+      label: 'Worker',
+      description: 'Streams role output.',
+      prompt: 'Answer as a streaming worker.',
+      color: 'bg-blue-500',
+      permission: 'read' as const,
+      enabled: true,
+      provider: model.provider,
+      modelId: model.id,
+    }
+    const config = normalizeMitaTeamsConfig(
+      {
+        ...base,
+        roles: [...base.roles, role],
+        channels: base.channels.map((channel) =>
+          channel.id === 'task'
+            ? { ...channel, roleIds: [...channel.roleIds, role.id] }
+            : channel
+        ),
+      },
+      model
+    )
+    const updates: Array<typeof config> = []
+    let decisionCount = 0
+
+    const result = await runMitaTeamsRuntime({
+      config,
+      userText: 'Ask the role for a short answer.',
+      onConfigChange: (next) => updates.push(next),
+      generateDecisionText: async () => {
+        decisionCount += 1
+        if (decisionCount === 1) {
+          return JSON.stringify({
+            action: 'call_roles',
+            mode: 'relay',
+            reason: 'Need one role answer.',
+            calls: [
+              {
+                roleId: role.id,
+                channelId: 'task',
+                instruction: 'Answer briefly.',
+              },
+            ],
+          })
+        }
+
+        return JSON.stringify({
+          action: 'stop',
+          reason: 'Role output streamed.',
+          finalResponse: 'Done.',
+        })
+      },
+      generateRoleText: async ({ onDelta }) => {
+        onDelta?.('Hel')
+        onDelta?.('lo')
+        return 'Hello'
+      },
+    })
+
+    const stream = result.config.runtime.roleStates[role.id]?.stream ?? []
+    const assistantMessages = stream.filter(
+      (message) => message.role === 'assistant'
+    )
+
+    expect(result.status).toBe('completed')
+    expect(assistantMessages).toHaveLength(1)
+    expect(assistantMessages[0]?.content).toBe('Hello')
+    expect(
+      updates.some((update) =>
+        update.runtime.roleStates[role.id]?.stream.some(
+          (message) => message.role === 'assistant' && message.content === 'Hel'
+        )
+      )
+    ).toBe(true)
+    expect(
+      updates.some((update) =>
+        update.runtime.roleStates[role.id]?.stream.some(
+          (message) =>
+            message.role === 'assistant' && message.content === 'Hello'
+        )
+      )
+    ).toBe(true)
+  })
+
+  it('moves team role calls out of the current task delivery channel', async () => {
+    const model = {
+      provider: 'openai',
+      id: 'gpt-5',
+    }
+    const config = createDefaultMitaTeamsConfig(model)
+    let decisionCount = 0
+
+    const result = await runMitaTeamsRuntime({
+      config,
+      userText: 'Ask a worker to draft and review a response.',
+      generateDecisionText: async () => {
+        decisionCount += 1
+        if (decisionCount === 1) {
+          return JSON.stringify({
+            action: 'configure_team',
+            reason: 'Create a worker, but mistakenly put the worker in task.',
+            roles: [
+              {
+                id: 'worker',
+                name: 'Worker',
+                label: 'Work',
+                description: 'Drafts internal work.',
+                prompt: 'Draft internal work.',
+                permission: 'read',
+              },
+            ],
+            channels: [
+              {
+                id: 'task',
+                label: 'Current task',
+                description: 'Delivery room.',
+                roleIds: ['orchestrator', 'worker'],
+              },
+            ],
+            calls: [
+              {
+                roleId: 'worker',
+                channelId: 'task',
+                instruction: 'Discuss the draft internally.',
+              },
+            ],
+          })
+        }
+
+        return JSON.stringify({
+          action: 'stop',
+          reason: 'Done.',
+          finalResponse: 'Final answer.',
+        })
+      },
+      generateRoleText: async () => 'Worker channel output.',
+    })
+
+    const taskChannel = result.config.channels.find(
+      (channel) => channel.id === 'task'
+    )
+    const discussionChannel = result.config.channels.find(
+      (channel) => channel.id === 'discussion'
+    )
+    const workerStream =
+      result.config.runtime.roleStates.worker?.stream ?? []
+
+    expect(taskChannel?.roleIds).toEqual(['orchestrator'])
+    expect(discussionChannel?.roleIds).toContain('worker')
+    expect(
+      workerStream.every((message) => message.channelId === 'discussion')
+    ).toBe(true)
+  })
+
+  it('surfaces empty channel role output as a direct role failure', async () => {
+    const model = {
+      provider: 'openai',
+      id: 'gpt-5',
+    }
+    const base = createDefaultMitaTeamsConfig(model)
+    const role = {
+      id: 'empty-worker',
+      name: 'Empty Worker',
+      label: 'Worker',
+      description: 'Returns no role output.',
+      prompt: 'Answer as an empty worker.',
+      color: 'bg-blue-500',
+      permission: 'read' as const,
+      enabled: true,
+      provider: model.provider,
+      modelId: model.id,
+    }
+    const config = normalizeMitaTeamsConfig(
+      {
+        ...base,
+        roles: [...base.roles, role],
+        channels: base.channels.map((channel) =>
+          channel.id === 'task'
+            ? { ...channel, roleIds: [...channel.roleIds, role.id] }
+            : channel
+        ),
+      },
+      model
+    )
+    let decisionCount = 0
+
+    const result = await runMitaTeamsRuntime({
+      config,
+      userText: 'Ask the role for an answer.',
+      generateDecisionText: async () => {
+        decisionCount += 1
+        if (decisionCount === 1) {
+          return JSON.stringify({
+            action: 'call_roles',
+            mode: 'relay',
+            reason: 'Need one role answer.',
+            calls: [
+              {
+                roleId: role.id,
+                channelId: 'task',
+                instruction: 'Answer briefly.',
+              },
+            ],
+          })
+        }
+
+        return JSON.stringify({
+          action: 'stop',
+          reason: 'Failure surfaced.',
+          finalResponse: 'Done.',
+        })
+      },
+      generateRoleText: async () => '',
+    })
+
+    const stream = result.config.runtime.roleStates[role.id]?.stream ?? []
+    const assistantMessage = stream.find(
+      (message) => message.role === 'assistant'
+    )
+
+    expect(result.status).toBe('completed')
+    expect(assistantMessage?.content).toContain(
+      'Mita Teams 角色运行失败：No output generated by Empty Worker.'
+    )
+    expect(assistantMessage?.content).not.toContain('Check the stream for errors')
+    expect(result.config.runtime.roleStates[role.id]?.lastError).toBe(
+      'No output generated by Empty Worker.'
+    )
+  })
+
+  it('rewrites generic stream no-output errors with the failing role name', async () => {
+    const model = {
+      provider: 'openai',
+      id: 'gpt-5',
+    }
+    const base = createDefaultMitaTeamsConfig(model)
+    const role = {
+      id: 'generic-empty-worker',
+      name: 'Generic Empty Worker',
+      label: 'Worker',
+      description: 'Throws a generic no-output error.',
+      prompt: 'Answer as a worker.',
+      color: 'bg-blue-500',
+      permission: 'read' as const,
+      enabled: true,
+      provider: model.provider,
+      modelId: model.id,
+    }
+    const config = normalizeMitaTeamsConfig(
+      {
+        ...base,
+        roles: [...base.roles, role],
+        channels: base.channels.map((channel) =>
+          channel.id === 'task'
+            ? { ...channel, roleIds: [...channel.roleIds, role.id] }
+            : channel
+        ),
+      },
+      model
+    )
+    let decisionCount = 0
+
+    const result = await runMitaTeamsRuntime({
+      config,
+      userText: 'Ask the role for an answer.',
+      generateDecisionText: async () => {
+        decisionCount += 1
+        if (decisionCount === 1) {
+          return JSON.stringify({
+            action: 'call_roles',
+            mode: 'relay',
+            reason: 'Need one role answer.',
+            calls: [
+              {
+                roleId: role.id,
+                channelId: 'task',
+                instruction: 'Answer briefly.',
+              },
+            ],
+          })
+        }
+
+        return JSON.stringify({
+          action: 'stop',
+          reason: 'Failure surfaced.',
+          finalResponse: 'Done.',
+        })
+      },
+      generateRoleText: async () => {
+        throw new Error('No output generated. Check the stream for errors.')
+      },
+    })
+
+    const stream = result.config.runtime.roleStates[role.id]?.stream ?? []
+    const assistantMessage = stream.find(
+      (message) => message.role === 'assistant'
+    )
+
+    expect(result.status).toBe('completed')
+    expect(assistantMessage?.content).toContain(
+      'Mita Teams 角色运行失败：No output generated by Generic Empty Worker.'
+    )
+    expect(assistantMessage?.content).not.toContain('Check the stream for errors')
+    expect(result.config.runtime.roleStates[role.id]?.lastError).toBe(
+      'No output generated by Generic Empty Worker.'
+    )
   })
 
   it('guides the orchestrator with available models and assigns role-specific fallbacks', async () => {
@@ -305,6 +641,10 @@ describe('mita teams runtime', () => {
       })
 
       expect(capturedPrompt).toContain('Model assignment guide:')
+      expect(capturedPrompt).toContain('Relay operating contract:')
+      expect(capturedPrompt).toContain(
+        'Treat relay as staged handoff, not repeated generation by one role.'
+      )
       expect(capturedPrompt).toContain('{provider:"openai", modelId:"gpt-5"')
       expect(capturedPrompt).toContain(
         '{provider:"anthropic", modelId:"claude-opus-4-7"'
@@ -337,6 +677,186 @@ describe('mita teams runtime', () => {
         provider: 'xai',
         modelId: 'grok-4',
       })
+    } finally {
+      useModelProvider.setState({
+        providers: previousModelState.providers,
+        selectedProvider: previousModelState.selectedProvider,
+        selectedModel: previousModelState.selectedModel,
+        deletedModels: previousModelState.deletedModels,
+      })
+    }
+  })
+
+  it('uses a market research playbook with language guidance for sector outlook requests', async () => {
+    const previousModelState = useModelProvider.getState()
+    useModelProvider.setState({
+      providers: [
+        {
+          active: true,
+          provider: 'anthropic',
+          api_key: 'sk-anthropic',
+          settings: [],
+          models: [{ id: 'claude-opus-4-7', displayName: 'Claude Opus' }],
+        },
+        {
+          active: true,
+          provider: 'gemini',
+          api_key: 'sk-gemini',
+          settings: [],
+          models: [{ id: 'gemini-3.5-pro', displayName: 'Gemini Pro' }],
+        },
+        {
+          active: true,
+          provider: 'xai',
+          api_key: 'sk-xai',
+          settings: [],
+          models: [{ id: 'grok-4', displayName: 'Grok 4' }],
+        },
+      ],
+      selectedProvider: 'anthropic',
+      selectedModel: { id: 'claude-opus-4-7', displayName: 'Claude Opus' },
+    })
+
+    try {
+      const config = createDefaultMitaTeamsConfig({
+        provider: 'anthropic',
+        id: 'claude-opus-4-7',
+      })
+      let capturedDecisionPrompt = ''
+      const rolePrompts: string[] = []
+
+      const result = await runMitaTeamsRuntime({
+        config,
+        userText: '帮我研究美股明日什么板块会涨',
+        threadTitle: 'Mita Teams',
+        generateDecisionText: async ({ prompt }) => {
+          capturedDecisionPrompt = prompt
+          return JSON.stringify({
+            action: 'stop',
+            reason: 'Try to stop early.',
+            finalResponse: 'Done too early.',
+          })
+        },
+        generateRoleText: async ({ role, prompt }) => {
+          rolePrompts.push(prompt)
+          return `${role.name} completed its playbook step.`
+        },
+      })
+
+      expect(capturedDecisionPrompt).toContain('Scenario playbook: Market research')
+      expect(capturedDecisionPrompt).toContain('Data Scout -> Market Analyst -> Skeptic Reviewer')
+      expect(capturedDecisionPrompt).toContain('User query language: Chinese')
+      expect(capturedDecisionPrompt).toContain('App language:')
+      expect(result.config.taskTemplateId).toBe('research')
+      expect(result.config.mode).toBe('relay')
+      expect(result.config.roles.map((role) => role.id)).toEqual(
+        expect.arrayContaining(['data_scout', 'market_analyst', 'skeptic'])
+      )
+      expect(
+        result.config.runtime.roleStates.data_scout?.stream.some(
+          (message) => message.role === 'assistant'
+        )
+      ).toBe(true)
+      expect(
+        result.config.runtime.roleStates.market_analyst?.stream.some(
+          (message) => message.role === 'assistant'
+        )
+      ).toBe(true)
+      expect(
+        result.config.runtime.roleStates.skeptic?.stream.some(
+          (message) => message.role === 'assistant'
+        )
+      ).toBe(true)
+      expect(rolePrompts.join('\n')).toContain('User query language: Chinese')
+    } finally {
+      useModelProvider.setState({
+        providers: previousModelState.providers,
+        selectedProvider: previousModelState.selectedProvider,
+        selectedModel: previousModelState.selectedModel,
+        deletedModels: previousModelState.deletedModels,
+      })
+    }
+  })
+
+  it('requests native web search for ticker investment research role calls', async () => {
+    const previousModelState = useModelProvider.getState()
+    useModelProvider.setState({
+      providers: [
+        {
+          active: true,
+          provider: 'jingxing',
+          api_key: 'sk-jingxing',
+          settings: [],
+          models: [
+            { id: 'claude-opus-4-7', displayName: 'Claude Opus' },
+            { id: 'grok-4.3', displayName: 'Grok 4.3' },
+            {
+              id: 'gemini-3.1-pro-preview',
+              displayName: 'Gemini 3.1 Pro Preview',
+            },
+          ],
+        },
+      ],
+      selectedProvider: 'jingxing',
+      selectedModel: {
+        id: 'claude-opus-4-7',
+        displayName: 'Claude Opus',
+      },
+    })
+
+    try {
+      const config = createDefaultMitaTeamsConfig({
+        provider: 'jingxing',
+        id: 'claude-opus-4-7',
+      })
+      const roleCalls: Array<{
+        roleId: string
+        modelId?: string
+        prompt: string
+        webSearch?: { enabled: boolean; reason: string }
+      }> = []
+
+      const result = await runMitaTeamsRuntime({
+        config,
+        userText: '帮我研究 $MRVL 投资价值',
+        generateDecisionText: async () =>
+          JSON.stringify({
+            action: 'stop',
+            reason: 'Try to stop before the market playbook completes.',
+            finalResponse: 'Done too early.',
+          }),
+        generateRoleText: async (input) => {
+          const webSearch = (
+            input as typeof input & {
+              webSearch?: { enabled: boolean; reason: string }
+            }
+          ).webSearch
+          roleCalls.push({
+            roleId: input.role.id,
+            modelId: input.model?.id,
+            prompt: input.prompt,
+            webSearch,
+          })
+          return `${input.role.name} checked live sources.`
+        },
+      })
+
+      expect(result.config.scenarioId).toBe('market_research')
+      expect(roleCalls.map((call) => call.roleId)).toEqual([
+        'data_scout',
+        'market_analyst',
+        'skeptic',
+      ])
+      expect(roleCalls.every((call) => call.webSearch?.enabled)).toBe(true)
+      expect(roleCalls.map((call) => call.webSearch?.reason).join('\n')).toContain(
+        'current market or investment data'
+      )
+      expect(
+        roleCalls.find((call) => call.roleId === 'data_scout')?.modelId
+      ).toBe('grok-4.3')
+      expect(roleCalls.map((call) => call.prompt).join('\n')).toContain(
+        'Native web search is requested for this role call'
+      )
     } finally {
       useModelProvider.setState({
         providers: previousModelState.providers,
