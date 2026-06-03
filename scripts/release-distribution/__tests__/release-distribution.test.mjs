@@ -37,6 +37,11 @@ function hasUsableBash() {
   return result.status === 0
 }
 
+function hasPython3() {
+  const result = spawnSync('python3', ['--version'], { encoding: 'utf8' })
+  return result.status === 0
+}
+
 function sampleRelease() {
   return {
     tagName: 'v1.2.3',
@@ -545,4 +550,79 @@ test('upload-baidu dry run writes a placeholder share file', {
   assert.equal(share.dryRun, true)
   assert.equal(share.remotePath, '/Mita/releases/v1.2.3')
   assert.equal(share.password, 'mita')
+})
+
+test('upload-baidu falls back to bundled download sharing', {
+  skip: hasUsableBash() && hasPython3() ? false : 'bash and python3 are required in this environment',
+}, () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'mita-release-distribution-'))
+  const assetsDir = path.join(dir, 'assets')
+  fs.mkdirSync(assetsDir)
+
+  const manifest = collectReleaseAssets(sampleRelease())
+  for (const asset of Object.values(manifest.assets)) {
+    fs.writeFileSync(path.join(assetsDir, asset.name), `fixture ${asset.name}`)
+  }
+
+  const manifestPath = path.join(dir, 'release-assets.json')
+  const sharePath = path.join(dir, 'baidu-share.json')
+  const logPath = path.join(dir, 'baidupcs.log')
+  const fakeBaidu = path.join(dir, 'BaiduPCS-Go')
+  fs.writeFileSync(manifestPath, `${JSON.stringify(manifest, null, 2)}\n`)
+  fs.writeFileSync(fakeBaidu, [
+    '#!/usr/bin/env bash',
+    'set -euo pipefail',
+    'printf \'%s\\n\' "$*" >> "$LOG_FILE"',
+    'case "${1:-}" in',
+    '  login) echo "login ok" ;;',
+    '  quota) echo "quota ok" ;;',
+    '  ls) exit 0 ;;',
+    '  mkdir) exit 0 ;;',
+    '  rm) exit 0 ;;',
+    '  upload) exit 0 ;;',
+    '  share)',
+    '    target="${@: -1}"',
+    '    if [ "$target" = "/Mita/releases/v1.2.3" ]; then',
+    '      echo "创建分享链接失败: 代码: 115" >&2',
+    '      exit 1',
+    '    fi',
+    '    if [ "$target" = "/Mita/releases/v1.2.3-download" ]; then',
+    '      echo "分享链接: https://pan.baidu.com/s/fallback"',
+    '      exit 0',
+    '    fi',
+    '    echo "unexpected share target: $target" >&2',
+    '    exit 2',
+    '    ;;',
+    '  *) echo "unexpected command: $*" >&2; exit 2 ;;',
+    'esac',
+  ].join('\n'))
+  fs.chmodSync(fakeBaidu, 0o755)
+
+  const result = spawnSync('bash', [uploadScript], {
+    env: {
+      ...process.env,
+      DRY_RUN: 'false',
+      RELEASE_ASSETS_JSON: manifestPath,
+      RELEASE_ASSETS_DIR: assetsDir,
+      BAIDU_SHARE_JSON: sharePath,
+      BAIDU_SHARE_PASSWORD: 'mita',
+      BAIDUPCS_GO_BDUSS: 'bduss',
+      BAIDUPCS_GO_BIN: fakeBaidu,
+      LOG_FILE: logPath,
+    },
+    encoding: 'utf8',
+  })
+
+  assert.equal(result.status, 0, `${result.stdout}\n${result.stderr}`)
+  const share = JSON.parse(fs.readFileSync(sharePath, 'utf8'))
+  assert.equal(share.dryRun, false)
+  assert.equal(share.url, 'https://pan.baidu.com/s/fallback')
+  assert.equal(share.remotePath, '/Mita/releases/v1.2.3-download')
+  assert.equal(share.password, 'mita')
+  assert.equal(fs.existsSync(path.join(assetsDir, 'Mita_1.2.3_release_assets.zip')), true)
+
+  const calls = fs.readFileSync(logPath, 'utf8')
+  assert.match(calls, /share set --period=0 -p mita -f \/Mita\/releases\/v1\.2\.3/)
+  assert.match(calls, /upload --policy overwrite .*Mita_1\.2\.3_release_assets\.zip \/Mita\/releases\/v1\.2\.3-download/)
+  assert.match(calls, /share set --period=0 -p mita -f \/Mita\/releases\/v1\.2\.3-download/)
 })

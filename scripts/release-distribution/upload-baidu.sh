@@ -22,8 +22,45 @@ json_value() {
   node -e "const fs = require('node:fs'); const data = JSON.parse(fs.readFileSync(process.argv[1], 'utf8')); const value = ${expr}; if (value == null) process.exit(1); console.log(value)" "$ASSETS_JSON"
 }
 
+create_share_bundle() {
+  local bundle_path="${ASSETS_DIR}/Mita_${TAG#v}_release_assets.zip"
+  rm -f "$bundle_path"
+
+  python3 - "$bundle_path" "${asset_paths[@]}" <<'PY'
+import os
+import sys
+import zipfile
+
+bundle_path, *asset_paths = sys.argv[1:]
+with zipfile.ZipFile(bundle_path, "w", compression=zipfile.ZIP_DEFLATED, allowZip64=True) as archive:
+    for asset_path in asset_paths:
+        archive.write(asset_path, arcname=os.path.basename(asset_path))
+PY
+
+  printf '%s\n' "$bundle_path"
+}
+
 show_quota() {
   "$BAIDUPCS_BIN" quota || true
+}
+
+try_share_path() {
+  local remote_path="$1"
+  local share_output
+
+  if ! share_output="$("$BAIDUPCS_BIN" share set --period=0 -p "$SHARE_PASSWORD" -f "$remote_path" 2>&1)"; then
+    printf '%s\n' "$share_output"
+    return 1
+  fi
+
+  printf '%s\n' "$share_output"
+  share_url="$(printf '%s\n' "$share_output" | grep -Eo 'https?://[^[:space:]]+' | head -n 1 || true)"
+  if [ -z "$share_url" ]; then
+    return 1
+  fi
+
+  share_remote_path="$remote_path"
+  return 0
 }
 
 prune_old_release_dirs() {
@@ -71,6 +108,7 @@ fi
 
 TAG="$(json_value 'data.tagName')"
 REMOTE_DIR="${REMOTE_ROOT%/}/${TAG}"
+SHARE_DIR="${REMOTE_ROOT%/}/${TAG}-download"
 
 asset_paths=()
 while IFS= read -r asset_name; do
@@ -129,23 +167,34 @@ show_quota
 "$BAIDUPCS_BIN" mkdir "$REMOTE_DIR" >/dev/null 2>&1 || true
 "$BAIDUPCS_BIN" upload --policy overwrite "${asset_paths[@]}" "$REMOTE_DIR"
 
-share_output="$("$BAIDUPCS_BIN" share set --period=0 -p "$SHARE_PASSWORD" -f "$REMOTE_DIR")"
-printf '%s\n' "$share_output"
+share_url=""
+share_remote_path="$REMOTE_DIR"
+if ! try_share_path "$REMOTE_DIR"; then
+  echo "Primary Baidu release directory share failed; creating a bundled download fallback at $SHARE_DIR" >&2
+  bundle_path="$(create_share_bundle)"
+  "$BAIDUPCS_BIN" mkdir "$SHARE_DIR" >/dev/null 2>&1 || true
+  "$BAIDUPCS_BIN" upload --policy overwrite "$bundle_path" "$SHARE_DIR"
 
-share_url="$(printf '%s\n' "$share_output" | grep -Eo 'https?://[^[:space:]]+' | head -n 1 || true)"
+  if ! try_share_path "$SHARE_DIR"; then
+    bundle_remote_path="${SHARE_DIR%/}/$(basename "$bundle_path")"
+    echo "Baidu download directory share failed; trying bundle file directly at $bundle_remote_path" >&2
+    try_share_path "$bundle_remote_path" || true
+  fi
+fi
+
 if [ -z "$share_url" ]; then
   echo "BaiduPCS-Go did not return a share URL" >&2
   exit 1
 fi
 
-SHARE_URL="$share_url" SHARE_PASSWORD="$SHARE_PASSWORD" REMOTE_DIR="$REMOTE_DIR" OUTPUT_JSON="$OUTPUT_JSON" node <<'NODE'
+SHARE_URL="$share_url" SHARE_PASSWORD="$SHARE_PASSWORD" SHARE_REMOTE_PATH="$share_remote_path" OUTPUT_JSON="$OUTPUT_JSON" node <<'NODE'
 const fs = require('node:fs')
 
 const share = {
   dryRun: false,
   url: process.env.SHARE_URL,
   password: process.env.SHARE_PASSWORD || 'mita',
-  remotePath: process.env.REMOTE_DIR,
+  remotePath: process.env.SHARE_REMOTE_PATH,
 }
 
 fs.writeFileSync(process.env.OUTPUT_JSON, `${JSON.stringify(share, null, 2)}\n`)
