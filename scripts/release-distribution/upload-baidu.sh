@@ -8,6 +8,7 @@ REMOTE_ROOT="${BAIDU_REMOTE_ROOT:-/Mita/releases}"
 SHARE_PASSWORD="${BAIDU_SHARE_PASSWORD:-mita}"
 DRY_RUN_VALUE="${DRY_RUN:-false}"
 BAIDUPCS_BIN="${BAIDUPCS_GO_BIN:-BaiduPCS-Go}"
+KEEP_RELEASES="${BAIDU_KEEP_RELEASES:-2}"
 
 is_true() {
   case "$(printf '%s' "$1" | tr '[:upper:]' '[:lower:]')" in
@@ -19,6 +20,48 @@ is_true() {
 json_value() {
   local expr="$1"
   node -e "const fs = require('node:fs'); const data = JSON.parse(fs.readFileSync(process.argv[1], 'utf8')); const value = ${expr}; if (value == null) process.exit(1); console.log(value)" "$ASSETS_JSON"
+}
+
+show_quota() {
+  "$BAIDUPCS_BIN" quota || true
+}
+
+prune_old_release_dirs() {
+  if ! [[ "$KEEP_RELEASES" =~ ^[0-9]+$ ]]; then
+    echo "Skipping Baidu release cleanup: BAIDU_KEEP_RELEASES must be a non-negative integer, got '$KEEP_RELEASES'"
+    return
+  fi
+
+  local releases_root="${REMOTE_ROOT%/}"
+  local list_output
+  list_output="$("$BAIDUPCS_BIN" ls "$releases_root" 2>/dev/null || true)"
+  if [ -z "$list_output" ]; then
+    echo "No existing Baidu release directories found under $releases_root"
+    return
+  fi
+
+  local release_tags=()
+  while IFS= read -r tag; do
+    release_tags+=("$tag")
+  done < <(printf '%s\n' "$list_output" | grep -Eo 'v[0-9]+\.[0-9]+\.[0-9]+' | sort -Vu)
+
+  if [ "${#release_tags[@]}" -le "$KEEP_RELEASES" ]; then
+    echo "Baidu release cleanup skipped: ${#release_tags[@]} release directories, keeping $KEEP_RELEASES"
+    return
+  fi
+
+  local prune_count=$(( ${#release_tags[@]} - KEEP_RELEASES ))
+  echo "Pruning $prune_count old Baidu release directories under $releases_root; keeping newest $KEEP_RELEASES"
+  for ((i = 0; i < prune_count; i++)); do
+    local tag="${release_tags[$i]}"
+    local remote_path="${releases_root}/${tag}"
+    if [ "$remote_path" = "$REMOTE_DIR" ]; then
+      echo "Skipping current release directory during cleanup: $remote_path"
+      continue
+    fi
+    echo "Removing old Baidu release directory: $remote_path"
+    "$BAIDUPCS_BIN" rm "$remote_path" || true
+  done
 }
 
 if [ ! -f "$ASSETS_JSON" ]; then
@@ -78,6 +121,10 @@ else
   echo "BAIDUPCS_GO_COOKIES or BAIDUPCS_GO_BDUSS is required when DRY_RUN is false" >&2
   exit 1
 fi
+
+show_quota
+prune_old_release_dirs
+show_quota
 
 "$BAIDUPCS_BIN" mkdir "$REMOTE_DIR" >/dev/null 2>&1 || true
 "$BAIDUPCS_BIN" upload --policy overwrite "${asset_paths[@]}" "$REMOTE_DIR"
