@@ -9,6 +9,7 @@ SHARE_PASSWORD="${BAIDU_SHARE_PASSWORD:-mita}"
 DRY_RUN_VALUE="${DRY_RUN:-false}"
 BAIDUPCS_BIN="${BAIDUPCS_GO_BIN:-BaiduPCS-Go}"
 KEEP_RELEASES="${BAIDU_KEEP_RELEASES:-2}"
+RAW_ASSET_UPLOAD_VALUE="${BAIDU_UPLOAD_RAW_ASSETS:-true}"
 
 is_true() {
   case "$(printf '%s' "$1" | tr '[:upper:]' '[:lower:]')" in
@@ -32,7 +33,7 @@ import sys
 import zipfile
 
 bundle_path, *asset_paths = sys.argv[1:]
-with zipfile.ZipFile(bundle_path, "w", compression=zipfile.ZIP_DEFLATED, allowZip64=True) as archive:
+with zipfile.ZipFile(bundle_path, "w", compression=zipfile.ZIP_STORED, allowZip64=True) as archive:
     for asset_path in asset_paths:
         archive.write(asset_path, arcname=os.path.basename(asset_path))
 PY
@@ -61,6 +62,19 @@ try_share_path() {
 
   share_remote_path="$remote_path"
   return 0
+}
+
+upload_bundle_share() {
+  echo "Creating a bundled Baidu download share at $SHARE_DIR" >&2
+  bundle_path="$(create_share_bundle)"
+  "$BAIDUPCS_BIN" mkdir "$SHARE_DIR" >/dev/null 2>&1 || true
+  "$BAIDUPCS_BIN" upload --policy overwrite "$bundle_path" "$SHARE_DIR"
+
+  if ! try_share_path "$SHARE_DIR"; then
+    bundle_remote_path="${SHARE_DIR%/}/$(basename "$bundle_path")"
+    echo "Baidu download directory share failed; trying bundle file directly at $bundle_remote_path" >&2
+    try_share_path "$bundle_remote_path" || true
+  fi
 }
 
 prune_old_release_dirs() {
@@ -164,22 +178,19 @@ show_quota
 prune_old_release_dirs
 show_quota
 
-"$BAIDUPCS_BIN" mkdir "$REMOTE_DIR" >/dev/null 2>&1 || true
-"$BAIDUPCS_BIN" upload --policy overwrite "${asset_paths[@]}" "$REMOTE_DIR"
-
 share_url=""
 share_remote_path="$REMOTE_DIR"
-if ! try_share_path "$REMOTE_DIR"; then
-  echo "Primary Baidu release directory share failed; creating a bundled download fallback at $SHARE_DIR" >&2
-  bundle_path="$(create_share_bundle)"
-  "$BAIDUPCS_BIN" mkdir "$SHARE_DIR" >/dev/null 2>&1 || true
-  "$BAIDUPCS_BIN" upload --policy overwrite "$bundle_path" "$SHARE_DIR"
+if is_true "$RAW_ASSET_UPLOAD_VALUE"; then
+  "$BAIDUPCS_BIN" mkdir "$REMOTE_DIR" >/dev/null 2>&1 || true
+  "$BAIDUPCS_BIN" upload --policy overwrite "${asset_paths[@]}" "$REMOTE_DIR"
 
-  if ! try_share_path "$SHARE_DIR"; then
-    bundle_remote_path="${SHARE_DIR%/}/$(basename "$bundle_path")"
-    echo "Baidu download directory share failed; trying bundle file directly at $bundle_remote_path" >&2
-    try_share_path "$bundle_remote_path" || true
+  if ! try_share_path "$REMOTE_DIR"; then
+    echo "Primary Baidu release directory share failed; falling back to a bundled download package" >&2
+    upload_bundle_share
   fi
+else
+  echo "Skipping raw Baidu release asset upload; uploading bundled download share only" >&2
+  upload_bundle_share
 fi
 
 if [ -z "$share_url" ]; then
