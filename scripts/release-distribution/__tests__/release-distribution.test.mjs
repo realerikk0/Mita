@@ -144,6 +144,26 @@ test('buildFeishuCard includes fixed release and download fields', () => {
   assert.match(body, /打开百度网盘/)
 })
 
+test('buildFeishuCard marks blocked Baidu share and links fallback', () => {
+  const manifest = collectReleaseAssets(sampleRelease())
+  const card = buildFeishuCard(
+    manifest,
+    {
+      url: 'https://github.com/realerikk0/Mita/releases/tag/v1.2.3',
+      password: null,
+      remotePath: '/Mita/releases/v1.2.3-download',
+      shareBlocked: true,
+      fallbackType: 'github-release',
+    },
+  )
+
+  const body = JSON.stringify(card)
+  assert.match(body, /分享受限/)
+  assert.match(body, /打开下载兜底/)
+  assert.match(body, /https:\/\/github\.com\/realerikk0\/Mita\/releases\/tag\/v1\.2\.3/)
+  assert.doesNotMatch(body, /提取码/)
+})
+
 test('buildDownloadManifest exposes Baidu share as public CDN metadata', () => {
   const manifest = buildDownloadManifest(
     collectReleaseAssets(sampleRelease()),
@@ -168,6 +188,29 @@ test('buildDownloadManifest exposes Baidu share as public CDN metadata', () => {
   assert.equal(manifest.github.windowsExe.name, 'Mita_1.2.3_x64-setup.exe')
 })
 
+test('buildDownloadManifest falls back to GitHub when Baidu sharing is blocked', () => {
+  const manifest = buildDownloadManifest(
+    collectReleaseAssets(sampleRelease()),
+    {
+      url: 'https://github.com/realerikk0/Mita/releases/tag/v1.2.3',
+      password: null,
+      remotePath: '/Mita/releases/v1.2.3-download',
+      shareBlocked: true,
+      fallbackType: 'github-release',
+      fallbackReason: 'baidu-share-115',
+    },
+    { generatedAt: '2026-05-15T09:00:00.000Z' },
+  )
+
+  assert.equal(manifest.primaryDownload.type, 'github-release')
+  assert.equal(manifest.primaryDownload.url, 'https://github.com/realerikk0/Mita/releases/tag/v1.2.3')
+  assert.equal(manifest.primaryDownload.password, null)
+  assert.equal(manifest.baidu.url, null)
+  assert.equal(manifest.baidu.shareBlocked, true)
+  assert.equal(manifest.baidu.remotePath, '/Mita/releases/v1.2.3-download')
+  assert.equal(manifest.baidu.fallbackReason, 'baidu-share-115')
+})
+
 test('buildDownloadPage redirects to Baidu and shows extraction code fallback', () => {
   const page = buildDownloadPage({
     primaryDownload: {
@@ -179,6 +222,20 @@ test('buildDownloadPage redirects to Baidu and shows extraction code fallback', 
   assert.match(page, /http-equiv="refresh"/)
   assert.match(page, /https:\/\/pan\.baidu\.com\/s\/example\?pwd=mita/)
   assert.match(page, /Extraction code: <code>mita<\/code>/)
+})
+
+test('buildDownloadPage redirects to GitHub fallback without extraction code', () => {
+  const page = buildDownloadPage({
+    primaryDownload: {
+      type: 'github-release',
+      url: 'https://github.com/realerikk0/Mita/releases/tag/v1.2.3',
+      password: null,
+    },
+  })
+
+  assert.match(page, /Open GitHub Release/)
+  assert.match(page, /https:\/\/github\.com\/realerikk0\/Mita\/releases\/tag\/v1\.2\.3/)
+  assert.doesNotMatch(page, /Extraction code/)
 })
 
 test('baiduUrlWithPassword preserves existing password parameter', () => {
@@ -694,4 +751,65 @@ test('upload-baidu can publish only a bundled download share', {
   assert.match(calls, /upload --policy overwrite .*Mita_1\.2\.3_release_assets\.zip \/Mita\/releases\/v1\.2\.3-download/)
   assert.doesNotMatch(calls, /upload --policy overwrite .*Mita_1\.2\.3_universal\.dmg/)
   assert.doesNotMatch(calls, /share set --period=0 -p mita -f \/Mita\/releases\/v1\.2\.3$/m)
+})
+
+test('upload-baidu writes GitHub fallback metadata when Baidu sharing is blocked', {
+  skip: hasUsableBash() && hasPython3() ? false : 'bash and python3 are required in this environment',
+}, () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'mita-release-distribution-'))
+  const assetsDir = path.join(dir, 'assets')
+  fs.mkdirSync(assetsDir)
+
+  const manifest = collectReleaseAssets(sampleRelease())
+  for (const asset of Object.values(manifest.assets)) {
+    fs.writeFileSync(path.join(assetsDir, asset.name), `fixture ${asset.name}`)
+  }
+
+  const manifestPath = path.join(dir, 'release-assets.json')
+  const sharePath = path.join(dir, 'baidu-share.json')
+  const logPath = path.join(dir, 'baidupcs.log')
+  const fakeBaidu = path.join(dir, 'BaiduPCS-Go')
+  fs.writeFileSync(manifestPath, `${JSON.stringify(manifest, null, 2)}\n`)
+  fs.writeFileSync(fakeBaidu, [
+    '#!/usr/bin/env bash',
+    'set -euo pipefail',
+    'printf \'%s\\n\' "$*" >> "$LOG_FILE"',
+    'case "${1:-}" in',
+    '  login) echo "login ok" ;;',
+    '  quota) echo "quota ok" ;;',
+    '  ls) exit 0 ;;',
+    '  mkdir) exit 0 ;;',
+    '  rm) exit 0 ;;',
+    '  upload) exit 0 ;;',
+    '  share) echo "创建分享链接失败: 代码: 115" >&2; exit 1 ;;',
+    '  *) echo "unexpected command: $*" >&2; exit 2 ;;',
+    'esac',
+  ].join('\n'))
+  fs.chmodSync(fakeBaidu, 0o755)
+
+  const result = spawnSync('bash', [uploadScript], {
+    env: {
+      ...process.env,
+      DRY_RUN: 'false',
+      RELEASE_ASSETS_JSON: manifestPath,
+      RELEASE_ASSETS_DIR: assetsDir,
+      BAIDU_SHARE_JSON: sharePath,
+      BAIDU_SHARE_PASSWORD: 'mita',
+      BAIDU_UPLOAD_RAW_ASSETS: 'false',
+      BAIDU_ALLOW_GITHUB_FALLBACK: 'true',
+      BAIDUPCS_GO_BDUSS: 'bduss',
+      BAIDUPCS_GO_BIN: fakeBaidu,
+      LOG_FILE: logPath,
+    },
+    encoding: 'utf8',
+  })
+
+  assert.equal(result.status, 0, `${result.stdout}\n${result.stderr}`)
+  const share = JSON.parse(fs.readFileSync(sharePath, 'utf8'))
+  assert.equal(share.url, 'https://github.com/realerikk0/Mita/releases/tag/v1.2.3')
+  assert.equal(share.password, null)
+  assert.equal(share.remotePath, '/Mita/releases/v1.2.3-download')
+  assert.equal(share.shareBlocked, true)
+  assert.equal(share.fallbackType, 'github-release')
+  assert.equal(share.fallbackReason, 'baidu-share-115')
 })

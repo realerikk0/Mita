@@ -64,7 +64,9 @@ function normalizeAsset(asset) {
 export function buildDownloadManifest(release, baiduShare, options = {}) {
   const tagName = release.tagName ?? release.tag_name
   const baiduUrl = baiduShare.url
-  const baiduPassword = baiduShare.password || 'mita'
+  const baiduShareBlocked = Boolean(baiduShare.shareBlocked)
+  const baiduPassword = baiduShareBlocked ? null : baiduShare.password || 'mita'
+  const releaseUrl = release.url ?? release.html_url ?? release.htmlUrl ?? null
 
   if (!tagName) {
     throw new Error('Release manifest is missing tagName')
@@ -74,13 +76,30 @@ export function buildDownloadManifest(release, baiduShare, options = {}) {
   }
 
   const baidu = {
-    url: baiduUrl,
-    urlWithPassword: baiduUrlWithPassword(baiduUrl, baiduPassword),
+    url: baiduShareBlocked ? null : baiduUrl,
+    urlWithPassword: baiduShareBlocked ? null : baiduUrlWithPassword(baiduUrl, baiduPassword),
     password: baiduPassword,
     remotePath: baiduShare.remotePath ?? null,
+    shareBlocked: baiduShareBlocked,
+    fallbackType: baiduShare.fallbackType ?? null,
+    fallbackReason: baiduShare.fallbackReason ?? null,
+    fallbackUrl: baiduShareBlocked ? baiduUrl : null,
   }
 
   const assets = release.assets ?? {}
+  const primaryDownload = baiduShareBlocked
+    ? {
+        type: 'github-release',
+        url: releaseUrl ?? baiduUrl,
+        password: null,
+        reason: baidu.fallbackReason,
+      }
+    : {
+        type: 'baidu-netdisk',
+        url: baidu.urlWithPassword,
+        password: baidu.password,
+      }
+
   return {
     schemaVersion: 1,
     product: 'Mita',
@@ -89,12 +108,8 @@ export function buildDownloadManifest(release, baiduShare, options = {}) {
     version: String(tagName).replace(/^v/, ''),
     generatedAt: options.generatedAt ?? new Date().toISOString(),
     publishedAt: release.publishedAt ?? release.published_at ?? null,
-    releaseUrl: release.url ?? release.html_url ?? release.htmlUrl ?? null,
-    primaryDownload: {
-      type: 'baidu-netdisk',
-      url: baidu.urlWithPassword,
-      password: baidu.password,
-    },
+    releaseUrl,
+    primaryDownload,
     baidu,
     github: {
       macosDmg: normalizeAsset(assets.macosDmg),
@@ -107,9 +122,14 @@ export function buildDownloadManifest(release, baiduShare, options = {}) {
 export function buildDownloadPage(manifest) {
   const downloadUrl = manifest.primaryDownload?.url ?? manifest.baidu?.url
   const password = manifest.primaryDownload?.password ?? manifest.baidu?.password ?? ''
+  const isBaidu = manifest.primaryDownload?.type === 'baidu-netdisk'
   const escapedUrl = escapeHtml(downloadUrl)
   const escapedPassword = escapeHtml(password)
   const jsonUrl = JSON.stringify(downloadUrl)
+  const downloadLabel = isBaidu ? 'Baidu Netdisk' : 'GitHub Release'
+  const passwordMarkup = password
+    ? `<p>Extraction code: <code>${escapedPassword}</code></p>`
+    : ''
 
   return `<!doctype html>
 <html lang="zh-CN">
@@ -117,7 +137,7 @@ export function buildDownloadPage(manifest) {
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta http-equiv="refresh" content="0; url=${escapedUrl}">
-  <title>Mita Baidu Netdisk Download</title>
+  <title>Mita Download</title>
   <style>
     body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; margin: 40px; line-height: 1.6; color: #111827; }
     a { color: #2563eb; }
@@ -125,9 +145,9 @@ export function buildDownloadPage(manifest) {
   </style>
 </head>
 <body>
-  <p>Opening Baidu Netdisk download...</p>
-  <p><a href="${escapedUrl}" rel="noopener noreferrer">Open Baidu Netdisk</a></p>
-  <p>Extraction code: <code>${escapedPassword}</code></p>
+  <p>Opening ${downloadLabel} download...</p>
+  <p><a href="${escapedUrl}" rel="noopener noreferrer">Open ${downloadLabel}</a></p>
+  ${passwordMarkup}
   <script>
     window.location.replace(${jsonUrl});
   </script>

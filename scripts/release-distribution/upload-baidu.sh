@@ -10,6 +10,7 @@ DRY_RUN_VALUE="${DRY_RUN:-false}"
 BAIDUPCS_BIN="${BAIDUPCS_GO_BIN:-BaiduPCS-Go}"
 KEEP_RELEASES="${BAIDU_KEEP_RELEASES:-2}"
 RAW_ASSET_UPLOAD_VALUE="${BAIDU_UPLOAD_RAW_ASSETS:-true}"
+ALLOW_GITHUB_FALLBACK_VALUE="${BAIDU_ALLOW_GITHUB_FALLBACK:-false}"
 
 is_true() {
   case "$(printf '%s' "$1" | tr '[:upper:]' '[:lower:]')" in
@@ -69,6 +70,7 @@ upload_bundle_share() {
   bundle_path="$(create_share_bundle)"
   "$BAIDUPCS_BIN" mkdir "$SHARE_DIR" >/dev/null 2>&1 || true
   "$BAIDUPCS_BIN" upload --policy overwrite "$bundle_path" "$SHARE_DIR"
+  share_remote_path="$SHARE_DIR"
 
   if ! try_share_path "$SHARE_DIR"; then
     bundle_remote_path="${SHARE_DIR%/}/$(basename "$bundle_path")"
@@ -194,6 +196,27 @@ else
 fi
 
 if [ -z "$share_url" ]; then
+  if is_true "$ALLOW_GITHUB_FALLBACK_VALUE"; then
+    release_url="$(json_value 'data.url')"
+    RELEASE_URL="$release_url" SHARE_PASSWORD="$SHARE_PASSWORD" SHARE_REMOTE_PATH="$share_remote_path" OUTPUT_JSON="$OUTPUT_JSON" node <<'NODE'
+const fs = require('node:fs')
+
+const share = {
+  dryRun: false,
+  url: process.env.RELEASE_URL,
+  password: null,
+  remotePath: process.env.SHARE_REMOTE_PATH,
+  shareBlocked: true,
+  fallbackType: 'github-release',
+  fallbackReason: 'baidu-share-115',
+}
+
+fs.writeFileSync(process.env.OUTPUT_JSON, `${JSON.stringify(share, null, 2)}\n`)
+console.log(`Baidu share is blocked; wrote GitHub release fallback metadata to ${process.env.OUTPUT_JSON}`)
+NODE
+    exit 0
+  fi
+
   echo "BaiduPCS-Go did not return a share URL" >&2
   exit 1
 fi

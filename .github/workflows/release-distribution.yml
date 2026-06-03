@@ -178,6 +178,7 @@ jobs:
           BAIDU_REMOTE_ROOT: ${{ vars.BAIDU_REMOTE_ROOT || '/Mita/releases' }}
           BAIDU_SHARE_PASSWORD: ${{ secrets.BAIDU_SHARE_PASSWORD || 'mita' }}
           BAIDU_UPLOAD_RAW_ASSETS: "false"
+          BAIDU_ALLOW_GITHUB_FALLBACK: "true"
           BAIDUPCS_GO_COOKIES: ${{ secrets.BAIDUPCS_GO_COOKIES }}
           BAIDUPCS_GO_BDUSS: ${{ secrets.BAIDUPCS_GO_BDUSS }}
           BAIDUPCS_GO_STOKEN: ${{ secrets.BAIDUPCS_GO_STOKEN }}

@@ -71,6 +71,7 @@ export function buildFeishuCard(release, baiduShare, options = {}) {
   const runUrl = options.runUrl ?? buildRunUrl()
   const title = `Mita ${release.tagName} 发布完成`
   const baiduPassword = baiduShare.password || 'mita'
+  const baiduShareBlocked = Boolean(baiduShare.shareBlocked)
   const releaseTime = release.publishedAt || 'unknown'
   const dryRunPrefix = baiduShare.dryRun ? '**Dry run**\n' : ''
   const releaseHighlights = buildReleaseHighlightsMarkdown(release, {
@@ -144,7 +145,13 @@ export function buildFeishuCard(release, baiduShare, options = {}) {
       tag: 'div',
       text: {
         tag: 'lark_md',
-        content: `${dryRunPrefix}**百度网盘**\n[打开百度网盘](${baiduShare.url})\n提取码: \`${baiduPassword}\``,
+        content: baiduShareBlocked
+          ? [
+              '**百度网盘**',
+              '分享受限，已切换 GitHub Release 下载兜底。',
+              `网盘路径: \`${baiduShare.remotePath ?? 'unknown'}\``,
+            ].join('\n')
+          : `${dryRunPrefix}**百度网盘**\n[打开百度网盘](${baiduShare.url})\n提取码: \`${baiduPassword}\``,
       },
     },
     {
@@ -163,10 +170,10 @@ export function buildFeishuCard(release, baiduShare, options = {}) {
           tag: 'button',
           text: {
             tag: 'plain_text',
-            content: '打开百度网盘',
+            content: baiduShareBlocked ? '打开下载兜底' : '打开百度网盘',
           },
           type: 'default',
-          url: baiduShare.url,
+          url: baiduShareBlocked ? release.url : baiduShare.url,
         },
       ],
     },
@@ -177,7 +184,7 @@ export function buildFeishuCard(release, baiduShare, options = {}) {
       wide_screen_mode: true,
     },
     header: {
-      template: baiduShare.dryRun ? 'yellow' : 'green',
+      template: baiduShare.dryRun ? 'yellow' : baiduShareBlocked ? 'orange' : 'green',
       title: {
         tag: 'plain_text',
         content: title,
