@@ -2,6 +2,17 @@ import { describe, it, expect, beforeEach, vi } from 'vitest'
 import { render, screen, fireEvent, waitFor, act } from '@testing-library/react'
 import { Route as GeneralRoute } from '../general'
 
+const webSearchMocks = vi.hoisted(() => ({
+  setEnabled: vi.fn(),
+  setActive: vi.fn().mockResolvedValue(true),
+  state: {
+    enabled: false,
+    hasConfig: true,
+    isActive: false,
+    isLoading: false,
+  },
+}))
+
 // Mock all the dependencies
 vi.mock('@/containers/SettingsMenu', () => ({
   default: () => <div data-testid="settings-menu">Settings Menu</div>,
@@ -66,6 +77,24 @@ vi.mock('@/hooks/useGeneralSetting', () => ({
   }),
 }))
 
+vi.mock('@/hooks/useWebSearch', () => ({
+  useWebSearch: (selector: any) =>
+    selector({
+      enabled: webSearchMocks.state.enabled,
+      setEnabled: webSearchMocks.setEnabled,
+      toggle: vi.fn(),
+    }),
+}))
+
+vi.mock('@/hooks/useMitaWebResearch', () => ({
+  useMitaWebResearch: () => ({
+    hasConfig: webSearchMocks.state.hasConfig,
+    isActive: webSearchMocks.state.isActive,
+    isLoading: webSearchMocks.state.isLoading,
+    setActive: webSearchMocks.setActive,
+  }),
+}))
+
 // Create a controllable mock
 const mockCheckForUpdate = vi.fn()
 
@@ -85,14 +114,17 @@ vi.mock('@/components/ui/switch', () => ({
   Switch: ({
     checked,
     onCheckedChange,
+    disabled,
   }: {
     checked: boolean
     onCheckedChange: (checked: boolean) => void
+    disabled?: boolean
   }) => (
     <input
       data-testid="switch"
       type="checkbox"
       checked={checked}
+      disabled={disabled}
       onChange={(e) => onCheckedChange(e.target.checked)}
     />
   ),
@@ -308,6 +340,11 @@ describe('General Settings Route', () => {
     vi.clearAllMocks()
     // Reset the mock to return a promise that resolves immediately by default
     mockCheckForUpdate.mockResolvedValue(null)
+    webSearchMocks.state.enabled = false
+    webSearchMocks.state.hasConfig = true
+    webSearchMocks.state.isActive = false
+    webSearchMocks.state.isLoading = false
+    webSearchMocks.setActive.mockResolvedValue(true)
   })
 
   it('should render the general settings page', async () => {
@@ -363,6 +400,27 @@ describe('General Settings Route', () => {
       fireEvent.click(switches[0])
     })
     expect(switches[0]).toBeInTheDocument()
+  })
+
+  it('should move web search control into general settings', async () => {
+    const Component = GeneralRoute.component as React.ComponentType
+    await act(async () => {
+      render(<Component />)
+    })
+
+    const webSearchTitle = screen.getByText('Web Search')
+    const cardItem = webSearchTitle.closest('[data-testid="card-item"]')
+    const switchInput = cardItem?.querySelector('input[type="checkbox"]')
+
+    expect(cardItem).toBeInTheDocument()
+    expect(switchInput).toBeInTheDocument()
+
+    await act(async () => {
+      fireEvent.click(switchInput!)
+    })
+
+    expect(webSearchMocks.setEnabled).toHaveBeenCalledWith(true)
+    expect(webSearchMocks.setActive).toHaveBeenCalledWith(true)
   })
 
   it('should handle huggingface token change', async () => {

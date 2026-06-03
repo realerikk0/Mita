@@ -143,13 +143,13 @@ pub fn computer_agent_tools(settings: &McpSettings, shell_available: bool) -> Ve
         ),
         tool(
             CREATE_DIRECTORY,
-            "Create a directory inside this thread workspace or an allowed root.",
+            "Create a directory. If path is a relative folder name like data, Mita creates it inside this thread's private agent workspace. Absolute paths must be inside an allowed root.",
             json!({
                 "type": "object",
                 "properties": {
                     "path": {
                         "type": "string",
-                        "description": "Directory path to create."
+                        "description": "Directory path to create. Relative paths resolve inside the thread workspace; absolute paths must be inside an allowed root."
                     }
                 },
                 "required": ["path"],

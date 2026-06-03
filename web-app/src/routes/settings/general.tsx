@@ -9,6 +9,8 @@ import { Card, CardItem } from '@/containers/Card'
 import { useTranslation } from '@/i18n/react-i18next-compat'
 import { useGeneralSetting } from '@/hooks/useGeneralSetting'
 import { useAppUpdater } from '@/hooks/useAppUpdater'
+import { useWebSearch } from '@/hooks/useWebSearch'
+import { useMitaWebResearch } from '@/hooks/useMitaWebResearch'
 import { useEffect, useState } from 'react'
 import ChangeDataFolderLocation from '@/containers/dialogs/ChangeDataFolderLocation'
 import { FactoryResetDialog } from '@/containers/dialogs'
@@ -45,6 +47,14 @@ function General() {
   } = useGeneralSetting()
   const { checkForUpdate } = useAppUpdater()
   const serviceHub = useServiceHub()
+  const webSearchEnabled = useWebSearch((state) => state.enabled)
+  const setWebSearchEnabled = useWebSearch((state) => state.setEnabled)
+  const {
+    hasConfig: hasWebResearchConfig,
+    isActive: webResearchActive,
+    isLoading: webResearchLoading,
+    setActive: setWebResearchActive,
+  } = useMitaWebResearch()
 
   const openFileTitle = (): string => {
     if (IS_MACOS) {
@@ -149,6 +159,21 @@ function General() {
       toast.error(t('settings:general.updateError'))
     } finally {
       setIsCheckingForUpdates(false)
+    }
+  }
+
+  const handleWebSearchChange = async (enabled: boolean) => {
+    setWebSearchEnabled(enabled)
+
+    if (!hasWebResearchConfig) return
+
+    if (enabled && !webResearchActive) {
+      await setWebResearchActive(true)
+      return
+    }
+
+    if (!enabled && webResearchActive) {
+      await setWebResearchActive(false)
     }
   }
 
@@ -455,6 +480,23 @@ function General() {
                   <Switch
                     checked={spellCheckChatInput}
                     onCheckedChange={(e) => setSpellCheckChatInput(e)}
+                  />
+                }
+              />
+              <CardItem
+                title="Web Search"
+                description={
+                  hasWebResearchConfig
+                    ? 'Enable native web search for supported models and keep Mita Web Research available for tool-based browsing.'
+                    : 'Enable native web search for supported Jingxing models. Configure Mita Web Research in MCP Servers for tool-based browsing.'
+                }
+                actions={
+                  <Switch
+                    checked={webSearchEnabled}
+                    disabled={webResearchLoading}
+                    onCheckedChange={(enabled) => {
+                      void handleWebSearchChange(enabled)
+                    }}
                   />
                 }
               />

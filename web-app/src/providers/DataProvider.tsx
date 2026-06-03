@@ -11,7 +11,7 @@ import {
 import { openAIProviderSettings, predefinedProviders } from '@/constants/providers'
 import { useAppUpdater } from '@/hooks/useAppUpdater'
 import { useServiceHub } from '@/hooks/useServiceHub'
-import { useCallback, useEffect, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import { useMCPServers, DEFAULT_MCP_SETTINGS } from '@/hooks/useMCPServers'
 import { useAssistant } from '@/hooks/useAssistant'
 import { useNavigate } from '@tanstack/react-router'
@@ -81,6 +81,8 @@ async function registerRemoteProvider(provider: ModelProvider) {
 // Track which providers have been registered so we can unregister stale ones
 let registeredProviderNames = new Set<string>()
 
+const localModelProviderNames = new Set(['llamacpp', 'mlx'])
+
 // Effect to sync remote providers when providers change
 const syncRemoteProviders = () => {
   const providers = useModelProvider.getState().providers
@@ -128,17 +130,12 @@ const createProviderForImportedConnection = (
   }
 }
 
-const withImportedModels = (
+const withProviderModelIds = (
   provider: ModelProvider,
-  importedConnection: ParsedProviderConnection,
   modelIds: string[]
 ): ModelProvider => {
   const candidateModelIds = Array.from(
-    new Set(
-      [...modelIds, importedConnection.defaultModel]
-        .map((id) => id.trim())
-        .filter(Boolean)
-    )
+    new Set(modelIds.map((id) => id.trim()).filter(Boolean))
   )
   const existingIds = new Set(provider.models.map((model) => model.id))
   const modelsToAdd = candidateModelIds
@@ -162,6 +159,26 @@ const withImportedModels = (
     models: [...provider.models, ...modelsToAdd],
   }
 }
+
+const withImportedModels = (
+  provider: ModelProvider,
+  importedConnection: ParsedProviderConnection,
+  modelIds: string[]
+): ModelProvider => {
+  return withProviderModelIds(provider, [
+    ...modelIds,
+    importedConnection.defaultModel,
+  ])
+}
+
+const canRefreshProviderModelsOnStartup = (provider: ModelProvider) =>
+  provider.active &&
+  !localModelProviderNames.has(provider.provider) &&
+  Boolean(provider.base_url?.trim()) &&
+  providerHasRemoteApiKeys(provider)
+
+const isStartupNetworkAvailable = () =>
+  typeof navigator === 'undefined' || navigator.onLine !== false
 
 const sensitiveDeepLinkQueryParams = ['apiKey', 'api_key', 'key']
 
@@ -191,6 +208,7 @@ export function DataProvider() {
   const [pendingProviderImport, setPendingProviderImport] =
     useState<ParsedProviderConnection | null>(null)
   const [isImportingProvider, setIsImportingProvider] = useState(false)
+  const startupModelRefreshStartedRef = useRef(false)
 
   const { checkForUpdate } = useAppUpdater()
   const { setServers, setSettings } = useMCPServers()
@@ -335,17 +353,63 @@ export function DataProvider() {
     updateProvider,
   ])
 
+  const refreshStartupProviderModels = useCallback(
+    async (providers: ModelProvider[]) => {
+      if (!isStartupNetworkAvailable()) return providers
+
+      return Promise.all(
+        providers.map(async (provider) => {
+          if (!canRefreshProviderModelsOnStartup(provider)) return provider
+
+          try {
+            const modelIds = await serviceHub
+              .providers()
+              .fetchModelsFromProvider(provider)
+            return withProviderModelIds(provider, modelIds)
+          } catch (error) {
+            console.warn(
+              `Failed to refresh ${provider.provider} models on startup:`,
+              error
+            )
+            return provider
+          }
+        })
+      )
+    },
+    [serviceHub]
+  )
+
   useEffect(() => {
+    let cancelled = false
+
     console.log('Initializing DataProvider...')
-    serviceHub.providers().getProviders().then((providers) => {
+    serviceHub.providers().getProviders().then(async (providers) => {
+      if (cancelled) return
       setProviders(providers)
+      const hydratedProviders = useModelProvider.getState().providers
+
       // Register active remote providers with the backend
-      providers.forEach((provider) => {
+      hydratedProviders.forEach((provider) => {
         if (provider.active) {
           registerRemoteProvider(provider)
           registeredProviderNames.add(provider.provider)
         }
       })
+
+      if (startupModelRefreshStartedRef.current) return
+      startupModelRefreshStartedRef.current = true
+
+      const refreshedProviders =
+        await refreshStartupProviderModels(hydratedProviders)
+      if (cancelled) return
+
+      const hasRefreshedProvider = refreshedProviders.some(
+        (provider, index) => provider !== hydratedProviders[index]
+      )
+      if (hasRefreshedProvider) {
+        setProviders(refreshedProviders)
+        syncRemoteProviders()
+      }
     })
     serviceHub
       .mcp()
@@ -383,10 +447,12 @@ export function DataProvider() {
         unsubscribe = unsub
       })
     return () => {
+      cancelled = true
       unsubscribe()
     }
   }, [
     handleDeepLink,
+    refreshStartupProviderModels,
     serviceHub,
     setAssistants,
     setProviders,

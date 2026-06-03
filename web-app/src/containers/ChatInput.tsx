@@ -26,7 +26,7 @@ import {
   DropdownMenuSubContent,
   DropdownMenuSubTrigger,
 } from '@/components/ui/dropdown-menu'
-import { ArrowRight, PlusIcon } from 'lucide-react'
+import { ArrowRight, PlusIcon, Repeat2 } from 'lucide-react'
 import {
   IconPhoto,
   IconAtom,
@@ -36,7 +36,6 @@ import {
   IconX,
   IconPaperclip,
   IconLoader2,
-  IconWorld,
   IconUser,
 } from '@tabler/icons-react'
 import { generateId } from 'ai'
@@ -90,13 +89,10 @@ import {
   createImageAttachment,
   createDocumentAttachment,
 } from '@/types/attachment'
-import { useWebSearch } from '@/hooks/useWebSearch'
-import { useMitaWebResearch } from '@/hooks/useMitaWebResearch'
 import { isBrowserMCPServerName } from '@/constants/mcp'
 import { PromptVisionModel } from '@/containers/PromptVisionModel'
 import { useAgentMode } from '@/hooks/useAgentMode'
 import { AssistantsMenu } from '@/components/AssistantsMenu'
-import { isJingxingNativeWebSearchModel } from '@/lib/models'
 import { parseCompactCommand } from '@/lib/compact-thread'
 
 type ChatInputProps = {
@@ -112,6 +108,9 @@ type ChatInputProps = {
   onCompact?: (instructions?: string) => Promise<void>
   onStop?: () => void
   chatStatus?: ChatStatus
+  showAutoRunToggle?: boolean
+  autoRunPanelVisible?: boolean
+  onToggleAutoRunPanel?: () => void
 }
 
 type DocumentFileInput = {
@@ -132,6 +131,9 @@ const ChatInput = memo(function ChatInput({
   onCompact,
   onStop,
   chatStatus,
+  showAutoRunToggle,
+  autoRunPanelVisible = true,
+  onToggleAutoRunPanel,
 }: ChatInputProps) {
   const textareaRef = useRef<HTMLTextAreaElement>(null)
   const [isFocused, setIsFocused] = useState(false)
@@ -264,75 +266,6 @@ const ChatInput = memo(function ChatInput({
   }, [tools])
 
   // No auto-selection: let the user explicitly pick an assistant
-
-  const webSearchEnabled = useWebSearch((state) => state.enabled)
-  const setWebSearchEnabled = useWebSearch((state) => state.setEnabled)
-  const {
-    hasConfig: hasWebResearchConfig,
-    isActive: webResearchActive,
-    isLoading: webResearchLoading,
-    setActive: setWebResearchActive,
-  } = useMitaWebResearch()
-
-  const modelSupportsNativeWebSearch = useMemo(
-    () =>
-      selectedProvider === 'jingxing' &&
-      isJingxingNativeWebSearchModel(selectedModel?.id),
-    [selectedModel?.id, selectedProvider]
-  )
-
-  const modelSupportsExternalWebResearch = useMemo(() => {
-    const capabilities = selectedModel?.capabilities || []
-    return capabilities.includes('tools')
-  }, [selectedModel?.capabilities])
-
-  const modelSupportsAnyWebSearch =
-    modelSupportsNativeWebSearch || modelSupportsExternalWebResearch
-
-  const handleWebSearchToggle = useCallback(async () => {
-    const nextEnabled = !webSearchEnabled
-
-    if (nextEnabled && !modelSupportsAnyWebSearch) {
-      toast.error('Web Search is not available for this model')
-      return
-    }
-
-    if (modelSupportsNativeWebSearch) {
-      setWebSearchEnabled(nextEnabled)
-      return
-    }
-
-    if (!hasWebResearchConfig) {
-      if (nextEnabled) {
-        toast.error('Mita Web Research is not configured')
-      }
-      return
-    }
-
-    if (nextEnabled && !webResearchActive) {
-      const activated = await setWebResearchActive(true)
-      if (!activated) return
-    } else if (!nextEnabled && webResearchActive) {
-      const deactivated = await setWebResearchActive(false)
-      if (!deactivated) return
-    }
-
-    setWebSearchEnabled(nextEnabled)
-  }, [
-    hasWebResearchConfig,
-    modelSupportsAnyWebSearch,
-    modelSupportsNativeWebSearch,
-    setWebResearchActive,
-    setWebSearchEnabled,
-    webResearchActive,
-    webSearchEnabled,
-  ])
-
-  useEffect(() => {
-    if (webSearchEnabled && !modelSupportsAnyWebSearch) {
-      setWebSearchEnabled(false)
-    }
-  }, [modelSupportsAnyWebSearch, setWebSearchEnabled, webSearchEnabled])
 
   const attachmentsEnabled = useAttachments((s) => s.enabled)
   const parsePreference = useAttachments((s) => s.parseMode)
@@ -521,6 +454,7 @@ const ChatInput = memo(function ChatInput({
           useAgentMode.getState().setAgentMode(TEMPORARY_CHAT_ID, true)
           useAgentMode.getState().removeThread(agentModeKey)
         }
+        setPrompt('')
         router.navigate({
           to: route.threadsDetail,
           params: { threadId: TEMPORARY_CHAT_ID },
@@ -580,13 +514,13 @@ const ChatInput = memo(function ChatInput({
           JSON.stringify(messagePayload)
         )
 
+        setPrompt('')
         router.navigate({
           to: route.threadsDetail,
           params: { threadId: newThread.id },
         })
       }
 
-      setPrompt('')
       // Don't clear attachments here — document attachments stored under
       // NEW_THREAD_ATTACHMENT_KEY need to survive until the thread detail
       // page transfers and processes them.  The thread detail page's
@@ -2053,39 +1987,35 @@ const ChatInput = memo(function ChatInput({
                   </Tooltip>
                 )}
 
-                {!effectiveAgentMode && modelSupportsAnyWebSearch && (
+                {showAutoRunToggle && onToggleAutoRunPanel && (
                   <Tooltip>
                     <TooltipTrigger asChild>
                       <Button
                         variant="ghost"
                         size="icon-xs"
-                        disabled={webResearchLoading}
-                        className={cn(webSearchEnabled && 'text-primary')}
-                        onClick={webResearchLoading ? undefined : handleWebSearchToggle}
+                        aria-label={
+                          autoRunPanelVisible
+                            ? t('chat:autoRun.hidePanel')
+                            : t('chat:autoRun.showPanel')
+                        }
+                        aria-pressed={autoRunPanelVisible}
+                        className={cn(autoRunPanelVisible && 'text-primary')}
+                        onClick={onToggleAutoRunPanel}
                       >
-                        {webResearchLoading ? (
-                          <IconLoader2
-                            size={18}
-                            className="text-primary animate-spin"
-                          />
-                        ) : (
-                          <IconWorld
-                            size={18}
-                            className={cn(
-                              'text-muted-foreground',
-                              webSearchEnabled && 'text-primary'
-                            )}
-                          />
-                        )}
+                        <Repeat2
+                          size={18}
+                          className={cn(
+                            'text-muted-foreground',
+                            autoRunPanelVisible && 'text-primary'
+                          )}
+                        />
                       </Button>
                     </TooltipTrigger>
                     <TooltipContent>
                       <p>
-                        {webSearchEnabled
-                          ? 'Web Search enabled'
-                          : modelSupportsNativeWebSearch
-                            ? 'Web Search'
-                            : 'Web Search via Mita Web Research'}
+                        {autoRunPanelVisible
+                          ? t('chat:autoRun.hidePanel')
+                          : t('chat:autoRun.showPanel')}
                       </p>
                     </TooltipContent>
                   </Tooltip>

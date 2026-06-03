@@ -45,6 +45,7 @@ import {
   providerQuotaErrorFromUnknown,
 } from '@/lib/provider-quota-error'
 import { trackMitaEvent } from '@/lib/analytics'
+import { normalizeModelCapabilitiesForProvider } from '@/lib/models'
 
 const COMPUTER_AGENT_SERVER_NAME = 'mita-computer-agent'
 
@@ -223,6 +224,19 @@ export class CustomChatTransport implements ChatTransport<UIMessage> {
     // Tools will be loaded when updateRagToolsAvailability is called with model capabilities
   }
 
+  private currentModelSupportsTools(): boolean {
+    const { selectedModel, selectedProvider } = useModelProvider.getState()
+    if (!selectedModel) {
+      return this.modelSupportsTools
+    }
+
+    const capabilities =
+      normalizeModelCapabilitiesForProvider(selectedProvider || '', selectedModel) ??
+      selectedModel.capabilities
+
+    return capabilities?.includes('tools') ?? this.modelSupportsTools
+  }
+
   setLastUserMessage(message: string): void {
     this.lastUserMessage = message
   }
@@ -280,8 +294,7 @@ export class CustomChatTransport implements ChatTransport<UIMessage> {
       return disabledToolKeys.includes(toolKey)
     }
 
-    const selectedModel = useModelProvider.getState().selectedModel
-    const modelSupportsTools = selectedModel?.capabilities?.includes('tools') ?? this.modelSupportsTools
+    const modelSupportsTools = this.currentModelSupportsTools()
 
     // Only load tools if model supports them
     if (modelSupportsTools) {
@@ -648,7 +661,7 @@ export class CustomChatTransport implements ChatTransport<UIMessage> {
 
     const mappedMessages = this.mapUserInlineAttachments(effectiveMessages)
     const hasTools = Object.keys(this.tools).length > 0
-    const modelSupportsTools = selectedModel?.capabilities?.includes('tools') ?? this.modelSupportsTools
+    const modelSupportsTools = this.currentModelSupportsTools()
     const shouldEnableTools = hasTools && modelSupportsTools
     const nativeWebSearchEnabled =
       useWebSearch.getState().enabled &&

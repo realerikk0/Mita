@@ -56,6 +56,8 @@ export default memo(function DropdownToolsAvailable({
   } = useToolAvailable()
 
   const currentThread = getCurrentThread()
+  const getToolKey = (serverName: string, toolName: string) =>
+    `${serverName}::${toolName}`
 
   // Separate effect for thread initialization - only when we have tools and a new thread
   useEffect(() => {
@@ -68,13 +70,13 @@ export default memo(function DropdownToolsAvailable({
     if (initialMessage) {
       // Update default tools for new threads/index page
       const currentDefaults = getDefaultDisabledTools()
-      const toolKey = `${serverName}::${toolName}`
+      const toolKey = getToolKey(serverName, toolName)
       if (checked) {
         setDefaultDisabledTools(
           currentDefaults.filter((key) => key !== toolKey)
         )
       } else {
-        setDefaultDisabledTools([...currentDefaults, toolKey])
+        setDefaultDisabledTools([...new Set([...currentDefaults, toolKey])])
       }
     } else if (currentThread?.id) {
       // Update tools for specific thread
@@ -85,7 +87,7 @@ export default memo(function DropdownToolsAvailable({
   const isToolChecked = (serverName: string, toolName: string): boolean => {
     if (initialMessage) {
       // Use default tools for index page
-      const toolKey = `${serverName}::${toolName}`
+      const toolKey = getToolKey(serverName, toolName)
       return !getDefaultDisabledTools().includes(toolKey)
     } else if (currentThread?.id) {
       // Use thread-specific tools
@@ -94,15 +96,46 @@ export default memo(function DropdownToolsAvailable({
     return false
   }
 
-  const handleDisableAllServerTools = (
+  const handleAllServerToolsToggle = (
     serverName: string,
-    disable: boolean
+    available: boolean
   ) => {
     const allToolsByServer = getToolsByServer()
     const serverTools = allToolsByServer[serverName] || []
+    const serverToolKeys = serverTools.map((tool) =>
+      getToolKey(tool.server, tool.name)
+    )
+    const serverToolKeySet = new Set(serverToolKeys)
+
+    if (initialMessage) {
+      const currentDefaults = getDefaultDisabledTools()
+      setDefaultDisabledTools(
+        available
+          ? currentDefaults.filter((key) => !serverToolKeySet.has(key))
+          : [...new Set([...currentDefaults, ...serverToolKeys])]
+      )
+      return
+    }
+
+    if (!currentThread?.id) return
+
+    const disabledTools = new Set(getDisabledToolsForThread(currentThread.id))
     serverTools.forEach((tool) => {
-      handleToolToggle(tool.server, tool.name, !disable)
+      const toolKey = getToolKey(tool.server, tool.name)
+      const isDisabled = disabledTools.has(toolKey)
+      if (available && isDisabled) {
+        setToolDisabledForThread(currentThread.id, tool.server, tool.name, true)
+      } else if (!available && !isDisabled) {
+        setToolDisabledForThread(currentThread.id, tool.server, tool.name, false)
+      }
     })
+  }
+
+  const handleAllServerToolsRowClick = (serverName: string) => {
+    handleAllServerToolsToggle(
+      serverName,
+      !areAllServerToolsEnabled(serverName)
+    )
   }
 
   const areAllServerToolsEnabled = (serverName: string): boolean => {
@@ -118,7 +151,7 @@ export default memo(function DropdownToolsAvailable({
         ? getDisabledToolsForThread(currentThread.id)
         : []
     return tools.filter((tool) => {
-      const toolKey = `${tool.server}::${tool.name}`
+      const toolKey = getToolKey(tool.server, tool.name)
       return !disabledToolKeys.includes(toolKey)
     }).length
   }
@@ -191,7 +224,22 @@ export default memo(function DropdownToolsAvailable({
                 <DropDrawerSubContent className="max-w-64 max-h-70 w-full overflow-hidden">
                   <DropDrawerGroup>
                     {serverTools.length > 1 && (
-                      <div className="sticky top-0 z-10  border-b px-4 md:px-2 pr-2 py-1.5 flex items-center justify-between">
+                      <div
+                        role="button"
+                        tabIndex={0}
+                        aria-label={`Toggle all tools for ${serverName}`}
+                        className="sticky top-0 z-10 border-b px-4 md:px-2 pr-2 py-1.5 flex cursor-pointer items-center justify-between select-none"
+                        onClick={(event) => {
+                          event.stopPropagation()
+                          handleAllServerToolsRowClick(serverName)
+                        }}
+                        onKeyDown={(event) => {
+                          if (event.key !== 'Enter' && event.key !== ' ') return
+                          event.preventDefault()
+                          event.stopPropagation()
+                          handleAllServerToolsRowClick(serverName)
+                        }}
+                      >
                         <span className="text-xs font-medium">
                           All Tools
                         </span>
@@ -204,10 +252,14 @@ export default memo(function DropdownToolsAvailable({
                           )}
                         >
                           <Switch
+                            aria-label={`All tools for ${serverName}`}
                             checked={areAllServerToolsEnabled(serverName)}
                             onCheckedChange={(checked) =>
-                              handleDisableAllServerTools(serverName, !checked)
+                              handleAllServerToolsToggle(serverName, checked)
                             }
+                            onClick={(event) => event.stopPropagation()}
+                            onKeyDown={(event) => event.stopPropagation()}
+                            onPointerDown={(event) => event.stopPropagation()}
                           />
                         </div>
                       </div>
@@ -231,7 +283,6 @@ export default memo(function DropdownToolsAvailable({
                               <Switch
                                 checked={isChecked}
                                 onCheckedChange={(checked) => {
-                                  console.log('checked', checked)
                                   handleToolToggle(tool.server, tool.name, checked)
                                 }}
                                 onClick={(e) => {

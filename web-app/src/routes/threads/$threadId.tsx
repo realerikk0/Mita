@@ -390,6 +390,7 @@ function ThreadDetail() {
     mita: MitaMessageMetadata
   } | null>(null)
   const autoRunSendingRef = useRef(false)
+  const [autoRunPanelVisible, setAutoRunPanelVisible] = useState(true)
 
   // Check if we should follow up with tool calls (respects abort signal)
   const followUpMessage = useCallback(
@@ -515,6 +516,8 @@ Tool result communication:
         ? `\n\nComputer Agent guidance:
 - Prefer structured computer tools for file and folder work.
 - If the user asks to create a file without a path, omit the directory so Mita uses the private thread workspace.
+- When the user asks to create a folder in the current workspace and gives only a name, call computer_agent_create_directory and pass the relative folder path, for example "data".
+- Relative Computer Agent paths resolve inside the private thread workspace. Use absolute paths only when the user supplies or approves an allowed root.
 - Do not invent absolute paths. Ask for a folder or use the thread workspace when the user gives no path.
 - The current Computer Agent sandbox access is ${computerAgentSandboxAccess === 'readOnly' ? 'read-only' : 'read-write'}.${
             computerAgentApprovalPolicy === 'never'
@@ -1785,6 +1788,14 @@ Tool result communication:
     persistAutoRunState({ status: 'stopped', enabled: false })
   }, [persistAutoRunState])
 
+  const handleAutoRunPanelToggle = useCallback(() => {
+    setAutoRunPanelVisible((visible) => !visible)
+  }, [])
+
+  useEffect(() => {
+    setAutoRunPanelVisible(true)
+  }, [threadId])
+
   // Check for and send initial message from sessionStorage
   const initialMessageSentRef = useRef(false)
 
@@ -2397,7 +2408,7 @@ Tool result communication:
 
   const inputArea = (
     <>
-      {!mitaTeamsConfig && (
+      {!mitaTeamsConfig && autoRunPanelVisible && (
         <AutoRunPanel
           threadId={threadId}
           disabled={Boolean(autoRunBlockedReason)}
@@ -2414,6 +2425,9 @@ Tool result communication:
         onCompact={handleManualCompact}
         onStop={handleStop}
         chatStatus={effectiveStatus}
+        showAutoRunToggle={!mitaTeamsConfig}
+        autoRunPanelVisible={autoRunPanelVisible}
+        onToggleAutoRunPanel={handleAutoRunPanelToggle}
       />
     </>
   )

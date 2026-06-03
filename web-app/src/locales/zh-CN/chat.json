@@ -33,6 +33,8 @@
   "temporaryChatDescription": "开始一个临时对话，不会保存到您的聊天历史记录中。",
   "autoRun": {
     "label": "自动对话",
+    "showPanel": "显示自动对话",
+    "hidePanel": "隐藏自动对话",
     "rounds": "轮数",
     "start": "开始",
     "pause": "暂停",

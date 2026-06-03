@@ -32,7 +32,7 @@ use crate::core::{
         permissions::{sanitize_file_stem, unique_txt_path, ComputerAgentScope},
         tools::{
             computer_agent_summary, computer_agent_tools, is_computer_agent_tool, CREATE_TEXT_FILE,
-            LIST_DIRECTORY, READ_TEXT_FILE, RUN_SHELL,
+            CREATE_DIRECTORY, LIST_DIRECTORY, READ_TEXT_FILE, RUN_SHELL,
         },
         windows_runner::{
             refused_response, validate_runner_request, RunnerRequest, RunnerResponseStatus,
@@ -180,6 +180,34 @@ fn computer_agent_tools_read_only_hides_write_and_shell_tools() {
     assert!(tools.iter().any(|tool| tool.name == READ_TEXT_FILE));
     assert!(!tools.iter().any(|tool| tool.name == CREATE_TEXT_FILE));
     assert!(!tools.iter().any(|tool| tool.name == RUN_SHELL));
+}
+
+#[test]
+fn create_directory_tool_explains_relative_workspace_paths() {
+    let settings = settings_enabled();
+    let tools = computer_agent_tools(&settings, false);
+    let create_directory = tools
+        .iter()
+        .find(|tool| tool.name == CREATE_DIRECTORY)
+        .expect("create directory tool should be exposed when writes are enabled");
+
+    let description = create_directory.description.as_deref().unwrap_or_default();
+    assert!(
+        description.contains("relative"),
+        "tool description should tell the model relative folder names are valid: {description}"
+    );
+    assert!(
+        description.contains("thread"),
+        "tool description should mention the thread workspace: {description}"
+    );
+
+    let path_description = create_directory.input_schema["properties"]["path"]["description"]
+        .as_str()
+        .unwrap_or_default();
+    assert!(
+        path_description.contains("Relative paths resolve inside the thread workspace"),
+        "path schema should explain where a relative folder name like data is created: {path_description}"
+    );
 }
 
 #[test]

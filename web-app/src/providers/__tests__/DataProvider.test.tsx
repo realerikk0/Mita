@@ -213,6 +213,9 @@ describe('DataProvider', () => {
     h.isDev.mockReturnValue(false)
     h.providerHasRemoteApiKeys.mockReturnValue(true)
     h.providerRemoteApiKeyChain.mockReturnValue(['key-1'])
+    h.setProviders.mockImplementation((providers) => {
+      h.providers = providers as Array<Record<string, unknown>>
+    })
     h.invoke.mockResolvedValue(undefined)
     h.getProviderByName.mockReturnValue(undefined)
     h.updateProvider.mockClear()
@@ -262,6 +265,41 @@ describe('DataProvider', () => {
       expect(h.setSettings).toHaveBeenCalledWith({ s: 1 })
       expect(h.setAssistants).toHaveBeenCalledWith([{ id: 'a1' }])
       expect(h.setThreads).toHaveBeenCalledWith([{ id: 't1' }])
+    })
+  })
+
+  it('refreshes configured remote provider models once on startup', async () => {
+    hubState.getProviders.mockResolvedValue([
+      {
+        provider: 'jingxing',
+        active: true,
+        api_key: 'sk-test',
+        base_url: 'https://api.example.com/v1',
+        models: [{ id: 'gpt-old' }],
+        custom_header: [],
+        settings: [],
+      },
+    ])
+    hubState.fetchModelsFromProvider.mockResolvedValue(['gpt-old', 'gpt-new'])
+
+    render(<DataProvider />)
+
+    await waitFor(() => {
+      expect(hubState.fetchModelsFromProvider).toHaveBeenCalledWith(
+        expect.objectContaining({ provider: 'jingxing' })
+      )
+    })
+
+    await waitFor(() => {
+      expect(h.setProviders).toHaveBeenCalledWith([
+        expect.objectContaining({
+          provider: 'jingxing',
+          models: expect.arrayContaining([
+            expect.objectContaining({ id: 'gpt-old' }),
+            expect.objectContaining({ id: 'gpt-new' }),
+          ]),
+        }),
+      ])
     })
   })
 
@@ -429,6 +467,7 @@ describe('DataProvider', () => {
     hubState.startServer.mockResolvedValue(2000)
     hubState.getActiveModels.mockResolvedValue(['m1'])
     h.providers = [{ provider: 'openai', models: [{ id: 'm1' }] }]
+    hubState.getProviders.mockResolvedValue(h.providers)
 
     render(<DataProvider />)
 

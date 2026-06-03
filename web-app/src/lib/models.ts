@@ -9,6 +9,16 @@ const uniqueCapabilities = (capabilities: Array<string | undefined>) =>
       Boolean(capability) && arr.indexOf(capability) === index
   )
 
+const includesModelId = (modelIds: string[], modelId: string) => {
+  const normalized = modelId.toLowerCase()
+  return modelIds.some((id) => id.toLowerCase() === normalized)
+}
+
+const isInferredOpenAIChatModel = (modelId: string): boolean => {
+  const normalized = modelId.toLowerCase()
+  return /^gpt-(?:4o|4\.1|4\.5|5)(?:[-.\w]*)?$/.test(normalized)
+}
+
 export const isJingxingImageGenerationModel = (modelId?: string): boolean => {
   if (!modelId) return false
   const normalized = modelId.toLowerCase()
@@ -91,11 +101,22 @@ export const normalizeModelCapabilitiesForProvider = (
   }
 
   const modelId = model.id || model.model
-  if (providerName !== 'jingxing' || !modelId) {
+  if (!modelId) {
     return model.capabilities
   }
 
-  return inferJingxingModelCapabilities(modelId)
+  if (providerName === 'jingxing') {
+    return inferJingxingModelCapabilities(modelId)
+  }
+
+  if (providerName === 'openai') {
+    return uniqueCapabilities([
+      ...getModelCapabilities(providerName, modelId),
+      ...(model.capabilities || []),
+    ])
+  }
+
+  return model.capabilities
 }
 
 export const defaultModel = (provider?: string) => {
@@ -137,10 +158,17 @@ export const getModelCapabilities = (
     ? (providerConfig.supportsImages as unknown as string[])
     : []
 
+  const inferredOpenAIChatModel =
+    providerName === 'openai' && isInferredOpenAIChatModel(modelId)
+
   return [
     ModelCapabilities.COMPLETION,
-    supportsToolCalls.includes(modelId) ? ModelCapabilities.TOOLS : undefined,
-    supportsImages.includes(modelId) ? ModelCapabilities.VISION : undefined,
+    includesModelId(supportsToolCalls, modelId) || inferredOpenAIChatModel
+      ? ModelCapabilities.TOOLS
+      : undefined,
+    includesModelId(supportsImages, modelId) || inferredOpenAIChatModel
+      ? ModelCapabilities.VISION
+      : undefined,
   ].filter(Boolean) as string[]
 }
 

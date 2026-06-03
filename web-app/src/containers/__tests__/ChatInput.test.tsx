@@ -9,11 +9,13 @@ let promptState = ''
 let activePromptKey = 'thread-1'
 let promptStateByKey: Record<string, string> = {}
 let currentThreadIdState = 'thread-1'
+let promptEvents: string[] = []
 const setActivePromptKeyMock = vi.fn((key = '__default__') => {
   activePromptKey = key
   promptState = promptStateByKey[key] ?? ''
 })
 const setPromptMock = vi.fn((val: string) => {
+  promptEvents.push(`${activePromptKey}:${val}`)
   promptState = val
   if (val) {
     promptStateByKey[activePromptKey] = val
@@ -230,8 +232,12 @@ vi.mock('@janhq/core', () => ({
   },
 }))
 
+const navigateMock = vi.fn(() => {
+  promptEvents.push('navigate')
+})
+
 vi.mock('@tanstack/react-router', () => ({
-  useRouter: () => ({ navigate: vi.fn() }),
+  useRouter: () => ({ navigate: navigateMock }),
 }))
 
 vi.mock('@/i18n/react-i18next-compat', () => ({
@@ -322,6 +328,7 @@ const resetAll = () => {
   activePromptKey = 'thread-1'
   promptStateByKey = {}
   currentThreadIdState = 'thread-1'
+  promptEvents = []
   appStateOverrides = {}
   attachmentsList = []
   attachmentsSettings = {
@@ -347,6 +354,8 @@ const resetAll = () => {
   for (const k of Object.keys(queueState)) delete queueState[k]
   getCurrentThreadMock.mockReturnValue(undefined)
   setActivePromptKeyMock.mockClear()
+  navigateMock.mockClear()
+  createThreadMock.mockReset()
 }
 
 const getTextarea = () =>
@@ -383,6 +392,31 @@ describe('ChatInput', () => {
     renderInput()
 
     expect(screen.getByText('正在索引文档…')).toBeInTheDocument()
+  })
+
+  it('does not render web search controls in the composer', () => {
+    renderInput()
+
+    expect(screen.queryByText(/Web Search/)).not.toBeInTheDocument()
+  })
+
+  it('renders an auto run panel visibility toggle in the composer', () => {
+    const onToggleAutoRunPanel = vi.fn()
+
+    renderInput({
+      showAutoRunToggle: true,
+      autoRunPanelVisible: true,
+      onToggleAutoRunPanel,
+    })
+
+    const toggle = screen.getByLabelText('chat:autoRun.hidePanel')
+
+    expect(toggle).toBeInTheDocument()
+    expect(screen.getByText('chat:autoRun.hidePanel')).toBeInTheDocument()
+
+    fireEvent.click(toggle)
+
+    expect(onToggleAutoRunPanel).toHaveBeenCalledTimes(1)
   })
 
   it('disables the send button when prompt is empty', () => {
@@ -428,6 +462,39 @@ describe('ChatInput', () => {
     expect(onSubmit).toHaveBeenCalledWith('hello world', undefined)
     expect(addToHistoryMock).toHaveBeenCalledWith('hello world')
     expect(setPromptMock).toHaveBeenCalledWith('')
+  })
+
+  it('clears the starter draft before navigating to the created thread', async () => {
+    currentThreadIdState = undefined as unknown as string
+    activePromptKey = 'temporary-chat'
+    promptState = 'starter prompt'
+    promptStateByKey = { 'temporary-chat': 'starter prompt' }
+    createThreadMock.mockResolvedValue({
+      id: 'thread-new',
+      title: 'starter prompt',
+      model: { id: 'model-a', provider: 'llamacpp' },
+      updated: Date.now() / 1000,
+      assistants: [],
+      metadata: {},
+    })
+
+    renderInput()
+
+    await act(async () => {
+      fireEvent.keyDown(getTextarea(), { key: 'Enter' })
+    })
+
+    expect(createThreadMock).toHaveBeenCalled()
+    expect(navigateMock).toHaveBeenCalledWith({
+      to: '/threads/$threadId',
+      params: { threadId: 'thread-new' },
+    })
+    expect(promptEvents).toEqual(
+      expect.arrayContaining(['temporary-chat:', 'navigate'])
+    )
+    expect(promptEvents.indexOf('temporary-chat:')).toBeLessThan(
+      promptEvents.indexOf('navigate')
+    )
   })
 
   it('routes /compact to onCompact without normal submit', async () => {

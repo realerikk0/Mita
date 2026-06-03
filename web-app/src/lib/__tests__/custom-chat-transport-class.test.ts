@@ -5,6 +5,7 @@ const h = vi.hoisted(() => ({
   serviceHub: null as any,
   mcpSettings: {} as any,
   selectedModel: null as any,
+  selectedProvider: '',
   getRelevantTools: vi.fn(),
   invalidateCache: vi.fn(),
 }))
@@ -19,7 +20,7 @@ vi.mock('@/hooks/useToolAvailable', () => ({
 }))
 
 vi.mock('@/hooks/useModelProvider', () => ({
-  useModelProvider: { getState: () => ({ selectedModel: h.selectedModel, selectedProvider: '', getProviderByName: () => null }) },
+  useModelProvider: { getState: () => ({ selectedModel: h.selectedModel, selectedProvider: h.selectedProvider, getProviderByName: () => null }) },
 }))
 
 vi.mock('@/hooks/useAssistant', () => ({
@@ -64,6 +65,7 @@ describe('CustomChatTransport', () => {
     h.serviceHub = null
     h.mcpSettings = {}
     h.selectedModel = null
+    h.selectedProvider = ''
     h.getRelevantTools.mockReset()
     h.invalidateCache.mockReset()
     transport = new CustomChatTransport('You are helpful', 'thread-1')
@@ -139,6 +141,37 @@ describe('CustomChatTransport', () => {
         pinnedServerNames: ['mita-computer-agent'],
       })
     )
+    expect(routedTransport.getTools()).toHaveProperty(
+      'computer_agent_create_directory'
+    )
+  })
+
+  it('loads tools for inferred OpenAI GPT tool-capable models with stale persisted capabilities', async () => {
+    h.selectedProvider = 'openai'
+    h.selectedModel = { id: 'gpt-5.5', capabilities: ['completion'] }
+    h.mcpSettings = {
+      enableSmartToolRouting: false,
+      computerAgentEnabled: true,
+    }
+    h.serviceHub = {
+      rag: () => ({ getTools: vi.fn().mockResolvedValue([]) }),
+      mcp: () => ({
+        getTools: vi.fn().mockResolvedValue([
+          {
+            name: 'computer_agent_create_directory',
+            description: 'Create a directory',
+            inputSchema: { type: 'object' },
+            server: 'mita-computer-agent',
+          },
+        ]),
+        getToolsForServers: vi.fn().mockResolvedValue([]),
+        getServerSummaries: vi.fn().mockResolvedValue([]),
+      }),
+    }
+    const routedTransport = new CustomChatTransport('You are helpful', 'thread-1')
+
+    await routedTransport.updateRagToolsAvailability(false, true, false)
+
     expect(routedTransport.getTools()).toHaveProperty(
       'computer_agent_create_directory'
     )

@@ -11,6 +11,8 @@
   "clearHistory": "Clear History",
   "autoRun": {
     "label": "Auto run",
+    "showPanel": "Show auto run",
+    "hidePanel": "Hide auto run",
     "rounds": "Rounds",
     "start": "Start",
     "pause": "Pause",

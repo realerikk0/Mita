@@ -251,6 +251,13 @@ describe('getModelCapabilities', () => {
     expect(capabilities).toContain(ModelCapabilities.COMPLETION)
   })
 
+  it('infers OpenAI GPT-5 point releases as tool-capable chat models', () => {
+    const capabilities = getModelCapabilities('openai', 'gpt-5.5')
+    expect(capabilities).toContain(ModelCapabilities.COMPLETION)
+    expect(capabilities).toContain(ModelCapabilities.TOOLS)
+    expect(capabilities).toContain(ModelCapabilities.VISION)
+  })
+
   it('excludes tools capability when model does not support it', () => {
     const capabilities = getModelCapabilities('mistral', 'mistral-nemo-2407')
     expect(capabilities).not.toContain(ModelCapabilities.TOOLS)
@@ -484,6 +491,27 @@ describe('getModelCapabilities', () => {
     expect(
       normalizeModelCapabilitiesForProvider('jingxing', {
         id: 'gpt-image-2',
+        capabilities: [ModelCapabilities.COMPLETION],
+        _userConfiguredCapabilities: true,
+      })
+    ).toEqual([ModelCapabilities.COMPLETION])
+  })
+
+  it('normalizes stale OpenAI GPT capabilities while preserving user configured values', () => {
+    expect(
+      normalizeModelCapabilitiesForProvider('openai', {
+        id: 'gpt-5.5',
+        capabilities: [ModelCapabilities.COMPLETION],
+      })
+    ).toEqual([
+      ModelCapabilities.COMPLETION,
+      ModelCapabilities.TOOLS,
+      ModelCapabilities.VISION,
+    ])
+
+    expect(
+      normalizeModelCapabilitiesForProvider('openai', {
+        id: 'gpt-5.5',
         capabilities: [ModelCapabilities.COMPLETION],
         _userConfiguredCapabilities: true,
       })

@@ -211,9 +211,25 @@ vi.mock('@/containers/DropdownModelProvider', () => ({
 }))
 
 vi.mock('@/containers/ChatInput', () => ({
-  default: ({ onSubmit, onStop, chatStatus }: any) => (
+  default: ({
+    onSubmit,
+    onStop,
+    chatStatus,
+    showAutoRunToggle,
+    autoRunPanelVisible,
+    onToggleAutoRunPanel,
+  }: any) => (
     <div data-testid="chat-input">
       <span data-testid="chat-status">{chatStatus}</span>
+      {showAutoRunToggle && (
+        <button
+          data-testid="auto-run-panel-toggle"
+          data-visible={String(autoRunPanelVisible)}
+          onClick={() => onToggleAutoRunPanel?.()}
+        >
+          toggle auto run
+        </button>
+      )}
       <button
         data-testid="chat-send"
         onClick={() => onSubmit('hello world', undefined)}
@@ -558,6 +574,12 @@ describe('ThreadDetail route', () => {
     h.messagesState.setMessages = vi.fn()
     h.appStateState.ragToolNames = new Set()
     h.appStateState.mcpToolNames = new Set()
+    h.mcpServersState.settings = {
+      computerAgentEnabled: false,
+      computerAgentShellEnabled: false,
+      computerAgentApprovalPolicy: 'alwaysAsk',
+      computerAgentSandboxAccess: 'readWrite',
+    }
     h.mockRagCallTool.mockResolvedValue({
       content: [{ type: 'text', text: 'rag result' }],
     })
@@ -655,6 +677,25 @@ describe('ThreadDetail route', () => {
     )
   })
 
+  it('instructs the model to create folders in the Computer Agent workspace with structured tools', () => {
+    h.mcpServersState.settings = {
+      computerAgentEnabled: true,
+      computerAgentShellEnabled: true,
+      computerAgentApprovalPolicy: 'alwaysAsk',
+      computerAgentSandboxAccess: 'readWrite',
+    }
+
+    renderComponent()
+
+    const systemMessage = h.useChatArgs.at(-1)?.systemMessage
+    expect(systemMessage).toContain('Computer Agent guidance')
+    expect(systemMessage).toContain('computer_agent_create_directory')
+    expect(systemMessage).toContain(
+      'When the user asks to create a folder in the current workspace'
+    )
+    expect(systemMessage).toContain('pass the relative folder path')
+  })
+
   it('prepends Mita identity guard to custom assistant instructions', () => {
     h.threadsState.threads['thread-1'].assistants = [
       { id: 'custom', name: 'Custom', instructions: 'Use a concise tone.' },
@@ -700,6 +741,36 @@ describe('ThreadDetail route', () => {
       expect(h.mockSendMessage).toHaveBeenCalled()
     })
     expect(h.messagesState.addMessage).toHaveBeenCalled()
+  })
+
+  it('toggles the auto run panel from the ChatInput toolbar', async () => {
+    renderComponent()
+
+    expect(screen.getByText('自动对话')).toBeInTheDocument()
+    expect(screen.getByTestId('auto-run-panel-toggle')).toHaveAttribute(
+      'data-visible',
+      'true'
+    )
+
+    await act(async () => {
+      screen.getByTestId('auto-run-panel-toggle').click()
+    })
+
+    expect(screen.queryByText('自动对话')).not.toBeInTheDocument()
+    expect(screen.getByTestId('auto-run-panel-toggle')).toHaveAttribute(
+      'data-visible',
+      'false'
+    )
+
+    await act(async () => {
+      screen.getByTestId('auto-run-panel-toggle').click()
+    })
+
+    expect(screen.getByText('自动对话')).toBeInTheDocument()
+    expect(screen.getByTestId('auto-run-panel-toggle')).toHaveAttribute(
+      'data-visible',
+      'true'
+    )
   })
 
   it('deletes a new empty thread when initial attachment processing fails', async () => {
