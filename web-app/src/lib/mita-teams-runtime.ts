@@ -1119,6 +1119,40 @@ function renderUserControl(control: MitaTeamsUserControl) {
   return parts.length ? parts.join('\n') : 'No explicit owner controls.'
 }
 
+function hasReusableTeam(config: MitaTeamsConfig) {
+  const hasSpecialistRole = config.roles.some(
+    (role) => role.enabled && role.id !== MITA_TEAMS_ORCHESTRATOR_ROLE_ID
+  )
+  if (!hasSpecialistRole) return false
+
+  const runStatus = config.runtime.run?.status
+  const hasRunHistory =
+    Boolean(runStatus && runStatus !== 'running') ||
+    config.runtime.teamEvents.some(
+      (event) =>
+        event.type === 'team_configured' ||
+        event.type === 'role_called' ||
+        event.type === 'run_completed'
+    ) ||
+    Object.values(config.runtime.roleStates).some(
+      (state) => state.stream.length > 0 || state.memory.version > 0
+    )
+
+  return hasRunHistory
+}
+
+function renderTeamContinuityGuidance(preferTeamReuse: boolean) {
+  if (!preferTeamReuse) {
+    return 'Team continuity: this appears to be a new Mita Teams task.'
+  }
+
+  return `Team continuity: this is a follow-up in an existing Mita Teams thread.
+- The current roles and channels are already configured; prefer reusing the configured team with call_roles.
+- Use configure_team only to add genuinely missing specialist roles or channels.
+- Do not recreate, rename, overwrite, or change the prompt/provider/model of existing roles.
+- Do not change the chosen task template, mode, scenario, or established channels unless the owner explicitly asks for a new team structure.`
+}
+
 function buildDecisionPrompt({
   config,
   runtime,
@@ -1129,6 +1163,7 @@ function buildDecisionPrompt({
   modelOptions,
   scenarioPlaybook,
   languageGuidance,
+  preferTeamReuse,
 }: {
   config: MitaTeamsConfig
   runtime: MitaTeamsRuntime
@@ -1139,6 +1174,7 @@ function buildDecisionPrompt({
   modelOptions: MitaTeamsModelOption[]
   scenarioPlaybook?: MitaTeamsScenarioPlaybook
   languageGuidance: string
+  preferTeamReuse: boolean
 }) {
   const roles = config.roles
     .filter((role) => role.enabled)
@@ -1174,6 +1210,8 @@ Recommended role ids: ${taskTemplate.recommendedRoleIds.join(', ') || 'none'}
 Default flow: ${taskTemplate.defaultFlow.join(' -> ')}
 Round: ${currentRound} / ${maxRounds}
 
+${renderTeamContinuityGuidance(preferTeamReuse)}
+
 Available enabled roles:
 ${roles}
 
@@ -1204,6 +1242,8 @@ Allowed shapes:
 Rules:
 - New teams start with only the Orchestrator and the main task channel.
 - If specialist work is needed, first create only the minimum useful roles and channels with configure_team.
+- For follow-up owner messages in an existing team, prefer call_roles with existing roleIds/channelIds before configuring anything new.
+- In follow-up runs, configure_team is additive only: include only new roles/channels that do not already exist.
 - Assign each newly created role a provider/modelId from the model assignment guide when a suitable configured model exists.
 - Prefer model diversity by role strength: GPT for code/build/debug, Claude for complex research/reasoning, Gemini for UI/UX or broad retrieval, Grok for fact-checking/skepticism.
 - If no suitable configured model exists for a role, reuse the current model instead of inventing unavailable provider/modelId values.
@@ -2188,6 +2228,72 @@ function applyTeamConfiguration({
   }
 }
 
+function teamConfigurationDelta(
+  config: MitaTeamsConfig,
+  decision: Extract<MitaTeamsOrchestratorDecision, { action: 'configure_team' }>
+) {
+  const currentRoleIds = new Set(config.roles.map((role) => role.id))
+  const currentChannels = new Map(
+    config.channels.map((channel) => [channel.id, channel])
+  )
+  const roles = decision.roles.filter((role) => !currentRoleIds.has(role.id))
+  const channels: MitaTeamsChannelConfig[] = []
+
+  for (const channel of decision.channels) {
+    const existing = currentChannels.get(channel.id)
+    if (!existing) {
+      channels.push(channel)
+      continue
+    }
+
+    const addedRoleIds = channel.roleIds.filter(
+      (roleId) => !existing.roleIds.includes(roleId)
+    )
+    if (addedRoleIds.length > 0) {
+      channels.push({
+        ...existing,
+        roleIds: Array.from(new Set([...existing.roleIds, ...addedRoleIds])),
+      })
+    }
+  }
+
+  return { roles, channels }
+}
+
+function preferExistingTeamDecision(
+  config: MitaTeamsConfig,
+  decision: MitaTeamsOrchestratorDecision,
+  preferTeamReuse: boolean
+): MitaTeamsOrchestratorDecision {
+  if (!preferTeamReuse || decision.action !== 'configure_team') {
+    return decision
+  }
+
+  const delta = teamConfigurationDelta(config, decision)
+  if (delta.roles.length === 0 && delta.channels.length === 0) {
+    if (decision.calls.length === 0) {
+      return {
+        action: 'milestone',
+        reason: decision.reason,
+        milestone: 'Mita Teams reused existing roles and channels.',
+      }
+    }
+    return {
+      action: 'call_roles',
+      mode: decision.mode ?? 'hybrid',
+      reason: decision.reason,
+      calls: decision.calls,
+      updates: decision.updates,
+    }
+  }
+
+  return {
+    ...decision,
+    roles: delta.roles,
+    channels: delta.channels,
+  }
+}
+
 function parseDecision(
   text: string,
   config: MitaTeamsConfig,
@@ -3168,10 +3274,13 @@ export async function runMitaTeamsRuntime({
   generateDecisionText = defaultGenerateDecisionText,
 }: RunMitaTeamsRuntimeOptions): Promise<MitaTeamsRuntimeResult> {
   const initialModelOptions = buildAvailableModelOptions()
+  const preferTeamReuse = hasReusableTeam(config)
   const scenarioPlaybook =
-    config.scenarioId === 'market_research'
-      ? MARKET_RESEARCH_PLAYBOOK
-      : detectScenarioPlaybook(userText)
+    preferTeamReuse
+      ? undefined
+      : config.scenarioId === 'market_research'
+        ? MARKET_RESEARCH_PLAYBOOK
+        : detectScenarioPlaybook(userText)
   const languageGuidance = buildLanguageGuidance(userText)
   let workingConfig = enforceTaskDeliveryChannel(
     applyScenarioPlaybook(
@@ -3226,6 +3335,7 @@ export async function runMitaTeamsRuntime({
         modelOptions: initialModelOptions,
         scenarioPlaybook,
         languageGuidance,
+        preferTeamReuse,
       })
       const decisionResolution = await generateParsedDecision({
         decisionPrompt,
@@ -3236,11 +3346,15 @@ export async function runMitaTeamsRuntime({
         generateDecisionText,
         abortSignal,
       })
-      const decision = enforceScenarioBeforeStop(
-        decisionResolution.decision,
+      const decision = preferExistingTeamDecision(
         workingConfig,
-        runtime,
-        scenarioPlaybook
+        enforceScenarioBeforeStop(
+          decisionResolution.decision,
+          workingConfig,
+          runtime,
+          scenarioPlaybook
+        ),
+        preferTeamReuse
       )
       runtime = addRunUsage(runtime, decisionResolution.usage)
 

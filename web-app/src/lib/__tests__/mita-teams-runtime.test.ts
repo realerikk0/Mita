@@ -1011,6 +1011,177 @@ describe('mita teams runtime', () => {
     )
   })
 
+  it('reuses existing roles and channels when a follow-up repeats configure_team', async () => {
+    const config = createDefaultMitaTeamsConfig({
+      provider: 'openai',
+      id: 'gpt-5',
+    })
+    let firstDecisionCount = 0
+
+    const firstRun = await runMitaTeamsRuntime({
+      config,
+      userText: '研究 MRVL 的投资价值。',
+      generateDecisionText: async () => {
+        firstDecisionCount += 1
+        if (firstDecisionCount === 1) {
+          return JSON.stringify({
+            action: 'configure_team',
+            mode: 'serial',
+            reason: 'Create the analyst role and research channel.',
+            roles: [
+              {
+                id: 'analyst',
+                name: 'Market Analyst',
+                label: 'Analyst',
+                description: 'Analyzes investment evidence.',
+                prompt: 'Use the established investment research framework.',
+                permission: 'read',
+              },
+            ],
+            channels: [
+              {
+                id: 'research',
+                label: 'Research',
+                description: 'Research room.',
+                roleIds: ['analyst'],
+              },
+            ],
+            calls: [
+              {
+                roleId: 'analyst',
+                channelId: 'research',
+                instruction: 'Prepare the first pass.',
+              },
+            ],
+          })
+        }
+
+        return JSON.stringify({
+          action: 'stop',
+          reason: 'First pass is ready.',
+          finalResponse: 'First pass ready.',
+        })
+      },
+      generateRoleText: async () => 'Fact: MRVL needs updated validation.',
+    })
+    const configuredEventCount = firstRun.config.runtime.teamEvents.filter(
+      (event) => event.type === 'team_configured'
+    ).length
+    let followUpDecisionCount = 0
+    let capturedPrompt = ''
+
+    const followUp = await runMitaTeamsRuntime({
+      config: firstRun.config,
+      userText: '继续补充风险审查。',
+      generateDecisionText: async ({ prompt }) => {
+        followUpDecisionCount += 1
+        capturedPrompt = prompt
+        if (followUpDecisionCount === 1) {
+          return JSON.stringify({
+            action: 'configure_team',
+            mode: 'serial',
+            reason: 'Rebuild the same team for the follow-up.',
+            roles: [
+              {
+                id: 'analyst',
+                name: 'Market Analyst',
+                label: 'Analyst',
+                description: 'Replacement description.',
+                prompt: 'Replacement prompt that should not overwrite memory.',
+                permission: 'read',
+              },
+            ],
+            channels: [
+              {
+                id: 'research',
+                label: 'Research',
+                description: 'Replacement room description.',
+                roleIds: ['analyst'],
+              },
+            ],
+            calls: [
+              {
+                roleId: 'analyst',
+                channelId: 'research',
+                instruction: 'Reuse the existing analyst for risk review.',
+              },
+            ],
+          })
+        }
+
+        return JSON.stringify({
+          action: 'stop',
+          reason: 'Follow-up is complete.',
+          finalResponse: 'Follow-up ready.',
+        })
+      },
+      generateRoleText: async () => 'Risk: Customer concentration still matters.',
+    })
+
+    expect(capturedPrompt).toContain('prefer reusing the configured team')
+    expect(followUp.status).toBe('completed')
+    expect(
+      followUp.config.roles.find((role) => role.id === 'analyst')?.prompt
+    ).toBe('Use the established investment research framework.')
+    expect(
+      followUp.config.runtime.teamEvents.filter(
+        (event) => event.type === 'team_configured'
+      )
+    ).toHaveLength(configuredEventCount)
+    expect(
+      followUp.config.runtime.teamEvents.some(
+        (event) => event.title === 'Orchestrator chose call_roles'
+      )
+    ).toBe(true)
+
+    let noOpDecisionCount = 0
+    const noOpFollowUp = await runMitaTeamsRuntime({
+      config: followUp.config,
+      userText: '继续。',
+      generateDecisionText: async () => {
+        noOpDecisionCount += 1
+        if (noOpDecisionCount === 1) {
+          return JSON.stringify({
+            action: 'configure_team',
+            reason: 'Repeat the same configuration without a call.',
+            roles: [
+              {
+                id: 'analyst',
+                name: 'Market Analyst',
+                label: 'Analyst',
+                description: 'Another replacement description.',
+                prompt: 'Another replacement prompt.',
+                permission: 'read',
+              },
+            ],
+            channels: [
+              {
+                id: 'research',
+                label: 'Research',
+                description: 'Another replacement room.',
+                roleIds: ['analyst'],
+              },
+            ],
+            calls: [],
+          })
+        }
+
+        return JSON.stringify({
+          action: 'stop',
+          reason: 'No-op follow-up is complete.',
+          finalResponse: 'No-op follow-up ready.',
+        })
+      },
+      generateRoleText: async () => 'unused',
+    })
+
+    expect(
+      noOpFollowUp.config.runtime.teamEvents.filter(
+        (event) => event.type === 'team_configured'
+      )
+    ).toHaveLength(configuredEventCount)
+  })
+
   it('aggregates orchestrator and role token usage across a run', async () => {
     const config = createDefaultMitaTeamsConfig({
       provider: 'openai',
