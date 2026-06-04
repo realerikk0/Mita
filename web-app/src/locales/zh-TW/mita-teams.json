@@ -72,6 +72,7 @@
   "roleDescription": "角色說明",
   "rolePrompt": "角色提示詞",
   "roleModel": "角色模型",
+  "archiveRole": "封存角色",
   "roleChatTitle": "與 {{role}} 對話",
   "editActivityTitle": "編輯活動標題",
   "roundLimit": "{{count}} 輪",

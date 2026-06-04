@@ -291,9 +291,12 @@ export type MitaTeamsRoleConfig = {
   enabled: boolean
 }
 
+export type MitaTeamsWorkflowControl = 'user_spec'
+
 export type MitaTeamsConfig = {
   enabled: boolean
   scenarioId?: MitaTeamsScenarioId
+  workflowControl?: MitaTeamsWorkflowControl
   mode: MitaTeamsMode
   taskTemplateId: MitaTeamsTaskTemplateId
   activeChannel: MitaTeamsChannelId
@@ -1247,6 +1250,7 @@ export function normalizeMitaTeamsConfig(
     ...raw,
     enabled: true,
     scenarioId: raw.scenarioId === 'market_research' ? raw.scenarioId : undefined,
+    workflowControl: raw.workflowControl === 'user_spec' ? 'user_spec' : undefined,
     mode: isMitaTeamsMode(raw.mode) ? raw.mode : fallback.mode,
     taskTemplateId,
     activeChannel,

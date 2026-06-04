@@ -72,6 +72,7 @@
   "roleDescription": "Role description",
   "rolePrompt": "Role prompt",
   "roleModel": "Role model",
+  "archiveRole": "Archive role",
   "roleChatTitle": "Chat with {{role}}",
   "editActivityTitle": "Edit activity title",
   "roundLimit": "{{count}} rounds",

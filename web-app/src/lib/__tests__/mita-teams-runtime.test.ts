@@ -1182,6 +1182,137 @@ describe('mita teams runtime', () => {
     ).toHaveLength(configuredEventCount)
   })
 
+  it('keeps markdown-defined workflows under owner control instead of injecting fallback roles', async () => {
+    const config = createDefaultMitaTeamsConfig({
+      provider: 'openai',
+      id: 'gpt-5',
+    })
+    let decisionCount = 0
+    let capturedPrompt = ''
+    const calledRoles: string[] = []
+
+    const result = await runMitaTeamsRuntime({
+      config,
+      userText: `# 人生决策听证会
+
+## 二、配置
+- **模式**：圆桌
+- **轮次**：5 轮
+- **频道名**：#人生听证会
+
+### 角色卡（按发言顺序）
+
+#### 1️⃣ 案情侦察员 · \`grok-4-1-fast-reasoning\`
+\`\`\`
+你是听证会的案情侦察员。只做事实清单。
+\`\`\`
+
+#### 2️⃣ 机会律师 · \`grok-4.3\`
+\`\`\`
+你是改变方辩护律师。
+\`\`\`
+
+#### 3️⃣ 大法官 · \`claude-opus-4-8\`
+\`\`\`
+你是主审大法官，在所有人发言结束后宣判。
+\`\`\`
+
+## 为什么不用美股调研
+美股调研容易触发财务合规风险，这个 demo 不使用 Market Research 团队。`,
+      generateDecisionText: async ({ prompt }) => {
+        decisionCount += 1
+        capturedPrompt = prompt
+        if (decisionCount === 1) {
+          return JSON.stringify({
+            action: 'configure_team',
+            mode: 'serial',
+            reason: 'Configure hearing roles, but accidentally add market fallback.',
+            roles: [
+              {
+                id: 'data_scout',
+                name: 'Data Scout',
+                label: 'Data',
+                description: 'Collects market data.',
+                prompt: 'Collect market data.',
+                permission: 'read',
+              },
+              {
+                id: 'case_scout',
+                name: '案情侦察员助手',
+                label: '侦察',
+                description: '把处境拆成事实清单。',
+                prompt: '你是听证会的案情侦察员。只做事实清单。',
+                permission: 'read',
+                modelId: 'wrong-model',
+              },
+              {
+                id: 'judge',
+                name: '大法官',
+                label: '法官',
+                description: '最终宣判。',
+                prompt: '你是主审大法官，在所有人发言结束后宣判。',
+                permission: 'read',
+              },
+            ],
+            channels: [
+              {
+                id: 'research',
+                label: 'Market Research',
+                description: 'Fallback market room.',
+                roleIds: ['data_scout'],
+              },
+              {
+                id: 'hearing',
+                label: '人生听证会',
+                description: '用户文档定义的听证会频道。',
+                roleIds: ['case_scout', 'judge', 'data_scout'],
+              },
+            ],
+            calls: [
+              {
+                roleId: 'data_scout',
+                channelId: 'research',
+                instruction: 'Run market research.',
+              },
+              {
+                roleId: 'case_scout',
+                channelId: 'hearing',
+                instruction: '列事实清单。',
+              },
+            ],
+          })
+        }
+
+        return JSON.stringify({
+          action: 'stop',
+          reason: 'Workflow run is complete.',
+          finalResponse: '听证会完成。',
+        })
+      },
+      generateRoleText: async ({ role }) => {
+        calledRoles.push(role.id)
+        return `Fact: ${role.name} completed its document-defined task.`
+      },
+    })
+
+    expect(capturedPrompt).toContain('owner supplied an explicit workflow')
+    expect(result.config.workflowControl).toBe('user_spec')
+    expect(result.config.scenarioId).toBeUndefined()
+    expect(result.config.roles.map((role) => role.id)).not.toContain(
+      'data_scout'
+    )
+    expect(result.config.roles.map((role) => role.name)).toEqual(
+      expect.arrayContaining(['案情侦察员助手', '大法官'])
+    )
+    expect(
+      result.config.channels.some((channel) => channel.id === 'research')
+    ).toBe(false)
+    expect(
+      result.config.channels.find((channel) => channel.id === 'hearing')?.roleIds
+    ).toEqual(['case_scout', 'judge'])
+    expect(calledRoles).toEqual(['case_scout'])
+  })
+
   it('aggregates orchestrator and role token usage across a run', async () => {
     const config = createDefaultMitaTeamsConfig({
       provider: 'openai',

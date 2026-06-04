@@ -53,6 +53,7 @@ import {
 import type { UIMessage } from '@ai-sdk/react'
 import {
   AlertTriangle,
+  Archive,
   ArrowLeft,
   Boxes,
   Brain,
@@ -393,17 +394,18 @@ function rolesForChannel(
   channel: MitaTeamsChannelConfig,
   roles: MitaTeamsRoleConfig[]
 ) {
+  const enabledRoles = roles.filter((role) => role.enabled)
   const roleIds = new Set(channel.roleIds)
   const channelRoles = channel.roleIds.length
-    ? roles.filter((role) => roleIds.has(role.id))
+    ? enabledRoles.filter((role) => roleIds.has(role.id))
     : []
 
   if (channelRoles.length) return channelRoles
 
-  const orchestrator = roles.find(
+  const orchestrator = enabledRoles.find(
     (role) => role.id === MITA_TEAMS_ORCHESTRATOR_ROLE_ID
   )
-  return orchestrator ? [orchestrator] : roles.slice(0, 1)
+  return orchestrator ? [orchestrator] : enabledRoles.slice(0, 1)
 }
 
 function eventBelongsToChannel(
@@ -1450,6 +1452,7 @@ function RoleConfigPanel({
   onBack,
   onUpdate,
   onSelectModel,
+  onArchive,
 }: {
   role: MitaTeamsRoleConfig
   modelOptions: ModelOption[]
@@ -1459,9 +1462,11 @@ function RoleConfigPanel({
     patch: Partial<MitaTeamsRoleConfig>
   ) => void
   onSelectModel: (roleId: MitaTeamsRoleId, option: ModelOption) => void
+  onArchive: (roleId: MitaTeamsRoleId) => void
 }) {
   const { t } = useTranslation()
   const roleName = localizedRoleName(role, t)
+  const canArchive = role.id !== MITA_TEAMS_ORCHESTRATOR_ROLE_ID
 
   return (
     <div className="h-full overflow-y-auto">
@@ -1594,6 +1599,20 @@ function RoleConfigPanel({
             </DropdownMenuContent>
           </DropdownMenu>
         </section>
+
+        {canArchive && (
+          <section className="border-t pt-4">
+            <Button
+              type="button"
+              variant="outline"
+              className="h-9 w-full justify-start gap-2 text-xs text-muted-foreground"
+              onClick={() => onArchive(role.id)}
+            >
+              <Archive className="size-3.5" />
+              {t('mita-teams:archiveRole')}
+            </Button>
+          </section>
+        )}
       </div>
     </div>
   )
@@ -1713,6 +1732,28 @@ export const MitaTeamsWorkspace = memo(function MitaTeamsWorkspace({
       })
     },
     [config.roles, patchConfig]
+  )
+
+  const archiveRole = useCallback(
+    (roleId: MitaTeamsRoleId) => {
+      if (roleId === MITA_TEAMS_ORCHESTRATOR_ROLE_ID) return
+      const fallbackRoleId =
+        config.roles.find((role) => role.enabled && role.id !== roleId)?.id ??
+        MITA_TEAMS_ORCHESTRATOR_ROLE_ID
+
+      patchConfig({
+        roles: config.roles.map((role) =>
+          role.id === roleId ? { ...role, enabled: false } : role
+        ),
+        channels: config.channels.map((channel) => ({
+          ...channel,
+          roleIds: channel.roleIds.filter((id) => id !== roleId),
+        })),
+        activeRoleId: fallbackRoleId,
+        workspaceView: 'team-chat',
+      })
+    },
+    [config.channels, config.roles, patchConfig]
   )
 
   const addRoleFromTemplate = useCallback(
@@ -1981,7 +2022,7 @@ export const MitaTeamsWorkspace = memo(function MitaTeamsWorkspace({
             </DropdownMenu>
           </div>
           <div className="space-y-2">
-            {config.roles.map((role) => {
+            {enabledRoles.map((role) => {
               const active = config.activeRoleId === role.id
               const roleViewActive =
                 active &&
@@ -2232,6 +2273,7 @@ export const MitaTeamsWorkspace = memo(function MitaTeamsWorkspace({
               onBack={openTeamChat}
               onUpdate={updateRole}
               onSelectModel={selectRoleModel}
+              onArchive={archiveRole}
             />
           ) : (
             <Conversation className="absolute inset-0 text-start">

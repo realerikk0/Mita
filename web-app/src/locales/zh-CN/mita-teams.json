@@ -72,6 +72,7 @@
   "roleDescription": "角色说明",
   "rolePrompt": "角色提示词",
   "roleModel": "角色模型",
+  "archiveRole": "归档角色",
   "roleChatTitle": "与 {{role}} 对话",
   "editActivityTitle": "编辑活动标题",
   "roundLimit": "{{count}} 轮",

@@ -78,6 +78,7 @@ const h = vi.hoisted(() => {
     'mita-teams:roleDescription': 'Role description',
     'mita-teams:rolePrompt': 'Role prompt',
     'mita-teams:roleModel': 'Role model',
+    'mita-teams:archiveRole': 'Archive role',
     'mita-teams:permissions': 'Permissions',
     'mita-teams:permissionRead': 'Read',
     'mita-teams:permissionTools': 'Tools',
@@ -475,6 +476,86 @@ describe('MitaTeamsWorkspace', () => {
         workspaceView: 'role-config',
       })
     )
+  })
+
+  it('archives a non-host role from role configuration and removes it from channels', async () => {
+    const user = userEvent.setup()
+    const onConfigChange = vi.fn()
+    const base = createConfig()
+    const strayRole = {
+      ...base.roles[0],
+      id: 'data_scout',
+      name: 'Data Scout',
+      label: 'Data',
+      description: 'Unexpected fallback role.',
+      prompt: 'Collect market data.',
+      color: 'bg-sky-600',
+      enabled: true,
+    }
+    const config: MitaTeamsConfig = {
+      ...base,
+      activeChannel: 'research',
+      activeRoleId: strayRole.id,
+      workspaceView: 'role-config',
+      roles: [...base.roles, strayRole],
+      channels: [
+        ...base.channels,
+        {
+          id: 'research',
+          label: 'Research',
+          description: 'Research room',
+          roleIds: [strayRole.id],
+        },
+      ],
+    }
+    renderWorkspace({ config, onConfigChange })
+
+    await user.click(screen.getByRole('button', { name: 'Archive role' }))
+
+    expect(onConfigChange).toHaveBeenCalledWith(
+      expect.objectContaining({
+        activeRoleId: 'orchestrator',
+        workspaceView: 'team-chat',
+        roles: expect.arrayContaining([
+          expect.objectContaining({ id: 'data_scout', enabled: false }),
+        ]),
+        channels: expect.arrayContaining([
+          expect.objectContaining({ id: 'research', roleIds: [] }),
+        ]),
+      })
+    )
+  })
+
+  it('hides archived roles from channel roster when saved membership is stale', () => {
+    const base = createConfig()
+    const archivedRole = {
+      ...base.roles[0],
+      id: 'data_scout',
+      name: 'Data Scout',
+      label: 'Data',
+      description: 'Unexpected fallback role.',
+      prompt: 'Collect market data.',
+      color: 'bg-sky-600',
+      enabled: false,
+    }
+    const config: MitaTeamsConfig = {
+      ...base,
+      activeChannel: 'research',
+      roles: [...base.roles, archivedRole],
+      channels: [
+        ...base.channels,
+        {
+          id: 'research',
+          label: 'Research',
+          description: 'Research room',
+          roleIds: [archivedRole.id],
+        },
+      ],
+    }
+
+    renderWorkspace({ config })
+
+    expect(screen.queryByText('Data Scout')).not.toBeInTheDocument()
   })
 
   it('renders the team timeline and channel discussion in readable order outside current task', () => {

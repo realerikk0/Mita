@@ -113,6 +113,18 @@ type MitaTeamsModelOption = {
   nativeWebSearch: boolean
 }
 
+type MitaTeamsUserWorkflowRoleSpec = {
+  name: string
+  key: string
+  modelId?: string
+}
+
+type MitaTeamsUserWorkflowSpec = {
+  explicit: boolean
+  roles: MitaTeamsUserWorkflowRoleSpec[]
+  channelLabel?: string
+}
+
 export type RunMitaTeamsRuntimeOptions = {
   config: MitaTeamsConfig
   userText: string
@@ -482,6 +494,54 @@ function detectScenarioPlaybook(userText: string) {
     return MARKET_RESEARCH_PLAYBOOK
   }
   return undefined
+}
+
+function workflowTextKey(value: string) {
+  return value
+    .trim()
+    .toLowerCase()
+    .replace(/[`*_~\s，。,.、:：()（）[\]【】"'“”‘’]/g, '')
+}
+
+function cleanWorkflowRoleName(value: string) {
+  return value
+    .replace(/^[\s\d.)、:：#️⃣\uFE0F\u20E3①-⑳一二三四五六七八九十]+/, '')
+    .replace(/\s+/g, ' ')
+    .trim()
+}
+
+function detectUserWorkflowSpec(userText: string): MitaTeamsUserWorkflowSpec {
+  const roles: MitaTeamsUserWorkflowRoleSpec[] = []
+  const seen = new Set<string>()
+  const headingPattern =
+    /^#{2,6}\s*(.+?)\s*[·•\-–—]\s*`([^`\n]+)`\s*$/gm
+  let match: RegExpExecArray | null
+
+  while ((match = headingPattern.exec(userText))) {
+    const name = cleanWorkflowRoleName(match[1] ?? '')
+    const modelId = match[2]?.trim()
+    const key = workflowTextKey(name)
+    if (!name || !key || seen.has(key)) continue
+    seen.add(key)
+    roles.push({
+      name,
+      key,
+      ...(modelId ? { modelId } : {}),
+    })
+  }
+
+  const channelMatch = userText.match(/频道名\s*[:：]\s*#?([^\n`*_]+)/)
+  const channelLabel = channelMatch?.[1]?.trim()
+  const hasWorkflowSignals =
+    /(角色卡|按发言顺序|频道名|轮次|模式|工作流|流程|prompt|提示词)/i.test(
+      userText
+    ) && /```|`[^`\n]+`/.test(userText)
+
+  return {
+    explicit: roles.length > 0 && hasWorkflowSignals,
+    roles,
+    ...(channelLabel ? { channelLabel } : {}),
+  }
 }
 
 function hasTickerLikeInvestmentTarget(userText: string) {
@@ -1153,6 +1213,30 @@ function renderTeamContinuityGuidance(preferTeamReuse: boolean) {
 - Do not change the chosen task template, mode, scenario, or established channels unless the owner explicitly asks for a new team structure.`
 }
 
+function renderWorkflowControlGuidance(
+  workflowSpec?: MitaTeamsUserWorkflowSpec
+) {
+  if (!workflowSpec?.explicit) return 'Workflow control: automatic team design.'
+
+  const roles = workflowSpec.roles.length
+    ? workflowSpec.roles
+        .map((role) =>
+          role.modelId ? `- ${role.name}: ${role.modelId}` : `- ${role.name}`
+        )
+        .join('\n')
+    : '- Reuse the roles already configured in this thread.'
+  const channel = workflowSpec.channelLabel
+    ? `\nOwner-defined channel: #${workflowSpec.channelLabel}`
+    : ''
+
+  return `Workflow control: the owner supplied an explicit workflow.
+Allowed owner-defined roles:
+${roles}${channel}
+- Do not invent fallback roles, market-research roles, template roles, or extra channels.
+- If a needed role/model/channel is missing or unavailable, ask the owner instead of silently replacing it.
+- Configure only the roles and channels described by the owner workflow, then call them in the owner-specified order.`
+}
+
 function buildDecisionPrompt({
   config,
   runtime,
@@ -1164,6 +1248,7 @@ function buildDecisionPrompt({
   scenarioPlaybook,
   languageGuidance,
   preferTeamReuse,
+  workflowSpec,
 }: {
   config: MitaTeamsConfig
   runtime: MitaTeamsRuntime
@@ -1175,6 +1260,7 @@ function buildDecisionPrompt({
   scenarioPlaybook?: MitaTeamsScenarioPlaybook
   languageGuidance: string
   preferTeamReuse: boolean
+  workflowSpec?: MitaTeamsUserWorkflowSpec
 }) {
   const roles = config.roles
     .filter((role) => role.enabled)
@@ -1211,6 +1297,8 @@ Default flow: ${taskTemplate.defaultFlow.join(' -> ')}
 Round: ${currentRound} / ${maxRounds}
 
 ${renderTeamContinuityGuidance(preferTeamReuse)}
+
+${renderWorkflowControlGuidance(workflowSpec)}
 
 Available enabled roles:
 ${roles}
@@ -2260,6 +2348,126 @@ function teamConfigurationDelta(
   return { roles, channels }
 }
 
+function workflowSpecForRole(
+  workflowSpec: MitaTeamsUserWorkflowSpec | undefined,
+  role: Pick<MitaTeamsRoleConfig, 'id' | 'name' | 'label'>
+) {
+  if (!workflowSpec?.explicit || workflowSpec.roles.length === 0) {
+    return undefined
+  }
+
+  const candidates = [
+    workflowTextKey(role.name),
+    workflowTextKey(role.label),
+    workflowTextKey(role.id),
+  ].filter(Boolean)
+
+  return workflowSpec.roles.find((spec) =>
+    candidates.some((candidate) => workflowKeysMatch(candidate, spec.key))
+  )
+}
+
+function workflowKeysMatch(candidate: string, specKey: string) {
+  if (candidate === specKey) return true
+
+  const shorter = candidate.length <= specKey.length ? candidate : specKey
+  const hasUsefulShortKey =
+    shorter.length >= 3 || /^[\u4E00-\u9FFF]{2,}$/.test(shorter)
+  if (!hasUsefulShortKey) return false
+
+  return candidate.includes(specKey) || specKey.includes(candidate)
+}
+
+function roleAllowedByWorkflowSpec(
+  workflowSpec: MitaTeamsUserWorkflowSpec | undefined,
+  role: Pick<MitaTeamsRoleConfig, 'id' | 'name' | 'label'>
+) {
+  if (!workflowSpec?.explicit) return true
+  if (workflowSpec.roles.length === 0) return true
+  return Boolean(workflowSpecForRole(workflowSpec, role))
+}
+
+function applyWorkflowRoleModel(
+  role: MitaTeamsRoleConfig,
+  workflowSpec: MitaTeamsUserWorkflowSpec,
+  modelOptions: MitaTeamsModelOption[]
+) {
+  const spec = workflowSpecForRole(workflowSpec, role)
+  if (!spec?.modelId) return role
+
+  const matchedModel = modelOptions.find(
+    (option) => option.modelId === spec.modelId
+  )
+  if (!matchedModel) return role
+
+  return {
+    ...role,
+    provider: matchedModel.provider,
+    modelId: matchedModel.modelId,
+  }
+}
+
+function constrainDecisionToWorkflowSpec(
+  config: MitaTeamsConfig,
+  decision: MitaTeamsOrchestratorDecision,
+  workflowSpec: MitaTeamsUserWorkflowSpec | undefined,
+  modelOptions: MitaTeamsModelOption[]
+): MitaTeamsOrchestratorDecision {
+  if (!workflowSpec?.explicit) return decision
+
+  if (decision.action === 'configure_team') {
+    const roles = decision.roles
+      .filter((role) => roleAllowedByWorkflowSpec(workflowSpec, role))
+      .map((role) => applyWorkflowRoleModel(role, workflowSpec, modelOptions))
+    const allowedRoleIds = new Set([
+      ...config.roles
+        .filter((role) => roleAllowedByWorkflowSpec(workflowSpec, role))
+        .map((role) => role.id),
+      ...roles.map((role) => role.id),
+    ])
+    const channels = decision.channels
+      .map((channel) => ({
+        ...channel,
+        roleIds: channel.roleIds.filter((roleId) => allowedRoleIds.has(roleId)),
+      }))
+      .filter(
+        (channel) =>
+          channel.id === MITA_TEAMS_TASK_CHANNEL_ID ||
+          channel.roleIds.length > 0
+      )
+    const channelIds = new Set([
+      ...config.channels.map((channel) => channel.id),
+      ...channels.map((channel) => channel.id),
+    ])
+    const calls = decision.calls.filter(
+      (call) =>
+        allowedRoleIds.has(call.roleId) &&
+        (!call.channelId || channelIds.has(call.channelId))
+    )
+
+    return {
+      ...decision,
+      roles,
+      channels,
+      calls,
+    }
+  }
+
+  if (decision.action === 'call_roles') {
+    const calls = decision.calls.filter((call) => {
+      const role = roleById(config, call.roleId)
+      return role ? roleAllowedByWorkflowSpec(workflowSpec, role) : false
+    })
+
+    return {
+      ...decision,
+      calls,
+    }
+  }
+
+  return decision
+}
+
 function preferExistingTeamDecision(
   config: MitaTeamsConfig,
   decision: MitaTeamsOrchestratorDecision,
@@ -3274,9 +3482,17 @@ export async function runMitaTeamsRuntime({
   generateDecisionText = defaultGenerateDecisionText,
 }: RunMitaTeamsRuntimeOptions): Promise<MitaTeamsRuntimeResult> {
   const initialModelOptions = buildAvailableModelOptions()
+  const detectedWorkflowSpec = detectUserWorkflowSpec(userText)
+  const workflowSpec =
+    detectedWorkflowSpec.explicit || config.workflowControl === 'user_spec'
+      ? {
+          ...detectedWorkflowSpec,
+          explicit: true,
+        }
+      : undefined
   const preferTeamReuse = hasReusableTeam(config)
   const scenarioPlaybook =
-    preferTeamReuse
+    workflowSpec?.explicit || preferTeamReuse
       ? undefined
       : config.scenarioId === 'market_research'
         ? MARKET_RESEARCH_PLAYBOOK
@@ -3289,6 +3505,14 @@ export async function runMitaTeamsRuntime({
       initialModelOptions
     )
   )
+  if (workflowSpec?.explicit) {
+    workingConfig = {
+      ...workingConfig,
+      workflowControl: 'user_spec',
+      scenarioId: undefined,
+      updatedAt: nowIso(),
+    }
+  }
   let runtime = startRuntimeRun(workingConfig.runtime, workingConfig)
   let recentOutputs: RoleOutput[] = []
   const userControl = parseUserControl(userText, workingConfig)
@@ -3336,6 +3560,7 @@ export async function runMitaTeamsRuntime({
         scenarioPlaybook,
         languageGuidance,
         preferTeamReuse,
+        workflowSpec,
       })
       const decisionResolution = await generateParsedDecision({
         decisionPrompt,
@@ -3349,7 +3574,12 @@ export async function runMitaTeamsRuntime({
       const decision = preferExistingTeamDecision(
         workingConfig,
         enforceScenarioBeforeStop(
-          decisionResolution.decision,
+          constrainDecisionToWorkflowSpec(
+            workingConfig,
+            decisionResolution.decision,
+            workflowSpec,
+            initialModelOptions
+          ),
           workingConfig,
           runtime,
           scenarioPlaybook

@@ -83,6 +83,26 @@ describe('mita teams metadata', () => {
     expect(config?.runtime.roleStates.reviewer?.roleId).toBe('reviewer')
   })
 
+  it('preserves explicit owner workflow control while cleaning unknown values', () => {
+    const config = normalizeMitaTeamsConfig(
+      {
+        enabled: true,
+        workflowControl: 'user_spec',
+      },
+      { provider: 'openai', id: 'gpt-5' }
+    )
+    const cleaned = normalizeMitaTeamsConfig(
+      {
+        enabled: true,
+        workflowControl: 'auto',
+      },
+      { provider: 'openai', id: 'gpt-5' }
+    )
+
+    expect(config?.workflowControl).toBe('user_spec')
+    expect(cleaned?.workflowControl).toBeUndefined()
+  })
+
   it('keeps dynamic roles and channels while cleaning channel membership', () => {
     const config = normalizeMitaTeamsConfig(
       {
