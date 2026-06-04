@@ -12,6 +12,7 @@ pub mod setup;
 pub mod state;
 pub mod system;
 pub mod threads;
+pub mod video_assets;
 
 #[cfg(not(any(target_os = "android", target_os = "ios")))]
 pub mod updater;

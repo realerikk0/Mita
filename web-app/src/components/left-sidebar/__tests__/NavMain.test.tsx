@@ -6,10 +6,10 @@ describe('NavMain', () => {
   it('places New Image directly after New Chat', () => {
     const items = getNavMainItems(vi.fn(), vi.fn(), vi.fn(), vi.fn(), vi.fn())
     const titles = items.map((item) => item.title)
-    const newImageItem = items.find((item) => item.title === 'common:newImage')
+    const newImageItem = items.find((item) => item.title === 'common:newMedia')
 
     expect(titles[titles.indexOf('common:newChat') + 1]).toBe(
-      'common:newImage'
+      'common:newMedia'
     )
     expect(newImageItem?.shortcut).toBeTruthy()
   })

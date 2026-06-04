@@ -85,7 +85,7 @@ export const getNavMainItems = (
     ),
   },
   {
-    title: 'common:newImage',
+    title: 'common:newMedia',
     url: route.images,
     icon: ImagePlus,
     shortcut: (

@@ -3,7 +3,9 @@ import {
   ArrowUp,
   ChevronsUpDown,
   Copy,
+  Download,
   Eye,
+  Film,
   FolderOpen,
   Image as ImageIcon,
   Loader2,
@@ -13,6 +15,7 @@ import {
   RefreshCcw,
   Sparkles,
   Trash2,
+  WandSparkles,
   X,
 } from 'lucide-react'
 import {
@@ -59,6 +62,10 @@ import {
   type ImageQualityPreset,
   type ImageRatio,
 } from '@/lib/image-generation'
+import {
+  getVideoModels,
+  videoFileExtension,
+} from '@/lib/video-generation'
 import { cn, getModelDisplayName, getProviderTitle } from '@/lib/utils'
 import { route } from '@/constants/routes'
 import { useModelProvider } from '@/hooks/useModelProvider'
@@ -72,10 +79,16 @@ import {
   type ImageGenerationRequestErrorDetails,
 } from '@/lib/image-generation-errors'
 import { trackMitaEvent } from '@/lib/analytics'
+import { ModelCapabilities } from '@/types/models'
 import type {
   ImageAssetRecord,
   ImageGenerationStatus,
 } from '@/services/image-generation/types'
+import type {
+  VideoAssetRecord,
+  VideoGenerationStatus,
+  VideoResolution,
+} from '@/services/video-generation/types'
 
 export const Route = createFileRoute(route.images as '/images')({
   component: Images,
@@ -118,6 +131,48 @@ type ImageTaskGroup = {
   tasks: ImageTask[]
 }
 
+type MediaMode = 'image' | 'storyboard'
+
+type StoryboardStage = 'compose' | 'storyboard' | 'video'
+
+type StoryboardShot = {
+  id: string
+  title: string
+  camera: string
+  prompt: string
+  duration: number
+}
+
+type StoryboardSettings = {
+  style: string
+  aspect: ImageRatio
+  qualityPreset: ImageQualityPreset
+  shotCount: number
+  template: 'grid' | 'table' | 'board'
+  systemPrompt: string
+  seed: string
+}
+
+type VideoSettings = {
+  ratio: ImageRatio
+  durationPerShot: number
+  resolution: VideoResolution
+  fps: number
+  camera: string
+  motion: number
+  generateAudio: boolean
+}
+
+type VideoModelOption = {
+  provider: ModelProvider
+  model: Model
+}
+
+type TextModelOption = {
+  provider: ModelProvider
+  model: Model
+}
+
 type AssetContextMenuState = {
   asset: ImageAssetRecord
   x: number
@@ -158,6 +213,32 @@ const QUALITY_OPTIONS: Array<{
     labelKey: 'quality.hd',
     compactLabelKey: 'quality.hdCompact',
   },
+]
+const STORYBOARD_STYLES = [
+  'Cinematic',
+  '3D animation',
+  'Realistic photo',
+  'Cyberpunk',
+  'Watercolor',
+  'Minimal',
+]
+const STORYBOARD_TEMPLATES: Array<{
+  value: StoryboardSettings['template']
+  label: string
+}> = [
+  { value: 'grid', label: 'Grid' },
+  { value: 'table', label: 'Shot table' },
+  { value: 'board', label: 'Visual board' },
+]
+const STORYBOARD_CAMERA_PRESETS = [
+  'Slow push in',
+  'Tracking shot',
+  'Low angle',
+  'Orbit',
+  'Wide pull back',
+  'Close-up',
+  'Handheld follow',
+  'Static frame',
 ]
 
 function qualityPresetLabel(t: TranslationFn, preset: ImageQualityPreset) {
@@ -218,12 +299,127 @@ function statusLabel(t: TranslationFn, status: ImageGenerationStatus) {
   return imageT(t, `status.${status}`)
 }
 
+function videoStatusLabel(t: TranslationFn, status: VideoGenerationStatus) {
+  return imageT(t, `storyboard.videoStatus.${status}`)
+}
+
 function imageModelKey(option: ImageModelOption) {
   return `${option.provider.provider}::${option.model.id}`
 }
 
+function getStoryboardTextModels(providers: ModelProvider[]): TextModelOption[] {
+  return providers.flatMap((provider) =>
+    provider.models
+      .filter((model) => isStoryboardTextModel(model))
+      .map((model) => ({ provider, model }))
+  )
+}
+
+function isStoryboardTextModel(model: Model) {
+  const capabilities = model.capabilities ?? []
+  return (
+    capabilities.includes(ModelCapabilities.COMPLETION) &&
+    !capabilities.includes(ModelCapabilities.IMAGE_GENERATION) &&
+    !capabilities.includes(ModelCapabilities.VIDEO_GENERATION) &&
+    !model.embedding
+  )
+}
+
 function createId() {
   return globalThis.crypto?.randomUUID?.() ?? `${Date.now()}-${Math.random()}`
+}
+
+function defaultStoryboardSettings(): StoryboardSettings {
+  return {
+    style: 'Cinematic',
+    aspect: '16:9',
+    qualityPreset: 'sd',
+    shotCount: 6,
+    template: 'board',
+    systemPrompt:
+      'Keep the same main character, consistent proportions, materials, color palette, cinematic lighting, shallow depth of field, and clear numbered storyboard panels.',
+    seed: String(Math.floor(Math.random() * 90_000_000) + 10_000_000),
+  }
+}
+
+function defaultVideoSettings(): VideoSettings {
+  return {
+    ratio: '16:9',
+    durationPerShot: 5,
+    resolution: '1080p',
+    fps: 30,
+    camera: 'Auto',
+    motion: 55,
+    generateAudio: true,
+  }
+}
+
+function buildStoryboardShots(story: string, count: number): StoryboardShot[] {
+  const trimmed = story.trim()
+  const beats = trimmed
+    .split(/[。！？.!?\n]+/)
+    .map((item) => item.trim())
+    .filter(Boolean)
+  const fallback = trimmed || 'A character moves through a cinematic scene.'
+
+  return Array.from({ length: count }, (_, index) => {
+    const beat = beats[index % Math.max(1, beats.length)] || fallback
+    const camera = STORYBOARD_CAMERA_PRESETS[index % STORYBOARD_CAMERA_PRESETS.length]
+    return {
+      id: createId(),
+      title: `Shot ${index + 1}`,
+      camera,
+      prompt: `${beat} ${camera.toLowerCase()}, cinematic continuity, clear subject silhouette, frame ${index + 1}.`,
+      duration: 5,
+    }
+  })
+}
+
+function buildStoryboardPrompt(
+  story: string,
+  settings: StoryboardSettings,
+  shots: StoryboardShot[]
+) {
+  const templateLabel =
+    STORYBOARD_TEMPLATES.find((item) => item.value === settings.template)?.label ??
+    'Visual board'
+  const shotLines = shots
+    .map(
+      (shot, index) =>
+        `${index + 1}. ${shot.title}: ${shot.camera}. ${shot.prompt}`
+    )
+    .join('\n')
+
+  return [
+    `Create a professional ${settings.aspect} storyboard sheet in ${settings.style} style.`,
+    `Template: ${templateLabel}. Include ${shots.length} clearly numbered panels in one single image.`,
+    `Story: ${story.trim()}`,
+    `Continuity rules: ${settings.systemPrompt}`,
+    `Seed reference: ${settings.seed}.`,
+    'Each panel must include a readable shot number, camera direction, and concise visual caption. Avoid messy text, collage artifacts, and inconsistent characters.',
+    shotLines,
+  ].join('\n')
+}
+
+function buildVideoPrompt(
+  story: string,
+  shots: StoryboardShot[],
+  videoSettings: VideoSettings
+) {
+  const shotLines = shots
+    .map(
+      (shot, index) =>
+        `${index + 1}. ${shot.camera}, ${shot.duration}s: ${shot.prompt}`
+    )
+    .join('\n')
+
+  return [
+    'Animate this storyboard into one coherent short film.',
+    `Story: ${story.trim()}`,
+    `Default camera: ${videoSettings.camera}. Motion intensity: ${videoSettings.motion}/100.`,
+    'Preserve the exact character identity, material, color palette, and scene order from the source storyboard image.',
+    shotLines,
+  ].join('\n')
 }
 
 function localPromptFromPath(path: string, fallback: string) {
@@ -669,11 +865,861 @@ function ImageModelPicker({
   )
 }
 
+function StoryboardStepper({
+  stage,
+  setStage,
+  hasStoryboard,
+}: {
+  stage: StoryboardStage
+  setStage: (stage: StoryboardStage) => void
+  hasStoryboard: boolean
+}) {
+  const { t } = useTranslation()
+  const steps: Array<{ value: StoryboardStage; label: string }> = [
+    { value: 'compose', label: imageT(t, 'storyboard.step.compose') },
+    { value: 'storyboard', label: imageT(t, 'storyboard.step.storyboard') },
+    { value: 'video', label: imageT(t, 'storyboard.step.video') },
+  ]
+  const activeIndex = steps.findIndex((item) => item.value === stage)
+
+  return (
+    <div className="flex items-center gap-2">
+      {steps.map((step, index) => {
+        const disabled = index > 0 && !hasStoryboard
+        return (
+          <button
+            key={step.value}
+            type="button"
+            disabled={disabled}
+            className={cn(
+              'flex h-8 items-center gap-2 rounded-lg px-3 text-xs transition-colors',
+              index === activeIndex
+                ? 'bg-primary text-primary-foreground'
+                : index < activeIndex
+                  ? 'bg-primary/10 text-primary'
+                  : 'bg-secondary/70 text-muted-foreground',
+              disabled && 'cursor-not-allowed opacity-50'
+            )}
+            onClick={() => !disabled && setStage(step.value)}
+          >
+            <span className="font-mono">{index + 1}</span>
+            {step.label}
+          </button>
+        )
+      })}
+    </div>
+  )
+}
+
+function StoryboardSheetPreview({
+  shots,
+  story,
+  settings,
+  asset,
+  assetSrc,
+  status,
+}: {
+  shots: StoryboardShot[]
+  story: string
+  settings: StoryboardSettings
+  asset?: ImageAssetRecord
+  assetSrc: (asset: ImageAssetRecord) => string
+  status: ImageGenerationStatus | 'idle'
+}) {
+  const { t } = useTranslation()
+
+  if (asset?.path) {
+    return (
+      <div className="overflow-hidden rounded-md border bg-background">
+        <img
+          src={assetSrc(asset)}
+          alt={asset.prompt}
+          className="max-h-[620px] w-full object-contain"
+        />
+      </div>
+    )
+  }
+
+  return (
+    <div
+      className={cn(
+        'overflow-hidden rounded-md border bg-neutral-950 p-5 text-neutral-100',
+        status === 'running' && 'animate-pulse'
+      )}
+    >
+      <div className="mb-4 flex items-end justify-between border-b border-white/10 pb-3">
+        <div>
+          <div className="text-[11px] font-semibold uppercase tracking-[0.2em] text-blue-300">
+            Storyboard
+          </div>
+          <div className="mt-1 text-lg font-semibold">
+            {story.trim() || imageT(t, 'storyboard.title')}
+          </div>
+        </div>
+        <div className="font-mono text-[11px] text-neutral-400">
+          {settings.aspect} · {qualityPresetCompactLabel(t, settings.qualityPreset)}
+        </div>
+      </div>
+      <div
+        className={cn(
+          'grid gap-3',
+          shots.length <= 4
+            ? 'grid-cols-2'
+            : shots.length <= 9
+              ? 'grid-cols-3'
+              : 'grid-cols-4'
+        )}
+      >
+        {shots.map((shot, index) => (
+          <div key={shot.id} className="space-y-1.5">
+            <div
+              className="flex items-start justify-between rounded bg-white/5 p-2"
+              style={{ aspectRatio: settings.aspect.replace(':', '/') }}
+            >
+              <span className="font-mono text-[10px] text-neutral-300">
+                {String(index + 1).padStart(2, '0')}
+              </span>
+              <span className="text-[10px] text-neutral-500">{shot.camera}</span>
+            </div>
+            <div className="truncate text-[11px] text-neutral-400">
+              {shot.prompt}
+            </div>
+          </div>
+        ))}
+      </div>
+    </div>
+  )
+}
+
+function StoryboardVideoMode({
+  serviceHub,
+  selectedImageModel,
+  textModels,
+  videoModels,
+  assetSrc,
+  onAssetSaved,
+}: {
+  serviceHub: ReturnType<typeof useServiceHub>
+  selectedImageModel?: ImageModelOption
+  textModels: TextModelOption[]
+  videoModels: VideoModelOption[]
+  assetSrc: (asset: ImageAssetRecord) => string
+  onAssetSaved: (asset: ImageAssetRecord) => void
+}) {
+  const { t } = useTranslation()
+  const [stage, setStage] = useState<StoryboardStage>('compose')
+  const [story, setStory] = useState(
+    'A gold robot wakes in a neon city, crosses a corridor, and reaches a rooftop.'
+  )
+  const [settings, setSettings] = useState<StoryboardSettings>(() =>
+    defaultStoryboardSettings()
+  )
+  const [videoSettings, setVideoSettings] = useState<VideoSettings>(() =>
+    defaultVideoSettings()
+  )
+  const [shots, setShots] = useState<StoryboardShot[]>([])
+  const [storyboardPrompt, setStoryboardPrompt] = useState('')
+  const [breakdownStatus, setBreakdownStatus] = useState<'idle' | 'running'>('idle')
+  const [storyboardStatus, setStoryboardStatus] = useState<ImageGenerationStatus | 'idle'>('idle')
+  const [storyboardAsset, setStoryboardAsset] = useState<ImageAssetRecord | undefined>()
+  const [videoStatus, setVideoStatus] = useState<VideoGenerationStatus>('queued')
+  const [videoProgress, setVideoProgress] = useState(0)
+  const [videoAsset, setVideoAsset] = useState<VideoAssetRecord | undefined>()
+
+  const textModel = textModels[0]
+  const videoModel = videoModels[0]
+  const totalDuration = shots.length * videoSettings.durationPerShot
+
+  const updateSettings = (patch: Partial<StoryboardSettings>) => {
+    setSettings((current) => ({ ...current, ...patch }))
+  }
+  const updateVideoSettings = (patch: Partial<VideoSettings>) => {
+    setVideoSettings((current) => ({ ...current, ...patch }))
+  }
+
+  const fallbackBreakdown = useCallback(() => {
+    const nextShots = buildStoryboardShots(story, settings.shotCount)
+    return nextShots.map((shot) => ({
+      ...shot,
+      duration: videoSettings.durationPerShot,
+    }))
+  }, [settings.shotCount, story, videoSettings.durationPerShot])
+
+  const breakdownStory = useCallback(async () => {
+    setBreakdownStatus('running')
+    try {
+      let timedShots = fallbackBreakdown()
+      let nextPrompt = ''
+
+      if (textModel) {
+        const result = await serviceHub.storyboardGeneration().breakdownStoryboard({
+          provider: textModel.provider,
+          model: textModel.model,
+          story,
+          style: settings.style,
+          aspect: settings.aspect,
+          shotCount: settings.shotCount,
+          template: settings.template,
+          systemPrompt: settings.systemPrompt,
+          durationPerShot: videoSettings.durationPerShot,
+        })
+        const fallbackShots = timedShots
+        timedShots = Array.from(
+          { length: Math.max(1, settings.shotCount) },
+          (_, index) => {
+            const shot = result.shots[index]
+            if (!shot) return fallbackShots[index]
+            return {
+              id: createId(),
+              title: shot.title || `Shot ${index + 1}`,
+              camera: shot.camera || fallbackShots[index]?.camera || 'Cinematic frame',
+              prompt: shot.prompt || fallbackShots[index]?.prompt || story,
+              duration: shot.duration || videoSettings.durationPerShot,
+            }
+          }
+        ).filter((shot): shot is StoryboardShot => Boolean(shot))
+        nextPrompt = result.storyboardPrompt?.trim() ?? ''
+      }
+
+      setShots(timedShots)
+      setStoryboardPrompt(nextPrompt || buildStoryboardPrompt(story, settings, timedShots))
+      setStoryboardAsset(undefined)
+      setStoryboardStatus('idle')
+      setStage('compose')
+    } catch (error) {
+      console.warn('Storyboard breakdown fell back to local shots:', error)
+      const timedShots = fallbackBreakdown()
+      setShots(timedShots)
+      setStoryboardPrompt(buildStoryboardPrompt(story, settings, timedShots))
+      setStoryboardAsset(undefined)
+      setStoryboardStatus('idle')
+      setStage('compose')
+    } finally {
+      setBreakdownStatus('idle')
+    }
+  }, [
+    fallbackBreakdown,
+    serviceHub,
+    settings,
+    story,
+    textModel,
+    videoSettings.durationPerShot,
+  ])
+
+  const generateStoryboard = useCallback(async () => {
+    if (!selectedImageModel) {
+      toast.error(imageT(t, 'toast.selectImageModelFirst'))
+      return
+    }
+
+    const nextShots = shots.length
+      ? shots
+      : buildStoryboardShots(story, settings.shotCount).map((shot) => ({
+          ...shot,
+          duration: videoSettings.durationPerShot,
+        }))
+    const prompt =
+      storyboardPrompt.trim() || buildStoryboardPrompt(story, settings, nextShots)
+    setShots(nextShots)
+    setStoryboardPrompt(prompt)
+    setStoryboardStatus('running')
+
+    try {
+      const images = await serviceHub.imageGeneration().generateImages({
+        provider: selectedImageModel.provider,
+        model: selectedImageModel.model,
+        prompt,
+        ratio: settings.aspect,
+        qualityPreset: settings.qualityPreset,
+        count: 1,
+        mode: 'generate',
+        sourceAssets: [],
+      })
+      const image = images[0]
+      if (!image) throw new Error(imageT(t, 'errors.generationFailed'))
+      const actualSize = await readImageSize(image)
+      const saved = await serviceHub.imageGeneration().saveAsset({
+        id: createId(),
+        prompt,
+        mode: 'generate',
+        provider: selectedImageModel.provider.provider,
+        model: selectedImageModel.model.id,
+        ratio: settings.aspect,
+        size: actualSize ?? imageSizeForRatio(settings.aspect, selectedImageModel.model.id),
+        quality: apiQualityForPreset(settings.qualityPreset, selectedImageModel.model.id),
+        sourceAssetIds: [],
+        revisedPrompt: image.revisedPrompt,
+        usage: image.usage,
+        status: 'succeeded',
+        mimeType: image.mimeType,
+        b64Json: image.b64Json,
+        extension: imageFileExtension(image.mimeType),
+      })
+      setStoryboardAsset(saved)
+      onAssetSaved(saved)
+      setStoryboardStatus('succeeded')
+      setStage('storyboard')
+    } catch (error) {
+      console.error('Failed to generate storyboard:', error)
+      setStoryboardStatus('failed')
+      toast.error(error instanceof Error ? error.message : imageT(t, 'errors.generationFailed'))
+    }
+  }, [
+    onAssetSaved,
+    selectedImageModel,
+    serviceHub,
+    settings,
+    shots,
+    story,
+    storyboardPrompt,
+    t,
+    videoSettings.durationPerShot,
+  ])
+
+  const generateVideo = useCallback(async () => {
+    if (!videoModel || !storyboardAsset) return
+
+    setVideoStatus('running')
+    setVideoProgress(0)
+    try {
+      const prompt = buildVideoPrompt(story, shots, videoSettings)
+      const task = await serviceHub.videoGeneration().generateVideo({
+        provider: videoModel.provider,
+        model: videoModel.model,
+        prompt,
+        ratio: videoSettings.ratio,
+        duration: totalDuration || videoSettings.durationPerShot,
+        resolution: videoSettings.resolution,
+        fps: videoSettings.fps,
+        generateAudio: videoSettings.generateAudio,
+        sourceAsset: storyboardAsset,
+      })
+      setVideoStatus(task.status)
+      setVideoProgress(task.progress)
+      const finalTask =
+        task.status === 'succeeded'
+          ? task
+          : await serviceHub.videoGeneration().pollVideoTask({
+              provider: videoModel.provider,
+              model: videoModel.model,
+              taskId: task.id,
+            })
+      setVideoStatus(finalTask.status)
+      setVideoProgress(finalTask.progress)
+      if (finalTask.status !== 'succeeded' || !finalTask.videoUrl) return
+
+      const saved = await serviceHub.videoGeneration().saveVideoAsset({
+        id: createId(),
+        prompt,
+        provider: videoModel.provider.provider,
+        model: videoModel.model.id,
+        ratio: videoSettings.ratio,
+        resolution: videoSettings.resolution,
+        duration: totalDuration || videoSettings.durationPerShot,
+        fps: videoSettings.fps,
+        sourceAssetIds: [storyboardAsset.id],
+        usage: finalTask.usage,
+        status: 'succeeded',
+        mimeType: 'video/mp4',
+        videoUrl: finalTask.videoUrl,
+        extension: videoFileExtension('video/mp4'),
+      })
+      setVideoAsset(saved)
+    } catch (error) {
+      console.error('Failed to generate video:', error)
+      setVideoStatus('failed')
+      toast.error(error instanceof Error ? error.message : imageT(t, 'errors.generationFailed'))
+    }
+  }, [
+    serviceHub,
+    shots,
+    storyboardAsset,
+    story,
+    t,
+    totalDuration,
+    videoModel,
+    videoSettings,
+  ])
+
+  const videoSrc = videoAsset?.path
+    ? /^https?:/i.test(videoAsset.path)
+      ? videoAsset.path
+      : serviceHub.core().convertFileSrc(videoAsset.path)
+    : ''
+  const downloadMedia = useCallback((href: string, fileName: string) => {
+    if (!href || typeof document === 'undefined') return
+    const link = document.createElement('a')
+    link.href = href
+    link.download = fileName
+    link.rel = 'noreferrer'
+    document.body.appendChild(link)
+    link.click()
+    link.remove()
+  }, [])
+
+  return (
+    <div className="mx-auto max-w-[1120px] space-y-6">
+      <div className="flex flex-wrap items-start justify-between gap-4">
+        <div className="space-y-2">
+          <h2 className="text-2xl font-semibold tracking-normal text-foreground">
+            {imageT(t, 'storyboard.title')}
+          </h2>
+          <StoryboardStepper
+            stage={stage}
+            setStage={setStage}
+            hasStoryboard={Boolean(storyboardAsset)}
+          />
+        </div>
+        <div className="rounded-lg border bg-background px-3 py-2 text-xs text-muted-foreground">
+          {stage === 'video' && videoModel
+            ? `${getProviderTitle(videoModel.provider.provider)} · ${getModelDisplayName(videoModel.model)}`
+            : selectedImageModel
+              ? `${getProviderTitle(selectedImageModel.provider.provider)} · ${getModelDisplayName(selectedImageModel.model)}`
+              : imageT(t, 'selectImageModel')}
+        </div>
+      </div>
+
+      {stage === 'compose' && (
+        <div className="space-y-5">
+          <section className="rounded-md border bg-background p-4">
+            <label className="text-sm font-medium text-foreground">
+              {imageT(t, 'storyboard.step.compose')}
+            </label>
+            <Textarea
+              className="mt-3 min-h-28 resize-none border-0 bg-secondary/40 text-sm shadow-none focus-visible:ring-0"
+              value={story}
+              placeholder={imageT(t, 'storyboard.storyPlaceholder')}
+              onChange={(event) => setStory(event.target.value)}
+            />
+            <div className="mt-4 flex flex-wrap items-end gap-3">
+              <div className="space-y-1.5">
+                <span className="text-xs text-muted-foreground">
+                  {imageT(t, 'storyboard.style')}
+                </span>
+                <div className="flex flex-wrap gap-2">
+                  {STORYBOARD_STYLES.map((style) => (
+                    <button
+                      key={style}
+                      type="button"
+                      className={cn(
+                        'h-8 rounded-lg border px-3 text-xs',
+                        settings.style === style
+                          ? 'border-primary bg-primary/10 text-primary'
+                          : 'bg-background text-muted-foreground'
+                      )}
+                      onClick={() => updateSettings({ style })}
+                    >
+                      {style}
+                    </button>
+                  ))}
+                </div>
+              </div>
+              <div className="space-y-1.5">
+                <span className="text-xs text-muted-foreground">
+                  {imageT(t, 'selectRatio')}
+                </span>
+                <div className="flex rounded-lg bg-secondary p-1">
+                  {(['16:9', '9:16', '1:1'] as ImageRatio[]).map((item) => (
+                    <button
+                      key={item}
+                      type="button"
+                      className={cn(
+                        'h-7 rounded-md px-3 text-xs',
+                        settings.aspect === item && 'bg-background shadow-sm'
+                      )}
+                      onClick={() => updateSettings({ aspect: item })}
+                    >
+                      {item}
+                    </button>
+                  ))}
+                </div>
+              </div>
+              <div className="space-y-1.5">
+                <span className="text-xs text-muted-foreground">
+                  {imageT(t, 'selectQuality')}
+                </span>
+                <div className="flex rounded-lg bg-secondary p-1">
+                  {QUALITY_OPTIONS.map((option) => (
+                    <button
+                      key={option.value}
+                      type="button"
+                      className={cn(
+                        'h-7 rounded-md px-3 text-xs',
+                        settings.qualityPreset === option.value &&
+                          'bg-background shadow-sm'
+                      )}
+                      onClick={() =>
+                        updateSettings({ qualityPreset: option.value })
+                      }
+                    >
+                      {qualityPresetCompactLabel(t, option.value)}
+                    </button>
+                  ))}
+                </div>
+              </div>
+              <div className="space-y-1.5">
+                <span className="text-xs text-muted-foreground">
+                  {imageT(t, 'storyboard.shotCount')}
+                </span>
+                <div className="box-border flex h-8 items-center rounded-lg border bg-background">
+                  <button
+                    type="button"
+                    className="flex size-8 items-center justify-center"
+                    onClick={() =>
+                      updateSettings({
+                        shotCount: Math.max(2, settings.shotCount - 1),
+                      })
+                    }
+                  >
+                    <Minus className="size-3.5" />
+                  </button>
+                  <span className="min-w-8 text-center text-xs">
+                    {settings.shotCount}
+                  </span>
+                  <button
+                    type="button"
+                    className="flex size-8 items-center justify-center"
+                    onClick={() =>
+                      updateSettings({
+                        shotCount: Math.min(12, settings.shotCount + 1),
+                      })
+                    }
+                  >
+                    <Plus className="size-3.5" />
+                  </button>
+                </div>
+              </div>
+              <Button
+                type="button"
+                variant="secondary"
+                className="ml-auto"
+                disabled={!story.trim() || breakdownStatus === 'running'}
+                onClick={breakdownStory}
+              >
+                {breakdownStatus === 'running' ? (
+                  <Loader2 className="size-4 animate-spin" />
+                ) : (
+                  <WandSparkles className="size-4" />
+                )}
+                {shots.length
+                  ? imageT(t, 'storyboard.regenerateBreakdown')
+                  : imageT(t, 'storyboard.aiBreakdown')}
+              </Button>
+            </div>
+          </section>
+
+          {shots.length > 0 && (
+            <section className="space-y-3">
+              <div className="flex items-center gap-2">
+                <span className="text-sm font-medium">
+                  {imageT(t, 'storyboard.shotScript')}
+                </span>
+                <span className="text-xs text-muted-foreground">
+                  {shots.length} shots
+                </span>
+              </div>
+              <div className="space-y-2">
+                {shots.map((shot, index) => (
+                  <div
+                    key={shot.id}
+                    className="grid grid-cols-[32px_1fr] gap-3 rounded-md border bg-background p-3"
+                  >
+                    <div className="flex size-8 items-center justify-center rounded-lg bg-primary/10 font-mono text-xs text-primary">
+                      {index + 1}
+                    </div>
+                    <div className="space-y-2">
+                      <div className="flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
+                        <span className="font-medium text-foreground">
+                          {shot.title}
+                        </span>
+                        <span>{shot.camera}</span>
+                      </div>
+                      <Textarea
+                        className="min-h-12 resize-none border-0 bg-secondary/40 text-sm shadow-none focus-visible:ring-0"
+                        value={shot.prompt}
+                        onChange={(event) => {
+                          const prompt = event.target.value
+                          setShots((current) =>
+                            current.map((item) =>
+                              item.id === shot.id ? { ...item, prompt } : item
+                            )
+                          )
+                        }}
+                      />
+                    </div>
+                  </div>
+                ))}
+              </div>
+              <div className="rounded-md border bg-background p-3">
+                <div className="mb-2 text-sm font-medium">
+                  {imageT(t, 'storyboard.prompt')}
+                </div>
+                <Textarea
+                  className="min-h-24 resize-none border-0 bg-secondary/40 font-mono text-xs shadow-none focus-visible:ring-0"
+                  value={storyboardPrompt}
+                  onChange={(event) => setStoryboardPrompt(event.target.value)}
+                />
+              </div>
+              <div className="flex justify-end">
+                <Button
+                  type="button"
+                  onClick={generateStoryboard}
+                  disabled={storyboardStatus === 'running'}
+                >
+                  {storyboardStatus === 'running' ? (
+                    <Loader2 className="size-4 animate-spin" />
+                  ) : (
+                    <Sparkles className="size-4" />
+                  )}
+                  {imageT(t, 'storyboard.generateStoryboard')}
+                </Button>
+              </div>
+            </section>
+          )}
+        </div>
+      )}
+
+      {stage === 'storyboard' && (
+        <div className="grid gap-5 lg:grid-cols-[1fr_280px]">
+          <div className="space-y-3">
+            <StoryboardSheetPreview
+              shots={shots}
+              story={story}
+              settings={settings}
+              asset={storyboardAsset}
+              assetSrc={assetSrc}
+              status={storyboardStatus}
+            />
+            {storyboardAsset && (
+              <div className="inline-flex rounded-full bg-emerald-500/10 px-2 py-0.5 text-xs text-emerald-600">
+                {imageT(t, 'storyboard.storyboardReady')}
+              </div>
+            )}
+          </div>
+          <aside className="space-y-4 rounded-md border bg-background p-4">
+            <div className="text-sm font-medium">
+              {imageT(t, 'storyboard.params')}
+            </div>
+            <div className="space-y-2">
+              {STORYBOARD_TEMPLATES.map((template) => (
+                <button
+                  key={template.value}
+                  type="button"
+                  className={cn(
+                    'flex h-9 w-full items-center rounded-lg border px-3 text-left text-xs',
+                    settings.template === template.value
+                      ? 'border-primary bg-primary/10 text-primary'
+                      : 'text-muted-foreground'
+                  )}
+                  onClick={() => updateSettings({ template: template.value })}
+                >
+                  {template.label}
+                </button>
+              ))}
+            </div>
+            {!videoModel && storyboardAsset && (
+              <p className="rounded-md bg-amber-500/10 p-3 text-xs text-amber-700 dark:text-amber-300">
+                {imageT(t, 'storyboard.videoModelRequired')}
+              </p>
+            )}
+            {storyboardAsset && (
+              <Button
+                type="button"
+                variant="secondary"
+                className="w-full"
+                onClick={() =>
+                  downloadMedia(
+                    assetSrc(storyboardAsset),
+                    storyboardAsset.fileName || 'storyboard.png'
+                  )
+                }
+              >
+                <Download className="size-4" />
+                {imageT(t, 'storyboard.downloadStoryboard')}
+              </Button>
+            )}
+            <div className="flex gap-2">
+              <Button
+                type="button"
+                variant="secondary"
+                onClick={() => setStage('compose')}
+              >
+                {t('common:back')}
+              </Button>
+              <Button
+                type="button"
+                disabled={!storyboardAsset}
+                onClick={() => setStage('video')}
+              >
+                {t('common:next')}
+              </Button>
+            </div>
+          </aside>
+        </div>
+      )}
+
+      {stage === 'video' && (
+        <div className="grid gap-5 lg:grid-cols-[1fr_300px]">
+          <div className="space-y-4">
+            <div className="rounded-md border bg-neutral-950 text-neutral-100">
+              <div
+                className="flex items-center justify-center"
+                style={{ aspectRatio: videoSettings.ratio.replace(':', '/') }}
+              >
+                {videoAsset && videoSrc ? (
+                  <video controls src={videoSrc} className="size-full" />
+                ) : videoStatus === 'running' ? (
+                  <div className="flex w-2/3 flex-col items-center gap-3">
+                    <Film className="size-7 animate-pulse text-primary" />
+                    <div className="h-1.5 w-full overflow-hidden rounded-full bg-white/10">
+                      <div
+                        className="h-full rounded-full bg-primary transition-all"
+                        style={{ width: `${videoProgress}%` }}
+                      />
+                    </div>
+                    <span className="font-mono text-xs text-neutral-400">
+                      {videoProgress}%
+                    </span>
+                  </div>
+                ) : (
+                  <span className="font-mono text-xs text-neutral-500">
+                    {videoStatusLabel(t, videoStatus)}
+                  </span>
+                )}
+              </div>
+            </div>
+            {storyboardAsset && (
+              <div className="flex items-center gap-3 rounded-md border bg-background p-3">
+                <img
+                  src={assetSrc(storyboardAsset)}
+                  alt={storyboardAsset.prompt}
+                  className="h-12 w-20 rounded object-cover"
+                />
+                <div className="min-w-0 text-sm">
+                  <div className="font-medium">
+                    {imageT(t, 'storyboard.sourceStoryboard')}
+                  </div>
+                  <div className="truncate text-xs text-muted-foreground">
+                    {storyboardAsset.model} · {settings.aspect}
+                  </div>
+                </div>
+              </div>
+            )}
+          </div>
+          <aside className="space-y-4 rounded-md border bg-background p-4">
+            <div className="text-sm font-medium">
+              {imageT(t, 'storyboard.videoParams')}
+            </div>
+            {!videoModel && (
+              <p className="rounded-md bg-amber-500/10 p-3 text-xs text-amber-700 dark:text-amber-300">
+                {imageT(t, 'storyboard.videoModelRequired')}
+              </p>
+            )}
+            <div className="space-y-2">
+              <span className="text-xs text-muted-foreground">
+                {imageT(t, 'selectRatio')}
+              </span>
+              <div className="flex rounded-lg bg-secondary p-1">
+                {(['16:9', '9:16', '1:1'] as ImageRatio[]).map((item) => (
+                  <button
+                    key={item}
+                    type="button"
+                    className={cn(
+                      'h-7 rounded-md px-3 text-xs',
+                      videoSettings.ratio === item && 'bg-background shadow-sm'
+                    )}
+                    onClick={() => updateVideoSettings({ ratio: item })}
+                  >
+                    {item}
+                  </button>
+                ))}
+              </div>
+            </div>
+            <div className="space-y-2">
+              <span className="text-xs text-muted-foreground">
+                {imageT(t, 'storyboard.durationPerShot')}
+              </span>
+              <input
+                type="range"
+                min={3}
+                max={10}
+                value={videoSettings.durationPerShot}
+                onChange={(event) =>
+                  updateVideoSettings({
+                    durationPerShot: Number(event.target.value),
+                  })
+                }
+                className="w-full"
+              />
+              <div className="text-xs text-muted-foreground">
+                {videoSettings.durationPerShot}s · {totalDuration || videoSettings.durationPerShot}s
+              </div>
+            </div>
+            <div className="space-y-2">
+              <span className="text-xs text-muted-foreground">
+                {imageT(t, 'storyboard.resolution')}
+              </span>
+              <div className="flex rounded-lg bg-secondary p-1">
+                {(['720p', '1080p', '4K'] as VideoResolution[]).map((item) => (
+                  <button
+                    key={item}
+                    type="button"
+                    className={cn(
+                      'h-7 rounded-md px-3 text-xs',
+                      videoSettings.resolution === item &&
+                        'bg-background shadow-sm'
+                    )}
+                    onClick={() => updateVideoSettings({ resolution: item })}
+                  >
+                    {item}
+                  </button>
+                ))}
+              </div>
+            </div>
+            <Button
+              type="button"
+              className="w-full"
+              disabled={!videoModel || !storyboardAsset || videoStatus === 'running'}
+              onClick={generateVideo}
+            >
+              {videoStatus === 'running' ? (
+                <Loader2 className="size-4 animate-spin" />
+              ) : (
+                <Film className="size-4" />
+              )}
+              {imageT(t, 'storyboard.generateVideo')}
+            </Button>
+            {videoAsset && videoSrc && (
+              <Button
+                type="button"
+                variant="secondary"
+                className="w-full"
+                onClick={() =>
+                  downloadMedia(
+                    videoSrc,
+                    videoAsset.fileName || 'storyboard-video.mp4'
+                  )
+                }
+              >
+                <Download className="size-4" />
+                {imageT(t, 'storyboard.downloadVideo')}
+              </Button>
+            )}
+          </aside>
+        </div>
+      )}
+    </div>
+  )
+}
+
 function Images() {
   const { t } = useTranslation()
   const serviceHub = useServiceHub()
   const providers = useModelProvider((state) => state.providers)
   const imageModels = useMemo(() => getImageModels(providers), [providers])
+  const textModels = useMemo(() => getStoryboardTextModels(providers), [providers])
+  const videoModels = useMemo(() => getVideoModels(providers), [providers])
+  const [mediaMode, setMediaMode] = useState<MediaMode>('image')
   const [selectedModelKey, setSelectedModelKey] = useState('')
   const [prompt, setPrompt] = useState('')
   const [ratio, setRatio] = useState<ImageRatio>('1:1')
@@ -1445,13 +2491,44 @@ function Images() {
       <HeaderPage />
 
       <div className="relative min-h-0 flex-1 overflow-hidden">
-        <main className="h-full overscroll-contain overflow-y-auto px-5 pb-48 pt-4">
+        <main
+          className={cn(
+            'h-full overscroll-contain overflow-y-auto px-5 pt-4',
+            mediaMode === 'image' ? 'pb-48' : 'pb-10'
+          )}
+        >
           <div className="mx-auto max-w-[1120px] space-y-8">
-            <h2 className="text-2xl font-semibold tracking-normal text-foreground">
-              {imageT(t, 'today')}
-            </h2>
+            <div className="flex items-center justify-between gap-3">
+              <div className="inline-flex rounded-xl border bg-background p-1 shadow-sm">
+                {([
+                  ['image', imageT(t, 'mode.image'), ImageIcon],
+                  ['storyboard', imageT(t, 'mode.storyboardVideo'), Film],
+                ] as const).map(([value, label, Icon]) => (
+                  <button
+                    key={value}
+                    type="button"
+                    className={cn(
+                      'flex h-8 items-center gap-1.5 rounded-lg px-3 text-sm transition-colors',
+                      mediaMode === value
+                        ? 'bg-secondary text-foreground'
+                        : 'text-muted-foreground hover:text-foreground'
+                    )}
+                    onClick={() => setMediaMode(value)}
+                  >
+                    <Icon className="size-4" />
+                    {label}
+                  </button>
+                ))}
+              </div>
+            </div>
 
-            {taskGroups.length === 0 && savedHistoryAssets.length === 0 ? (
+            {mediaMode === 'image' ? (
+              <>
+                <h2 className="text-2xl font-semibold tracking-normal text-foreground">
+                  {imageT(t, 'today')}
+                </h2>
+
+                {taskGroups.length === 0 && savedHistoryAssets.length === 0 ? (
               <div className="flex min-h-[360px] items-center justify-center text-sm text-muted-foreground">
                 {imageT(t, 'emptyState')}
               </div>
@@ -1727,9 +2804,26 @@ function Images() {
                 ))}
               </>
             )}
+              </>
+            ) : (
+              <StoryboardVideoMode
+                serviceHub={serviceHub}
+                selectedImageModel={selectedModel}
+                textModels={textModels}
+                videoModels={videoModels}
+                assetSrc={assetSrc}
+                onAssetSaved={(asset) =>
+                  setAssets((current) => [
+                    asset,
+                    ...current.filter((item) => item.id !== asset.id),
+                  ])
+                }
+              />
+            )}
           </div>
         </main>
 
+        {mediaMode === 'image' && (
         <div className="pointer-events-none absolute inset-x-0 bottom-0 bg-linear-to-t from-[#f7f8fa] via-[#f7f8fa] to-transparent px-4 pb-5 pt-12 dark:from-background dark:via-background">
           <form
             className="pointer-events-auto mx-auto max-w-[960px] rounded-[28px] border bg-background/95 p-4 shadow-lg backdrop-blur"
@@ -1926,6 +3020,7 @@ function Images() {
             </div>
           </form>
         </div>
+        )}
       </div>
 
       {contextMenu && (

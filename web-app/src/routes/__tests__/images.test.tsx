@@ -16,6 +16,12 @@ const h = vi.hoisted(() => ({
   importAsset: vi.fn(),
   listAssets: vi.fn(),
   deleteAsset: vi.fn(),
+  generateVideo: vi.fn(),
+  pollVideoTask: vi.fn(),
+  saveVideoAsset: vi.fn(),
+  listVideoAssets: vi.fn(),
+  deleteVideoAsset: vi.fn(),
+  breakdownStoryboard: vi.fn(),
   dialogOpen: vi.fn(),
   revealItemInDir: vi.fn(),
   openExternalUrl: vi.fn(),
@@ -44,6 +50,16 @@ vi.mock('@/hooks/useServiceHub', () => ({
       listAssets: h.listAssets,
       deleteAsset: h.deleteAsset,
     }),
+    videoGeneration: () => ({
+      generateVideo: h.generateVideo,
+      pollVideoTask: h.pollVideoTask,
+      saveVideoAsset: h.saveVideoAsset,
+      listVideoAssets: h.listVideoAssets,
+      deleteVideoAsset: h.deleteVideoAsset,
+    }),
+    storyboardGeneration: () => ({
+      breakdownStoryboard: h.breakdownStoryboard,
+    }),
     dialog: () => ({ open: h.dialogOpen }),
     core: () => ({ convertFileSrc: h.convertFileSrc }),
     opener: () => ({
@@ -64,6 +80,24 @@ const translations: Record<string, string> = {
   'common:preview': 'Preview',
   'common:cancel': 'Cancel',
   'common:imageGeneration.emptyState': 'Generated images will appear here.',
+  'common:imageGeneration.mode.image': 'Image',
+  'common:imageGeneration.mode.storyboardVideo': 'Storyboard video',
+  'common:imageGeneration.storyboard.title': 'Storyboard short film',
+  'common:imageGeneration.storyboard.storyPlaceholder':
+    'Describe a short story for the storyboard video.',
+  'common:imageGeneration.storyboard.aiBreakdown': 'AI breakdown',
+  'common:imageGeneration.storyboard.regenerateBreakdown': 'Regenerate breakdown',
+  'common:imageGeneration.storyboard.shotScript': 'Shot script',
+  'common:imageGeneration.storyboard.generateStoryboard': 'Generate storyboard',
+  'common:imageGeneration.storyboard.storyboardReady': 'Storyboard ready',
+  'common:imageGeneration.storyboard.videoModelRequired':
+    'Configure a video model to generate Seedance clips.',
+  'common:imageGeneration.storyboard.generateVideo': 'Generate video',
+  'common:imageGeneration.storyboard.downloadStoryboard': 'Download storyboard',
+  'common:imageGeneration.storyboard.downloadVideo': 'Download video',
+  'common:imageGeneration.storyboard.step.compose': 'Script',
+  'common:imageGeneration.storyboard.step.storyboard': 'Storyboard',
+  'common:imageGeneration.storyboard.step.video': 'Video',
   'common:imageGeneration.noImageModelsAvailable': 'No image models available',
   'common:imageGeneration.openProviders': 'Open Providers',
   'common:imageGeneration.selectImageModel': 'Select image model',
@@ -166,6 +200,12 @@ describe('Images route', () => {
     h.saveAsset.mockResolvedValue(null)
     h.importAsset.mockResolvedValue(null)
     h.listAssets.mockResolvedValue([])
+    h.generateVideo.mockResolvedValue(null)
+    h.pollVideoTask.mockResolvedValue(null)
+    h.saveVideoAsset.mockResolvedValue(null)
+    h.listVideoAssets.mockResolvedValue([])
+    h.deleteVideoAsset.mockResolvedValue(undefined)
+    h.breakdownStoryboard.mockResolvedValue(null)
     h.dialogOpen.mockResolvedValue(null)
     h.revealItemInDir.mockResolvedValue(undefined)
     h.openExternalUrl.mockResolvedValue(undefined)
@@ -232,6 +272,10 @@ describe('Images route', () => {
     expect(screen.queryByText('Queue')).not.toBeInTheDocument()
     expect(screen.queryByText('Assets')).not.toBeInTheDocument()
     expect(screen.queryByText('图片生成')).not.toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Image' })).toBeInTheDocument()
+    expect(
+      screen.getByRole('button', { name: 'Storyboard video' })
+    ).toBeInTheDocument()
     expect(screen.queryByRole('button', { name: 'Generate' })).toBeInTheDocument()
     expect(screen.queryByRole('button', { name: 'Edit' })).not.toBeInTheDocument()
     expect(screen.queryByRole('button', { name: 'Variation' })).not.toBeInTheDocument()
@@ -258,6 +302,113 @@ describe('Images route', () => {
     expect(screen.getByRole('button', { name: 'Image size settings' })).toHaveTextContent(
       'Ultra HD 4K'
     )
+  })
+
+  it('switches to storyboard video mode and generates a storyboard image', async () => {
+    h.providers = [
+      {
+        provider: 'jingxing',
+        base_url: 'https://api.jingxing.uk/v1',
+        settings: [],
+        models: [
+          {
+            id: 'gpt-5-mini',
+            capabilities: [ModelCapabilities.COMPLETION],
+          },
+          {
+            id: 'gpt-image-2',
+            capabilities: [ModelCapabilities.IMAGE_GENERATION],
+          },
+        ],
+      },
+    ]
+    h.generateImages.mockResolvedValueOnce([
+      {
+        b64Json: 'aGVsbG8=',
+        mimeType: 'image/png',
+        revisedPrompt: 'storyboard',
+      },
+    ])
+    h.saveAsset.mockImplementation((request: any) =>
+      Promise.resolve({
+        ...request,
+        createdAt: '2026-06-04T00:00:00Z',
+        path: `/mock/mita/image-assets/${request.id}/image.png`,
+        fileName: 'image.png',
+      })
+    )
+    h.breakdownStoryboard.mockResolvedValueOnce({
+      shots: [
+        {
+          title: 'Wake',
+          camera: 'Slow push in',
+          prompt: 'A gold robot wakes in a neon city.',
+          duration: 5,
+        },
+        {
+          title: 'Cross',
+          camera: 'Tracking shot',
+          prompt: 'The gold robot crosses a glowing corridor.',
+          duration: 5,
+        },
+      ],
+      storyboardPrompt: 'LLM storyboard prompt with numbered panels.',
+    })
+    vi.stubGlobal(
+      'Image',
+      class {
+        naturalWidth = 0
+        naturalHeight = 0
+        onerror?: () => void
+        set src(_value: string) {
+          this.onerror?.()
+        }
+      }
+    )
+
+    renderComponent()
+
+    await waitFor(() => expect(h.listAssets).toHaveBeenCalled())
+    fireEvent.click(screen.getByRole('button', { name: 'Storyboard video' }))
+
+    expect(screen.getByText('Storyboard short film')).toBeInTheDocument()
+    fireEvent.change(
+      screen.getByPlaceholderText('Describe a short story for the storyboard video.'),
+      {
+        target: {
+          value:
+            'A gold robot wakes in a neon city, crosses a corridor, and reaches a rooftop.',
+        },
+      }
+    )
+    fireEvent.click(screen.getByRole('button', { name: 'AI breakdown' }))
+
+    await waitFor(() =>
+      expect(h.breakdownStoryboard).toHaveBeenCalledWith(
+        expect.objectContaining({
+          model: expect.objectContaining({ id: 'gpt-5-mini' }),
+          shotCount: 6,
+        })
+      )
+    )
+    expect(await screen.findByText('Shot script')).toBeInTheDocument()
+    expect(screen.getAllByDisplayValue(/gold robot/i).length).toBeGreaterThan(1)
+    fireEvent.click(screen.getByRole('button', { name: 'Generate storyboard' }))
+
+    await waitFor(() => expect(h.generateImages).toHaveBeenCalled())
+    expect(h.generateImages.mock.calls.at(-1)?.[0]).toMatchObject({
+      mode: 'generate',
+      model: expect.objectContaining({ id: 'gpt-image-2' }),
+      count: 1,
+      sourceAssets: [],
+    })
+    expect(h.generateImages.mock.calls.at(-1)?.[0].prompt).toContain(
+      'LLM storyboard prompt'
+    )
+    expect(await screen.findByText('Storyboard ready')).toBeInTheDocument()
+    expect(
+      screen.getByText('Configure a video model to generate Seedance clips.')
+    ).toBeInTheDocument()
   })
 
   it('submits plain prompt requests as generate tasks', async () => {

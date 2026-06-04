@@ -33,6 +33,10 @@ import { DefaultUploadsService } from './uploads/default'
 import type { UploadsService } from './uploads/types'
 import { DefaultImageGenerationService } from './image-generation/default'
 import type { ImageGenerationService } from './image-generation/types'
+import { DefaultVideoGenerationService } from './video-generation/default'
+import type { VideoGenerationService } from './video-generation/types'
+import { DefaultStoryboardGenerationService } from './storyboard-generation/default'
+import type { StoryboardGenerationService } from './storyboard-generation/types'
 
 // Import service types
 import type { ThemeService } from './theme/types'
@@ -79,6 +83,8 @@ export interface ServiceHub {
   rag(): RAGService
   uploads(): UploadsService
   imageGeneration(): ImageGenerationService
+  videoGeneration(): VideoGenerationService
+  storyboardGeneration(): StoryboardGenerationService
 }
 
 class PlatformServiceHub implements ServiceHub {
@@ -105,6 +111,10 @@ class PlatformServiceHub implements ServiceHub {
   private uploadsService: UploadsService = new DefaultUploadsService()
   private imageGenerationService: ImageGenerationService =
     new DefaultImageGenerationService()
+  private videoGenerationService: VideoGenerationService =
+    new DefaultVideoGenerationService()
+  private storyboardGenerationService: StoryboardGenerationService =
+    new DefaultStoryboardGenerationService()
   private initialized = false
 
   /**
@@ -138,6 +148,8 @@ class PlatformServiceHub implements ServiceHub {
           coreModule,
           deepLinkModule,
           imageGenerationModule,
+          videoGenerationModule,
+          storyboardGenerationModule,
         ] = await Promise.all([
           import('./theme/tauri'),
           import('./window/tauri'),
@@ -153,6 +165,8 @@ class PlatformServiceHub implements ServiceHub {
           import('./core/tauri'),
           import('./deeplink/tauri'),
           import('./image-generation/tauri'),
+          import('./video-generation/tauri'),
+          import('./storyboard-generation/tauri'),
         ])
 
         this.themeService = new themeModule.TauriThemeService()
@@ -170,6 +184,10 @@ class PlatformServiceHub implements ServiceHub {
         this.deepLinkService = new deepLinkModule.TauriDeepLinkService()
         this.imageGenerationService =
           new imageGenerationModule.TauriImageGenerationService()
+        this.videoGenerationService =
+          new videoGenerationModule.TauriVideoGenerationService()
+        this.storyboardGenerationService =
+          new storyboardGenerationModule.TauriStoryboardGenerationService()
       } else if (isPlatformIOS() || isPlatformAndroid()) {
         const [
           themeModule,
@@ -336,6 +354,16 @@ class PlatformServiceHub implements ServiceHub {
   imageGeneration(): ImageGenerationService {
     this.ensureInitialized()
     return this.imageGenerationService
+  }
+
+  videoGeneration(): VideoGenerationService {
+    this.ensureInitialized()
+    return this.videoGenerationService
+  }
+
+  storyboardGeneration(): StoryboardGenerationService {
+    this.ensureInitialized()
+    return this.storyboardGenerationService
   }
 }
 

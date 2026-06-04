@@ -8,6 +8,7 @@ export enum ModelCapabilities {
   TOOLS = 'tools',
   EMBEDDINGS = 'embeddings',
   IMAGE_GENERATION = 'image_generation',
+  VIDEO_GENERATION = 'video_generation',
   AUDIO_GENERATION = 'audio_generation',
   TEXT_TO_IMAGE = 'text_to_image',
   IMAGE_TO_IMAGE = 'image_to_image',

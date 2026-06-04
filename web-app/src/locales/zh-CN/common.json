@@ -20,10 +20,15 @@
   "keyboardShortcuts": "快捷键",
   "newChat": "新建聊天",
   "newImage": "新建图片",
+  "newMedia": "新建媒体",
   "newMitaTeams": "新建Mita小组",
   "imageGeneration": {
     "today": "今天",
     "emptyState": "生成的图片会显示在这里。",
+    "mode": {
+      "image": "图片",
+      "storyboardVideo": "故事板视频"
+    },
     "noImageModelsAvailable": "暂无可用图片模型",
     "noImageModelsDescription": "请添加或刷新包含 image_generation 能力的提供商模型。",
     "openProviders": "打开提供商设置",
@@ -102,6 +107,38 @@
       "requestTimeout": "图片生成请求超时，请稍后重试。",
       "invalidSourceImage": "参考图无法被图片模型读取，请重新导入或换一张图片。",
       "invalidSourceImageWithIndex": "第 {{index}} 张参考图无法被图片模型读取，请重新导入或换一张图片。"
+    },
+    "storyboard": {
+      "title": "故事板短片",
+      "storyPlaceholder": "描述一段要生成故事板视频的短故事。",
+      "aiBreakdown": "AI 拆解",
+      "regenerateBreakdown": "重新拆解",
+      "shotScript": "分镜脚本",
+      "generateStoryboard": "生成故事板",
+      "storyboardReady": "故事板已生成",
+      "videoModelRequired": "需要配置视频模型后才能生成 Seedance 片段。",
+      "generateVideo": "生成视频",
+      "downloadStoryboard": "下载故事板",
+      "downloadVideo": "下载视频",
+      "style": "风格",
+      "shotCount": "分镜数",
+      "prompt": "故事板提示词",
+      "params": "故事板参数",
+      "sourceStoryboard": "来源故事板",
+      "videoParams": "视频参数",
+      "durationPerShot": "每镜头时长",
+      "resolution": "清晰度",
+      "step": {
+        "compose": "脚本",
+        "storyboard": "故事板",
+        "video": "视频"
+      },
+      "videoStatus": {
+        "queued": "等待中",
+        "running": "生成中",
+        "succeeded": "已完成",
+        "failed": "失败"
+      }
     },
     "addReferenceImage": "添加参考图",
     "removeReferenceImage": "移除 {{prompt}}",

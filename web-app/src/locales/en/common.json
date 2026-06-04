@@ -25,10 +25,15 @@
   "keyboardShortcuts": "Shortcuts",
   "newChat": "New Chat",
   "newImage": "New Image",
+  "newMedia": "New Media",
   "newMitaTeams": "New Mita Teams",
   "imageGeneration": {
     "today": "Today",
     "emptyState": "Generated images will appear here.",
+    "mode": {
+      "image": "Image",
+      "storyboardVideo": "Storyboard video"
+    },
     "noImageModelsAvailable": "No image models available",
     "noImageModelsDescription": "Add or refresh a provider model with image_generation capability.",
     "openProviders": "Open Providers",
@@ -107,6 +112,38 @@
       "requestTimeout": "Image generation request timed out. Please try again later.",
       "invalidSourceImage": "A reference image could not be read by the image model. Re-import it or choose another image.",
       "invalidSourceImageWithIndex": "Reference image {{index}} could not be read by the image model. Re-import it or choose another image."
+    },
+    "storyboard": {
+      "title": "Storyboard short film",
+      "storyPlaceholder": "Describe a short story for the storyboard video.",
+      "aiBreakdown": "AI breakdown",
+      "regenerateBreakdown": "Regenerate breakdown",
+      "shotScript": "Shot script",
+      "generateStoryboard": "Generate storyboard",
+      "storyboardReady": "Storyboard ready",
+      "videoModelRequired": "Configure a video model to generate Seedance clips.",
+      "generateVideo": "Generate video",
+      "downloadStoryboard": "Download storyboard",
+      "downloadVideo": "Download video",
+      "style": "Style",
+      "shotCount": "Shots",
+      "prompt": "Storyboard prompt",
+      "params": "Storyboard params",
+      "sourceStoryboard": "Source storyboard",
+      "videoParams": "Video params",
+      "durationPerShot": "Duration per shot",
+      "resolution": "Resolution",
+      "step": {
+        "compose": "Script",
+        "storyboard": "Storyboard",
+        "video": "Video"
+      },
+      "videoStatus": {
+        "queued": "Queued",
+        "running": "Running",
+        "succeeded": "Succeeded",
+        "failed": "Failed"
+      }
     },
     "addReferenceImage": "Add reference image",
     "removeReferenceImage": "Remove {{prompt}}",
