@@ -1195,7 +1195,8 @@ function hasReusableTeam(config: MitaTeamsConfig) {
         event.type === 'run_completed'
     ) ||
     Object.values(config.runtime.roleStates).some(
-      (state) => state.stream.length > 0 || state.memory.version > 0
+      (state) =>
+        Boolean(state && (state.stream.length > 0 || state.memory.version > 0))
     )
 
   return hasRunHistory
@@ -2439,7 +2440,7 @@ function constrainDecisionToWorkflowSpec(
       ...config.channels.map((channel) => channel.id),
       ...channels.map((channel) => channel.id),
     ])
-    const calls = decision.calls.filter(
+    const calls = (decision.calls ?? []).filter(
       (call) =>
         allowedRoleIds.has(call.roleId) &&
         (!call.channelId || channelIds.has(call.channelId))
@@ -2478,8 +2479,9 @@ function preferExistingTeamDecision(
   }
 
   const delta = teamConfigurationDelta(config, decision)
+  const decisionCalls = decision.calls ?? []
   if (delta.roles.length === 0 && delta.channels.length === 0) {
-    if (decision.calls.length === 0) {
+    if (decisionCalls.length === 0) {
       return {
         action: 'milestone',
         reason: decision.reason,
@@ -2490,7 +2492,7 @@ function preferExistingTeamDecision(
       action: 'call_roles',
       mode: decision.mode ?? 'hybrid',
       reason: decision.reason,
-      calls: decision.calls,
+      calls: decisionCalls,
       updates: decision.updates,
     }
   }
