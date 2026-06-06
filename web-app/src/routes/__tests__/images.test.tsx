@@ -34,7 +34,9 @@ vi.mock('@tanstack/react-router', () => ({
 }))
 
 vi.mock('@/containers/HeaderPage', () => ({
-  default: ({ children }: any) => <div data-testid="header-page">{children}</div>,
+  default: ({ children }: any) => (
+    <div data-testid="header-page">{children}</div>
+  ),
 }))
 
 vi.mock('@/hooks/useModelProvider', () => ({
@@ -82,20 +84,144 @@ const translations: Record<string, string> = {
   'common:imageGeneration.emptyState': 'Generated images will appear here.',
   'common:imageGeneration.mode.image': 'Image',
   'common:imageGeneration.mode.storyboardVideo': 'Storyboard video',
+  'common:imageGeneration.mode.newBadge': 'New',
+  'common:imageGeneration.mode.longVideo': 'Long video',
+  'common:imageGeneration.mode.soonBadge': 'Unavailable',
   'common:imageGeneration.storyboard.title': 'Storyboard short film',
+  'common:imageGeneration.storyboard.newMediaPrefix': 'New Media',
   'common:imageGeneration.storyboard.storyPlaceholder':
-    'Describe a short story for the storyboard video.',
+    'Describe the single video you want in one sentence.',
   'common:imageGeneration.storyboard.aiBreakdown': 'AI breakdown',
-  'common:imageGeneration.storyboard.regenerateBreakdown': 'Regenerate breakdown',
+  'common:imageGeneration.storyboard.regenerateBreakdown':
+    'Regenerate breakdown',
   'common:imageGeneration.storyboard.shotScript': 'Shot script',
   'common:imageGeneration.storyboard.generateStoryboard': 'Generate storyboard',
   'common:imageGeneration.storyboard.storyboardReady': 'Storyboard ready',
   'common:imageGeneration.storyboard.videoModelRequired':
-    'Configure a video model to generate Seedance clips.',
+    'Configure a video model to generate video.',
   'common:imageGeneration.storyboard.generateVideo': 'Generate video',
   'common:imageGeneration.storyboard.downloadStoryboard': 'Download storyboard',
   'common:imageGeneration.storyboard.downloadVideo': 'Download video',
-  'common:imageGeneration.storyboard.step.compose': 'Script',
+  'common:imageGeneration.storyboard.variantCount': 'Variants',
+  'common:imageGeneration.storyboard.prompt': 'Prompt',
+  'common:imageGeneration.storyboard.promptEmpty':
+    'Click AI breakdown to generate professional prompt variants here.',
+  'common:imageGeneration.storyboard.promptTabLabel': 'Prompt {{index}}',
+  'common:imageGeneration.storyboard.actions': 'Storyboard actions',
+  'common:imageGeneration.storyboard.duration': 'Duration',
+  'common:imageGeneration.storyboard.videoModel': 'Video model',
+  'common:imageGeneration.storyboard.videoModelMissing':
+    'No video model configured',
+  'common:imageGeneration.storyboard.searchVideoModels': 'Search video models',
+  'common:imageGeneration.storyboard.noVideoModelsFound':
+    'No video models found',
+  'common:imageGeneration.storyboard.storyLabel': 'Story description',
+  'common:imageGeneration.storyboard.visualStyle': 'Visual style',
+  'common:imageGeneration.storyboard.templateLabel': 'Storyboard layout',
+  'common:imageGeneration.storyboard.aspectRatio': 'Aspect ratio',
+  'common:imageGeneration.storyboard.advancedTitle':
+    'System prompt and advanced settings',
+  'common:imageGeneration.storyboard.advancedHint':
+    'Consistency · references · seed',
+  'common:imageGeneration.storyboard.systemPrompt': 'System prompt',
+  'common:imageGeneration.storyboard.systemPromptHint':
+    'Injected into every shot to keep character, color, and composition consistent.',
+  'common:imageGeneration.storyboard.characterReferences':
+    'Character references',
+  'common:imageGeneration.storyboard.references': 'Reference images',
+  'common:imageGeneration.storyboard.addReferenceSlot':
+    'Add another reference image',
+  'common:imageGeneration.storyboard.referenceModelUnsupported':
+    'The selected image model does not support reference inputs, so storyboard generation will use text only.',
+  'common:imageGeneration.storyboard.seed': 'Random seed',
+  'common:imageGeneration.storyboard.consistencyLabel': 'Shot consistency',
+  'common:imageGeneration.storyboard.shotScriptHint':
+    '{{count}} shots · editable',
+  'common:imageGeneration.storyboard.promptHint':
+    'AI generated · sent to {{imageModel}}',
+  'common:imageGeneration.storyboard.generateStoryboardHint':
+    'Generate 1 storyboard image with {{imageModel}} · {{aspect}} · {{quality}}',
+  'common:imageGeneration.storyboard.generatedMeta':
+    '{{imageModel}} · {{aspect}} · {{quality}}',
+  'common:imageGeneration.storyboard.backToScript': 'Back to script',
+  'common:imageGeneration.storyboard.nextStep': 'Next · generate video',
+  'common:imageGeneration.storyboard.sourceStoryboardTitle':
+    'Source · 1 storyboard image',
+  'common:imageGeneration.storyboard.sourceStoryboardMeta':
+    '{{imageModel}} · {{aspect}} · {{count}} shots',
+  'common:imageGeneration.storyboard.sourceStoryboardHint':
+    'The video model will use this storyboard image as reference input to generate one complete video.',
+  'common:imageGeneration.storyboard.viewStoryboard': 'View storyboard',
+  'common:imageGeneration.storyboard.openPreview': 'Open preview',
+  'common:imageGeneration.storyboard.previewTitle': 'Storyboard preview',
+  'common:imageGeneration.storyboard.noStoryboardPreview':
+    'No storyboard image to preview yet.',
+  'common:imageGeneration.storyboard.editStoryboard': 'Edit storyboard',
+  'common:imageGeneration.storyboard.zoomIn': 'Zoom in',
+  'common:imageGeneration.storyboard.zoomOut': 'Zoom out',
+  'common:imageGeneration.storyboard.videoDoneMeta':
+    'Rendered · {{duration}}s · {{resolution}}',
+  'common:imageGeneration.storyboard.saveToMediaLibrary':
+    'Save to media library',
+  'common:imageGeneration.storyboard.fps': 'Frame rate',
+  'common:imageGeneration.storyboard.defaultCamera': 'Default camera',
+  'common:imageGeneration.storyboard.motion': 'Motion',
+  'common:imageGeneration.storyboard.aiMusic': 'AI music',
+  'common:imageGeneration.storyboard.subtitle.compose':
+    'Single video generation. Describe your story in one sentence, then use AI and a template to generate professional prompts. Use an image model to create one storyboard image, then a video model can generate one complete video.',
+  'common:imageGeneration.storyboard.subtitle.storyboard':
+    'Single storyboard image generated by {{imageModel}} · {{template}} · {{count}} shots · {{aspect}} · {{quality}}',
+  'common:imageGeneration.storyboard.subtitle.video':
+    'After configuring video parameters, {{videoModel}} will use the storyboard image as reference to generate one complete video.',
+  'common:imageGeneration.storyboard.styles.cinematic': 'Cinematic',
+  'common:imageGeneration.storyboard.styles.animation3d': '3D animation',
+  'common:imageGeneration.storyboard.styles.realisticPhoto': 'Realistic photo',
+  'common:imageGeneration.storyboard.styles.cyberpunk': 'Cyberpunk',
+  'common:imageGeneration.storyboard.styles.watercolor': 'Watercolor',
+  'common:imageGeneration.storyboard.styles.minimal': 'Minimal',
+  'common:imageGeneration.storyboard.templates.grid.label': 'Grid shots',
+  'common:imageGeneration.storyboard.templates.grid.description':
+    'Comic panel layout',
+  'common:imageGeneration.storyboard.templates.table.label': 'Shot table',
+  'common:imageGeneration.storyboard.templates.table.description':
+    'Camera table',
+  'common:imageGeneration.storyboard.templates.board.label': 'Visual dev board',
+  'common:imageGeneration.storyboard.templates.board.description':
+    'Palette/reference/params',
+  'common:imageGeneration.storyboard.consistency.standard': 'Standard',
+  'common:imageGeneration.storyboard.consistency.strong': 'Strong',
+  'common:imageGeneration.storyboard.consistency.lockedCharacter':
+    'Lock character',
+  'common:imageGeneration.storyboard.camera.auto': 'Auto',
+  'common:imageGeneration.storyboard.camera.pushIn': 'Push in',
+  'common:imageGeneration.storyboard.camera.pullOut': 'Pull out',
+  'common:imageGeneration.storyboard.camera.orbit': 'Orbit',
+  'common:imageGeneration.storyboard.camera.truck': 'Truck',
+  'common:imageGeneration.storyboard.camera.tiltUp': 'Tilt up',
+  'common:imageGeneration.storyboard.camera.handheld': 'Handheld follow',
+  'common:imageGeneration.storyboard.motionLevel.light': 'Light',
+  'common:imageGeneration.storyboard.motionLevel.medium': 'Medium',
+  'common:imageGeneration.storyboard.motionLevel.strong': 'Strong',
+  'common:imageGeneration.storyboard.version.original': 'Original',
+  'common:imageGeneration.storyboard.version.edited': 'Edit {{index}}',
+  'common:imageGeneration.storyboard.version.editedPromptSuffix':
+    'edited storyboard version',
+  'common:imageGeneration.storyboard.editor.title': 'Edit storyboard',
+  'common:imageGeneration.storyboard.editor.tool': 'Tool',
+  'common:imageGeneration.storyboard.editor.pen': 'Pen',
+  'common:imageGeneration.storyboard.editor.rect': 'Box',
+  'common:imageGeneration.storyboard.editor.crop': 'Crop',
+  'common:imageGeneration.storyboard.editor.color': 'Color',
+  'common:imageGeneration.storyboard.editor.colorOption':
+    'Choose color {{color}}',
+  'common:imageGeneration.storyboard.editor.zoom': 'Zoom',
+  'common:imageGeneration.storyboard.editor.undo': 'Undo',
+  'common:imageGeneration.storyboard.editor.redo': 'Redo',
+  'common:imageGeneration.storyboard.editor.save': 'Save version',
+  'common:imageGeneration.storyboard.editor.saved': 'Edited storyboard saved',
+  'common:imageGeneration.storyboard.editor.saveFailed':
+    'Failed to save edited storyboard',
+  'common:imageGeneration.storyboard.step.compose': 'Script & prompt',
   'common:imageGeneration.storyboard.step.storyboard': 'Storyboard',
   'common:imageGeneration.storyboard.step.video': 'Video',
   'common:imageGeneration.noImageModelsAvailable': 'No image models available',
@@ -214,7 +340,9 @@ describe('Images route', () => {
   it('shows the no-image-model empty state', async () => {
     renderComponent()
 
-    expect(await screen.findByText('No image models available')).toBeInTheDocument()
+    expect(
+      await screen.findByText('No image models available')
+    ).toBeInTheDocument()
     expect(screen.getByText('Open Providers')).toBeInTheDocument()
   })
 
@@ -249,25 +377,29 @@ describe('Images route', () => {
 
     await waitFor(() => expect(h.listAssets).toHaveBeenCalled())
     expect(screen.queryByText('New Image')).not.toBeInTheDocument()
-    expect(screen.getByRole('button', { name: 'Image model' })).toHaveTextContent(
-      'gpt-image-1.5'
-    )
-    expect(screen.getByRole('button', { name: 'Image model' })).toHaveTextContent(
-      'Jingxing'
-    )
-    expect(screen.getByRole('button', { name: 'Image model' })).not.toHaveTextContent(
-      'Model ·'
-    )
+    expect(
+      screen.getByRole('button', { name: 'Image model' })
+    ).toHaveTextContent('gpt-image-1.5')
+    expect(
+      screen.getByRole('button', { name: 'Image model' })
+    ).toHaveTextContent('Jingxing')
+    expect(
+      screen.getByRole('button', { name: 'Image model' })
+    ).not.toHaveTextContent('Model ·')
     await act(async () => {
       fireEvent.click(screen.getByRole('button', { name: 'Image model' }))
     })
-    expect(screen.getByRole('button', { name: 'gemini-2.5-flash-image' })).toBeInTheDocument()
+    expect(
+      screen.getByRole('button', { name: 'gemini-2.5-flash-image' })
+    ).toBeInTheDocument()
     await act(async () => {
-      fireEvent.click(await screen.findByRole('button', { name: 'gpt-image-2' }))
+      fireEvent.click(
+        await screen.findByRole('button', { name: 'gpt-image-2' })
+      )
     })
-    expect(screen.getByRole('button', { name: 'Image model' })).toHaveTextContent(
-      'gpt-image-2'
-    )
+    expect(
+      screen.getByRole('button', { name: 'Image model' })
+    ).toHaveTextContent('gpt-image-2')
     expect(screen.getByText('Today')).toBeInTheDocument()
     expect(screen.queryByText('Queue')).not.toBeInTheDocument()
     expect(screen.queryByText('Assets')).not.toBeInTheDocument()
@@ -276,32 +408,43 @@ describe('Images route', () => {
     expect(
       screen.getByRole('button', { name: 'Storyboard video' })
     ).toBeInTheDocument()
-    expect(screen.queryByRole('button', { name: 'Generate' })).toBeInTheDocument()
-    expect(screen.queryByRole('button', { name: 'Edit' })).not.toBeInTheDocument()
-    expect(screen.queryByRole('button', { name: 'Variation' })).not.toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Long video' })).toBeDisabled()
+    expect(
+      screen.queryByRole('button', { name: 'Generate' })
+    ).toBeInTheDocument()
+    expect(
+      screen.queryByRole('button', { name: 'Edit' })
+    ).not.toBeInTheDocument()
+    expect(
+      screen.queryByRole('button', { name: 'Variation' })
+    ).not.toBeInTheDocument()
     expect(screen.queryByText('1 image')).not.toBeInTheDocument()
-    expect(screen.getByRole('button', { name: 'Image size settings' })).toHaveTextContent(
-      '1:1'
-    )
-    expect(screen.getByRole('button', { name: 'Image size settings' })).toHaveTextContent(
-      'HD 2K'
-    )
+    expect(
+      screen.getByRole('button', { name: 'Image size settings' })
+    ).toHaveTextContent('1:1')
+    expect(
+      screen.getByRole('button', { name: 'Image size settings' })
+    ).toHaveTextContent('HD 2K')
     expect(screen.queryByText('SD')).not.toBeInTheDocument()
     expect(screen.queryByText('HD')).not.toBeInTheDocument()
 
     fireEvent.click(screen.getByRole('button', { name: 'Image size settings' }))
     expect(screen.getByText('Select ratio')).toBeInTheDocument()
     expect(screen.getByText('Select resolution')).toBeInTheDocument()
-    expect(screen.queryByRole('button', { name: '智能' })).not.toBeInTheDocument()
-    expect(screen.queryByRole('button', { name: '21:9' })).not.toBeInTheDocument()
+    expect(
+      screen.queryByRole('button', { name: '智能' })
+    ).not.toBeInTheDocument()
+    expect(
+      screen.queryByRole('button', { name: '21:9' })
+    ).not.toBeInTheDocument()
     fireEvent.click(screen.getByRole('button', { name: '16:9' }))
     fireEvent.click(screen.getByRole('button', { name: /Ultra HD 4K/ }))
-    expect(screen.getByRole('button', { name: 'Image size settings' })).toHaveTextContent(
-      '16:9'
-    )
-    expect(screen.getByRole('button', { name: 'Image size settings' })).toHaveTextContent(
-      'Ultra HD 4K'
-    )
+    expect(
+      screen.getByRole('button', { name: 'Image size settings' })
+    ).toHaveTextContent('16:9')
+    expect(
+      screen.getByRole('button', { name: 'Image size settings' })
+    ).toHaveTextContent('Ultra HD 4K')
   })
 
   it('switches to storyboard video mode and generates a storyboard image', async () => {
@@ -337,7 +480,7 @@ describe('Images route', () => {
         fileName: 'image.png',
       })
     )
-    h.breakdownStoryboard.mockResolvedValueOnce({
+    h.breakdownStoryboard.mockResolvedValue({
       shots: [
         {
           title: 'Wake',
@@ -373,7 +516,9 @@ describe('Images route', () => {
 
     expect(screen.getByText('Storyboard short film')).toBeInTheDocument()
     fireEvent.change(
-      screen.getByPlaceholderText('Describe a short story for the storyboard video.'),
+      screen.getByPlaceholderText(
+        'Describe the single video you want in one sentence.'
+      ),
       {
         target: {
           value:
@@ -391,8 +536,8 @@ describe('Images route', () => {
         })
       )
     )
-    expect(await screen.findByText('Shot script')).toBeInTheDocument()
-    expect(screen.getAllByDisplayValue(/gold robot/i).length).toBeGreaterThan(1)
+    expect(await screen.findByText('Prompt 3')).toBeInTheDocument()
+    expect(screen.getAllByDisplayValue(/gold robot/i).length).toBeGreaterThan(0)
     fireEvent.click(screen.getByRole('button', { name: 'Generate storyboard' }))
 
     await waitFor(() => expect(h.generateImages).toHaveBeenCalled())
@@ -406,9 +551,191 @@ describe('Images route', () => {
       'LLM storyboard prompt'
     )
     expect(await screen.findByText('Storyboard ready')).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Original' })).toBeInTheDocument()
     expect(
-      screen.getByText('Configure a video model to generate Seedance clips.')
+      screen.getByRole('button', { name: 'Open preview' })
     ).toBeInTheDocument()
+    fireEvent.click(screen.getByRole('button', { name: 'Open preview' }))
+    expect(await screen.findByText('Storyboard preview')).toBeInTheDocument()
+    fireEvent.click(screen.getByRole('button', { name: 'Close' }))
+
+    const canvasContext = {
+      beginPath: vi.fn(),
+      clearRect: vi.fn(),
+      closePath: vi.fn(),
+      drawImage: vi.fn(),
+      lineTo: vi.fn(),
+      moveTo: vi.fn(),
+      stroke: vi.fn(),
+      strokeRect: vi.fn(),
+      lineCap: 'round',
+      lineJoin: 'round',
+      lineWidth: 4,
+      strokeStyle: '#f36f4f',
+    }
+    const getContextSpy = vi
+      .spyOn(HTMLCanvasElement.prototype, 'getContext')
+      .mockReturnValue(canvasContext as any)
+    const toDataUrlSpy = vi
+      .spyOn(HTMLCanvasElement.prototype, 'toDataURL')
+      .mockReturnValue('data:image/png;base64,ZWRpdGVk')
+    class EditorImage {
+      naturalWidth = 80
+      naturalHeight = 45
+      width = 80
+      height = 45
+      onload?: () => void
+      onerror?: () => void
+      set crossOrigin(_value: string) {}
+      set src(_value: string) {
+        this.onload?.()
+      }
+    }
+    vi.stubGlobal('Image', EditorImage)
+    window.Image = EditorImage as any
+    fireEvent.click(screen.getByRole('button', { name: 'Edit storyboard' }))
+    await waitFor(() =>
+      expect(screen.getByRole('button', { name: 'Save version' })).toBeEnabled()
+    )
+
+    const canvas = document.querySelector('canvas') as HTMLCanvasElement
+    const rectSpy = vi.spyOn(canvas, 'getBoundingClientRect').mockReturnValue({
+      bottom: 45,
+      height: 45,
+      left: 0,
+      right: 80,
+      top: 0,
+      width: 80,
+      x: 0,
+      y: 0,
+      toJSON: () => ({}),
+    })
+    const fireCanvasPointer = (
+      type: 'pointerdown' | 'pointermove' | 'pointerup',
+      x: number,
+      y: number,
+      pointerId: number
+    ) => {
+      const event = new Event(type, { bubbles: true, cancelable: true })
+      Object.defineProperties(event, {
+        clientX: { value: x },
+        clientY: { value: y },
+        pointerId: { value: pointerId },
+      })
+      fireEvent(canvas, event)
+    }
+
+    fireEvent.click(
+      screen.getByRole('button', { name: 'Choose color #2563eb' })
+    )
+    fireEvent.click(screen.getByRole('button', { name: 'Box' }))
+    fireCanvasPointer('pointerdown', 10, 10, 1)
+    fireCanvasPointer('pointermove', 35, 25, 1)
+    fireCanvasPointer('pointerup', 35, 25, 1)
+    await waitFor(() => expect(canvasContext.strokeRect).toHaveBeenCalled())
+    await waitFor(() =>
+      expect(screen.getByRole('button', { name: 'Undo' })).toBeEnabled()
+    )
+    fireEvent.click(screen.getByRole('button', { name: 'Undo' }))
+    await waitFor(() =>
+      expect(screen.getByRole('button', { name: 'Redo' })).toBeEnabled()
+    )
+    fireEvent.click(screen.getByRole('button', { name: 'Redo' }))
+
+    fireEvent.click(screen.getByRole('button', { name: 'Crop' }))
+    fireCanvasPointer('pointerdown', 5, 5, 2)
+    fireCanvasPointer('pointermove', 45, 30, 2)
+    fireCanvasPointer('pointerup', 45, 30, 2)
+    await waitFor(() => expect(canvas.width).toBe(40))
+    expect(canvas.height).toBe(25)
+
+    fireEvent.click(screen.getByRole('button', { name: 'Save version' }))
+    await waitFor(() => expect(h.saveAsset).toHaveBeenCalledTimes(2))
+    expect(h.saveAsset.mock.calls.at(-1)?.[0]).toMatchObject({
+      mode: 'edit',
+      mimeType: 'image/png',
+      b64Json: 'ZWRpdGVk',
+      sourceAssetIds: [expect.any(String)],
+    })
+    expect(
+      await screen.findByRole('button', { name: 'Edit 1' })
+    ).toBeInTheDocument()
+    rectSpy.mockRestore()
+    getContextSpy.mockRestore()
+    toDataUrlSpy.mockRestore()
+    expect(
+      screen.getByText('Configure a video model to generate video.')
+    ).toBeInTheDocument()
+  })
+
+  it('lets storyboard mode switch image models, layout, consistency, and references', async () => {
+    h.providers = [
+      {
+        provider: 'jingxing',
+        base_url: 'https://api.jingxing.uk/v1',
+        settings: [],
+        models: [
+          {
+            id: 'gpt-image-1.5',
+            capabilities: [ModelCapabilities.IMAGE_GENERATION],
+          },
+          {
+            id: 'gpt-image-2',
+            capabilities: [
+              ModelCapabilities.IMAGE_GENERATION,
+              ModelCapabilities.IMAGE_TO_IMAGE,
+            ],
+          },
+        ],
+      },
+    ]
+    const referenceAsset = {
+      id: 'story-ref-1',
+      prompt: 'hero',
+      mode: 'edit',
+      provider: 'local',
+      model: 'reference-image',
+      ratio: '1:1',
+      size: 'original',
+      quality: 'source',
+      sourceAssetIds: [],
+      createdAt: '2026-06-06T00:00:00Z',
+      status: 'succeeded',
+      path: '/mock/mita/image-assets/story-ref-1/image.png',
+      fileName: 'image.png',
+      mimeType: 'image/png',
+      assetKind: 'reference',
+    }
+    h.dialogOpen.mockResolvedValue(['/Users/eric/Desktop/hero.png'])
+    h.importAsset.mockResolvedValue(referenceAsset)
+
+    renderComponent()
+
+    await waitFor(() => expect(h.listAssets).toHaveBeenCalled())
+    fireEvent.click(screen.getByRole('button', { name: 'Storyboard video' }))
+
+    expect(
+      screen.getByRole('button', { name: 'Image model' })
+    ).toHaveTextContent('gpt-image-1.5')
+    fireEvent.click(screen.getByRole('button', { name: 'Image model' }))
+    fireEvent.click(await screen.findByRole('button', { name: 'gpt-image-2' }))
+    expect(
+      screen.getByRole('button', { name: 'Image model' })
+    ).toHaveTextContent('gpt-image-2')
+
+    expect(screen.getByText('Storyboard layout')).toBeInTheDocument()
+    fireEvent.click(screen.getByRole('button', { name: /Shot table/ }))
+    fireEvent.click(screen.getByRole('button', { name: 'Strong' }))
+
+    await act(async () => {
+      fireEvent.click(
+        screen.getByRole('button', { name: 'Add reference image' })
+      )
+      await Promise.resolve()
+    })
+
+    await waitFor(() => expect(h.importAsset).toHaveBeenCalled())
+    expect(await screen.findByAltText('hero')).toBeInTheDocument()
   })
 
   it('submits plain prompt requests as generate tasks', async () => {
@@ -470,10 +797,9 @@ describe('Images route', () => {
     renderComponent()
 
     await waitFor(() => expect(h.listAssets).toHaveBeenCalled())
-    fireEvent.change(
-      screen.getByPlaceholderText(/Upload a reference image/),
-      { target: { value: 'a tiny moon desk' } }
-    )
+    fireEvent.change(screen.getByPlaceholderText(/Upload a reference image/), {
+      target: { value: 'a tiny moon desk' },
+    })
     fireEvent.click(screen.getByRole('button', { name: 'Generate' }))
 
     expect(await screen.findByText('该令牌额度已用尽')).toBeInTheDocument()
@@ -481,7 +807,9 @@ describe('Images route', () => {
     expect(h.openExternalUrl).toHaveBeenCalledWith(
       'https://api.jingxing.uk/console/topup'
     )
-    expect(screen.getByRole('button', { name: 'Manage tokens' })).toBeInTheDocument()
+    expect(
+      screen.getByRole('button', { name: 'Manage tokens' })
+    ).toBeInTheDocument()
   })
 
   it('shows a readable busy error and retry cooldown for image request failures', async () => {
@@ -511,10 +839,9 @@ describe('Images route', () => {
     renderComponent()
 
     await waitFor(() => expect(h.listAssets).toHaveBeenCalled())
-    fireEvent.change(
-      screen.getByPlaceholderText(/Upload a reference image/),
-      { target: { value: 'a tiny moon desk' } }
-    )
+    fireEvent.change(screen.getByPlaceholderText(/Upload a reference image/), {
+      target: { value: 'a tiny moon desk' },
+    })
     fireEvent.click(screen.getByRole('button', { name: 'Generate' }))
 
     expect(
@@ -566,10 +893,9 @@ describe('Images route', () => {
     expect(screen.queryByText('Mask')).not.toBeInTheDocument()
     expect(screen.getAllByText('moon desk').length).toBeGreaterThan(0)
 
-    fireEvent.change(
-      screen.getByPlaceholderText(/Upload a reference image/),
-      { target: { value: 'make it glass' } }
-    )
+    fireEvent.change(screen.getByPlaceholderText(/Upload a reference image/), {
+      target: { value: 'make it glass' },
+    })
     fireEvent.click(screen.getByRole('button', { name: 'Generate' }))
 
     await waitFor(() =>
@@ -581,10 +907,9 @@ describe('Images route', () => {
     )
 
     h.generateImages.mockClear()
-    fireEvent.change(
-      screen.getByPlaceholderText(/Upload a reference image/),
-      { target: { value: '' } }
-    )
+    fireEvent.change(screen.getByPlaceholderText(/Upload a reference image/), {
+      target: { value: '' },
+    })
     fireEvent.click(screen.getByRole('button', { name: 'Generate' }))
 
     await waitFor(() =>
@@ -637,10 +962,9 @@ describe('Images route', () => {
     await screen.findByText('moon desk')
     fireEvent.click(screen.getByRole('button', { name: 'Use saved asset' }))
     fireEvent.click(screen.getByRole('button', { name: 'Remove moon desk' }))
-    fireEvent.change(
-      screen.getByPlaceholderText(/Upload a reference image/),
-      { target: { value: '' } }
-    )
+    fireEvent.change(screen.getByPlaceholderText(/Upload a reference image/), {
+      target: { value: '' },
+    })
     fireEvent.click(screen.getByRole('button', { name: 'Generate' }))
 
     await waitFor(() => expect(h.generateImages).not.toHaveBeenCalled())
@@ -686,10 +1010,9 @@ describe('Images route', () => {
       prompt: 'second-logo',
       path: '/mock/mita/image-assets/local-ref-2/image.png',
     }
-    h.listAssets.mockResolvedValueOnce([]).mockResolvedValue([
-      referenceAsset,
-      secondReferenceAsset,
-    ])
+    h.listAssets
+      .mockResolvedValueOnce([])
+      .mockResolvedValue([referenceAsset, secondReferenceAsset])
     h.dialogOpen.mockResolvedValue([
       '/Users/eric/Desktop/logo-v1.png',
       '/Users/eric/Desktop/second-logo.webp',
@@ -706,7 +1029,9 @@ describe('Images route', () => {
 
     await waitFor(() => expect(h.listAssets).toHaveBeenCalled())
     await act(async () => {
-      fireEvent.click(screen.getByRole('button', { name: 'Add reference image' }))
+      fireEvent.click(
+        screen.getByRole('button', { name: 'Add reference image' })
+      )
       await Promise.resolve()
     })
 
@@ -736,7 +1061,9 @@ describe('Images route', () => {
     )
     expect(screen.queryByText(/reference-image/)).not.toBeInTheDocument()
     expect((await screen.findAllByAltText('logo-v1')).length).toBeGreaterThan(0)
-    expect((await screen.findAllByAltText('second-logo')).length).toBeGreaterThan(0)
+    expect(
+      (await screen.findAllByAltText('second-logo')).length
+    ).toBeGreaterThan(0)
 
     fireEvent.click(screen.getByRole('button', { name: 'Generate' }))
 
@@ -796,12 +1123,13 @@ describe('Images route', () => {
     renderComponent()
 
     await waitFor(() => expect(h.listAssets).toHaveBeenCalled())
-    fireEvent.change(
-      screen.getByPlaceholderText(/Upload a reference image/),
-      { target: { value: 'make it white' } }
-    )
+    fireEvent.change(screen.getByPlaceholderText(/Upload a reference image/), {
+      target: { value: 'make it white' },
+    })
     await act(async () => {
-      fireEvent.click(screen.getByRole('button', { name: 'Add reference image' }))
+      fireEvent.click(
+        screen.getByRole('button', { name: 'Add reference image' })
+      )
       await Promise.resolve()
     })
 
@@ -817,7 +1145,9 @@ describe('Images route', () => {
       await Promise.resolve()
     })
 
-    expect((await screen.findAllByAltText('slow-ref')).length).toBeGreaterThan(0)
+    expect((await screen.findAllByAltText('slow-ref')).length).toBeGreaterThan(
+      0
+    )
     expect(screen.getByRole('button', { name: 'Generate' })).not.toBeDisabled()
     fireEvent.click(screen.getByRole('button', { name: 'Generate' }))
     await waitFor(() =>
@@ -964,7 +1294,9 @@ describe('Images route', () => {
       const image = (await screen.findAllByAltText('moon desk'))[1]
       fireEvent.contextMenu(image)
 
-      expect(screen.getByRole('menuitem', { name: 'Preview' })).toBeInTheDocument()
+      expect(
+        screen.getByRole('menuitem', { name: 'Preview' })
+      ).toBeInTheDocument()
       expect(
         screen.getByRole('menuitem', { name: 'Open in Finder' })
       ).toBeInTheDocument()

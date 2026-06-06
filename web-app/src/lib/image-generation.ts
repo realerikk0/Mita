@@ -1,6 +1,7 @@
 import { ModelCapabilities } from '@/types/models'
 
 export const IMAGE_RATIOS = [
+  '21:9',
   '9:16',
   '4:3',
   '3:2',
@@ -15,6 +16,7 @@ export type ImageQualityPreset = 'sd' | 'hd'
 export type ImageGenerationMode = 'generate' | 'edit' | 'variation'
 
 const GPT_IMAGE_SIZE_BY_RATIO: Record<ImageRatio, string> = {
+  '21:9': '1536x1024',
   '9:16': '1024x1536',
   '4:3': '1536x1024',
   '3:2': '1536x1024',
@@ -25,6 +27,7 @@ const GPT_IMAGE_SIZE_BY_RATIO: Record<ImageRatio, string> = {
 }
 
 const LEGACY_SIZE_BY_RATIO: Record<ImageRatio, string> = {
+  '21:9': '1536x1024',
   '9:16': '1024x1536',
   '4:3': '1536x1024',
   '3:2': '1536x1024',
@@ -35,6 +38,7 @@ const LEGACY_SIZE_BY_RATIO: Record<ImageRatio, string> = {
 }
 
 const JINGXING_LEGACY_EDIT_SIZE_BY_RATIO: Record<ImageRatio, string> = {
+  '21:9': '1792x1024',
   '9:16': '1024x1792',
   '4:3': '1792x1024',
   '3:2': '1792x1024',
@@ -44,7 +48,9 @@ const JINGXING_LEGACY_EDIT_SIZE_BY_RATIO: Record<ImageRatio, string> = {
   '16:9': '1792x1024',
 }
 
-export function isImageGenerationModel(model?: Pick<Model, 'capabilities'> | null) {
+export function isImageGenerationModel(
+  model?: Pick<Model, 'capabilities'> | null
+) {
   const capabilities = model?.capabilities ?? []
   return (
     capabilities.includes(ModelCapabilities.IMAGE_GENERATION) ||
@@ -53,7 +59,9 @@ export function isImageGenerationModel(model?: Pick<Model, 'capabilities'> | nul
 }
 
 export function isImageEditModel(model?: Pick<Model, 'capabilities'> | null) {
-  return model?.capabilities?.includes(ModelCapabilities.IMAGE_TO_IMAGE) ?? false
+  return (
+    model?.capabilities?.includes(ModelCapabilities.IMAGE_TO_IMAGE) ?? false
+  )
 }
 
 function imageModelSortKey(provider: ModelProvider, model: Pick<Model, 'id'>) {
@@ -95,10 +103,7 @@ export function imageSizeForRatio(ratio: ImageRatio, modelId?: string) {
     : LEGACY_SIZE_BY_RATIO[ratio]
 }
 
-export function isJingxingImageProvider(
-  providerId?: string,
-  baseUrl?: string
-) {
+export function isJingxingImageProvider(providerId?: string, baseUrl?: string) {
   const normalizedProvider = providerId?.toLowerCase() ?? ''
   const normalizedBaseUrl = baseUrl?.toLowerCase() ?? ''
   return (
@@ -114,7 +119,9 @@ export function usesJingxingCompatibleImageEditParams(
   providerId?: string,
   baseUrl?: string
 ) {
-  return isGptImageModel(modelId) && isJingxingImageProvider(providerId, baseUrl)
+  return (
+    isGptImageModel(modelId) && isJingxingImageProvider(providerId, baseUrl)
+  )
 }
 
 export function usesJingxingLegacyImageEditSize(

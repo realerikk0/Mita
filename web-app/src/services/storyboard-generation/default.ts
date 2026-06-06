@@ -59,8 +59,7 @@ export class DefaultStoryboardGenerationService
         {
           role: 'user',
           content: JSON.stringify({
-            task:
-              'Break the story into editable video storyboard shots and one image-generation prompt for a numbered storyboard sheet.',
+            task: 'Break the story into editable video storyboard shots and one image-generation prompt for a numbered storyboard sheet.',
             schema: {
               shots:
                 'Array of objects with title, camera, prompt, and duration fields.',
@@ -74,6 +73,12 @@ export class DefaultStoryboardGenerationService
             template: request.template,
             continuityRules: request.systemPrompt,
             durationPerShot: request.durationPerShot,
+            variantIndex: request.variantIndex,
+            variantCount: request.variantCount,
+            variantGuidance:
+              request.variantCount && request.variantCount > 1
+                ? `Create variation ${request.variantIndex ?? 1} of ${request.variantCount}; keep the story but vary framing, pacing, and prompt wording.`
+                : undefined,
           }),
         },
       ],
@@ -214,9 +219,7 @@ export class DefaultStoryboardGenerationService
       camera,
       prompt,
       duration:
-        Number.isFinite(duration) && duration > 0
-          ? duration
-          : fallbackDuration,
+        Number.isFinite(duration) && duration > 0 ? duration : fallbackDuration,
     }
   }
 

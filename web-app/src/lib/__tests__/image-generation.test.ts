@@ -33,9 +33,18 @@ describe('image generation helpers', () => {
             id: 'gemini-2.5-flash-image',
             capabilities: [ModelCapabilities.IMAGE_GENERATION],
           },
-          { id: 'gpt-image-1.5', capabilities: [ModelCapabilities.IMAGE_GENERATION] },
-          { id: 'gpt-image-2', capabilities: [ModelCapabilities.IMAGE_GENERATION] },
-          { id: 'mai-image-2-5', capabilities: [ModelCapabilities.IMAGE_GENERATION] },
+          {
+            id: 'gpt-image-1.5',
+            capabilities: [ModelCapabilities.IMAGE_GENERATION],
+          },
+          {
+            id: 'gpt-image-2',
+            capabilities: [ModelCapabilities.IMAGE_GENERATION],
+          },
+          {
+            id: 'mai-image-2-5',
+            capabilities: [ModelCapabilities.IMAGE_GENERATION],
+          },
           { id: 'gpt-5.4', capabilities: [ModelCapabilities.COMPLETION] },
         ],
       },
@@ -51,6 +60,7 @@ describe('image generation helpers', () => {
 
   it('maps gpt-image models to supported fixed sizes and falls back otherwise', () => {
     expect(imageSizeForRatio('3:4', 'gpt-image-2')).toBe('1024x1536')
+    expect(imageSizeForRatio('21:9', 'gpt-image-2')).toBe('1536x1024')
     expect(imageSizeForRatio('16:9', 'gpt-image-2')).toBe('1536x1024')
     expect(imageSizeForRatio('9:16', 'gpt-image-1')).toBe('1024x1536')
     expect(imageSizeForRatio('16:9', 'custom-image-model')).toBe('1536x1024')

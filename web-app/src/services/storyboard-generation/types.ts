@@ -15,6 +15,8 @@ export type StoryboardBreakdownRequest = {
   template: string
   systemPrompt: string
   durationPerShot: number
+  variantIndex?: number
+  variantCount?: number
   signal?: AbortSignal
 }
 
