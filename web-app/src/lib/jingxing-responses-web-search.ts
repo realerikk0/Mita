@@ -15,6 +15,11 @@ import {
   parseProviderErrorResponse,
   providerQuotaErrorFromUnknown,
 } from '@/lib/provider-quota-error'
+import {
+  searchDecisionMetadata,
+  type SearchDecision,
+  type SearchDepth,
+} from '@/lib/search-decision'
 
 type ResponseStreamEvent = {
   type?: string
@@ -74,6 +79,8 @@ type JingxingResponsesWebSearchOptions = {
   provider: ProviderObject
   messages: UIMessage[]
   system?: string
+  searchDecision?: SearchDecision
+  searchDepth?: SearchDepth
   maxOutputTokens?: number
   abortSignal?: AbortSignal
   onTokenUsage?: (usage: LanguageModelUsage, messageId: string) => void
@@ -97,8 +104,18 @@ const JSON_HEADERS = {
 }
 
 export const JINGXING_WEB_SEARCH_OPTIONS = {
-  search_context_size: 'low',
+  search_context_size: 'medium',
 } as const
+
+export const JINGXING_NATIVE_WEB_SEARCH_MIN_OUTPUT_TOKENS = 4096
+
+export function jingxingWebSearchOptionsForDepth(
+  depth: SearchDepth = 'medium'
+) {
+  return {
+    search_context_size: depth,
+  } as const
+}
 
 const JINGXING_GEMINI_NATIVE_WEB_SEARCH_MODELS = new Set([
   'gemini-3.5-flash',
@@ -240,15 +257,14 @@ export function geminiGenerateContentEndpointFromBaseUrl(
   }
 }
 
-function protectedResponsesMaxOutputTokens(
-  modelId: string,
+export function protectedJingxingMaxOutputTokens(
   maxOutputTokens?: number
-): number | undefined {
+): number {
   if (
-    modelId.toLowerCase().startsWith('gpt-5.4-pro') &&
-    (!maxOutputTokens || maxOutputTokens < 4096)
+    maxOutputTokens === undefined ||
+    maxOutputTokens < JINGXING_NATIVE_WEB_SEARCH_MIN_OUTPUT_TOKENS
   ) {
-    return 4096
+    return JINGXING_NATIVE_WEB_SEARCH_MIN_OUTPUT_TOKENS
   }
   return maxOutputTokens
 }
@@ -424,12 +440,18 @@ export function buildJingxingNativeWebSearchRequest(options: {
   baseUrl?: string
   messages: UIMessage[]
   system?: string
+  searchDepth?: SearchDepth
   maxOutputTokens?: number
 }): JingxingNativeWebSearchRequest {
+  const webSearchOptions = jingxingWebSearchOptionsForDepth(options.searchDepth)
+  const maxOutputTokens = protectedJingxingMaxOutputTokens(
+    options.maxOutputTokens
+  )
+
   if (isJingxingGeminiNativeWebSearchModel(options.modelId)) {
     const body: Record<string, unknown> = {
       contents: messagesToGeminiContents(options.messages),
-      web_search_options: JINGXING_WEB_SEARCH_OPTIONS,
+      web_search_options: webSearchOptions,
     }
 
     if (options.system) {
@@ -437,10 +459,8 @@ export function buildJingxingNativeWebSearchRequest(options: {
         parts: [{ text: options.system }],
       }
     }
-    if (options.maxOutputTokens !== undefined) {
-      body.generationConfig = {
-        maxOutputTokens: options.maxOutputTokens,
-      }
+    body.generationConfig = {
+      maxOutputTokens,
     }
 
     return {
@@ -459,24 +479,17 @@ export function buildJingxingNativeWebSearchRequest(options: {
     )
   }
 
-  const maxOutputTokens = protectedResponsesMaxOutputTokens(
-    options.modelId,
-    options.maxOutputTokens
-  )
-
   const body: Record<string, unknown> = {
     model: options.modelId,
     input: messagesToResponsesInput(options.messages),
     stream: true,
-    web_search_options: JINGXING_WEB_SEARCH_OPTIONS,
+    web_search_options: webSearchOptions,
   }
 
   if (options.system) {
     body.instructions = options.system
   }
-  if (maxOutputTokens !== undefined) {
-    body.max_output_tokens = maxOutputTokens
-  }
+  body.max_output_tokens = maxOutputTokens
   if (options.modelId.toLowerCase().startsWith('gpt-5.4-pro')) {
     body.reasoning = { effort: 'medium' }
   }
@@ -508,6 +521,7 @@ export function streamJingxingNativeWebSearch(
         baseUrl: options.provider.base_url,
         messages: options.messages,
         system: options.system,
+        searchDepth: options.searchDecision?.depth ?? options.searchDepth,
         maxOutputTokens: options.maxOutputTokens,
       })
 
@@ -575,16 +589,24 @@ export function streamJingxingNativeWebSearch(
       writer.write({
         type: 'finish',
         finishReason,
-        messageMetadata: usage
-          ? {
-              usage,
-              tokenSpeed: {
-                tokenSpeed: 0,
-                tokenCount: usage.outputTokens,
-                durationMs: 0,
-              },
-            }
-          : undefined,
+        messageMetadata: {
+          ...(usage
+            ? {
+                usage,
+                tokenSpeed: {
+                  tokenSpeed: 0,
+                  tokenCount: usage.outputTokens,
+                  durationMs: 0,
+                },
+              }
+            : {}),
+          ...(options.searchDecision
+            ? searchDecisionMetadata(options.searchDecision, {
+                transport: request.transport,
+                sourceCount: emittedSources.size,
+              })
+            : {}),
+        },
       })
 
       if (usage) {

@@ -813,7 +813,12 @@ describe('mita teams runtime', () => {
         roleId: string
         modelId?: string
         prompt: string
-        webSearch?: { enabled: boolean; reason: string }
+        webSearch?: {
+          enabled: boolean
+          reason: string
+          depth?: string
+          blockedReason?: string
+        }
       }> = []
 
       const result = await runMitaTeamsRuntime({
@@ -828,7 +833,12 @@ describe('mita teams runtime', () => {
         generateRoleText: async (input) => {
           const webSearch = (
             input as typeof input & {
-              webSearch?: { enabled: boolean; reason: string }
+              webSearch?: {
+                enabled: boolean
+                reason: string
+                depth?: string
+                blockedReason?: string
+              }
             }
           ).webSearch
           roleCalls.push({
@@ -848,6 +858,9 @@ describe('mita teams runtime', () => {
         'skeptic',
       ])
       expect(roleCalls.every((call) => call.webSearch?.enabled)).toBe(true)
+      expect(roleCalls.every((call) => call.webSearch?.depth === 'high')).toBe(
+        true
+      )
       expect(roleCalls.map((call) => call.webSearch?.reason).join('\n')).toContain(
         'current market or investment data'
       )
@@ -855,7 +868,80 @@ describe('mita teams runtime', () => {
         roleCalls.find((call) => call.roleId === 'data_scout')?.modelId
       ).toBe('grok-4.3')
       expect(roleCalls.map((call) => call.prompt).join('\n')).toContain(
-        'Native web search is requested for this role call'
+        'Return a compact research packet'
+      )
+    } finally {
+      useModelProvider.setState({
+        providers: previousModelState.providers,
+        selectedProvider: previousModelState.selectedProvider,
+        selectedModel: previousModelState.selectedModel,
+        deletedModels: previousModelState.deletedModels,
+      })
+    }
+  })
+
+  it('does not inject fake live-search guidance for unsupported assigned models', async () => {
+    const previousModelState = useModelProvider.getState()
+    useModelProvider.setState({
+      providers: [
+        {
+          active: true,
+          provider: 'jingxing',
+          api_key: 'sk-jingxing',
+          settings: [],
+          models: [{ id: 'claude-opus-4-7', displayName: 'Claude Opus' }],
+        },
+      ],
+      selectedProvider: 'jingxing',
+      selectedModel: {
+        id: 'claude-opus-4-7',
+        displayName: 'Claude Opus',
+      },
+    })
+
+    try {
+      const config = createDefaultMitaTeamsConfig({
+        provider: 'jingxing',
+        id: 'claude-opus-4-7',
+      })
+      const roleCalls: Array<{
+        prompt: string
+        webSearch?: { enabled: boolean; blockedReason?: string }
+      }> = []
+
+      await runMitaTeamsRuntime({
+        config,
+        userText: '帮我研究 $MRVL 投资价值',
+        generateDecisionText: async () =>
+          JSON.stringify({
+            action: 'stop',
+            reason: 'Try to stop before the market playbook completes.',
+            finalResponse: 'Done too early.',
+          }),
+        generateRoleText: async (input) => {
+          roleCalls.push({
+            prompt: input.prompt,
+            webSearch: input.webSearch,
+          })
+          return 'Missing live inputs: assigned model has no native search.'
+        },
+      })
+
+      expect(roleCalls.length).toBeGreaterThan(0)
+      expect(roleCalls.every((call) => call.webSearch?.enabled === false)).toBe(
+        true
+      )
+      expect(roleCalls[0]?.webSearch).toMatchObject({
+        enabled: false,
+        blockedReason:
+          'Assigned model does not support native web search for this role call.',
+      })
+      expect(roleCalls[0]?.prompt).toContain(
+        'Native web search is not available for this role call'
+      )
+      expect(roleCalls[0]?.prompt).toContain('Gaps for next role:')
+      expect(roleCalls[0]?.prompt).not.toContain(
+        'Native web search is enabled for this role call'
       )
     } finally {
       useModelProvider.setState({

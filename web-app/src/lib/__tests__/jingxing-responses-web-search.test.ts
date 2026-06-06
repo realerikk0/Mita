@@ -6,6 +6,7 @@ import {
   canUseJingxingNativeWebSearch,
   geminiGenerateContentResponseToOutput,
   JINGXING_WEB_SEARCH_OPTIONS,
+  jingxingWebSearchOptionsForDepth,
 } from '../jingxing-responses-web-search'
 
 const textMessages = [
@@ -114,13 +115,14 @@ describe('canUseJingxingNativeWebSearch', () => {
     ).toBe(false)
   })
 
-  it('builds Responses requests with only unified web_search_options', () => {
+  it('builds Responses requests with dynamic unified web_search_options', () => {
     for (const modelId of ['gpt-5.4', 'grok-4.3', 'gpt-5.3-codex']) {
       const request = buildJingxingNativeWebSearchRequest({
         modelId,
         baseUrl: 'https://api.jingxing.uk/v1',
         messages: textMessages,
         system: 'You are helpful',
+        searchDepth: 'high',
         maxOutputTokens: 512,
       })
 
@@ -131,8 +133,8 @@ describe('canUseJingxingNativeWebSearch', () => {
         input: [{ role: 'user', content: '查一下新闻' }],
         instructions: 'You are helpful',
         stream: true,
-        max_output_tokens: 512,
-        web_search_options: JINGXING_WEB_SEARCH_OPTIONS,
+        max_output_tokens: 4096,
+        web_search_options: jingxingWebSearchOptionsForDepth('high'),
       })
       expect(request.body).not.toHaveProperty('tools')
       expect(request.body).not.toHaveProperty('tool_choice')
@@ -158,16 +160,31 @@ describe('canUseJingxingNativeWebSearch', () => {
       stream: true,
       max_output_tokens: 4096,
       web_search_options: JINGXING_WEB_SEARCH_OPTIONS,
+      reasoning: { effort: 'medium' },
     })
     expect(codexRequest.transport).toBe('responses')
     expect(codexRequest.body).toMatchObject({
       model: 'gpt-5.3-codex',
       stream: true,
+      max_output_tokens: 4096,
       web_search_options: JINGXING_WEB_SEARCH_OPTIONS,
     })
   })
 
-  it('builds Gemini generateContent requests with unified web_search_options', () => {
+  it('keeps configured native search token budgets above the 4096 floor', () => {
+    const request = buildJingxingNativeWebSearchRequest({
+      modelId: 'gpt-5.4',
+      baseUrl: 'https://api.jingxing.uk/v1',
+      messages: textMessages,
+      maxOutputTokens: 8192,
+    })
+
+    expect(request.body).toMatchObject({
+      max_output_tokens: 8192,
+    })
+  })
+
+  it('builds Gemini generateContent requests with dynamic unified web_search_options', () => {
     for (const modelId of [
       'gemini-3.5-flash',
       'gemini-3.1-pro-preview',
@@ -178,6 +195,7 @@ describe('canUseJingxingNativeWebSearch', () => {
         baseUrl: 'https://api.jingxing.uk/v1',
         messages: textMessages,
         system: 'You are helpful',
+        searchDepth: 'low',
         maxOutputTokens: 1024,
       })
 
@@ -196,9 +214,9 @@ describe('canUseJingxingNativeWebSearch', () => {
           parts: [{ text: 'You are helpful' }],
         },
         generationConfig: {
-          maxOutputTokens: 1024,
+          maxOutputTokens: 4096,
         },
-        web_search_options: JINGXING_WEB_SEARCH_OPTIONS,
+        web_search_options: jingxingWebSearchOptionsForDepth('low'),
       })
       expect(request.body).not.toHaveProperty('tools')
       expect(JSON.stringify(request.body)).not.toContain('googleSearch')

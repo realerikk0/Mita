@@ -37,6 +37,7 @@ import { isBrowserMCPServerName } from '@/constants/mcp'
 import { useWebSearch } from '@/hooks/useWebSearch'
 import {
   canUseJingxingNativeWebSearch,
+  protectedJingxingMaxOutputTokens,
   streamJingxingNativeWebSearch,
 } from '@/lib/jingxing-responses-web-search'
 import { getToolAwareSystemMessage } from '@/lib/mita-prompt'
@@ -46,6 +47,12 @@ import {
 } from '@/lib/provider-quota-error'
 import { trackMitaEvent } from '@/lib/analytics'
 import { normalizeModelCapabilitiesForProvider } from '@/lib/models'
+import {
+  blockSearchDecision,
+  decideChatSearch,
+  searchDecisionMetadata,
+  webSearchModeFromEnabled,
+} from '@/lib/search-decision'
 
 const COMPUTER_AGENT_SERVER_NAME = 'mita-computer-agent'
 
@@ -81,24 +88,19 @@ export type ServiceHub = {
   }
 }
 
-export const JINGXING_GEMINI_3_5_FLASH_MIN_OUTPUT_TOKENS = 1024
+export const JINGXING_REMOTE_MIN_OUTPUT_TOKENS = 4096
+export const JINGXING_GEMINI_3_5_FLASH_MIN_OUTPUT_TOKENS =
+  JINGXING_REMOTE_MIN_OUTPUT_TOKENS
 
 export function getProtectedMaxOutputTokens(
   modelId: string | undefined,
   configuredMaxOutputTokens: number | undefined
 ): number | undefined {
-  if (modelId?.toLowerCase() !== 'gemini-3.5-flash') {
+  if (!modelId) {
     return configuredMaxOutputTokens
   }
 
-  if (
-    configuredMaxOutputTokens === undefined ||
-    configuredMaxOutputTokens < JINGXING_GEMINI_3_5_FLASH_MIN_OUTPUT_TOKENS
-  ) {
-    return JINGXING_GEMINI_3_5_FLASH_MIN_OUTPUT_TOKENS
-  }
-
-  return configuredMaxOutputTokens
+  return protectedJingxingMaxOutputTokens(configuredMaxOutputTokens)
 }
 
 function normalizeToolInputSchemaValue(value: unknown): unknown {
@@ -663,16 +665,39 @@ export class CustomChatTransport implements ChatTransport<UIMessage> {
     const hasTools = Object.keys(this.tools).length > 0
     const modelSupportsTools = this.currentModelSupportsTools()
     const shouldEnableTools = hasTools && modelSupportsTools
-    const nativeWebSearchEnabled =
-      useWebSearch.getState().enabled &&
+    const webSearchState = useWebSearch.getState()
+    const searchMode = webSearchModeFromEnabled(
+      webSearchState.enabled,
+      webSearchState.mode
+    )
+    const searchDecision = decideChatSearch({
+      mode: searchMode,
+      latestUserText: this.lastUserMessage,
+    })
+    const canUseNativeWebSearch =
+      searchDecision.enabled &&
       canUseJingxingNativeWebSearch({
         providerName: providerId,
         modelId,
         messages: mappedMessages,
       })
+    const effectiveSearchDecision =
+      searchDecision.enabled && !canUseNativeWebSearch
+        ? blockSearchDecision(
+            searchDecision,
+            'Native web search is unavailable for this model or message shape.'
+          )
+        : searchDecision
+    const nativeWebSearchEnabled =
+      effectiveSearchDecision.enabled && canUseNativeWebSearch
     const systemMessage = getToolAwareSystemMessage(this.systemMessage ?? '', {
       structuredToolsEnabled: shouldEnableTools,
       nativeWebSearchEnabled,
+      searchDecision: effectiveSearchDecision,
+    })
+    const webSearchMetadata = searchDecisionMetadata(effectiveSearchDecision, {
+      transport: nativeWebSearchEnabled ? 'jingxing_native' : 'none',
+      sourceCount: 0,
     })
 
     trackMitaEvent('assistant_response_started', {
@@ -682,7 +707,7 @@ export class CustomChatTransport implements ChatTransport<UIMessage> {
       message_count: mappedMessages.length,
       tools_enabled: shouldEnableTools,
       tool_count: Object.keys(this.tools).length,
-      web_search_enabled: useWebSearch.getState().enabled,
+      ...webSearchMetadata,
       transport: 'desktop_custom_chat_transport',
     })
 
@@ -692,6 +717,7 @@ export class CustomChatTransport implements ChatTransport<UIMessage> {
         provider: effectiveProvider,
         messages: mappedMessages,
         system: systemMessage,
+        searchDecision: effectiveSearchDecision,
         maxOutputTokens,
         abortSignal: options.abortSignal,
         onTokenUsage: this.onTokenUsage,

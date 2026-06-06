@@ -47,4 +47,31 @@ You have tools to search for and access real-time, up-to-date data. Use them whe
       })
     ).toBe(instructions)
   })
+
+  it('appends the search contract only when native search is enabled for this turn', () => {
+    const instructions = 'You are helpful.'
+    const searchDecision = {
+      enabled: true,
+      mode: 'auto' as const,
+      depth: 'medium' as const,
+      intent: 'news' as const,
+      reason: 'The request depends on current news, policy, or announcements.',
+    }
+
+    expect(
+      getToolAwareSystemMessage(instructions, {
+        structuredToolsEnabled: false,
+        nativeWebSearchEnabled: true,
+        searchDecision,
+      })
+    ).toContain('Search contract:')
+
+    expect(
+      getToolAwareSystemMessage(instructions, {
+        structuredToolsEnabled: false,
+        nativeWebSearchEnabled: false,
+        searchDecision,
+      })
+    ).not.toContain('Search contract:')
+  })
 })

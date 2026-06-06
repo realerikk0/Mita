@@ -22,6 +22,7 @@ export type MitaAnalyticsEventName =
   | 'model_selected'
   | 'api_mode_changed'
   | 'web_search_toggled'
+  | 'web_search_decision_recorded'
   | 'web_search_completed'
   | 'attachment_added'
   | 'attachment_processing_failed'
@@ -85,6 +86,7 @@ const SAFE_KEY_EXCEPTIONS = new Set([
   'selected_server_count',
   'session_id',
   'source',
+  'source_count',
   'status',
   'theme',
   'tool_count',
@@ -93,8 +95,15 @@ const SAFE_KEY_EXCEPTIONS = new Set([
   'tools_enabled',
   'total_latency_ms',
   'total_tokens',
+  'blocked_reason',
+  'role_id',
   'transport',
+  'web_search_depth',
   'web_search_enabled',
+  'web_search_intent',
+  'web_search_mode',
+  'web_search_reason',
+  'web_search_transport',
 ])
 
 function configuredPostHog() {

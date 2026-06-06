@@ -1,5 +1,10 @@
 import { describe, expect, it, vi, beforeEach } from 'vitest'
-import { CustomChatTransport, normalizeToolInputSchema } from '../custom-chat-transport'
+import {
+  CustomChatTransport,
+  getProtectedMaxOutputTokens,
+  JINGXING_REMOTE_MIN_OUTPUT_TOKENS,
+  normalizeToolInputSchema,
+} from '../custom-chat-transport'
 
 const h = vi.hoisted(() => ({
   serviceHub: null as any,
@@ -276,5 +281,24 @@ describe('normalizeToolInputSchema edge cases', () => {
     }
     const result = normalizeToolInputSchema(schema)
     expect((result.properties as any).tags.items.type).toBe('string')
+  })
+})
+
+describe('getProtectedMaxOutputTokens', () => {
+  it('raises Jingxing remote max tokens below the shared floor', () => {
+    expect(getProtectedMaxOutputTokens('gpt-5.4', undefined)).toBe(
+      JINGXING_REMOTE_MIN_OUTPUT_TOKENS
+    )
+    expect(getProtectedMaxOutputTokens('gemini-3.5-flash', 1024)).toBe(
+      JINGXING_REMOTE_MIN_OUTPUT_TOKENS
+    )
+  })
+
+  it('keeps Jingxing remote max tokens above the shared floor', () => {
+    expect(getProtectedMaxOutputTokens('gpt-5.4', 8192)).toBe(8192)
+  })
+
+  it('does not apply the Jingxing floor when no Jingxing model is passed', () => {
+    expect(getProtectedMaxOutputTokens(undefined, 1024)).toBe(1024)
   })
 })
