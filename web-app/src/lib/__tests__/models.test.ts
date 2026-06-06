@@ -466,6 +466,8 @@ describe('getModelCapabilities', () => {
       'gemini-3.1-flash-image-preview',
       'gpt-image-1.5',
       'gpt-image-2',
+      'mai-image-2-5',
+      'mai-image-2-5-flash',
     ]) {
       expect(isJingxingImageGenerationModel(modelId)).toBe(true)
       expect(inferJingxingModelCapabilities(modelId)).toEqual([

@@ -35,13 +35,15 @@ describe('image generation helpers', () => {
           },
           { id: 'gpt-image-1.5', capabilities: [ModelCapabilities.IMAGE_GENERATION] },
           { id: 'gpt-image-2', capabilities: [ModelCapabilities.IMAGE_GENERATION] },
+          { id: 'mai-image-2-5', capabilities: [ModelCapabilities.IMAGE_GENERATION] },
           { id: 'gpt-5.4', capabilities: [ModelCapabilities.COMPLETION] },
         ],
       },
     ] as ModelProvider[]
 
-    expect(getImageModels(providers)).toHaveLength(3)
+    expect(getImageModels(providers)).toHaveLength(4)
     expect(getImageModels(providers)[0].model.id).toBe('gpt-image-1.5')
+    expect(getImageModels(providers)[2].model.id).toBe('mai-image-2-5')
     expect(getImageModels(providers).map(({ model }) => model.id)).toContain(
       'gemini-2.5-flash-image'
     )

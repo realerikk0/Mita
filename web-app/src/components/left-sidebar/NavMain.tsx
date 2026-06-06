@@ -9,7 +9,7 @@ import {
 import { Kbd, KbdGroup } from '@/components/ui/kbd'
 import { useTranslation } from '@/i18n/react-i18next-compat'
 
-import { Link, useNavigate } from '@tanstack/react-router'
+import { Link, useNavigate, useRouterState } from '@tanstack/react-router'
 import { PlatformMetaKey } from '@/containers/PlatformMetaKey'
 import React, { useRef } from 'react'
 import {
@@ -197,6 +197,9 @@ function NavMainItemWithAnimatedIcon({
 export function NavMain() {
   const { t } = useTranslation()
   const navigate = useNavigate()
+  const pathname = useRouterState({
+    select: (state) => state.location.pathname,
+  })
   const { addFolder } = useThreadManagement()
   const { open: searchOpen, setOpen: setSearchOpen } = useSearchDialog()
   const { open: projectDialogOpen, setOpen: setProjectDialogOpen } =
@@ -209,14 +212,19 @@ export function NavMain() {
       void startNewMitaTeams(navigate)
     },
     () => startNewAgentChat(navigate)
-  ).filter(
-    (item) =>
-      ![
-        'common:newAgentChat',
-        'common:projects.new',
-        'common:hub',
-      ].includes(item.title)
   )
+    .map((item) => ({
+      ...item,
+      isActive: item.url ? pathname.startsWith(item.url) : item.isActive,
+    }))
+    .filter(
+      (item) =>
+        ![
+          'common:newAgentChat',
+          'common:projects.new',
+          'common:hub',
+        ].includes(item.title)
+    )
 
   const handleCreateProject = async (name: string, assistantId?: string) => {
     const newProject = await addFolder(name, assistantId)

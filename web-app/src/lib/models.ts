@@ -25,6 +25,7 @@ export const isJingxingImageGenerationModel = (modelId?: string): boolean => {
 
   return [
     /^gpt-image(?:-|$)/,
+    /^mai-image(?:-|$)/,
     /^gemini-\d+(?:\.\d+)?-(?:flash|pro)-image(?:-preview)?$/,
   ].some((pattern) => pattern.test(normalized))
 }

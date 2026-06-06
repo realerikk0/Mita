@@ -1,6 +1,9 @@
 import { createFileRoute, Link } from '@tanstack/react-router'
 import {
+  ArrowLeft,
+  ArrowRight,
   ArrowUp,
+  Check,
   ChevronsUpDown,
   Copy,
   Download,
@@ -9,16 +12,22 @@ import {
   FolderOpen,
   Image as ImageIcon,
   Loader2,
+  Music,
   Minus,
   MoreHorizontal,
   Plus,
+  Play,
   RefreshCcw,
+  Save,
+  SlidersHorizontal,
   Sparkles,
   Trash2,
+  Upload,
   WandSparkles,
   X,
 } from 'lucide-react'
 import {
+  type ReactNode,
   type MouseEvent,
   useCallback,
   useEffect,
@@ -27,8 +36,8 @@ import {
   useState,
 } from 'react'
 import { toast } from 'sonner'
+import { IconLayoutSidebar } from '@tabler/icons-react'
 
-import HeaderPage from '@/containers/HeaderPage'
 import { ProviderQuotaActions } from '@/components/ProviderQuotaActions'
 import { Button } from '@/components/ui/button'
 import {
@@ -80,6 +89,8 @@ import {
 } from '@/lib/image-generation-errors'
 import { trackMitaEvent } from '@/lib/analytics'
 import { ModelCapabilities } from '@/types/models'
+import { DownloadManagement } from '@/containers/DownloadManegement'
+import { useLeftPanel } from '@/hooks/useLeftPanel'
 import type {
   ImageAssetRecord,
   ImageGenerationStatus,
@@ -93,6 +104,38 @@ import type {
 export const Route = createFileRoute(route.images as '/images')({
   component: Images,
 })
+
+function MediaHeader({ children }: { children?: ReactNode }) {
+  const { open, setLeftPanel } = useLeftPanel()
+
+  return (
+    <div
+      className={cn(
+        'flex h-[52px] shrink-0 items-center border-b border-black/[0.06] bg-[#fbfbfa] px-[22px] dark:border-white/10 dark:bg-background',
+        IS_MACOS && !open && 'pl-24',
+        IS_WINDOWS && 'pr-28'
+      )}
+    >
+      <div className="flex min-w-0 flex-1 items-center gap-1">
+        {!open && (
+          <>
+            <DownloadManagement />
+            <Button
+              variant="ghost"
+              size="icon-sm"
+              className="relative z-50 rounded-full"
+              onClick={() => setLeftPanel(!open)}
+              aria-label="Toggle sidebar"
+            >
+              <IconLayoutSidebar className="relative size-4.5 text-muted-foreground" />
+            </Button>
+          </>
+        )}
+        <div className="min-w-0 flex-1">{children}</div>
+      </div>
+    </div>
+  )
+}
 
 type ImageTask = {
   id: string
@@ -215,30 +258,31 @@ const QUALITY_OPTIONS: Array<{
   },
 ]
 const STORYBOARD_STYLES = [
-  'Cinematic',
-  '3D animation',
-  'Realistic photo',
-  'Cyberpunk',
-  'Watercolor',
-  'Minimal',
+  '电影感',
+  '3D 动画',
+  '写实摄影',
+  '赛博朋克',
+  '水彩插画',
+  '极简留白',
 ]
 const STORYBOARD_TEMPLATES: Array<{
   value: StoryboardSettings['template']
   label: string
+  description: string
 }> = [
-  { value: 'grid', label: 'Grid' },
-  { value: 'table', label: 'Shot table' },
-  { value: 'board', label: 'Visual board' },
+  { value: 'grid', label: '网格分镜', description: '分格漫画式' },
+  { value: 'table', label: '分镜表', description: '镜头表格' },
+  { value: 'board', label: '视觉开发板', description: '含色卡/参考/参数' },
 ]
 const STORYBOARD_CAMERA_PRESETS = [
-  'Slow push in',
-  'Tracking shot',
-  'Low angle',
-  'Orbit',
-  'Wide pull back',
-  'Close-up',
-  'Handheld follow',
-  'Static frame',
+  '缓慢推近',
+  '横移跟随',
+  '低角度',
+  '环绕',
+  '缓慢拉远',
+  '微距特写',
+  '手持跟随',
+  '固定镜头',
 ]
 
 function qualityPresetLabel(t: TranslationFn, preset: ImageQualityPreset) {
@@ -299,10 +343,6 @@ function statusLabel(t: TranslationFn, status: ImageGenerationStatus) {
   return imageT(t, `status.${status}`)
 }
 
-function videoStatusLabel(t: TranslationFn, status: VideoGenerationStatus) {
-  return imageT(t, `storyboard.videoStatus.${status}`)
-}
-
 function imageModelKey(option: ImageModelOption) {
   return `${option.provider.provider}::${option.model.id}`
 }
@@ -331,13 +371,13 @@ function createId() {
 
 function defaultStoryboardSettings(): StoryboardSettings {
   return {
-    style: 'Cinematic',
+    style: '电影感',
     aspect: '16:9',
     qualityPreset: 'sd',
     shotCount: 6,
     template: 'board',
     systemPrompt:
-      'Keep the same main character, consistent proportions, materials, color palette, cinematic lighting, shallow depth of field, and clear numbered storyboard panels.',
+      '保持主角为同一只金色机械人形机器人，电影级打光，统一冷调霓虹色板，浅景深，镜头之间角色比例与材质一致。',
     seed: String(Math.floor(Math.random() * 90_000_000) + 10_000_000),
   }
 }
@@ -348,7 +388,7 @@ function defaultVideoSettings(): VideoSettings {
     durationPerShot: 5,
     resolution: '1080p',
     fps: 30,
-    camera: 'Auto',
+    camera: '自动',
     motion: 55,
     generateAudio: true,
   }
@@ -360,16 +400,17 @@ function buildStoryboardShots(story: string, count: number): StoryboardShot[] {
     .split(/[。！？.!?\n]+/)
     .map((item) => item.trim())
     .filter(Boolean)
-  const fallback = trimmed || 'A character moves through a cinematic scene.'
+  const fallback =
+    trimmed || '一个角色穿过具有电影感的场景，并在结尾完成一个清晰动作。'
 
   return Array.from({ length: count }, (_, index) => {
     const beat = beats[index % Math.max(1, beats.length)] || fallback
     const camera = STORYBOARD_CAMERA_PRESETS[index % STORYBOARD_CAMERA_PRESETS.length]
     return {
       id: createId(),
-      title: `Shot ${index + 1}`,
+      title: `镜头 ${index + 1}`,
       camera,
-      prompt: `${beat} ${camera.toLowerCase()}, cinematic continuity, clear subject silhouette, frame ${index + 1}.`,
+      prompt: `${beat}。${camera}，保持电影级连续性、主体轮廓清晰、角色材质一致，编号分镜 ${index + 1}。`,
       duration: 5,
     }
   })
@@ -382,7 +423,7 @@ function buildStoryboardPrompt(
 ) {
   const templateLabel =
     STORYBOARD_TEMPLATES.find((item) => item.value === settings.template)?.label ??
-    'Visual board'
+    '视觉开发板'
   const shotLines = shots
     .map(
       (shot, index) =>
@@ -391,12 +432,12 @@ function buildStoryboardPrompt(
     .join('\n')
 
   return [
-    `Create a professional ${settings.aspect} storyboard sheet in ${settings.style} style.`,
-    `Template: ${templateLabel}. Include ${shots.length} clearly numbered panels in one single image.`,
-    `Story: ${story.trim()}`,
-    `Continuity rules: ${settings.systemPrompt}`,
-    `Seed reference: ${settings.seed}.`,
-    'Each panel must include a readable shot number, camera direction, and concise visual caption. Avoid messy text, collage artifacts, and inconsistent characters.',
+    `创建一张 ${settings.aspect} 横版「${templateLabel}」，整体呈现 ${settings.style} 风格。`,
+    `在单张图片内清晰排列 ${shots.length} 个编号分镜，每格标注镜头编号、运镜方式和一句画面描述。`,
+    `故事：${story.trim()}`,
+    `一致性规则：${settings.systemPrompt}`,
+    `随机种子参考：${settings.seed}。`,
+    '排版专业、结构清晰、分区明确，避免文字混乱、低质拼贴、角色不一致。',
     shotLines,
   ].join('\n')
 }
@@ -414,10 +455,10 @@ function buildVideoPrompt(
     .join('\n')
 
   return [
-    'Animate this storyboard into one coherent short film.',
-    `Story: ${story.trim()}`,
-    `Default camera: ${videoSettings.camera}. Motion intensity: ${videoSettings.motion}/100.`,
-    'Preserve the exact character identity, material, color palette, and scene order from the source storyboard image.',
+    '将这张故事板动画化为一支连贯短片。',
+    `故事：${story.trim()}`,
+    `默认运镜：${videoSettings.camera}。运动幅度：${videoSettings.motion}/100。`,
+    '严格保留来源故事板中的角色身份、材质、色板和镜头顺序。',
     shotLines,
   ].join('\n')
 }
@@ -592,7 +633,7 @@ function ReferenceImageStack({
       <button
         type="button"
         aria-label={imageT(t, 'addReferenceImage')}
-        className="flex size-16 shrink-0 items-center justify-center rounded-md border bg-secondary/70 text-muted-foreground transition-colors hover:text-foreground"
+        className="flex size-[58px] shrink-0 items-center justify-center rounded-[10px] border border-dashed border-[#cfcfd3] bg-transparent text-muted-foreground transition-colors hover:border-[#f7693f] hover:text-[#f7693f]"
         disabled={loading}
         onClick={onAdd}
       >
@@ -883,7 +924,7 @@ function StoryboardStepper({
   const activeIndex = steps.findIndex((item) => item.value === stage)
 
   return (
-    <div className="flex items-center gap-2">
+    <div className="flex flex-wrap items-center gap-2">
       {steps.map((step, index) => {
         const disabled = index > 0 && !hasStoryboard
         return (
@@ -892,17 +933,19 @@ function StoryboardStepper({
             type="button"
             disabled={disabled}
             className={cn(
-              'flex h-8 items-center gap-2 rounded-lg px-3 text-xs transition-colors',
+              'flex h-7 items-center gap-2 rounded-lg px-3 text-xs transition-colors',
               index === activeIndex
-                ? 'bg-primary text-primary-foreground'
+                ? 'bg-[#f36f4f] text-white shadow-sm'
                 : index < activeIndex
-                  ? 'bg-primary/10 text-primary'
-                  : 'bg-secondary/70 text-muted-foreground',
+                  ? 'bg-[#f36f4f]/10 text-[#de5d40]'
+                  : 'bg-[#eef0f3] text-muted-foreground',
               disabled && 'cursor-not-allowed opacity-50'
             )}
             onClick={() => !disabled && setStage(step.value)}
           >
-            <span className="font-mono">{index + 1}</span>
+            <span className="font-mono">
+              {index < activeIndex ? <Check className="size-3" /> : index + 1}
+            </span>
             {step.label}
           </button>
         )
@@ -930,7 +973,7 @@ function StoryboardSheetPreview({
 
   if (asset?.path) {
     return (
-      <div className="overflow-hidden rounded-md border bg-background">
+      <div className="overflow-hidden rounded-lg border bg-background shadow-sm">
         <img
           src={assetSrc(asset)}
           alt={asset.prompt}
@@ -943,14 +986,14 @@ function StoryboardSheetPreview({
   return (
     <div
       className={cn(
-        'overflow-hidden rounded-md border bg-neutral-950 p-5 text-neutral-100',
+        'overflow-hidden rounded-lg border bg-neutral-950 p-5 text-neutral-100 shadow-sm',
         status === 'running' && 'animate-pulse'
       )}
     >
       <div className="mb-4 flex items-end justify-between border-b border-white/10 pb-3">
         <div>
           <div className="text-[11px] font-semibold uppercase tracking-[0.2em] text-blue-300">
-            Storyboard
+            Storyboard Sheet
           </div>
           <div className="mt-1 text-lg font-semibold">
             {story.trim() || imageT(t, 'storyboard.title')}
@@ -973,13 +1016,15 @@ function StoryboardSheetPreview({
         {shots.map((shot, index) => (
           <div key={shot.id} className="space-y-1.5">
             <div
-              className="flex items-start justify-between rounded bg-white/5 p-2"
+              className="relative flex items-start justify-between overflow-hidden rounded bg-white/5 p-2"
               style={{ aspectRatio: settings.aspect.replace(':', '/') }}
             >
-              <span className="font-mono text-[10px] text-neutral-300">
+              <span className="rounded bg-black/35 px-1.5 py-0.5 font-mono text-[10px] text-neutral-300">
                 {String(index + 1).padStart(2, '0')}
               </span>
-              <span className="text-[10px] text-neutral-500">{shot.camera}</span>
+              <span className="rounded bg-black/25 px-1.5 py-0.5 text-[10px] text-neutral-400">
+                {shot.camera}
+              </span>
             </div>
             <div className="truncate text-[11px] text-neutral-400">
               {shot.prompt}
@@ -1257,54 +1302,82 @@ function StoryboardVideoMode({
     link.remove()
   }, [])
 
+  const storyboardModelLabel =
+    stage === 'video' && videoModel
+      ? `${getProviderTitle(videoModel.provider.provider)} · ${getModelDisplayName(videoModel.model)}`
+      : selectedImageModel
+        ? `${getProviderTitle(selectedImageModel.provider.provider)} · ${getModelDisplayName(selectedImageModel.model)}`
+        : imageT(t, 'selectImageModel')
+  const stageSubtitle =
+    stage === 'compose'
+      ? '用一句话描述你的故事，AI 会拆解成分镜并生成提示词，用 gpt-image-2 出一张故事板图，再交给 Seedance 2.0 合成视频。'
+      : stage === 'storyboard'
+        ? `gpt-image-2 生成的单张故事板图 · ${
+            STORYBOARD_TEMPLATES.find((item) => item.value === settings.template)
+              ?.label ?? '视觉开发板'
+          } · 含 ${shots.length || settings.shotCount} 个分镜 · ${settings.aspect} · ${qualityPresetCompactLabel(t, settings.qualityPreset)}`
+        : '以这张故事板图为输入，Seedance 2.0 将每个分镜动画化并串联成片。'
+
   return (
-    <div className="mx-auto max-w-[1120px] space-y-6">
-      <div className="flex flex-wrap items-start justify-between gap-4">
-        <div className="space-y-2">
+    <div className="mx-auto max-w-[1120px] space-y-4">
+      <div className="space-y-3">
+        <div className="flex flex-wrap items-start justify-between gap-4">
+          <div className="max-w-[760px] space-y-2">
           <h2 className="text-2xl font-semibold tracking-normal text-foreground">
-            {imageT(t, 'storyboard.title')}
+            {stage === 'compose' ? (
+              <>
+                新建媒体 · <span>{imageT(t, 'storyboard.title')}</span>
+              </>
+            ) : (
+              <span>
+                {stage === 'storyboard'
+                  ? imageT(t, 'storyboard.step.storyboard')
+                  : imageT(t, 'storyboard.generateVideo')}
+              </span>
+            )}
           </h2>
+          <p className="max-w-[760px] text-sm leading-6 text-muted-foreground">
+            {stageSubtitle}
+          </p>
+          </div>
+          <div className="mt-1 rounded-lg border bg-background px-3 py-2 text-xs text-muted-foreground shadow-sm">
+            <span className="mr-2 inline-flex size-1.5 rounded-full bg-[#f36f4f]" />
+            {storyboardModelLabel}
+          </div>
+        </div>
+        <div className="flex">
           <StoryboardStepper
             stage={stage}
             setStage={setStage}
             hasStoryboard={Boolean(storyboardAsset)}
           />
         </div>
-        <div className="rounded-lg border bg-background px-3 py-2 text-xs text-muted-foreground">
-          {stage === 'video' && videoModel
-            ? `${getProviderTitle(videoModel.provider.provider)} · ${getModelDisplayName(videoModel.model)}`
-            : selectedImageModel
-              ? `${getProviderTitle(selectedImageModel.provider.provider)} · ${getModelDisplayName(selectedImageModel.model)}`
-              : imageT(t, 'selectImageModel')}
-        </div>
       </div>
 
       {stage === 'compose' && (
-        <div className="space-y-5">
-          <section className="rounded-md border bg-background p-4">
-            <label className="text-sm font-medium text-foreground">
-              {imageT(t, 'storyboard.step.compose')}
-            </label>
+        <div className="space-y-3">
+          <section className="rounded-lg border bg-background p-4 shadow-sm">
+            <label className="text-sm font-medium text-foreground">故事描述</label>
             <Textarea
-              className="mt-3 min-h-28 resize-none border-0 bg-secondary/40 text-sm shadow-none focus-visible:ring-0"
+              className="mt-3 min-h-24 resize-none rounded-lg border-0 bg-[#f7f8fa] px-4 py-3 text-sm shadow-none focus-visible:ring-0"
               value={story}
               placeholder={imageT(t, 'storyboard.storyPlaceholder')}
               onChange={(event) => setStory(event.target.value)}
             />
-            <div className="mt-4 flex flex-wrap items-end gap-3">
-              <div className="space-y-1.5">
+            <div className="mt-4 grid items-end gap-x-3 gap-y-3 lg:grid-cols-[minmax(0,1fr)_auto_auto_auto_auto]">
+              <div className="min-w-0 space-y-1.5">
                 <span className="text-xs text-muted-foreground">
-                  {imageT(t, 'storyboard.style')}
+                  画面风格
                 </span>
-                <div className="flex flex-wrap gap-2">
+                <div className="flex flex-wrap gap-2 lg:flex-nowrap">
                   {STORYBOARD_STYLES.map((style) => (
                     <button
                       key={style}
                       type="button"
                       className={cn(
-                        'h-8 rounded-lg border px-3 text-xs',
+                        'h-8 shrink-0 rounded-lg border px-3 text-xs transition-colors',
                         settings.style === style
-                          ? 'border-primary bg-primary/10 text-primary'
+                          ? 'border-[#f36f4f] bg-[#f36f4f]/10 text-[#e25f43]'
                           : 'bg-background text-muted-foreground'
                       )}
                       onClick={() => updateSettings({ style })}
@@ -1316,9 +1389,9 @@ function StoryboardVideoMode({
               </div>
               <div className="space-y-1.5">
                 <span className="text-xs text-muted-foreground">
-                  {imageT(t, 'selectRatio')}
+                  画面比例
                 </span>
-                <div className="flex rounded-lg bg-secondary p-1">
+                <div className="flex rounded-lg bg-[#eef0f3] p-1">
                   {(['16:9', '9:16', '1:1'] as ImageRatio[]).map((item) => (
                     <button
                       key={item}
@@ -1336,9 +1409,9 @@ function StoryboardVideoMode({
               </div>
               <div className="space-y-1.5">
                 <span className="text-xs text-muted-foreground">
-                  {imageT(t, 'selectQuality')}
+                  选择分辨率
                 </span>
-                <div className="flex rounded-lg bg-secondary p-1">
+                <div className="flex rounded-lg bg-[#eef0f3] p-1">
                   {QUALITY_OPTIONS.map((option) => (
                     <button
                       key={option.value}
@@ -1391,8 +1464,7 @@ function StoryboardVideoMode({
               </div>
               <Button
                 type="button"
-                variant="secondary"
-                className="ml-auto"
+                className="h-9 bg-[#f36f4f] px-4 text-white hover:bg-[#e96346]"
                 disabled={!story.trim() || breakdownStatus === 'running'}
                 onClick={breakdownStory}
               >
@@ -1408,23 +1480,143 @@ function StoryboardVideoMode({
             </div>
           </section>
 
+          <details className="rounded-lg border bg-background shadow-sm">
+            <summary className="flex h-11 cursor-pointer list-none items-center gap-2 px-4 text-sm font-medium">
+              <SlidersHorizontal className="size-4 text-muted-foreground" />
+              系统提示词与高级设置
+              <span className="ml-2 text-xs font-normal text-muted-foreground">
+                控制画风一致性 · 参考图 · 种子
+              </span>
+            </summary>
+            <div className="space-y-4 border-t px-4 py-4">
+              <div className="space-y-2">
+                <span className="text-xs font-medium text-foreground">
+                  系统提示词
+                </span>
+                <Textarea
+                  className="min-h-20 resize-none rounded-lg border-0 bg-[#f7f8fa] font-mono text-xs shadow-none focus-visible:ring-0"
+                  value={settings.systemPrompt}
+                  onChange={(event) =>
+                    updateSettings({ systemPrompt: event.target.value })
+                  }
+                />
+                <p className="text-xs text-muted-foreground">
+                  注入每个分镜，确保人物、色调与构图在镜头间保持一致。
+                </p>
+              </div>
+              <div className="flex flex-wrap items-end gap-4">
+                <div className="space-y-2">
+                  <span className="text-xs text-muted-foreground">角色参考图</span>
+                  <div className="flex gap-2">
+                    <div className="flex size-[52px] items-center justify-center rounded-lg border border-dashed bg-[#f7f8fa] text-muted-foreground">
+                      <Upload className="size-4" />
+                    </div>
+                    <div className="flex size-[52px] items-center justify-center rounded-lg border bg-background text-muted-foreground">
+                      <Plus className="size-4" />
+                    </div>
+                  </div>
+                </div>
+                <div className="space-y-2">
+                  <span className="text-xs text-muted-foreground">随机种子</span>
+                  <div className="flex h-9 items-center gap-2">
+                    <input
+                      className="h-9 w-28 rounded-lg border bg-background px-3 font-mono text-xs"
+                      value={settings.seed}
+                      onChange={(event) =>
+                        updateSettings({ seed: event.target.value })
+                      }
+                    />
+                    <button
+                      type="button"
+                      className="flex size-9 items-center justify-center rounded-lg border bg-background"
+                      onClick={() =>
+                        updateSettings({
+                          seed: String(
+                            Math.floor(Math.random() * 90_000_000) + 10_000_000
+                          ),
+                        })
+                      }
+                    >
+                      <RefreshCcw className="size-4" />
+                    </button>
+                  </div>
+                </div>
+                <div className="space-y-2">
+                  <span className="text-xs text-muted-foreground">镜头一致性</span>
+                  <div className="flex rounded-lg bg-[#eef0f3] p-1">
+                    {['标准', '强', '锁定角色'].map((item) => (
+                      <button
+                        key={item}
+                        type="button"
+                        className={cn(
+                          'h-7 rounded-md px-3 text-xs',
+                          item === '锁定角色' && 'bg-background shadow-sm'
+                        )}
+                      >
+                        {item}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              </div>
+            </div>
+          </details>
+
           {shots.length > 0 && (
             <section className="space-y-3">
+              <div className="grid gap-3 sm:grid-cols-3">
+                {STORYBOARD_TEMPLATES.map((template) => (
+                  <button
+                    key={template.value}
+                    type="button"
+                    className={cn(
+                      'rounded-lg border bg-background p-3 text-left shadow-sm transition-colors',
+                      settings.template === template.value &&
+                        'border-[#f36f4f] bg-[#f36f4f]/10'
+                    )}
+                    onClick={() => updateSettings({ template: template.value })}
+                  >
+                    <div
+                      className={cn(
+                        'text-sm font-medium',
+                        settings.template === template.value
+                          ? 'text-[#e25f43]'
+                          : 'text-foreground'
+                      )}
+                    >
+                      {template.label}
+                    </div>
+                    <div className="mt-1 text-xs text-muted-foreground">
+                      {template.description}
+                    </div>
+                  </button>
+                ))}
+              </div>
               <div className="flex items-center gap-2">
                 <span className="text-sm font-medium">
                   {imageT(t, 'storyboard.shotScript')}
                 </span>
                 <span className="text-xs text-muted-foreground">
-                  {shots.length} shots
+                  共 {shots.length} 个镜头 · 可逐条编辑
                 </span>
+                <Button
+                  type="button"
+                  variant="secondary"
+                  size="sm"
+                  className="ml-auto"
+                  onClick={breakdownStory}
+                >
+                  <RefreshCcw className="size-4" />
+                  {imageT(t, 'storyboard.regenerateBreakdown')}
+                </Button>
               </div>
               <div className="space-y-2">
                 {shots.map((shot, index) => (
                   <div
                     key={shot.id}
-                    className="grid grid-cols-[32px_1fr] gap-3 rounded-md border bg-background p-3"
+                    className="grid grid-cols-[32px_1fr] gap-3 rounded-lg border bg-background p-3 shadow-sm"
                   >
-                    <div className="flex size-8 items-center justify-center rounded-lg bg-primary/10 font-mono text-xs text-primary">
+                    <div className="flex size-8 items-center justify-center rounded-lg bg-[#f36f4f]/10 font-mono text-xs text-[#e25f43]">
                       {index + 1}
                     </div>
                     <div className="space-y-2">
@@ -1435,7 +1627,7 @@ function StoryboardVideoMode({
                         <span>{shot.camera}</span>
                       </div>
                       <Textarea
-                        className="min-h-12 resize-none border-0 bg-secondary/40 text-sm shadow-none focus-visible:ring-0"
+                        className="min-h-12 resize-none rounded-lg border-0 bg-[#f7f8fa] text-sm shadow-none focus-visible:ring-0"
                         value={shot.prompt}
                         onChange={(event) => {
                           const prompt = event.target.value
@@ -1450,19 +1642,30 @@ function StoryboardVideoMode({
                   </div>
                 ))}
               </div>
-              <div className="rounded-md border bg-background p-3">
-                <div className="mb-2 text-sm font-medium">
-                  {imageT(t, 'storyboard.prompt')}
+              <div className="overflow-hidden rounded-lg border bg-background shadow-sm">
+                <div className="flex items-center gap-2 border-b px-4 py-3">
+                  <WandSparkles className="size-4 text-[#e25f43]" />
+                  <span className="text-sm font-medium">
+                    {imageT(t, 'storyboard.prompt')}
+                  </span>
+                  <span className="text-xs text-muted-foreground">
+                    AI 生成 · 喂给 gpt-image-2
+                  </span>
                 </div>
                 <Textarea
-                  className="min-h-24 resize-none border-0 bg-secondary/40 font-mono text-xs shadow-none focus-visible:ring-0"
+                  className="min-h-28 resize-none rounded-none border-0 bg-[#f7f8fa] px-4 py-3 font-mono text-xs leading-6 shadow-none focus-visible:ring-0"
                   value={storyboardPrompt}
                   onChange={(event) => setStoryboardPrompt(event.target.value)}
                 />
               </div>
-              <div className="flex justify-end">
+              <div className="flex flex-wrap items-center justify-end gap-3">
+                <span className="mr-auto text-xs text-muted-foreground">
+                  将生成 1 张故事板图 · {settings.aspect} ·{' '}
+                  {qualityPresetCompactLabel(t, settings.qualityPreset)}
+                </span>
                 <Button
                   type="button"
+                  className="bg-[#f36f4f] text-white hover:bg-[#e96346]"
                   onClick={generateStoryboard}
                   disabled={storyboardStatus === 'running'}
                 >
@@ -1480,7 +1683,7 @@ function StoryboardVideoMode({
       )}
 
       {stage === 'storyboard' && (
-        <div className="grid gap-5 lg:grid-cols-[1fr_280px]">
+        <div className="grid gap-5 lg:grid-cols-[1fr_290px]">
           <div className="space-y-3">
             <StoryboardSheetPreview
               shots={shots}
@@ -1491,13 +1694,20 @@ function StoryboardVideoMode({
               status={storyboardStatus}
             />
             {storyboardAsset && (
-              <div className="inline-flex rounded-full bg-emerald-500/10 px-2 py-0.5 text-xs text-emerald-600">
-                {imageT(t, 'storyboard.storyboardReady')}
+              <div className="flex flex-wrap items-center gap-2">
+                <span className="inline-flex items-center gap-1 rounded-full bg-emerald-500/10 px-2 py-0.5 text-xs text-emerald-600">
+                  <Check className="size-3" />
+                  {imageT(t, 'storyboard.storyboardReady')}
+                </span>
+                <span className="text-xs text-muted-foreground">
+                  {storyboardAsset.model} · 种子 {settings.seed}
+                </span>
               </div>
             )}
           </div>
-          <aside className="space-y-4 rounded-md border bg-background p-4">
-            <div className="text-sm font-medium">
+          <aside className="space-y-4 rounded-lg border bg-background p-4 shadow-sm">
+            <div className="flex items-center gap-2 text-sm font-medium">
+              <SlidersHorizontal className="size-4 text-muted-foreground" />
               {imageT(t, 'storyboard.params')}
             </div>
             <div className="space-y-2">
@@ -1508,7 +1718,7 @@ function StoryboardVideoMode({
                   className={cn(
                     'flex h-9 w-full items-center rounded-lg border px-3 text-left text-xs',
                     settings.template === template.value
-                      ? 'border-primary bg-primary/10 text-primary'
+                      ? 'border-[#f36f4f] bg-[#f36f4f]/10 text-[#e25f43]'
                       : 'text-muted-foreground'
                   )}
                   onClick={() => updateSettings({ template: template.value })}
@@ -1544,14 +1754,17 @@ function StoryboardVideoMode({
                 variant="secondary"
                 onClick={() => setStage('compose')}
               >
-                {t('common:back')}
+                <ArrowLeft className="size-4" />
+                返回脚本
               </Button>
               <Button
                 type="button"
+                className="bg-[#f36f4f] text-white hover:bg-[#e96346]"
                 disabled={!storyboardAsset}
                 onClick={() => setStage('video')}
               >
-                {t('common:next')}
+                下一步
+                <ArrowRight className="size-4" />
               </Button>
             </div>
           </aside>
@@ -1559,9 +1772,41 @@ function StoryboardVideoMode({
       )}
 
       {stage === 'video' && (
-        <div className="grid gap-5 lg:grid-cols-[1fr_300px]">
+        <div className="space-y-5">
+          {storyboardAsset && (
+            <div className="flex items-center gap-3 rounded-lg border bg-background p-3 shadow-sm">
+              <img
+                src={assetSrc(storyboardAsset)}
+                alt={storyboardAsset.prompt}
+                className="h-14 w-24 rounded object-cover"
+              />
+              <div className="min-w-0 text-sm">
+                <div className="font-medium">
+                  来源 · 1 张故事板图
+                  <span className="ml-2 font-normal text-muted-foreground">
+                    {storyboardAsset.model} · {settings.aspect} · 含{' '}
+                    {shots.length} 个分镜
+                  </span>
+                </div>
+                <div className="mt-1 text-xs text-muted-foreground">
+                  Seedance 会识别图内每个编号分镜，逐镜生成视频片段。
+                </div>
+              </div>
+              <Button
+                type="button"
+                variant="secondary"
+                size="sm"
+                className="ml-auto"
+                onClick={() => setStage('storyboard')}
+              >
+                <ImageIcon className="size-4" />
+                查看故事板
+              </Button>
+            </div>
+          )}
+          <div className="grid gap-5 lg:grid-cols-[1fr_312px]">
           <div className="space-y-4">
-            <div className="rounded-md border bg-neutral-950 text-neutral-100">
+            <div className="overflow-hidden rounded-lg border bg-neutral-950 text-neutral-100 shadow-sm">
               <div
                 className="flex items-center justify-center"
                 style={{ aspectRatio: videoSettings.ratio.replace(':', '/') }}
@@ -1570,10 +1815,10 @@ function StoryboardVideoMode({
                   <video controls src={videoSrc} className="size-full" />
                 ) : videoStatus === 'running' ? (
                   <div className="flex w-2/3 flex-col items-center gap-3">
-                    <Film className="size-7 animate-pulse text-primary" />
+                    <Film className="size-7 animate-pulse text-[#f36f4f]" />
                     <div className="h-1.5 w-full overflow-hidden rounded-full bg-white/10">
                       <div
-                        className="h-full rounded-full bg-primary transition-all"
+                        className="h-full rounded-full bg-[#f36f4f] transition-all"
                         style={{ width: `${videoProgress}%` }}
                       />
                     </div>
@@ -1582,32 +1827,52 @@ function StoryboardVideoMode({
                     </span>
                   </div>
                 ) : (
-                  <span className="font-mono text-xs text-neutral-500">
-                    {videoStatusLabel(t, videoStatus)}
-                  </span>
+                  <div className="flex size-14 items-center justify-center rounded-full bg-white/90 text-neutral-950">
+                    <Play className="ml-0.5 size-6" />
+                  </div>
                 )}
               </div>
-            </div>
-            {storyboardAsset && (
-              <div className="flex items-center gap-3 rounded-md border bg-background p-3">
-                <img
-                  src={assetSrc(storyboardAsset)}
-                  alt={storyboardAsset.prompt}
-                  className="h-12 w-20 rounded object-cover"
-                />
-                <div className="min-w-0 text-sm">
-                  <div className="font-medium">
-                    {imageT(t, 'storyboard.sourceStoryboard')}
-                  </div>
-                  <div className="truncate text-xs text-muted-foreground">
-                    {storyboardAsset.model} · {settings.aspect}
-                  </div>
+              <div className="flex items-center gap-3 bg-neutral-950 px-4 py-3">
+                <Play className="size-4 text-white" />
+                <div className="h-1 flex-1 rounded-full bg-white/15">
+                  <div className="h-full w-0 rounded-full bg-white" />
                 </div>
+                <span className="font-mono text-xs text-neutral-500">
+                  00:00 / 00:{String(totalDuration || videoSettings.durationPerShot).padStart(2, '0')}
+                </span>
+              </div>
+            </div>
+            {videoAsset && videoSrc && (
+              <div className="flex flex-wrap items-center gap-2">
+                <span className="inline-flex items-center gap-1 rounded-full bg-emerald-500/10 px-2 py-0.5 text-xs text-emerald-600">
+                  <Check className="size-3" />
+                  已合成 · {totalDuration || videoSettings.durationPerShot}s ·{' '}
+                  {videoSettings.resolution}
+                </span>
+                <Button type="button" variant="secondary" size="sm">
+                  <Save className="size-4" />
+                  保存到媒体库
+                </Button>
+                <Button
+                  type="button"
+                  variant="secondary"
+                  size="sm"
+                  onClick={() =>
+                    downloadMedia(
+                      videoSrc,
+                      videoAsset.fileName || 'storyboard-video.mp4'
+                    )
+                  }
+                >
+                  <Download className="size-4" />
+                  {imageT(t, 'storyboard.downloadVideo')}
+                </Button>
               </div>
             )}
           </div>
-          <aside className="space-y-4 rounded-md border bg-background p-4">
-            <div className="text-sm font-medium">
+          <aside className="space-y-4 rounded-lg border bg-background p-4 shadow-sm">
+            <div className="flex items-center gap-2 text-sm font-medium">
+              <SlidersHorizontal className="size-4 text-muted-foreground" />
               {imageT(t, 'storyboard.videoParams')}
             </div>
             {!videoModel && (
@@ -1617,9 +1882,9 @@ function StoryboardVideoMode({
             )}
             <div className="space-y-2">
               <span className="text-xs text-muted-foreground">
-                {imageT(t, 'selectRatio')}
+                长宽比
               </span>
-              <div className="flex rounded-lg bg-secondary p-1">
+              <div className="flex rounded-lg bg-[#eef0f3] p-1">
                 {(['16:9', '9:16', '1:1'] as ImageRatio[]).map((item) => (
                   <button
                     key={item}
@@ -1659,7 +1924,7 @@ function StoryboardVideoMode({
               <span className="text-xs text-muted-foreground">
                 {imageT(t, 'storyboard.resolution')}
               </span>
-              <div className="flex rounded-lg bg-secondary p-1">
+              <div className="flex rounded-lg bg-[#eef0f3] p-1">
                 {(['720p', '1080p', '4K'] as VideoResolution[]).map((item) => (
                   <button
                     key={item}
@@ -1676,9 +1941,79 @@ function StoryboardVideoMode({
                 ))}
               </div>
             </div>
+            <div className="space-y-2">
+              <span className="text-xs text-muted-foreground">帧率</span>
+              <div className="flex rounded-lg bg-[#eef0f3] p-1">
+                {([24, 30, 60] as const).map((item) => (
+                  <button
+                    key={item}
+                    type="button"
+                    className={cn(
+                      'h-7 rounded-md px-3 text-xs',
+                      videoSettings.fps === item && 'bg-background shadow-sm'
+                    )}
+                    onClick={() => updateVideoSettings({ fps: item })}
+                  >
+                    {item}fps
+                  </button>
+                ))}
+              </div>
+            </div>
+            <div className="space-y-2">
+              <span className="text-xs text-muted-foreground">默认运镜</span>
+              <select
+                className="h-9 w-full rounded-lg border bg-background px-3 text-sm"
+                value={videoSettings.camera}
+                onChange={(event) =>
+                  updateVideoSettings({ camera: event.target.value })
+                }
+              >
+                {['自动', '推近', '拉远', '环绕', '横移', '上摇', '手持跟随'].map(
+                  (item) => (
+                    <option key={item} value={item}>
+                      {item}
+                    </option>
+                  )
+                )}
+              </select>
+            </div>
+            <div className="space-y-2">
+              <div className="flex items-center text-xs text-muted-foreground">
+                <span>运动幅度</span>
+                <span className="ml-auto">
+                  {videoSettings.motion <= 33
+                    ? '轻微'
+                    : videoSettings.motion <= 66
+                      ? '适中'
+                      : '强烈'}
+                </span>
+              </div>
+              <input
+                type="range"
+                min={0}
+                max={100}
+                value={videoSettings.motion}
+                onChange={(event) =>
+                  updateVideoSettings({ motion: Number(event.target.value) })
+                }
+                className="w-full"
+              />
+            </div>
+            <label className="flex items-center gap-2 rounded-lg border bg-[#f7f8fa] px-3 py-2 text-sm">
+              <Music className="size-4 text-muted-foreground" />
+              AI 配乐
+              <input
+                type="checkbox"
+                className="ml-auto"
+                checked={videoSettings.generateAudio}
+                onChange={(event) =>
+                  updateVideoSettings({ generateAudio: event.target.checked })
+                }
+              />
+            </label>
             <Button
               type="button"
-              className="w-full"
+              className="w-full bg-[#f36f4f] text-white hover:bg-[#e96346]"
               disabled={!videoModel || !storyboardAsset || videoStatus === 'running'}
               onClick={generateVideo}
             >
@@ -1689,23 +2024,8 @@ function StoryboardVideoMode({
               )}
               {imageT(t, 'storyboard.generateVideo')}
             </Button>
-            {videoAsset && videoSrc && (
-              <Button
-                type="button"
-                variant="secondary"
-                className="w-full"
-                onClick={() =>
-                  downloadMedia(
-                    videoSrc,
-                    videoAsset.fileName || 'storyboard-video.mp4'
-                  )
-                }
-              >
-                <Download className="size-4" />
-                {imageT(t, 'storyboard.downloadVideo')}
-              </Button>
-            )}
           </aside>
+          </div>
         </div>
       )}
     </div>
@@ -1806,6 +2126,232 @@ function Images() {
     )
   }, [imageModels, selectedModelKey])
 
+  const mediaModeSwitch = (
+    <div className="flex items-center gap-3">
+      <div className="inline-flex gap-0.5 rounded-[9px] bg-[#f3f3f2] p-[3px] shadow-[0_0_0_0.5px_rgba(0,0,0,0.08)]">
+        {([
+          ['image', imageT(t, 'mode.image'), ImageIcon],
+          ['storyboard', imageT(t, 'mode.storyboardVideo'), Film],
+        ] as const).map(([value, label, Icon]) => (
+          <button
+            key={value}
+            type="button"
+            className={cn(
+              'flex h-7 items-center gap-[7px] rounded-[7px] px-[13px] text-[13px] transition-colors',
+              mediaMode === value
+                ? 'bg-white font-semibold text-foreground shadow-[0_1px_2px_rgba(0,0,0,0.10),0_0_0_0.5px_rgba(0,0,0,0.04)]'
+                : 'text-muted-foreground hover:text-foreground'
+            )}
+            onClick={() => setMediaMode(value)}
+          >
+            <Icon className="size-[15px]" />
+            {label}
+          </button>
+        ))}
+      </div>
+    </div>
+  )
+  const renderImageComposer = ({
+    pinned = false,
+  }: { pinned?: boolean } = {}) => (
+    <form
+      className={cn(
+        'w-full overflow-hidden rounded-2xl border bg-background shadow-[0_2px_10px_rgba(0,0,0,0.04)]',
+        !pinned && 'mt-[22px]'
+      )}
+      onSubmit={(event) => {
+        event.preventDefault()
+        startGeneration()
+      }}
+    >
+      <div className="flex gap-3.5 px-[18px] py-4">
+        <ReferenceImageStack
+          assets={sourceAssets}
+          assetSrc={assetSrc}
+          loading={referenceAssetsLoading}
+          onAdd={() => void importReferenceAssets()}
+          onRemove={removeSourceAsset}
+        />
+
+        <Textarea
+          className="min-h-[58px] flex-1 resize-none border-0 bg-transparent p-0 pt-1.5 text-sm shadow-none focus-visible:ring-0"
+          value={prompt}
+          placeholder={imageT(t, 'promptPlaceholder')}
+          onChange={(event) => setPrompt(event.target.value)}
+          onPaste={(event) => {
+            const itemFiles = Array.from(event.clipboardData.items ?? [])
+              .filter((item) => item.kind === 'file')
+              .map((item) => item.getAsFile())
+              .filter((file): file is File => Boolean(file))
+            const clipboardFiles = Array.from(event.clipboardData.files ?? [])
+            const imageFiles = [...itemFiles, ...clipboardFiles].filter(
+              (file, index, allFiles) =>
+                file.type.startsWith('image/') &&
+                allFiles.findIndex(
+                  (candidate) =>
+                    candidate.name === file.name &&
+                    candidate.size === file.size &&
+                    candidate.type === file.type
+                ) === index
+            )
+
+            if (imageFiles.length === 0) return
+
+            event.preventDefault()
+            void savePastedReferenceFiles(imageFiles)
+          }}
+        />
+      </div>
+
+      {sourceModelUnsupported && (
+        <p className="mt-3 text-xs text-destructive">
+          {imageT(t, 'sourceModelUnsupported')}
+        </p>
+      )}
+
+      <div className="flex items-center justify-between gap-3 border-t border-black/[0.06] px-3.5 py-2.5 dark:border-white/10">
+        <div className="flex min-w-0 flex-wrap items-center gap-2">
+          <ImageModelPicker
+            imageModels={imageModels}
+            selectedModelKey={selectedModelKey}
+            onSelect={setSelectedModelKey}
+            showProviderName
+            side="top"
+            triggerClassName="box-border h-[30px] min-h-[30px] max-w-[240px] rounded-lg bg-background px-3 text-xs"
+          />
+
+          <Popover>
+            <PopoverTrigger asChild>
+              <button
+                type="button"
+                aria-label={imageT(t, 'imageSizeSettings')}
+                className="box-border flex h-[30px] min-h-[30px] items-center gap-1 rounded-lg border bg-background px-2 text-[12px] font-normal leading-none transition-colors hover:bg-secondary/60"
+              >
+                <RatioGlyph
+                  ratio={ratio}
+                  selected
+                  size={13}
+                  borderWidth={1.5}
+                />
+                <span className="text-foreground">{ratio}</span>
+                <span className="text-muted-foreground/70">|</span>
+                <span>{qualityPresetCompactLabel(t, qualityPreset)}</span>
+                {qualityPreset === 'hd' && (
+                  <Sparkles className="size-3 text-sky-500" />
+                )}
+              </button>
+            </PopoverTrigger>
+            <PopoverContent
+              side="top"
+              align="center"
+              sideOffset={10}
+              className="w-[calc(100vw-2rem)] max-w-[600px] rounded-[22px] border-0 bg-background/95 p-5 shadow-xl backdrop-blur"
+            >
+              <div className="space-y-5">
+                <div className="space-y-2.5">
+                  <p className="text-sm font-medium text-muted-foreground">
+                    {imageT(t, 'selectRatio')}
+                  </p>
+                  <div className="grid grid-cols-4 rounded-[18px] bg-secondary/70 p-1 sm:grid-cols-7">
+                    {COMPOSER_RATIO_ORDER.map((item) => (
+                      <button
+                        key={item}
+                        type="button"
+                        className={cn(
+                          'flex min-h-16 flex-col items-center justify-center gap-1 rounded-[14px] px-1.5 text-xs font-medium transition-colors',
+                          ratio === item
+                            ? 'bg-background text-foreground shadow-sm'
+                            : 'text-foreground/80 hover:bg-background/60'
+                        )}
+                        onClick={() => setRatio(item)}
+                      >
+                        <RatioGlyph
+                          ratio={item}
+                          selected={ratio === item}
+                          size={15}
+                          borderWidth={1.6}
+                        />
+                        <span>{item}</span>
+                      </button>
+                    ))}
+                  </div>
+                </div>
+
+                <div className="space-y-2.5">
+                  <p className="text-sm font-medium text-muted-foreground">
+                    {imageT(t, 'selectQuality')}
+                  </p>
+                  <div className="grid rounded-[16px] bg-secondary/70 p-1 sm:grid-cols-2">
+                    {QUALITY_OPTIONS.map((option) => (
+                      <button
+                        key={option.value}
+                        type="button"
+                        className={cn(
+                          'flex h-12 items-center justify-center gap-1.5 rounded-[12px] text-xs font-semibold transition-colors',
+                          qualityPreset === option.value
+                            ? 'bg-background text-foreground shadow-sm'
+                            : 'text-foreground/80 hover:bg-background/60'
+                        )}
+                        onClick={() => setQualityPreset(option.value)}
+                      >
+                        {qualityPresetLabel(t, option.value)}
+                        {option.value === 'hd' && (
+                          <Sparkles className="size-3 text-sky-500" />
+                        )}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              </div>
+            </PopoverContent>
+          </Popover>
+
+          <div className="box-border flex h-[30px] min-h-[30px] items-center rounded-lg border bg-background">
+            <button
+              type="button"
+              aria-label={imageT(t, 'decreaseCount')}
+              className="flex size-[30px] items-center justify-center text-muted-foreground hover:text-foreground disabled:opacity-40"
+              disabled={count <= 1}
+              onClick={() => setCount((current) => Math.max(1, current - 1))}
+            >
+              <Minus className="size-3.5" />
+            </button>
+            <span className="min-w-8 text-center text-xs font-medium">
+              {count}
+            </span>
+            <button
+              type="button"
+              aria-label={imageT(t, 'increaseCount')}
+              className="flex size-[30px] items-center justify-center text-muted-foreground hover:text-foreground disabled:opacity-40"
+              disabled={count >= 8}
+              onClick={() => setCount((current) => Math.min(8, current + 1))}
+            >
+              <Plus className="size-3.5" />
+            </button>
+          </div>
+        </div>
+
+        <div className="flex shrink-0 items-center">
+          <Button
+            type="submit"
+            size="icon"
+            aria-label={imageT(t, 'generate')}
+            className="size-9 rounded-full"
+            disabled={submitDisabled}
+            title={
+              referenceAssetsLoading
+                ? imageT(t, 'toast.waitForReferenceImport')
+                : undefined
+            }
+          >
+            <ArrowUp className="size-4" />
+          </Button>
+        </div>
+      </div>
+    </form>
+  )
+
+
   const resolveAssetById = useCallback(
     (id: string) =>
       assets.find((asset) => asset.id === id) ??
@@ -1863,6 +2409,10 @@ function Images() {
       ),
     [assets, taskAssetIds]
   )
+  const leadingSavedHistoryAssets =
+    taskGroups.length === 0 ? savedHistoryAssets.slice(0, 1) : []
+  const trailingSavedHistoryAssets =
+    taskGroups.length === 0 ? savedHistoryAssets.slice(1) : savedHistoryAssets
 
   const assetSrc = useCallback(
     (asset: ImageAssetRecord) =>
@@ -2458,10 +3008,100 @@ function Images() {
     })
   }
 
+  const renderSavedHistoryAsset = (asset: ImageAssetRecord) => (
+    <section
+      key={asset.id}
+      className="w-full space-y-3 rounded-xl border bg-background p-[18px] shadow-sm"
+    >
+      <div className="flex items-start gap-2.5">
+        <button
+          type="button"
+          className="mt-0.5 size-10 shrink-0 rotate-[-7deg] overflow-hidden rounded-sm bg-secondary shadow-sm"
+          onClick={() => editFromAsset(asset)}
+          aria-label={imageT(t, 'useSavedAsset')}
+        >
+          {asset.path ? (
+            <img
+              src={assetSrc(asset)}
+              alt={asset.prompt}
+              className="size-full object-cover"
+            />
+          ) : (
+            <div className="flex size-full items-center justify-center">
+              <ImageIcon className="size-4 text-muted-foreground" />
+            </div>
+          )}
+        </button>
+        <div className="min-w-0 space-y-1">
+          <div className="flex flex-wrap items-center gap-x-2 gap-y-1 text-sm text-foreground">
+            <span className="font-medium">{asset.prompt}</span>
+            <span className="text-muted-foreground">
+              {asset.model} · {asset.ratio} ·{' '}
+              {assetQualityLabel(t, asset.quality)}
+            </span>
+          </div>
+          <span className="inline-flex rounded-full bg-emerald-500/10 px-2 py-0.5 text-xs text-emerald-600">
+            {imageT(t, 'status.saved')}
+          </span>
+        </div>
+      </div>
+
+      <div className="max-w-[380px] overflow-hidden rounded-lg bg-border">
+        <div className="aspect-square bg-secondary">
+          {asset.path ? (
+            <img
+              src={assetSrc(asset)}
+              alt={asset.prompt}
+              className="size-full object-cover"
+              onContextMenu={(event) => showAssetContextMenu(event, asset)}
+            />
+          ) : (
+            <div className="flex size-full items-center justify-center">
+              <ImageIcon className="size-6 text-muted-foreground" />
+            </div>
+          )}
+        </div>
+      </div>
+
+      <div className="flex flex-wrap items-center gap-2">
+        <Button
+          variant="secondary"
+          size="sm"
+          onClick={() => editFromAsset(asset)}
+        >
+          <ImageIcon className="size-4" />
+          {imageT(t, 'reEdit')}
+        </Button>
+        <Button
+          variant="secondary"
+          size="sm"
+          onClick={() => regeneratePrompt(asset.prompt)}
+        >
+          <RefreshCcw className="size-4" />
+          {imageT(t, 'regenerate')}
+        </Button>
+        <Button
+          variant="secondary"
+          size="icon-sm"
+          onClick={() => void copyPrompt(asset.prompt)}
+        >
+          <Copy className="size-4" />
+        </Button>
+        <Button
+          variant="secondary"
+          size="icon-sm"
+          onClick={() => void deleteAsset(asset)}
+        >
+          <Trash2 className="size-4" />
+        </Button>
+      </div>
+    </section>
+  )
+
   if (imageModels.length === 0) {
     return (
       <div className="flex h-svh max-h-svh flex-col overflow-hidden">
-        <HeaderPage />
+        <MediaHeader />
         <div className="flex flex-1 items-center justify-center px-6">
           <div className="max-w-md space-y-4 text-center">
             <div className="mx-auto flex size-12 items-center justify-center rounded-full bg-secondary">
@@ -2487,53 +3127,33 @@ function Images() {
   }
 
   return (
-    <div className="flex h-svh max-h-svh flex-col overflow-hidden bg-[#f7f8fa] dark:bg-background">
-      <HeaderPage />
+    <div className="flex h-svh max-h-svh flex-col overflow-hidden bg-[#fbfbfa] dark:bg-background">
+      <MediaHeader>{mediaModeSwitch}</MediaHeader>
 
       <div className="relative min-h-0 flex-1 overflow-hidden">
         <main
           className={cn(
-            'h-full overscroll-contain overflow-y-auto px-5 pt-4',
-            mediaMode === 'image' ? 'pb-48' : 'pb-10'
+            'h-full overscroll-contain overflow-y-auto'
           )}
         >
-          <div className="mx-auto max-w-[1120px] space-y-8">
-            <div className="flex items-center justify-between gap-3">
-              <div className="inline-flex rounded-xl border bg-background p-1 shadow-sm">
-                {([
-                  ['image', imageT(t, 'mode.image'), ImageIcon],
-                  ['storyboard', imageT(t, 'mode.storyboardVideo'), Film],
-                ] as const).map(([value, label, Icon]) => (
-                  <button
-                    key={value}
-                    type="button"
-                    className={cn(
-                      'flex h-8 items-center gap-1.5 rounded-lg px-3 text-sm transition-colors',
-                      mediaMode === value
-                        ? 'bg-secondary text-foreground'
-                        : 'text-muted-foreground hover:text-foreground'
-                    )}
-                    onClick={() => setMediaMode(value)}
-                  >
-                    <Icon className="size-4" />
-                    {label}
-                  </button>
-                ))}
-              </div>
-            </div>
-
+          <div
+            className={cn(
+              'mx-auto max-w-[1040px] px-[26px] pt-[22px]',
+              mediaMode === 'image' ? 'pb-[190px]' : 'pb-10'
+            )}
+          >
             {mediaMode === 'image' ? (
               <>
-                <h2 className="text-2xl font-semibold tracking-normal text-foreground">
+                <h2 className="mt-1 mb-[14px] text-2xl font-semibold tracking-normal text-foreground">
                   {imageT(t, 'today')}
                 </h2>
 
                 {taskGroups.length === 0 && savedHistoryAssets.length === 0 ? (
-              <div className="flex min-h-[360px] items-center justify-center text-sm text-muted-foreground">
-                {imageT(t, 'emptyState')}
-              </div>
-            ) : (
-              <>
+                  <div className="flex min-h-[360px] items-center justify-center text-sm text-muted-foreground">
+                    {imageT(t, 'emptyState')}
+                  </div>
+                ) : (
+                  <>
                 {taskGroups.map((group) => {
                   const groupSourceAssets = group.sourceAssetIds
                     .map((id) => resolveAssetById(id))
@@ -2546,12 +3166,15 @@ function Images() {
                   )
 
                   return (
-                    <section key={group.id} className="space-y-3">
-                      <div className="flex items-start gap-3">
+                    <section
+                      key={group.id}
+                      className="w-full space-y-3 rounded-xl border bg-background p-[18px] shadow-sm"
+                    >
+                      <div className="flex items-start gap-2.5">
                         {source && (
                           <button
                             type="button"
-                            className="mt-1 size-11 shrink-0 rotate-[-7deg] overflow-hidden rounded-sm bg-secondary shadow-sm"
+                            className="mt-0.5 size-10 shrink-0 rotate-[-7deg] overflow-hidden rounded-sm bg-secondary shadow-sm"
                             onClick={() => editFromAsset(source, group.prompt)}
                             aria-label={imageT(t, 'useSourceImage')}
                           >
@@ -2602,12 +3225,12 @@ function Images() {
 
                       <div
                         className={cn(
-                          'grid overflow-hidden rounded-sm bg-border',
+                          'grid overflow-hidden rounded-lg bg-border',
                           group.tasks.length === 1
-                            ? 'max-w-[360px] grid-cols-1'
+                            ? 'max-w-[380px] grid-cols-1'
                             : group.tasks.length === 2
-                              ? 'grid-cols-2'
-                              : 'grid-cols-2 md:grid-cols-4'
+                              ? 'max-w-[760px] grid-cols-2'
+                              : 'max-w-[760px] grid-cols-2 md:grid-cols-4'
                         )}
                       >
                         {group.tasks.map((task) => {
@@ -2716,94 +3339,12 @@ function Images() {
                   )
                 })}
 
-                {savedHistoryAssets.map((asset) => (
-                  <section key={asset.id} className="space-y-3">
-                    <div className="flex items-start gap-3">
-                      <button
-                        type="button"
-                        className="mt-1 size-11 shrink-0 rotate-[-7deg] overflow-hidden rounded-sm bg-secondary shadow-sm"
-                        onClick={() => editFromAsset(asset)}
-                        aria-label={imageT(t, 'useSavedAsset')}
-                      >
-                        {asset.path ? (
-                          <img
-                            src={assetSrc(asset)}
-                            alt={asset.prompt}
-                            className="size-full object-cover"
-                          />
-                        ) : (
-                          <div className="flex size-full items-center justify-center">
-                            <ImageIcon className="size-4 text-muted-foreground" />
-                          </div>
-                        )}
-                      </button>
-                      <div className="min-w-0 space-y-1">
-                        <div className="flex flex-wrap items-center gap-x-2 gap-y-1 text-sm text-foreground">
-                          <span className="font-medium">{asset.prompt}</span>
-                          <span className="text-muted-foreground">
-                            {asset.model} · {asset.ratio} ·{' '}
-                            {assetQualityLabel(t, asset.quality)}
-                          </span>
-                        </div>
-                        <span className="inline-flex rounded-full bg-emerald-500/10 px-2 py-0.5 text-xs text-emerald-600">
-                          {imageT(t, 'status.saved')}
-                        </span>
-                      </div>
-                    </div>
+                    {leadingSavedHistoryAssets.map(renderSavedHistoryAsset)}
+                  </>
+                )}
 
-                    <div className="max-w-[360px] overflow-hidden rounded-sm bg-border">
-                      <div className="aspect-square bg-secondary">
-                        {asset.path ? (
-                          <img
-                            src={assetSrc(asset)}
-                            alt={asset.prompt}
-                            className="size-full object-cover"
-                            onContextMenu={(event) => showAssetContextMenu(event, asset)}
-                          />
-                        ) : (
-                          <div className="flex size-full items-center justify-center">
-                            <ImageIcon className="size-6 text-muted-foreground" />
-                          </div>
-                        )}
-                      </div>
-                    </div>
-
-                    <div className="flex flex-wrap items-center gap-2">
-                      <Button
-                        variant="secondary"
-                        size="sm"
-                        onClick={() => editFromAsset(asset)}
-                      >
-                        <ImageIcon className="size-4" />
-                        {imageT(t, 'reEdit')}
-                      </Button>
-                      <Button
-                        variant="secondary"
-                        size="sm"
-                        onClick={() => regeneratePrompt(asset.prompt)}
-                      >
-                        <RefreshCcw className="size-4" />
-                        {imageT(t, 'regenerate')}
-                      </Button>
-                      <Button
-                        variant="secondary"
-                        size="icon-sm"
-                        onClick={() => void copyPrompt(asset.prompt)}
-                      >
-                        <Copy className="size-4" />
-                      </Button>
-                      <Button
-                        variant="secondary"
-                        size="icon-sm"
-                        onClick={() => void deleteAsset(asset)}
-                      >
-                        <Trash2 className="size-4" />
-                      </Button>
-                    </div>
-                  </section>
-                ))}
-              </>
-            )}
+                {(taskGroups.length > 0 || savedHistoryAssets.length > 0) &&
+                  trailingSavedHistoryAssets.map(renderSavedHistoryAsset)}
               </>
             ) : (
               <StoryboardVideoMode
@@ -2824,202 +3365,11 @@ function Images() {
         </main>
 
         {mediaMode === 'image' && (
-        <div className="pointer-events-none absolute inset-x-0 bottom-0 bg-linear-to-t from-[#f7f8fa] via-[#f7f8fa] to-transparent px-4 pb-5 pt-12 dark:from-background dark:via-background">
-          <form
-            className="pointer-events-auto mx-auto max-w-[960px] rounded-[28px] border bg-background/95 p-4 shadow-lg backdrop-blur"
-            onSubmit={(event) => {
-              event.preventDefault()
-              startGeneration()
-            }}
-          >
-            <div className="flex gap-4">
-              <ReferenceImageStack
-                assets={sourceAssets}
-                assetSrc={assetSrc}
-                loading={referenceAssetsLoading}
-                onAdd={() => void importReferenceAssets()}
-                onRemove={removeSourceAsset}
-              />
-
-              <Textarea
-                className="min-h-20 flex-1 resize-none border-0 bg-transparent p-0 text-sm shadow-none focus-visible:ring-0"
-                value={prompt}
-                placeholder={imageT(t, 'promptPlaceholder')}
-                onChange={(event) => setPrompt(event.target.value)}
-                onPaste={(event) => {
-                  const itemFiles = Array.from(event.clipboardData.items ?? [])
-                    .filter((item) => item.kind === 'file')
-                    .map((item) => item.getAsFile())
-                    .filter((file): file is File => Boolean(file))
-                  const clipboardFiles = Array.from(
-                    event.clipboardData.files ?? []
-                  )
-                  const imageFiles = [...itemFiles, ...clipboardFiles].filter(
-                    (file, index, allFiles) =>
-                      file.type.startsWith('image/') &&
-                      allFiles.findIndex(
-                        (candidate) =>
-                          candidate.name === file.name &&
-                          candidate.size === file.size &&
-                          candidate.type === file.type
-                      ) === index
-                  )
-
-                  if (imageFiles.length === 0) return
-
-                  event.preventDefault()
-                  void savePastedReferenceFiles(imageFiles)
-                }}
-              />
+          <div className="pointer-events-none absolute inset-x-0 bottom-0 z-20 bg-gradient-to-t from-[#fbfbfa] via-[#fbfbfa] to-transparent pb-5 pt-8 dark:from-background dark:via-background">
+            <div className="pointer-events-auto mx-auto max-w-[1040px] px-[26px]">
+              {renderImageComposer({ pinned: true })}
             </div>
-
-            {sourceModelUnsupported && (
-              <p className="mt-3 text-xs text-destructive">
-                {imageT(t, 'sourceModelUnsupported')}
-              </p>
-            )}
-
-            <div className="mt-4 flex items-center justify-between gap-3">
-              <div className="flex min-w-0 flex-wrap items-center gap-2">
-                <ImageModelPicker
-                  imageModels={imageModels}
-                  selectedModelKey={selectedModelKey}
-                  onSelect={setSelectedModelKey}
-                  showProviderName
-                  side="top"
-                  triggerClassName="box-border h-8 min-h-8 max-w-[240px] rounded-lg bg-secondary/60 px-3 text-xs"
-                />
-
-                <Popover>
-                  <PopoverTrigger asChild>
-                    <button
-                      type="button"
-                      aria-label={imageT(t, 'imageSizeSettings')}
-                      className="box-border flex h-8 min-h-8 items-center gap-1 rounded-lg border bg-background px-2 text-[12px] font-normal leading-none transition-colors hover:bg-secondary/60"
-                    >
-                      <RatioGlyph
-                        ratio={ratio}
-                        selected
-                        size={13}
-                        borderWidth={1.5}
-                      />
-                      <span className="text-foreground">{ratio}</span>
-                      <span className="text-muted-foreground/70">|</span>
-                      <span>{qualityPresetCompactLabel(t, qualityPreset)}</span>
-                      {qualityPreset === 'hd' && (
-                        <Sparkles className="size-3 text-sky-500" />
-                      )}
-                    </button>
-                  </PopoverTrigger>
-                  <PopoverContent
-                    side="top"
-                    align="center"
-                    sideOffset={10}
-                    className="w-[calc(100vw-2rem)] max-w-[600px] rounded-[22px] border-0 bg-background/95 p-5 shadow-xl backdrop-blur"
-                  >
-                    <div className="space-y-5">
-                      <div className="space-y-2.5">
-                        <p className="text-sm font-medium text-muted-foreground">
-                          {imageT(t, 'selectRatio')}
-                        </p>
-                        <div className="grid grid-cols-4 rounded-[18px] bg-secondary/70 p-1 sm:grid-cols-7">
-                          {COMPOSER_RATIO_ORDER.map((item) => (
-                            <button
-                              key={item}
-                              type="button"
-                              className={cn(
-                                'flex min-h-16 flex-col items-center justify-center gap-1 rounded-[14px] px-1.5 text-xs font-medium transition-colors',
-                                ratio === item
-                                  ? 'bg-background text-foreground shadow-sm'
-                                  : 'text-foreground/80 hover:bg-background/60'
-                              )}
-                              onClick={() => setRatio(item)}
-                            >
-                              <RatioGlyph
-                                ratio={item}
-                                selected={ratio === item}
-                                size={15}
-                                borderWidth={1.6}
-                              />
-                              <span>{item}</span>
-                            </button>
-                          ))}
-                        </div>
-                      </div>
-
-                      <div className="space-y-2.5">
-                        <p className="text-sm font-medium text-muted-foreground">
-                          {imageT(t, 'selectQuality')}
-                        </p>
-                        <div className="grid rounded-[16px] bg-secondary/70 p-1 sm:grid-cols-2">
-                          {QUALITY_OPTIONS.map((option) => (
-                            <button
-                              key={option.value}
-                              type="button"
-                              className={cn(
-                                'flex h-12 items-center justify-center gap-1.5 rounded-[12px] text-xs font-semibold transition-colors',
-                                qualityPreset === option.value
-                                  ? 'bg-background text-foreground shadow-sm'
-                                  : 'text-foreground/80 hover:bg-background/60'
-                              )}
-                              onClick={() => setQualityPreset(option.value)}
-                            >
-                              {qualityPresetLabel(t, option.value)}
-                              {option.value === 'hd' && (
-                                <Sparkles className="size-3 text-sky-500" />
-                              )}
-                            </button>
-                          ))}
-                        </div>
-                      </div>
-                    </div>
-                  </PopoverContent>
-                </Popover>
-
-                <div className="box-border flex h-8 min-h-8 items-center rounded-lg border bg-background">
-                  <button
-                    type="button"
-                    aria-label={imageT(t, 'decreaseCount')}
-                    className="flex size-8 items-center justify-center text-muted-foreground hover:text-foreground disabled:opacity-40"
-                    disabled={count <= 1}
-                    onClick={() => setCount((current) => Math.max(1, current - 1))}
-                  >
-                    <Minus className="size-3.5" />
-                  </button>
-                  <span className="min-w-8 text-center text-xs font-medium">
-                    {count}
-                  </span>
-                  <button
-                    type="button"
-                    aria-label={imageT(t, 'increaseCount')}
-                    className="flex size-8 items-center justify-center text-muted-foreground hover:text-foreground disabled:opacity-40"
-                    disabled={count >= 8}
-                    onClick={() => setCount((current) => Math.min(8, current + 1))}
-                  >
-                    <Plus className="size-3.5" />
-                  </button>
-                </div>
-              </div>
-
-              <div className="flex shrink-0 items-center">
-                <Button
-                  type="submit"
-                  size="icon"
-                  aria-label={imageT(t, 'generate')}
-                  className="size-9 rounded-full"
-                  disabled={submitDisabled}
-                  title={
-                    referenceAssetsLoading
-                      ? imageT(t, 'toast.waitForReferenceImport')
-                      : undefined
-                  }
-                >
-                  <ArrowUp className="size-4" />
-                </Button>
-              </div>
-            </div>
-          </form>
-        </div>
+          </div>
         )}
       </div>
 

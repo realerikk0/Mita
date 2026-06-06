@@ -63,9 +63,10 @@ function imageModelSortKey(provider: ModelProvider, model: Pick<Model, 'id'>) {
   if (id === 'gpt-image-1.5') return 0
   if (id === 'gpt-image-2') return 1
   if (id.startsWith('gpt-image-')) return 2
-  if (id.startsWith('gemini-')) return 3
-  if (id.includes('imagen')) return 4
-  if (id.includes('qwen-image')) return 5
+  if (id.startsWith('mai-image-')) return 3
+  if (id.startsWith('gemini-')) return 4
+  if (id.includes('imagen')) return 5
+  if (id.includes('qwen-image')) return 6
   return 10
 }
 
@@ -102,7 +103,9 @@ export function isJingxingImageProvider(
   const normalizedBaseUrl = baseUrl?.toLowerCase() ?? ''
   return (
     normalizedProvider === 'jingxing' ||
-    normalizedBaseUrl.includes('api.jingxing.uk')
+    normalizedBaseUrl.includes('api.jingxing.uk') ||
+    normalizedBaseUrl.includes('api.jingxing.io') ||
+    normalizedBaseUrl.includes('jingxing.io')
   )
 }
 
