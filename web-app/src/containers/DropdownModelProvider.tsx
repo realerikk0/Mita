@@ -32,6 +32,7 @@ import { getLastUsedModel } from '@/utils/getModelToStart'
 import { ChevronsUpDown } from 'lucide-react'
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip'
 import { isModelChatSelectable } from '@/lib/provider-models'
+import { getChatModelFamilySortRank } from '@/lib/chat-model-sort'
 
 type DropdownModelProviderProps = {
   model?: ThreadModel
@@ -44,6 +45,16 @@ interface SearchableModel {
   searchStr: string
   value: string
   highlightedId?: string
+}
+
+function compareSearchableModelsByFamily(
+  a: SearchableModel,
+  b: SearchableModel
+): number {
+  return (
+    getChatModelFamilySortRank(a.provider.provider, a.model.id) -
+    getChatModelFamilySortRank(b.provider.provider, b.model.id)
+  )
 }
 
 // Helper functions for localStorage
@@ -307,7 +318,7 @@ const DropdownModelProvider = memo(function DropdownModelProvider({
       })
     })
 
-    return items
+    return items.sort(compareSearchableModelsByFamily)
   }, [providers])
 
   // Create Fzf instance for fuzzy search
@@ -320,9 +331,9 @@ const DropdownModelProvider = memo(function DropdownModelProvider({
 
   // Get favorite models that are currently available
   const favoriteItems = useMemo(() => {
-    return searchableItems.filter((item) =>
-      favoriteModels.some((fav) => fav.id === item.model.id)
-    )
+    return searchableItems
+      .filter((item) => favoriteModels.some((fav) => fav.id === item.model.id))
+      .sort(compareSearchableModelsByFamily)
   }, [searchableItems, favoriteModels])
 
   // Filter models based on search value
@@ -374,6 +385,11 @@ const DropdownModelProvider = memo(function DropdownModelProvider({
           const bHasApiKeyOrCustomModel =
             providerHasRemoteApiKeys(b) ||
             (!bIsPredefined && b.models.length > 0)
+          const familyRankDiff =
+            getChatModelFamilySortRank(a.provider) -
+            getChatModelFamilySortRank(b.provider)
+          if (familyRankDiff !== 0) return familyRankDiff
+
           // Providers with API keys or custom with models filled second
           if (aHasApiKeyOrCustomModel && !bHasApiKeyOrCustomModel) return -1
           if (!aHasApiKeyOrCustomModel && bHasApiKeyOrCustomModel) return 1
@@ -399,6 +415,10 @@ const DropdownModelProvider = memo(function DropdownModelProvider({
       if (!searchValue && isFavorite) return // Skip adding this item to regular provider section
 
       groups[providerKey].push(item)
+    })
+
+    Object.values(groups).forEach((models) => {
+      models.sort(compareSearchableModelsByFamily)
     })
 
     return groups

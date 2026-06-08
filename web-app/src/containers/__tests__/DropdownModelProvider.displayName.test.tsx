@@ -2,6 +2,7 @@ import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
 import { render, screen, cleanup } from '@testing-library/react'
 import '@testing-library/jest-dom'
 import DropdownModelProvider from '../DropdownModelProvider'
+import { getChatModelFamilySortRank } from '@/lib/chat-model-sort'
 import { getModelDisplayName } from '@/lib/utils'
 import { useModelProvider } from '@/hooks/useModelProvider'
 import { useFavoriteModel } from '@/hooks/useFavoriteModel'
@@ -78,6 +79,43 @@ vi.mock('@/lib/platform/const', () => ({
     projects: true,
   },
 }))
+
+describe('DropdownModelProvider - Chat Model Sorting', () => {
+  it('orders known providers as Claude, GPT, Gemini, and Grok', () => {
+    const orderedProviders = ['anthropic', 'openai', 'gemini', 'xai']
+    const shuffledProviders = ['xai', 'gemini', 'openai', 'anthropic']
+
+    expect(
+      shuffledProviders.sort(
+        (a, b) =>
+          getChatModelFamilySortRank(a) - getChatModelFamilySortRank(b)
+      )
+    ).toEqual(orderedProviders)
+  })
+
+  it('orders mixed provider model ids as Claude, GPT, Gemini, and Grok', () => {
+    const orderedModelIds = [
+      'anthropic/claude-sonnet-4-5',
+      'openai/gpt-5.4-mini',
+      'google/gemini-3-flash-preview',
+      'xai/grok-4-fast-reasoning',
+    ]
+    const shuffledModelIds = [
+      'xai/grok-4-fast-reasoning',
+      'google/gemini-3-flash-preview',
+      'openai/gpt-5.4-mini',
+      'anthropic/claude-sonnet-4-5',
+    ]
+
+    expect(
+      shuffledModelIds.sort(
+        (a, b) =>
+          getChatModelFamilySortRank('jingxing', a) -
+          getChatModelFamilySortRank('jingxing', b)
+      )
+    ).toEqual(orderedModelIds)
+  })
+})
 
 // Mock UI components
 vi.mock('@/components/ui/popover', () => ({
