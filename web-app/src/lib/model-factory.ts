@@ -142,12 +142,18 @@ const REMOTE_UNSUPPORTED_PARAM_KEYS: ReadonlySet<string> = new Set([
 ])
 
 function isClaudeModel(modelId: string): boolean {
-  return modelId.toLowerCase().startsWith('claude-')
+  const lowerModelId = modelId.toLowerCase()
+  return (
+    lowerModelId.startsWith('claude-') ||
+    lowerModelId.startsWith('anthropic.claude-')
+  )
 }
 
-function isClaudeOpus47Model(modelId: string): boolean {
+function isClaudeOpus47OrLaterModel(modelId: string): boolean {
   const lowerModelId = modelId.toLowerCase()
-  return lowerModelId.startsWith('claude-opus-4-7')
+  return /^(?:anthropic\.)?claude-opus-4-(?:[7-9]|\d{2,})(?:$|[-_.])/.test(
+    lowerModelId
+  )
 }
 
 function normalizeInferenceParameters(
@@ -170,18 +176,21 @@ function normalizeInferenceParameters(
     normalised[targetKey] = value
   }
 
-  if (modelId && isClaudeOpus47Model(modelId)) {
-    delete normalised.temperature
-    delete normalised.top_p
-  }
+  if (modelId && isClaudeModel(modelId)) {
+    delete normalised.frequency_penalty
+    delete normalised.presence_penalty
+    delete normalised.repeat_penalty
 
-  if (
-    modelId &&
-    isClaudeModel(modelId) &&
-    normalised.temperature !== undefined &&
-    normalised.top_p !== undefined
-  ) {
-    delete normalised.top_p
+    if (isClaudeOpus47OrLaterModel(modelId)) {
+      delete normalised.temperature
+      delete normalised.top_p
+      delete normalised.top_k
+    } else if (
+      normalised.temperature !== undefined &&
+      normalised.top_p !== undefined
+    ) {
+      delete normalised.top_p
+    }
   }
 
   return normalised

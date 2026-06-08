@@ -3,6 +3,7 @@ import type { UIMessage } from 'ai'
 
 import {
   buildJingxingNativeWebSearchRequest,
+  buildJingxingResponsesChatRequest,
   canUseJingxingNativeWebSearch,
   geminiGenerateContentResponseToOutput,
   JINGXING_WEB_SEARCH_OPTIONS,
@@ -96,6 +97,7 @@ describe('canUseJingxingNativeWebSearch', () => {
       'gemini-3.5-flash',
       'gemini-3.1-pro-preview',
       'gemini-3-flash-preview',
+      'claude-opus-4-8',
     ]) {
       expect(
         canUseJingxingNativeWebSearch({
@@ -112,7 +114,7 @@ describe('canUseJingxingNativeWebSearch', () => {
         modelId: 'claude-sonnet-4-6',
         messages: textMessages,
       })
-    ).toBe(false)
+    ).toBe(true)
   })
 
   it('builds Responses requests with dynamic unified web_search_options', () => {
@@ -169,6 +171,71 @@ describe('canUseJingxingNativeWebSearch', () => {
       max_output_tokens: 4096,
       web_search_options: JINGXING_WEB_SEARCH_OPTIONS,
     })
+  })
+
+  it('builds response-only chat requests without web search options', () => {
+    const request = buildJingxingResponsesChatRequest({
+      modelId: 'gpt-5.4-pro',
+      baseUrl: 'https://api.jingxing.io/v1',
+      messages: textMessages,
+      system: 'You are helpful',
+      maxOutputTokens: 512,
+    })
+
+    expect(request.transport).toBe('responses')
+    expect(request.endpoint).toBe('https://api.jingxing.io/v1/responses')
+    expect(request.body).toMatchObject({
+      model: 'gpt-5.4-pro',
+      input: [{ role: 'user', content: '查一下新闻' }],
+      instructions: 'You are helpful',
+      stream: true,
+      max_output_tokens: 4096,
+      reasoning: { effort: 'medium' },
+    })
+    expect(request.body).not.toHaveProperty('web_search_options')
+  })
+
+  it('keeps Grok on Responses web search requests', () => {
+    const request = buildJingxingNativeWebSearchRequest({
+      modelId: 'grok-4.3',
+      baseUrl: 'https://api.jingxing.io/v1',
+      messages: textMessages,
+      searchDepth: 'medium',
+    })
+
+    expect(request.transport).toBe('responses')
+    expect(request.endpoint).toBe('https://api.jingxing.io/v1/responses')
+    expect(request.body).toMatchObject({
+      model: 'grok-4.3',
+      stream: true,
+      web_search_options: JINGXING_WEB_SEARCH_OPTIONS,
+    })
+  })
+
+  it('builds Claude chat-completions web search requests', () => {
+    const request = buildJingxingNativeWebSearchRequest({
+      modelId: 'claude-opus-4-8',
+      baseUrl: 'https://api.jingxing.io/v1',
+      messages: textMessages,
+      system: 'You are helpful',
+      searchDepth: 'low',
+      maxOutputTokens: 1024,
+    })
+
+    expect(request.transport).toBe('chat-completions')
+    expect(request.endpoint).toBe('https://api.jingxing.io/v1/chat/completions')
+    expect(request.body).toEqual({
+      model: 'claude-opus-4-8',
+      messages: [
+        { role: 'system', content: 'You are helpful' },
+        { role: 'user', content: '查一下新闻' },
+      ],
+      stream: true,
+      max_tokens: 4096,
+      web_search_options: jingxingWebSearchOptionsForDepth('low'),
+    })
+    expect(request.body).not.toHaveProperty('input')
+    expect(request.body).not.toHaveProperty('tools')
   })
 
   it('keeps configured native search token budgets above the 4096 floor', () => {

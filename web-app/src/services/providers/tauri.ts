@@ -11,6 +11,7 @@ import { ExtensionManager } from '@/lib/extension'
 import { fetch as fetchTauri } from '@tauri-apps/plugin-http'
 import { DefaultProvidersService } from './default'
 import { getModelCapabilities } from '@/lib/models'
+import type { ProviderModelDescriptor } from '@/lib/provider-models'
 import { providerRemoteApiKeyChain } from '@/lib/provider-api-keys'
 import {
   parseProviderErrorResponse,
@@ -49,6 +50,45 @@ function errorMessageFromUnknown(error: unknown) {
 function includesAnyFragment(message: string, fragments: string[]) {
   const normalized = message.toLowerCase()
   return fragments.some((fragment) => normalized.includes(fragment))
+}
+
+function providerModelDescriptorFromUnknown(
+  value: unknown
+): ProviderModelDescriptor | null {
+  if (typeof value === 'string') {
+    const trimmed = value.trim()
+    return trimmed ? trimmed : null
+  }
+  if (!value || typeof value !== 'object') return null
+
+  const record = value as Record<string, unknown>
+  const id =
+    typeof record.id === 'string'
+      ? record.id.trim()
+      : typeof record.model === 'string'
+        ? record.model.trim()
+        : ''
+  if (!id) return null
+
+  const meaningfulKeys = Object.entries(record).filter(
+    ([, recordValue]) => recordValue !== undefined && recordValue !== null
+  )
+  if (
+    meaningfulKeys.length === 1 &&
+    (meaningfulKeys[0]?.[0] === 'id' || meaningfulKeys[0]?.[0] === 'model')
+  ) {
+    return id
+  }
+
+  return { ...record, id } as ProviderModelDescriptor
+}
+
+function providerModelDescriptorsFromArray(
+  values: unknown[]
+): ProviderModelDescriptor[] {
+  return values
+    .map(providerModelDescriptorFromUnknown)
+    .filter((model): model is ProviderModelDescriptor => Boolean(model))
 }
 
 export class TauriProvidersService extends DefaultProvidersService {
@@ -174,7 +214,9 @@ export class TauriProvidersService extends DefaultProvidersService {
     }
   }
 
-  async fetchModelsFromProvider(provider: ModelProvider): Promise<string[]> {
+  async fetchModelsFromProvider(
+    provider: ModelProvider
+  ): Promise<ProviderModelDescriptor[]> {
     if (!provider.base_url) {
       throw new Error('Provider must have base_url configured')
     }
@@ -259,23 +301,13 @@ export class TauriProvidersService extends DefaultProvidersService {
         const data = await response.json()
 
         if (data.data && Array.isArray(data.data)) {
-          return data.data
-            .map((model: { id: string }) => model.id)
-            .filter(Boolean)
+          return providerModelDescriptorsFromArray(data.data)
         }
         if (Array.isArray(data)) {
-          return data
-            .filter(Boolean)
-            .map((model) =>
-              typeof model === 'object' && 'id' in model ? model.id : model
-            )
+          return providerModelDescriptorsFromArray(data)
         }
         if (data.models && Array.isArray(data.models)) {
-          return data.models
-            .map((model: string | { id: string }) =>
-              typeof model === 'string' ? model : model.id
-            )
-            .filter(Boolean)
+          return providerModelDescriptorsFromArray(data.models)
         }
         console.warn('Unexpected response format from provider API:', data)
         return []

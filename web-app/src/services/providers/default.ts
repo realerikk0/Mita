@@ -3,13 +3,16 @@
  */
 
 import type { ProvidersService } from './types'
+import type { ProviderModelDescriptor } from '@/lib/provider-models'
 
 export class DefaultProvidersService implements ProvidersService {
   async getProviders(): Promise<ModelProvider[]> {
     return []
   }
 
-  async fetchModelsFromProvider(provider: ModelProvider): Promise<string[]> {
+  async fetchModelsFromProvider(
+    provider: ModelProvider
+  ): Promise<ProviderModelDescriptor[]> {
     console.log('fetchModelsFromProvider called with provider:', provider)
     return []
   }

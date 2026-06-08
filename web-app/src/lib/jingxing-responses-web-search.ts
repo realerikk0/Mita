@@ -49,6 +49,38 @@ type ResponseStreamEvent = {
 }
 type ResponsesUsage = NonNullable<ResponseStreamEvent['response']>['usage']
 
+type ChatCompletionsStreamChunk = {
+  choices?: Array<{
+    delta?: {
+      content?: string
+      reasoning_content?: string
+      reasoning?: string
+      annotations?: ChatCompletionAnnotation[]
+      sources?: ChatCompletionAnnotation[]
+      citations?: ChatCompletionAnnotation[]
+    }
+    finish_reason?: string
+  }>
+  usage?: {
+    prompt_tokens?: number
+    completion_tokens?: number
+    total_tokens?: number
+  }
+  error?: {
+    message?: string
+  }
+}
+
+type ChatCompletionAnnotation = {
+  type?: string
+  url?: string
+  title?: string
+  url_citation?: {
+    url?: string
+    title?: string
+  }
+}
+
 type GeminiGenerateContentResponse = {
   candidates?: Array<{
     content?: {
@@ -87,7 +119,7 @@ type JingxingResponsesWebSearchOptions = {
 }
 
 type JingxingNativeWebSearchRequest = {
-  transport: 'responses' | 'gemini-generate-content'
+  transport: 'responses' | 'gemini-generate-content' | 'chat-completions'
   endpoint: string
   body: Record<string, unknown>
 }
@@ -206,10 +238,41 @@ function messagesToGeminiContents(messages: UIMessage[]) {
     .filter((message) => message.parts[0].text.length > 0)
 }
 
+function messagesToChatCompletionMessages(messages: UIMessage[], system?: string) {
+  const chatMessages = messages
+    .filter((message) => message.role === 'user' || message.role === 'assistant')
+    .map((message) => {
+      const content = (message.parts ?? [])
+        .map(textFromPart)
+        .filter(Boolean)
+        .join('\n')
+        .trim()
+
+      return {
+        role: message.role as 'user' | 'assistant',
+        content,
+      }
+    })
+    .filter((message) => message.content.length > 0)
+
+  return system
+    ? [{ role: 'system' as const, content: system }, ...chatMessages]
+    : chatMessages
+}
+
 export function isJingxingGeminiNativeWebSearchModel(modelId?: string): boolean {
   return Boolean(
     modelId &&
       JINGXING_GEMINI_NATIVE_WEB_SEARCH_MODELS.has(modelId.toLowerCase())
+  )
+}
+
+export function isJingxingClaudeNativeWebSearchModel(modelId?: string): boolean {
+  if (!modelId) return false
+  const normalized = modelId.toLowerCase()
+  return (
+    normalized.startsWith('claude-') ||
+    normalized.startsWith('anthropic.claude-')
   )
 }
 
@@ -218,6 +281,7 @@ function isJingxingResponsesNativeWebSearchModel(modelId?: string): boolean {
   const normalized = modelId.toLowerCase()
   return (
     !isJingxingGeminiNativeWebSearchModel(normalized) &&
+    !isJingxingClaudeNativeWebSearchModel(normalized) &&
     isJingxingNativeWebSearchModel(normalized)
   )
 }
@@ -228,6 +292,10 @@ function trimTrailingSlashes(value: string): string {
 
 function responsesEndpointFromBaseUrl(baseUrl?: string): string {
   return `${trimTrailingSlashes(baseUrl || 'https://api.jingxing.uk/v1')}/responses`
+}
+
+function chatCompletionsEndpointFromBaseUrl(baseUrl?: string): string {
+  return `${trimTrailingSlashes(baseUrl || 'https://api.jingxing.uk/v1')}/chat/completions`
 }
 
 export function geminiGenerateContentEndpointFromBaseUrl(
@@ -281,8 +349,28 @@ function responseUsageToLanguageModelUsage(
   }
 }
 
+function chatCompletionUsageToLanguageModelUsage(
+  usage?: ChatCompletionsStreamChunk['usage']
+): LanguageModelUsage | undefined {
+  if (!usage) return undefined
+  const inputTokens = usage.prompt_tokens ?? 0
+  const outputTokens = usage.completion_tokens ?? 0
+  return {
+    inputTokens,
+    outputTokens,
+    totalTokens: usage.total_tokens ?? inputTokens + outputTokens,
+  }
+}
+
 function finishReasonFromStatus(status?: string): FinishReason {
   return status === 'incomplete' ? 'length' : 'stop'
+}
+
+function finishReasonFromChatCompletions(reason?: string): FinishReason {
+  if (reason === 'length' || reason === 'max_tokens') return 'length'
+  if (reason === 'content_filter') return 'content-filter'
+  if (reason === 'tool_calls') return 'tool-calls'
+  return 'stop'
 }
 
 function finishReasonFromGemini(reason?: string): FinishReason {
@@ -377,6 +465,71 @@ async function readResponsesSse(
   }
 }
 
+async function readChatCompletionsSse(
+  response: Response,
+  onChunk: (chunk: ChatCompletionsStreamChunk) => void
+) {
+  if (!response.body) {
+    const body = await response.text()
+    if (body) {
+      onChunk(JSON.parse(body) as ChatCompletionsStreamChunk)
+    }
+    return
+  }
+
+  const reader = response.body.getReader()
+  const decoder = new TextDecoder()
+  let buffer = ''
+
+  while (true) {
+    const { done, value } = await reader.read()
+    if (done) break
+
+    buffer += decoder.decode(value, { stream: true })
+    const frames = buffer.split('\n\n')
+    buffer = frames.pop() ?? ''
+
+    for (const frame of frames) {
+      const dataLines = frame
+        .split('\n')
+        .filter((line) => line.startsWith('data:'))
+        .map((line) => line.slice(5).trim())
+
+      if (!dataLines.length) continue
+      const data = dataLines.join('\n')
+      if (!data || data === '[DONE]') continue
+      onChunk(JSON.parse(data) as ChatCompletionsStreamChunk)
+    }
+  }
+}
+
+function sourcesFromChatCompletionDelta(
+  delta?: NonNullable<
+    NonNullable<ChatCompletionsStreamChunk['choices']>[number]['delta']
+  >
+) {
+  const annotations = [
+    ...(delta?.annotations ?? []),
+    ...(delta?.sources ?? []),
+    ...(delta?.citations ?? []),
+  ]
+
+  return annotations.flatMap((annotation) => {
+    if (
+      annotation.type &&
+      !['url_citation', 'url', 'source', 'web_search_result'].includes(
+        annotation.type
+      )
+    ) {
+      return []
+    }
+    const url = annotation.url_citation?.url || annotation.url
+    if (!url) return []
+    const title = annotation.url_citation?.title || annotation.title
+    return [{ url, title }]
+  })
+}
+
 async function fetchJingxingNativeWebSearchWithKeyRotation(
   provider: ProviderObject,
   endpoint: string,
@@ -396,6 +549,7 @@ async function fetchJingxingNativeWebSearchWithKeyRotation(
       headers: {
         ...JSON_HEADERS,
         Authorization: `Bearer ${keys[i]}`,
+        'x-api-key': keys[i] ?? '',
       },
       body: JSON.stringify(body),
       signal: abortSignal,
@@ -473,6 +627,23 @@ export function buildJingxingNativeWebSearchRequest(options: {
     }
   }
 
+  if (isJingxingClaudeNativeWebSearchModel(options.modelId)) {
+    return {
+      transport: 'chat-completions',
+      endpoint: chatCompletionsEndpointFromBaseUrl(options.baseUrl),
+      body: {
+        model: options.modelId,
+        messages: messagesToChatCompletionMessages(
+          options.messages,
+          options.system
+        ),
+        stream: true,
+        max_tokens: maxOutputTokens,
+        web_search_options: webSearchOptions,
+      },
+    }
+  }
+
   if (!isJingxingResponsesNativeWebSearchModel(options.modelId)) {
     throw new Error(
       `Model ${options.modelId} does not support Jingxing native web search.`
@@ -499,6 +670,113 @@ export function buildJingxingNativeWebSearchRequest(options: {
     endpoint: responsesEndpointFromBaseUrl(options.baseUrl),
     body,
   }
+}
+
+export function buildJingxingResponsesChatRequest(options: {
+  modelId: string
+  baseUrl?: string
+  messages: UIMessage[]
+  system?: string
+  maxOutputTokens?: number
+}): JingxingNativeWebSearchRequest {
+  const body: Record<string, unknown> = {
+    model: options.modelId,
+    input: messagesToResponsesInput(options.messages),
+    stream: true,
+    max_output_tokens: protectedJingxingMaxOutputTokens(
+      options.maxOutputTokens
+    ),
+  }
+
+  if (options.system) {
+    body.instructions = options.system
+  }
+  if (options.modelId.toLowerCase().startsWith('gpt-5.4-pro')) {
+    body.reasoning = { effort: 'medium' }
+  }
+
+  return {
+    transport: 'responses',
+    endpoint: responsesEndpointFromBaseUrl(options.baseUrl),
+    body,
+  }
+}
+
+export function streamJingxingResponsesChat(options: {
+  modelId: string
+  provider: ProviderObject
+  messages: UIMessage[]
+  system?: string
+  maxOutputTokens?: number
+  abortSignal?: AbortSignal
+  onTokenUsage?: (usage: LanguageModelUsage, messageId: string) => void
+}): ReadableStream<UIMessageChunk> {
+  const responseMessageId = generateId()
+  const textId = generateId()
+
+  return createUIMessageStream<UIMessage>({
+    execute: async ({ writer }) => {
+      writer.write({ type: 'start', messageId: responseMessageId })
+      writer.write({ type: 'text-start', id: textId })
+
+      let usage: LanguageModelUsage | undefined
+      let finishReason: FinishReason = 'stop'
+      const request = buildJingxingResponsesChatRequest({
+        modelId: options.modelId,
+        baseUrl: options.provider.base_url,
+        messages: options.messages,
+        system: options.system,
+        maxOutputTokens: options.maxOutputTokens,
+      })
+      const response = await fetchJingxingNativeWebSearchWithKeyRotation(
+        options.provider,
+        request.endpoint,
+        request.body,
+        options.abortSignal
+      )
+
+      await readResponsesSse(response, (event) => {
+        if (event.type === 'response.output_text.delta' && event.delta) {
+          writer.write({ type: 'text-delta', id: textId, delta: event.delta })
+          return
+        }
+
+        if (event.type === 'response.completed') {
+          usage = responseUsageToLanguageModelUsage(event.response?.usage)
+          finishReason = finishReasonFromStatus(event.response?.status)
+        }
+
+        if (event.type === 'error') {
+          throw new Error(event.error?.message || 'Jingxing Responses chat failed.')
+        }
+      })
+
+      writer.write({ type: 'text-end', id: textId })
+      writer.write({
+        type: 'finish',
+        finishReason,
+        messageMetadata: usage
+          ? {
+              usage,
+              tokenSpeed: {
+                tokenSpeed: 0,
+                tokenCount: usage.outputTokens,
+                durationMs: 0,
+              },
+            }
+          : undefined,
+      })
+
+      if (usage) {
+        options.onTokenUsage?.(usage, responseMessageId)
+      }
+    },
+    onError: (error) => {
+      const quotaError = providerQuotaErrorFromUnknown(error)
+      if (quotaError) return encodeProviderQuotaError(quotaError)
+      return error instanceof Error ? error.message : JSON.stringify(error)
+    },
+  })
 }
 
 export function streamJingxingNativeWebSearch(
@@ -552,6 +830,41 @@ export function streamJingxingNativeWebSearch(
             url: source.url,
             title: source.title,
           })
+        })
+      } else if (request.transport === 'chat-completions') {
+        await readChatCompletionsSse(response, (chunk) => {
+          if (chunk.error?.message) {
+            throw new Error(chunk.error.message)
+          }
+
+          const chunkUsage = chatCompletionUsageToLanguageModelUsage(chunk.usage)
+          if (chunkUsage) {
+            usage = chunkUsage
+          }
+
+          for (const choice of chunk.choices ?? []) {
+            const content = choice.delta?.content
+            if (content) {
+              writer.write({ type: 'text-delta', id: textId, delta: content })
+            }
+
+            for (const source of sourcesFromChatCompletionDelta(choice.delta)) {
+              if (emittedSources.has(source.url)) continue
+              emittedSources.add(source.url)
+              writer.write({
+                type: 'source-url',
+                sourceId: `web-${emittedSources.size}`,
+                url: source.url,
+                title: source.title,
+              })
+            }
+
+            if (choice.finish_reason) {
+              finishReason = finishReasonFromChatCompletions(
+                choice.finish_reason
+              )
+            }
+          }
         })
       } else {
         await readResponsesSse(response, (event) => {

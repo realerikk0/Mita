@@ -36,6 +36,8 @@ type Model = {
   description?: string
   format?: string
   capabilities?: string[]
+  supported_endpoint_types?: string[]
+  supportedEndpointTypes?: string[]
   settings?: Record<string, ProviderSetting>
   /** Whether this model is an embedding model (e.g., BERT-based) */
   embedding?: boolean

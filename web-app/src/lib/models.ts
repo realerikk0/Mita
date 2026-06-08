@@ -37,6 +37,8 @@ export const isJingxingNativeWebSearchModel = (modelId?: string): boolean => {
   return (
     /^gpt-(?:4o|4\.1|5(?:[-.\w]*))/.test(normalized) ||
     normalized.startsWith('grok-') ||
+    normalized.startsWith('claude-') ||
+    normalized.startsWith('anthropic.claude-') ||
     [
       'gemini-3.5-flash',
       'gemini-3.1-pro-preview',

@@ -30,7 +30,12 @@ import {
   parseProviderConnectionDeepLink,
   type ParsedProviderConnection,
 } from '@/lib/provider-connection-import'
-import { getModelCapabilities } from '@/lib/models'
+import {
+  modelDescriptorToModel,
+  modelIdFromDescriptor,
+  providerModelDescriptorHasMetadata,
+  type ProviderModelDescriptor,
+} from '@/lib/provider-models'
 import cloneDeep from 'lodash/cloneDeep'
 import { toast } from 'sonner'
 
@@ -132,41 +137,46 @@ const createProviderForImportedConnection = (
 
 const withProviderModelIds = (
   provider: ModelProvider,
-  modelIds: string[]
+  modelDescriptors: ProviderModelDescriptor[]
 ): ModelProvider => {
-  const candidateModelIds = Array.from(
-    new Set(modelIds.map((id) => id.trim()).filter(Boolean))
+  const fetchedModels = modelDescriptors
+    .map((descriptor) => modelDescriptorToModel(provider.provider, descriptor))
+    .filter((model): model is Model => Boolean(model))
+  const fetchedById = new Map(fetchedModels.map((model) => [model.id, model]))
+  const metadataModelIds = new Set(
+    modelDescriptors
+      .filter(providerModelDescriptorHasMetadata)
+      .map(modelIdFromDescriptor)
   )
   const existingIds = new Set(provider.models.map((model) => model.id))
-  const modelsToAdd = candidateModelIds
-    .filter((id) => !existingIds.has(id))
-    .map(
-      (id) =>
-        ({
-          id,
-          model: id,
-          name: id,
-          displayName: id,
-          capabilities: getModelCapabilities(provider.provider, id),
-          version: '1.0',
-        }) as Model
-    )
+  const updatedExistingModels = provider.models.map((model) => {
+    const fetched = fetchedById.get(model.id)
+    return fetched && metadataModelIds.has(model.id)
+      ? { ...model, ...fetched, settings: model.settings }
+      : model
+  })
+  const modelsToAdd = fetchedModels.filter((model) => !existingIds.has(model.id))
+  const existingModelsChanged = updatedExistingModels.some(
+    (model, index) => model !== provider.models[index]
+  )
 
-  if (modelsToAdd.length === 0) return provider
+  if (modelsToAdd.length === 0 && !existingModelsChanged) {
+    return provider
+  }
 
   return {
     ...provider,
-    models: [...provider.models, ...modelsToAdd],
+    models: [...updatedExistingModels, ...modelsToAdd],
   }
 }
 
 const withImportedModels = (
   provider: ModelProvider,
   importedConnection: ParsedProviderConnection,
-  modelIds: string[]
+  modelDescriptors: ProviderModelDescriptor[]
 ): ModelProvider => {
   return withProviderModelIds(provider, [
-    ...modelIds,
+    ...modelDescriptors,
     importedConnection.defaultModel,
   ])
 }

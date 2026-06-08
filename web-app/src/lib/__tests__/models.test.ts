@@ -322,21 +322,25 @@ describe('getModelCapabilities', () => {
         ModelCapabilities.COMPLETION,
         ModelCapabilities.TOOLS,
         ModelCapabilities.VISION,
+        ModelCapabilities.WEB_SEARCH,
       ],
       'claude-opus-4-6': [
         ModelCapabilities.COMPLETION,
         ModelCapabilities.TOOLS,
         ModelCapabilities.VISION,
+        ModelCapabilities.WEB_SEARCH,
       ],
       'claude-opus-4-7': [
         ModelCapabilities.COMPLETION,
         ModelCapabilities.TOOLS,
         ModelCapabilities.VISION,
+        ModelCapabilities.WEB_SEARCH,
       ],
       'claude-sonnet-4-6': [
         ModelCapabilities.COMPLETION,
         ModelCapabilities.TOOLS,
         ModelCapabilities.VISION,
+        ModelCapabilities.WEB_SEARCH,
       ],
       'gemini-3-flash-preview': [
         ModelCapabilities.COMPLETION,
@@ -455,7 +459,8 @@ describe('getModelCapabilities', () => {
     expect(isJingxingNativeWebSearchModel('gemini-3.5-flash')).toBe(true)
     expect(isJingxingNativeWebSearchModel('gemini-3.1-pro-preview')).toBe(true)
     expect(isJingxingNativeWebSearchModel('gemini-3-flash-preview')).toBe(true)
-    expect(isJingxingNativeWebSearchModel('claude-opus-4-7')).toBe(false)
+    expect(isJingxingNativeWebSearchModel('claude-opus-4-7')).toBe(true)
+    expect(isJingxingNativeWebSearchModel('claude-opus-4-8')).toBe(true)
     expect(isJingxingNativeWebSearchModel('gpt-image-2')).toBe(false)
   })
 

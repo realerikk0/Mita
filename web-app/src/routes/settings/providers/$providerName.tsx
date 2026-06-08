@@ -18,7 +18,11 @@ import { FavoriteModelAction } from '@/containers/FavoriteModelAction'
 import { route } from '@/constants/routes'
 import DeleteProvider from '@/containers/dialogs/DeleteProvider'
 import { useServiceHub } from '@/hooks/useServiceHub'
-import { getModelCapabilities } from '@/lib/models'
+import {
+  modelDescriptorsToModels,
+  modelIdFromDescriptor,
+  providerModelDescriptorHasMetadata,
+} from '@/lib/provider-models'
 import { Button } from '@/components/ui/button'
 import {
   Dialog,
@@ -464,28 +468,37 @@ function ProviderDetail() {
 
     setRefreshingModels(true)
     try {
-      const modelIds = await serviceHub
+      const modelDescriptors = await serviceHub
         .providers()
         .fetchModelsFromProvider(provider)
 
-      // Create new models from the fetched IDs
-      const newModels: Model[] = modelIds.map((id) => ({
-        id,
-        model: id,
-        name: id,
-        capabilities: getModelCapabilities(providerName, id),
-        version: '1.0',
-      }))
+      // Create new models from the fetched descriptors
+      const newModels = modelDescriptorsToModels(providerName, modelDescriptors)
 
       // Filter out models that already exist
       const existingModelIds = provider.models.map((m) => m.id)
+      const fetchedById = new Map(newModels.map((model) => [model.id, model]))
+      const metadataModelIds = new Set(
+        modelDescriptors
+          .filter(providerModelDescriptorHasMetadata)
+          .map(modelIdFromDescriptor)
+      )
+      const updatedExistingModels = provider.models.map((model) => {
+        const fetched = fetchedById.get(model.id)
+        return fetched && metadataModelIds.has(model.id)
+          ? { ...model, ...fetched, settings: model.settings }
+          : model
+      })
+      const hasUpdatedExistingModels = updatedExistingModels.some(
+        (model, index) => model !== provider.models[index]
+      )
       const modelsToAdd = newModels.filter(
         (model) => !existingModelIds.includes(model.id)
       )
 
-      if (modelsToAdd.length > 0) {
+      if (modelsToAdd.length > 0 || hasUpdatedExistingModels) {
         // Update the provider with new models
-        const updatedModels = [...provider.models, ...modelsToAdd]
+        const updatedModels = [...updatedExistingModels, ...modelsToAdd]
         updateProvider(providerName, {
           ...provider,
           models: updatedModels,

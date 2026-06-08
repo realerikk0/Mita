@@ -39,6 +39,7 @@ import {
   canUseJingxingNativeWebSearch,
   protectedJingxingMaxOutputTokens,
   streamJingxingNativeWebSearch,
+  streamJingxingResponsesChat,
 } from '@/lib/jingxing-responses-web-search'
 import { getToolAwareSystemMessage } from '@/lib/mita-prompt'
 import {
@@ -53,6 +54,7 @@ import {
   searchDecisionMetadata,
   webSearchModeFromEnabled,
 } from '@/lib/search-decision'
+import { modelRequiresResponsesEndpoint } from '@/lib/provider-models'
 
 const COMPUTER_AGENT_SERVER_NAME = 'mita-computer-agent'
 
@@ -665,6 +667,10 @@ export class CustomChatTransport implements ChatTransport<UIMessage> {
     const hasTools = Object.keys(this.tools).length > 0
     const modelSupportsTools = this.currentModelSupportsTools()
     const shouldEnableTools = hasTools && modelSupportsTools
+    const responsesChatEnabled =
+      providerId === 'jingxing' &&
+      modelRequiresResponsesEndpoint(modelId, selectedModel)
+    const streamTextToolsEnabled = shouldEnableTools && !responsesChatEnabled
     const webSearchState = useWebSearch.getState()
     const searchMode = webSearchModeFromEnabled(
       webSearchState.enabled,
@@ -691,7 +697,7 @@ export class CustomChatTransport implements ChatTransport<UIMessage> {
     const nativeWebSearchEnabled =
       effectiveSearchDecision.enabled && canUseNativeWebSearch
     const systemMessage = getToolAwareSystemMessage(this.systemMessage ?? '', {
-      structuredToolsEnabled: shouldEnableTools,
+      structuredToolsEnabled: streamTextToolsEnabled,
       nativeWebSearchEnabled,
       searchDecision: effectiveSearchDecision,
     })
@@ -705,10 +711,12 @@ export class CustomChatTransport implements ChatTransport<UIMessage> {
       model_id: modelId,
       model_capabilities: selectedModel?.capabilities ?? [],
       message_count: mappedMessages.length,
-      tools_enabled: shouldEnableTools,
+      tools_enabled: streamTextToolsEnabled,
       tool_count: Object.keys(this.tools).length,
       ...webSearchMetadata,
-      transport: 'desktop_custom_chat_transport',
+      transport: responsesChatEnabled
+        ? 'jingxing_responses_chat'
+        : 'desktop_custom_chat_transport',
     })
 
     if (nativeWebSearchEnabled) {
@@ -718,6 +726,18 @@ export class CustomChatTransport implements ChatTransport<UIMessage> {
         messages: mappedMessages,
         system: systemMessage,
         searchDecision: effectiveSearchDecision,
+        maxOutputTokens,
+        abortSignal: options.abortSignal,
+        onTokenUsage: this.onTokenUsage,
+      })
+    }
+
+    if (responsesChatEnabled) {
+      return streamJingxingResponsesChat({
+        modelId,
+        provider: effectiveProvider,
+        messages: mappedMessages,
+        system: systemMessage,
         maxOutputTokens,
         abortSignal: options.abortSignal,
         onTokenUsage: this.onTokenUsage,
@@ -743,8 +763,8 @@ export class CustomChatTransport implements ChatTransport<UIMessage> {
       model: this.model,
       messages: modelMessages,
       abortSignal: options.abortSignal,
-      tools: shouldEnableTools ? this.tools : undefined,
-      toolChoice: shouldEnableTools ? 'auto' : undefined,
+      tools: streamTextToolsEnabled ? this.tools : undefined,
+      toolChoice: streamTextToolsEnabled ? 'auto' : undefined,
       system: systemMessage,
       ...(maxOutputTokens !== undefined ? { maxTokens: maxOutputTokens } : {}),
     })
@@ -837,7 +857,7 @@ export class CustomChatTransport implements ChatTransport<UIMessage> {
           provider_id: providerId,
           model_id: modelId,
           error_kind: quotaError ? 'quota' : 'stream',
-          has_tools: shouldEnableTools,
+          has_tools: streamTextToolsEnabled,
         })
         if (quotaError) {
           trackMitaEvent('quota_error_shown', {

@@ -12,7 +12,7 @@ import { predefinedProviders } from '@/constants/providers'
 import { route } from '@/constants/routes'
 import { useServiceHub } from '@/hooks/useServiceHub'
 import { useModelProvider } from '@/hooks/useModelProvider'
-import { getModelCapabilities } from '@/lib/models'
+import { modelDescriptorsToModels } from '@/lib/provider-models'
 import {
   mergeProviderCustomHeaders,
   parseProviderConnection,
@@ -193,24 +193,17 @@ function SetupScreen() {
         baseUrl,
         importedCustomHeaders
       )
-      const modelIds = await serviceHub
+      const modelDescriptors = await serviceHub
         .providers()
         .fetchModelsFromProvider(providerWithKey)
-      const uniqueModelIds = Array.from(new Set(modelIds)).filter(Boolean)
+      const models = modelDescriptorsToModels(
+        provider.provider,
+        modelDescriptors
+      )
 
-      if (uniqueModelIds.length === 0) {
+      if (models.length === 0) {
         throw new Error('No models were returned by this provider')
       }
-
-      const models = uniqueModelIds.map((id) => ({
-        id,
-        model: id,
-        name: id,
-        displayName: id,
-        capabilities: getModelCapabilities(provider.provider, id),
-        version: '1.0',
-        provider: provider.provider,
-      })) as Model[]
 
       const updatedProvider = {
         ...providerWithKey,

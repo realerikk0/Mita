@@ -223,6 +223,37 @@ describe('TauriProvidersService', () => {
       expect(result).toEqual(['model-1', 'model-2'])
     })
 
+    it('preserves provider model endpoint metadata from data.data format', async () => {
+      vi.mocked(fetchTauri).mockResolvedValueOnce({
+        ok: true,
+        status: 200,
+        json: vi.fn().mockResolvedValue({
+          data: [
+            {
+              id: 'gpt-5.4-pro',
+              supported_endpoint_types: ['openai-response'],
+            },
+            {
+              id: 'gpt-4o-transcribe',
+              supported_endpoint_types: ['audio-transcription'],
+            },
+          ],
+        }),
+      } as any)
+
+      const result = await svc.fetchModelsFromProvider(baseProvider)
+      expect(result).toEqual([
+        {
+          id: 'gpt-5.4-pro',
+          supported_endpoint_types: ['openai-response'],
+        },
+        {
+          id: 'gpt-4o-transcribe',
+          supported_endpoint_types: ['audio-transcription'],
+        },
+      ])
+    })
+
     it('returns model ids from array format', async () => {
       vi.mocked(fetchTauri).mockResolvedValueOnce({
         ok: true,
