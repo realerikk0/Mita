@@ -116,6 +116,7 @@
   "roleCalls": "Calls",
   "elapsed": "Elapsed",
   "tokenUsage": "Tokens",
+  "tokenUsageDetail": "Prompt {{prompt}} · Completion {{completion}}",
   "reserved": "Reserved",
   "templatesById": {
     "code": {

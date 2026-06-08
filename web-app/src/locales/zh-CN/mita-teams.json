@@ -116,6 +116,7 @@
   "roleCalls": "调用",
   "elapsed": "耗时",
   "tokenUsage": "Token",
+  "tokenUsageDetail": "提示词 {{prompt}} · 输出 {{completion}}",
   "reserved": "预留",
   "templatesById": {
     "code": {

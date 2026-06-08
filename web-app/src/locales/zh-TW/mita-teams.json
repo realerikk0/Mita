@@ -98,6 +98,7 @@
   "roleCalls": "呼叫",
   "elapsed": "耗時",
   "tokenUsage": "Token",
+  "tokenUsageDetail": "提示詞 {{prompt}} · 輸出 {{completion}}",
   "reserved": "預留",
   "templatesById": {
     "code": {

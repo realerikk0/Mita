@@ -52,6 +52,7 @@ import {
   type MitaTeamsTaskStatus,
   type MitaTeamsTaskTemplateId,
   type MitaTeamsTeamEvent,
+  type MitaTeamsTokenUsage,
 } from '@/types/mita-teams'
 import type { UIMessage } from '@ai-sdk/react'
 import {
@@ -388,6 +389,53 @@ function displayDuration(value?: number) {
   if (seconds < 60) return `${seconds}s`
   const minutes = Math.floor(seconds / 60)
   return `${minutes}m ${seconds % 60}s`
+}
+
+function formatTokenCount(value?: number) {
+  if (!value || value <= 0) return undefined
+  return new Intl.NumberFormat().format(Math.round(value))
+}
+
+function totalTokenCount(usage?: MitaTeamsTokenUsage) {
+  if (!usage) return undefined
+  if (usage.totalTokens && usage.totalTokens > 0) return usage.totalTokens
+  const prompt = usage.promptTokens ?? 0
+  const completion = usage.completionTokens ?? 0
+  const total = prompt + completion
+  return total > 0 ? total : undefined
+}
+
+function RuntimeTokenUsageSummary({
+  usage,
+}: {
+  usage?: MitaTeamsTokenUsage
+}) {
+  const { t } = useTranslation()
+  const total = formatTokenCount(totalTokenCount(usage))
+  if (!total) return null
+
+  const prompt = formatTokenCount(usage?.promptTokens)
+  const completion = formatTokenCount(usage?.completionTokens)
+  const detail =
+    prompt || completion
+      ? t('mita-teams:tokenUsageDetail', {
+          prompt: prompt ?? '0',
+          completion: completion ?? '0',
+        })
+      : undefined
+
+  return (
+    <div className="mb-4 flex justify-center">
+      <div className="inline-flex max-w-[min(44rem,92%)] flex-wrap items-center justify-center gap-x-2 gap-y-1 rounded-full border bg-background/90 px-3 py-1.5 text-xs text-muted-foreground shadow-sm">
+        <Brain className="size-3.5 text-primary" />
+        <span className="font-medium text-foreground">
+          {t('mita-teams:tokenUsage')}
+        </span>
+        <span>{total} tokens</span>
+        {detail && <span className="text-[11px]">{detail}</span>}
+      </div>
+    </div>
+  )
 }
 
 function timeValue(value?: string) {
@@ -2611,10 +2659,13 @@ export const MitaTeamsWorkspace = memo(function MitaTeamsWorkspace({
                   </div>
                 )}
                 {isRoleChat ? (
-                  <RoleStreamPanel
-                    role={activeRole}
-                    state={activePrivateRoleState}
-                  />
+                  <>
+                    <RoleStreamPanel
+                      role={activeRole}
+                      state={activePrivateRoleState}
+                    />
+                    <RuntimeTokenUsageSummary usage={runtime.run?.usage} />
+                  </>
                 ) : (
                   <>
                     {showChannelDiscussion && (
@@ -2654,6 +2705,7 @@ export const MitaTeamsWorkspace = memo(function MitaTeamsWorkspace({
                         isRuntimeBusy={isRuntimeBusy}
                       />
                     )}
+                    <RuntimeTokenUsageSummary usage={runtime.run?.usage} />
                   </>
                 )}
               </ConversationContent>

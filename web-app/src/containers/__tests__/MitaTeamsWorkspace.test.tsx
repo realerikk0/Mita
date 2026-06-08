@@ -36,6 +36,7 @@ const h = vi.hoisted(() => {
     'mita-teams:roleCalls': 'Calls',
     'mita-teams:elapsed': 'Elapsed',
     'mita-teams:tokenUsage': 'Tokens',
+    'mita-teams:tokenUsageDetail': 'Prompt {{prompt}} · Completion {{completion}}',
     'mita-teams:reserved': 'Reserved',
     'mita-teams:waitingForOwner': 'Choose one option to continue',
     'mita-teams:planReviewTitle': 'Review plan',
@@ -413,6 +414,31 @@ describe('MitaTeamsWorkspace', () => {
     expect(onConfigChange).not.toHaveBeenCalledWith(
       expect.objectContaining({ mode: 'debate' })
     )
+  })
+
+  it('shows token usage at the bottom of the team output', () => {
+    const base = createConfig()
+    const config: MitaTeamsConfig = {
+      ...base,
+      runtime: {
+        ...base.runtime,
+        run: base.runtime.run
+          ? {
+              ...base.runtime.run,
+              usage: {
+                promptTokens: 800,
+                completionTokens: 434,
+                totalTokens: 1234,
+              },
+            }
+          : undefined,
+      },
+    }
+
+    renderWorkspace({ config })
+
+    expect(screen.getByText('1,234 tokens')).toBeInTheDocument()
+    expect(screen.getByText('Prompt 800 · Completion 434')).toBeInTheDocument()
   })
 
   it('allows choosing template and mode before the first team run starts', async () => {
