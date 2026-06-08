@@ -37,6 +37,10 @@ describe('provider model descriptors', () => {
     expect(isModelChatSelectable({ id: 'whisper-1' } as Model)).toBe(false)
     expect(isModelChatSelectable({ id: 'gpt-image-2' } as Model)).toBe(false)
     expect(isModelChatSelectable({ id: 'seedance-1-pro' } as Model)).toBe(false)
+    expect(isModelChatSelectable({ id: 'seedream-4.0' } as Model)).toBe(false)
+    expect(isModelChatSelectable({ id: 'sora-2-pro' } as Model)).toBe(false)
+    expect(isModelChatSelectable({ id: 'veo-3.1-generate-preview' } as Model)).toBe(false)
+    expect(isModelChatSelectable({ id: 'doubao-seed-asr-2.0' } as Model)).toBe(false)
   })
 
   it('detects response-only chat models from metadata and Jingxing policy', () => {
