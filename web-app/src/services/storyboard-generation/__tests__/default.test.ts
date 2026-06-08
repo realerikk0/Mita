@@ -80,4 +80,47 @@ describe('DefaultStoryboardGenerationService', () => {
       storyboardPrompt: 'Create a numbered storyboard sheet.',
     })
   })
+
+  it('asks for a plain image prompt without storyboard layout instructions', async () => {
+    const fetchMock = vi.fn().mockResolvedValueOnce(
+      new Response(
+        JSON.stringify({
+          choices: [
+            {
+              message: {
+                content:
+                  '{"shots":[{"title":"Wake","camera":"Slow push in","prompt":"A gold robot wakes in a neon city.","duration":4}],"storyboardPrompt":"A gold robot wakes in a neon city, cinematic lighting."}',
+              },
+            },
+          ],
+        }),
+        { status: 200, headers: { 'content-type': 'application/json' } }
+      )
+    )
+    vi.stubGlobal('fetch', fetchMock)
+
+    const service = new DefaultStoryboardGenerationService()
+    await service.breakdownStoryboard({
+      provider,
+      model,
+      story: 'A gold robot wakes in a neon city.',
+      style: 'Cinematic',
+      aspect: '16:9',
+      shotCount: 4,
+      template: 'plain',
+      systemPrompt: 'Keep character identity consistent.',
+      durationPerShot: 5,
+    })
+
+    const init = fetchMock.mock.calls[0][1] as RequestInit & {
+      body: string
+    }
+    const body = JSON.parse(init.body)
+    const userMessage = JSON.parse(body.messages[1].content)
+
+    expect(userMessage.task).toContain('single plain image')
+    expect(userMessage.task).toContain('Do not add storyboard layout')
+    expect(userMessage.task).not.toContain('numbered storyboard sheet')
+    expect(userMessage.schema.storyboardPrompt).toContain('no extra layout')
+  })
 })

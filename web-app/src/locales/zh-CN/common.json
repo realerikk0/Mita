@@ -30,7 +30,7 @@
       "storyboardVideo": "故事板视频",
       "newBadge": "新",
       "longVideo": "长视频",
-      "soonBadge": "不可用"
+      "soonBadge": "即将上线"
     },
     "noImageModelsAvailable": "暂无可用图片模型",
     "noImageModelsDescription": "请添加或刷新包含 image_generation 能力的提供商模型。",
@@ -115,10 +115,12 @@
       "title": "故事板短片",
       "newMediaPrefix": "新建媒体",
       "storyPlaceholder": "用一句话描述你想生成的单个视频。",
-      "aiBreakdown": "AI 拆解",
-      "regenerateBreakdown": "重新拆解",
+      "aiBreakdown": "提示词优化",
+      "regenerateBreakdown": "重新优化",
+      "undoPrompt": "撤销",
+      "redoPrompt": "重复",
       "shotScript": "分镜脚本",
-      "generateStoryboard": "生成故事板",
+      "generateStoryboard": "生成故事板图片",
       "storyboardReady": "故事板已生成",
       "videoModelRequired": "需要配置视频模型后才能生成视频。",
       "generateVideo": "生成视频",
@@ -191,6 +193,10 @@
         "minimal": "极简留白"
       },
       "templates": {
+        "plain": {
+          "label": "纯图片",
+          "description": "无额外版式提示词"
+        },
         "grid": {
           "label": "网格分镜",
           "description": "分格漫画式"

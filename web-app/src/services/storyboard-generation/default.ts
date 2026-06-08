@@ -48,6 +48,7 @@ export class DefaultStoryboardGenerationService
   }
 
   private breakdownBody(request: StoryboardBreakdownRequest) {
+    const isPlainImage = request.template === 'plain'
     return {
       model: request.model.id,
       messages: [
@@ -59,12 +60,15 @@ export class DefaultStoryboardGenerationService
         {
           role: 'user',
           content: JSON.stringify({
-            task: 'Break the story into editable video storyboard shots and one image-generation prompt for a numbered storyboard sheet.',
+            task: isPlainImage
+              ? 'Break the story into editable video shots and one image-generation prompt for a single plain image. Do not add storyboard layout, panel, grid, table, board, numbering, label, or typography instructions.'
+              : 'Break the story into editable video storyboard shots and one image-generation prompt for a numbered storyboard sheet.',
             schema: {
               shots:
                 'Array of objects with title, camera, prompt, and duration fields.',
-              storyboardPrompt:
-                'Single prompt for generating one numbered storyboard image containing all shots.',
+              storyboardPrompt: isPlainImage
+                ? 'Single prompt for generating one plain image with no extra layout instructions.'
+                : 'Single prompt for generating one numbered storyboard image containing all shots.',
             },
             story: request.story,
             style: request.style,

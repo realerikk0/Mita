@@ -78,7 +78,12 @@ import {
   type ImageRatio,
 } from '@/lib/image-generation'
 import { getVideoModels, videoFileExtension } from '@/lib/video-generation'
-import { cn, getModelDisplayName, getProviderTitle } from '@/lib/utils'
+import {
+  cn,
+  getModelDisplayName,
+  getModelLogoProvider,
+  getProviderTitle,
+} from '@/lib/utils'
 import { route } from '@/constants/routes'
 import { useModelProvider } from '@/hooks/useModelProvider'
 import { useServiceHub } from '@/hooks/useServiceHub'
@@ -194,7 +199,7 @@ type StoryboardSettings = {
   aspect: ImageRatio
   qualityPreset: ImageQualityPreset
   variantCount: number
-  template: 'grid' | 'table' | 'board'
+  template: 'plain' | 'grid' | 'table' | 'board'
   consistency: 'standard' | 'strong' | 'lockedCharacter'
 }
 
@@ -305,6 +310,13 @@ const STORYBOARD_TEMPLATES: Array<{
   descriptionKey: string
 }> = [
   {
+    value: 'plain',
+    label: '纯图片',
+    labelKey: 'storyboard.templates.plain.label',
+    description: '不添加版式提示词',
+    descriptionKey: 'storyboard.templates.plain.description',
+  },
+  {
     value: 'grid',
     label: '网格分镜',
     labelKey: 'storyboard.templates.grid.label',
@@ -360,6 +372,7 @@ const VIDEO_ASPECT_OPTIONS: ImageRatio[] = STORYBOARD_ASPECT_OPTIONS
 const STORYBOARD_VARIANT_MIN = 1
 const STORYBOARD_VARIANT_MAX = 6
 const DEFAULT_STORYBOARD_SHOT_COUNT = 6
+const STORY_HISTORY_LIMIT = 50
 const VIDEO_DURATION_MIN = 4
 const VIDEO_DURATION_MAX = 15
 const VIDEO_RESOLUTION_OPTIONS: VideoResolution[] = ['720p', '1080p']
@@ -492,6 +505,63 @@ function statusLabel(t: TranslationFn, status: ImageGenerationStatus) {
   return imageT(t, `status.${status}`)
 }
 
+function numberFromUsageValue(value: unknown) {
+  if (typeof value === 'number' && Number.isFinite(value)) return value
+  if (typeof value === 'string') {
+    const parsed = Number(value)
+    if (Number.isFinite(parsed)) return parsed
+  }
+  return undefined
+}
+
+function imageTokenUsageTotal(usage: unknown) {
+  if (!usage) return undefined
+  const directUsage = numberFromUsageValue(usage)
+  if (directUsage !== undefined) return Math.round(directUsage)
+  if (typeof usage !== 'object') return undefined
+
+  const usageRecord = usage as Record<string, unknown>
+  const totalKeys = [
+    'total_tokens',
+    'totalTokens',
+    'total_token_count',
+    'totalTokenCount',
+  ]
+  for (const key of totalKeys) {
+    const total = numberFromUsageValue(usageRecord[key])
+    if (total !== undefined) return Math.round(total)
+  }
+
+  const input =
+    numberFromUsageValue(usageRecord.input_tokens) ??
+    numberFromUsageValue(usageRecord.prompt_tokens)
+  const output =
+    numberFromUsageValue(usageRecord.output_tokens) ??
+    numberFromUsageValue(usageRecord.completion_tokens)
+  if (input !== undefined || output !== undefined) {
+    return Math.round((input ?? 0) + (output ?? 0))
+  }
+
+  return undefined
+}
+
+function imageTokenUsageLabel(usage: unknown) {
+  const total = imageTokenUsageTotal(usage)
+  if (!total || total <= 0) return undefined
+  return `${new Intl.NumberFormat().format(total)} tokens`
+}
+
+function ImageTokenUsageBadge({ usage }: { usage?: unknown }) {
+  const label = imageTokenUsageLabel(usage)
+  if (!label) return null
+
+  return (
+    <span className="pointer-events-none absolute right-2 top-2 z-10 rounded-full bg-background/90 px-2 py-0.5 text-[11px] font-medium leading-5 text-muted-foreground shadow-sm backdrop-blur">
+      {label}
+    </span>
+  )
+}
+
 function imageModelKey(option: ModelPickerOption) {
   return `${option.provider.provider}::${option.model.id}`
 }
@@ -580,6 +650,17 @@ function buildStoryboardPrompt(
   settings: StoryboardSettings,
   shots: StoryboardShot[]
 ) {
+  if (settings.template === 'plain') {
+    const consistencyPrompt = storyboardConsistencyPrompt(settings.consistency)
+
+    return [
+      `故事：${story.trim()}`,
+      `风格：${settings.style}`,
+      `画幅：${settings.aspect}`,
+      `镜头一致性：${consistencyPrompt}`,
+    ].join('\n')
+  }
+
   const templateLabel =
     STORYBOARD_TEMPLATES.find((item) => item.value === settings.template)
       ?.label ?? '视觉开发板'
@@ -940,11 +1021,11 @@ function ImageModelPicker({
   const displayModel = selected
     ? getModelDisplayName(selected.model)
     : imageT(t, fallbackLabelKey)
-  const providerLabel = selected
-    ? getProviderTitle(selected.provider.provider)
-    : imageT(t, 'provider')
+  const selectedModelLogoProvider = selected
+    ? getModelLogoProvider(selected.model.id, selected.provider.provider)
+    : undefined
   const triggerLabel = showProviderName
-    ? `${providerLabel} · ${displayModel}`
+    ? displayModel
     : labelPrefix
       ? `${labelPrefix} · ${displayModel}`
       : displayModel
@@ -972,7 +1053,11 @@ function ImageModelPicker({
         >
           {selected && (
             <div className="shrink-0">
-              <ProvidersAvatar provider={selected.provider} />
+              <ProvidersAvatar
+                provider={{
+                  provider: selectedModelLogoProvider ?? selected.provider.provider,
+                }}
+              />
             </div>
           )}
           <Tooltip>
@@ -1047,6 +1132,10 @@ function ImageModelPicker({
                     {models.map((option) => {
                       const key = imageModelKey(option)
                       const isSelected = key === selectedModelKey
+                      const modelLogoProvider = getModelLogoProvider(
+                        option.model.id,
+                        option.provider.provider
+                      )
 
                       return (
                         <button
@@ -1062,6 +1151,11 @@ function ImageModelPicker({
                             setOpen(false)
                           }}
                         >
+                          <div className="shrink-0" aria-hidden="true">
+                            <ProvidersAvatar
+                              provider={{ provider: modelLogoProvider }}
+                            />
+                          </div>
                           <span className="truncate text-sm">
                             {getModelDisplayName(option.model)}
                           </span>
@@ -1855,6 +1949,8 @@ function StoryboardVideoMode({
   const [story, setStory] = useState(
     'A gold robot wakes in a neon city, crosses a corridor, and reaches a rooftop.'
   )
+  const [storyUndoStack, setStoryUndoStack] = useState<string[]>([])
+  const [storyRedoStack, setStoryRedoStack] = useState<string[]>([])
   const [settings, setSettings] = useState<StoryboardSettings>(() =>
     defaultStoryboardSettings()
   )
@@ -1900,7 +1996,6 @@ function StoryboardVideoMode({
     () => promptTabs.find((tab) => tab.id === activePromptTabId),
     [activePromptTabId, promptTabs]
   )
-  const activePrompt = activePromptTab?.prompt ?? ''
   const selectedImageModelCanUseReferences = Boolean(
     selectedImageModel?.model && isImageEditModel(selectedImageModel.model)
   )
@@ -1924,14 +2019,35 @@ function StoryboardVideoMode({
   const updateVideoSettings = (patch: Partial<VideoSettings>) => {
     setVideoSettings((current) => ({ ...current, ...patch }))
   }
-  const updateActivePrompt = (prompt: string) => {
-    if (!activePromptTab) return
-    setPromptTabs((current) =>
-      current.map((tab) =>
-        tab.id === activePromptTab.id ? { ...tab, prompt } : tab
+  const commitStoryChange = useCallback(
+    (nextStory: string) => {
+      if (story === nextStory) return
+      setStoryUndoStack((current) =>
+        [...current, story].slice(-STORY_HISTORY_LIMIT)
       )
+      setStoryRedoStack([])
+      setStory(nextStory)
+    },
+    [story]
+  )
+  const undoStoryChange = useCallback(() => {
+    if (storyUndoStack.length === 0) return
+    const previousStory = storyUndoStack[storyUndoStack.length - 1]!
+    setStoryRedoStack((current) =>
+      [...current, story].slice(-STORY_HISTORY_LIMIT)
     )
-  }
+    setStoryUndoStack((current) => current.slice(0, -1))
+    setStory(previousStory)
+  }, [story, storyUndoStack])
+  const redoStoryChange = useCallback(() => {
+    if (storyRedoStack.length === 0) return
+    const nextStory = storyRedoStack[storyRedoStack.length - 1]!
+    setStoryUndoStack((current) =>
+      [...current, story].slice(-STORY_HISTORY_LIMIT)
+    )
+    setStoryRedoStack((current) => current.slice(0, -1))
+    setStory(nextStory)
+  }, [story, storyRedoStack])
   const showStoryboardReferenceLimitToast = useCallback(() => {
     toast.error(
       imageT(t, 'toast.referenceLimitReached', {
@@ -2108,6 +2224,7 @@ function StoryboardVideoMode({
       if (lastTab) {
         setActivePromptTabId(lastTab.id)
         setShots(lastTab.shots)
+        commitStoryChange(lastTab.prompt)
       }
       setStoryboardAsset(undefined)
       setStoryboardVersions([])
@@ -2129,6 +2246,7 @@ function StoryboardVideoMode({
       }
       setPromptTabs((current) => [...current, fallbackTab])
       setActivePromptTabId(fallbackTab.id)
+      commitStoryChange(fallbackTab.prompt)
       setStoryboardAsset(undefined)
       setStoryboardVersions([])
       setActiveStoryboardVersionId('')
@@ -2139,6 +2257,7 @@ function StoryboardVideoMode({
     }
   }, [
     fallbackBreakdown,
+    commitStoryChange,
     serviceHub,
     settings,
     story,
@@ -2170,7 +2289,7 @@ function StoryboardVideoMode({
             })
           )
     const prompt =
-      activePrompt.trim() || buildStoryboardPrompt(story, settings, nextShots)
+      story.trim() || buildStoryboardPrompt(story, settings, nextShots)
     const sourceAssets =
       referenceAssets.length > 0 && selectedImageModelCanUseReferences
         ? referenceAssets
@@ -2244,7 +2363,6 @@ function StoryboardVideoMode({
     settings,
     shots,
     story,
-    activePrompt,
     activePromptTab,
     referenceAssets,
     selectedImageModelCanUseReferences,
@@ -2400,7 +2518,8 @@ function StoryboardVideoMode({
     : imageT(t, 'storyboard.videoModelMissing')
   const selectedTemplate =
     STORYBOARD_TEMPLATES.find((item) => item.value === settings.template) ??
-    STORYBOARD_TEMPLATES[2]!
+    STORYBOARD_TEMPLATES.find((item) => item.value === 'board') ??
+    STORYBOARD_TEMPLATES[0]!
   const stageSubtitle =
     stage === 'compose'
       ? imageT(t, 'storyboard.subtitle.compose', {
@@ -2453,9 +2572,11 @@ function StoryboardVideoMode({
           <section className="rounded-lg border bg-background p-[18px] shadow-sm">
             <div className="grid gap-4 lg:grid-cols-[132px_minmax(0,1fr)_minmax(320px,0.9fr)]">
               <div className="space-y-2">
-                <span className="text-xs font-semibold text-muted-foreground">
-                  {imageT(t, 'storyboard.references')}
-                </span>
+                <div className="flex h-8 items-center">
+                  <span className="text-xs font-semibold text-muted-foreground">
+                    {imageT(t, 'storyboard.references')}
+                  </span>
+                </div>
                 <div className="flex flex-wrap gap-2 lg:flex-col">
                   <button
                     type="button"
@@ -2507,74 +2628,62 @@ function StoryboardVideoMode({
                   )}
               </div>
 
-              <div className="space-y-2">
+              <div className="space-y-2 lg:col-span-2">
                 <div className="flex items-center justify-between gap-3">
                   <label className="text-xs font-semibold text-muted-foreground">
                     {imageT(t, 'storyboard.storyLabel')}
                   </label>
-                  <Button
-                    type="button"
-                    size="sm"
-                    className="h-8 bg-[#f36f4f] px-3 text-white hover:bg-[#e96346]"
-                    disabled={!story.trim() || breakdownStatus === 'running'}
-                    onClick={breakdownStory}
-                  >
-                    {breakdownStatus === 'running' ? (
-                      <Loader2 className="size-4 animate-spin" />
-                    ) : (
-                      <WandSparkles className="size-4" />
-                    )}
-                    {imageT(t, 'storyboard.aiBreakdown')}
-                  </Button>
+                  <div className="flex items-center gap-1.5">
+                    <Button
+                      type="button"
+                      size="sm"
+                      variant="ghost"
+                      className="h-8 px-2.5 text-muted-foreground"
+                      disabled={
+                        storyUndoStack.length === 0 ||
+                        breakdownStatus === 'running'
+                      }
+                      onClick={undoStoryChange}
+                    >
+                      <Undo2 className="size-4" />
+                      {imageT(t, 'storyboard.undoPrompt')}
+                    </Button>
+                    <Button
+                      type="button"
+                      size="sm"
+                      variant="ghost"
+                      className="h-8 px-2.5 text-muted-foreground"
+                      disabled={
+                        storyRedoStack.length === 0 ||
+                        breakdownStatus === 'running'
+                      }
+                      onClick={redoStoryChange}
+                    >
+                      <Redo2 className="size-4" />
+                      {imageT(t, 'storyboard.redoPrompt')}
+                    </Button>
+                    <Button
+                      type="button"
+                      size="sm"
+                      className="h-8 bg-[#f36f4f] px-3 text-white hover:bg-[#e96346]"
+                      disabled={!story.trim() || breakdownStatus === 'running'}
+                      onClick={breakdownStory}
+                    >
+                      {breakdownStatus === 'running' ? (
+                        <Loader2 className="size-4 animate-spin" />
+                      ) : (
+                        <WandSparkles className="size-4" />
+                      )}
+                      {imageT(t, 'storyboard.aiBreakdown')}
+                    </Button>
+                  </div>
                 </div>
                 <Textarea
                   className="min-h-[156px] resize-none rounded-lg border-0 bg-[#f7f8fa] px-4 py-3 text-[15px] leading-6 shadow-none focus-visible:ring-0"
                   value={story}
                   placeholder={imageT(t, 'storyboard.storyPlaceholder')}
-                  onChange={(event) => setStory(event.target.value)}
+                  onChange={(event) => commitStoryChange(event.target.value)}
                 />
-              </div>
-
-              <div className="overflow-hidden rounded-lg border bg-[#f7f8fa]">
-                <div className="flex min-h-11 items-center gap-2 border-b bg-background px-3">
-                  <WandSparkles className="size-4 text-[#e25f43]" />
-                  <span className="shrink-0 text-sm font-medium">
-                    {imageT(t, 'storyboard.prompt')}
-                  </span>
-                  {promptTabs.length > 0 && (
-                    <div className="flex min-w-0 flex-1 gap-1 overflow-x-auto py-2">
-                      {promptTabs.map((tab) => (
-                        <button
-                          key={tab.id}
-                          type="button"
-                          className={cn(
-                            'h-7 shrink-0 rounded-md px-2.5 text-xs transition-colors',
-                            tab.id === activePromptTabId
-                              ? 'bg-[#f36f4f] text-white shadow-sm'
-                              : 'bg-secondary text-muted-foreground hover:text-foreground'
-                          )}
-                          onClick={() => {
-                            setActivePromptTabId(tab.id)
-                            setShots(tab.shots)
-                          }}
-                        >
-                          {tab.label}
-                        </button>
-                      ))}
-                    </div>
-                  )}
-                </div>
-                {activePromptTab ? (
-                  <Textarea
-                    className="min-h-[156px] resize-none rounded-none border-0 bg-transparent px-4 py-3 font-mono text-xs leading-6 shadow-none focus-visible:ring-0"
-                    value={activePrompt}
-                    onChange={(event) => updateActivePrompt(event.target.value)}
-                  />
-                ) : (
-                  <div className="flex min-h-[156px] items-center justify-center px-6 text-center text-xs leading-5 text-muted-foreground">
-                    {imageT(t, 'storyboard.promptEmpty')}
-                  </div>
-                )}
               </div>
             </div>
 
@@ -2633,7 +2742,7 @@ function StoryboardVideoMode({
                 <span className="text-xs text-muted-foreground">
                   {imageT(t, 'storyboard.templateLabel')}
                 </span>
-                <div className="grid gap-2 sm:grid-cols-3">
+                <div className="grid gap-2 sm:grid-cols-2 xl:grid-cols-4">
                   {STORYBOARD_TEMPLATES.map((template) => (
                     <button
                       key={template.value}
@@ -2759,8 +2868,7 @@ function StoryboardVideoMode({
                   type="button"
                   className="ml-auto h-9 bg-[#f36f4f] px-4 text-white hover:bg-[#e96346]"
                   disabled={
-                    storyboardStatus === 'running' ||
-                    (!activePrompt.trim() && !story.trim())
+                    storyboardStatus === 'running' || !story.trim()
                   }
                   onClick={generateStoryboard}
                 >
@@ -4286,7 +4394,8 @@ function Images() {
       </div>
 
       <div className="max-w-[380px] overflow-hidden rounded-lg bg-border">
-        <div className="aspect-square bg-secondary">
+        <div className="relative aspect-square bg-secondary">
+          <ImageTokenUsageBadge usage={asset.usage} />
           {asset.path ? (
             <img
               src={assetSrc(asset)}
@@ -4488,8 +4597,11 @@ function Images() {
                               return (
                                 <div
                                   key={task.id}
-                                  className="aspect-square bg-secondary"
+                                  className="relative aspect-square bg-secondary"
                                 >
+                                  <ImageTokenUsageBadge
+                                    usage={task.asset?.usage}
+                                  />
                                   {task.asset?.path ? (
                                     <img
                                       src={assetSrc(task.asset)}

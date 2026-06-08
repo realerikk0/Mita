@@ -1,5 +1,11 @@
 /* eslint-disable @typescript-eslint/no-explicit-any */
-import { fireEvent, render, screen, waitFor } from '@testing-library/react'
+import {
+  fireEvent,
+  render,
+  screen,
+  waitFor,
+  within,
+} from '@testing-library/react'
 import '@testing-library/jest-dom'
 import React, { act } from 'react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
@@ -87,16 +93,19 @@ const translations: Record<string, string> = {
   'common:imageGeneration.mode.storyboardVideo': 'Storyboard video',
   'common:imageGeneration.mode.newBadge': 'New',
   'common:imageGeneration.mode.longVideo': 'Long video',
-  'common:imageGeneration.mode.soonBadge': 'Unavailable',
+  'common:imageGeneration.mode.soonBadge': 'Coming soon',
   'common:imageGeneration.storyboard.title': 'Storyboard short film',
   'common:imageGeneration.storyboard.newMediaPrefix': 'New Media',
   'common:imageGeneration.storyboard.storyPlaceholder':
     'Describe the single video you want in one sentence.',
-  'common:imageGeneration.storyboard.aiBreakdown': 'AI breakdown',
+  'common:imageGeneration.storyboard.aiBreakdown': 'Optimize prompt',
   'common:imageGeneration.storyboard.regenerateBreakdown':
-    'Regenerate breakdown',
+    'Re-optimize',
+  'common:imageGeneration.storyboard.undoPrompt': 'Undo',
+  'common:imageGeneration.storyboard.redoPrompt': 'Redo',
   'common:imageGeneration.storyboard.shotScript': 'Shot script',
-  'common:imageGeneration.storyboard.generateStoryboard': 'Generate storyboard',
+  'common:imageGeneration.storyboard.generateStoryboard':
+    'Generate storyboard image',
   'common:imageGeneration.storyboard.storyboardReady': 'Storyboard ready',
   'common:imageGeneration.storyboard.videoModelRequired':
     'Configure a video model to generate video.',
@@ -180,6 +189,9 @@ const translations: Record<string, string> = {
   'common:imageGeneration.storyboard.styles.cyberpunk': 'Cyberpunk',
   'common:imageGeneration.storyboard.styles.watercolor': 'Watercolor',
   'common:imageGeneration.storyboard.styles.minimal': 'Minimal',
+  'common:imageGeneration.storyboard.templates.plain.label': 'Plain image',
+  'common:imageGeneration.storyboard.templates.plain.description':
+    'No layout prompt',
   'common:imageGeneration.storyboard.templates.grid.label': 'Grid shots',
   'common:imageGeneration.storyboard.templates.grid.description':
     'Comic panel layout',
@@ -386,7 +398,12 @@ describe('Images route', () => {
     ).toHaveTextContent('gpt-image-1.5')
     expect(
       screen.getByRole('button', { name: 'Image model' })
-    ).toHaveTextContent('Jingxing')
+    ).not.toHaveTextContent('Jingxing')
+    expect(
+      within(screen.getByRole('button', { name: 'Image model' })).getByAltText(
+        'openai - Logo'
+      )
+    ).toBeInTheDocument()
     expect(
       screen.getByRole('button', { name: 'Image model' })
     ).not.toHaveTextContent('Model ·')
@@ -395,6 +412,16 @@ describe('Images route', () => {
     })
     expect(
       screen.getByRole('button', { name: 'gemini-2.5-flash-image' })
+    ).toBeInTheDocument()
+    expect(
+      within(
+        screen.getByRole('button', { name: 'gemini-2.5-flash-image' })
+      ).getByAltText('gemini - Logo')
+    ).toBeInTheDocument()
+    expect(
+      within(screen.getByRole('button', { name: 'gpt-image-2' })).getByAltText(
+        'openai - Logo'
+      )
     ).toBeInTheDocument()
     await act(async () => {
       fireEvent.click(
@@ -466,7 +493,13 @@ describe('Images route', () => {
       },
     ]
     let resolveGeneration:
-      | ((images: Array<{ b64Json: string; mimeType: string }>) => void)
+      | ((
+          images: Array<{
+            b64Json: string
+            mimeType: string
+            usage?: unknown
+          }>
+        ) => void)
       | undefined
     h.generateImages.mockImplementationOnce(
       () =>
@@ -525,7 +558,13 @@ describe('Images route', () => {
     expect(screen.getByText('Running')).toBeInTheDocument()
 
     await act(async () => {
-      resolveGeneration?.([{ b64Json: 'aGVsbG8=', mimeType: 'image/png' }])
+      resolveGeneration?.([
+        {
+          b64Json: 'aGVsbG8=',
+          mimeType: 'image/png',
+          usage: { total_tokens: 1234 },
+        },
+      ])
       await Promise.resolve()
       await Promise.resolve()
       await Promise.resolve()
@@ -533,6 +572,7 @@ describe('Images route', () => {
 
     expect(await screen.findByText('Succeeded')).toBeInTheDocument()
     expect(await screen.findByAltText('moon desk')).toBeInTheDocument()
+    expect(await screen.findByText('1,234 tokens')).toBeInTheDocument()
   })
 
   it('switches to storyboard video mode and generates a storyboard image', async () => {
@@ -603,6 +643,7 @@ describe('Images route', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Storyboard video' }))
 
     expect(screen.getByText('Storyboard short film')).toBeInTheDocument()
+    fireEvent.click(screen.getByRole('button', { name: /Plain image/ }))
     fireEvent.change(
       screen.getByPlaceholderText(
         'Describe the single video you want in one sentence.'
@@ -614,19 +655,23 @@ describe('Images route', () => {
         },
       }
     )
-    fireEvent.click(screen.getByRole('button', { name: 'AI breakdown' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Optimize prompt' }))
 
     await waitFor(() =>
       expect(h.breakdownStoryboard).toHaveBeenCalledWith(
         expect.objectContaining({
           model: expect.objectContaining({ id: 'gpt-5-mini' }),
           shotCount: 6,
+          template: 'plain',
         })
       )
     )
-    expect(await screen.findByText('Prompt 3')).toBeInTheDocument()
-    expect(screen.getAllByDisplayValue(/gold robot/i).length).toBeGreaterThan(0)
-    fireEvent.click(screen.getByRole('button', { name: 'Generate storyboard' }))
+    expect(
+      await screen.findByDisplayValue('LLM storyboard prompt with numbered panels.')
+    ).toBeInTheDocument()
+    fireEvent.click(
+      screen.getByRole('button', { name: 'Generate storyboard image' })
+    )
 
     await waitFor(() => expect(h.generateImages).toHaveBeenCalled())
     expect(h.generateImages.mock.calls.at(-1)?.[0]).toMatchObject({
@@ -812,6 +857,7 @@ describe('Images route', () => {
     ).toHaveTextContent('gpt-image-2')
 
     expect(screen.getByText('Storyboard layout')).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: /Plain image/ })).toBeInTheDocument()
     fireEvent.click(screen.getByRole('button', { name: /Shot table/ }))
     fireEvent.click(screen.getByRole('button', { name: 'Strong' }))
 

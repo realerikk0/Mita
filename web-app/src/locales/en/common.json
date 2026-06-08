@@ -35,7 +35,7 @@
       "storyboardVideo": "Storyboard video",
       "newBadge": "New",
       "longVideo": "Long video",
-      "soonBadge": "Unavailable"
+      "soonBadge": "Coming soon"
     },
     "noImageModelsAvailable": "No image models available",
     "noImageModelsDescription": "Add or refresh a provider model with image_generation capability.",
@@ -120,10 +120,12 @@
       "title": "Storyboard short film",
       "newMediaPrefix": "New Media",
       "storyPlaceholder": "Describe the single video you want in one sentence.",
-      "aiBreakdown": "AI breakdown",
-      "regenerateBreakdown": "Regenerate breakdown",
+      "aiBreakdown": "Optimize prompt",
+      "regenerateBreakdown": "Re-optimize",
+      "undoPrompt": "Undo",
+      "redoPrompt": "Redo",
       "shotScript": "Shot script",
-      "generateStoryboard": "Generate storyboard",
+      "generateStoryboard": "Generate storyboard image",
       "storyboardReady": "Storyboard ready",
       "videoModelRequired": "Configure a video model to generate video.",
       "generateVideo": "Generate video",
@@ -196,6 +198,10 @@
         "minimal": "Minimal"
       },
       "templates": {
+        "plain": {
+          "label": "Plain image",
+          "description": "No layout prompt"
+        },
         "grid": {
           "label": "Grid shots",
           "description": "Comic panel layout"
