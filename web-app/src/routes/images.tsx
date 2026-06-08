@@ -84,7 +84,6 @@ import { useModelProvider } from '@/hooks/useModelProvider'
 import { useServiceHub } from '@/hooks/useServiceHub'
 import {
   providerQuotaErrorFromUnknown,
-  type ProviderQuotaErrorDetails,
 } from '@/lib/provider-quota-error'
 import {
   imageGenerationRequestErrorFromUnknown,
@@ -98,6 +97,11 @@ import type {
   ImageAssetRecord,
   ImageGenerationStatus,
 } from '@/services/image-generation/types'
+import {
+  type ImageTask,
+  type ImageTaskGroup,
+  useImageGenerationStore,
+} from '@/stores/image-generation-store'
 import type {
   VideoAssetRecord,
   VideoGenerationStatus,
@@ -163,25 +167,6 @@ function TauriDragSpacer() {
   )
 }
 
-type ImageTask = {
-  id: string
-  batchId: string
-  createdAt: string
-  prompt: string
-  mode: ImageGenerationMode
-  providerName: string
-  modelId: string
-  ratio: ImageRatio
-  qualityPreset: ImageQualityPreset
-  status: ImageGenerationStatus
-  sourceAssetIds: string[]
-  message?: string
-  quotaError?: ProviderQuotaErrorDetails
-  requestError?: ImageGenerationRequestErrorDetails
-  retryAvailableAt?: number
-  asset?: ImageAssetRecord
-}
-
 type ImageModelOption = {
   provider: ModelProvider
   model: Model
@@ -190,19 +175,6 @@ type ImageModelOption = {
 type ModelPickerOption = {
   provider: ModelProvider
   model: Model
-}
-
-type ImageTaskGroup = {
-  id: string
-  createdAt: string
-  prompt: string
-  mode: ImageGenerationMode
-  providerName: string
-  modelId: string
-  ratio: ImageRatio
-  qualityPreset: ImageQualityPreset
-  sourceAssetIds: string[]
-  tasks: ImageTask[]
 }
 
 type MediaMode = 'image' | 'storyboard' | 'long-video'
@@ -3250,20 +3222,37 @@ function Images() {
   const [ratio, setRatio] = useState<ImageRatio>('1:1')
   const [qualityPreset, setQualityPreset] = useState<ImageQualityPreset>('sd')
   const [count, setCount] = useState(1)
-  const [assets, setAssets] = useState<ImageAssetRecord[]>([])
+  const assets = useImageGenerationStore((state) => state.assets)
+  const tasks = useImageGenerationStore((state) => state.tasks)
+  const setAssets = useImageGenerationStore((state) => state.setAssets)
+  const addTasks = useImageGenerationStore((state) => state.addTasks)
+  const updateTask = useImageGenerationStore((state) => state.updateTask)
+  const upsertAsset = useImageGenerationStore((state) => state.upsertAsset)
+  const upsertAssets = useImageGenerationStore((state) => state.upsertAssets)
+  const removeAsset = useImageGenerationStore((state) => state.removeAsset)
+  const registerTaskController = useImageGenerationStore(
+    (state) => state.registerTaskController
+  )
+  const releaseTaskController = useImageGenerationStore(
+    (state) => state.releaseTaskController
+  )
+  const cancelImageTask = useImageGenerationStore((state) => state.cancelTask)
+  const isTaskCancelled = useImageGenerationStore(
+    (state) => state.isTaskCancelled
+  )
+  const clearTaskCancellation = useImageGenerationStore(
+    (state) => state.clearTaskCancellation
+  )
   const [sourceAssetIds, setSourceAssetIds] = useState<string[]>([])
   const [sourceAssetRecords, setSourceAssetRecords] = useState<
     ImageAssetRecord[]
   >([])
   const [referenceAssetsLoading, setReferenceAssetsLoading] = useState(false)
-  const [tasks, setTasks] = useState<ImageTask[]>([])
   const [nowMs, setNowMs] = useState(() => Date.now())
   const [previewAsset, setPreviewAsset] = useState<ImageAssetRecord | null>(
     null
   )
   const [contextMenu, setContextMenu] = useState<AssetContextMenuState>(null)
-  const controllers = useRef(new Map<string, AbortController>())
-  const cancelledTasks = useRef(new Set<string>())
 
   useEffect(() => {
     if (imageModels.length === 0) {
@@ -3294,7 +3283,7 @@ function Images() {
     return () => {
       mounted = false
     }
-  }, [serviceHub, t])
+  }, [serviceHub, setAssets, t])
 
   useEffect(() => {
     if (!contextMenu) return
@@ -3677,12 +3666,6 @@ function Images() {
   const submitDisabled =
     !selectedModel || sourceModelUnsupported || referenceAssetsLoading
 
-  const updateTask = useCallback((id: string, patch: Partial<ImageTask>) => {
-    setTasks((current) =>
-      current.map((task) => (task.id === id ? { ...task, ...patch } : task))
-    )
-  }, [])
-
   const findTaskModel = useCallback(
     (task: ImageTask) =>
       imageModels.find(
@@ -3706,8 +3689,16 @@ function Images() {
       const sourceAssets = task.sourceAssetIds
         .map((id) => resolveAssetById(id))
         .filter((asset): asset is ImageAssetRecord => Boolean(asset))
+      if (isTaskCancelled(task.id)) return
+
       const controller = new AbortController()
-      controllers.current.set(task.id, controller)
+      registerTaskController(task.id, controller)
+      if (isTaskCancelled(task.id)) {
+        releaseTaskController(task.id)
+        clearTaskCancellation(task.id)
+        return
+      }
+
       updateTask(task.id, {
         status: 'running',
         message: undefined,
@@ -3774,7 +3765,7 @@ function Images() {
           extension: imageFileExtension(image.mimeType),
         })
 
-        setAssets((current) => [saved, ...current])
+        upsertAsset(saved)
         updateTask(task.id, { status: 'succeeded', asset: saved })
         trackMitaEvent('image_generation_completed', {
           provider_id: match.provider.provider,
@@ -3796,6 +3787,7 @@ function Images() {
       } catch (error) {
         const quotaError = providerQuotaErrorFromUnknown(error)
         const requestError = imageGenerationRequestErrorFromUnknown(error)
+        const taskCancelled = isTaskCancelled(task.id)
         const message =
           quotaError?.message ||
           (requestError
@@ -3810,17 +3802,13 @@ function Images() {
           ? failedAt + requestError.retryAfterMs
           : undefined
         updateTask(task.id, {
-          status: cancelledTasks.current.has(task.id) ? 'failed' : 'failed',
-          message: cancelledTasks.current.has(task.id)
+          status: 'failed',
+          message: taskCancelled
             ? imageT(t, 'status.canceled')
             : message,
-          quotaError: cancelledTasks.current.has(task.id)
-            ? undefined
-            : quotaError?.toJSON(),
-          requestError: cancelledTasks.current.has(task.id)
-            ? undefined
-            : requestError?.toJSON(),
-          retryAvailableAt: cancelledTasks.current.has(task.id)
+          quotaError: taskCancelled ? undefined : quotaError?.toJSON(),
+          requestError: taskCancelled ? undefined : requestError?.toJSON(),
+          retryAvailableAt: taskCancelled
             ? undefined
             : retryAvailableAt,
         })
@@ -3831,18 +3819,29 @@ function Images() {
           ratio: task.ratio,
           quality: task.qualityPreset,
           source_asset_count: sourceAssets.length,
-          error_kind: cancelledTasks.current.has(task.id)
+          error_kind: taskCancelled
             ? 'cancelled'
             : quotaError
               ? 'quota'
               : (requestError?.kind ?? 'generation'),
         })
       } finally {
-        controllers.current.delete(task.id)
-        cancelledTasks.current.delete(task.id)
+        releaseTaskController(task.id)
+        clearTaskCancellation(task.id)
       }
     },
-    [findTaskModel, resolveAssetById, serviceHub, t, updateTask]
+    [
+      clearTaskCancellation,
+      findTaskModel,
+      isTaskCancelled,
+      registerTaskController,
+      releaseTaskController,
+      resolveAssetById,
+      serviceHub,
+      t,
+      updateTask,
+      upsertAsset,
+    ]
   )
 
   const runQueue = useCallback(
@@ -3853,7 +3852,11 @@ function Images() {
         async () => {
           while (pending.length > 0) {
             const task = pending.shift()
-            if (!task || cancelledTasks.current.has(task.id)) continue
+            if (!task) continue
+            if (isTaskCancelled(task.id)) {
+              clearTaskCancellation(task.id)
+              continue
+            }
             await runTask(task)
           }
         }
@@ -3861,7 +3864,7 @@ function Images() {
 
       await Promise.all(workers)
     },
-    [runTask]
+    [clearTaskCancellation, isTaskCancelled, runTask]
   )
 
   const startGeneration = useCallback(() => {
@@ -3910,10 +3913,11 @@ function Images() {
       status: 'pending',
     }))
 
-    setTasks((current) => [...nextTasks, ...current])
+    addTasks(nextTasks)
     setPrompt('')
     void runQueue(nextTasks)
   }, [
+    addTasks,
     count,
     inferredMode,
     prompt,
@@ -3947,10 +3951,10 @@ function Images() {
         retryAvailableAt: undefined,
         asset: undefined,
       }
-      setTasks((current) => [retry, ...current])
+      addTasks([retry])
       void runQueue([retry])
     },
-    [runQueue, t]
+    [addTasks, runQueue, t]
   )
 
   const rerunGroup = useCallback(
@@ -3969,10 +3973,10 @@ function Images() {
         retryAvailableAt: undefined,
         asset: undefined,
       }))
-      setTasks((current) => [...nextTasks, ...current])
+      addTasks(nextTasks)
       void runQueue(nextTasks)
     },
-    [runQueue]
+    [addTasks, runQueue]
   )
 
   const regeneratePrompt = useCallback(
@@ -4003,25 +4007,20 @@ function Images() {
         sourceAssetIds: [],
         status: 'pending',
       }))
-      setTasks((current) => [...nextTasks, ...current])
+      addTasks(nextTasks)
       void runQueue(nextTasks)
     },
-    [count, qualityPreset, ratio, runQueue, selectedModel, t]
+    [addTasks, count, qualityPreset, ratio, runQueue, selectedModel, t]
   )
 
   const cancelTask = (taskId: string) => {
-    cancelledTasks.current.add(taskId)
-    controllers.current.get(taskId)?.abort()
-    updateTask(taskId, {
-      status: 'failed',
-      message: imageT(t, 'status.canceled'),
-    })
+    cancelImageTask(taskId, imageT(t, 'status.canceled'))
   }
 
   const deleteAsset = async (asset: ImageAssetRecord) => {
     try {
       await serviceHub.imageGeneration().deleteAsset(asset.id)
-      setAssets((current) => current.filter((item) => item.id !== asset.id))
+      removeAsset(asset.id)
       setSourceAssetRecords((current) =>
         current.filter((item) => item.id !== asset.id)
       )
@@ -4125,12 +4124,7 @@ function Images() {
           })
         )
       )
-      setAssets((current) => [
-        ...imported,
-        ...current.filter(
-          (asset) => !imported.some((nextAsset) => nextAsset.id === asset.id)
-        ),
-      ])
+      upsertAssets(imported)
       addSourceAssets(imported)
       toast.success(imageT(t, 'toast.referenceImported'))
     } catch (error) {
@@ -4145,6 +4139,7 @@ function Images() {
     showReferenceLimitToast,
     sourceAssetIds.length,
     t,
+    upsertAssets,
   ])
 
   const savePastedReferenceFiles = useCallback(
@@ -4194,13 +4189,7 @@ function Images() {
           savedAssets.push(saved)
         }
 
-        setAssets((current) => [
-          ...savedAssets,
-          ...current.filter(
-            (asset) =>
-              !savedAssets.some((nextAsset) => nextAsset.id === asset.id)
-          ),
-        ])
+        upsertAssets(savedAssets)
         addSourceAssets(savedAssets)
         toast.success(imageT(t, 'toast.referenceImported'))
       } catch (error) {
@@ -4216,6 +4205,7 @@ function Images() {
       showReferenceLimitToast,
       sourceAssetIds.length,
       t,
+      upsertAssets,
     ]
   )
 
@@ -4618,12 +4608,7 @@ function Images() {
                 textModels={textModels}
                 videoModels={videoModels}
                 assetSrc={assetSrc}
-                onAssetSaved={(asset) =>
-                  setAssets((current) => [
-                    asset,
-                    ...current.filter((item) => item.id !== asset.id),
-                  ])
-                }
+                onAssetSaved={upsertAsset}
               />
             )}
           </div>

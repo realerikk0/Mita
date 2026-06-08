@@ -7,6 +7,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { ModelCapabilities } from '@/types/models'
 import { ProviderQuotaError } from '@/lib/provider-quota-error'
 import { ImageGenerationRequestError } from '@/lib/image-generation-errors'
+import { useImageGenerationStore } from '@/stores/image-generation-store'
 
 const h = vi.hoisted(() => ({
   providers: [] as any[],
@@ -319,6 +320,9 @@ describe('Images route', () => {
   })
 
   beforeEach(() => {
+    act(() => {
+      useImageGenerationStore.getState().reset()
+    })
     vi.clearAllMocks()
     h.providers = []
     h.assets = []
@@ -445,6 +449,90 @@ describe('Images route', () => {
     expect(
       screen.getByRole('button', { name: 'Image size settings' })
     ).toHaveTextContent('Ultra HD 4K')
+  })
+
+  it('keeps an in-flight image task visible after leaving and returning to the media route', async () => {
+    h.providers = [
+      {
+        provider: 'jingxing',
+        base_url: 'https://api.jingxing.uk/v1',
+        settings: [],
+        models: [
+          {
+            id: 'gpt-image-2',
+            capabilities: [ModelCapabilities.IMAGE_GENERATION],
+          },
+        ],
+      },
+    ]
+    let resolveGeneration:
+      | ((images: Array<{ b64Json: string; mimeType: string }>) => void)
+      | undefined
+    h.generateImages.mockImplementationOnce(
+      () =>
+        new Promise((resolve) => {
+          resolveGeneration = resolve
+        })
+    )
+    h.saveAsset.mockImplementation((request: any) =>
+      Promise.resolve({
+        ...request,
+        createdAt: '2026-06-08T00:00:00Z',
+        path: `/mock/mita/image-assets/${request.id}/image.png`,
+        fileName: 'image.png',
+      })
+    )
+    vi.stubGlobal(
+      'Image',
+      class {
+        naturalWidth = 1024
+        naturalHeight = 1024
+        onload?: () => void
+        set src(_value: string) {
+          this.onload?.()
+        }
+      }
+    )
+
+    let firstRender: ReturnType<typeof render> | undefined
+    await act(async () => {
+      firstRender = renderComponent()
+    })
+
+    await waitFor(() => expect(h.listAssets).toHaveBeenCalled())
+    await act(async () => {
+      fireEvent.change(screen.getByPlaceholderText(/Upload a reference image/), {
+        target: { value: 'moon desk' },
+      })
+      fireEvent.click(screen.getByRole('button', { name: 'Generate' }))
+    })
+
+    expect(await screen.findByText('Running')).toBeInTheDocument()
+
+    const listCallsBeforeReturn = h.listAssets.mock.calls.length
+    await act(async () => {
+      firstRender?.unmount()
+    })
+    await act(async () => {
+      renderComponent()
+    })
+
+    await waitFor(() =>
+      expect(h.listAssets.mock.calls.length).toBeGreaterThan(
+        listCallsBeforeReturn
+      )
+    )
+    expect(screen.getByText('Running')).toBeInTheDocument()
+
+    await act(async () => {
+      resolveGeneration?.([{ b64Json: 'aGVsbG8=', mimeType: 'image/png' }])
+      await Promise.resolve()
+      await Promise.resolve()
+      await Promise.resolve()
+    })
+
+    expect(await screen.findByText('Succeeded')).toBeInTheDocument()
+    expect(await screen.findByAltText('moon desk')).toBeInTheDocument()
   })
 
   it('switches to storyboard video mode and generates a storyboard image', async () => {
