@@ -801,6 +801,128 @@ describe('Images route', () => {
     ).toBeInTheDocument()
   })
 
+  it('generates a storyboard video from the storyboard image', async () => {
+    h.providers = [
+      {
+        provider: 'jingxing',
+        base_url: 'https://api.jingxing.uk/v1',
+        settings: [],
+        models: [
+          {
+            id: 'gpt-image-2',
+            capabilities: [ModelCapabilities.IMAGE_GENERATION],
+          },
+          {
+            id: 'seedance-2.0',
+            capabilities: [ModelCapabilities.VIDEO_GENERATION],
+          },
+        ],
+      },
+    ]
+    h.generateImages.mockResolvedValueOnce([
+      {
+        b64Json: 'aGVsbG8=',
+        mimeType: 'image/png',
+        revisedPrompt: 'storyboard',
+      },
+    ])
+    h.saveAsset.mockImplementation((request: any) =>
+      Promise.resolve({
+        ...request,
+        createdAt: '2026-06-04T00:00:00Z',
+        path: `/mock/mita/image-assets/${request.id}/image.png`,
+        fileName: 'image.png',
+      })
+    )
+    h.generateVideo.mockResolvedValueOnce({
+      id: 'video-task-1',
+      status: 'queued',
+      progress: 0,
+    })
+    h.pollVideoTask.mockResolvedValueOnce({
+      id: 'video-task-1',
+      status: 'succeeded',
+      progress: 100,
+      videoUrl: 'https://cdn.example.test/video.mp4',
+      usage: { total_tokens: 15000 },
+    })
+    h.saveVideoAsset.mockImplementation((request: any) =>
+      Promise.resolve({
+        ...request,
+        createdAt: '2026-06-04T00:01:00Z',
+        path: '/mock/mita/video-assets/video-asset-1/video.mp4',
+        fileName: 'video.mp4',
+      })
+    )
+    vi.stubGlobal(
+      'Image',
+      class {
+        naturalWidth = 0
+        naturalHeight = 0
+        onerror?: () => void
+        set src(_value: string) {
+          this.onerror?.()
+        }
+      }
+    )
+
+    renderComponent()
+
+    await waitFor(() => expect(h.listAssets).toHaveBeenCalled())
+    fireEvent.click(screen.getByRole('button', { name: 'Storyboard video' }))
+    fireEvent.change(
+      screen.getByPlaceholderText(
+        'Describe the single video you want in one sentence.'
+      ),
+      {
+        target: {
+          value:
+            'A gold robot wakes in a neon city, crosses a corridor, and reaches a rooftop.',
+        },
+      }
+    )
+    fireEvent.click(
+      screen.getByRole('button', { name: 'Generate storyboard image' })
+    )
+
+    expect(await screen.findByText('Storyboard ready')).toBeInTheDocument()
+    fireEvent.click(
+      screen.getByRole('button', { name: /Next .* generate video/ })
+    )
+    fireEvent.click(screen.getByRole('button', { name: 'Generate video' }))
+
+    await waitFor(() => expect(h.generateVideo).toHaveBeenCalledTimes(1))
+    expect(h.generateVideo.mock.calls[0][0]).toMatchObject({
+      model: expect.objectContaining({ id: 'seedance-2.0' }),
+      sourceAsset: expect.objectContaining({
+        path: expect.stringContaining('/mock/mita/image-assets/'),
+      }),
+      ratio: '16:9',
+      resolution: '1080p',
+      fps: 30,
+    })
+    await waitFor(() => expect(h.pollVideoTask).toHaveBeenCalledWith(
+      expect.objectContaining({
+        taskId: 'video-task-1',
+        model: expect.objectContaining({ id: 'seedance-2.0' }),
+      })
+    ))
+    await waitFor(() => expect(h.saveVideoAsset).toHaveBeenCalledTimes(1))
+    expect(h.saveVideoAsset.mock.calls[0][0]).toMatchObject({
+      provider: 'jingxing',
+      model: 'seedance-2.0',
+      sourceAssetIds: [expect.any(String)],
+      usage: { total_tokens: 15000 },
+      videoUrl: 'https://cdn.example.test/video.mp4',
+      status: 'succeeded',
+    })
+    expect(
+      await screen.findByText(/Rendered .* 8s .* 1080p/)
+    ).toBeInTheDocument()
+    expect(screen.getByText('15,000 tokens')).toBeInTheDocument()
+    expect(screen.getByText('Download video')).toBeInTheDocument()
+  })
+
   it('lets storyboard mode switch image models, layout, consistency, and references', async () => {
     h.providers = [
       {

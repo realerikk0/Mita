@@ -135,6 +135,7 @@ export class DefaultVideoGenerationService implements VideoGenerationService {
   private async generationBody(request: GenerateVideoRequest) {
     return {
       model: request.model.id,
+      prompt: request.prompt,
       content: [
         { type: 'text', text: request.prompt },
         ...(request.sourceAsset
@@ -175,7 +176,7 @@ export class DefaultVideoGenerationService implements VideoGenerationService {
     path: string
     mimeType: string
   }) {
-    const response = await this.fetch()(this.fileSrc(asset.path))
+    const response = await globalThis.fetch(this.fileSrc(asset.path))
     if (!response.ok) throw new Error('Unable to read storyboard image')
     const mimeType =
       response.headers.get('content-type')?.split(';')[0] ||

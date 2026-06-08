@@ -62,6 +62,7 @@ describe('DefaultVideoGenerationService', () => {
     expect(init.headers['x-custom']).toBe('yes')
     expect(JSON.parse(init.body)).toMatchObject({
       model: 'seedance-2.0',
+      prompt: 'A gold robot walks through a neon city.',
       content: [
         {
           type: 'text',

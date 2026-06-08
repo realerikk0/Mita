@@ -2444,6 +2444,7 @@ function StoryboardVideoMode({
       ? videoAsset.path
       : serviceHub.core().convertFileSrc(videoAsset.path)
     : ''
+  const videoTokenUsageLabel = imageTokenUsageLabel(videoAsset?.usage)
   const downloadMedia = useCallback((href: string, fileName: string) => {
     if (!href || typeof document === 'undefined') return
     const link = document.createElement('a')
@@ -3049,6 +3050,11 @@ function StoryboardVideoMode({
                       resolution: videoSettings.resolution,
                     })}
                   </span>
+                  {videoTokenUsageLabel && (
+                    <span className="inline-flex items-center rounded-full bg-background px-2 py-0.5 text-xs font-medium text-muted-foreground shadow-sm ring-1 ring-border">
+                      {videoTokenUsageLabel}
+                    </span>
+                  )}
                   <Button type="button" variant="secondary" size="sm">
                     <Save className="size-4" />
                     {imageT(t, 'storyboard.saveToMediaLibrary')}
