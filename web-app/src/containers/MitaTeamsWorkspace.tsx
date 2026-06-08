@@ -36,6 +36,7 @@ import {
   MITA_TEAMS_MODES,
   MITA_TEAMS_ROLE_COLORS,
   MITA_TEAMS_TASK_TEMPLATES,
+  markMitaTeamsRoleUserEdit,
   patchMitaTeamsConfig,
   type MitaTeamsArtifact,
   type MitaTeamsChannelConfig,
@@ -43,7 +44,9 @@ import {
   type MitaTeamsChoiceRequest,
   type MitaTeamsConfig,
   type MitaTeamsMode,
+  type MitaTeamsPlanDraft,
   type MitaTeamsRoleConfig,
+  type MitaTeamsRoleEditableField,
   type MitaTeamsRoleId,
   type MitaTeamsRoleState,
   type MitaTeamsTaskStatus,
@@ -99,6 +102,9 @@ type MitaTeamsWorkspaceProps = {
   inputArea: ReactNode
   isRuntimeBusy?: boolean
   onChoiceSelect?: (optionId: string) => void
+  onTextResponse?: (text: string) => void
+  onPlanApprove?: () => void
+  onPlanRevise?: (revision: string) => void
   onConfigChange: (config: MitaTeamsConfig) => void
 }
 
@@ -596,13 +602,20 @@ function RuntimeStatusBadge({
 function ChoiceRequestCard({
   choice,
   onSelect,
+  onTextResponse,
   disabled,
 }: {
   choice: MitaTeamsChoiceRequest
   onSelect?: (optionId: string) => void
+  onTextResponse?: (text: string) => void
   disabled?: boolean
 }) {
   const { t } = useTranslation()
+  const [textResponse, setTextResponse] = useState('')
+  const isPending = choice.status === 'pending'
+  const isFreeText = choice.kind === 'free_text'
+  const canSubmitText =
+    isFreeText && isPending && !disabled && textResponse.trim().length > 0
 
   return (
     <div className="mb-4 rounded-lg border bg-card p-4">
@@ -617,29 +630,235 @@ function ChoiceRequestCard({
           </div>
         </div>
       </div>
-      <div className="grid gap-2">
-        {choice.options.map((option) => (
-          <Button
-            key={option.id}
-            type="button"
-            variant="outline"
-            className="h-auto justify-start whitespace-normal px-3 py-2 text-left"
-            disabled={disabled || choice.status !== 'pending'}
-            onClick={() => {
-              if (disabled || choice.status !== 'pending') return
-              onSelect?.(option.id)
-            }}
-          >
-            <span className="min-w-0">
-              <span className="block text-sm font-medium">{option.label}</span>
-              {option.description && (
-                <span className="mt-0.5 block text-xs font-normal text-muted-foreground">
-                  {option.description}
-                </span>
-              )}
-            </span>
-          </Button>
-        ))}
+      {isFreeText ? (
+        <div className="grid gap-2">
+          <Textarea
+            value={textResponse}
+            placeholder={t('mita-teams:freeTextPlaceholder')}
+            rows={4}
+            disabled={disabled || !isPending}
+            onChange={(event) => setTextResponse(event.target.value)}
+          />
+          <div className="flex justify-end">
+            <Button
+              type="button"
+              size="sm"
+              disabled={!canSubmitText}
+              onClick={() => {
+                if (!canSubmitText) return
+                onTextResponse?.(textResponse.trim())
+              }}
+            >
+              {t('mita-teams:submitFreeText')}
+            </Button>
+          </div>
+        </div>
+      ) : (
+        <div className="grid gap-2">
+          {choice.options.map((option) => (
+            <Button
+              key={option.id}
+              type="button"
+              variant="outline"
+              className="h-auto justify-start whitespace-normal px-3 py-2 text-left"
+              disabled={disabled || !isPending}
+              onClick={() => {
+                if (disabled || !isPending) return
+                onSelect?.(option.id)
+              }}
+            >
+              <span className="min-w-0">
+                <span className="block text-sm font-medium">{option.label}</span>
+                {option.description && (
+                  <span className="mt-0.5 block text-xs font-normal text-muted-foreground">
+                    {option.description}
+                  </span>
+                )}
+              </span>
+            </Button>
+          ))}
+        </div>
+      )}
+    </div>
+  )
+}
+
+function FloatingDots({ muted = false }: { muted?: boolean }) {
+  return (
+    <span
+      data-testid="progress-floating-dots"
+      className="inline-flex w-6 shrink-0 items-center justify-center gap-0.5"
+      aria-hidden="true"
+    >
+      {[0, 1, 2].map((index) => (
+        <span
+          key={index}
+          className={cn(
+            'size-1.5 animate-bounce rounded-full',
+            muted ? 'bg-muted-foreground/50' : 'bg-primary'
+          )}
+          style={{ animationDelay: `${index * 120}ms` }}
+        />
+      ))}
+    </span>
+  )
+}
+
+function PlanReviewCard({
+  plan,
+  disabled,
+  onApprove,
+  onRevise,
+}: {
+  plan: MitaTeamsPlanDraft
+  disabled?: boolean
+  onApprove?: () => void
+  onRevise?: (revision: string) => void
+}) {
+  const { t } = useTranslation()
+  const [revision, setRevision] = useState('')
+  const isApproved = plan.status === 'approved'
+  const canSubmitRevision = revision.trim().length > 0 && !disabled
+
+  return (
+    <div className="mb-4 rounded-lg border bg-card p-4">
+      <div className="mb-3 flex items-start gap-2">
+        <FileText className="mt-0.5 size-4 shrink-0 text-primary" />
+        <div className="min-w-0">
+          <div className="text-sm font-medium">
+            {t('mita-teams:planReviewTitle')}
+          </div>
+          <div className="mt-1 text-sm leading-5 text-muted-foreground">
+            {t(
+              isApproved
+                ? 'mita-teams:planApprovedDescription'
+                : 'mita-teams:planReviewDescription'
+            )}
+          </div>
+        </div>
+      </div>
+
+      <div className="space-y-3">
+        <div>
+          <div className="text-sm font-semibold">{plan.goal}</div>
+          <p className="mt-1 text-sm leading-5 text-muted-foreground">
+            {plan.summary}
+          </p>
+        </div>
+
+        {plan.scope.length > 0 && (
+          <section className="grid gap-1">
+            <div className="text-xs font-medium text-muted-foreground">
+              {t('mita-teams:planScope')}
+            </div>
+            <ul className="list-disc space-y-1 pl-5 text-sm">
+              {plan.scope.map((item) => (
+                <li key={item}>{item}</li>
+              ))}
+            </ul>
+          </section>
+        )}
+
+        {plan.acceptanceCriteria.length > 0 && (
+          <section className="grid gap-1">
+            <div className="text-xs font-medium text-muted-foreground">
+              {t('mita-teams:planAcceptanceCriteria')}
+            </div>
+            <ul className="list-disc space-y-1 pl-5 text-sm">
+              {plan.acceptanceCriteria.map((item) => (
+                <li key={item}>{item}</li>
+              ))}
+            </ul>
+          </section>
+        )}
+
+        {plan.tasks.length > 0 && (
+          <section className="grid gap-1">
+            <div className="text-xs font-medium text-muted-foreground">
+              {t('mita-teams:planTasks')}
+            </div>
+            <div className="grid gap-1.5">
+              {plan.tasks.map((task) => (
+                <div
+                  key={task.id}
+                  className="rounded-md border bg-muted/20 px-3 py-2 text-sm"
+                >
+                  <div className="font-medium">{task.title}</div>
+                  {task.description && (
+                    <div className="mt-0.5 text-xs text-muted-foreground">
+                      {task.description}
+                    </div>
+                  )}
+                </div>
+              ))}
+            </div>
+          </section>
+        )}
+
+        {plan.roleAssignments.length > 0 && (
+          <section className="grid gap-1">
+            <div className="text-xs font-medium text-muted-foreground">
+              {t('mita-teams:planRoles')}
+            </div>
+            <div className="grid gap-1.5">
+              {plan.roleAssignments.map((role) => (
+                <div
+                  key={role.roleId}
+                  className="rounded-md border bg-muted/20 px-3 py-2 text-sm"
+                >
+                  <div className="flex items-center justify-between gap-2">
+                    <span className="font-medium">{role.name}</span>
+                    {role.model && (
+                      <span className="truncate text-xs text-muted-foreground">
+                        {role.model}
+                      </span>
+                    )}
+                  </div>
+                  <div className="mt-0.5 text-xs text-muted-foreground">
+                    {role.assignment}
+                  </div>
+                </div>
+              ))}
+            </div>
+          </section>
+        )}
+
+        {!isApproved && (
+          <div className="grid gap-2">
+            <Textarea
+              rows={4}
+              value={revision}
+              placeholder={t('mita-teams:planRevisionPlaceholder')}
+              onChange={(event) => setRevision(event.target.value)}
+            />
+            <Button
+              type="button"
+              size="sm"
+              disabled={!canSubmitRevision}
+              onClick={() => {
+                if (!canSubmitRevision) return
+                onRevise?.(revision.trim())
+                setRevision('')
+              }}
+            >
+              {t('mita-teams:submitPlanRevision')}
+            </Button>
+          </div>
+        )}
+
+        {!isApproved && (
+          <div className="flex flex-wrap gap-2">
+            <Button
+              type="button"
+              size="sm"
+              disabled={disabled}
+              onClick={() => onApprove?.()}
+            >
+              <CheckCircle2 className="size-4" />
+              {t('mita-teams:approvePlan')}
+            </Button>
+          </div>
+        )}
       </div>
     </div>
   )
@@ -981,6 +1200,63 @@ function RuntimeActivityIndicator({
       <div className="inline-flex max-w-[min(44rem,92%)] items-center gap-2 rounded-lg border bg-muted/30 px-3 py-2 text-sm text-muted-foreground">
         <Loader2 className="size-4 animate-spin text-primary" />
         <span>{label}</span>
+      </div>
+    </div>
+  )
+}
+
+function OrchestratorProgressCard({
+  runtime,
+}: {
+  runtime: MitaTeamsConfig['runtime']
+}) {
+  const { t } = useTranslation()
+  const hasDecision = Boolean(runtime.run?.lastDecision)
+  const hasPlan = Boolean(runtime.planDraft)
+  const steps = [
+    {
+      id: 'understanding',
+      label: t('mita-teams:orchestratorProgressUnderstanding'),
+      done: hasDecision || hasPlan,
+      active: !hasDecision && !hasPlan,
+    },
+    {
+      id: 'planning',
+      label: t('mita-teams:orchestratorProgressPlanning'),
+      done: hasPlan,
+      active: hasDecision && !hasPlan,
+    },
+    {
+      id: 'finalizing',
+      label: t('mita-teams:orchestratorProgressFinalizing'),
+      done: hasPlan,
+      active: hasDecision && !hasPlan,
+    },
+  ]
+
+  return (
+    <div className="mb-4 rounded-lg border bg-card p-4">
+      <div className="mb-3 flex items-center gap-2">
+        <Loader2 className="size-4 animate-spin text-primary" />
+        <div className="text-sm font-medium">
+          {t('mita-teams:orchestratorProgressTitle')}
+        </div>
+      </div>
+      <div className="grid gap-2">
+        {steps.map((step) => (
+          <div
+            key={step.id}
+            className={cn(
+              'flex items-center gap-2 text-sm',
+              step.done || step.active
+                ? 'text-foreground'
+                : 'text-muted-foreground'
+            )}
+          >
+            <FloatingDots muted={!step.done && !step.active} />
+            <span>{step.label}</span>
+          </div>
+        ))}
       </div>
     </div>
   )
@@ -1626,6 +1902,9 @@ export const MitaTeamsWorkspace = memo(function MitaTeamsWorkspace({
   inputArea,
   isRuntimeBusy,
   onChoiceSelect,
+  onTextResponse,
+  onPlanApprove,
+  onPlanRevise,
   onConfigChange,
 }: MitaTeamsWorkspaceProps) {
   const { t } = useTranslation()
@@ -1647,9 +1926,13 @@ export const MitaTeamsWorkspace = memo(function MitaTeamsWorkspace({
     : undefined
   const setupLocked = isSetupLocked(config, messages)
   const pendingChoice =
-    runtime.userChoiceRequest?.status === 'pending'
+    runtime.userChoiceRequest?.status === 'pending' &&
+    runtime.userChoiceRequest.kind !== 'plan_approval'
       ? runtime.userChoiceRequest
       : undefined
+  const reviewPlan =
+    runtime.approvedPlan ??
+    (runtime.phase === 'awaiting_plan_approval' ? runtime.planDraft : undefined)
   const activeChannel =
     config.channels.find((channel) => channel.id === config.activeChannel) ??
     config.channels[0] ??
@@ -1679,12 +1962,22 @@ export const MitaTeamsWorkspace = memo(function MitaTeamsWorkspace({
       ),
     [activeChannel.id, channelRoles, runtime.roleStates]
   )
+  const hasActiveRoleCalls = (runtime.run?.activeRoleIds ?? []).length > 0
+  const showOrchestratorProgress =
+    showThreadMessages &&
+    !isRoleChat &&
+    !runtime.approvedPlan &&
+    !reviewPlan &&
+    !hasActiveRoleCalls &&
+    (isRuntimeBusy || runtime.run?.status === 'running')
   const hasMessages =
     isRoleChat
       ? (activePrivateRoleState?.stream.length ?? 0) > 0
       : (showThreadMessages && messages.length > 0) ||
         (showChannelDiscussion && channelEvents.length > 0) ||
         (showChannelDiscussion && channelHasRoleMessages) ||
+        showOrchestratorProgress ||
+        (showThreadMessages && Boolean(reviewPlan)) ||
         (showThreadMessages && Boolean(pendingChoice))
   const taskText = compactTaskText(messages, thread?.title)
   const availableChannelTemplates = useMemo(
@@ -1725,13 +2018,20 @@ export const MitaTeamsWorkspace = memo(function MitaTeamsWorkspace({
 
   const updateRole = useCallback(
     (roleId: MitaTeamsRoleId, patch: Partial<MitaTeamsRoleConfig>) => {
-      patchConfig({
+      const nextConfig = patchMitaTeamsConfig(config, {
         roles: config.roles.map((role) =>
           role.id === roleId ? { ...role, ...patch } : role
         ),
       })
+      onConfigChange(
+        markMitaTeamsRoleUserEdit(
+          nextConfig,
+          roleId,
+          Object.keys(patch) as MitaTeamsRoleEditableField[]
+        )
+      )
     },
-    [config.roles, patchConfig]
+    [config, onConfigChange]
   )
 
   const archiveRole = useCallback(
@@ -2310,13 +2610,6 @@ export const MitaTeamsWorkspace = memo(function MitaTeamsWorkspace({
                     </div>
                   </div>
                 )}
-                {showThreadMessages && pendingChoice && !isRoleChat && (
-                  <ChoiceRequestCard
-                    choice={pendingChoice}
-                    disabled={isRuntimeBusy}
-                    onSelect={onChoiceSelect}
-                  />
-                )}
                 {isRoleChat ? (
                   <RoleStreamPanel
                     role={activeRole}
@@ -2328,6 +2621,25 @@ export const MitaTeamsWorkspace = memo(function MitaTeamsWorkspace({
                       <TeamTimeline events={channelEvents} />
                     )}
                     {showThreadMessages && messageItems}
+                    {showOrchestratorProgress && (
+                      <OrchestratorProgressCard runtime={runtime} />
+                    )}
+                    {showThreadMessages && pendingChoice && !isRoleChat && (
+                      <ChoiceRequestCard
+                        choice={pendingChoice}
+                        disabled={isRuntimeBusy}
+                        onSelect={onChoiceSelect}
+                        onTextResponse={onTextResponse}
+                      />
+                    )}
+                    {showThreadMessages && reviewPlan && !isRoleChat && (
+                      <PlanReviewCard
+                        plan={reviewPlan}
+                        disabled={isRuntimeBusy}
+                        onApprove={onPlanApprove}
+                        onRevise={onPlanRevise}
+                      />
+                    )}
                     {showChannelDiscussion && (
                       <ChannelRoleStreams
                         roles={channelEnabledRoles}
@@ -2335,11 +2647,13 @@ export const MitaTeamsWorkspace = memo(function MitaTeamsWorkspace({
                         channelId={activeChannel.id}
                       />
                     )}
-                    <RuntimeActivityIndicator
-                      roles={config.roles}
-                      runtime={runtime}
-                      isRuntimeBusy={isRuntimeBusy}
-                    />
+                    {!showOrchestratorProgress && (
+                      <RuntimeActivityIndicator
+                        roles={config.roles}
+                        runtime={runtime}
+                        isRuntimeBusy={isRuntimeBusy}
+                      />
+                    )}
                   </>
                 )}
               </ConversationContent>

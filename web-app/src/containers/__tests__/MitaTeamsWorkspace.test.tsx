@@ -38,6 +38,20 @@ const h = vi.hoisted(() => {
     'mita-teams:tokenUsage': 'Tokens',
     'mita-teams:reserved': 'Reserved',
     'mita-teams:waitingForOwner': 'Choose one option to continue',
+    'mita-teams:planReviewTitle': 'Review plan',
+    'mita-teams:planReviewDescription': 'Approve the plan before the team starts.',
+    'mita-teams:planApprovedDescription': 'Approved plan. The team is executing it.',
+    'mita-teams:approvePlan': 'Approve and continue',
+    'mita-teams:modifyPlan': 'Modify plan',
+    'mita-teams:submitPlanRevision': 'Submit plan revision',
+    'mita-teams:planRevisionPlaceholder': 'Describe what should change.',
+    'mita-teams:planScope': 'Scope',
+    'mita-teams:planAcceptanceCriteria': 'Acceptance criteria',
+    'mita-teams:planTasks': 'Tasks',
+    'mita-teams:planRoles': 'Planned roles',
+    'mita-teams:keepRoleEditsTitle': 'Keep role edits?',
+    'mita-teams:freeTextPlaceholder': 'Type your answer.',
+    'mita-teams:submitFreeText': 'Submit answer',
     'mita-teams:statusIdle': 'Idle',
     'mita-teams:statusWaiting': 'Waiting',
     'mita-teams:statusRunning': 'Running',
@@ -71,6 +85,10 @@ const h = vi.hoisted(() => {
     'mita-teams:runtimeThinking': 'Thinking...',
     'mita-teams:runtimeRunning': 'Running...',
     'mita-teams:runtimeRunningRole': 'Running {{role}}...',
+    'mita-teams:orchestratorProgressTitle': 'Host progress',
+    'mita-teams:orchestratorProgressUnderstanding': 'Understanding request',
+    'mita-teams:orchestratorProgressPlanning': 'Preparing next step',
+    'mita-teams:orchestratorProgressFinalizing': 'Finalizing plan',
     'mita-teams:streamEmpty': 'No stream yet.',
     'mita-teams:backToTeam': 'Back to team',
     'mita-teams:roleName': 'Role name',
@@ -312,6 +330,9 @@ function renderWorkspace({
   messages = [],
   isRuntimeBusy = false,
   onChoiceSelect = vi.fn(),
+  onPlanApprove = vi.fn(),
+  onPlanRevise = vi.fn(),
+  onTextResponse = vi.fn(),
   onConfigChange = vi.fn(),
 }: {
   config?: MitaTeamsConfig
@@ -320,6 +341,9 @@ function renderWorkspace({
   messages?: ComponentProps<typeof MitaTeamsWorkspace>['messages']
   isRuntimeBusy?: boolean
   onChoiceSelect?: (optionId: string) => void
+  onPlanApprove?: () => void
+  onPlanRevise?: (revision: string) => void
+  onTextResponse?: (text: string) => void
   onConfigChange?: (config: MitaTeamsConfig) => void
 } = {}) {
   render(
@@ -331,11 +355,21 @@ function renderWorkspace({
       inputArea={inputArea}
       isRuntimeBusy={isRuntimeBusy}
       onChoiceSelect={onChoiceSelect}
+      onPlanApprove={onPlanApprove}
+      onPlanRevise={onPlanRevise}
+      onTextResponse={onTextResponse}
       onConfigChange={onConfigChange}
     />
   )
 
-  return { config, onChoiceSelect, onConfigChange }
+  return {
+    config,
+    onChoiceSelect,
+    onPlanApprove,
+    onPlanRevise,
+    onTextResponse,
+    onConfigChange,
+  }
 }
 
 function withResearchChannel(
@@ -462,6 +496,267 @@ describe('MitaTeamsWorkspace', () => {
     expect(onChoiceSelect).not.toHaveBeenCalled()
   })
 
+  it('submits a free-text owner clarification', async () => {
+    const user = userEvent.setup()
+    const base = createConfig()
+    const config: MitaTeamsConfig = {
+      ...base,
+      runtime: {
+        ...base.runtime,
+        userChoiceRequest: {
+          id: 'text-1',
+          kind: 'free_text',
+          question: 'What deadline should the team optimize for?',
+          options: [],
+          status: 'pending',
+          createdAt: '2026-06-08T00:00:00.000Z',
+        },
+      },
+    }
+    const onTextResponse = vi.fn()
+
+    renderWorkspace({ config, onTextResponse })
+
+    await user.type(screen.getByPlaceholderText('Type your answer.'), 'Friday')
+    await user.click(screen.getByRole('button', { name: 'Submit answer' }))
+
+    expect(onTextResponse).toHaveBeenCalledWith('Friday')
+  })
+
+  it('renders a plan review card and approves the plan from the task channel', async () => {
+    const user = userEvent.setup()
+    const now = '2026-06-08T00:00:00.000Z'
+    const base = createConfig()
+    const config: MitaTeamsConfig = {
+      ...base,
+      runtime: {
+        ...base.runtime,
+        phase: 'awaiting_plan_approval',
+        planDraft: {
+          id: 'plan-1',
+          version: 1,
+          status: 'draft',
+          goal: 'Ship a safer release workflow',
+          summary: 'Inspect, implement, and verify the release path.',
+          scope: ['Release workflow only'],
+          acceptanceCriteria: ['Owner approves before execution'],
+          tasks: [
+            {
+              id: 'task-1',
+              title: 'Inspect release workflow',
+              roleId: 'orchestrator',
+            },
+          ],
+          roleAssignments: [
+            {
+              roleId: 'orchestrator',
+              name: 'Orchestrator',
+              assignment: 'Own the plan gate.',
+              model: 'jingxing / claude-sonnet-4-6',
+            },
+          ],
+          executionOrder: ['Inspect release workflow'],
+          createdAt: now,
+          updatedAt: now,
+        },
+      },
+    }
+    const onPlanApprove = vi.fn()
+
+    renderWorkspace({ config, onPlanApprove })
+
+    expect(screen.getByText('Review plan')).toBeInTheDocument()
+    expect(screen.getByText('Ship a safer release workflow')).toBeInTheDocument()
+    expect(screen.getByText('Owner approves before execution')).toBeInTheDocument()
+
+    await user.click(screen.getByRole('button', { name: 'Approve and continue' }))
+    expect(onPlanApprove).toHaveBeenCalledTimes(1)
+  })
+
+  it('shows thread messages before the plan review and hides duplicate plan approval choices', () => {
+    const now = '2026-06-08T00:00:00.000Z'
+    const base = createConfig()
+    const config: MitaTeamsConfig = {
+      ...base,
+      runtime: {
+        ...base.runtime,
+        phase: 'awaiting_plan_approval',
+        planDraft: {
+          id: 'plan-1',
+          version: 1,
+          status: 'draft',
+          goal: 'Review the owner request',
+          summary: 'Plan from the current owner request.',
+          scope: ['Task channel'],
+          acceptanceCriteria: ['Owner approves once'],
+          tasks: [{ id: 'task-1', title: 'Review', roleId: 'orchestrator' }],
+          roleAssignments: [
+            {
+              roleId: 'orchestrator',
+              name: 'Orchestrator',
+              assignment: 'Coordinate.',
+            },
+          ],
+          executionOrder: ['Review'],
+          createdAt: now,
+          updatedAt: now,
+        },
+        userChoiceRequest: {
+          id: 'plan-choice-1',
+          kind: 'plan_approval',
+          question: 'Review and approve the Mita Teams plan.',
+          options: [
+            { id: 'approve', label: 'Approve and continue' },
+            { id: 'revise', label: 'Modify plan' },
+          ],
+          status: 'pending',
+          createdAt: now,
+        },
+      },
+    }
+
+    renderWorkspace({
+      config,
+      messageItems: <div data-testid="owner-message">Owner request</div>,
+    })
+
+    const ownerMessage = screen.getByTestId('owner-message')
+    const planTitle = screen.getByText('Review plan')
+
+    expect(
+      ownerMessage.compareDocumentPosition(planTitle) &
+        Node.DOCUMENT_POSITION_FOLLOWING
+    ).toBeTruthy()
+    expect(screen.getAllByRole('button', { name: 'Approve and continue' }))
+      .toHaveLength(1)
+    expect(screen.queryByText('Choose one option to continue')).not.toBeInTheDocument()
+    expect(
+      screen.queryByText('Review and approve the Mita Teams plan.')
+    ).not.toBeInTheDocument()
+  })
+
+  it('shows a host progress card below the owner message while the runtime is busy', () => {
+    const base = createConfig()
+    const config: MitaTeamsConfig = {
+      ...base,
+      runtime: {
+        ...base.runtime,
+        phase: 'running',
+        userChoiceRequest: undefined,
+        run: {
+          ...base.runtime.run!,
+          status: 'running',
+          lastDecision: undefined,
+        },
+      },
+    }
+
+    renderWorkspace({
+      config,
+      isRuntimeBusy: true,
+      messageItems: <div data-testid="owner-message">Owner request</div>,
+    })
+
+    const ownerMessage = screen.getByTestId('owner-message')
+    const progressTitle = screen.getByText('Host progress')
+
+    expect(
+      ownerMessage.compareDocumentPosition(progressTitle) &
+        Node.DOCUMENT_POSITION_FOLLOWING
+    ).toBeTruthy()
+    expect(screen.getByText('Understanding request')).toBeInTheDocument()
+    expect(screen.getByText('Preparing next step')).toBeInTheDocument()
+    expect(screen.getByText('Finalizing plan')).toBeInTheDocument()
+    expect(screen.getAllByTestId('progress-floating-dots')).toHaveLength(3)
+  })
+
+  it('shows the plan revision text area without first toggling edit mode', async () => {
+    const user = userEvent.setup()
+    const base = createConfig()
+    const config: MitaTeamsConfig = {
+      ...base,
+      runtime: {
+        ...base.runtime,
+        phase: 'awaiting_plan_approval',
+        planDraft: {
+          id: 'plan-1',
+          version: 1,
+          status: 'draft',
+          goal: 'Draft onboarding plan',
+          summary: 'Plan first.',
+          scope: ['Onboarding'],
+          acceptanceCriteria: ['Reviewed'],
+          tasks: [{ id: 'task-1', title: 'Draft', roleId: 'orchestrator' }],
+          roleAssignments: [
+            {
+              roleId: 'orchestrator',
+              name: 'Orchestrator',
+              assignment: 'Coordinate.',
+            },
+          ],
+          executionOrder: ['Draft'],
+          createdAt: '2026-06-08T00:00:00.000Z',
+          updatedAt: '2026-06-08T00:00:00.000Z',
+        },
+      },
+    }
+    const onPlanRevise = vi.fn()
+
+    renderWorkspace({ config, onPlanRevise })
+
+    expect(
+      screen.getByPlaceholderText('Describe what should change.')
+    ).toBeInTheDocument()
+    await user.type(
+      screen.getByPlaceholderText('Describe what should change.'),
+      'Add a reviewer role.'
+    )
+    await user.click(screen.getByRole('button', { name: 'Submit plan revision' }))
+
+    expect(onPlanRevise).toHaveBeenCalledWith('Add a reviewer role.')
+  })
+
+  it('keeps the approved plan body visible after approval', () => {
+    const base = createConfig()
+    const config: MitaTeamsConfig = {
+      ...base,
+      runtime: {
+        ...base.runtime,
+        phase: 'running',
+        approvedPlan: {
+          id: 'plan-1',
+          version: 1,
+          status: 'approved',
+          goal: 'Draft onboarding plan',
+          summary: 'Plan first.',
+          scope: ['Onboarding'],
+          acceptanceCriteria: ['Reviewed'],
+          tasks: [{ id: 'task-1', title: 'Draft', roleId: 'orchestrator' }],
+          roleAssignments: [
+            {
+              roleId: 'orchestrator',
+              name: 'Orchestrator',
+              assignment: 'Coordinate.',
+            },
+          ],
+          executionOrder: ['Draft'],
+          createdAt: '2026-06-08T00:00:00.000Z',
+          updatedAt: '2026-06-08T00:00:00.000Z',
+          approvedAt: '2026-06-08T00:01:00.000Z',
+        },
+      },
+    }
+
+    renderWorkspace({ config })
+
+    expect(screen.getByText('Draft onboarding plan')).toBeInTheDocument()
+    expect(screen.getByText('Plan first.')).toBeInTheDocument()
+    expect(screen.getByText('Approved plan. The team is executing it.')).toBeInTheDocument()
+    expect(
+      screen.queryByRole('button', { name: 'Approve and continue' })
+    ).not.toBeInTheDocument()
+  })
+
   it('persists role-config navigation through onConfigChange', () => {
     const onConfigChange = vi.fn()
     renderWorkspace({ onConfigChange })
@@ -474,6 +769,33 @@ describe('MitaTeamsWorkspace', () => {
       expect.objectContaining({
         activeRoleId: 'orchestrator',
         workspaceView: 'role-config',
+      })
+    )
+  })
+
+  it('marks role prompt edits as user role edits', () => {
+    const onConfigChange = vi.fn()
+    const config = {
+      ...createConfig(),
+      workspaceView: 'role-config' as const,
+      activeRoleId: 'orchestrator',
+    }
+
+    renderWorkspace({ config, onConfigChange })
+
+    fireEvent.change(screen.getByDisplayValue(config.roles[0].prompt), {
+      target: { value: 'Use the owner-approved plan before executing.' },
+    })
+
+    expect(onConfigChange).toHaveBeenCalledWith(
+      expect.objectContaining({
+        runtime: expect.objectContaining({
+          roleUserEdits: expect.objectContaining({
+            orchestrator: expect.objectContaining({
+              fields: expect.arrayContaining(['prompt']),
+            }),
+          }),
+        }),
       })
     )
   })

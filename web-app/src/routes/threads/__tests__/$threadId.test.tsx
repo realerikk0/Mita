@@ -276,10 +276,30 @@ vi.mock('@/containers/MitaTeamsWorkspace', () => ({
     isRuntimeBusy,
     messageItems,
     onChoiceSelect,
+    onPlanApprove,
+    onPlanRevise,
   }: any) => (
     <div data-testid="mita-teams-workspace">
       {messageItems}
       {inputArea}
+      {config.runtime.planDraft && (
+        <div data-testid="plan-review">
+          <button
+            data-testid="approve-plan"
+            disabled={isRuntimeBusy}
+            onClick={() => onPlanApprove?.()}
+          >
+            approve plan
+          </button>
+          <button
+            data-testid="revise-plan"
+            disabled={isRuntimeBusy}
+            onClick={() => onPlanRevise?.('Add a reviewer before execution.')}
+          >
+            revise plan
+          </button>
+        </div>
+      )}
       {config.runtime.userChoiceRequest?.options.map(
         (option: { id: string; label: string }) => (
           <button
@@ -1070,6 +1090,225 @@ describe('ThreadDetail route', () => {
 
     expect(h.messagesState.addMessage).toHaveBeenCalledTimes(1)
     expect(h.mockRunMitaTeamsRuntime).toHaveBeenCalledTimes(1)
+  })
+
+  it('approves a Mita Teams plan once without adding a visible synthetic approval message', async () => {
+    const baseConfig = createDefaultMitaTeamsConfig({
+      provider: 'openai',
+      id: 'gpt-x',
+    })
+    const mitaTeams = {
+      ...baseConfig,
+      runtime: {
+        ...baseConfig.runtime,
+        phase: 'awaiting_plan_approval' as const,
+        planDraft: {
+          id: 'plan-1',
+          version: 1,
+          status: 'draft' as const,
+          goal: 'Prepare release plan.',
+          summary: 'Plan before running.',
+          scope: ['Release'],
+          acceptanceCriteria: ['Approved'],
+          tasks: [{ id: 'task-1', title: 'Inspect', roleId: 'orchestrator' }],
+          roleAssignments: [
+            {
+              roleId: 'orchestrator',
+              name: 'Orchestrator',
+              assignment: 'Coordinate.',
+            },
+          ],
+          executionOrder: ['Inspect'],
+          createdAt: '2026-06-08T00:00:00.000Z',
+          updatedAt: '2026-06-08T00:00:00.000Z',
+        },
+      },
+    }
+    h.threadsState.threads['thread-1'] = {
+      ...h.threadsState.threads['thread-1'],
+      metadata: { mitaTeams },
+    }
+    h.mockRunMitaTeamsRuntime.mockImplementation(async ({ config }: any) => ({
+      config,
+      status: 'completed',
+      finalResponse: 'Approved work started.',
+    }))
+
+    renderComponent()
+
+    await act(async () => {
+      screen.getByTestId('approve-plan').click()
+      screen.getByTestId('approve-plan').click()
+      await Promise.resolve()
+      await Promise.resolve()
+    })
+
+    expect(h.mockRunMitaTeamsRuntime).toHaveBeenCalledTimes(1)
+    expect(h.mockRunMitaTeamsRuntime).toHaveBeenCalledWith(
+      expect.objectContaining({
+        config: expect.objectContaining({
+          runtime: expect.objectContaining({
+            phase: 'running',
+            approvedPlan: expect.objectContaining({
+              goal: 'Prepare release plan.',
+            }),
+          }),
+        }),
+        userText: expect.stringContaining('Approved Mita Teams plan'),
+      })
+    )
+    expect(h.messagesState.addMessage).not.toHaveBeenCalledWith(
+      expect.objectContaining({
+        role: 'user',
+        metadata: expect.objectContaining({
+          mitaTeams: expect.objectContaining({
+            action: 'approve_plan',
+          }),
+        }),
+      })
+    )
+  })
+
+  it('asks whether to keep dirty role edits before applying a plan revision', async () => {
+    const baseConfig = createDefaultMitaTeamsConfig({
+      provider: 'openai',
+      id: 'gpt-x',
+    })
+    const mitaTeams = {
+      ...baseConfig,
+      runtime: {
+        ...baseConfig.runtime,
+        phase: 'awaiting_plan_approval' as const,
+        roleUserEdits: {
+          orchestrator: {
+            fields: ['prompt'],
+            updatedAt: '2026-06-08T00:00:00.000Z',
+          },
+        },
+        planDraft: {
+          id: 'plan-1',
+          version: 1,
+          status: 'draft' as const,
+          goal: 'Prepare release plan.',
+          summary: 'Plan before running.',
+          scope: ['Release'],
+          acceptanceCriteria: ['Approved'],
+          tasks: [{ id: 'task-1', title: 'Inspect', roleId: 'orchestrator' }],
+          roleAssignments: [
+            {
+              roleId: 'orchestrator',
+              name: 'Orchestrator',
+              assignment: 'Coordinate.',
+            },
+          ],
+          executionOrder: ['Inspect'],
+          createdAt: '2026-06-08T00:00:00.000Z',
+          updatedAt: '2026-06-08T00:00:00.000Z',
+        },
+      },
+    }
+    h.threadsState.threads['thread-1'] = {
+      ...h.threadsState.threads['thread-1'],
+      metadata: { mitaTeams },
+    }
+
+    renderComponent()
+
+    await act(async () => {
+      screen.getByTestId('revise-plan').click()
+      await Promise.resolve()
+    })
+
+    expect(h.mockRunMitaTeamsRuntime).not.toHaveBeenCalled()
+    expect(h.threadsState.updateThread).toHaveBeenCalledWith(
+      'thread-1',
+      expect.objectContaining({
+        metadata: expect.objectContaining({
+          mitaTeams: expect.objectContaining({
+            runtime: expect.objectContaining({
+              phase: 'awaiting_role_edit_confirmation',
+              pendingPlanRevision: 'Add a reviewer before execution.',
+              userChoiceRequest: expect.objectContaining({
+                kind: 'keep_role_edits',
+              }),
+            }),
+          }),
+        }),
+      })
+    )
+  })
+
+  it('resolves keep-role-edits choices before resuming plan revision', async () => {
+    const baseConfig = createDefaultMitaTeamsConfig({
+      provider: 'openai',
+      id: 'gpt-x',
+    })
+    const mitaTeams = {
+      ...baseConfig,
+      roles: [
+        {
+          ...baseConfig.roles[0],
+          prompt: 'User-edited host prompt.',
+        },
+      ],
+      runtime: {
+        ...baseConfig.runtime,
+        phase: 'awaiting_role_edit_confirmation' as const,
+        pendingPlanRevision: 'Add a reviewer before execution.',
+        roleUserEdits: {
+          orchestrator: {
+            fields: ['prompt'],
+            updatedAt: '2026-06-08T00:00:00.000Z',
+          },
+        },
+        userChoiceRequest: {
+          id: 'keep-choice',
+          kind: 'keep_role_edits' as const,
+          question: 'Keep role edits?',
+          options: [
+            { id: 'keep', label: 'Keep role edits' },
+            { id: 'discard', label: 'Discard role edits' },
+          ],
+          status: 'pending' as const,
+          createdAt: '2026-06-08T00:00:00.000Z',
+        },
+      },
+    }
+    h.threadsState.threads['thread-1'] = {
+      ...h.threadsState.threads['thread-1'],
+      metadata: { mitaTeams },
+    }
+    h.mockRunMitaTeamsRuntime.mockImplementation(async ({ config }: any) => ({
+      config,
+      status: 'waiting-for-user',
+    }))
+
+    renderComponent()
+
+    await act(async () => {
+      screen.getByTestId('choice-keep').click()
+      await Promise.resolve()
+      await Promise.resolve()
+    })
+
+    expect(h.mockRunMitaTeamsRuntime).toHaveBeenCalledWith(
+      expect.objectContaining({
+        config: expect.objectContaining({
+          roles: expect.arrayContaining([
+            expect.objectContaining({
+              id: 'orchestrator',
+              prompt: 'User-edited host prompt.',
+            }),
+          ]),
+          runtime: expect.objectContaining({
+            phase: 'clarifying',
+            roleUserEdits: {},
+            userChoiceRequest: undefined,
+          }),
+        }),
+        userText: expect.stringContaining('Add a reviewer before execution.'),
+      })
+    )
   })
 
   it('updates the thread title after a completed Mita Teams round', async () => {

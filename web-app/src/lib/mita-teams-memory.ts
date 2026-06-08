@@ -412,6 +412,43 @@ export function answerMitaTeamsChoice(
   )
 }
 
+export function answerMitaTeamsText(
+  runtime: MitaTeamsRuntime,
+  responseText: string
+): MitaTeamsRuntime {
+  const choice = runtime.userChoiceRequest
+  const trimmed = responseText.trim()
+  const storedText =
+    trimmed.length > 1200 ? `${trimmed.slice(0, 1197)}...` : trimmed
+  if (
+    !choice ||
+    choice.status !== 'pending' ||
+    choice.kind !== 'free_text' ||
+    !storedText
+  ) {
+    return runtime
+  }
+
+  const answered = {
+    ...choice,
+    status: 'answered' as const,
+    responseText: storedText,
+    answeredAt: nowIso(),
+  }
+
+  return appendMitaTeamsEvent(
+    {
+      ...runtime,
+      userChoiceRequest: answered,
+    },
+    {
+      type: 'choice_answered',
+      title: 'Owner answered with text',
+      detail: trimText(storedText),
+    }
+  )
+}
+
 export function roleMemoryText(memory: MitaTeamsRoleMemory): string {
   return [
     memory.summary ? `Summary: ${memory.summary}` : undefined,

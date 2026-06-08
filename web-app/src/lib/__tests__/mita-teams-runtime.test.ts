@@ -7,9 +7,52 @@ import {
 } from '@/lib/mita-teams-runtime'
 import { ProviderQuotaError } from '@/lib/provider-quota-error'
 import {
+  approveMitaTeamsPlan,
   createDefaultMitaTeamsConfig,
+  markMitaTeamsRoleUserEdit,
   normalizeMitaTeamsConfig,
+  requestMitaTeamsPlanRevision,
+  type MitaTeamsConfig,
 } from '@/types/mita-teams'
+
+function approveRuntimeForExecution(config: MitaTeamsConfig): MitaTeamsConfig {
+  if (config.runtime.approvedPlan) return config
+
+  return approveMitaTeamsPlan({
+    ...config,
+    runtime: {
+      ...config.runtime,
+      phase: 'awaiting_plan_approval',
+      planDraft: {
+        id: 'test-plan',
+        version: 1,
+        status: 'draft',
+        goal: 'Approved test plan',
+        summary: 'Approved test plan for execution-stage runtime tests.',
+        scope: ['Exercise execution-stage behavior.'],
+        acceptanceCriteria: ['Runtime may execute role calls.'],
+        tasks: [
+          {
+            id: 'test-task',
+            title: 'Run approved test task',
+            roleId: 'orchestrator',
+          },
+        ],
+        roleAssignments: config.roles.map((role) => ({
+          roleId: role.id,
+          name: role.name,
+          assignment: role.description,
+          model: role.modelId
+            ? `${role.provider ?? 'provider'}/${role.modelId}`
+            : undefined,
+        })),
+        executionOrder: ['Run approved test task'],
+        createdAt: '2026-06-08T00:00:00.000Z',
+        updatedAt: '2026-06-08T00:00:00.000Z',
+      },
+    },
+  })
+}
 
 describe('mita teams runtime', () => {
   it('configures a minimal team, runs channel-scoped role calls, and merges memory', async () => {
@@ -21,7 +64,7 @@ describe('mita teams runtime', () => {
     let decisionCount = 0
 
     const result = await runMitaTeamsRuntime({
-      config,
+      config: approveRuntimeForExecution(config),
       userText: 'Design a safer release checklist.',
       onConfigChange: (next) => updates.push(next),
       generateDecisionText: async () => {
@@ -241,7 +284,7 @@ describe('mita teams runtime', () => {
     let decisionCount = 0
 
     const result = await runMitaTeamsRuntime({
-      config,
+      config: approveRuntimeForExecution(config),
       userText: 'Ask the role for a short answer.',
       onConfigChange: (next) => updates.push(next),
       generateDecisionText: async () => {
@@ -308,7 +351,7 @@ describe('mita teams runtime', () => {
     let decisionCount = 0
 
     const result = await runMitaTeamsRuntime({
-      config,
+      config: approveRuntimeForExecution(config),
       userText: 'Ask a worker to draft and review a response.',
       generateDecisionText: async () => {
         decisionCount += 1
@@ -402,7 +445,7 @@ describe('mita teams runtime', () => {
     let decisionCount = 0
 
     const result = await runMitaTeamsRuntime({
-      config,
+      config: approveRuntimeForExecution(config),
       userText: 'Ask the role for an answer.',
       generateDecisionText: async () => {
         decisionCount += 1
@@ -478,7 +521,7 @@ describe('mita teams runtime', () => {
     let decisionCount = 0
 
     const result = await runMitaTeamsRuntime({
-      config,
+      config: approveRuntimeForExecution(config),
       userText: 'Ask the role for an answer.',
       generateDecisionText: async () => {
         decisionCount += 1
@@ -569,7 +612,7 @@ describe('mita teams runtime', () => {
       let capturedPrompt = ''
 
       const result = await runMitaTeamsRuntime({
-        config,
+        config: approveRuntimeForExecution(config),
         userText:
           'Create a team for coding, complex research, UI design, and fact checking.',
         generateDecisionText: async ({ prompt }) => {
@@ -726,7 +769,7 @@ describe('mita teams runtime', () => {
       const rolePrompts: string[] = []
 
       const result = await runMitaTeamsRuntime({
-        config,
+        config: approveRuntimeForExecution(config),
         userText: '帮我研究美股明日什么板块会涨',
         threadTitle: 'Mita Teams',
         generateDecisionText: async ({ prompt }) => {
@@ -822,7 +865,7 @@ describe('mita teams runtime', () => {
       }> = []
 
       const result = await runMitaTeamsRuntime({
-        config,
+        config: approveRuntimeForExecution(config),
         userText: '帮我研究 $MRVL 投资价值',
         generateDecisionText: async () =>
           JSON.stringify({
@@ -910,7 +953,7 @@ describe('mita teams runtime', () => {
       }> = []
 
       await runMitaTeamsRuntime({
-        config,
+        config: approveRuntimeForExecution(config),
         userText: '帮我研究 $MRVL 投资价值',
         generateDecisionText: async () =>
           JSON.stringify({
@@ -961,7 +1004,7 @@ describe('mita teams runtime', () => {
     let decisionCalls = 0
 
     const result = await runMitaTeamsRuntime({
-      config,
+      config: approveRuntimeForExecution(config),
       userText: 'Summarize the plan.',
       generateDecisionText: async () => {
         decisionCalls += 1
@@ -992,7 +1035,7 @@ describe('mita teams runtime', () => {
     })
 
     const result = await runMitaTeamsRuntime({
-      config,
+      config: approveRuntimeForExecution(config),
       userText: 'Start a team run.',
       generateDecisionText: async () => {
         throw {
@@ -1025,7 +1068,7 @@ describe('mita teams runtime', () => {
     })
 
     const result = await runMitaTeamsRuntime({
-      config,
+      config: approveRuntimeForExecution(config),
       userText: 'Start a team run.',
       generateDecisionText: async () => {
         throw new ProviderQuotaError({
@@ -1058,7 +1101,7 @@ describe('mita teams runtime', () => {
     let decisionCalls = 0
 
     const result = await runMitaTeamsRuntime({
-      config,
+      config: approveRuntimeForExecution(config),
       userText: 'Keep configuring only.',
       generateDecisionText: async () => {
         decisionCalls += 1
@@ -1105,7 +1148,7 @@ describe('mita teams runtime', () => {
     let firstDecisionCount = 0
 
     const firstRun = await runMitaTeamsRuntime({
-      config,
+      config: approveRuntimeForExecution(config),
       userText: '研究 MRVL 的投资价值。',
       generateDecisionText: async () => {
         firstDecisionCount += 1
@@ -1278,7 +1321,7 @@ describe('mita teams runtime', () => {
     const calledRoles: string[] = []
 
     const result = await runMitaTeamsRuntime({
-      config,
+      config: approveRuntimeForExecution(config),
       userText: `# 人生决策听证会
 
 ## 二、配置
@@ -1407,7 +1450,7 @@ describe('mita teams runtime', () => {
     let decisionCount = 0
 
     const result = await runMitaTeamsRuntime({
-      config,
+      config: approveRuntimeForExecution(config),
       userText: 'Plan and review usage.',
       generateDecisionText: async () => {
         decisionCount += 1
@@ -1533,7 +1576,7 @@ describe('mita teams runtime', () => {
     let decisionCount = 0
 
     const result = await runMitaTeamsRuntime({
-      config,
+      config: approveRuntimeForExecution(config),
       userText: 'Finish the task.',
       generateDecisionText: async () => {
         decisionCount += 1
@@ -1590,7 +1633,7 @@ describe('mita teams runtime', () => {
     }
 
     const result = await runMitaTeamsRuntime({
-      config,
+      config: approveRuntimeForExecution(config),
       userText: 'Actually, continue with the smallest scope.',
       generateDecisionText: async () =>
         JSON.stringify({
@@ -1643,7 +1686,7 @@ describe('mita teams runtime', () => {
     const controller = new AbortController()
 
     const result = await runMitaTeamsRuntime({
-      config,
+      config: approveRuntimeForExecution(config),
       userText: 'Start then abort.',
       abortSignal: controller.signal,
       generateDecisionText: async () =>
@@ -1683,7 +1726,7 @@ describe('mita teams runtime', () => {
     let roleCallCount = 0
 
     const result = await runMitaTeamsRuntime({
-      config,
+      config: approveRuntimeForExecution(config),
       userText: 'Do something ambiguous.',
       generateDecisionText: async () => 'not json',
       generateRoleText: async () => {
@@ -1692,12 +1735,12 @@ describe('mita teams runtime', () => {
       },
     })
 
-    expect(result.status).toBe('waiting-for-user')
+    expect(result.status).toBe('failed')
     expect(roleCallCount).toBe(0)
     expect(Object.keys(result.config.runtime.roleStates)).toEqual([
       'orchestrator',
     ])
-    expect(result.config.runtime.userChoiceRequest?.options).toHaveLength(2)
+    expect(result.config.runtime.userChoiceRequest).toBeUndefined()
   })
 
   it('filters role calls that ask for permissions the role does not have', async () => {
@@ -1709,7 +1752,7 @@ describe('mita teams runtime', () => {
     let decisionCount = 0
 
     const result = await runMitaTeamsRuntime({
-      config,
+      config: approveRuntimeForExecution(config),
       userText: 'Implement a tiny fix.',
       generateDecisionText: async () => {
         decisionCount += 1
@@ -1826,7 +1869,7 @@ describe('mita teams runtime', () => {
     const calledRoles: string[] = []
 
     const result = await runMitaTeamsRuntime({
-      config,
+      config: approveRuntimeForExecution(config),
       userText: '只让 @reader 看一下这个方案。',
       generateDecisionText: async () => {
         decisionCount += 1
@@ -1899,5 +1942,406 @@ describe('mita teams runtime', () => {
       )
     ).toEqual(['small-beta', 'small-beta-2'])
     expect(result.choiceRequestId).toBeTruthy()
+  })
+
+  it('proposes a plan draft and waits for owner approval before role execution', async () => {
+    const config = createDefaultMitaTeamsConfig({
+      provider: 'openai',
+      id: 'gpt-5',
+    })
+    const roleCalls: string[] = []
+
+    const result = await runMitaTeamsRuntime({
+      config,
+      userText: 'Build a safer billing export flow.',
+      generateDecisionText: async () =>
+        JSON.stringify({
+          action: 'propose_plan',
+          reason: 'Owner should approve the execution plan first.',
+          plan: {
+            goal: 'Build a safer billing export flow.',
+            summary: 'Clarify export boundaries, implement the flow, and verify it.',
+            scope: ['Inspect current export code', 'Add focused tests'],
+            acceptanceCriteria: ['Owner can approve before execution starts'],
+            tasks: [
+              {
+                title: 'Inspect export flow',
+                roleId: 'orchestrator',
+                description: 'Find the current implementation boundary.',
+              },
+            ],
+            roleAssignments: [
+              {
+                roleId: 'orchestrator',
+                name: 'Orchestrator',
+                assignment: 'Own plan and final synthesis.',
+              },
+            ],
+            executionOrder: ['Inspect export flow'],
+          },
+        }),
+      generateRoleText: async ({ role }) => {
+        roleCalls.push(role.id)
+        return 'unused'
+      },
+    })
+
+    expect(result.status).toBe('waiting-for-user')
+    expect(roleCalls).toEqual([])
+    expect(result.config.runtime.phase).toBe('awaiting_plan_approval')
+    expect(result.config.runtime.planDraft).toMatchObject({
+      goal: 'Build a safer billing export flow.',
+      status: 'draft',
+    })
+    expect(result.config.runtime.userChoiceRequest).toMatchObject({
+      kind: 'plan_approval',
+      status: 'pending',
+    })
+  })
+
+  it('converts premature execution decisions into a plan approval request', async () => {
+    const config = createDefaultMitaTeamsConfig({
+      provider: 'openai',
+      id: 'gpt-5',
+    })
+    let roleCallCount = 0
+
+    const result = await runMitaTeamsRuntime({
+      config,
+      userText: 'Draft a short launch checklist.',
+      generateDecisionText: async () =>
+        JSON.stringify({
+          action: 'call_roles',
+          mode: 'serial',
+          reason: 'The orchestrator tried to execute too early.',
+          calls: [
+            {
+              roleId: 'orchestrator',
+              channelId: 'task',
+              instruction: 'Draft the launch checklist.',
+            },
+          ],
+        }),
+      generateRoleText: async () => {
+        roleCallCount += 1
+        return 'Should not run before approval.'
+      },
+    })
+
+    expect(result.status).toBe('waiting-for-user')
+    expect(roleCallCount).toBe(0)
+    expect(result.config.runtime.phase).toBe('awaiting_plan_approval')
+    expect(result.config.runtime.planDraft).toMatchObject({
+      goal: 'Draft a short launch checklist.',
+      tasks: [
+        expect.objectContaining({
+          title: 'Draft the launch checklist.',
+          roleId: 'orchestrator',
+        }),
+      ],
+    })
+    expect(result.config.runtime.userChoiceRequest).toMatchObject({
+      kind: 'plan_approval',
+      status: 'pending',
+    })
+  })
+
+  it('executes role calls only after the plan has been approved', async () => {
+    const base = createDefaultMitaTeamsConfig({
+      provider: 'openai',
+      id: 'gpt-5',
+    })
+    const planned = await runMitaTeamsRuntime({
+      config: base,
+      userText: 'Prepare a launch checklist.',
+      generateDecisionText: async () =>
+        JSON.stringify({
+          action: 'propose_plan',
+          reason: 'Plan first.',
+          plan: {
+            goal: 'Prepare a launch checklist.',
+            summary: 'Inspect, build, and review.',
+            scope: ['Release checklist'],
+            acceptanceCriteria: ['Checklist reviewed'],
+            tasks: [{ title: 'Review launch checks', roleId: 'orchestrator' }],
+            roleAssignments: [
+              {
+                roleId: 'orchestrator',
+                name: 'Orchestrator',
+                assignment: 'Coordinate execution.',
+              },
+            ],
+            executionOrder: ['Review launch checks'],
+          },
+        }),
+      generateRoleText: async () => 'unused',
+    })
+    const approved = approveMitaTeamsPlan(planned.config)
+    const calledRoles: string[] = []
+    let decisionCount = 0
+
+    const result = await runMitaTeamsRuntime({
+      config: approved,
+      userText: 'Plan approved. Continue.',
+      generateDecisionText: async () => {
+        decisionCount += 1
+        if (decisionCount === 1) {
+          return JSON.stringify({
+            action: 'call_roles',
+            mode: 'serial',
+            reason: 'Approved plan can now execute.',
+            calls: [
+              {
+                roleId: 'orchestrator',
+                channelId: 'task',
+                instruction: 'Start the approved checklist.',
+              },
+            ],
+          })
+        }
+
+        return JSON.stringify({
+          action: 'stop',
+          reason: 'Approved work is complete.',
+          finalResponse: 'Checklist ready.',
+        })
+      },
+      generateRoleText: async ({ role }) => {
+        calledRoles.push(role.id)
+        return 'Decision: Approved plan executed.'
+      },
+    })
+
+    expect(approved.runtime.approvedPlan?.goal).toBe('Prepare a launch checklist.')
+    expect(result.status).toBe('completed')
+    expect(calledRoles).toEqual(['orchestrator'])
+    expect(result.config.runtime.phase).toBe('completed')
+  })
+
+  it('materializes approved plan role assignments before execution starts', async () => {
+    const base = createDefaultMitaTeamsConfig({
+      provider: 'openai',
+      id: 'gpt-5',
+    })
+    const planned = normalizeMitaTeamsConfig(
+      {
+        ...base,
+        runtime: {
+          ...base.runtime,
+          phase: 'awaiting_plan_approval',
+          planDraft: {
+            id: 'plan-1',
+            version: 1,
+            status: 'draft',
+            goal: 'Design mita.md generation.',
+            summary: 'Create roles from the approved plan.',
+            scope: ['Schema', 'Generator'],
+            acceptanceCriteria: ['The builder role executes.'],
+            tasks: [
+              {
+                id: 'task-1',
+                title: 'Draft generator pseudocode',
+                roleId: 'mita_builder',
+              },
+            ],
+            roleAssignments: [
+              {
+                roleId: 'mita_builder',
+                name: 'Mita Builder',
+                assignment: 'Turn the approved mita.md plan into generator logic.',
+                model: 'openai/gpt-5',
+                prompt: 'You build concrete mita.md generator logic.',
+              },
+            ],
+            executionOrder: ['Draft generator pseudocode'],
+            createdAt: '2026-06-08T00:00:00.000Z',
+            updatedAt: '2026-06-08T00:00:00.000Z',
+          },
+        },
+      },
+      { provider: 'openai', id: 'gpt-5' }
+    )!
+    const approved = approveMitaTeamsPlan(planned)
+    const calledRoles: string[] = []
+    let decisionCount = 0
+
+    expect(approved.roles).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          id: 'mita_builder',
+          name: 'Mita Builder',
+          prompt: 'You build concrete mita.md generator logic.',
+          provider: 'openai',
+          modelId: 'gpt-5',
+          enabled: true,
+        }),
+      ])
+    )
+    expect(approved.runtime.approvedRoleSnapshot).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          id: 'mita_builder',
+          name: 'Mita Builder',
+        }),
+      ])
+    )
+
+    const result = await runMitaTeamsRuntime({
+      config: approved,
+      userText: 'Approved Mita Teams plan. Continue.',
+      generateDecisionText: async () => {
+        decisionCount += 1
+        if (decisionCount === 1) {
+          return JSON.stringify({
+            action: 'call_roles',
+            mode: 'serial',
+            reason: 'Execute the materialized builder role.',
+            calls: [
+              {
+                roleId: 'mita_builder',
+                channelId: 'build',
+                instruction: 'Draft the generator pseudocode.',
+                requiredPermission: 'read',
+              },
+            ],
+          })
+        }
+
+        return JSON.stringify({
+          action: 'stop',
+          reason: 'Builder finished.',
+          finalResponse: 'Generator pseudocode ready.',
+        })
+      },
+      generateRoleText: async ({ role }) => {
+        calledRoles.push(role.id)
+        return 'Builder output.'
+      },
+    })
+
+    expect(result.status).toBe('completed')
+    expect(calledRoles).toEqual(['mita_builder'])
+  })
+
+  it('rejects owner questions after a plan has already been approved', async () => {
+    const base = createDefaultMitaTeamsConfig({
+      provider: 'openai',
+      id: 'gpt-5',
+    })
+    const approved = approveMitaTeamsPlan(
+      normalizeMitaTeamsConfig(
+        {
+          ...base,
+          runtime: {
+            ...base.runtime,
+            phase: 'awaiting_plan_approval',
+            planDraft: {
+              id: 'plan-1',
+              version: 1,
+              status: 'draft',
+              goal: 'Research memory policy.',
+              summary: 'Ask blocking questions before approval.',
+              scope: ['Memory policy'],
+              acceptanceCriteria: ['No post-approval owner question.'],
+              tasks: [
+                {
+                  id: 'task-1',
+                  title: 'Execute approved memory policy research',
+                  roleId: 'orchestrator',
+                },
+              ],
+              roleAssignments: [
+                {
+                  roleId: 'orchestrator',
+                  name: 'Orchestrator',
+                  assignment: 'Coordinate.',
+                },
+              ],
+              executionOrder: ['Execute approved memory policy research'],
+              createdAt: '2026-06-08T00:00:00.000Z',
+              updatedAt: '2026-06-08T00:00:00.000Z',
+            },
+          },
+        },
+        { provider: 'openai', id: 'gpt-5' }
+      )!
+    )
+
+    const result = await runMitaTeamsRuntime({
+      config: approved,
+      userText: 'Approved Mita Teams plan. Continue.',
+      generateDecisionText: async () =>
+        JSON.stringify({
+          action: 'ask_user',
+          reason: 'This should have been asked before approval.',
+          question: 'Enable auto memory?',
+          options: [{ id: 'yes', label: 'Yes' }],
+        }),
+      generateRoleText: async () => 'unused',
+    })
+
+    expect(result.status).toBe('failed')
+    expect(result.config.runtime.userChoiceRequest).toBeUndefined()
+    expect(result.config.runtime.run?.error).toContain(
+      'cannot ask the owner after plan approval'
+    )
+  })
+
+  it('asks whether to keep role edits before applying a plan revision', () => {
+    const base = createDefaultMitaTeamsConfig({
+      provider: 'openai',
+      id: 'gpt-5',
+    })
+    const planned = normalizeMitaTeamsConfig(
+      {
+        ...base,
+        runtime: {
+          ...base.runtime,
+          phase: 'awaiting_plan_approval',
+          planDraft: {
+            id: 'plan-1',
+            version: 1,
+            status: 'draft',
+            goal: 'Draft launch plan.',
+            summary: 'Draft first.',
+            scope: ['Launch'],
+            acceptanceCriteria: ['Approved'],
+            tasks: [{ id: 'task-1', title: 'Draft', roleId: 'orchestrator' }],
+            roleAssignments: [
+              {
+                roleId: 'orchestrator',
+                name: 'Orchestrator',
+                assignment: 'Coordinate.',
+              },
+            ],
+            executionOrder: ['Draft'],
+            createdAt: '2026-06-08T00:00:00.000Z',
+            updatedAt: '2026-06-08T00:00:00.000Z',
+          },
+        },
+      },
+      { provider: 'openai', id: 'gpt-5' }
+    )!
+    const edited = markMitaTeamsRoleUserEdit(planned, 'orchestrator', [
+      'prompt',
+      'modelId',
+    ])
+
+    const revised = requestMitaTeamsPlanRevision(
+      edited,
+      'Add a reviewer before execution.'
+    )
+
+    expect(revised.runtime.phase).toBe('awaiting_role_edit_confirmation')
+    expect(revised.runtime.pendingPlanRevision).toBe(
+      'Add a reviewer before execution.'
+    )
+    expect(revised.runtime.userChoiceRequest).toMatchObject({
+      kind: 'keep_role_edits',
+      status: 'pending',
+    })
+    expect(
+      revised.runtime.userChoiceRequest?.options.map((option) => option.id)
+    ).toEqual(['keep', 'discard'])
   })
 })

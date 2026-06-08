@@ -42,6 +42,7 @@ import {
   MITA_TEAMS_MODES,
   MITA_TEAMS_ROLE_COLORS,
   MITA_TEAMS_TASK_TEMPLATES,
+  createMitaTeamsPlanDraft,
   normalizeMitaTeamsId,
   type MitaTeamsArtifactType,
   type MitaTeamsArtifactUpdate,
@@ -1308,6 +1309,9 @@ Template guidance: ${taskTemplate.orchestratorHint}
 Recommended role ids: ${taskTemplate.recommendedRoleIds.join(', ') || 'none'}
 Default flow: ${taskTemplate.defaultFlow.join(' -> ')}
 Round: ${currentRound} / ${maxRounds}
+Runtime phase: ${runtime.phase}
+Approved plan: ${runtime.approvedPlan ? `${runtime.approvedPlan.goal} (v${runtime.approvedPlan.version})` : 'none'}
+Pending plan draft: ${runtime.planDraft && !runtime.approvedPlan ? `${runtime.planDraft.goal} (v${runtime.planDraft.version})` : 'none'}
 
 ${renderTeamContinuityGuidance(preferTeamReuse)}
 
@@ -1334,6 +1338,9 @@ ${renderModelAssignmentGuide(modelOptions)}
 Choose exactly one next action. Output valid JSON only.
 
 Allowed shapes:
+0. {"action":"clarify_user","reason":"...","question":"...","inputKind":"single_choice|free_text","options":[{"id":"a","label":"Option A","description":"..."}]}
+0b. {"action":"propose_plan","reason":"...","plan":{"goal":"...","summary":"...","scope":["..."],"acceptanceCriteria":["..."],"tasks":[{"title":"...","roleId":"orchestrator","description":"..."}],"roleAssignments":[{"roleId":"orchestrator","name":"Orchestrator","assignment":"...","model":"provider/model"}],"executionOrder":["..."]}}
+0c. {"action":"revise_plan","reason":"...","plan":{"goal":"...","summary":"...","scope":["..."],"acceptanceCriteria":["..."],"tasks":[{"title":"...","roleId":"orchestrator"}],"roleAssignments":[{"roleId":"orchestrator","name":"Orchestrator","assignment":"..."}],"executionOrder":["..."]}}
 1. {"action":"configure_team","reason":"...","roles":[{"id":"researcher","name":"Researcher","label":"Research","description":"...","prompt":"...","permission":"read","provider":"anthropic","modelId":"claude-..."}],"channels":[{"id":"research","label":"Research","description":"...","roleIds":["researcher"]}],"mode":"parallel|serial|hybrid","calls":[{"roleId":"researcher","channelId":"research","instruction":"...","requiredPermission":"read","group":1}],"updates":{"tasks":[{"title":"Inspect evidence","status":"researching","roleId":"researcher","channelId":"research"}],"artifacts":[{"type":"decision","title":"Scope","summary":"..."}]}}
 2. {"action":"call_roles","mode":"parallel|serial|hybrid","reason":"...","calls":[{"roleId":"researcher","channelId":"research","instruction":"...","requiredPermission":"read","group":1}],"updates":{"tasks":[{"title":"Review answer","status":"reviewing"}],"artifacts":[{"type":"risk","title":"Main risk","summary":"..."}]}}
 3. {"action":"ask_user","reason":"...","question":"...","options":[{"id":"a","label":"Option A","description":"..."}]}
@@ -1342,6 +1349,11 @@ Allowed shapes:
 
 Rules:
 - New teams start with only the Orchestrator and the main task channel.
+- For a fresh owner task, clarify only when the missing information materially changes scope, success criteria, constraints, inputs, or deliverable format.
+- Ask at most three clarification rounds. If enough context exists, propose_plan instead of asking.
+- Before any role execution, propose a complete plan for owner approval. Only use configure_team/call_roles after a plan is approved or when continuing an already approved run.
+- When an approved plan exists, do not use clarify_user, ask_user, propose_plan, or revise_plan. Execute the approved plan with configure_team/call_roles/stop only; any blocking owner question should have been asked before plan approval.
+- The plan must include goal, summary, scope, acceptance criteria, tasks, role assignments, and execution order.
 - If specialist work is needed, first create only the minimum useful roles and channels with configure_team.
 - For follow-up owner messages in an existing team, prefer call_roles with existing roleIds/channelIds before configuring anything new.
 - In follow-up runs, configure_team is additive only: include only new roles/channels that do not already exist.
@@ -1683,7 +1695,6 @@ function normalizeCalls(
       const raw = item as Partial<MitaTeamsRoleCallPlan>
       const roleId = normalizeMitaTeamsId(raw.roleId, '')
       if (!isRoleId(roleId) || !enabledIds.has(roleId)) return undefined
-      if (roleId === MITA_TEAMS_ORCHESTRATOR_ROLE_ID) return undefined
       if (onlyRoleIds.size > 0 && !onlyRoleIds.has(roleId)) return undefined
       const role = roleById(config, roleId)
       if (!role) return undefined
@@ -2612,6 +2623,45 @@ function parseDecision(
       }
     }
 
+    if (raw.action === 'clarify_user') {
+      const inputKind =
+        raw.inputKind === 'free_text' ? 'free_text' : 'single_choice'
+      const options =
+        inputKind === 'single_choice' ? normalizeChoiceOptions(raw.options) : []
+      if (
+        typeof raw.question !== 'string' ||
+        (inputKind === 'single_choice' && options.length < 2)
+      ) {
+        return undefined
+      }
+      return {
+        action: 'clarify_user',
+        reason,
+        question: raw.question,
+        inputKind,
+        options,
+        updates: normalizeStructuredUpdates(raw.updates, config),
+      }
+    }
+
+    if (raw.action === 'propose_plan' || raw.action === 'revise_plan') {
+      const rawPlan =
+        raw.plan && typeof raw.plan === 'object'
+          ? (raw.plan as Record<string, unknown>)
+          : raw
+      const plan = createMitaTeamsPlanDraft(
+        rawPlan,
+        config.runtime.pendingPlanRevision || reason,
+        config.runtime.planDraft?.version ?? 0
+      )
+      return {
+        action: raw.action,
+        reason,
+        plan,
+        updates: normalizeStructuredUpdates(raw.updates, config),
+      }
+    }
+
     if (raw.action === 'milestone') {
       if (typeof raw.milestone !== 'string') return undefined
       return {
@@ -2751,6 +2801,7 @@ function startRuntimeRun(
   return appendMitaTeamsEvent(
     {
       ...runtime,
+      phase: 'running',
       userChoiceRequest: undefined,
       run: {
         id: stableId('teams-run'),
@@ -2818,14 +2869,23 @@ function completeRun(
           new Date(completedAt).getTime() - new Date(startedAt).getTime()
         )
       : runtime.run?.durationMs
+  const updated = updateRun(runtime, {
+    status,
+    activeRoleIds: [],
+    completedAt,
+    durationMs,
+    error: status === 'failed' ? detail : undefined,
+  })
   return appendMitaTeamsEvent(
-    updateRun(runtime, {
-      status,
-      activeRoleIds: [],
-      completedAt,
-      durationMs,
-      error: status === 'failed' ? detail : undefined,
-    }),
+    {
+      ...updated,
+      phase:
+        status === 'waiting-for-user'
+          ? updated.phase
+          : status === 'completed'
+            ? 'completed'
+            : updated.phase,
+    },
     {
       type: status === 'failed' ? 'run_failed' : 'run_completed',
       title:
@@ -3315,6 +3375,151 @@ function synthesizeFinalResponse(
     : 'Mita Teams 已准备好继续，但当前没有可合成的角色输出。'
 }
 
+type ExecutionDecision = Extract<
+  MitaTeamsOrchestratorDecision,
+  { action: 'configure_team' | 'call_roles' | 'stop' }
+>
+
+function decisionNeedsPlanApproval(
+  runtime: MitaTeamsRuntime,
+  decision: MitaTeamsOrchestratorDecision
+) {
+  return (
+    !runtime.approvedPlan &&
+    (decision.action === 'configure_team' ||
+      decision.action === 'call_roles' ||
+      decision.action === 'stop')
+  )
+}
+
+function approvedExecutionOwnerQuestionError(
+  runtime: MitaTeamsRuntime,
+  decision: MitaTeamsOrchestratorDecision
+) {
+  if (!runtime.approvedPlan) return undefined
+  if (decision.action !== 'ask_user' && decision.action !== 'clarify_user') {
+    return undefined
+  }
+
+  return `Mita Teams cannot ask the owner after plan approval. Blocking questions must be collected before proposing the plan. (${decision.action}: ${decision.question})`
+}
+
+function planRoleAssignment(
+  role: MitaTeamsRoleConfig,
+  assignment?: string
+) {
+  return {
+    roleId: role.id,
+    name: role.name,
+    assignment: assignment || role.description || role.prompt,
+    model: role.modelId
+      ? `${role.provider ?? 'provider'}/${role.modelId}`
+      : undefined,
+    prompt: role.prompt,
+  }
+}
+
+function planDraftFromExecutionDecision({
+  config,
+  runtime,
+  decision,
+  userText,
+  threadTitle,
+}: {
+  config: MitaTeamsConfig
+  runtime: MitaTeamsRuntime
+  decision: ExecutionDecision
+  userText: string
+  threadTitle?: string
+}) {
+  const virtualRoles =
+    decision.action === 'configure_team'
+      ? mergeRoles(config.roles, decision.roles)
+      : config.roles
+  const calls =
+    decision.action === 'configure_team' || decision.action === 'call_roles'
+      ? decision.calls ?? []
+      : []
+  const callRoleIds = new Set(calls.map((call) => call.roleId))
+  const taskUpdates = decision.updates?.tasks ?? []
+  const callTasks = calls.map((call, index) => {
+    const role = virtualRoles.find((item) => item.id === call.roleId)
+    return {
+      title: call.instruction || `Run ${role?.name ?? call.roleId}`,
+      description: call.channelId
+        ? `Channel: #${call.channelId}. ${decision.reason}`
+        : decision.reason,
+      roleId: call.roleId,
+      id: `planned-call-${index + 1}`,
+    }
+  })
+  const updateTasks = taskUpdates.map((task, index) => ({
+    id: `planned-task-${index + 1}`,
+    title: task.title,
+    roleId: task.roleId,
+  }))
+  const fallbackTask = {
+    id: 'planned-orchestrator-delivery',
+    title:
+      decision.action === 'stop'
+        ? 'Deliver coordinator response'
+        : 'Execute approved Mita Teams plan',
+    description:
+      decision.action === 'stop' ? decision.finalResponse : decision.reason,
+    roleId: MITA_TEAMS_ORCHESTRATOR_ROLE_ID,
+  }
+  const tasks = callTasks.length
+    ? callTasks
+    : updateTasks.length
+      ? updateTasks
+      : [fallbackTask]
+  const involvedRoles = virtualRoles.filter((role) =>
+    callRoleIds.size > 0
+      ? callRoleIds.has(role.id)
+      : role.id === MITA_TEAMS_ORCHESTRATOR_ROLE_ID ||
+        (decision.action === 'configure_team' &&
+          decision.roles.some((item) => item.id === role.id))
+  )
+  const roleAssignments = (
+    involvedRoles.length
+      ? involvedRoles
+      : virtualRoles.filter((role) => role.id === MITA_TEAMS_ORCHESTRATOR_ROLE_ID)
+  ).map((role) => {
+    const roleCalls = calls.filter((call) => call.roleId === role.id)
+    return planRoleAssignment(
+      role,
+      roleCalls.length
+        ? roleCalls.map((call) => call.instruction).join(' ')
+        : undefined
+    )
+  })
+  const goal = userText || threadTitle || 'Mita Teams task'
+  const summary =
+    decision.action === 'stop'
+      ? decision.finalResponse || decision.reason
+      : decision.reason
+
+  return createMitaTeamsPlanDraft(
+    {
+      goal,
+      summary,
+      scope: [
+        `Owner request: ${goal}`,
+        'Role execution starts only after owner approval.',
+      ],
+      acceptanceCriteria: [
+        'The owner approves this plan before any role calls run.',
+        'The final delivery addresses the owner request and the planned tasks.',
+      ],
+      tasks,
+      roleAssignments,
+      executionOrder: tasks.map((task) => task.title),
+    },
+    goal,
+    runtime.planDraft?.version ?? 0
+  )
+}
+
 export async function runMitaTeamsPrivateRoleChat({
   config,
   roleId,
@@ -3656,12 +3861,208 @@ export async function runMitaTeamsRuntime({
       )
       notify(runtime)
 
+      const approvedQuestionError = approvedExecutionOwnerQuestionError(
+        runtime,
+        decision
+      )
+      if (approvedQuestionError) {
+        throw new Error(approvedQuestionError)
+      }
+
+      if (decisionNeedsPlanApproval(runtime, decision)) {
+        const executionDecision = decision as ExecutionDecision
+        const planDraft = planDraftFromExecutionDecision({
+          config: workingConfig,
+          runtime,
+          decision: executionDecision,
+          userText,
+          threadTitle,
+        })
+        runtime = appendMitaTeamsEvent(
+          {
+            ...updateRun(runtime, { status: 'waiting-for-user' }),
+            phase: 'awaiting_plan_approval',
+            planDraft,
+            pendingPlanRevision: undefined,
+            userChoiceRequest: {
+              id: stableId('plan-choice'),
+              kind: 'plan_approval',
+              question: 'Review and approve the Mita Teams plan.',
+              options: [
+                { id: 'approve', label: 'Approve and continue' },
+                { id: 'revise', label: 'Modify plan' },
+              ],
+              status: 'pending',
+              createdAt: nowIso(),
+            },
+          },
+          {
+            type: 'plan_proposed',
+            title: 'Plan proposed before execution',
+            detail: planDraft.goal,
+            roleId: MITA_TEAMS_ORCHESTRATOR_ROLE_ID,
+            channelId: MITA_TEAMS_TASK_CHANNEL_ID,
+          }
+        )
+        notify(runtime)
+        return {
+          config: workingConfig,
+          choiceRequestId: runtime.userChoiceRequest?.id,
+          status: 'waiting-for-user',
+        }
+      }
+
       if (decision.updates) {
         runtime = applyStructuredUpdates(runtime, decision.updates, {
           roleId: MITA_TEAMS_ORCHESTRATOR_ROLE_ID,
           channelId: MITA_TEAMS_TASK_CHANNEL_ID,
         })
         notify(runtime)
+      }
+
+      if (decision.action === 'clarify_user') {
+        if ((runtime.clarificationCount ?? 0) >= 3) {
+          const fallbackPlan = createMitaTeamsPlanDraft(
+            {
+              goal: userText || threadTitle || 'Mita Teams task',
+              summary:
+                'The clarification limit was reached, so the coordinator prepared a plan from the available context.',
+              scope: ['Use the available owner request and thread context.'],
+              acceptanceCriteria: [
+                'Owner approves the plan before role execution starts.',
+              ],
+              tasks: [
+                {
+                  id: 'execute-approved-owner-request',
+                  title: 'Execute approved owner request',
+                  roleId: MITA_TEAMS_ORCHESTRATOR_ROLE_ID,
+                },
+              ],
+              roleAssignments: [
+                {
+                  roleId: MITA_TEAMS_ORCHESTRATOR_ROLE_ID,
+                  name: 'Orchestrator',
+                  assignment: 'Coordinate the approved work.',
+                },
+              ],
+              executionOrder: ['Execute approved owner request'],
+            },
+            userText || 'Mita Teams task',
+            runtime.planDraft?.version ?? 0
+          )
+          runtime = appendMitaTeamsEvent(
+            {
+              ...updateRun(runtime, { status: 'waiting-for-user' }),
+              phase: 'awaiting_plan_approval',
+              planDraft: fallbackPlan,
+              userChoiceRequest: {
+                id: stableId('plan-choice'),
+                kind: 'plan_approval',
+                question: 'Review and approve the Mita Teams plan.',
+                options: [
+                  { id: 'approve', label: 'Approve and continue' },
+                  { id: 'revise', label: 'Modify plan' },
+                ],
+                status: 'pending',
+                createdAt: nowIso(),
+              },
+            },
+            {
+              type: 'plan_proposed',
+              title: 'Plan proposed after clarification limit',
+              detail: fallbackPlan.goal,
+              roleId: MITA_TEAMS_ORCHESTRATOR_ROLE_ID,
+              channelId: MITA_TEAMS_TASK_CHANNEL_ID,
+            }
+          )
+          notify(runtime)
+          return {
+            config: workingConfig,
+            choiceRequestId: runtime.userChoiceRequest?.id,
+            status: 'waiting-for-user',
+          }
+        }
+
+        runtime = appendMitaTeamsEvent(
+          {
+            ...updateRun(runtime, { status: 'waiting-for-user' }),
+            phase: 'clarifying',
+            clarificationCount: (runtime.clarificationCount ?? 0) + 1,
+            userChoiceRequest: {
+              id: stableId('choice'),
+              kind: decision.inputKind ?? 'single_choice',
+              question: decision.question,
+              options: decision.options ?? [],
+              status: 'pending',
+              createdAt: nowIso(),
+            },
+          },
+          {
+            type: 'choice_requested',
+            title: 'Orchestrator requested owner clarification',
+            detail: decision.question,
+            roleId: MITA_TEAMS_ORCHESTRATOR_ROLE_ID,
+          }
+        )
+        notify(runtime)
+        return {
+          config: workingConfig,
+          choiceRequestId: runtime.userChoiceRequest?.id,
+          status: 'waiting-for-user',
+        }
+      }
+
+      if (
+        decision.action === 'propose_plan' ||
+        decision.action === 'revise_plan'
+      ) {
+        const planDraft = createMitaTeamsPlanDraft(
+          {
+            ...decision.plan,
+            status: 'draft',
+            revisionPrompt:
+              decision.action === 'revise_plan'
+                ? (runtime.pendingPlanRevision ?? decision.plan.revisionPrompt)
+                : decision.plan.revisionPrompt,
+          },
+          userText || threadTitle || decision.reason,
+          runtime.planDraft?.version ?? 0
+        )
+        runtime = appendMitaTeamsEvent(
+          {
+            ...updateRun(runtime, { status: 'waiting-for-user' }),
+            phase: 'awaiting_plan_approval',
+            planDraft,
+            pendingPlanRevision: undefined,
+            userChoiceRequest: {
+              id: stableId('plan-choice'),
+              kind: 'plan_approval',
+              question: 'Review and approve the Mita Teams plan.',
+              options: [
+                { id: 'approve', label: 'Approve and continue' },
+                { id: 'revise', label: 'Modify plan' },
+              ],
+              status: 'pending',
+              createdAt: nowIso(),
+            },
+          },
+          {
+            type: 'plan_proposed',
+            title:
+              decision.action === 'revise_plan'
+                ? 'Revised plan proposed'
+                : 'Plan proposed',
+            detail: planDraft.goal,
+            roleId: MITA_TEAMS_ORCHESTRATOR_ROLE_ID,
+            channelId: MITA_TEAMS_TASK_CHANNEL_ID,
+          }
+        )
+        notify(runtime)
+        return {
+          config: workingConfig,
+          choiceRequestId: runtime.userChoiceRequest?.id,
+          status: 'waiting-for-user',
+        }
       }
 
       if (decision.action === 'configure_team') {
@@ -3716,8 +4117,10 @@ export async function runMitaTeamsRuntime({
         runtime = appendMitaTeamsEvent(
           {
             ...updateRun(runtime, { status: 'waiting-for-user' }),
+            phase: 'clarifying',
             userChoiceRequest: {
               id: stableId('choice'),
+              kind: 'single_choice',
               question: decision.question,
               options: decision.options,
               status: 'pending',

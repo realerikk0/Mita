@@ -99,13 +99,17 @@ import {
 import { MitaTeamsWorkspace } from '@/containers/MitaTeamsWorkspace'
 import {
   MITA_TEAMS_ORCHESTRATOR_ROLE_ID,
+  approveMitaTeamsPlan,
   normalizeMitaTeamsConfig,
+  requestMitaTeamsPlanRevision,
+  resolveMitaTeamsRoleEditConfirmation,
   renderMitaTeamsSystemInstructions,
   type MitaTeamsConfig,
 } from '@/types/mita-teams'
 import { trackMitaEvent } from '@/lib/analytics'
 import {
   answerMitaTeamsChoice,
+  answerMitaTeamsText,
   withMitaTeamsRuntime,
 } from '@/lib/mita-teams-memory'
 import {
@@ -1876,6 +1880,44 @@ Tool result communication:
       const option = choice.options.find((item) => item.id === optionId)
       if (!option) return
       mitaTeamsAnsweredChoiceIdsRef.current.add(answeredChoiceKey)
+
+      if (choice.kind === 'keep_role_edits') {
+        const keepRoleEdits = optionId === 'keep'
+        const nextConfig = resolveMitaTeamsRoleEditConfirmation(
+          mitaTeamsConfig,
+          keepRoleEdits
+        )
+        const revision =
+          nextConfig.runtime.pendingPlanRevision ??
+          mitaTeamsConfig.runtime.pendingPlanRevision ??
+          ''
+        const userText = [
+          `Keep role edits: ${keepRoleEdits ? 'yes' : 'no'}`,
+          revision,
+        ]
+          .filter(Boolean)
+          .join('\n')
+        const userMessage = newUserThreadContent(
+          threadId,
+          userText,
+          [],
+          generateId(),
+          {
+            mitaTeams: {
+              choiceRequestId: choice.id,
+              selectedOptionId: optionId,
+              action: 'keep_role_edits',
+            },
+          }
+        )
+
+        persistMitaTeamsConfig(nextConfig)
+        addMessage(userMessage)
+        appendThreadMessageToChat(userMessage)
+        void startMitaTeamsRuntime(nextConfig, userText)
+        return
+      }
+
       const nextRuntime = answerMitaTeamsChoice(
         mitaTeamsConfig.runtime,
         optionId
@@ -1904,6 +1946,129 @@ Tool result communication:
       addMessage(userMessage)
       appendThreadMessageToChat(userMessage)
       void startMitaTeamsRuntime(nextConfig, userText)
+    },
+    [
+      addMessage,
+      appendThreadMessageToChat,
+      isMitaTeamsRuntimeBusy,
+      mitaTeamsConfig,
+      persistMitaTeamsConfig,
+      startMitaTeamsRuntime,
+      threadId,
+    ]
+  )
+
+  const handleMitaTeamsTextResponse = useCallback(
+    (text: string) => {
+      const choice = mitaTeamsConfig?.runtime.userChoiceRequest
+      const trimmed = text.trim()
+      const answeredChoiceKey = choice ? `${threadId}:${choice.id}` : undefined
+      if (
+        !mitaTeamsConfig ||
+        !choice ||
+        choice.status !== 'pending' ||
+        choice.kind !== 'free_text' ||
+        !trimmed ||
+        isMitaTeamsRuntimeBusy ||
+        !answeredChoiceKey ||
+        mitaTeamsAnsweredChoiceIdsRef.current.has(answeredChoiceKey)
+      ) {
+        return
+      }
+
+      mitaTeamsAnsweredChoiceIdsRef.current.add(answeredChoiceKey)
+      const nextRuntime = answerMitaTeamsText(
+        mitaTeamsConfig.runtime,
+        trimmed
+      )
+      const nextConfig = withMitaTeamsRuntime(mitaTeamsConfig, nextRuntime)
+      const userText = `填写：${trimmed}`
+      const userMessage = newUserThreadContent(
+        threadId,
+        userText,
+        [],
+        generateId(),
+        {
+          mitaTeams: {
+            choiceRequestId: choice.id,
+            responseText: trimmed,
+          },
+        }
+      )
+
+      persistMitaTeamsConfig(nextConfig)
+      addMessage(userMessage)
+      appendThreadMessageToChat(userMessage)
+      void startMitaTeamsRuntime(nextConfig, userText)
+    },
+    [
+      addMessage,
+      appendThreadMessageToChat,
+      isMitaTeamsRuntimeBusy,
+      mitaTeamsConfig,
+      persistMitaTeamsConfig,
+      startMitaTeamsRuntime,
+      threadId,
+    ]
+  )
+
+  const handleMitaTeamsPlanApprove = useCallback(() => {
+    const plan = mitaTeamsConfig?.runtime.planDraft
+    const approvalKey = plan ? `${threadId}:plan:${plan.id}:approve` : undefined
+    if (
+      !mitaTeamsConfig ||
+      !plan ||
+      isMitaTeamsRuntimeBusy ||
+      !approvalKey ||
+      mitaTeamsAnsweredChoiceIdsRef.current.has(approvalKey)
+    ) {
+      return
+    }
+
+    mitaTeamsAnsweredChoiceIdsRef.current.add(approvalKey)
+    const nextConfig = approveMitaTeamsPlan(mitaTeamsConfig)
+    const userText = `Approved Mita Teams plan "${plan.goal}". Continue with the approved role snapshot.`
+
+    persistMitaTeamsConfig(nextConfig)
+    void startMitaTeamsRuntime(nextConfig, userText)
+  }, [
+    isMitaTeamsRuntimeBusy,
+    mitaTeamsConfig,
+    persistMitaTeamsConfig,
+    startMitaTeamsRuntime,
+    threadId,
+  ])
+
+  const handleMitaTeamsPlanRevise = useCallback(
+    (revision: string) => {
+      const plan = mitaTeamsConfig?.runtime.planDraft
+      const trimmed = revision.trim()
+      if (!mitaTeamsConfig || !plan || !trimmed || isMitaTeamsRuntimeBusy) {
+        return
+      }
+
+      const nextConfig = requestMitaTeamsPlanRevision(mitaTeamsConfig, trimmed)
+      const userText = `Plan revision request:\n${trimmed}`
+      const userMessage = newUserThreadContent(
+        threadId,
+        userText,
+        [],
+        generateId(),
+        {
+          mitaTeams: {
+            planId: plan.id,
+            action: 'revise_plan',
+          },
+        }
+      )
+
+      persistMitaTeamsConfig(nextConfig)
+      addMessage(userMessage)
+      appendThreadMessageToChat(userMessage)
+
+      if (nextConfig.runtime.phase !== 'awaiting_role_edit_confirmation') {
+        void startMitaTeamsRuntime(nextConfig, userText)
+      }
     },
     [
       addMessage,
@@ -2484,6 +2649,9 @@ Tool result communication:
           inputArea={inputArea}
           isRuntimeBusy={isMitaTeamsRuntimeBusy}
           onChoiceSelect={handleMitaTeamsChoiceSelect}
+          onTextResponse={handleMitaTeamsTextResponse}
+          onPlanApprove={handleMitaTeamsPlanApprove}
+          onPlanRevise={handleMitaTeamsPlanRevise}
           onConfigChange={persistMitaTeamsConfig}
         />
       ) : (
