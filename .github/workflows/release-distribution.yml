@@ -272,14 +272,17 @@ jobs:
           aliyun --profile release oss cp "$mac_path" "oss://${ALIYUN_OSS_BUCKET}/${version_root}/${mac_name}" \
             --endpoint "$endpoint" \
             --meta "Cache-Control:${immutable_cache}#Content-Type:application/x-apple-diskimage" \
+            --acl public-read \
             --force
           aliyun --profile release oss cp "$win_path" "oss://${ALIYUN_OSS_BUCKET}/${version_root}/${win_name}" \
             --endpoint "$endpoint" \
             --meta "Cache-Control:${immutable_cache}#Content-Type:application/octet-stream" \
+            --acl public-read \
             --force
           aliyun --profile release oss cp "$msi_path" "oss://${ALIYUN_OSS_BUCKET}/${version_root}/${msi_name}" \
             --endpoint "$endpoint" \
             --meta "Cache-Control:${immutable_cache}#Content-Type:application/octet-stream" \
+            --acl public-read \
             --force
 
           node scripts/release-distribution/build-download-manifest.mjs \
@@ -293,18 +296,22 @@ jobs:
           aliyun --profile release oss cp dist/mita-download/latest.json "oss://${ALIYUN_OSS_BUCKET}/${manifest_key}" \
             --endpoint "$endpoint" \
             --meta "Cache-Control:${manifest_cache}#Content-Type:application/json" \
+            --acl public-read \
             --force
           aliyun --profile release oss cp dist/mita-download/index.html "oss://${ALIYUN_OSS_BUCKET}/${page_key}" \
             --endpoint "$endpoint" \
             --meta "Cache-Control:${page_cache}#Content-Type:text/html; charset=utf-8" \
+            --acl public-read \
             --force
           aliyun --profile release oss cp dist/mita-download/latest.json "oss://${ALIYUN_OSS_BUCKET}/${version_root}/download.json" \
             --endpoint "$endpoint" \
             --meta "Cache-Control:${immutable_cache}#Content-Type:application/json" \
+            --acl public-read \
             --force
           aliyun --profile release oss cp dist/mita-download/index.html "oss://${ALIYUN_OSS_BUCKET}/${version_root}/index.html" \
             --endpoint "$endpoint" \
             --meta "Cache-Control:${immutable_cache}#Content-Type:text/html; charset=utf-8" \
+            --acl public-read \
             --force
 
           echo "Published Mita download manifest: ${cdn_base}/${manifest_key}"

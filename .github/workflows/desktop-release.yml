@@ -423,22 +423,27 @@ jobs:
           aliyun --profile release oss cp "$MAC_TAR" "oss://${ALIYUN_OSS_BUCKET}/${VERSION_PREFIX}/${MAC_NAME}" \
             --endpoint "$endpoint" \
             --meta "Cache-Control:${immutable_cache}#Content-Type:application/gzip" \
+            --acl public-read \
             --force
           aliyun --profile release oss cp "$MAC_SIG" "oss://${ALIYUN_OSS_BUCKET}/${VERSION_PREFIX}/${MAC_NAME}.sig" \
             --endpoint "$endpoint" \
             --meta "Cache-Control:${immutable_cache}#Content-Type:text/plain" \
+            --acl public-read \
             --force
           aliyun --profile release oss cp "$WIN_EXE" "oss://${ALIYUN_OSS_BUCKET}/${VERSION_PREFIX}/${WIN_NAME}" \
             --endpoint "$endpoint" \
             --meta "Cache-Control:${immutable_cache}#Content-Type:application/octet-stream" \
+            --acl public-read \
             --force
           aliyun --profile release oss cp "$WIN_SIG" "oss://${ALIYUN_OSS_BUCKET}/${VERSION_PREFIX}/${WIN_NAME}.sig" \
             --endpoint "$endpoint" \
             --meta "Cache-Control:${immutable_cache}#Content-Type:text/plain" \
+            --acl public-read \
             --force
           aliyun --profile release oss cp dist/updater/latest.json "oss://${ALIYUN_OSS_BUCKET}/mita/latest.json" \
             --endpoint "$endpoint" \
             --meta "Cache-Control:${manifest_cache}#Content-Type:application/json" \
+            --acl public-read \
             --force
 
       - name: Refresh Aliyun CDN latest manifest
