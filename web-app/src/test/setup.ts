@@ -89,8 +89,16 @@ const mockServiceHub = {
   imageGeneration: () => ({
     generateImages: vi.fn().mockResolvedValue([]),
     saveAsset: vi.fn().mockResolvedValue(null),
+    importAsset: vi.fn().mockResolvedValue(null),
     listAssets: vi.fn().mockResolvedValue([]),
     deleteAsset: vi.fn().mockResolvedValue(undefined),
+  }),
+  videoGeneration: () => ({
+    generateVideo: vi.fn().mockResolvedValue(null),
+    pollVideoTask: vi.fn().mockResolvedValue(null),
+    saveVideoAsset: vi.fn().mockResolvedValue(null),
+    listVideoAssets: vi.fn().mockResolvedValue([]),
+    deleteVideoAsset: vi.fn().mockResolvedValue(undefined),
   }),
   models: () => ({
     getModels: vi.fn().mockResolvedValue([]),

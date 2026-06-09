@@ -33,10 +33,12 @@ const h = vi.hoisted(() => ({
   revealItemInDir: vi.fn(),
   openExternalUrl: vi.fn(),
   convertFileSrc: vi.fn((path: string) => `asset://${path}`),
+  search: {} as Record<string, unknown>,
 }))
 
 vi.mock('@tanstack/react-router', () => ({
   createFileRoute: () => (config: any) => ({ ...config, id: '/images' }),
+  useSearch: () => h.search,
   Link: ({ children, to }: any) => <a href={to}>{children}</a>,
 }))
 
@@ -351,6 +353,7 @@ describe('Images route', () => {
     h.dialogOpen.mockResolvedValue(null)
     h.revealItemInDir.mockResolvedValue(undefined)
     h.openExternalUrl.mockResolvedValue(undefined)
+    h.search = {}
   })
 
   it('shows the no-image-model empty state', async () => {
@@ -683,6 +686,9 @@ describe('Images route', () => {
     expect(h.generateImages.mock.calls.at(-1)?.[0].prompt).toContain(
       'LLM storyboard prompt'
     )
+    expect(h.saveAsset.mock.calls.at(-1)?.[0]).toMatchObject({
+      assetKind: 'storyboard',
+    })
     expect(await screen.findByText('Storyboard ready')).toBeInTheDocument()
     expect(screen.getByRole('button', { name: 'Original' })).toBeInTheDocument()
     expect(
@@ -915,6 +921,7 @@ describe('Images route', () => {
       usage: { total_tokens: 15000 },
       videoUrl: 'https://cdn.example.test/video.mp4',
       status: 'succeeded',
+      assetKind: 'storyboard',
     })
     expect(
       await screen.findByText(/Rendered .* 8s .* 1080p/)
@@ -1023,6 +1030,93 @@ describe('Images route', () => {
       sourceAssets: [],
     })
     expect(promptInput).toHaveValue('')
+  })
+
+  it('opens an image asset from history search params', async () => {
+    h.providers = [
+      {
+        provider: 'jingxing',
+        base_url: 'https://api.jingxing.uk/v1',
+        settings: [],
+        models: [
+          {
+            id: 'gpt-image-2',
+            capabilities: [ModelCapabilities.IMAGE_GENERATION],
+          },
+        ],
+      },
+    ]
+    h.search = { media: 'image', assetId: 'asset-1' }
+    h.listAssets.mockResolvedValue([
+      {
+        id: 'asset-1',
+        prompt: 'moon desk',
+        mode: 'generate',
+        provider: 'jingxing',
+        model: 'gpt-image-2',
+        ratio: '1:1',
+        size: '1024x1024',
+        quality: 'high',
+        sourceAssetIds: [],
+        createdAt: '2026-05-11T00:00:00Z',
+        status: 'succeeded',
+        path: '/tmp/asset.png',
+        fileName: 'image.png',
+        mimeType: 'image/png',
+      },
+    ])
+
+    renderComponent()
+
+    expect(await screen.findByText('Image preview')).toBeInTheDocument()
+    expect(screen.getAllByAltText('moon desk').at(-1)).toHaveAttribute(
+      'src',
+      'asset:///tmp/asset.png'
+    )
+  })
+
+  it('opens a storyboard video asset from history search params', async () => {
+    h.providers = [
+      {
+        provider: 'jingxing',
+        base_url: 'https://api.jingxing.uk/v1',
+        settings: [],
+        models: [
+          {
+            id: 'gpt-image-2',
+            capabilities: [ModelCapabilities.IMAGE_GENERATION],
+          },
+        ],
+      },
+    ]
+    h.search = { media: 'storyboard', videoId: 'video-asset-1' }
+    h.listVideoAssets.mockResolvedValue([
+      {
+        id: 'video-asset-1',
+        prompt: 'robot film',
+        provider: 'jingxing',
+        model: 'seedance-2.0',
+        ratio: '16:9',
+        resolution: '1080p',
+        duration: 8,
+        fps: 30,
+        sourceAssetIds: ['storyboard-1'],
+        createdAt: '2026-06-04T00:00:00Z',
+        status: 'succeeded',
+        path: '/tmp/video.mp4',
+        fileName: 'video.mp4',
+        mimeType: 'video/mp4',
+        assetKind: 'storyboard',
+      },
+    ])
+
+    renderComponent()
+
+    expect(await screen.findByText('robot film')).toBeInTheDocument()
+    expect(document.querySelector('video')).toHaveAttribute(
+      'src',
+      'asset:///tmp/video.mp4'
+    )
   })
 
   it('shows recharge actions when image generation quota is exhausted', async () => {

@@ -100,6 +100,7 @@ pub fn save_video_asset<R: Runtime>(
         path: video_path.to_string_lossy().to_string(),
         file_name,
         mime_type: asset.mime_type,
+        asset_kind: asset.asset_kind.or_else(|| Some("generated".to_string())),
     };
 
     write_metadata(&metadata_path(&asset_dir), &record)?;

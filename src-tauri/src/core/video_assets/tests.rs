@@ -21,6 +21,7 @@ fn test_asset(id: &str) -> SaveVideoAssetRequest {
         b64_json: "AAAA".to_string(),
         extension: Some("mp4".to_string()),
         created_at: Some("2026-06-04T00:00:00Z".to_string()),
+        asset_kind: None,
     }
 }
 
@@ -39,6 +40,7 @@ fn saves_lists_and_deletes_video_asset_under_data_folder() {
     assert!(record.path.ends_with("video.mp4"));
     assert!(fs::metadata(&record.path).unwrap().is_file());
     assert_eq!(record.source_asset_ids, vec!["storyboard-1".to_string()]);
+    assert_eq!(record.asset_kind.as_deref(), Some("generated"));
 
     let assets = list_video_assets(app.handle().clone()).unwrap();
     assert!(assets.iter().any(|asset| asset.id == id));

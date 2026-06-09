@@ -1,4 +1,4 @@
-import { createFileRoute, Link } from '@tanstack/react-router'
+import { createFileRoute, Link, useSearch } from '@tanstack/react-router'
 import {
   ArrowLeft,
   ArrowRight,
@@ -113,8 +113,24 @@ import type {
   VideoResolution,
 } from '@/services/video-generation/types'
 
+type ImagesSearchParams = {
+  media?: 'image' | 'storyboard'
+  assetId?: string
+  videoId?: string
+}
+
 export const Route = createFileRoute(route.images as '/images')({
   component: Images,
+  validateSearch: (search: Record<string, unknown>): ImagesSearchParams => ({
+    media:
+      search.media === 'storyboard'
+        ? 'storyboard'
+        : search.media === 'image'
+          ? 'image'
+          : undefined,
+    assetId: typeof search.assetId === 'string' ? search.assetId : undefined,
+    videoId: typeof search.videoId === 'string' ? search.videoId : undefined,
+  }),
 })
 
 function MediaHeader({ children }: { children?: ReactNode }) {
@@ -2332,6 +2348,7 @@ function StoryboardVideoMode({
         mimeType: image.mimeType,
         b64Json: image.b64Json,
         extension: imageFileExtension(image.mimeType),
+        assetKind: 'storyboard',
       })
       setStoryboardAsset(saved)
       setStoryboardVersions([
@@ -2417,8 +2434,10 @@ function StoryboardVideoMode({
         mimeType: 'video/mp4',
         videoUrl: finalTask.videoUrl,
         extension: videoFileExtension('video/mp4'),
+        assetKind: 'storyboard',
       })
       setVideoAsset(saved)
+      window.dispatchEvent(new Event('mita-media-history-updated'))
     } catch (error) {
       console.error('Failed to generate video:', error)
       setVideoStatus('failed')
@@ -2485,6 +2504,7 @@ function StoryboardVideoMode({
           mimeType: edited.mimeType,
           b64Json: edited.b64Json,
           extension: imageFileExtension(edited.mimeType),
+          assetKind: 'storyboard',
         })
         const nextVersion: StoryboardAssetVersion = {
           id: saved.id,
@@ -3322,6 +3342,7 @@ function StoryboardVideoMode({
 
 function Images() {
   const { t } = useTranslation()
+  const search = useSearch({ from: Route.id })
   const serviceHub = useServiceHub()
   const providers = useModelProvider((state) => state.providers)
   const imageModels = useMemo(() => getImageModels(providers), [providers])
@@ -3330,7 +3351,9 @@ function Images() {
     [providers]
   )
   const videoModels = useMemo(() => getVideoModels(providers), [providers])
-  const [mediaMode, setMediaMode] = useState<MediaMode>('image')
+  const [mediaMode, setMediaMode] = useState<MediaMode>(() =>
+    search.media === 'storyboard' || search.videoId ? 'storyboard' : 'image'
+  )
   const [selectedModelKey, setSelectedModelKey] = useState('')
   const [prompt, setPrompt] = useState('')
   const [ratio, setRatio] = useState<ImageRatio>('1:1')
@@ -3366,7 +3389,20 @@ function Images() {
   const [previewAsset, setPreviewAsset] = useState<ImageAssetRecord | null>(
     null
   )
+  const [previewVideoAsset, setPreviewVideoAsset] =
+    useState<VideoAssetRecord | null>(null)
   const [contextMenu, setContextMenu] = useState<AssetContextMenuState>(null)
+
+  useEffect(() => {
+    if (search.media === 'storyboard' || search.videoId) {
+      setMediaMode('storyboard')
+      return
+    }
+
+    if (search.media === 'image' || search.assetId) {
+      setMediaMode('image')
+    }
+  }, [search.assetId, search.media, search.videoId])
 
   useEffect(() => {
     if (imageModels.length === 0) {
@@ -3398,6 +3434,33 @@ function Images() {
       mounted = false
     }
   }, [serviceHub, setAssets, t])
+
+  useEffect(() => {
+    if (!search.assetId) return
+    const asset = assets.find(
+      (item) => item.id === search.assetId && item.assetKind !== 'reference'
+    )
+    if (asset) setPreviewAsset(asset)
+  }, [assets, search.assetId])
+
+  useEffect(() => {
+    if (!search.videoId) return
+    let mounted = true
+    serviceHub
+      .videoGeneration()
+      .listVideoAssets()
+      .then((videos) => {
+        if (!mounted) return
+        const asset = videos.find((item) => item.id === search.videoId)
+        if (asset) setPreviewVideoAsset(asset)
+      })
+      .catch((error) => {
+        console.error('Failed to load video asset from history link:', error)
+      })
+    return () => {
+      mounted = false
+    }
+  }, [search.videoId, serviceHub])
 
   useEffect(() => {
     if (!contextMenu) return
@@ -3753,16 +3816,17 @@ function Images() {
       ),
     [assets, taskAssetIds]
   )
-  const leadingSavedHistoryAssets =
-    taskGroups.length === 0 ? savedHistoryAssets.slice(0, 1) : []
-  const trailingSavedHistoryAssets =
-    taskGroups.length === 0 ? savedHistoryAssets.slice(1) : savedHistoryAssets
 
   const assetSrc = useCallback(
     (asset: ImageAssetRecord) =>
       asset.path ? serviceHub.core().convertFileSrc(asset.path) : '',
     [serviceHub]
   )
+  const previewVideoSrc = previewVideoAsset?.path
+    ? /^https?:/i.test(previewVideoAsset.path)
+      ? previewVideoAsset.path
+      : serviceHub.core().convertFileSrc(previewVideoAsset.path)
+    : ''
 
   const selectedModelCanEdit = selectedModel?.model
     ? isImageEditModel(selectedModel.model)
@@ -4505,7 +4569,7 @@ function Images() {
                     {imageT(t, 'emptyState')}
                   </div>
                 ) : (
-                  <>
+                  <div className="space-y-5">
                     {taskGroups.map((group) => {
                       const groupSourceAssets = group.sourceAssetIds
                         .map((id) => resolveAssetById(id))
@@ -4709,12 +4773,9 @@ function Images() {
                       )
                     })}
 
-                    {leadingSavedHistoryAssets.map(renderSavedHistoryAsset)}
-                  </>
+                    {savedHistoryAssets.map(renderSavedHistoryAsset)}
+                  </div>
                 )}
-
-                {(taskGroups.length > 0 || savedHistoryAssets.length > 0) &&
-                  trailingSavedHistoryAssets.map(renderSavedHistoryAsset)}
               </>
             ) : (
               <StoryboardVideoMode
@@ -4810,6 +4871,34 @@ function Images() {
           ) : (
             <div className="flex h-[60vh] items-center justify-center text-muted-foreground">
               <ImageIcon className="size-8" />
+            </div>
+          )}
+        </DialogContent>
+      </Dialog>
+
+      <Dialog
+        open={Boolean(previewVideoAsset)}
+        onOpenChange={(open) => {
+          if (!open) setPreviewVideoAsset(null)
+        }}
+      >
+        <DialogContent
+          className="max-w-[92vw] border-0 bg-black/95 p-3 shadow-2xl"
+          showCloseButton
+        >
+          <DialogTitle className="sr-only">
+            {previewVideoAsset?.prompt ||
+              imageT(t, 'storyboard.downloadVideo')}
+          </DialogTitle>
+          {previewVideoSrc ? (
+            <video
+              controls
+              src={previewVideoSrc}
+              className="max-h-[82vh] w-full bg-black"
+            />
+          ) : (
+            <div className="flex h-[60vh] items-center justify-center text-muted-foreground">
+              <Film className="size-8" />
             </div>
           )}
         </DialogContent>

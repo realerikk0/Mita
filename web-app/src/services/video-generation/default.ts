@@ -120,6 +120,7 @@ export class DefaultVideoGenerationService implements VideoGenerationService {
       path: request.videoUrl ?? '',
       fileName: `${request.id}.${request.extension ?? videoFileExtension(mimeType)}`,
       mimeType,
+      assetKind: request.assetKind ?? 'generated',
     }
   }
 

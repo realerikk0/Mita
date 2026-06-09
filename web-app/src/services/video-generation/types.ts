@@ -55,6 +55,7 @@ export type VideoAssetRecord = {
   path: string
   fileName: string
   mimeType: string
+  assetKind?: 'generated' | 'storyboard'
 }
 
 export type SaveVideoAssetRequest = Omit<

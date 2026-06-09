@@ -27,7 +27,7 @@ export type ImageAssetRecord = {
   path: string
   fileName: string
   mimeType: string
-  assetKind?: 'generated' | 'reference'
+  assetKind?: 'generated' | 'reference' | 'storyboard'
 }
 
 export type SaveImageAssetRequest = Omit<
