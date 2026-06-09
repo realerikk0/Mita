@@ -190,14 +190,18 @@ export const useAppUpdater = () => {
     if (!updateState.updateInfo) return
 
     try {
-      setUpdateState((prev) => ({
-        ...prev,
+      const downloadingState = {
         isDownloading: true,
         isUpdateReadyToInstall: false,
         downloadProgress: 0,
         downloadedBytes: 0,
         totalBytes: 0,
+      }
+      setUpdateState((prev) => ({
+        ...prev,
+        ...downloadingState,
       }))
+      syncStateToOtherInstances(downloadingState)
 
       let downloaded = 0
       let contentLength = 0
@@ -206,10 +210,20 @@ export const useAppUpdater = () => {
         switch (event.event) {
           case 'Started':
             contentLength = event.data?.contentLength || 0
-            setUpdateState((prev) => ({
-              ...prev,
-              totalBytes: contentLength,
-            }))
+            {
+              const newState = {
+                isDownloading: true,
+                isUpdateReadyToInstall: false,
+                downloadProgress: 0,
+                downloadedBytes: 0,
+                totalBytes: contentLength,
+              }
+              setUpdateState((prev) => ({
+                ...prev,
+                ...newState,
+              }))
+              syncStateToOtherInstances(newState)
+            }
             console.log(`Started downloading ${contentLength} bytes`)
 
             // Emit app update download started event
@@ -222,11 +236,16 @@ export const useAppUpdater = () => {
           case 'Progress': {
             downloaded += event.data?.chunkLength || 0
             const progress = contentLength > 0 ? downloaded / contentLength : 0
-            setUpdateState((prev) => ({
-              ...prev,
+            const newState = {
               downloadProgress: progress,
               downloadedBytes: downloaded,
+              totalBytes: contentLength,
+            }
+            setUpdateState((prev) => ({
+              ...prev,
+              ...newState,
             }))
+            syncStateToOtherInstances(newState)
             console.log(`Downloaded ${downloaded} from ${contentLength}`)
 
             // Emit app update download progress event
@@ -263,11 +282,15 @@ export const useAppUpdater = () => {
       console.log('Update downloaded')
     } catch (error) {
       console.error('Error downloading update:', error)
-      setUpdateState((prev) => ({
-        ...prev,
+      const newState = {
         isDownloading: false,
         isUpdateReadyToInstall: false,
+      }
+      setUpdateState((prev) => ({
+        ...prev,
+        ...newState,
       }))
+      syncStateToOtherInstances(newState)
 
       // Emit app update download error event
       events.emit(AppEvent.onAppUpdateDownloadError, {

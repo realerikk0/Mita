@@ -441,5 +441,47 @@ describe('useAppUpdater', () => {
       })
       expect(mockEvents.emit).toHaveBeenCalledWith('onAppUpdateDownloadSuccess', {})
     })
+
+    it('should sync in-progress download state to other updater instances', async () => {
+      const mockUpdate = {
+        version: '1.2.0',
+      }
+
+      mockUpdaterCheck.mockResolvedValue(mockUpdate)
+
+      const { result } = renderHook(() => useAppUpdater())
+
+      await act(async () => {
+        await result.current.checkForUpdate()
+      })
+
+      mockUpdaterDownloadUpdateWithProgress.mockImplementation(async (progressCallback) => {
+        progressCallback({
+          event: 'Started',
+          data: { contentLength: 2000 },
+        })
+        progressCallback({
+          event: 'Progress',
+          data: { chunkLength: 500 },
+        })
+      })
+
+      await act(async () => {
+        await result.current.downloadUpdate()
+      })
+
+      expect(mockEvents.emit).toHaveBeenCalledWith('onAppUpdateStateSync', {
+        isDownloading: true,
+        isUpdateReadyToInstall: false,
+        downloadProgress: 0,
+        downloadedBytes: 0,
+        totalBytes: 2000,
+      })
+      expect(mockEvents.emit).toHaveBeenCalledWith('onAppUpdateStateSync', {
+        downloadProgress: 0.25,
+        downloadedBytes: 500,
+        totalBytes: 2000,
+      })
+    })
   })
 })

@@ -3,7 +3,7 @@ import { useAppUpdater } from '@/hooks/useAppUpdater'
 import { IconDownload } from '@tabler/icons-react'
 import { Button } from '@/components/ui/button'
 
-import { useState, useEffect } from 'react'
+import { useState, useEffect, type CSSProperties } from 'react'
 import { useReleaseNotes } from '@/hooks/useReleaseNotes'
 import { RenderMarkdown } from '../RenderMarkdown'
 import { cn, isDev } from '@/lib/utils'
@@ -15,6 +15,38 @@ const DialogAppUpdater = () => {
   const { updateState, downloadUpdate, installDownloadedUpdate, setRemindMeLater } =
     useAppUpdater()
   const [showReleaseNotes, setShowReleaseNotes] = useState(false)
+  const { release, fetchLatestRelease } = useReleaseNotes()
+  const [appUpdateState, setAppUpdateState] = useState({
+    remindMeLater: false,
+    isUpdateAvailable: false,
+    isUpdateReadyToInstall: false,
+  })
+  const progressPercent = Math.min(
+    100,
+    Math.max(0, Math.round(updateState.downloadProgress * 100))
+  )
+  const hasKnownDownloadSize = updateState.totalBytes > 0
+  const releaseNotesContent = updateState.updateInfo?.body || release?.body
+  const showNightlyFallback = isNightly && !isBeta && !releaseNotesContent
+  const updateProgressRingStyle = updateState.isDownloading
+    ? ({
+        '--app-update-progress': hasKnownDownloadSize
+          ? `${progressPercent}%`
+          : '0%',
+        background: hasKnownDownloadSize
+          ? 'conic-gradient(#2563eb var(--app-update-progress), rgba(37, 99, 235, 0.18) 0)'
+          : 'linear-gradient(90deg, rgba(37, 99, 235, 0.2), rgba(37, 99, 235, 0.95), rgba(37, 99, 235, 0.2))',
+      } as CSSProperties)
+    : undefined
+  const updateButtonLabel = updateState.isInstalling
+    ? t('updater:installing')
+    : updateState.isDownloading
+      ? hasKnownDownloadSize
+        ? `${t('updater:downloading')} ${progressPercent}%`
+        : t('updater:downloading')
+      : appUpdateState.isUpdateReadyToInstall
+        ? t('updater:restartToUpdate')
+        : t('updater:downloadUpdate')
 
   const handleUpdate = () => {
     if (updateState.isUpdateReadyToInstall) {
@@ -25,19 +57,11 @@ const DialogAppUpdater = () => {
     downloadUpdate()
   }
 
-  const { release, fetchLatestRelease } = useReleaseNotes()
-
   useEffect(() => {
     if (!isDev()) {
       fetchLatestRelease(isBeta)
     }
   }, [fetchLatestRelease])
-
-  const [appUpdateState, setAppUpdateState] = useState({
-    remindMeLater: false,
-    isUpdateAvailable: false,
-    isUpdateReadyToInstall: false,
-  })
 
   useEffect(() => {
     setAppUpdateState({
@@ -83,7 +107,7 @@ const DialogAppUpdater = () => {
 
             {showReleaseNotes && (
               <div className="max-h-[500px] p-4 w-[400px] overflow-y-scroll  text-sm font-normal leading-relaxed">
-                {isNightly && !isBeta ? (
+                {showNightlyFallback ? (
                   <p className="text-sm font-normal">
                     {t('updater:nightlyBuild')}
                   </p>
@@ -101,7 +125,7 @@ const DialogAppUpdater = () => {
                         <h2 {...props} className="text-xl! mt-0!" />
                       ),
                     }}
-                    content={release?.body}
+                    content={releaseNotesContent}
                   />
                 )}
               </div>
@@ -126,19 +150,32 @@ const DialogAppUpdater = () => {
                   >
                     {t('updater:remindMeLater')}
                   </Button>
-                  <Button
-                    onClick={handleUpdate}
-                    disabled={updateState.isDownloading || updateState.isInstalling}
-                    size="sm"
+                  <span
+                    data-testid={
+                      updateState.isDownloading
+                        ? 'app-update-progress-ring'
+                        : undefined
+                    }
+                    className={cn(
+                      'inline-flex rounded-full',
+                      updateState.isDownloading && 'p-[2px]'
+                    )}
+                    style={updateProgressRingStyle}
                   >
-                    {updateState.isInstalling
-                      ? t('updater:installing')
-                      : updateState.isDownloading
-                        ? t('updater:downloading')
-                        : appUpdateState.isUpdateReadyToInstall
-                          ? t('updater:restartToUpdate')
-                          : t('updater:downloadUpdate')}
-                  </Button>
+                    <Button
+                      onClick={handleUpdate}
+                      disabled={
+                        updateState.isDownloading || updateState.isInstalling
+                      }
+                      aria-busy={
+                        updateState.isDownloading || updateState.isInstalling
+                      }
+                      className={cn(updateState.isDownloading && 'relative z-10')}
+                      size="sm"
+                    >
+                      {updateButtonLabel}
+                    </Button>
+                  </span>
                 </div>
               </div>
             </div>
