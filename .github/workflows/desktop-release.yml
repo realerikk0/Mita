@@ -243,20 +243,20 @@ jobs:
             src-tauri/target/release/bundle/nsis/*.exe.sig
             src-tauri/target/release/bundle/msi/*.msi
 
-  sync-cloudflare-updater:
-    name: Sync updater to Cloudflare CDN
+  sync-aliyun-updater:
+    name: Sync updater to Aliyun CDN
     runs-on: ubuntu-latest
     needs:
       - build-macos
       - build-windows-x64
     env:
-      CLOUDFLARE_R2_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_R2_ACCOUNT_ID }}
-      CLOUDFLARE_R2_BUCKET: ${{ secrets.CLOUDFLARE_R2_BUCKET }}
-      CLOUDFLARE_R2_ACCESS_KEY_ID: ${{ secrets.CLOUDFLARE_R2_ACCESS_KEY_ID }}
-      CLOUDFLARE_R2_SECRET_ACCESS_KEY: ${{ secrets.CLOUDFLARE_R2_SECRET_ACCESS_KEY }}
-      CLOUDFLARE_ZONE_ID: ${{ secrets.CLOUDFLARE_ZONE_ID }}
-      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
-      UPDATES_CDN_BASE_URL: ${{ vars.UPDATES_CDN_BASE_URL || 'https://updates.mita.so' }}
+      ALIYUN_ACCESS_KEY_ID: ${{ secrets.ALIYUN_ACCESS_KEY_ID }}
+      ALIYUN_ACCESS_KEY_SECRET: ${{ secrets.ALIYUN_ACCESS_KEY_SECRET }}
+      ALIYUN_OSS_BUCKET: ${{ secrets.ALIYUN_OSS_BUCKET || vars.ALIYUN_OSS_BUCKET || 'mita-static' }}
+      ALIYUN_OSS_ENDPOINT: ${{ vars.ALIYUN_OSS_ENDPOINT || 'oss-cn-hangzhou.aliyuncs.com' }}
+      ALIYUN_REGION: ${{ vars.ALIYUN_REGION || 'cn-hangzhou' }}
+      ALIYUN_CDN_DOMAIN: ${{ vars.ALIYUN_CDN_DOMAIN || 'static.mitapp.cn' }}
+      UPDATES_CDN_BASE_URL: ${{ vars.UPDATES_CDN_BASE_URL || 'https://static.mitapp.cn' }}
     steps:
       - name: Derive version
         id: version
@@ -355,20 +355,42 @@ jobs:
 
           cat dist/updater/latest.json
 
-      - name: Ensure AWS CLI for Cloudflare R2
+      - name: Install Alibaba Cloud CLI
         shell: bash
         run: |
           set -euo pipefail
-          if command -v aws >/dev/null 2>&1; then
-            aws --version
+          if command -v aliyun >/dev/null 2>&1; then
+            aliyun version
             exit 0
           fi
 
-          python3 -m pip install --user awscli
-          echo "$HOME/.local/bin" >> "$GITHUB_PATH"
-          "$HOME/.local/bin/aws" --version
+          /bin/bash -c "$(curl -fsSL https://aliyuncli.alicdn.com/install.sh)"
+          aliyun version
 
-      - name: Upload updater files to Cloudflare R2
+      - name: Configure Alibaba Cloud CLI
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          required=(
+            ALIYUN_ACCESS_KEY_ID
+            ALIYUN_ACCESS_KEY_SECRET
+          )
+          for name in "${required[@]}"; do
+            if [ -z "${!name:-}" ]; then
+              echo "$name is required for Aliyun updater sync" >&2
+              exit 1
+            fi
+          done
+
+          aliyun configure set \
+            --profile release \
+            --mode AK \
+            --region "$ALIYUN_REGION" \
+            --access-key-id "$ALIYUN_ACCESS_KEY_ID" \
+            --access-key-secret "$ALIYUN_ACCESS_KEY_SECRET"
+
+      - name: Upload updater files to Aliyun OSS
         shell: bash
         env:
           VERSION_PREFIX: ${{ steps.manifest.outputs.version_prefix }}
@@ -378,67 +400,58 @@ jobs:
           WIN_EXE: ${{ steps.manifest.outputs.win_exe }}
           WIN_SIG: ${{ steps.manifest.outputs.win_sig }}
           WIN_NAME: ${{ steps.manifest.outputs.win_name }}
-          AWS_ACCESS_KEY_ID: ${{ secrets.CLOUDFLARE_R2_ACCESS_KEY_ID }}
-          AWS_SECRET_ACCESS_KEY: ${{ secrets.CLOUDFLARE_R2_SECRET_ACCESS_KEY }}
-          AWS_DEFAULT_REGION: auto
-          AWS_EC2_METADATA_DISABLED: "true"
         run: |
           set -euo pipefail
 
           required=(
-            CLOUDFLARE_R2_ACCOUNT_ID
-            CLOUDFLARE_R2_BUCKET
-            AWS_ACCESS_KEY_ID
-            AWS_SECRET_ACCESS_KEY
+            ALIYUN_OSS_BUCKET
+            ALIYUN_OSS_ENDPOINT
           )
           for name in "${required[@]}"; do
             if [ -z "${!name:-}" ]; then
-              echo "$name is required for Cloudflare R2 updater sync" >&2
+              echo "$name is required for Aliyun updater sync" >&2
               exit 1
             fi
           done
 
-          endpoint="https://${CLOUDFLARE_R2_ACCOUNT_ID}.r2.cloudflarestorage.com"
+          endpoint="${ALIYUN_OSS_ENDPOINT#https://}"
+          endpoint="${endpoint#http://}"
+          endpoint="https://${endpoint}"
           immutable_cache="public, max-age=31536000, immutable"
           manifest_cache="public, max-age=60, must-revalidate"
 
-          aws s3 cp "$MAC_TAR" "s3://${CLOUDFLARE_R2_BUCKET}/${VERSION_PREFIX}/${MAC_NAME}" \
-            --endpoint-url "$endpoint" \
-            --cache-control "$immutable_cache" \
-            --content-type "application/gzip"
-          aws s3 cp "$MAC_SIG" "s3://${CLOUDFLARE_R2_BUCKET}/${VERSION_PREFIX}/${MAC_NAME}.sig" \
-            --endpoint-url "$endpoint" \
-            --cache-control "$immutable_cache" \
-            --content-type "text/plain"
-          aws s3 cp "$WIN_EXE" "s3://${CLOUDFLARE_R2_BUCKET}/${VERSION_PREFIX}/${WIN_NAME}" \
-            --endpoint-url "$endpoint" \
-            --cache-control "$immutable_cache" \
-            --content-type "application/octet-stream"
-          aws s3 cp "$WIN_SIG" "s3://${CLOUDFLARE_R2_BUCKET}/${VERSION_PREFIX}/${WIN_NAME}.sig" \
-            --endpoint-url "$endpoint" \
-            --cache-control "$immutable_cache" \
-            --content-type "text/plain"
-          aws s3 cp dist/updater/latest.json "s3://${CLOUDFLARE_R2_BUCKET}/mita/latest.json" \
-            --endpoint-url "$endpoint" \
-            --cache-control "$manifest_cache" \
-            --content-type "application/json"
+          aliyun --profile release oss cp "$MAC_TAR" "oss://${ALIYUN_OSS_BUCKET}/${VERSION_PREFIX}/${MAC_NAME}" \
+            --endpoint "$endpoint" \
+            --meta "Cache-Control:${immutable_cache}#Content-Type:application/gzip" \
+            --force
+          aliyun --profile release oss cp "$MAC_SIG" "oss://${ALIYUN_OSS_BUCKET}/${VERSION_PREFIX}/${MAC_NAME}.sig" \
+            --endpoint "$endpoint" \
+            --meta "Cache-Control:${immutable_cache}#Content-Type:text/plain" \
+            --force
+          aliyun --profile release oss cp "$WIN_EXE" "oss://${ALIYUN_OSS_BUCKET}/${VERSION_PREFIX}/${WIN_NAME}" \
+            --endpoint "$endpoint" \
+            --meta "Cache-Control:${immutable_cache}#Content-Type:application/octet-stream" \
+            --force
+          aliyun --profile release oss cp "$WIN_SIG" "oss://${ALIYUN_OSS_BUCKET}/${VERSION_PREFIX}/${WIN_NAME}.sig" \
+            --endpoint "$endpoint" \
+            --meta "Cache-Control:${immutable_cache}#Content-Type:text/plain" \
+            --force
+          aliyun --profile release oss cp dist/updater/latest.json "oss://${ALIYUN_OSS_BUCKET}/mita/latest.json" \
+            --endpoint "$endpoint" \
+            --meta "Cache-Control:${manifest_cache}#Content-Type:application/json" \
+            --force
 
-      - name: Purge Cloudflare latest manifest cache
+      - name: Refresh Aliyun CDN latest manifest
         shell: bash
         run: |
           set -euo pipefail
-          if [ -z "${CLOUDFLARE_ZONE_ID:-}" ] || [ -z "${CLOUDFLARE_API_TOKEN:-}" ]; then
-            echo "Skipping cache purge because CLOUDFLARE_ZONE_ID or CLOUDFLARE_API_TOKEN is not configured"
-            exit 0
-          fi
 
           latest_url="${UPDATES_CDN_BASE_URL%/}/mita/latest.json"
-          curl -fsS -X POST "https://api.cloudflare.com/client/v4/zones/${CLOUDFLARE_ZONE_ID}/purge_cache" \
-            -H "Authorization: Bearer ${CLOUDFLARE_API_TOKEN}" \
-            -H "Content-Type: application/json" \
-            --data "{\"files\":[\"${latest_url}\"]}"
+          aliyun --profile release cdn RefreshObjectCaches \
+            --ObjectPath "$latest_url" \
+            --ObjectType File
 
-      - name: Verify Cloudflare CDN updater URLs
+      - name: Verify Aliyun CDN updater URLs
         shell: bash
         env:
           VERSION_PREFIX: ${{ steps.manifest.outputs.version_prefix }}
@@ -466,7 +479,7 @@ jobs:
     needs:
       - build-macos
       - build-windows-x64
-      - sync-cloudflare-updater
+      - sync-aliyun-updater
     steps:
       - name: Checkout
         uses: actions/checkout@v4

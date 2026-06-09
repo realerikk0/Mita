@@ -1,6 +1,6 @@
 # Mita 构建与分发流程
 
-本文档固定 Mita 桌面端的正式构建、GitHub Release、百度网盘分发和飞书群通知流程。
+本文档固定 Mita 桌面端的正式构建、GitHub Release、阿里云 OSS/CDN、百度网盘兜底分发和飞书群通知流程。
 
 ## 当前流水线
 
@@ -16,8 +16,8 @@
    - 触发方式：GitHub Release 从 Draft 发布为正式 Release 后自动触发。
    - 分发内容：下载 GitHub Release 中的 `.dmg`、`.exe`、`.msi`。
    - 发布海报：基于 GitHub Release notes 中的“新增功能 / 问题修复 / 优化调整”列表调用井陉 `gpt-image-2` 生成新版本宣传海报。
-   - 百度网盘：上传到 `/Mita/releases/<tag>/`，创建长期公开分享链接。
-   - CDN 下载入口：将百度网盘链接和提取码写入公开 manifest，并同步到 Cloudflare R2 CDN，供外部站点的“百度网盘下载”按钮读取。
+   - 百度网盘：上传到 `/Mita/releases/<tag>/`，创建长期公开分享链接，作为国内直链异常时的兜底入口。
+   - CDN 下载入口：将 `.dmg`、`.exe`、`.msi` 同步到阿里云 OSS，并发布 `latest.json` 和 `/mita/download` 到阿里云 CDN；下载页会按用户系统跳转到最新 macOS 或 Windows 安装包。
    - 飞书通知：飞书应用机器人主动发送到指定群；第一条是固定格式消息卡片，卡片中包含本次更新和问题修复摘要；第二条是“宣传图：”文本，第三条是单独的新版本宣传海报图片。如果海报生成或上传失败，降级为只发送第一条无图卡片。
 
 旧的 `Tauri Builder - Tag` 已改为仅手动触发，不再响应 tag push，避免与 `Desktop Release` 双重构建。
@@ -37,10 +37,8 @@ BAIDUPCS_GO_COOKIES
 FEISHU_APP_ID
 FEISHU_APP_SECRET
 FEISHU_RELEASE_CHAT_ID
-CLOUDFLARE_R2_ACCOUNT_ID
-CLOUDFLARE_R2_BUCKET
-CLOUDFLARE_R2_ACCESS_KEY_ID
-CLOUDFLARE_R2_SECRET_ACCESS_KEY
+ALIYUN_ACCESS_KEY_ID
+ALIYUN_ACCESS_KEY_SECRET
 ```
 
 建议 secrets：
@@ -50,8 +48,6 @@ BAIDU_SHARE_PASSWORD
 JINGXING_API_KEY
 FEISHU_RELEASE_WEBHOOK
 FEISHU_RELEASE_SECRET
-CLOUDFLARE_ZONE_ID
-CLOUDFLARE_API_TOKEN
 ```
 
 备用百度登录 secrets：
@@ -67,7 +63,11 @@ Environment variables：
 ```text
 BAIDUPCS_VERSION=v4.0.1
 BAIDU_REMOTE_ROOT=/Mita/releases
-UPDATES_CDN_BASE_URL=https://updates.mita.so
+ALIYUN_REGION=cn-hangzhou
+ALIYUN_OSS_BUCKET=mita-static
+ALIYUN_OSS_ENDPOINT=oss-cn-hangzhou.aliyuncs.com
+ALIYUN_CDN_DOMAIN=static.mitapp.cn
+UPDATES_CDN_BASE_URL=https://static.mitapp.cn
 MITA_DOWNLOAD_MANIFEST_KEY=mita/download/latest.json
 MITA_DOWNLOAD_PAGE_KEY=mita/download
 MITA_DOWNLOAD_VERSION_ROOT=mita/download/releases
@@ -77,16 +77,17 @@ RELEASE_POSTER_STRICT=false
 ```
 
 `BAIDUPCS_GO_COOKIES` 是百度网盘网页登录态，可能过期。更新时不要包含最外层引号。
-`FEISHU_RELEASE_CHAT_ID` 是目标飞书群会话 ID，通常形如 `oc_...`；也可以放在 environment variable 中。`FEISHU_APP_ID` 和 `FEISHU_APP_SECRET` 用于获取租户 token、上传海报图片以及由应用机器人主动发送卡片、文本和图片消息。`JINGXING_API_KEY` 用于生成飞书发布海报；如果缺失或接口失败，流程会降级发送无图卡片。`FEISHU_RELEASE_WEBHOOK` 和 `FEISHU_RELEASE_SECRET` 仅保留为旧 webhook 兜底。`CLOUDFLARE_ZONE_ID` 和 `CLOUDFLARE_API_TOKEN` 用于发布下载入口后主动清理 CDN 缓存；缺失时不会阻塞上传，但最新入口可能最多按缓存时间延迟更新。
+`FEISHU_RELEASE_CHAT_ID` 是目标飞书群会话 ID，通常形如 `oc_...`；也可以放在 environment variable 中。`FEISHU_APP_ID` 和 `FEISHU_APP_SECRET` 用于获取租户 token、上传海报图片以及由应用机器人主动发送卡片、文本和图片消息。`JINGXING_API_KEY` 用于生成飞书发布海报；如果缺失或接口失败，流程会降级发送无图卡片。`FEISHU_RELEASE_WEBHOOK` 和 `FEISHU_RELEASE_SECRET` 仅保留为旧 webhook 兜底。`ALIYUN_ACCESS_KEY_ID` 和 `ALIYUN_ACCESS_KEY_SECRET` 用于上传 OSS 对象并刷新阿里云 CDN，建议只授予目标 bucket 写入和 CDN 刷新权限。
 
 默认公开下载入口：
 
 ```text
-https://updates.mita.so/mita/download
-https://updates.mita.so/mita/download/latest.json
+https://static.mitapp.cn/mita/latest.json
+https://static.mitapp.cn/mita/download
+https://static.mitapp.cn/mita/download/latest.json
 ```
 
-`latest.json` 包含 `primaryDownload.url`、`primaryDownload.password`、`baidu.url`、`baidu.password`、`tagName` 和 GitHub 安装包信息。外部站点优先链接到 `/mita/download`；需要自己控制 UI 时可读取 `/mita/download/latest.json`。
+`/mita/latest.json` 是桌面自动更新入口。`/mita/download` 是官网和控制台可直接使用的“下载最新版本”入口，会按系统跳转到最新 `.dmg` 或 `.exe`。`/mita/download/latest.json` 包含 `platforms.macos.url`、`platforms.windows.url`、`platforms.windowsMsi.url`、`baidu`、`primaryDownload`、`tagName` 和 GitHub 安装包信息；外部站点需要自己控制 UI 时读取它即可。
 
 ## 正式发布步骤
 
@@ -151,7 +152,7 @@ https://github.com/realerikk0/Mita/compare/<previous-tag>...<current-tag>
 
 ```text
 Upload assets to Baidu Netdisk
-Publish Baidu download manifest to Cloudflare R2
+Publish download manifest to Aliyun OSS
 Send Feishu release messages
 ```
 
@@ -183,7 +184,7 @@ gh workflow run "Release Distribution" \
 
 dry-run 产物里的 `feishu-card.json` 是待发送消息 payload 数组；互动卡片应包含“本次更新 / 问题修复”摘要，海报上传成功时应包含三项：互动卡片、`宣传图：` 文本、图片消息。
 
-`dry_run=true` 不会上传百度网盘正式安装包，也不会发布公开 CDN 下载入口。只有正式分发成功创建百度分享链接后，才会刷新 `latest.json` 和 `/mita/download`。
+`dry_run=true` 不会上传百度网盘正式安装包，也不会发布公开 CDN 下载入口。只有正式分发成功创建百度分享链接后，才会刷新 `latest.json`、`/mita/download` 和版本化安装包。
 
 ## 百度凭据探针
 
@@ -214,8 +215,9 @@ shareID
 - GitHub Release 正文包含结构化更新列表，而不是只有 `Full Changelog` 链接。
 - Release assets 包含 macOS `.dmg`、Windows `.exe`、Windows `.msi`。
 - 百度网盘目录 `/Mita/releases/<tag>/` 下包含同一批安装包。
-- 百度分享链接可打开，提取码可用。
-- Cloudflare CDN 上的 `/mita/download/latest.json` 已更新为当前 tag，并且 `/mita/download` 会跳转到百度网盘。
+- 阿里云 CDN 上的 `/mita/latest.json` 已更新为当前 tag，桌面自动更新包指向 `https://static.mitapp.cn/mita/stable/<tag>/...`。
+- 阿里云 CDN 上的 `/mita/download/latest.json` 已更新为当前 tag，并且 `/mita/download` 会按系统跳转到最新 macOS 或 Windows 安装包。
+- 百度分享链接可作为 fallback 打开，提取码可用。
 - 指定 `FEISHU_RELEASE_CHAT_ID` 的飞书群收到应用机器人发送的固定格式卡片，卡片中包含本次更新摘要、GitHub Release 地址和百度网盘地址。
 - 如果海报凭据已配置，分发 artifact 中应包含 `release-poster.png`、`release-poster.json`；飞书群随后收到“宣传图：”文本和一条单独的新版本海报图片消息。
 

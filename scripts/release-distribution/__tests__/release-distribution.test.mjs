@@ -188,6 +188,36 @@ test('buildDownloadManifest exposes Baidu share as public CDN metadata', () => {
   assert.equal(manifest.github.windowsExe.name, 'Mita_1.2.3_x64-setup.exe')
 })
 
+test('buildDownloadManifest exposes Aliyun CDN platform URLs', () => {
+  const manifest = buildDownloadManifest(
+    collectReleaseAssets(sampleRelease()),
+    {
+      url: 'https://pan.baidu.com/s/example',
+      password: 'mita',
+      remotePath: '/Mita/releases/v1.2.3',
+    },
+    {
+      generatedAt: '2026-05-15T09:00:00.000Z',
+      cdnBaseUrl: 'https://static.mitapp.cn',
+      downloadVersionRoot: 'mita/download/releases/v1.2.3',
+    },
+  )
+
+  assert.equal(manifest.schemaVersion, 2)
+  assert.equal(
+    manifest.platforms.macos.url,
+    'https://static.mitapp.cn/mita/download/releases/v1.2.3/Mita_1.2.3_universal.dmg',
+  )
+  assert.equal(
+    manifest.platforms.windows.url,
+    'https://static.mitapp.cn/mita/download/releases/v1.2.3/Mita_1.2.3_x64-setup.exe',
+  )
+  assert.equal(
+    manifest.platforms.windowsMsi.url,
+    'https://static.mitapp.cn/mita/download/releases/v1.2.3/Mita_1.2.3_x64_en-US.msi',
+  )
+})
+
 test('buildDownloadManifest falls back to GitHub when Baidu sharing is blocked', () => {
   const manifest = buildDownloadManifest(
     collectReleaseAssets(sampleRelease()),
@@ -236,6 +266,25 @@ test('buildDownloadPage redirects to GitHub fallback without extraction code', (
   assert.match(page, /Open GitHub Release/)
   assert.match(page, /https:\/\/github\.com\/realerikk0\/Mita\/releases\/tag\/v1\.2\.3/)
   assert.doesNotMatch(page, /Extraction code/)
+})
+
+test('buildDownloadPage redirects platform users to Aliyun CDN assets', () => {
+  const page = buildDownloadPage({
+    platforms: {
+      macos: {
+        url: 'https://static.mitapp.cn/mita/download/releases/v1.2.3/Mita_1.2.3_universal.dmg',
+      },
+      windows: {
+        url: 'https://static.mitapp.cn/mita/download/releases/v1.2.3/Mita_1.2.3_x64-setup.exe',
+      },
+    },
+  })
+
+  assert.match(page, /Download for macOS/)
+  assert.match(page, /Download for Windows/)
+  assert.match(page, /Macintosh\|Mac OS X/)
+  assert.match(page, /https:\/\/static\.mitapp\.cn\/mita\/download\/releases\/v1\.2\.3\/Mita_1\.2\.3_x64-setup\.exe/)
+  assert.doesNotMatch(page, /http-equiv="refresh"/)
 })
 
 test('baiduUrlWithPassword preserves existing password parameter', () => {

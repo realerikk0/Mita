@@ -61,6 +61,32 @@ function normalizeAsset(asset) {
   }
 }
 
+function trimSlashes(value) {
+  return String(value ?? '').replace(/^\/+|\/+$/g, '')
+}
+
+function joinUrl(baseUrl, ...parts) {
+  const base = String(baseUrl ?? '').replace(/\/+$/g, '')
+  const path = parts
+    .flatMap((part) => trimSlashes(part).split('/'))
+    .filter(Boolean)
+    .map(encodeURIComponent)
+    .join('/')
+  return path ? `${base}/${path}` : base
+}
+
+function buildCdnAsset(asset, options = {}) {
+  if (!asset || !options.cdnBaseUrl || !options.downloadVersionRoot) {
+    return null
+  }
+
+  return {
+    name: asset.name,
+    url: joinUrl(options.cdnBaseUrl, options.downloadVersionRoot, asset.name),
+    size: asset.size ?? null,
+  }
+}
+
 export function buildDownloadManifest(release, baiduShare, options = {}) {
   const tagName = release.tagName ?? release.tag_name
   const baiduUrl = baiduShare.url
@@ -87,6 +113,9 @@ export function buildDownloadManifest(release, baiduShare, options = {}) {
   }
 
   const assets = release.assets ?? {}
+  const cdnBaseUrl = options.cdnBaseUrl ?? null
+  const downloadVersionRoot =
+    options.downloadVersionRoot ?? (cdnBaseUrl ? `mita/download/releases/${tagName}` : null)
   const primaryDownload = baiduShareBlocked
     ? {
         type: 'github-release',
@@ -101,7 +130,7 @@ export function buildDownloadManifest(release, baiduShare, options = {}) {
       }
 
   return {
-    schemaVersion: 1,
+    schemaVersion: cdnBaseUrl ? 2 : 1,
     product: 'Mita',
     channel: 'stable',
     tagName,
@@ -110,6 +139,22 @@ export function buildDownloadManifest(release, baiduShare, options = {}) {
     publishedAt: release.publishedAt ?? release.published_at ?? null,
     releaseUrl,
     primaryDownload,
+    platforms: cdnBaseUrl
+      ? {
+          macos: buildCdnAsset(assets.macosDmg, {
+            cdnBaseUrl,
+            downloadVersionRoot,
+          }),
+          windows: buildCdnAsset(assets.windowsExe, {
+            cdnBaseUrl,
+            downloadVersionRoot,
+          }),
+          windowsMsi: buildCdnAsset(assets.windowsMsi, {
+            cdnBaseUrl,
+            downloadVersionRoot,
+          }),
+        }
+      : undefined,
     baidu,
     github: {
       macosDmg: normalizeAsset(assets.macosDmg),
@@ -120,15 +165,32 @@ export function buildDownloadManifest(release, baiduShare, options = {}) {
 }
 
 export function buildDownloadPage(manifest) {
-  const downloadUrl = manifest.primaryDownload?.url ?? manifest.baidu?.url
+  const macosUrl = manifest.platforms?.macos?.url
+  const windowsUrl = manifest.platforms?.windows?.url
+  const fallbackPlatformUrl = windowsUrl ?? macosUrl
+  const downloadUrl = fallbackPlatformUrl ?? manifest.primaryDownload?.url ?? manifest.baidu?.url
   const password = manifest.primaryDownload?.password ?? manifest.baidu?.password ?? ''
   const isBaidu = manifest.primaryDownload?.type === 'baidu-netdisk'
   const escapedUrl = escapeHtml(downloadUrl)
+  const escapedMacosUrl = escapeHtml(macosUrl)
+  const escapedWindowsUrl = escapeHtml(windowsUrl)
   const escapedPassword = escapeHtml(password)
   const jsonUrl = JSON.stringify(downloadUrl)
-  const downloadLabel = isBaidu ? 'Baidu Netdisk' : 'GitHub Release'
+  const jsonMacosUrl = JSON.stringify(macosUrl)
+  const jsonWindowsUrl = JSON.stringify(windowsUrl)
+  const hasPlatformRouting = Boolean(manifest.platforms)
+  const downloadLabel = hasPlatformRouting ? 'Mita' : isBaidu ? 'Baidu Netdisk' : 'GitHub Release'
+  const metaRefresh = hasPlatformRouting
+    ? ''
+    : `  <meta http-equiv="refresh" content="0; url=${escapedUrl}">\n`
   const passwordMarkup = password
     ? `<p>Extraction code: <code>${escapedPassword}</code></p>`
+    : ''
+  const platformButtons = hasPlatformRouting
+    ? `<p>
+    ${macosUrl ? `<a href="${escapedMacosUrl}" rel="noopener noreferrer">Download for macOS</a>` : ''}
+    ${windowsUrl ? `${macosUrl ? ' · ' : ''}<a href="${escapedWindowsUrl}" rel="noopener noreferrer">Download for Windows</a>` : ''}
+  </p>`
     : ''
 
   return `<!doctype html>
@@ -136,8 +198,7 @@ export function buildDownloadPage(manifest) {
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <meta http-equiv="refresh" content="0; url=${escapedUrl}">
-  <title>Mita Download</title>
+${metaRefresh}  <title>Mita Download</title>
   <style>
     body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; margin: 40px; line-height: 1.6; color: #111827; }
     a { color: #2563eb; }
@@ -147,9 +208,18 @@ export function buildDownloadPage(manifest) {
 <body>
   <p>Opening ${downloadLabel} download...</p>
   <p><a href="${escapedUrl}" rel="noopener noreferrer">Open ${downloadLabel}</a></p>
+  ${platformButtons}
   ${passwordMarkup}
   <script>
-    window.location.replace(${jsonUrl});
+    const macosUrl = ${jsonMacosUrl};
+    const windowsUrl = ${jsonWindowsUrl};
+    const fallbackUrl = ${jsonUrl};
+    const platformUrl = /Macintosh|Mac OS X/i.test(navigator.userAgent)
+      ? macosUrl
+      : /Windows/i.test(navigator.userAgent)
+        ? windowsUrl
+        : fallbackUrl;
+    window.location.replace(platformUrl || fallbackUrl);
   </script>
 </body>
 </html>
@@ -172,11 +242,16 @@ async function main() {
   const baiduJson = args['baidu-json']
   const manifestOutput = args['manifest-output'] ?? 'dist/mita-download-manifest.json'
   const pageOutput = args['page-output'] ?? 'dist/mita-download.html'
+  const cdnBaseUrl = args['cdn-base-url']
+  const downloadVersionRoot = args['download-version-root']
 
   if (!releaseJson) throw new Error('--release-json is required')
   if (!baiduJson) throw new Error('--baidu-json is required')
 
-  const manifest = buildDownloadManifest(readJson(releaseJson), readJson(baiduJson))
+  const manifest = buildDownloadManifest(readJson(releaseJson), readJson(baiduJson), {
+    cdnBaseUrl,
+    downloadVersionRoot,
+  })
   writeDownloadManifest(manifest, manifestOutput)
   writeDownloadPage(buildDownloadPage(manifest), pageOutput)
 
