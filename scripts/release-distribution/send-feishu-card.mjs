@@ -67,13 +67,13 @@ export function createFeishuSign(timestamp, secret) {
 
 export const RELEASE_POSTER_LABEL = '宣传图：'
 
-export function buildFeishuCard(release, baiduShare, options = {}) {
+export function buildFeishuCard(release, distribution = {}, options = {}) {
   const runUrl = options.runUrl ?? buildRunUrl()
   const title = `Mita ${release.tagName} 发布完成`
-  const baiduPassword = baiduShare.password || 'mita'
-  const baiduShareBlocked = Boolean(baiduShare.shareBlocked)
   const releaseTime = release.publishedAt || 'unknown'
-  const dryRunPrefix = baiduShare.dryRun ? '**Dry run**\n' : ''
+  const dryRunPrefix = options.dryRun || distribution.dryRun ? '**Dry run**\n' : ''
+  const downloadPageUrl =
+    distribution.downloadPageUrl ?? options.downloadPageUrl ?? release.downloadPageUrl ?? null
   const releaseHighlights = buildReleaseHighlightsMarkdown(release, {
     maxFeatures: options.maxFeatures ?? 5,
     maxFixes: options.maxFixes ?? 5,
@@ -145,13 +145,9 @@ export function buildFeishuCard(release, baiduShare, options = {}) {
       tag: 'div',
       text: {
         tag: 'lark_md',
-        content: baiduShareBlocked
-          ? [
-              '**百度网盘**',
-              '分享受限，已切换 GitHub Release 下载兜底。',
-              `网盘路径: \`${baiduShare.remotePath ?? 'unknown'}\``,
-            ].join('\n')
-          : `${dryRunPrefix}**百度网盘**\n[打开百度网盘](${baiduShare.url})\n提取码: \`${baiduPassword}\``,
+        content: downloadPageUrl
+          ? `${dryRunPrefix}**阿里云 CDN 最新下载**\n[打开下载页](${downloadPageUrl})`
+          : `${dryRunPrefix}**阿里云 CDN 最新下载**\n未配置下载页 URL，请使用 GitHub Release。`,
       },
     },
     {
@@ -170,10 +166,10 @@ export function buildFeishuCard(release, baiduShare, options = {}) {
           tag: 'button',
           text: {
             tag: 'plain_text',
-            content: baiduShareBlocked ? '打开下载兜底' : '打开百度网盘',
+            content: '打开 CDN 下载',
           },
           type: 'default',
-          url: baiduShareBlocked ? release.url : baiduShare.url,
+          url: downloadPageUrl ?? release.url,
         },
       ],
     },
@@ -184,7 +180,7 @@ export function buildFeishuCard(release, baiduShare, options = {}) {
       wide_screen_mode: true,
     },
     header: {
-      template: baiduShare.dryRun ? 'yellow' : baiduShareBlocked ? 'orange' : 'green',
+      template: options.dryRun || distribution.dryRun ? 'yellow' : 'green',
       title: {
         tag: 'plain_text',
         content: title,
@@ -526,14 +522,13 @@ export async function resolvePosterImageKey(options = {}) {
 async function main() {
   const args = parseArgs(process.argv.slice(2))
   const releaseJson = args['release-json']
-  const baiduJson = args['baidu-json']
+  const downloadPageUrl = args['download-page-url'] ?? process.env.MITA_DOWNLOAD_PAGE_URL
   const output = args.output ?? 'dist/feishu-card.json'
   const dryRun = args.dryRun || isTruthy(process.env.DRY_RUN)
   const strictPoster = isTruthy(process.env.RELEASE_POSTER_STRICT)
   const chatId = args['chat-id'] ?? process.env.FEISHU_RELEASE_CHAT_ID
 
   if (!releaseJson) throw new Error('--release-json is required')
-  if (!baiduJson) throw new Error('--baidu-json is required')
 
   const appId = process.env.FEISHU_APP_ID
   const appSecret = process.env.FEISHU_APP_SECRET
@@ -546,15 +541,15 @@ async function main() {
   }
 
   const release = readJson(releaseJson)
-  const baiduShare = readJson(baiduJson)
   const posterImageKey = await resolvePosterImageKey({
     posterJson: args['poster-json'],
     posterPath: args['poster-path'],
     tenantAccessToken,
     strict: strictPoster,
   })
-  const card = buildFeishuCard(release, baiduShare, {
+  const card = buildFeishuCard(release, { downloadPageUrl }, {
     runUrl: buildRunUrl(),
+    dryRun,
   })
   const payloads = buildFeishuReleasePayloads(card, {
     chatId,

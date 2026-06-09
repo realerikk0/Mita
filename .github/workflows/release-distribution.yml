@@ -10,14 +10,9 @@ on:
         required: true
         type: string
       dry_run:
-        description: "Render and validate only; do not upload to Baidu or send Feishu"
+        description: "Render and validate only; do not upload to Aliyun OSS or send Feishu"
         required: true
         default: true
-        type: boolean
-      probe_only:
-        description: "Upload a tiny Baidu probe file only; skip GitHub release packages and Feishu"
-        required: true
-        default: false
         type: boolean
 
 permissions:
@@ -28,12 +23,11 @@ concurrency:
   cancel-in-progress: false
 
 env:
-  BAIDUPCS_VERSION: ${{ vars.BAIDUPCS_VERSION || 'v4.0.1' }}
   NODE_OPTIONS: "--max-old-space-size=4096"
 
 jobs:
   distribute:
-    name: Upload release assets and notify Feishu
+    name: Publish release assets and notify Feishu
     runs-on: ubuntu-latest
     timeout-minutes: 60
     environment: release-distribution
@@ -50,11 +44,9 @@ jobs:
           if [ "${{ github.event_name }}" = "release" ]; then
             tag="${{ github.event.release.tag_name }}"
             dry_run="false"
-            probe_only="false"
           else
             tag="${{ inputs.tag }}"
             dry_run="${{ inputs.dry_run }}"
-            probe_only="${{ inputs.probe_only }}"
           fi
 
           if [ -z "$tag" ]; then
@@ -65,7 +57,6 @@ jobs:
           {
             echo "tag=$tag"
             echo "dry_run=$dry_run"
-            echo "probe_only=$probe_only"
           } >> "$GITHUB_OUTPUT"
           echo "Distributing release $tag (dry_run=$dry_run)"
 
@@ -75,7 +66,6 @@ jobs:
           node-version: "20"
 
       - name: Fetch release metadata
-        if: steps.release.outputs.probe_only != 'true'
         shell: bash
         run: |
           mkdir -p dist/release-assets
@@ -84,7 +74,6 @@ jobs:
             > dist/release.json
 
       - name: Download release packages
-        if: steps.release.outputs.probe_only != 'true'
         shell: bash
         run: |
           gh release download "${{ steps.release.outputs.tag }}" \
@@ -96,7 +85,6 @@ jobs:
           find dist/release-assets -maxdepth 1 -type f -print | sort
 
       - name: Collect and validate release assets
-        if: steps.release.outputs.probe_only != 'true'
         shell: bash
         run: |
           node scripts/release-distribution/collect-release-assets.mjs \
@@ -105,7 +93,6 @@ jobs:
             --output dist/release-assets.json
 
       - name: Generate release poster
-        if: steps.release.outputs.probe_only != 'true'
         shell: bash
         env:
           JINGXING_API_KEY: ${{ secrets.JINGXING_API_KEY }}
@@ -118,75 +105,8 @@ jobs:
             --output dist/release-poster.png \
             --metadata dist/release-poster.json
 
-      - name: Create Baidu credential probe payload
-        if: steps.release.outputs.probe_only == 'true'
-        shell: bash
-        run: |
-          mkdir -p dist/release-assets
-          probe_name="mita-baidu-probe-${GITHUB_RUN_ID}.txt"
-          probe_path="dist/release-assets/${probe_name}"
-          printf 'Mita Baidu credential probe\nrun=%s\ntime=%s\n' \
-            "${GITHUB_RUN_ID}" \
-            "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
-            > "$probe_path"
-
-          node <<'NODE'
-          const fs = require('node:fs')
-
-          const probeName = process.env.PROBE_NAME
-          const probeTag = process.env.PROBE_TAG
-          const manifest = {
-            tagName: probeTag,
-            name: probeTag,
-            url: `${process.env.GITHUB_SERVER_URL}/${process.env.GITHUB_REPOSITORY}/actions/runs/${process.env.GITHUB_RUN_ID}`,
-            publishedAt: new Date().toISOString(),
-            assets: {
-              probe: {
-                name: probeName,
-                downloadUrl: `${process.env.GITHUB_SERVER_URL}/${process.env.GITHUB_REPOSITORY}/actions/runs/${process.env.GITHUB_RUN_ID}`,
-                size: fs.statSync(`dist/release-assets/${probeName}`).size,
-                contentType: 'text/plain',
-              },
-            },
-            allAssets: [],
-          }
-
-          fs.writeFileSync('dist/release-assets.json', `${JSON.stringify(manifest, null, 2)}\n`)
-          NODE
-        env:
-          PROBE_NAME: mita-baidu-probe-${{ github.run_id }}.txt
-          PROBE_TAG: baidu-probe-${{ github.run_id }}
-
-      - name: Install BaiduPCS-Go
-        if: steps.release.outputs.dry_run != 'true'
-        shell: bash
-        run: |
-          version="${BAIDUPCS_VERSION}"
-          archive="BaiduPCS-Go-${version}-linux-amd64.zip"
-          curl -fsSLO "https://github.com/qjfoidnh/BaiduPCS-Go/releases/download/${BAIDUPCS_VERSION}/${archive}"
-          unzip -q "$archive"
-          chmod +x "BaiduPCS-Go-${version}-linux-amd64/BaiduPCS-Go"
-          echo "$PWD/BaiduPCS-Go-${version}-linux-amd64" >> "$GITHUB_PATH"
-
-      - name: Upload assets to Baidu Netdisk
-        shell: bash
-        env:
-          DRY_RUN: ${{ steps.release.outputs.dry_run }}
-          RELEASE_ASSETS_JSON: dist/release-assets.json
-          RELEASE_ASSETS_DIR: dist/release-assets
-          BAIDU_SHARE_JSON: dist/baidu-share.json
-          BAIDU_REMOTE_ROOT: ${{ vars.BAIDU_REMOTE_ROOT || '/Mita/releases' }}
-          BAIDU_SHARE_PASSWORD: ${{ secrets.BAIDU_SHARE_PASSWORD || 'mita' }}
-          BAIDU_UPLOAD_RAW_ASSETS: "false"
-          BAIDU_ALLOW_GITHUB_FALLBACK: "true"
-          BAIDUPCS_GO_COOKIES: ${{ secrets.BAIDUPCS_GO_COOKIES }}
-          BAIDUPCS_GO_BDUSS: ${{ secrets.BAIDUPCS_GO_BDUSS }}
-          BAIDUPCS_GO_STOKEN: ${{ secrets.BAIDUPCS_GO_STOKEN }}
-          BAIDUPCS_GO_PTOKEN: ${{ secrets.BAIDUPCS_GO_PTOKEN }}
-        run: bash scripts/release-distribution/upload-baidu.sh
-
       - name: Install Alibaba Cloud CLI
-        if: steps.release.outputs.dry_run != 'true' && steps.release.outputs.probe_only != 'true'
+        if: steps.release.outputs.dry_run != 'true'
         shell: bash
         run: |
           set -euo pipefail
@@ -199,7 +119,7 @@ jobs:
           aliyun version
 
       - name: Configure Alibaba Cloud CLI
-        if: steps.release.outputs.dry_run != 'true' && steps.release.outputs.probe_only != 'true'
+        if: steps.release.outputs.dry_run != 'true'
         shell: bash
         env:
           ALIYUN_ACCESS_KEY_ID: ${{ secrets.ALIYUN_ACCESS_KEY_ID }}
@@ -218,7 +138,6 @@ jobs:
               exit 1
             fi
           done
-
           aliyun configure set \
             --profile release \
             --mode AK \
@@ -227,7 +146,7 @@ jobs:
             --access-key-secret "$ALIYUN_ACCESS_KEY_SECRET"
 
       - name: Publish download manifest to Aliyun OSS
-        if: steps.release.outputs.dry_run != 'true' && steps.release.outputs.probe_only != 'true'
+        if: steps.release.outputs.dry_run != 'true'
         shell: bash
         env:
           ALIYUN_OSS_BUCKET: ${{ secrets.ALIYUN_OSS_BUCKET || vars.ALIYUN_OSS_BUCKET || 'mita-static' }}
@@ -284,11 +203,11 @@ jobs:
 
           node scripts/release-distribution/build-download-manifest.mjs \
             --release-json dist/release-assets.json \
-            --baidu-json dist/baidu-share.json \
             --manifest-output dist/mita-download/latest.json \
             --page-output dist/mita-download/index.html \
             --cdn-base-url "$cdn_base" \
-            --download-version-root "$version_root"
+            --download-version-root "$version_root" \
+            --download-page-url "${cdn_base}/${page_key}"
 
           aliyun --profile release oss cp dist/mita-download/latest.json "oss://${ALIYUN_OSS_BUCKET}/${manifest_key}" \
             --endpoint "$endpoint" \
@@ -328,12 +247,12 @@ jobs:
           done
 
       - name: Send Feishu release messages
-        if: steps.release.outputs.probe_only != 'true'
         shell: bash
         env:
           DRY_RUN: ${{ steps.release.outputs.dry_run }}
           RELEASE_ASSETS_JSON: dist/release-assets.json
-          BAIDU_SHARE_JSON: dist/baidu-share.json
+          UPDATES_CDN_BASE_URL: ${{ vars.UPDATES_CDN_BASE_URL || 'https://static.mitapp.cn' }}
+          MITA_DOWNLOAD_PAGE_KEY: ${{ vars.MITA_DOWNLOAD_PAGE_KEY || 'mita/download' }}
           FEISHU_RELEASE_CHAT_ID: ${{ secrets.FEISHU_RELEASE_CHAT_ID || vars.FEISHU_RELEASE_CHAT_ID }}
           FEISHU_RELEASE_WEBHOOK: ${{ secrets.FEISHU_RELEASE_WEBHOOK }}
           FEISHU_RELEASE_SECRET: ${{ secrets.FEISHU_RELEASE_SECRET }}
@@ -343,9 +262,9 @@ jobs:
         run: |
           args=(
             --release-json "$RELEASE_ASSETS_JSON"
-            --baidu-json "$BAIDU_SHARE_JSON"
             --poster-json dist/release-poster.json
             --poster-path dist/release-poster.png
+            --download-page-url "${UPDATES_CDN_BASE_URL%/}/${MITA_DOWNLOAD_PAGE_KEY#/}"
             --output dist/feishu-card.json
           )
           if [ "$DRY_RUN" = "true" ]; then
@@ -362,7 +281,6 @@ jobs:
           path: |
             dist/release.json
             dist/release-assets.json
-            dist/baidu-share.json
             dist/feishu-card.json
             dist/release-poster.*
             dist/mita-download/*
