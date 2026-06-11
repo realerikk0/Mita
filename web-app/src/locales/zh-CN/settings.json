@@ -54,6 +54,9 @@
   "others": {
     "spellCheck": "拼写检查",
     "spellCheckDesc": "为您的线程启用拼写检查。",
+    "webSearch": "网页搜索",
+    "webSearchDescConfigured": "为支持的模型启用原生网页搜索，并保留幂塔网页研究用于基于工具的浏览。",
+    "webSearchDescUnconfigured": "为支持的景行模型启用原生网页搜索。若要使用基于工具的浏览，请在 MCP 服务器中配置幂塔网页研究。",
     "resetFactory": "恢复出厂设置",
     "resetFactoryDesc": "将应用程序恢复到其初始状态，清除所有模型和聊天记录。此操作不可逆，仅在应用程序损坏时建议使用。"
   },

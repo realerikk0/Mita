@@ -484,11 +484,17 @@ function General() {
                 }
               />
               <CardItem
-                title="Web Search"
+                title={t('settings:others.webSearch', {
+                  ns: 'settings',
+                })}
                 description={
                   hasWebResearchConfig
-                    ? 'Enable native web search for supported models and keep Mita Web Research available for tool-based browsing.'
-                    : 'Enable native web search for supported Jingxing models. Configure Mita Web Research in MCP Servers for tool-based browsing.'
+                    ? t('settings:others.webSearchDescConfigured', {
+                        ns: 'settings',
+                      })
+                    : t('settings:others.webSearchDescUnconfigured', {
+                        ns: 'settings',
+                      })
                 }
                 actions={
                   <Switch

@@ -14,8 +14,8 @@ type WebSearchState = {
 export const useWebSearch = create<WebSearchState>()(
   persist(
     (set, get) => ({
-      enabled: false,
-      mode: 'off',
+      enabled: true,
+      mode: 'auto',
       setEnabled: (enabled) =>
         set({
           enabled,

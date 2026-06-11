@@ -408,11 +408,14 @@ describe('General Settings Route', () => {
       render(<Component />)
     })
 
-    const webSearchTitle = screen.getByText('Web Search')
+    const webSearchTitle = screen.getByText('settings:others.webSearch')
     const cardItem = webSearchTitle.closest('[data-testid="card-item"]')
     const switchInput = cardItem?.querySelector('input[type="checkbox"]')
 
     expect(cardItem).toBeInTheDocument()
+    expect(cardItem).toHaveTextContent(
+      'settings:others.webSearchDescConfigured'
+    )
     expect(switchInput).toBeInTheDocument()
 
     await act(async () => {
