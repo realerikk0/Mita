@@ -27,7 +27,10 @@ jobs:
     permissions:
       contents: read
     env:
-      CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_R2_ACCOUNT_ID }}
+      AWS_ACCESS_KEY_ID: ${{ secrets.CLOUDFLARE_R2_ACCESS_KEY_ID }}
+      AWS_SECRET_ACCESS_KEY: ${{ secrets.CLOUDFLARE_R2_SECRET_ACCESS_KEY }}
+      AWS_DEFAULT_REGION: auto
+      CLOUDFLARE_R2_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_R2_ACCOUNT_ID }}
       CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
       CLOUDFLARE_ZONE_ID: ${{ secrets.CLOUDFLARE_ZONE_ID }}
       R2_BUCKET: ${{ secrets.CLOUDFLARE_R2_BUCKET }}
@@ -35,15 +38,15 @@ jobs:
       PUBLIC_URL: ${{ inputs.public_url }}
       TARGET_KEY: ${{ inputs.target_key }}
       EXPECTED_VERSION: ${{ inputs.expected_version }}
-      WRANGLER_VERSION: "4.2.0"
     steps:
       - name: Validate configuration
         shell: bash
         run: |
           set -euo pipefail
           required=(
-            CLOUDFLARE_ACCOUNT_ID
-            CLOUDFLARE_API_TOKEN
+            AWS_ACCESS_KEY_ID
+            AWS_SECRET_ACCESS_KEY
+            CLOUDFLARE_R2_ACCOUNT_ID
             R2_BUCKET
             SOURCE_URL
             PUBLIC_URL
@@ -56,6 +59,7 @@ jobs:
               exit 1
             fi
           done
+          aws --version
 
       - name: Download and validate source manifest
         shell: bash
@@ -84,29 +88,29 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
+          r2_endpoint="https://${CLOUDFLARE_R2_ACCOUNT_ID}.r2.cloudflarestorage.com"
           backup="dist/legacy-latest-backup-$(date -u +%Y%m%dT%H%M%SZ).json"
-          npx --yes "wrangler@${WRANGLER_VERSION}" r2 object get "${R2_BUCKET}/${TARGET_KEY}" \
-            --file "$backup" \
-            --remote
+          aws s3 cp "s3://${R2_BUCKET}/${TARGET_KEY}" "$backup" \
+            --endpoint-url "$r2_endpoint"
           echo "Backed up ${R2_BUCKET}/${TARGET_KEY} to ${backup}"
 
       - name: Upload legacy manifest to R2
         shell: bash
         run: |
           set -euo pipefail
-          npx --yes "wrangler@${WRANGLER_VERSION}" r2 object put "${R2_BUCKET}/${TARGET_KEY}" \
-            --file dist/latest.json \
+          r2_endpoint="https://${CLOUDFLARE_R2_ACCOUNT_ID}.r2.cloudflarestorage.com"
+          aws s3 cp dist/latest.json "s3://${R2_BUCKET}/${TARGET_KEY}" \
+            --endpoint-url "$r2_endpoint" \
             --content-type "application/json" \
-            --cache-control "public, max-age=60, must-revalidate" \
-            --remote
+            --cache-control "public, max-age=60, must-revalidate"
 
       - name: Verify R2 object
         shell: bash
         run: |
           set -euo pipefail
-          npx --yes "wrangler@${WRANGLER_VERSION}" r2 object get "${R2_BUCKET}/${TARGET_KEY}" \
-            --file dist/legacy-latest-after.json \
-            --remote
+          r2_endpoint="https://${CLOUDFLARE_R2_ACCOUNT_ID}.r2.cloudflarestorage.com"
+          aws s3 cp "s3://${R2_BUCKET}/${TARGET_KEY}" dist/legacy-latest-after.json \
+            --endpoint-url "$r2_endpoint"
           node <<'NODE'
           const fs = require('node:fs')
 
