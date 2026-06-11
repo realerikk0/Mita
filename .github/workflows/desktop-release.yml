@@ -257,6 +257,15 @@ jobs:
       ALIYUN_REGION: ${{ vars.ALIYUN_REGION || 'cn-hangzhou' }}
       ALIYUN_CDN_DOMAIN: ${{ vars.ALIYUN_CDN_DOMAIN || 'static.mitapp.cn' }}
       UPDATES_CDN_BASE_URL: ${{ vars.UPDATES_CDN_BASE_URL || 'https://static.mitapp.cn' }}
+      AWS_ACCESS_KEY_ID: ${{ secrets.CLOUDFLARE_R2_ACCESS_KEY_ID }}
+      AWS_SECRET_ACCESS_KEY: ${{ secrets.CLOUDFLARE_R2_SECRET_ACCESS_KEY }}
+      AWS_DEFAULT_REGION: auto
+      CLOUDFLARE_R2_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_R2_ACCOUNT_ID }}
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+      CLOUDFLARE_ZONE_ID: ${{ secrets.CLOUDFLARE_ZONE_ID }}
+      LEGACY_UPDATER_R2_BUCKET: ${{ secrets.CLOUDFLARE_R2_BUCKET }}
+      LEGACY_UPDATER_OBJECT_KEY: ${{ vars.LEGACY_UPDATER_OBJECT_KEY || 'mita/latest.json' }}
+      LEGACY_UPDATER_PUBLIC_URL: ${{ vars.LEGACY_UPDATER_PUBLIC_URL || 'https://updates.mita.so/mita/latest.json' }}
     steps:
       - name: Derive version
         id: version
@@ -472,6 +481,131 @@ jobs:
             echo "Verifying $url"
             curl -fsSI --retry 5 --retry-delay 5 "$url"
           done
+
+      - name: Sync legacy updater manifest to Cloudflare R2
+        shell: bash
+        env:
+          VERSION: ${{ steps.version.outputs.version }}
+        run: |
+          set -euo pipefail
+
+          required=(
+            AWS_ACCESS_KEY_ID
+            AWS_SECRET_ACCESS_KEY
+            CLOUDFLARE_R2_ACCOUNT_ID
+            LEGACY_UPDATER_R2_BUCKET
+            LEGACY_UPDATER_OBJECT_KEY
+            VERSION
+          )
+          for name in "${required[@]}"; do
+            if [ -z "${!name:-}" ]; then
+              echo "$name is required for legacy updater sync" >&2
+              exit 1
+            fi
+          done
+          aws --version
+
+          node <<'NODE'
+          const fs = require('node:fs')
+
+          const manifest = JSON.parse(fs.readFileSync('dist/updater/latest.json', 'utf8'))
+          const expected = process.env.VERSION
+          if (manifest.version !== expected) {
+            throw new Error(`Expected updater manifest version ${expected}, got ${manifest.version}`)
+          }
+          for (const platform of ['darwin-aarch64', 'darwin-x86_64', 'windows-x86_64']) {
+            const entry = manifest.platforms?.[platform]
+            if (!entry?.url || !entry?.signature) {
+              throw new Error(`Missing updater url/signature for ${platform}`)
+            }
+          }
+          console.log(`Validated updater manifest ${manifest.version}`)
+          NODE
+
+          mkdir -p dist/legacy-updater
+          r2_endpoint="https://${CLOUDFLARE_R2_ACCOUNT_ID}.r2.cloudflarestorage.com"
+          backup="dist/legacy-updater/latest-backup-$(date -u +%Y%m%dT%H%M%SZ).json"
+
+          aws s3 cp "s3://${LEGACY_UPDATER_R2_BUCKET}/${LEGACY_UPDATER_OBJECT_KEY}" "$backup" \
+            --endpoint-url "$r2_endpoint"
+          aws s3 cp dist/updater/latest.json "s3://${LEGACY_UPDATER_R2_BUCKET}/${LEGACY_UPDATER_OBJECT_KEY}" \
+            --endpoint-url "$r2_endpoint" \
+            --content-type "application/json" \
+            --cache-control "public, max-age=60, must-revalidate"
+
+          aws s3 cp "s3://${LEGACY_UPDATER_R2_BUCKET}/${LEGACY_UPDATER_OBJECT_KEY}" dist/legacy-updater/latest-after.json \
+            --endpoint-url "$r2_endpoint"
+          cmp -s dist/updater/latest.json dist/legacy-updater/latest-after.json
+
+      - name: Refresh legacy updater cache
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          required=(
+            CLOUDFLARE_API_TOKEN
+            CLOUDFLARE_ZONE_ID
+            LEGACY_UPDATER_PUBLIC_URL
+          )
+          for name in "${required[@]}"; do
+            if [ -z "${!name:-}" ]; then
+              echo "$name is required for legacy updater cache purge" >&2
+              exit 1
+            fi
+          done
+
+          curl -fsS -X POST "https://api.cloudflare.com/client/v4/zones/${CLOUDFLARE_ZONE_ID}/purge_cache" \
+            -H "Authorization: Bearer ${CLOUDFLARE_API_TOKEN}" \
+            -H "Content-Type: application/json" \
+            --data "{\"files\":[\"${LEGACY_UPDATER_PUBLIC_URL}\"]}" \
+            -o dist/legacy-updater/cache-purge.json
+
+          node <<'NODE'
+          const fs = require('node:fs')
+
+          const response = JSON.parse(fs.readFileSync('dist/legacy-updater/cache-purge.json', 'utf8'))
+          if (!response.success) {
+            throw new Error(`Cloudflare cache purge failed: ${JSON.stringify(response.errors || response)}`)
+          }
+          console.log('Purged legacy updater cache')
+          NODE
+
+      - name: Verify legacy updater URL
+        shell: bash
+        env:
+          VERSION: ${{ steps.version.outputs.version }}
+        run: |
+          set -euo pipefail
+
+          for attempt in $(seq 1 10); do
+            curl -fsSL "$LEGACY_UPDATER_PUBLIC_URL" \
+              -o dist/legacy-updater/public-latest.json
+
+            if node <<'NODE'
+          const fs = require('node:fs')
+
+          const source = fs.readFileSync('dist/updater/latest.json')
+          const publicManifestBytes = fs.readFileSync('dist/legacy-updater/public-latest.json')
+          const publicManifest = JSON.parse(publicManifestBytes.toString('utf8'))
+          const expected = process.env.VERSION
+          if (publicManifest.version !== expected) {
+            throw new Error(`Legacy updater URL has version ${publicManifest.version}, expected ${expected}`)
+          }
+          if (!source.equals(publicManifestBytes)) {
+            throw new Error('Legacy updater URL does not match the Aliyun updater manifest')
+          }
+          console.log(`Verified legacy updater manifest ${publicManifest.version}`)
+          NODE
+            then
+              exit 0
+            fi
+
+            echo "Legacy updater URL is not fresh yet, retrying (${attempt}/10)"
+            sleep 6
+          done
+
+          echo "Legacy updater URL did not match after retries" >&2
+          exit 1
 
   release:
     name: Create draft release
