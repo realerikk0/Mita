@@ -1,0 +1,153 @@
+name: Sync Legacy Updater Manifest
+
+on:
+  workflow_dispatch:
+    inputs:
+      source_url:
+        description: "Source updater manifest URL"
+        required: true
+        default: "https://static.mitapp.cn/mita/latest.json"
+      public_url:
+        description: "Public URL to verify after upload"
+        required: true
+        default: "https://updates.mita.so/mita/latest.json"
+      target_key:
+        description: "R2 object key to overwrite"
+        required: true
+        default: "mita/latest.json"
+      expected_version:
+        description: "Expected manifest version"
+        required: true
+        default: "0.6.624"
+
+jobs:
+  sync:
+    name: Sync legacy updater manifest
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    env:
+      CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_R2_ACCOUNT_ID }}
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+      CLOUDFLARE_ZONE_ID: ${{ secrets.CLOUDFLARE_ZONE_ID }}
+      R2_BUCKET: ${{ secrets.CLOUDFLARE_R2_BUCKET }}
+      SOURCE_URL: ${{ inputs.source_url }}
+      PUBLIC_URL: ${{ inputs.public_url }}
+      TARGET_KEY: ${{ inputs.target_key }}
+      EXPECTED_VERSION: ${{ inputs.expected_version }}
+      WRANGLER_VERSION: "4.2.0"
+    steps:
+      - name: Validate configuration
+        shell: bash
+        run: |
+          set -euo pipefail
+          required=(
+            CLOUDFLARE_ACCOUNT_ID
+            CLOUDFLARE_API_TOKEN
+            R2_BUCKET
+            SOURCE_URL
+            PUBLIC_URL
+            TARGET_KEY
+            EXPECTED_VERSION
+          )
+          for name in "${required[@]}"; do
+            if [ -z "${!name:-}" ]; then
+              echo "$name is required" >&2
+              exit 1
+            fi
+          done
+
+      - name: Download and validate source manifest
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p dist
+          curl -fsSL --retry 5 --retry-delay 3 "$SOURCE_URL" -o dist/latest.json
+          node <<'NODE'
+          const fs = require('node:fs')
+
+          const manifest = JSON.parse(fs.readFileSync('dist/latest.json', 'utf8'))
+          const expected = process.env.EXPECTED_VERSION
+          if (manifest.version !== expected) {
+            throw new Error(`Expected version ${expected}, got ${manifest.version}`)
+          }
+          for (const platform of ['darwin-aarch64', 'darwin-x86_64', 'windows-x86_64']) {
+            const entry = manifest.platforms?.[platform]
+            if (!entry?.url || !entry?.signature) {
+              throw new Error(`Missing updater url/signature for ${platform}`)
+            }
+          }
+          console.log(`Validated updater manifest ${manifest.version}`)
+          NODE
+
+      - name: Back up current legacy manifest
+        shell: bash
+        run: |
+          set -euo pipefail
+          backup="dist/legacy-latest-backup-$(date -u +%Y%m%dT%H%M%SZ).json"
+          npx --yes "wrangler@${WRANGLER_VERSION}" r2 object get "${R2_BUCKET}/${TARGET_KEY}" \
+            --file "$backup" \
+            --remote
+          echo "Backed up ${R2_BUCKET}/${TARGET_KEY} to ${backup}"
+
+      - name: Upload legacy manifest to R2
+        shell: bash
+        run: |
+          set -euo pipefail
+          npx --yes "wrangler@${WRANGLER_VERSION}" r2 object put "${R2_BUCKET}/${TARGET_KEY}" \
+            --file dist/latest.json \
+            --content-type "application/json" \
+            --cache-control "public, max-age=60, must-revalidate" \
+            --remote
+
+      - name: Verify R2 object
+        shell: bash
+        run: |
+          set -euo pipefail
+          npx --yes "wrangler@${WRANGLER_VERSION}" r2 object get "${R2_BUCKET}/${TARGET_KEY}" \
+            --file dist/legacy-latest-after.json \
+            --remote
+          node <<'NODE'
+          const fs = require('node:fs')
+
+          const manifest = JSON.parse(fs.readFileSync('dist/legacy-latest-after.json', 'utf8'))
+          const expected = process.env.EXPECTED_VERSION
+          if (manifest.version !== expected) {
+            throw new Error(`R2 object still has version ${manifest.version}, expected ${expected}`)
+          }
+          console.log(`Verified R2 updater manifest ${manifest.version}`)
+          NODE
+
+      - name: Purge Cloudflare cache
+        if: env.CLOUDFLARE_ZONE_ID != ''
+        shell: bash
+        run: |
+          set -euo pipefail
+          curl -fsS -X POST "https://api.cloudflare.com/client/v4/zones/${CLOUDFLARE_ZONE_ID}/purge_cache" \
+            -H "Authorization: Bearer ${CLOUDFLARE_API_TOKEN}" \
+            -H "Content-Type: application/json" \
+            --data "{\"files\":[\"${PUBLIC_URL}\"]}"
+
+      - name: Verify public legacy URL
+        shell: bash
+        run: |
+          set -euo pipefail
+          curl -fsSL --retry 10 --retry-delay 6 "$PUBLIC_URL" -o dist/public-latest.json
+          node <<'NODE'
+          const fs = require('node:fs')
+
+          const manifest = JSON.parse(fs.readFileSync('dist/public-latest.json', 'utf8'))
+          const expected = process.env.EXPECTED_VERSION
+          if (manifest.version !== expected) {
+            throw new Error(`Public legacy URL still has version ${manifest.version}, expected ${expected}`)
+          }
+          console.log(`Verified public updater manifest ${manifest.version}`)
+          NODE
+
+      - name: Upload backup artifact
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: legacy-updater-sync
+          if-no-files-found: ignore
+          path: dist/*.json
