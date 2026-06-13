@@ -130,7 +130,7 @@ endif
 	yarn build:icon
 	yarn build:mlx-server
 	bash ./scripts/prepare-tauri-test-resources.sh
-	yarn build:cli
+	node ./scripts/build-cli.mjs --release --cli-only
 	cargo test --manifest-path src-tauri/Cargo.toml --no-default-features --features test-tauri -- --test-threads=1
 	cargo test --manifest-path src-tauri/plugins/tauri-plugin-hardware/Cargo.toml
 	cargo test --manifest-path src-tauri/plugins/tauri-plugin-llamacpp/Cargo.toml

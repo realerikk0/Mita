@@ -4,6 +4,7 @@ import { spawnSync } from 'node:child_process'
 
 const root = process.cwd()
 const isDev = process.argv.includes('--dev')
+const cliOnly = process.argv.includes('--cli-only')
 const makeTarget = isDev ? 'build-cli-dev' : 'build-cli'
 
 function run(command, args, options = {}) {
@@ -23,10 +24,12 @@ function run(command, args, options = {}) {
   }
 }
 
-if (process.platform !== 'win32') {
+if (process.platform !== 'win32' && !cliOnly) {
   run('make', [makeTarget])
   process.exit(0)
 }
+
+const cliBinaryName = process.platform === 'win32' ? 'mita-cli.exe' : 'mita-cli'
 
 const cargoArgs = [
   'build',
@@ -45,11 +48,11 @@ if (!isDev) {
 run('cargo', cargoArgs)
 
 const profile = isDev ? 'debug' : 'release'
-const source = join(root, 'src-tauri', 'target', profile, 'mita-cli.exe')
+const source = join(root, 'src-tauri', 'target', profile, cliBinaryName)
 const destinationDir = join(root, 'src-tauri', 'resources', 'bin')
-const destination = join(destinationDir, 'mita-cli.exe')
+const destination = join(destinationDir, cliBinaryName)
 
 mkdirSync(destinationDir, { recursive: true })
 copyFileSync(source, destination)
 
-console.log(`Prepared Windows Mita CLI: ${destination}`)
+console.log(`Prepared Mita CLI: ${destination}`)
