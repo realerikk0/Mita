@@ -33,7 +33,7 @@ const SettingsMenu = () => {
   const matches = useMatches()
   const navigate = useNavigate()
 
-  const { providers, addProvider } = useModelProvider()
+  const { providers, selectedProvider, addProvider } = useModelProvider()
 
   const createProvider = useCallback(
     (name: string) => {
@@ -134,6 +134,12 @@ const SettingsMenu = () => {
     },
   ]
 
+  const currentProviderBadge = (
+    <span className="ml-auto shrink-0 rounded-full bg-primary/10 px-1.5 py-0.5 text-[10px] font-medium leading-none text-primary">
+      当前
+    </span>
+  )
+
   return (
     <>
       <div className="h-full w-58 shrink-0 px-1.5 flex overflow-auto">
@@ -219,6 +225,8 @@ const SettingsMenu = () => {
                     <div className="truncate flex-1">
                       <span>{getProviderTitle(provider.provider)}</span>
                     </div>
+                    {provider.provider === selectedProvider &&
+                      currentProviderBadge}
                   </div>
                 )
               })}
@@ -267,6 +275,8 @@ const SettingsMenu = () => {
                           <div className="truncate flex-1">
                             <span>{getProviderTitle(provider.provider)}</span>
                           </div>
+                          {provider.provider === selectedProvider &&
+                            currentProviderBadge}
                         </div>
                       )
                     })}

@@ -6,6 +6,7 @@ import { getChatModelFamilySortRank } from '@/lib/chat-model-sort'
 import { getModelDisplayName } from '@/lib/utils'
 import { useModelProvider } from '@/hooks/useModelProvider'
 import { useFavoriteModel } from '@/hooks/useFavoriteModel'
+import { useProviderBalance } from '@/hooks/useProviderBalance'
 
 // Define basic types to avoid missing declarations
 type ModelProvider = {
@@ -69,6 +70,15 @@ vi.mock('@tanstack/react-router', () => ({
 vi.mock('@/hooks/useFavoriteModel', () => ({
   useFavoriteModel: vi.fn(() => ({
     favoriteModels: [],
+  })),
+}))
+
+vi.mock('@/hooks/useProviderBalance', () => ({
+  useProviderBalance: vi.fn(() => ({
+    balance: null,
+    loading: false,
+    error: null,
+    refetch: vi.fn(),
   })),
 }))
 
@@ -182,6 +192,12 @@ describe('DropdownModelProvider - Display Name Integration', () => {
 
   beforeEach(() => {
     vi.clearAllMocks()
+    vi.mocked(useProviderBalance).mockReturnValue({
+      balance: null,
+      loading: false,
+      error: null,
+      refetch: vi.fn(),
+    })
 
     // Reset the mock for each test
     vi.mocked(useModelProvider).mockReturnValue({
@@ -210,6 +226,25 @@ describe('DropdownModelProvider - Display Name Integration', () => {
     expect(screen.getAllByText('Custom Model 1')).toHaveLength(2) // One in trigger, one in dropdown
     // Model ID should not be visible as text (it's only in title attributes)
     expect(screen.queryByDisplayValue('model1.gguf')).not.toBeInTheDocument()
+  })
+
+  it('does not show provider balance in the model selector trigger', () => {
+    vi.mocked(useProviderBalance).mockReturnValue({
+      balance: {
+        state: 'supported',
+        provider: 'llamacpp',
+        unit: 'usd',
+        fetchedAt: 1781260326,
+        accountBalance: { available: 77.13 },
+      },
+      loading: false,
+      error: null,
+      refetch: vi.fn(),
+    })
+
+    render(<DropdownModelProvider />)
+
+    expect(screen.getByTestId('popover-trigger')).not.toHaveTextContent('余额')
   })
 
   it('should fall back to model ID when no displayName is set', () => {

@@ -12,6 +12,11 @@ import { fetch as fetchTauri } from '@tauri-apps/plugin-http'
 import { DefaultProvidersService } from './default'
 import { getModelCapabilities } from '@/lib/models'
 import type { ProviderModelDescriptor } from '@/lib/provider-models'
+import type {
+  ProviderBalanceLinks,
+  ProviderBalanceStatus,
+  ProviderBalanceTotals,
+} from './types'
 import { providerRemoteApiKeyChain } from '@/lib/provider-api-keys'
 import {
   parseProviderErrorResponse,
@@ -89,6 +94,147 @@ function providerModelDescriptorsFromArray(
   return values
     .map(providerModelDescriptorFromUnknown)
     .filter((model): model is ProviderModelDescriptor => Boolean(model))
+}
+
+function providerSettingValue(
+  provider: ModelProvider,
+  keys: string[]
+): string {
+  const setting = provider.settings?.find((item) => keys.includes(item.key))
+  const value = setting?.controller_props?.value
+  return typeof value === 'string' ? value.trim() : ''
+}
+
+function ensureUrlProtocol(value: string) {
+  const trimmed = value.trim().replace(/\/+$/, '')
+  if (!trimmed) return ''
+  if (/^https?:\/\//i.test(trimmed)) return trimmed
+  return `https://${trimmed}`
+}
+
+function joinUrl(baseUrl: string, path: string) {
+  return `${ensureUrlProtocol(baseUrl)}${path.startsWith('/') ? path : `/${path}`}`
+}
+
+function balanceBaseUrl(provider: ModelProvider) {
+  return ensureUrlProtocol(provider.base_url ?? '')
+}
+
+function biyuanBalanceUrl(provider: ModelProvider) {
+  const baseUrl = balanceBaseUrl(provider)
+  if (!baseUrl) return ''
+  if (/\/v1$/i.test(baseUrl)) return joinUrl(baseUrl, '/balance')
+  return joinUrl(baseUrl, '/v1/balance')
+}
+
+function deepSeekBalanceUrl(provider: ModelProvider) {
+  const baseUrl = balanceBaseUrl(provider).replace(/\/v1$/i, '')
+  return joinUrl(baseUrl, '/user/balance')
+}
+
+function asRecord(value: unknown): Record<string, unknown> {
+  return value && typeof value === 'object' ? value as Record<string, unknown> : {}
+}
+
+function numericValue(value: unknown): number | undefined {
+  if (typeof value === 'number' && Number.isFinite(value)) return value
+  if (typeof value === 'string' && value.trim()) {
+    const parsed = Number(value)
+    if (Number.isFinite(parsed)) return parsed
+  }
+  return undefined
+}
+
+function totalsFromRecord(
+  record: Record<string, unknown>,
+  keys: { available: string; used?: string; total?: string }
+): ProviderBalanceTotals | undefined {
+  const available = numericValue(record[keys.available])
+  if (available === undefined) return undefined
+  const used = keys.used ? numericValue(record[keys.used]) : undefined
+  const total = keys.total ? numericValue(record[keys.total]) : undefined
+  return {
+    available,
+    ...(used !== undefined ? { used } : {}),
+    ...(total !== undefined ? { total } : {}),
+  }
+}
+
+function linksFromUnknown(value: unknown): ProviderBalanceLinks | undefined {
+  const record = asRecord(value)
+  const links: ProviderBalanceLinks = {}
+  for (const key of ['billing', 'topup', 'tokens', 'dashboard'] as const) {
+    if (typeof record[key] === 'string' && record[key].trim()) {
+      links[key] = record[key].trim()
+    }
+  }
+  return Object.keys(links).length > 0 ? links : undefined
+}
+
+function tokenLimitFromBiyuan(data: Record<string, unknown>) {
+  const available = numericValue(data.total_available)
+  const used = numericValue(data.total_used)
+  const total = numericValue(data.total_granted)
+  if (available === undefined && used === undefined && total === undefined) {
+    return undefined
+  }
+  return {
+    available: available ?? 0,
+    ...(used !== undefined ? { used } : {}),
+    ...(total !== undefined ? { total } : {}),
+    unlimited: data.unlimited_quota === true,
+    status: numericValue(data.token_status),
+    expiresAt: numericValue(data.expires_at),
+    modelLimitsEnabled: data.model_limits_enabled === true,
+    modelLimits: asRecord(data.model_limits) as Record<string, boolean>,
+  }
+}
+
+function isBiyuanProvider(provider: ModelProvider) {
+  const baseUrl = provider.base_url ?? ''
+  return (
+    provider.provider === 'jingxing' ||
+    provider.provider === 'biyuan' ||
+    baseUrl.includes('api.biyuan.ai') ||
+    baseUrl.includes('api.jingxing')
+  )
+}
+
+function isDeepSeekProvider(provider: ModelProvider) {
+  return (
+    provider.provider === 'deepseek' ||
+    (provider.base_url ?? '').includes('api.deepseek.com')
+  )
+}
+
+function providerConsoleLink(providerName: string) {
+  switch (providerName) {
+    case 'jingxing':
+    case 'biyuan':
+      return 'https://biyuan.ai'
+    case 'openai':
+      return 'https://platform.openai.com/usage'
+    case 'azure':
+      return 'https://oai.azure.com/'
+    case 'gemini':
+      return 'https://aistudio.google.com/'
+    case 'mistral':
+      return 'https://console.mistral.ai/usage/'
+    case 'groq':
+      return 'https://console.groq.com/dashboard/usage'
+    case 'huggingface':
+      return 'https://huggingface.co/settings/billing'
+    case 'nvidia':
+      return 'https://build.nvidia.com/'
+    case 'minimax':
+      return 'https://platform.minimaxi.com/user-center/basic-information/balance'
+    case 'anthropic':
+      return 'https://console.anthropic.com/settings/billing'
+    case 'xai':
+      return 'https://console.x.ai/'
+    default:
+      return undefined
+  }
 }
 
 export class TauriProvidersService extends DefaultProvidersService {
@@ -357,6 +503,334 @@ export class TauriProvidersService extends DefaultProvidersService {
       throw new Error(
         `Unexpected error while fetching models from ${provider.provider}: ${errorMessage}`
       )
+    }
+  }
+
+  private async fetchBalanceJson(
+    provider: ModelProvider,
+    url: string,
+    apiKey: string,
+    extraHeaders?: Record<string, string>
+  ): Promise<ProviderBalanceStatus | { json: unknown }> {
+    const headers: Record<string, string> = {
+      'Content-Type': 'application/json',
+      Authorization: `Bearer ${apiKey}`,
+      ...extraHeaders,
+    }
+
+    if (apiKey) {
+      headers['x-api-key'] = apiKey
+    }
+
+    try {
+      const response = await fetchTauri(url, {
+        method: 'GET',
+        headers,
+      })
+
+      if (!response.ok) {
+        if (response.status === 401) {
+          return {
+            state: 'error',
+            provider: provider.provider,
+            status: 401,
+            message: 'API key is missing or invalid.',
+          }
+        }
+        if (response.status === 403) {
+          return {
+            state: 'error',
+            provider: provider.provider,
+            status: 403,
+            message: 'The account is forbidden or the key lacks permission.',
+          }
+        }
+        if (response.status === 429) {
+          return {
+            state: 'error',
+            provider: provider.provider,
+            status: 429,
+            retryable: true,
+            message: 'Balance lookup is rate limited.',
+          }
+        }
+        return {
+          state: 'error',
+          provider: provider.provider,
+          status: response.status,
+          retryable: response.status >= 500,
+          message: `Balance lookup failed: ${response.status} ${response.statusText}`,
+        }
+      }
+
+      return { json: await response.json() }
+    } catch (error) {
+      return {
+        state: 'error',
+        provider: provider.provider,
+        retryable: true,
+        message: errorMessageFromUnknown(error),
+      }
+    }
+  }
+
+  async fetchProviderBalance(
+    provider: ModelProvider
+  ): Promise<ProviderBalanceStatus> {
+    const primaryKey = providerRemoteApiKeyChain(provider)[0]?.trim()
+
+    if (isBiyuanProvider(provider)) {
+      if (!primaryKey) {
+        return {
+          state: 'needs_extra_auth',
+          provider: provider.provider,
+          reason: 'Enter a Biyuan API key to query account balance.',
+          required: ['api key'],
+          link: providerConsoleLink('biyuan'),
+        }
+      }
+
+      const result = await this.fetchBalanceJson(
+        provider,
+        biyuanBalanceUrl(provider),
+        primaryKey
+      )
+      if ('state' in result) return result
+
+      const data = asRecord(result.json)
+      const account = totalsFromRecord(asRecord(data.account), {
+        available: 'total_available',
+        used: 'total_used',
+        total: 'total_granted',
+      })
+
+      return {
+        state: 'supported',
+        provider: provider.provider,
+        unit: 'quota',
+        fetchedAt: numericValue(data.fetched_at) ?? Math.floor(Date.now() / 1000),
+        ...(account ? { accountBalance: account } : {}),
+        tokenLimit: tokenLimitFromBiyuan(data),
+        ...(account
+          ? { converted: { usdAvailable: account.available / 500000 } }
+          : {}),
+        links: linksFromUnknown(data.links),
+        raw: result.json,
+      }
+    }
+
+    if (provider.provider === 'openrouter') {
+      if (!primaryKey) {
+        return {
+          state: 'needs_extra_auth',
+          provider: provider.provider,
+          reason: 'Enter an OpenRouter API key to query credits.',
+          required: ['api key'],
+          link: 'https://openrouter.ai/settings/keys',
+        }
+      }
+
+      const result = await this.fetchBalanceJson(
+        provider,
+        joinUrl(balanceBaseUrl(provider), '/credits'),
+        primaryKey
+      )
+      if ('state' in result) return result
+
+      const data = asRecord(asRecord(result.json).data)
+      const total = numericValue(data.total_credits)
+      const used = numericValue(data.total_usage)
+      if (total === undefined || used === undefined) {
+        return {
+          state: 'error',
+          provider: provider.provider,
+          message: 'OpenRouter credits response did not include total_credits and total_usage.',
+        }
+      }
+
+      return {
+        state: 'supported',
+        provider: provider.provider,
+        unit: 'usd',
+        currency: 'USD',
+        fetchedAt: Math.floor(Date.now() / 1000),
+        accountBalance: {
+          available: total - used,
+          used,
+          total,
+        },
+        links: {
+          billing: 'https://openrouter.ai/settings/credits',
+          topup: 'https://openrouter.ai/settings/credits',
+        },
+        raw: result.json,
+      }
+    }
+
+    if (isDeepSeekProvider(provider)) {
+      if (!primaryKey) {
+        return {
+          state: 'needs_extra_auth',
+          provider: provider.provider,
+          reason: 'Enter a DeepSeek API key to query balance.',
+          required: ['api key'],
+          link: 'https://platform.deepseek.com/api_keys',
+        }
+      }
+
+      const result = await this.fetchBalanceJson(
+        provider,
+        deepSeekBalanceUrl(provider),
+        primaryKey
+      )
+      if ('state' in result) return result
+
+      const balanceInfos = asRecord(result.json).balance_infos
+      const balances = Array.isArray(balanceInfos) ? balanceInfos.map(asRecord) : []
+      const preferred =
+        balances.find((item) => item.currency === 'CNY') ?? balances[0]
+      const available = preferred
+        ? numericValue(preferred.total_balance)
+        : undefined
+
+      if (!preferred || available === undefined) {
+        return {
+          state: 'error',
+          provider: provider.provider,
+          message: 'DeepSeek balance response did not include balance_infos.',
+        }
+      }
+
+      return {
+        state: 'supported',
+        provider: provider.provider,
+        unit: 'currency',
+        currency:
+          typeof preferred.currency === 'string' ? preferred.currency : 'CNY',
+        fetchedAt: Math.floor(Date.now() / 1000),
+        accountBalance: {
+          available,
+          total: available,
+        },
+        links: {
+          billing: 'https://platform.deepseek.com/usage',
+          topup: 'https://platform.deepseek.com/top_up',
+        },
+        raw: result.json,
+      }
+    }
+
+    if (provider.provider === 'xai') {
+      const managementKey = providerSettingValue(provider, [
+        'management-key',
+        'xai-management-key',
+      ])
+      const teamId = providerSettingValue(provider, [
+        'team-id',
+        'xai-team-id',
+      ])
+
+      if (!managementKey || !teamId) {
+        return {
+          state: 'needs_extra_auth',
+          provider: provider.provider,
+          reason: 'xAI billing lookup requires a management key and team id.',
+          required: ['management key', 'team id'],
+          link: providerConsoleLink('xai'),
+        }
+      }
+
+      const result = await this.fetchBalanceJson(
+        provider,
+        `https://management-api.x.ai/v1/billing/teams/${encodeURIComponent(teamId)}/prepaid/balance`,
+        managementKey
+      )
+      if ('state' in result) return result
+
+      const data = asRecord(result.json)
+      const nested = asRecord(data.balance)
+      const available =
+        numericValue(data.balance) ??
+        numericValue(data.amount) ??
+        numericValue(data.available_balance) ??
+        numericValue(nested.amount) ??
+        numericValue(nested.available)
+
+      if (available === undefined) {
+        return {
+          state: 'error',
+          provider: provider.provider,
+          message: 'xAI balance response did not include a supported balance field.',
+        }
+      }
+
+      return {
+        state: 'supported',
+        provider: provider.provider,
+        unit: 'currency',
+        currency:
+          typeof data.currency === 'string'
+            ? data.currency
+            : typeof nested.currency === 'string'
+              ? nested.currency
+              : 'USD',
+        fetchedAt: Math.floor(Date.now() / 1000),
+        accountBalance: { available, total: available },
+        links: { billing: providerConsoleLink('xai') },
+        raw: result.json,
+      }
+    }
+
+    if (provider.provider === 'anthropic') {
+      const adminKey = providerSettingValue(provider, [
+        'admin-api-key',
+        'anthropic-admin-api-key',
+      ])
+      return {
+        state: adminKey ? 'unsupported' : 'needs_extra_auth',
+        provider: provider.provider,
+        reason: adminKey
+          ? 'Anthropic exposes admin usage and cost reports, not a real-time account balance.'
+          : 'Anthropic usage and cost reports require an Admin API key.',
+        ...(adminKey ? {} : { required: ['admin api key'] }),
+        link: providerConsoleLink('anthropic'),
+      } as ProviderBalanceStatus
+    }
+
+    if (provider.provider === 'openai' || provider.provider === 'azure') {
+      return {
+        state: 'unsupported',
+        provider: provider.provider,
+        reason:
+          provider.provider === 'openai'
+            ? 'OpenAI does not expose a reliable balance lookup through ordinary model API keys.'
+            : 'Azure OpenAI costs are available through Azure billing, not the Azure OpenAI model key.',
+        link: providerConsoleLink(provider.provider),
+      }
+    }
+
+    const unsupportedLinks = new Set([
+      'gemini',
+      'mistral',
+      'groq',
+      'huggingface',
+      'nvidia',
+      'minimax',
+    ])
+
+    if (unsupportedLinks.has(provider.provider)) {
+      return {
+        state: 'unsupported',
+        provider: provider.provider,
+        reason: 'This provider does not support automatic balance lookup with the configured model API key.',
+        link: providerConsoleLink(provider.provider),
+      }
+    }
+
+    return {
+      state: 'unsupported',
+      provider: provider.provider,
+      reason: 'Automatic balance lookup is not configured for this provider.',
     }
   }
 

@@ -40,6 +40,10 @@ import { useSearchDialog } from '@/hooks/useSearchDialog'
 import { useProjectDialog } from '@/hooks/useProjectDialog'
 import { PlatformShortcuts, ShortcutAction } from '@/lib/shortcuts'
 import { startNewAgentChat, startNewChat, startNewMitaTeams } from '@/lib/new-chat'
+import { useModelProvider } from '@/hooks/useModelProvider'
+import { useProviderBalance } from '@/hooks/useProviderBalance'
+import { getProviderBalanceBadgeLabel } from '@/lib/provider-balance-display'
+import { providerHasRemoteApiKeys } from '@/lib/provider-api-keys'
 
 type AnimatedIconHandle =
   | SearchIconHandle
@@ -164,9 +168,11 @@ export const getNavMainItems = (
 function NavMainItemWithAnimatedIcon({
   item,
   label,
+  endAdornment,
 }: {
   item: NavMainItem
   label: string
+  endAdornment?: React.ReactNode
 }) {
   const iconRef = useRef<AnimatedIconHandle>(null)
   const AnimatedIcon = item.animatedIcon!
@@ -176,6 +182,7 @@ function NavMainItemWithAnimatedIcon({
       <AnimatedIcon ref={iconRef} className="text-foreground/70" size={16} />
       <span>{label}</span>
       {item.shortcut}
+      {endAdornment}
     </>
   )
 
@@ -201,6 +208,17 @@ export function NavMain() {
     select: (state) => state.location.pathname,
   })
   const { addFolder } = useThreadManagement()
+  const { selectedProvider, getProviderByName } = useModelProvider()
+  const currentProvider = selectedProvider
+    ? getProviderByName(selectedProvider)
+    : undefined
+  const { balance: currentProviderBalance } = useProviderBalance(
+    currentProvider,
+    Boolean(currentProvider && providerHasRemoteApiKeys(currentProvider))
+  )
+  const settingsBalanceLabel = getProviderBalanceBadgeLabel(
+    currentProviderBalance
+  )
   const { open: searchOpen, setOpen: setSearchOpen } = useSearchDialog()
   const { open: projectDialogOpen, setOpen: setProjectDialogOpen } =
     useProjectDialog()
@@ -239,12 +257,20 @@ export function NavMain() {
     <>
       <SidebarMenu>
         {navMainItems.map((item) => {
+          const endAdornment =
+            item.title === 'common:settings' && settingsBalanceLabel ? (
+              <span className="ml-auto shrink-0 rounded-full bg-secondary px-1.5 py-0.5 text-[11px] font-medium leading-none text-muted-foreground">
+                {settingsBalanceLabel}
+              </span>
+            ) : undefined
+
           if (item.animatedIcon) {
             return (
               <NavMainItemWithAnimatedIcon
                 key={item.title}
                 item={item}
                 label={t(item.title)}
+                endAdornment={endAdornment}
               />
             )
           }
@@ -262,12 +288,14 @@ export function NavMain() {
                     {Icon && <Icon className="text-foreground/70" />}
                     <span>{t(item.title)}</span>
                     {item.shortcut}
+                    {endAdornment}
                   </Link>
                 ) : (
                   <>
                     {Icon && <Icon className="text-foreground/70" />}
                     <span>{t(item.title)}</span>
                     {item.shortcut}
+                    {endAdornment}
                   </>
                 )}
               </SidebarMenuButton>

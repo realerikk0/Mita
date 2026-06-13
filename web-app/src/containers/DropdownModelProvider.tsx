@@ -490,9 +490,10 @@ const DropdownModelProvider = memo(function DropdownModelProvider({
     ? getModelBy(selectedModel?.id)
     : undefined
 
+  const provider = getProviderByName(selectedProvider)
+
   if (!providers.length) return null
 
-  const provider = getProviderByName(selectedProvider)
   const selectedModelLogoProvider =
     provider && selectedModel?.id
       ? { provider: getModelLogoProvider(selectedModel.id, provider.provider) }

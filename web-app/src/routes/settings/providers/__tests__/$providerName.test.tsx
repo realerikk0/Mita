@@ -97,6 +97,11 @@ const h = vi.hoisted(() => {
     getProviders: vi.fn().mockResolvedValue([]),
     updateSettings: vi.fn().mockResolvedValue(undefined),
     fetchModelsFromProvider: vi.fn().mockResolvedValue(['gpt-4', 'gpt-5']),
+    fetchProviderBalance: vi.fn().mockResolvedValue({
+      state: 'unsupported',
+      provider: 'openai',
+      reason: 'not supported in test',
+    }),
     fetch: vi.fn(() =>
       vi.fn().mockResolvedValue({ ok: true, status: 200, statusText: 'OK' })
     ),
@@ -172,6 +177,12 @@ vi.mock('sonner', () => ({
     error: (...a: any[]) => h.toastError(...a),
     info: (...a: any[]) => h.toastInfo(...a),
   },
+}))
+
+vi.mock('@/components/ProviderBalanceCard', () => ({
+  ProviderBalanceCard: ({ provider }: any) => (
+    <div data-testid="provider-balance-card">{provider.provider}</div>
+  ),
 }))
 
 vi.mock('@/i18n/react-i18next-compat', () => ({
@@ -395,6 +406,11 @@ beforeEach(() => {
   h.providersSvc.getProviders = vi.fn().mockResolvedValue([])
   h.providersSvc.updateSettings = vi.fn().mockResolvedValue(undefined)
   h.providersSvc.fetchModelsFromProvider = vi.fn().mockResolvedValue(['gpt-4', 'gpt-5'])
+  h.providersSvc.fetchProviderBalance = vi.fn().mockResolvedValue({
+    state: 'unsupported',
+    provider: 'openai',
+    reason: 'not supported in test',
+  })
   h.providersSvc.fetch = vi.fn(() =>
     vi.fn().mockResolvedValue({ ok: true, status: 200, statusText: 'OK' })
   )

@@ -182,6 +182,24 @@ describe('SettingsMenu', () => {
     expect(openaiProvider).toBeInTheDocument()
   })
 
+  it('marks the currently selected chat provider in the provider list', () => {
+    vi.mocked(useModelProvider).mockReturnValue({
+      providers: [
+        { provider: 'openai', active: true, models: [] },
+        { provider: 'jingxing', active: true, models: [] },
+      ],
+      selectedProvider: 'jingxing',
+      addProvider: vi.fn(),
+    })
+
+    render(<SettingsMenu />)
+
+    const jingxingProvider = screen
+      .getByTestId('provider-avatar-jingxing')
+      .closest('div[class*="cursor-pointer"]')
+    expect(jingxingProvider).toHaveTextContent('当前')
+  })
+
   it('navigates to provider when provider is clicked', async () => {
     const user = userEvent.setup()
     render(<SettingsMenu />)

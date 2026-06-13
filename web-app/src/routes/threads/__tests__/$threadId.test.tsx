@@ -21,6 +21,7 @@ const h = vi.hoisted(() => {
   const mockRunMitaTeamsRuntime = vi.fn()
   const mockRunMitaTeamsPrivateRoleChat = vi.fn()
   const mockRouterNavigate = vi.fn()
+  const mockNotifyProviderBalanceMayHaveChanged = vi.fn()
   const openExternalUrl = vi.fn()
   const useChatArgs: any[] = []
 
@@ -159,6 +160,7 @@ const h = vi.hoisted(() => {
     mockRunMitaTeamsRuntime,
     mockRunMitaTeamsPrivateRoleChat,
     mockRouterNavigate,
+    mockNotifyProviderBalanceMayHaveChanged,
     openExternalUrl,
     useChatArgs,
     chatState,
@@ -512,6 +514,10 @@ vi.mock('@/hooks/useMCPServers', () => ({ useMCPServers: h.useMCPServersMock }))
 vi.mock('@/hooks/useToolApproval', () => ({ useToolApproval: h.useToolApprovalMock }))
 vi.mock('@/hooks/useAgentMode', () => ({ useAgentMode: h.useAgentModeMock }))
 vi.mock('@/stores/message-queue-store', () => ({ useMessageQueue: h.useMessageQueueMock }))
+vi.mock('@/hooks/useProviderBalance', () => ({
+  notifyProviderBalanceMayHaveChanged:
+    h.mockNotifyProviderBalanceMayHaveChanged,
+}))
 
 vi.mock('@/hooks/useAutoScroll', () => ({
   useAutoScroll: () => ({
@@ -1482,7 +1488,7 @@ describe('ThreadDetail route', () => {
     expect(screen.getByText('Regenerate')).toBeInTheDocument()
   })
 
-  it('shows provider quota actions instead of regenerate for quota errors', () => {
+  it('shows provider quota actions instead of regenerate for quota errors', async () => {
     h.chatState.error = new ProviderQuotaError({
       message: '璇ヤ护鐗岄搴﹀凡鐢ㄥ敖',
       status: 403,
@@ -1496,6 +1502,11 @@ describe('ThreadDetail route', () => {
     expect(screen.getByText('Provider quota exhausted')).toBeInTheDocument()
     expect(screen.getByText('璇ヤ护鐗岄搴﹀凡鐢ㄥ敖')).toBeInTheDocument()
     expect(screen.queryByText('Regenerate')).not.toBeInTheDocument()
+    await waitFor(() => {
+      expect(h.mockNotifyProviderBalanceMayHaveChanged).toHaveBeenCalledWith(
+        'openai'
+      )
+    })
     screen.getByText('Recharge').click()
     expect(h.openExternalUrl).toHaveBeenCalledWith(
       'https://api.jingxing.uk/console/topup'

@@ -53,6 +53,7 @@ import { useAppState } from '@/hooks/useAppState'
 import { useShallow } from 'zustand/shallow'
 import { DialogAddModel } from '@/containers/dialogs/AddModel'
 import { ProviderQuotaActions } from '@/components/ProviderQuotaActions'
+import { ProviderBalanceCard } from '@/components/ProviderBalanceCard'
 import {
   providerHasRemoteApiKeys,
   providerRemoteApiKeyChain,
@@ -1131,6 +1132,12 @@ function ProviderDetail() {
                       )}
                     </div>
                   </Card>
+                )}
+
+              {provider &&
+                provider.provider !== 'llamacpp' &&
+                provider.provider !== 'mlx' && (
+                  <ProviderBalanceCard provider={provider} />
                 )}
 
               {/* Models */}
