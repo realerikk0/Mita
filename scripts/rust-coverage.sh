@@ -10,4 +10,9 @@ cargo llvm-cov --no-report --manifest-path src-tauri/Cargo.toml --no-default-fea
 cargo llvm-cov --no-report --manifest-path src-tauri/plugins/tauri-plugin-hardware/Cargo.toml
 cargo llvm-cov --no-report --manifest-path src-tauri/plugins/tauri-plugin-llamacpp/Cargo.toml
 cargo llvm-cov --no-report --manifest-path src-tauri/utils/Cargo.toml
+
+# Tauri copies resource stubs into the coverage target directory. They are not
+# Rust coverage objects, and llvm-cov can fail when it tries to inspect them.
+find src-tauri/target/llvm-cov-target -path '*/resources/bin/*' -type f -delete 2>/dev/null || true
+
 cargo llvm-cov report --lcov --output-path rust-lcov.info --manifest-path src-tauri/Cargo.toml
