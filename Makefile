@@ -129,7 +129,8 @@ endif
 	yarn copy:assets:tauri
 	yarn build:icon
 	yarn build:mlx-server
-	make build-cli
+	bash ./scripts/prepare-tauri-test-resources.sh
+	yarn build:cli
 	cargo test --manifest-path src-tauri/Cargo.toml --no-default-features --features test-tauri -- --test-threads=1
 	cargo test --manifest-path src-tauri/plugins/tauri-plugin-hardware/Cargo.toml
 	cargo test --manifest-path src-tauri/plugins/tauri-plugin-llamacpp/Cargo.toml
