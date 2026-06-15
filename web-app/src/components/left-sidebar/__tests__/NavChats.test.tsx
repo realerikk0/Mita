@@ -1,4 +1,4 @@
-import { render, screen, waitFor } from '@testing-library/react'
+import { fireEvent, render, screen, waitFor } from '@testing-library/react'
 import '@testing-library/jest-dom'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
@@ -10,6 +10,9 @@ const h = vi.hoisted(() => ({
   imageAssets: [] as any[],
   videoAssets: [] as any[],
   deleteAllThreads: vi.fn(),
+  deleteThread: vi.fn(),
+  renameThread: vi.fn(),
+  toggleThreadPinned: vi.fn(),
 }))
 
 vi.mock('@tanstack/react-router', () => ({
@@ -30,9 +33,15 @@ vi.mock('@/i18n/react-i18next-compat', () => ({
     t: (key: string) =>
       ({
         'common:history': 'History',
+        'common:pinned': 'Pinned',
+        'common:pinToTop': 'Pin to top',
+        'common:unpin': 'Unpin',
         'common:newMedia': 'New Media',
         'common:newThread': 'New Thread',
         'common:imageGeneration.mode.storyboardVideo': 'Storyboard video',
+        'common:recents': 'Recents',
+        'common:rename': 'Rename',
+        'common:delete': 'Delete',
       })[key] ?? key,
   }),
 }))
@@ -43,6 +52,9 @@ vi.mock('@/hooks/useThreads', () => ({
       getFilteredThreads: () => h.threads,
       threads: Object.fromEntries(h.threads.map((thread) => [thread.id, thread])),
       deleteAllThreads: h.deleteAllThreads,
+      deleteThread: h.deleteThread,
+      renameThread: h.renameThread,
+      toggleThreadPinned: h.toggleThreadPinned,
     }),
 }))
 
@@ -62,6 +74,7 @@ vi.mock('@/components/ui/sidebar', () => ({
   SidebarGroupAction: ({ children }: any) => <button>{children}</button>,
   SidebarGroupLabel: ({ children }: any) => <h2>{children}</h2>,
   SidebarMenu: ({ children }: any) => <ul>{children}</ul>,
+  SidebarMenuAction: ({ children }: any) => <button>{children}</button>,
   SidebarMenuButton: ({ children }: any) => <li>{children}</li>,
   SidebarMenuItem: ({ children }: any) => <>{children}</>,
 }))
@@ -71,12 +84,23 @@ vi.mock('@/components/ui/dropdown-menu', () => {
   return {
     DropdownMenu: Passthrough,
     DropdownMenuContent: Passthrough,
+    DropdownMenuItem: ({ children, disabled, onSelect }: any) => (
+      <button disabled={disabled} onClick={onSelect}>
+        {children}
+      </button>
+    ),
+    DropdownMenuSeparator: () => null,
     DropdownMenuTrigger: Passthrough,
   }
 })
 
 vi.mock('@/containers/dialogs/DeleteAllThreadsDialog', () => ({
   DeleteAllThreadsDialog: () => null,
+}))
+
+vi.mock('@/containers/dialogs', () => ({
+  DeleteThreadDialog: () => null,
+  RenameThreadDialog: () => null,
 }))
 
 const makeThread = (overrides: Partial<Thread>): Thread =>
@@ -94,6 +118,9 @@ describe('NavChats history stream', () => {
     h.imageAssets = []
     h.videoAssets = []
     h.deleteAllThreads.mockClear()
+    h.deleteThread.mockClear()
+    h.renameThread.mockClear()
+    h.toggleThreadPinned.mockClear()
     useImageGenerationStore.getState().reset()
   })
 
@@ -171,5 +198,61 @@ describe('NavChats history stream', () => {
 
     expect(await screen.findByText('generated image')).toBeInTheDocument()
     expect(screen.queryByText('reference image')).not.toBeInTheDocument()
+  })
+
+  it('keeps pinned chats above recent history and toggles pin state from the row menu', async () => {
+    h.threads = [
+      makeThread({
+        id: 'chat-recent',
+        title: 'Recent chat',
+        updated: Date.parse('2026-06-05T00:00:00Z') / 1000,
+      }),
+      makeThread({
+        id: 'chat-pinned',
+        title: 'Pinned chat',
+        updated: Date.parse('2026-06-01T00:00:00Z') / 1000,
+        metadata: { pinned_at: Date.parse('2026-06-02T00:00:00Z') },
+      }),
+    ]
+    h.imageAssets = [
+      {
+        id: 'image-newer',
+        prompt: 'newer image',
+        createdAt: '2026-06-06T00:00:00Z',
+        assetKind: 'generated',
+      },
+    ]
+
+    render(<NavChats />)
+
+    await screen.findByText('Pinned chat')
+    const links = screen.getAllByRole('link')
+    expect(links.map((link) => link.textContent)).toEqual([
+      'Pinned chat',
+      'newer image',
+      'Recent chat',
+    ])
+    expect(screen.getByText('Pinned')).toBeInTheDocument()
+    expect(screen.getByText('Recents')).toBeInTheDocument()
+
+    fireEvent.click(screen.getByRole('button', { name: /Unpin/i }))
+    expect(h.toggleThreadPinned).toHaveBeenCalledWith('chat-pinned')
+  })
+
+  it('only offers pinning actions for chat history entries', async () => {
+    h.imageAssets = [
+      {
+        id: 'image-only',
+        prompt: 'image only',
+        createdAt: '2026-06-06T00:00:00Z',
+        assetKind: 'generated',
+      },
+    ]
+
+    render(<NavChats />)
+
+    expect(await screen.findByText('image only')).toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: /Pin to top/i })).not.toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: /Unpin/i })).not.toBeInTheDocument()
   })
 })

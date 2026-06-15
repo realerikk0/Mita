@@ -317,6 +317,28 @@ describe('useThreads - coverage', () => {
     expect(result.current.threads['t3']).toBeDefined()
   })
 
+  it('should delete all threads keeping pinned threads', () => {
+    const { result } = renderHook(() => useThreads())
+
+    act(() => {
+      result.current.setThreads([
+        { id: 't1', title: 'Pinned', metadata: { pinned_at: 123 } } as any,
+        { id: 't2', title: 'Normal' } as any,
+        { id: 't3', title: 'Unpinned', metadata: { pinned_at: 0 } } as any,
+      ])
+    })
+
+    act(() => {
+      result.current.deleteAllThreads()
+    })
+
+    expect(result.current.threads['t1']).toBeDefined()
+    expect(result.current.threads['t2']).toBeUndefined()
+    expect(result.current.threads['t3']).toBeUndefined()
+    expect(mockDeleteThread).toHaveBeenCalledWith('t2')
+    expect(mockDeleteThread).toHaveBeenCalledWith('t3')
+  })
+
   it('should clear all threads', () => {
     const { result } = renderHook(() => useThreads())
 
@@ -455,5 +477,45 @@ describe('useThreads - coverage', () => {
 
     const favorites = result.current.getFavoriteThreads()
     expect(favorites).toHaveLength(2)
+  })
+
+  it('toggleThreadPinned should set and clear pinned metadata', () => {
+    const { result } = renderHook(() => useThreads())
+
+    act(() => {
+      result.current.setThreads([
+        { id: 't1', title: 'T1', updated: 1000, metadata: {} } as any,
+      ])
+    })
+
+    act(() => {
+      result.current.toggleThreadPinned('t1')
+    })
+
+    expect(result.current.threads['t1'].metadata?.pinned_at).toEqual(
+      expect.any(Number)
+    )
+    expect(mockUpdateThread).toHaveBeenLastCalledWith(
+      expect.objectContaining({
+        id: 't1',
+        metadata: expect.objectContaining({
+          pinned_at: expect.any(Number),
+        }),
+      })
+    )
+
+    act(() => {
+      result.current.toggleThreadPinned('t1')
+    })
+
+    expect(result.current.threads['t1'].metadata?.pinned_at).toBeUndefined()
+    expect(mockUpdateThread).toHaveBeenLastCalledWith(
+      expect.objectContaining({
+        id: 't1',
+        metadata: expect.not.objectContaining({
+          pinned_at: expect.any(Number),
+        }),
+      })
+    )
   })
 })

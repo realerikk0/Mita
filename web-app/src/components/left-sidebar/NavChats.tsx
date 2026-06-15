@@ -3,23 +3,30 @@ import {
   SidebarGroupAction,
   SidebarGroupLabel,
   SidebarMenu,
+  SidebarMenuAction,
   SidebarMenuButton,
   SidebarMenuItem,
 } from "@/components/ui/sidebar"
 import {
   DropdownMenu,
   DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu"
 import {
   ImagePlus,
   MessageCircle,
   MoreHorizontal,
+  Pencil,
+  Pin,
+  PinOff,
+  Trash2,
   UsersRound,
   Video,
   type LucideIcon,
 } from "lucide-react"
-import { useEffect, useMemo, useState } from "react"
+import { useEffect, useMemo, useState, type ReactNode } from "react"
 import { useTranslation } from '@/i18n/react-i18next-compat'
 import { useThreads } from "@/hooks/useThreads"
 import { DeleteAllThreadsDialog } from "@/containers/dialogs/DeleteAllThreadsDialog"
@@ -29,13 +36,16 @@ import type { ImageAssetRecord } from "@/services/image-generation/types"
 import type { VideoAssetRecord } from "@/services/video-generation/types"
 import { Link } from "@tanstack/react-router"
 import { route } from "@/constants/routes"
+import { DeleteThreadDialog, RenameThreadDialog } from "@/containers/dialogs"
 
 type HistoryEntry =
   | {
       id: string
       kind: 'chat' | 'team'
+      thread: Thread
       title: string
       updatedAt: number
+      pinnedAt: number
       icon: LucideIcon
       to: '/threads/$threadId'
       params: { threadId: string }
@@ -64,6 +74,11 @@ function isMitaTeamsThread(thread: Thread) {
   return Boolean(thread.metadata?.mitaTeams)
 }
 
+function threadPinnedAt(thread: Thread) {
+  const pinnedAt = thread.metadata?.pinned_at
+  return typeof pinnedAt === 'number' && pinnedAt > 0 ? pinnedAt : 0
+}
+
 function mediaTitle(
   asset: Pick<ImageAssetRecord | VideoAssetRecord, 'prompt'>,
   fallback: string
@@ -72,20 +87,75 @@ function mediaTitle(
   return firstLine?.trim() || fallback
 }
 
-function HistoryItem({ entry }: { entry: HistoryEntry }) {
+function isThreadHistoryEntry(
+  entry: HistoryEntry
+): entry is Extract<HistoryEntry, { kind: 'chat' | 'team' }> {
+  return entry.kind === 'chat' || entry.kind === 'team'
+}
+
+function isPinnedHistoryEntry(
+  entry: HistoryEntry
+): entry is Extract<HistoryEntry, { kind: 'chat' | 'team' }> {
+  return isThreadHistoryEntry(entry) && entry.pinnedAt > 0
+}
+
+function sortHistoryEntries(a: HistoryEntry, b: HistoryEntry) {
+  const aPinnedAt = isThreadHistoryEntry(a) ? a.pinnedAt : 0
+  const bPinnedAt = isThreadHistoryEntry(b) ? b.pinnedAt : 0
+  const aPinned = aPinnedAt > 0
+  const bPinned = bPinnedAt > 0
+
+  if (aPinned && bPinned) {
+    return bPinnedAt - aPinnedAt || b.updatedAt - a.updatedAt
+  }
+  if (aPinned) return -1
+  if (bPinned) return 1
+
+  return b.updatedAt - a.updatedAt
+}
+
+function SectionLabel({ children }: { children: ReactNode }) {
+  return (
+    <SidebarMenuItem>
+      <div className="px-2 pb-1 pt-2 text-[11px] font-medium text-muted-foreground">
+        {children}
+      </div>
+    </SidebarMenuItem>
+  )
+}
+
+function HistoryItem({
+  entry,
+  onTogglePin,
+  onRename,
+  onDelete,
+}: {
+  entry: HistoryEntry
+  onTogglePin: (threadId: string) => void
+  onRename: (threadId: string, title: string) => void
+  onDelete: (threadId: string) => void
+}) {
+  const { t } = useTranslation()
+  const [renameOpen, setRenameOpen] = useState(false)
+  const [deleteOpen, setDeleteOpen] = useState(false)
   const Icon = entry.icon
+  const isThreadEntry = isThreadHistoryEntry(entry)
+  const isPinned = isPinnedHistoryEntry(entry)
   const content = (
     <>
       <Icon className="size-4 shrink-0 text-foreground/70" />
       <span className="min-w-0 flex-1 truncate" title={entry.title}>
         {entry.title}
       </span>
+      {isPinned && (
+        <Pin className="size-3 shrink-0 text-muted-foreground" />
+      )}
     </>
   )
 
   return (
     <SidebarMenuItem>
-      <SidebarMenuButton asChild>
+      <SidebarMenuButton asChild className={isThreadEntry ? 'pr-8' : undefined}>
         {entry.kind === 'media' ? (
           <Link to={entry.to} search={entry.search}>
             {content}
@@ -96,6 +166,57 @@ function HistoryItem({ entry }: { entry: HistoryEntry }) {
           </Link>
         )}
       </SidebarMenuButton>
+      {isThreadEntry && (
+        <DropdownMenu>
+          <DropdownMenuTrigger asChild>
+            <SidebarMenuAction showOnHover className="hover:bg-sidebar-foreground/8">
+              <MoreHorizontal />
+              <span className="sr-only">More</span>
+            </SidebarMenuAction>
+          </DropdownMenuTrigger>
+          <DropdownMenuContent className="w-44" side="right" align="start">
+            <DropdownMenuItem onSelect={() => onTogglePin(entry.id)}>
+              {isPinned ? (
+                <PinOff className="size-4" />
+              ) : (
+                <Pin className="size-4" />
+              )}
+              <span>{isPinned ? t('common:unpin') : t('common:pinToTop')}</span>
+            </DropdownMenuItem>
+            <DropdownMenuItem onSelect={() => setRenameOpen(true)}>
+              <Pencil className="size-4" />
+              <span>{t('common:rename')}</span>
+            </DropdownMenuItem>
+            <DropdownMenuSeparator />
+            <DropdownMenuItem
+              variant="destructive"
+              onSelect={() => setDeleteOpen(true)}
+            >
+              <Trash2 className="size-4" />
+              <span>{t('common:delete')}</span>
+            </DropdownMenuItem>
+          </DropdownMenuContent>
+        </DropdownMenu>
+      )}
+      {isThreadEntry && (
+        <>
+          <RenameThreadDialog
+            thread={entry.thread}
+            plainTitleForRename={entry.title}
+            onRename={onRename}
+            open={renameOpen}
+            onOpenChange={setRenameOpen}
+            withoutTrigger
+          />
+          <DeleteThreadDialog
+            thread={entry.thread}
+            onDelete={onDelete}
+            open={deleteOpen}
+            onOpenChange={setDeleteOpen}
+            withoutTrigger
+          />
+        </>
+      )}
     </SidebarMenuItem>
   )
 }
@@ -106,6 +227,9 @@ export function NavChats() {
   const getFilteredThreads = useThreads((state) => state.getFilteredThreads)
   const threads = useThreads((state) => state.threads)
   const deleteAllThreads = useThreads((state) => state.deleteAllThreads)
+  const deleteThread = useThreads((state) => state.deleteThread)
+  const renameThread = useThreads((state) => state.renameThread)
+  const toggleThreadPinned = useThreads((state) => state.toggleThreadPinned)
   const imageAssets = useImageGenerationStore((state) => state.assets)
   const setImageAssets = useImageGenerationStore((state) => state.setAssets)
   const [dropdownOpen, setDropdownOpen] = useState(false)
@@ -158,8 +282,10 @@ export function NavChats() {
       return {
         id: thread.id,
         kind: team ? 'team' : 'chat',
+        thread,
         title: thread.title || t('common:newThread'),
         updatedAt: (thread.updated || 0) * 1000,
+        pinnedAt: threadPinnedAt(thread),
         icon: team ? UsersRound : MessageCircle,
         to: '/threads/$threadId',
         params: { threadId: thread.id },
@@ -195,9 +321,18 @@ export function NavChats() {
     }))
 
     return [...threadEntries, ...imageEntries, ...videoEntries].sort(
-      (a, b) => b.updatedAt - a.updatedAt
+      sortHistoryEntries
     )
   }, [imageAssets, threadsWithoutProject, t, videoAssets])
+
+  const pinnedEntries = useMemo(
+    () => historyEntries.filter(isPinnedHistoryEntry),
+    [historyEntries]
+  )
+  const recentEntries = useMemo(
+    () => historyEntries.filter((entry) => !isPinnedHistoryEntry(entry)),
+    [historyEntries]
+  )
 
   if (historyEntries.length === 0) {
     return null
@@ -223,8 +358,31 @@ export function NavChats() {
         </DropdownMenu>
       }
       <SidebarMenu>
-        {historyEntries.map((entry) => (
-          <HistoryItem key={`${entry.kind}-${entry.id}`} entry={entry} />
+        {pinnedEntries.length > 0 && (
+          <>
+            <SectionLabel>{t('common:pinned')}</SectionLabel>
+            {pinnedEntries.map((entry) => (
+              <HistoryItem
+                key={`${entry.kind}-${entry.id}`}
+                entry={entry}
+                onTogglePin={toggleThreadPinned}
+                onRename={renameThread}
+                onDelete={deleteThread}
+              />
+            ))}
+            {recentEntries.length > 0 && (
+              <SectionLabel>{t('common:recents')}</SectionLabel>
+            )}
+          </>
+        )}
+        {(pinnedEntries.length > 0 ? recentEntries : historyEntries).map((entry) => (
+          <HistoryItem
+            key={`${entry.kind}-${entry.id}`}
+            entry={entry}
+            onTogglePin={toggleThreadPinned}
+            onRename={renameThread}
+            onDelete={deleteThread}
+          />
         ))}
       </SidebarMenu>
     </SidebarGroup>

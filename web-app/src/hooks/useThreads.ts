@@ -16,6 +16,7 @@ type ThreadState = {
   getFavoriteThreads: () => Thread[]
   getThreadById: (threadId: string) => Thread | undefined
   toggleFavorite: (threadId: string) => void
+  toggleThreadPinned: (threadId: string) => void
   deleteThread: (threadId: string) => void
   renameThread: (threadId: string, newTitle: string) => void
   deleteAllThreads: () => void
@@ -54,6 +55,15 @@ const cleanupVectorDB = async (threadId: string) => {
     )
   }
 }
+
+const isPinnedThread = (thread: Thread) =>
+  typeof thread.metadata?.pinned_at === 'number' &&
+  thread.metadata.pinned_at > 0
+
+const shouldKeepThreadOnBulkDelete = (thread: Thread) =>
+  thread.isFavorite ||
+  Boolean(thread.metadata?.project) ||
+  isPinnedThread(thread)
 
 export const useThreads = create<ThreadState>()((set, get) => ({
   threads: {},
@@ -151,6 +161,37 @@ export const useThreads = create<ThreadState>()((set, get) => ({
       }
     })
   },
+  toggleThreadPinned: (threadId) => {
+    set((state) => {
+      const thread = state.threads[threadId]
+      if (!thread) return state
+
+      const metadata = { ...thread.metadata }
+      const isPinned =
+        typeof metadata.pinned_at === 'number' && metadata.pinned_at > 0
+
+      if (isPinned) {
+        delete metadata.pinned_at
+      } else {
+        metadata.pinned_at = Date.now()
+      }
+
+      const updatedThread = {
+        ...thread,
+        metadata,
+        updated: Date.now() / 1000,
+      }
+
+      getServiceHub().threads().updateThread(updatedThread)
+
+      return {
+        threads: {
+          ...state.threads,
+          [threadId]: updatedThread,
+        },
+      }
+    })
+  },
   deleteThread: (threadId) => {
     set((state) => {
       // eslint-disable-next-line @typescript-eslint/no-unused-vars
@@ -179,18 +220,14 @@ export const useThreads = create<ThreadState>()((set, get) => ({
     set((state) => {
       const allThreadIds = Object.keys(state.threads)
 
-      // Identify threads to keep (favorites OR have project metadata)
+      // Identify threads to keep (favorites, pinned, or project threads)
       const threadsToKeepIds = allThreadIds.filter(
-        (threadId) =>
-          state.threads[threadId].isFavorite ||
-          state.threads[threadId].metadata?.project
+        (threadId) => shouldKeepThreadOnBulkDelete(state.threads[threadId])
       )
 
-      // Identify threads to delete (non-favorites AND no project metadata)
+      // Identify threads to delete (not favorite, not pinned, and not project threads)
       const threadsToDeleteIds = allThreadIds.filter(
-        (threadId) =>
-          !state.threads[threadId].isFavorite &&
-          !state.threads[threadId].metadata?.project
+        (threadId) => !shouldKeepThreadOnBulkDelete(state.threads[threadId])
       )
 
       // Delete threads and clean up their vector DB collections
@@ -199,7 +236,7 @@ export const useThreads = create<ThreadState>()((set, get) => ({
         getServiceHub().threads().deleteThread(threadId)
       })
 
-      // Keep favorite threads and threads with project metadata
+      // Keep favorite, pinned, and project threads
       const remainingThreads = threadsToKeepIds.reduce(
         (acc, threadId) => {
           acc[threadId] = state.threads[threadId]
