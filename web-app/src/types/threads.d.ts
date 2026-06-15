@@ -45,6 +45,7 @@ type Thread = {
   updated: number
   order?: number
   metadata?: {
+    pinned_at?: number
     project?: {
       id: string
       name: string

@@ -16,6 +16,7 @@ type ThreadState = {
   getFavoriteThreads: () => Thread[]
   getThreadById: (threadId: string) => Thread | undefined
   toggleFavorite: (threadId: string) => void
+  toggleThreadPinned: (threadId: string) => void
   deleteThread: (threadId: string) => void
   renameThread: (threadId: string, newTitle: string) => void
   deleteAllThreads: () => void
@@ -147,6 +148,37 @@ export const useThreads = create<ThreadState>()((set, get) => ({
             isFavorite: !state.threads[threadId].isFavorite,
             updated: Date.now() / 1000,
           },
+        },
+      }
+    })
+  },
+  toggleThreadPinned: (threadId) => {
+    set((state) => {
+      const thread = state.threads[threadId]
+      if (!thread) return state
+
+      const metadata = { ...thread.metadata }
+      const isPinned =
+        typeof metadata.pinned_at === 'number' && metadata.pinned_at > 0
+
+      if (isPinned) {
+        delete metadata.pinned_at
+      } else {
+        metadata.pinned_at = Date.now()
+      }
+
+      const updatedThread = {
+        ...thread,
+        metadata,
+        updated: Date.now() / 1000,
+      }
+
+      getServiceHub().threads().updateThread(updatedThread)
+
+      return {
+        threads: {
+          ...state.threads,
+          [threadId]: updatedThread,
         },
       }
     })

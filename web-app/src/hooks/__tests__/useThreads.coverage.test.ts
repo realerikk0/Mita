@@ -456,4 +456,44 @@ describe('useThreads - coverage', () => {
     const favorites = result.current.getFavoriteThreads()
     expect(favorites).toHaveLength(2)
   })
+
+  it('toggleThreadPinned should set and clear pinned metadata', () => {
+    const { result } = renderHook(() => useThreads())
+
+    act(() => {
+      result.current.setThreads([
+        { id: 't1', title: 'T1', updated: 1000, metadata: {} } as any,
+      ])
+    })
+
+    act(() => {
+      result.current.toggleThreadPinned('t1')
+    })
+
+    expect(result.current.threads['t1'].metadata?.pinned_at).toEqual(
+      expect.any(Number)
+    )
+    expect(mockUpdateThread).toHaveBeenLastCalledWith(
+      expect.objectContaining({
+        id: 't1',
+        metadata: expect.objectContaining({
+          pinned_at: expect.any(Number),
+        }),
+      })
+    )
+
+    act(() => {
+      result.current.toggleThreadPinned('t1')
+    })
+
+    expect(result.current.threads['t1'].metadata?.pinned_at).toBeUndefined()
+    expect(mockUpdateThread).toHaveBeenLastCalledWith(
+      expect.objectContaining({
+        id: 't1',
+        metadata: expect.not.objectContaining({
+          pinned_at: expect.any(Number),
+        }),
+      })
+    )
+  })
 })
