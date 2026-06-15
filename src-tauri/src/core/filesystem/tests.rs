@@ -34,6 +34,49 @@ fn test_mkdir() {
 }
 
 #[test]
+fn test_copy_file_copies_file_to_selected_destination() {
+    let app = mock_app();
+    let data_dir = get_mita_data_folder_path(app.handle().clone());
+    fs::create_dir_all(&data_dir).unwrap();
+    let source_path = data_dir.join("test_copy_file_source.txt");
+    fs::write(&source_path, "storyboard image bytes").unwrap();
+    let destination_dir = unique_test_dir("copy-destination");
+    fs::create_dir_all(&destination_dir).unwrap();
+    let destination_path = destination_dir.join("storyboard.png");
+
+    let result = copy_file(
+        app.handle().clone(),
+        vec![
+            "file://test_copy_file_source.txt".to_string(),
+            destination_path.to_string_lossy().to_string(),
+        ],
+    );
+
+    assert!(result.is_ok());
+    assert_eq!(
+        fs::read_to_string(&destination_path).unwrap(),
+        "storyboard image bytes"
+    );
+
+    let _ = fs::remove_file(source_path);
+    let _ = fs::remove_dir_all(destination_dir);
+}
+
+#[test]
+fn test_copy_file_rejects_missing_destination_argument() {
+    let app = mock_app();
+    let result = copy_file(
+        app.handle().clone(),
+        vec!["file://test_copy_file_source.txt".to_string()],
+    );
+
+    assert_eq!(
+        result.unwrap_err(),
+        "copy_file error: Invalid argument - source and destination required"
+    );
+}
+
+#[test]
 fn test_join_path() {
     let app = mock_app();
     let path = "file://test_dir";

@@ -30,10 +30,31 @@ const h = vi.hoisted(() => ({
   deleteVideoAsset: vi.fn(),
   breakdownStoryboard: vi.fn(),
   dialogOpen: vi.fn(),
+  dialogSave: vi.fn(),
   revealItemInDir: vi.fn(),
   openExternalUrl: vi.fn(),
   convertFileSrc: vi.fn((path: string) => `asset://${path}`),
+  copyFile: vi.fn(),
+  toast: {
+    success: vi.fn(),
+    error: vi.fn(),
+  },
   search: {} as Record<string, unknown>,
+}))
+
+vi.mock('@janhq/core', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('@janhq/core')>()
+  return {
+    ...actual,
+    fs: {
+      ...actual.fs,
+      copyFile: h.copyFile,
+    },
+  }
+})
+
+vi.mock('sonner', () => ({
+  toast: h.toast,
 }))
 
 vi.mock('@tanstack/react-router', () => ({
@@ -71,7 +92,7 @@ vi.mock('@/hooks/useServiceHub', () => ({
     storyboardGeneration: () => ({
       breakdownStoryboard: h.breakdownStoryboard,
     }),
-    dialog: () => ({ open: h.dialogOpen }),
+    dialog: () => ({ open: h.dialogOpen, save: h.dialogSave }),
     core: () => ({ convertFileSrc: h.convertFileSrc }),
     opener: () => ({
       revealItemInDir: h.revealItemInDir,
@@ -310,6 +331,10 @@ const translations: Record<string, string> = {
   'common:providerQuota.recharge': 'Recharge',
   'common:providerQuota.manageTokens': 'Manage tokens',
   'common:providerQuota.linksUnavailable': 'No links available',
+  'common:toast.downloadComplete.title': 'Download complete',
+  'common:toast.downloadComplete.description': '{{item}} saved',
+  'common:toast.downloadFailed.title': 'Download failed',
+  'common:toast.downloadFailed.description': 'Could not save {{item}}',
 }
 
 vi.mock('@/i18n/react-i18next-compat', () => ({
@@ -351,8 +376,12 @@ describe('Images route', () => {
     h.deleteVideoAsset.mockResolvedValue(undefined)
     h.breakdownStoryboard.mockResolvedValue(null)
     h.dialogOpen.mockResolvedValue(null)
+    h.dialogSave.mockResolvedValue(null)
     h.revealItemInDir.mockResolvedValue(undefined)
     h.openExternalUrl.mockResolvedValue(undefined)
+    h.copyFile.mockResolvedValue(undefined)
+    h.toast.success.mockClear()
+    h.toast.error.mockClear()
     h.search = {}
   })
 
@@ -805,6 +834,168 @@ describe('Images route', () => {
     expect(
       screen.getByText('Configure a video model to generate video.')
     ).toBeInTheDocument()
+  })
+
+  it('downloads a generated storyboard without navigating away from the app', async () => {
+    h.providers = [
+      {
+        provider: 'jingxing',
+        base_url: 'https://api.jingxing.uk/v1',
+        settings: [],
+        models: [
+          {
+            id: 'gpt-image-2',
+            capabilities: [ModelCapabilities.IMAGE_GENERATION],
+          },
+        ],
+      },
+    ]
+    h.generateImages.mockResolvedValueOnce([
+      {
+        b64Json: 'aGVsbG8=',
+        mimeType: 'image/png',
+        revisedPrompt: 'storyboard',
+      },
+    ])
+    h.saveAsset.mockImplementation((request: any) =>
+      Promise.resolve({
+        ...request,
+        createdAt: '2026-06-04T00:00:00Z',
+        path: `/mock/mita/image-assets/${request.id}/image.png`,
+        fileName: 'storyboard.png',
+      })
+    )
+    h.dialogSave.mockResolvedValue('/Users/test/Downloads/storyboard.png')
+    vi.stubGlobal(
+      'Image',
+      class {
+        naturalWidth = 0
+        naturalHeight = 0
+        onerror?: () => void
+        set src(_value: string) {
+          this.onerror?.()
+        }
+      }
+    )
+
+    renderComponent()
+
+    await waitFor(() => expect(h.listAssets).toHaveBeenCalled())
+    fireEvent.click(screen.getByRole('button', { name: 'Storyboard video' }))
+    fireEvent.click(
+      screen.getByRole('button', { name: 'Generate storyboard image' })
+    )
+
+    expect(await screen.findByText('Storyboard ready')).toBeInTheDocument()
+    const anchorClick = vi.fn()
+    const createElement = document.createElement.bind(document)
+    const createElementSpy = vi
+      .spyOn(document, 'createElement')
+      .mockImplementation((tagName: string, options?: ElementCreationOptions) => {
+        const element = createElement(tagName, options)
+        if (tagName.toLowerCase() === 'a') {
+          Object.defineProperty(element, 'click', {
+            configurable: true,
+            value: anchorClick,
+          })
+        }
+        return element
+      })
+
+    try {
+      fireEvent.click(screen.getByRole('button', { name: 'Download storyboard' }))
+
+      await waitFor(() =>
+        expect(h.dialogSave).toHaveBeenCalledWith({
+          fileName: 'storyboard.png',
+          filters: [{ name: 'PNG', extensions: ['png'] }],
+        })
+      )
+      expect(h.copyFile).toHaveBeenCalledWith(
+        expect.stringContaining('/mock/mita/image-assets/'),
+        '/Users/test/Downloads/storyboard.png'
+      )
+      expect(h.toast.success).toHaveBeenCalledWith('Download complete', {
+        description: 'storyboard.png saved',
+      })
+      expect(anchorClick).not.toHaveBeenCalled()
+    } finally {
+      createElementSpy.mockRestore()
+    }
+  })
+
+  it('falls back to browser download for remote storyboard image URLs', async () => {
+    h.providers = [
+      {
+        provider: 'jingxing',
+        base_url: 'https://api.jingxing.uk/v1',
+        settings: [],
+        models: [
+          {
+            id: 'gpt-image-2',
+            capabilities: [ModelCapabilities.IMAGE_GENERATION],
+          },
+        ],
+      },
+    ]
+    h.generateImages.mockResolvedValueOnce([
+      {
+        mimeType: 'image/png',
+        b64Json: 'aGVsbG8=',
+        revisedPrompt: 'remote storyboard',
+      },
+    ])
+    h.saveAsset.mockImplementation((request: any) =>
+      Promise.resolve({
+        ...request,
+        createdAt: '2026-06-04T00:00:00Z',
+        path: 'https://cdn.example.com/storyboard.png',
+        fileName: 'storyboard.png',
+      })
+    )
+    vi.stubGlobal(
+      'Image',
+      class {
+        naturalWidth = 1536
+        naturalHeight = 864
+        onload?: () => void
+        set src(_value: string) {
+          this.onload?.()
+        }
+      }
+    )
+    const anchorClick = vi.fn()
+    const createElement = document.createElement.bind(document)
+    const createElementSpy = vi
+      .spyOn(document, 'createElement')
+      .mockImplementation((tagName: string, options?: ElementCreationOptions) => {
+        const element = createElement(tagName, options)
+        if (tagName.toLowerCase() === 'a') {
+          Object.defineProperty(element, 'click', {
+            configurable: true,
+            value: anchorClick,
+          })
+        }
+        return element
+      })
+
+    try {
+      renderComponent()
+      await waitFor(() => expect(h.listAssets).toHaveBeenCalled())
+      fireEvent.click(screen.getByRole('button', { name: 'Storyboard video' }))
+      fireEvent.click(
+        screen.getByRole('button', { name: 'Generate storyboard image' })
+      )
+
+      expect(await screen.findByText('Storyboard ready')).toBeInTheDocument()
+      fireEvent.click(screen.getByRole('button', { name: 'Download storyboard' }))
+
+      await waitFor(() => expect(anchorClick).toHaveBeenCalled())
+      expect(h.dialogSave).not.toHaveBeenCalled()
+      expect(h.copyFile).not.toHaveBeenCalled()
+    } finally {
+      createElementSpy.mockRestore()
+    }
   })
 
   it('generates a storyboard video from the storyboard image', async () => {
