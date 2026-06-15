@@ -47,6 +47,7 @@ import {
 import { toast } from 'sonner'
 import { IconLayoutSidebar } from '@tabler/icons-react'
 import { getCurrentWebviewWindow } from '@tauri-apps/api/webviewWindow'
+import { fs } from '@janhq/core'
 
 import { ProviderQuotaActions } from '@/components/ProviderQuotaActions'
 import { Button } from '@/components/ui/button'
@@ -279,11 +280,38 @@ type TranslationFn = (key: string, options?: Record<string, unknown>) => string
 
 const IMAGE_I18N_PREFIX = 'common:imageGeneration'
 const MAX_REFERENCE_IMAGES = 8
+const DOWNLOAD_MIME_EXTENSIONS: Record<string, string> = {
+  'image/jpeg': 'jpg',
+  'image/png': 'png',
+  'image/webp': 'webp',
+  'video/mp4': 'mp4',
+}
 const imageT = (
   t: TranslationFn,
   key: string,
   options?: Record<string, unknown>
 ) => t(`${IMAGE_I18N_PREFIX}.${key}`, options)
+
+function downloadExtension(fileName: string, mimeType?: string) {
+  const fileExtension = fileName.split('.').pop()?.trim().toLowerCase()
+  if (fileExtension && fileExtension !== fileName.toLowerCase()) {
+    return fileExtension === 'jpeg' ? 'jpg' : fileExtension
+  }
+
+  return DOWNLOAD_MIME_EXTENSIONS[mimeType?.toLowerCase() ?? ''] ?? 'bin'
+}
+
+function triggerBrowserDownload(href: string, fileName: string) {
+  if (!href || typeof document === 'undefined') return
+
+  const link = document.createElement('a')
+  link.href = href
+  link.download = fileName
+  link.rel = 'noreferrer'
+  document.body.appendChild(link)
+  link.click()
+  link.remove()
+}
 
 const COMPOSER_RATIO_ORDER: ImageRatio[] = [
   '16:9',
@@ -2464,16 +2492,48 @@ function StoryboardVideoMode({
       : serviceHub.core().convertFileSrc(videoAsset.path)
     : ''
   const videoTokenUsageLabel = imageTokenUsageLabel(videoAsset?.usage)
-  const downloadMedia = useCallback((href: string, fileName: string) => {
-    if (!href || typeof document === 'undefined') return
-    const link = document.createElement('a')
-    link.href = href
-    link.download = fileName
-    link.rel = 'noreferrer'
-    document.body.appendChild(link)
-    link.click()
-    link.remove()
-  }, [])
+  const downloadMedia = useCallback(
+    async ({
+      href,
+      sourcePath,
+      fileName,
+      mimeType,
+    }: {
+      href: string
+      sourcePath?: string
+      fileName: string
+      mimeType?: string
+    }) => {
+      if (sourcePath) {
+        const extension = downloadExtension(fileName, mimeType)
+        const destination = await serviceHub.dialog().save({
+          defaultPath: fileName,
+          filters: [
+            {
+              name: extension.toUpperCase(),
+              extensions: [extension],
+            },
+          ],
+        })
+        if (!destination) return
+
+        try {
+          await fs.copyFile(sourcePath, destination)
+        } catch (error) {
+          console.error('Failed to download media:', error)
+          toast.error(t('common:toast.downloadFailed.title'), {
+            description: t('common:toast.downloadFailed.description', {
+              item: fileName,
+            }),
+          })
+        }
+        return
+      }
+
+      triggerBrowserDownload(href, fileName)
+    },
+    [serviceHub, t]
+  )
 
   const selectStoryboardVersion = useCallback(
     (versionId: string) => {
@@ -2954,10 +3014,12 @@ function StoryboardVideoMode({
                 variant="secondary"
                 className="w-full"
                 onClick={() =>
-                  downloadMedia(
-                    assetSrc(storyboardAsset),
-                    storyboardAsset.fileName || 'storyboard.png'
-                  )
+                  void downloadMedia({
+                    href: assetSrc(storyboardAsset),
+                    sourcePath: storyboardAsset.path,
+                    fileName: storyboardAsset.fileName || 'storyboard.png',
+                    mimeType: storyboardAsset.mimeType,
+                  })
                 }
               >
                 <Download className="size-4" />
@@ -3084,10 +3146,14 @@ function StoryboardVideoMode({
                     variant="secondary"
                     size="sm"
                     onClick={() =>
-                      downloadMedia(
-                        videoSrc,
-                        videoAsset.fileName || 'storyboard-video.mp4'
-                      )
+                      void downloadMedia({
+                        href: videoSrc,
+                        sourcePath: /^https?:/i.test(videoAsset.path)
+                          ? undefined
+                          : videoAsset.path,
+                        fileName: videoAsset.fileName || 'storyboard-video.mp4',
+                        mimeType: videoAsset.mimeType,
+                      })
                     }
                   >
                     <Download className="size-4" />
