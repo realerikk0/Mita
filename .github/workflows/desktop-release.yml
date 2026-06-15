@@ -157,6 +157,50 @@ jobs:
           MITA_SIGNING_KEY: ${{ secrets.MITA_SIGNING_KEY }}
         run: make build
 
+      - name: Notarize macOS DMGs
+        shell: bash
+        env:
+          APPLE_API_ISSUER: ${{ secrets.NOTARY_ISSUER }}
+          APPLE_API_KEY: ${{ secrets.NOTARY_KEY_ID }}
+          APPLE_API_KEY_PATH: /tmp/notary-key.p8
+        run: |
+          set -euo pipefail
+          shopt -s nullglob
+
+          if [ -z "${APPLE_API_ISSUER:-}" ]; then
+            echo "Missing NOTARY_ISSUER secret" >&2
+            exit 1
+          fi
+
+          if [ -z "${APPLE_API_KEY:-}" ]; then
+            echo "Missing NOTARY_KEY_ID secret" >&2
+            exit 1
+          fi
+
+          if [ ! -f "$APPLE_API_KEY_PATH" ]; then
+            echo "Missing notarization API key at $APPLE_API_KEY_PATH" >&2
+            exit 1
+          fi
+
+          dmgs=(src-tauri/target/universal-apple-darwin/release/bundle/dmg/*.dmg)
+          if [ "${#dmgs[@]}" -eq 0 ]; then
+            echo "No macOS DMG found to notarize" >&2
+            exit 1
+          fi
+
+          for dmg in "${dmgs[@]}"; do
+            echo "Submitting DMG for notarization: $dmg"
+            xcrun notarytool submit "$dmg" \
+              --key "$APPLE_API_KEY_PATH" \
+              --key-id "$APPLE_API_KEY" \
+              --issuer "$APPLE_API_ISSUER" \
+              --wait
+
+            echo "Stapling notarization ticket to $dmg"
+            xcrun stapler staple "$dmg"
+            xcrun stapler validate "$dmg"
+          done
+
       - name: Verify macOS signing and notarization
         shell: bash
         run: |
