@@ -68,7 +68,7 @@ const appendFileSync = (...args: any[]) => globalThis.core.api?.appendFileSync(.
  * @returns
  */
 const copyFile: (src: string, dest: string) => Promise<void> = (src, dest) =>
-  globalThis.core.api?.copyFile(src, dest)
+  globalThis.core.api?.copyFile({ args: [src, dest] })
 
 /**
  * Gets the list of gguf files in a directory

@@ -313,6 +313,10 @@ function triggerBrowserDownload(href: string, fileName: string) {
   link.remove()
 }
 
+function localDownloadSourcePath(path?: string) {
+  return path && !/^https?:/i.test(path) ? path : undefined
+}
+
 const COMPOSER_RATIO_ORDER: ImageRatio[] = [
   '16:9',
   '3:2',
@@ -2507,7 +2511,7 @@ function StoryboardVideoMode({
       if (sourcePath) {
         const extension = downloadExtension(fileName, mimeType)
         const destination = await serviceHub.dialog().save({
-          defaultPath: fileName,
+          fileName,
           filters: [
             {
               name: extension.toUpperCase(),
@@ -2519,6 +2523,11 @@ function StoryboardVideoMode({
 
         try {
           await fs.copyFile(sourcePath, destination)
+          toast.success(t('common:toast.downloadComplete.title'), {
+            description: t('common:toast.downloadComplete.description', {
+              item: fileName,
+            }),
+          })
         } catch (error) {
           console.error('Failed to download media:', error)
           toast.error(t('common:toast.downloadFailed.title'), {
@@ -3016,7 +3025,7 @@ function StoryboardVideoMode({
                 onClick={() =>
                   void downloadMedia({
                     href: assetSrc(storyboardAsset),
-                    sourcePath: storyboardAsset.path,
+                    sourcePath: localDownloadSourcePath(storyboardAsset.path),
                     fileName: storyboardAsset.fileName || 'storyboard.png',
                     mimeType: storyboardAsset.mimeType,
                   })
@@ -3148,9 +3157,7 @@ function StoryboardVideoMode({
                     onClick={() =>
                       void downloadMedia({
                         href: videoSrc,
-                        sourcePath: /^https?:/i.test(videoAsset.path)
-                          ? undefined
-                          : videoAsset.path,
+                        sourcePath: localDownloadSourcePath(videoAsset.path),
                         fileName: videoAsset.fileName || 'storyboard-video.mp4',
                         mimeType: videoAsset.mimeType,
                       })

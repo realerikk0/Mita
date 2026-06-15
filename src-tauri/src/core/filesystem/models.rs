@@ -17,6 +17,7 @@ pub struct DialogOpenOptions {
     pub multiple: Option<bool>,
     pub directory: Option<bool>,
     pub default_path: Option<String>,
+    pub file_name: Option<String>,
     pub filters: Option<Vec<DialogFilter>>,
 }
 
@@ -54,6 +55,7 @@ mod tests {
             multiple: Some(true),
             directory: Some(false),
             default_path: Some("/tmp".into()),
+            file_name: None,
             filters: None,
         };
         let json = serde_json::to_string(&opts).unwrap();
@@ -63,20 +65,36 @@ mod tests {
     }
 
     #[test]
+    fn dialog_open_options_uses_camel_case_for_file_name() {
+        let opts = DialogOpenOptions {
+            multiple: None,
+            directory: None,
+            default_path: None,
+            file_name: Some("storyboard.png".into()),
+            filters: None,
+        };
+        let json = serde_json::to_string(&opts).unwrap();
+        assert!(json.contains("\"fileName\":\"storyboard.png\""));
+        assert!(!json.contains("file_name"));
+    }
+
+    #[test]
     fn dialog_open_options_deserializes_with_missing_fields() {
         let json = r#"{}"#;
         let parsed: DialogOpenOptions = serde_json::from_str(json).unwrap();
         assert!(parsed.multiple.is_none());
         assert!(parsed.directory.is_none());
         assert!(parsed.default_path.is_none());
+        assert!(parsed.file_name.is_none());
         assert!(parsed.filters.is_none());
     }
 
     #[test]
     fn dialog_open_options_deserializes_camel_case() {
-        let json = r#"{"defaultPath":"/x","filters":[{"name":"T","extensions":["txt"]}]}"#;
+        let json = r#"{"defaultPath":"/x","fileName":"storyboard.png","filters":[{"name":"T","extensions":["txt"]}]}"#;
         let parsed: DialogOpenOptions = serde_json::from_str(json).unwrap();
         assert_eq!(parsed.default_path.as_deref(), Some("/x"));
+        assert_eq!(parsed.file_name.as_deref(), Some("storyboard.png"));
         let filters = parsed.filters.unwrap();
         assert_eq!(filters.len(), 1);
         assert_eq!(filters[0].name, "T");

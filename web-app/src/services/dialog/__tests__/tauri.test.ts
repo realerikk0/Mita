@@ -39,8 +39,9 @@ describe('TauriDialogService', () => {
   describe('save', () => {
     it('invokes save_dialog and returns path', async () => {
       mockInvoke.mockResolvedValue('/save/path.txt')
-      expect(await svc.save({ defaultPath: '/save' })).toBe('/save/path.txt')
-      expect(mockInvoke).toHaveBeenCalledWith('save_dialog', { options: { defaultPath: '/save' } })
+      const options = { defaultPath: '/save', fileName: 'storyboard.png' }
+      expect(await svc.save(options)).toBe('/save/path.txt')
+      expect(mockInvoke).toHaveBeenCalledWith('save_dialog', { options })
     })
 
     it('returns null on error', async () => {

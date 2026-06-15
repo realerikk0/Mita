@@ -65,6 +65,33 @@ pub fn mv<R: Runtime>(app_handle: tauri::AppHandle<R>, args: Vec<String>) -> Res
 }
 
 #[tauri::command]
+pub fn copy_file<R: Runtime>(
+    app_handle: tauri::AppHandle<R>,
+    args: Vec<String>,
+) -> Result<(), String> {
+    if args.len() < 2 || args[0].is_empty() || args[1].is_empty() {
+        return Err(
+            "copy_file error: Invalid argument - source and destination required".to_string(),
+        );
+    }
+
+    let source = resolve_path(app_handle.clone(), &args[0]);
+    let destination = resolve_path(app_handle, &args[1]);
+
+    if !source.exists() {
+        return Err("copy_file error: Source path does not exist".to_string());
+    }
+
+    if source.is_dir() {
+        return Err("copy_file error: Source path is a directory".to_string());
+    }
+
+    fs::copy(&source, &destination)
+        .map(|_| ())
+        .map_err(|e| e.to_string())
+}
+
+#[tauri::command]
 pub fn join_path<R: Runtime>(
     app_handle: tauri::AppHandle<R>,
     args: Vec<String>,
@@ -307,6 +334,10 @@ pub async fn save_dialog(options: Option<DialogOpenOptions>) -> Result<Option<St
         // Set default path
         if let Some(path) = opts.default_path {
             dialog = dialog.set_directory(&path);
+        }
+
+        if let Some(file_name) = opts.file_name {
+            dialog = dialog.set_file_name(&file_name);
         }
 
         // Set filters
