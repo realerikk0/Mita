@@ -2461,7 +2461,10 @@ Tool result communication:
     return undefined
   }, [effectiveStatus, sessionData.tools.length, t, threadId, threadModel])
   const activeError = error ?? contextLimitError
-  const quotaError = providerQuotaErrorFromUnknown(activeError)
+  const quotaError = useMemo(
+    () => providerQuotaErrorFromUnknown(activeError),
+    [activeError]
+  )
   const activeErrorMessage = quotaError?.message ?? activeError?.message
 
   useEffect(() => {

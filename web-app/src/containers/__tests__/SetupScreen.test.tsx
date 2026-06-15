@@ -63,7 +63,7 @@ vi.mock('@/constants/providers', () => ({
       provider: 'jingxing',
       active: true,
       api_key: '',
-      base_url: 'https://api.jingxing.uk/v1',
+      base_url: 'https://api.biyuan.ai/v1',
       models: [],
       settings: [
         {
@@ -72,7 +72,7 @@ vi.mock('@/constants/providers', () => ({
         },
         {
           key: 'base-url',
-          controller_props: { value: 'https://api.jingxing.uk/v1' },
+          controller_props: { value: 'https://api.biyuan.ai/v1' },
         },
       ],
     },
@@ -137,7 +137,7 @@ describe('SetupScreen', () => {
     localStorage.clear()
   })
 
-  it('renders the Mita provider setup form with Jingxing selected by default', () => {
+  it('renders the Mita provider setup form with Biyuan selected by default', () => {
     render(<SetupScreen />)
     expect(screen.getByText('幂塔')).toBeInTheDocument()
     expect(
@@ -145,11 +145,11 @@ describe('SetupScreen', () => {
     ).toBeInTheDocument()
     expect(screen.getByText('Model Provider')).toBeInTheDocument()
     expect(screen.getByText('导入')).toBeInTheDocument()
-    expect(screen.getByText('Jingxing API Key')).toBeInTheDocument()
-    expect(screen.getByText('Connect Jingxing')).toBeInTheDocument()
+    expect(screen.getByText('彼源 AI API Key')).toBeInTheDocument()
+    expect(screen.getByText('Connect 彼源 AI')).toBeInTheDocument()
     expect(
-      screen.getByRole('link', { name: /没有井陉账号？前往注册并充值/i })
-    ).toHaveAttribute('href', 'https://jingxing.uk/')
+      screen.getByRole('link', { name: /没有彼源 AI 账号？前往注册并充值/i })
+    ).toHaveAttribute('href', 'https://api.biyuan.ai/console')
   })
 
   it('renders the header page component', () => {
@@ -159,9 +159,9 @@ describe('SetupScreen', () => {
 
   it('shows an error when connecting without a token', () => {
     render(<SetupScreen />)
-    fireEvent.click(screen.getByText('Connect Jingxing'))
+    fireEvent.click(screen.getByText('Connect 彼源 AI'))
     expect(hoisted.toastMock.error).toHaveBeenCalledWith(
-      'Add your Jingxing API key first'
+      'Add your 彼源 AI API key first'
     )
   })
 
@@ -192,7 +192,7 @@ describe('SetupScreen', () => {
     expect(screen.getByPlaceholderText('sk-...')).toHaveValue('sk-imported')
     expect(screen.getByDisplayValue('https://api.example.com/v1')).toBeInTheDocument()
 
-    fireEvent.click(screen.getByText('Connect Jingxing'))
+    fireEvent.click(screen.getByText('Connect 彼源 AI'))
     await waitFor(() =>
       expect(hoisted.fetchModelsFromProviderMock).toHaveBeenCalledWith(
         expect.objectContaining({
@@ -226,19 +226,19 @@ describe('SetupScreen', () => {
     )
   })
 
-  it('loads models, adds the Jingxing provider, selects the first model, and navigates home', async () => {
+  it('loads models, adds the Biyuan provider, selects the first model, and navigates home', async () => {
     render(<SetupScreen />)
     fireEvent.change(screen.getByPlaceholderText('sk-...'), {
       target: { value: 'sk-test' },
     })
-    fireEvent.click(screen.getByText('Connect Jingxing'))
+    fireEvent.click(screen.getByText('Connect 彼源 AI'))
 
     await waitFor(() =>
       expect(hoisted.fetchModelsFromProviderMock).toHaveBeenCalledWith(
         expect.objectContaining({
           provider: 'jingxing',
           api_key: 'sk-test',
-          base_url: 'https://api.jingxing.uk/v1',
+          base_url: 'https://api.biyuan.ai/v1',
         })
       )
     )
@@ -257,19 +257,19 @@ describe('SetupScreen', () => {
       'jingxing',
       'gpt-4.1-mini'
     )
-    expect(hoisted.toastMock.success).toHaveBeenCalledWith('Jingxing is ready', {
+    expect(hoisted.toastMock.success).toHaveBeenCalledWith('彼源 AI is ready', {
       description: '2 models loaded',
     })
     expect(hoisted.navigateMock).toHaveBeenCalledWith({ to: '/' })
   })
 
-  it('allows selecting and connecting a non-Jingxing provider', async () => {
+  it('allows selecting and connecting a non-Biyuan provider', async () => {
     render(<SetupScreen />)
     fireEvent.change(screen.getByRole('combobox'), {
       target: { value: 'openai' },
     })
     expect(
-      screen.queryByRole('link', { name: /没有井陉账号？前往注册并充值/i })
+      screen.queryByRole('link', { name: /没有彼源 AI 账号？前往注册并充值/i })
     ).not.toBeInTheDocument()
     fireEvent.change(screen.getByPlaceholderText('sk-...'), {
       target: { value: 'sk-openai' },
@@ -305,18 +305,18 @@ describe('SetupScreen', () => {
     })
   })
 
-  it('updates an existing Jingxing provider', async () => {
+  it('updates an existing Biyuan provider', async () => {
     hoisted.providersMock.getProviderByName.mockReturnValue({
       provider: 'jingxing',
       active: true,
       api_key: '',
-      base_url: 'https://api.jingxing.uk/v1',
+      base_url: 'https://api.biyuan.ai/v1',
       models: [],
       settings: [
         { key: 'api-key', controller_props: { value: '' } },
         {
           key: 'base-url',
-          controller_props: { value: 'https://api.jingxing.uk/v1' },
+          controller_props: { value: 'https://api.biyuan.ai/v1' },
         },
       ],
     })
@@ -325,7 +325,7 @@ describe('SetupScreen', () => {
     fireEvent.change(screen.getByPlaceholderText('sk-...'), {
       target: { value: 'sk-existing' },
     })
-    fireEvent.click(screen.getByText('Connect Jingxing'))
+    fireEvent.click(screen.getByText('Connect 彼源 AI'))
 
     await waitFor(() =>
       expect(hoisted.providersMock.updateProvider).toHaveBeenCalledWith(
@@ -345,11 +345,11 @@ describe('SetupScreen', () => {
     fireEvent.change(screen.getByPlaceholderText('sk-...'), {
       target: { value: 'bad-token' },
     })
-    fireEvent.click(screen.getByText('Connect Jingxing'))
+    fireEvent.click(screen.getByText('Connect 彼源 AI'))
 
     await waitFor(() =>
       expect(hoisted.toastMock.error).toHaveBeenCalledWith(
-        'Failed to connect Jingxing',
+        'Failed to connect 彼源 AI',
         { description: 'Unauthorized' }
       )
     )

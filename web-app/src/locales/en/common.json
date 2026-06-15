@@ -742,5 +742,43 @@
     "manageTokens": "Manage tokens",
     "linksUnavailable": "Recharge links are unavailable for this provider.",
     "refreshModelsTitle": "Cannot refresh models: quota exhausted"
+  },
+  "providerBalance": {
+    "title": "Balance",
+    "description": "Query the current provider account balance and key status.",
+    "loading": "Checking balance",
+    "notFetched": "Balance has not been checked yet.",
+    "refresh": "Refresh",
+    "retry": "Retry",
+    "topup": "Top up",
+    "openConsole": "Open console",
+    "openBillingConsole": "Open billing console",
+    "needsManagementTitle": "Management permission required",
+    "unsupportedTitle": "Automatic balance lookup unsupported",
+    "errorTitle": "Balance lookup failed",
+    "availableBalance": "Available balance",
+    "accountUnavailableTitle": "Account balance unavailable",
+    "keyLimitOnly": "Only key limit information was returned",
+    "unlimitedKey": "Unlimited key",
+    "keyLimitRemaining": "Key limit remaining {{value}}",
+    "keyStatus": "Key {{status}}",
+    "accountUsed": "Account used",
+    "keyUsed": "Key used",
+    "updatedAt": "Updated",
+    "sourceNote": "{{provider}} main balance comes from the account wallet. Key limits only explain the current key status.",
+    "quotaPoints": "quota points",
+    "badgeLabel": "Balance",
+    "current": "Current",
+    "tokenStatus": {
+      "normal": "normal",
+      "disabled": "disabled",
+      "expired": "expired",
+      "exhausted": "exhausted",
+      "unknown": "status {{status}}"
+    },
+    "notices": {
+      "openrouterOverdrawn": "Overdrawn {{amount}}",
+      "deepseekUnavailable": "Account unavailable"
+    }
   }
 }

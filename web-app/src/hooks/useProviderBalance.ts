@@ -17,6 +17,7 @@ type UseProviderBalanceState = {
 const BALANCE_CACHE_DURATION = 60 * 1000
 const PROVIDER_BALANCE_REFRESH_EVENT = 'mita-provider-balance-refresh'
 const balanceCache = new Map<string, ProviderBalanceCacheEntry>()
+const balanceRequests = new Map<string, Promise<ProviderBalanceStatus>>()
 
 type ProviderBalanceRefreshEvent = CustomEvent<{ provider?: string }>
 
@@ -69,8 +70,14 @@ export function notifyProviderBalanceMayHaveChanged(providerName?: string) {
         balanceCache.delete(key)
       }
     }
+    for (const key of balanceRequests.keys()) {
+      if (key.startsWith(`${providerName}|`)) {
+        balanceRequests.delete(key)
+      }
+    }
   } else {
     balanceCache.clear()
+    balanceRequests.clear()
   }
 
   if (typeof window === 'undefined') return
@@ -94,6 +101,8 @@ export function useProviderBalance(
 
   const fetchBalance = useCallback(
     async (force = false) => {
+      const requestId = ++requestIdRef.current
+
       if (!provider || !enabled) {
         setBalance(null)
         setError(null)
@@ -105,15 +114,27 @@ export function useProviderBalance(
       if (!force && cached && Date.now() - cached.timestamp < BALANCE_CACHE_DURATION) {
         setBalance(cached.balance)
         setError(null)
+        setLoading(false)
         return
       }
 
-      const requestId = ++requestIdRef.current
       setLoading(true)
       setError(null)
 
       try {
-        const result = await serviceHub.providers().fetchProviderBalance(provider)
+        let request = balanceRequests.get(cacheKey)
+        if (!request) {
+          request = serviceHub.providers().fetchProviderBalance(provider)
+          balanceRequests.set(cacheKey, request)
+          const cleanup = () => {
+            if (balanceRequests.get(cacheKey) === request) {
+              balanceRequests.delete(cacheKey)
+            }
+          }
+          request.then(cleanup, cleanup)
+        }
+
+        const result = await request
         if (requestId !== requestIdRef.current) return
 
         if (result.state === 'error' && result.retryable && cached) {

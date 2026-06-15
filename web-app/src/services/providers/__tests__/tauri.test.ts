@@ -534,7 +534,7 @@ describe('TauriProvidersService', () => {
         },
       })
       if (result.state === 'supported') {
-        expect(result.converted?.usdAvailable).toBeCloseTo(77.127902)
+        expect(result).not.toHaveProperty('converted')
         expect(result.links?.topup).toBe('https://api.biyuan.ai/console/topup')
       }
     })
@@ -568,7 +568,7 @@ describe('TauriProvidersService', () => {
       })
       if (result.state === 'supported') {
         expect(result.accountBalance).toBeUndefined()
-        expect(result.converted).toBeUndefined()
+        expect(result).not.toHaveProperty('converted')
       }
     })
 
@@ -603,6 +603,42 @@ describe('TauriProvidersService', () => {
           available: 37.5,
           used: 12.5,
           total: 50,
+        },
+      })
+    })
+
+    it('does not expose negative OpenRouter credit balance as available balance', async () => {
+      vi.mocked(providerRemoteApiKeyChain).mockReturnValue(['or-key'])
+      vi.mocked(fetchTauri).mockResolvedValueOnce({
+        ok: true,
+        status: 200,
+        json: vi.fn().mockResolvedValue({
+          data: {
+            total_credits: 10,
+            total_usage: 13.2,
+          },
+        }),
+      } as any)
+
+      const result = await svc.fetchProviderBalance({
+        provider: 'openrouter',
+        base_url: 'https://openrouter.ai/api/v1',
+        active: true,
+      } as any)
+
+      expect(result).toMatchObject({
+        state: 'supported',
+        provider: 'openrouter',
+        accountBalance: {
+          available: 0,
+          used: 13.2,
+          total: 10,
+        },
+        notice: {
+          code: 'openrouter_overdrawn',
+          tone: 'warning',
+          amount: 3.2,
+          currency: 'USD',
         },
       })
     })
@@ -643,6 +679,43 @@ describe('TauriProvidersService', () => {
         accountBalance: {
           available: 88.25,
           total: 88.25,
+        },
+      })
+    })
+
+    it('marks DeepSeek balance as unavailable when the account is disabled', async () => {
+      vi.mocked(providerRemoteApiKeyChain).mockReturnValue(['deepseek-key'])
+      vi.mocked(fetchTauri).mockResolvedValueOnce({
+        ok: true,
+        status: 200,
+        json: vi.fn().mockResolvedValue({
+          is_available: false,
+          balance_infos: [
+            {
+              currency: 'CNY',
+              total_balance: '88.25',
+            },
+          ],
+        }),
+      } as any)
+
+      const result = await svc.fetchProviderBalance({
+        provider: 'deepseek',
+        base_url: 'https://api.deepseek.com/v1',
+        active: true,
+      } as any)
+
+      expect(result).toMatchObject({
+        state: 'supported',
+        provider: 'deepseek',
+        accountBalance: {
+          available: 88.25,
+          total: 88.25,
+        },
+        notice: {
+          code: 'deepseek_unavailable',
+          tone: 'warning',
+          hideBadge: true,
         },
       })
     })

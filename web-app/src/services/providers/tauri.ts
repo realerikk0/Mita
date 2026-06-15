@@ -48,6 +48,8 @@ const connectionErrorFragments = [
   'error sending request',
 ]
 
+const BALANCE_REQUEST_TIMEOUT_MS = 15_000
+
 function errorMessageFromUnknown(error: unknown) {
   return error instanceof Error ? error.message : 'Unknown error'
 }
@@ -211,7 +213,7 @@ function providerConsoleLink(providerName: string) {
   switch (providerName) {
     case 'jingxing':
     case 'biyuan':
-      return 'https://biyuan.ai'
+      return 'https://api.biyuan.ai/console'
     case 'openai':
       return 'https://platform.openai.com/usage'
     case 'azure':
@@ -522,10 +524,18 @@ export class TauriProvidersService extends DefaultProvidersService {
       headers['x-api-key'] = apiKey
     }
 
+    const controller = new AbortController()
+    let timedOut = false
+    const timeoutId = setTimeout(() => {
+      timedOut = true
+      controller.abort()
+    }, BALANCE_REQUEST_TIMEOUT_MS)
+
     try {
       const response = await fetchTauri(url, {
         method: 'GET',
         headers,
+        signal: controller.signal,
       })
 
       if (!response.ok) {
@@ -569,8 +579,12 @@ export class TauriProvidersService extends DefaultProvidersService {
         state: 'error',
         provider: provider.provider,
         retryable: true,
-        message: errorMessageFromUnknown(error),
+        message: timedOut
+          ? 'Balance lookup timed out. Please try again.'
+          : errorMessageFromUnknown(error),
       }
+    } finally {
+      clearTimeout(timeoutId)
     }
   }
 
@@ -611,9 +625,6 @@ export class TauriProvidersService extends DefaultProvidersService {
         fetchedAt: numericValue(data.fetched_at) ?? Math.floor(Date.now() / 1000),
         ...(account ? { accountBalance: account } : {}),
         tokenLimit: tokenLimitFromBiyuan(data),
-        ...(account
-          ? { converted: { usdAvailable: account.available / 500000 } }
-          : {}),
         links: linksFromUnknown(data.links),
         raw: result.json,
       }
@@ -648,6 +659,10 @@ export class TauriProvidersService extends DefaultProvidersService {
         }
       }
 
+      const available = Math.max(0, total - used)
+      const overdrawn =
+        used > total ? Number((used - total).toFixed(6)) : undefined
+
       return {
         state: 'supported',
         provider: provider.provider,
@@ -655,10 +670,20 @@ export class TauriProvidersService extends DefaultProvidersService {
         currency: 'USD',
         fetchedAt: Math.floor(Date.now() / 1000),
         accountBalance: {
-          available: total - used,
+          available,
           used,
           total,
         },
+        ...(overdrawn !== undefined
+          ? {
+              notice: {
+                code: 'openrouter_overdrawn',
+                tone: 'warning',
+                amount: overdrawn,
+                currency: 'USD',
+              },
+            }
+          : {}),
         links: {
           billing: 'https://openrouter.ai/settings/credits',
           topup: 'https://openrouter.ai/settings/credits',
@@ -685,7 +710,8 @@ export class TauriProvidersService extends DefaultProvidersService {
       )
       if ('state' in result) return result
 
-      const balanceInfos = asRecord(result.json).balance_infos
+      const responseJson = asRecord(result.json)
+      const balanceInfos = responseJson.balance_infos
       const balances = Array.isArray(balanceInfos) ? balanceInfos.map(asRecord) : []
       const preferred =
         balances.find((item) => item.currency === 'CNY') ?? balances[0]
@@ -712,6 +738,15 @@ export class TauriProvidersService extends DefaultProvidersService {
           available,
           total: available,
         },
+        ...(responseJson.is_available === false
+          ? {
+              notice: {
+                code: 'deepseek_unavailable',
+                tone: 'warning',
+                hideBadge: true,
+              },
+            }
+          : {}),
         links: {
           billing: 'https://platform.deepseek.com/usage',
           topup: 'https://platform.deepseek.com/top_up',

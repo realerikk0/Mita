@@ -5,6 +5,9 @@ import { cn, getProviderTitle } from '@/lib/utils'
 import { useProviderBalance } from '@/hooks/useProviderBalance'
 import type { ProviderBalanceStatus } from '@/services/providers/types'
 import { providerBalancePrimaryLabel } from '@/lib/provider-balance-display'
+import { useTranslation } from '@/i18n/react-i18next-compat'
+
+type TranslationFn = (key: string, options?: Record<string, unknown>) => string
 
 type ProviderBalanceContentProps = {
   provider: ModelProvider
@@ -14,11 +17,11 @@ type ProviderBalanceContentProps = {
   onRefresh: () => void
 }
 
-const tokenStatusLabels: Record<number, string> = {
-  1: '正常',
-  2: '已禁用',
-  3: '已过期',
-  4: '已耗尽',
+const tokenStatusLabelKeys: Record<number, string> = {
+  1: 'common:providerBalance.tokenStatus.normal',
+  2: 'common:providerBalance.tokenStatus.disabled',
+  3: 'common:providerBalance.tokenStatus.expired',
+  4: 'common:providerBalance.tokenStatus.exhausted',
 }
 
 function formatInteger(value?: number) {
@@ -34,17 +37,43 @@ function formatTimeFromUnixSeconds(value?: number) {
   }).format(new Date(value * 1000))
 }
 
-function tokenStatusLabel(status?: number) {
-  if (!status) return undefined
-  return tokenStatusLabels[status] ?? `状态 ${status}`
+function formatMoney(value: number, currency = 'USD') {
+  return new Intl.NumberFormat('en-US', {
+    style: 'currency',
+    currency,
+    maximumFractionDigits: 2,
+  }).format(value)
 }
 
-function providerDisplayUnit(balance: ProviderBalanceStatus) {
+function tokenStatusLabel(status: number | undefined, t: TranslationFn) {
+  if (!status) return undefined
+  return tokenStatusLabelKeys[status]
+    ? t(tokenStatusLabelKeys[status])
+    : t('common:providerBalance.tokenStatus.unknown', { status })
+}
+
+function providerDisplayUnit(balance: ProviderBalanceStatus, t: TranslationFn) {
   if (balance.state !== 'supported') return ''
-  if (balance.unit === 'quota') return '额度点'
+  if (balance.unit === 'quota') return t('common:providerBalance.quotaPoints')
   if (balance.currency) return balance.currency
   if (balance.unit === 'usd') return 'USD'
   return balance.unit
+}
+
+function providerNoticeLabel(balance: ProviderBalanceStatus, t: TranslationFn) {
+  if (balance.state !== 'supported' || !balance.notice) return undefined
+  if (balance.notice.code === 'openrouter_overdrawn') {
+    return t('common:providerBalance.notices.openrouterOverdrawn', {
+      amount: formatMoney(
+        balance.notice.amount ?? 0,
+        balance.notice.currency ?? balance.currency ?? 'USD'
+      ),
+    })
+  }
+  if (balance.notice.code === 'deepseek_unavailable') {
+    return t('common:providerBalance.notices.deepseekUnavailable')
+  }
+  return undefined
 }
 
 function DetailRow({ label, value }: { label: string; value: string }) {
@@ -84,13 +113,14 @@ export function ProviderBalanceContent({
   error,
   onRefresh,
 }: ProviderBalanceContentProps) {
+  const { t } = useTranslation()
   const providerTitle = getProviderTitle(provider.provider)
 
   if (!balance && loading) {
     return (
       <div className="flex items-center gap-2 text-sm text-muted-foreground">
         <IconLoader size={16} className="animate-spin" />
-        <span>正在查询余额</span>
+        <span>{t('common:providerBalance.loading')}</span>
       </div>
     )
   }
@@ -98,10 +128,12 @@ export function ProviderBalanceContent({
   if (!balance) {
     return (
       <div className="space-y-3">
-        <p className="text-sm text-muted-foreground">尚未查询余额。</p>
+        <p className="text-sm text-muted-foreground">
+          {t('common:providerBalance.notFetched')}
+        </p>
         <Button size="sm" variant="outline" onClick={onRefresh} disabled={loading}>
           {loading ? <IconLoader size={14} className="animate-spin" /> : <IconRefresh size={14} />}
-          刷新
+          {t('common:providerBalance.refresh')}
         </Button>
       </div>
     )
@@ -111,19 +143,21 @@ export function ProviderBalanceContent({
     return (
       <div className="space-y-3">
         <div>
-          <h3 className="font-medium">需要管理权限</h3>
+          <h3 className="font-medium">
+            {t('common:providerBalance.needsManagementTitle')}
+          </h3>
           <p className="mt-1 text-sm text-muted-foreground">{balance.reason}</p>
           <p className="mt-1 text-sm font-medium">{balance.required.join(', ')}</p>
         </div>
         <div className="flex items-center gap-2">
           <Button size="sm" variant="outline" onClick={onRefresh} disabled={loading}>
             {loading ? <IconLoader size={14} className="animate-spin" /> : <IconRefresh size={14} />}
-            刷新
+            {t('common:providerBalance.refresh')}
           </Button>
           {balance.link && (
             <Button size="sm" variant="outline" asChild>
               <a href={balance.link} target="_blank" rel="noreferrer">
-                打开控制台
+                {t('common:providerBalance.openConsole')}
                 <IconExternalLink size={14} />
               </a>
             </Button>
@@ -137,18 +171,20 @@ export function ProviderBalanceContent({
     return (
       <div className="space-y-3">
         <div>
-          <h3 className="font-medium">不支持自动余额查询</h3>
+          <h3 className="font-medium">
+            {t('common:providerBalance.unsupportedTitle')}
+          </h3>
           <p className="mt-1 text-sm text-muted-foreground">{balance.reason}</p>
         </div>
         <div className="flex items-center gap-2">
           <Button size="sm" variant="outline" onClick={onRefresh} disabled={loading}>
             {loading ? <IconLoader size={14} className="animate-spin" /> : <IconRefresh size={14} />}
-            刷新
+            {t('common:providerBalance.refresh')}
           </Button>
           {balance.link && (
             <Button size="sm" variant="outline" asChild>
               <a href={balance.link} target="_blank" rel="noreferrer">
-                打开账单控制台
+                {t('common:providerBalance.openBillingConsole')}
                 <IconExternalLink size={14} />
               </a>
             </Button>
@@ -162,48 +198,69 @@ export function ProviderBalanceContent({
     return (
       <div className="space-y-3">
         <div>
-          <h3 className="font-medium">余额查询失败</h3>
+          <h3 className="font-medium">
+            {t('common:providerBalance.errorTitle')}
+          </h3>
           <p className="mt-1 text-sm text-muted-foreground">{balance.message}</p>
         </div>
         <Button size="sm" variant="outline" onClick={onRefresh} disabled={loading}>
           {loading ? <IconLoader size={14} className="animate-spin" /> : <IconRefresh size={14} />}
-          重试
+          {t('common:providerBalance.retry')}
         </Button>
       </div>
     )
   }
 
   const hasAccountBalance = Boolean(balance.accountBalance)
-  const displayUnit = providerDisplayUnit(balance)
-  const primary = providerBalancePrimaryLabel(balance)
+  const quotaUnitLabel = t('common:providerBalance.quotaPoints')
+  const displayUnit = providerDisplayUnit(balance, t)
+  const primary = providerBalancePrimaryLabel(balance, { quotaUnitLabel })
   const topupLink = balance.links?.topup
   const tokenLimit = balance.tokenLimit
-  const tokenStatus = tokenStatusLabel(tokenLimit?.status)
+  const tokenStatus = tokenStatusLabel(tokenLimit?.status, t)
+  const notice = providerNoticeLabel(balance, t)
 
   return (
     <div className="space-y-4">
       {hasAccountBalance ? (
         <div className="space-y-1">
-          <div className="text-sm text-muted-foreground">可用余额</div>
+          <div className="text-sm text-muted-foreground">
+            {t('common:providerBalance.availableBalance')}
+          </div>
           <div className="text-2xl font-semibold tracking-normal">{primary}</div>
         </div>
       ) : (
         <div className="space-y-1">
-          <h3 className="font-medium">无法获取账户余额</h3>
+          <h3 className="font-medium">
+            {t('common:providerBalance.accountUnavailableTitle')}
+          </h3>
           <p className="text-sm text-muted-foreground">
-            仅获取到 Key 限额信息
+            {t('common:providerBalance.keyLimitOnly')}
           </p>
         </div>
       )}
 
       <div className="flex flex-wrap gap-2">
-        {tokenLimit?.unlimited && <StatusPill tone="success">不限额 Key</StatusPill>}
+        {notice && (
+          <StatusPill tone={balance.notice?.tone === 'warning' ? 'warning' : 'neutral'}>
+            {notice}
+          </StatusPill>
+        )}
+        {tokenLimit?.unlimited && (
+          <StatusPill tone="success">
+            {t('common:providerBalance.unlimitedKey')}
+          </StatusPill>
+        )}
         {!tokenLimit?.unlimited && tokenLimit?.available !== undefined && (
-          <StatusPill>此 Key 限额剩余 {formatInteger(tokenLimit.available)}</StatusPill>
+          <StatusPill>
+            {t('common:providerBalance.keyLimitRemaining', {
+              value: formatInteger(tokenLimit.available),
+            })}
+          </StatusPill>
         )}
         {tokenStatus && (
           <StatusPill tone={tokenLimit?.status === 1 ? 'success' : 'warning'}>
-            Key {tokenStatus}
+            {t('common:providerBalance.keyStatus', { status: tokenStatus })}
           </StatusPill>
         )}
       </div>
@@ -211,29 +268,32 @@ export function ProviderBalanceContent({
       <div className="space-y-1.5">
         {balance.accountBalance?.used !== undefined && (
           <DetailRow
-            label="账户已用"
+            label={t('common:providerBalance.accountUsed')}
             value={`${formatInteger(balance.accountBalance.used)} ${displayUnit}`}
           />
         )}
         {!tokenLimit?.unlimited && tokenLimit?.used !== undefined && (
           <DetailRow
-            label="Key 已用"
+            label={t('common:providerBalance.keyUsed')}
             value={`${formatInteger(tokenLimit.used)} ${displayUnit}`}
           />
         )}
-        <DetailRow label="更新时间" value={formatTimeFromUnixSeconds(balance.fetchedAt)} />
+        <DetailRow
+          label={t('common:providerBalance.updatedAt')}
+          value={formatTimeFromUnixSeconds(balance.fetchedAt)}
+        />
         {error && <p className="text-xs text-yellow-600">{error}</p>}
       </div>
 
       <div className="flex items-center gap-2">
         <Button size="sm" variant="outline" onClick={onRefresh} disabled={loading}>
           {loading ? <IconLoader size={14} className="animate-spin" /> : <IconRefresh size={14} />}
-          刷新
+          {t('common:providerBalance.refresh')}
         </Button>
         {topupLink && (
           <Button size="sm" variant="outline" asChild>
             <a href={topupLink} target="_blank" rel="noreferrer">
-              去充值
+              {t('common:providerBalance.topup')}
               <IconExternalLink size={14} />
             </a>
           </Button>
@@ -241,7 +301,7 @@ export function ProviderBalanceContent({
       </div>
 
       <p className="text-xs text-muted-foreground">
-        {providerTitle} 的主余额来自账户钱包；Key 限额只用于解释当前密钥状态。
+        {t('common:providerBalance.sourceNote', { provider: providerTitle })}
       </p>
     </div>
   )
@@ -249,15 +309,18 @@ export function ProviderBalanceContent({
 
 export function ProviderBalanceCard({ provider }: { provider: ModelProvider }) {
   const { balance, loading, error, refetch } = useProviderBalance(provider)
+  const { t } = useTranslation()
 
   return (
     <Card>
       <div className="space-y-3">
         <div className="flex items-center justify-between gap-2">
           <div>
-            <h2 className="font-medium text-foreground text-base">余额</h2>
+            <h2 className="font-medium text-foreground text-base">
+              {t('common:providerBalance.title')}
+            </h2>
             <p className="text-sm text-muted-foreground leading-normal">
-              查询当前供应商的账户余额和 Key 状态。
+              {t('common:providerBalance.description')}
             </p>
           </div>
           {loading && <IconLoader size={16} className="animate-spin text-muted-foreground" />}

@@ -25,6 +25,14 @@ export type ProviderBalanceLinks = {
   dashboard?: string
 }
 
+export type ProviderBalanceNotice = {
+  code: 'openrouter_overdrawn' | 'deepseek_unavailable'
+  tone: 'warning' | 'neutral'
+  amount?: number
+  currency?: string
+  hideBadge?: boolean
+}
+
 export type SupportedProviderBalance = {
   state: 'supported'
   provider: string
@@ -33,9 +41,7 @@ export type SupportedProviderBalance = {
   fetchedAt: number
   accountBalance?: ProviderBalanceTotals
   tokenLimit?: ProviderTokenLimit
-  converted?: {
-    usdAvailable?: number
-  }
+  notice?: ProviderBalanceNotice
   links?: ProviderBalanceLinks
   raw?: unknown
 }

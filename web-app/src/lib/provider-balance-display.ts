@@ -1,5 +1,10 @@
 import type { ProviderBalanceStatus } from '@/services/providers/types'
 
+type ProviderBalanceLabelOptions = {
+  balancePrefix?: string
+  quotaUnitLabel?: string
+}
+
 function formatMoney(value: number, currency = 'USD') {
   return new Intl.NumberFormat('en-US', {
     style: 'currency',
@@ -8,31 +13,43 @@ function formatMoney(value: number, currency = 'USD') {
   }).format(value)
 }
 
+function formatWholeNumber(value: number) {
+  return new Intl.NumberFormat('en-US', {
+    maximumFractionDigits: 0,
+  }).format(value)
+}
+
 export function providerBalancePrimaryLabel(
-  balance: ProviderBalanceStatus
+  balance: ProviderBalanceStatus,
+  options: ProviderBalanceLabelOptions = {}
 ) {
   if (balance.state !== 'supported' || !balance.accountBalance) return null
-  if (balance.converted?.usdAvailable !== undefined) {
-    return formatMoney(balance.converted.usdAvailable, 'USD')
-  }
   if (balance.unit === 'usd') {
     return formatMoney(balance.accountBalance.available, 'USD')
   }
   if (balance.unit === 'currency') {
     return formatMoney(balance.accountBalance.available, balance.currency ?? 'USD')
   }
-  return new Intl.NumberFormat('en-US', {
-    maximumFractionDigits: 0,
-  }).format(balance.accountBalance.available)
+  const formatted = formatWholeNumber(balance.accountBalance.available)
+  if (balance.unit === 'quota') {
+    return `${formatted} ${options.quotaUnitLabel ?? 'quota'}`
+  }
+  return formatted
 }
 
 export function getProviderBalanceBadgeLabel(
-  balance?: ProviderBalanceStatus | null
+  balance?: ProviderBalanceStatus | null,
+  options: ProviderBalanceLabelOptions = {}
 ) {
-  if (!balance || balance.state !== 'supported' || !balance.accountBalance) {
+  if (
+    !balance ||
+    balance.state !== 'supported' ||
+    !balance.accountBalance ||
+    balance.notice?.hideBadge
+  ) {
     return null
   }
-  const primary = providerBalancePrimaryLabel(balance)
+  const primary = providerBalancePrimaryLabel(balance, options)
   if (!primary) return null
-  return `余额 ${primary}`
+  return `${options.balancePrefix ?? 'Balance'} ${primary}`
 }

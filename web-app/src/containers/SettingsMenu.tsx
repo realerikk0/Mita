@@ -136,7 +136,7 @@ const SettingsMenu = () => {
 
   const currentProviderBadge = (
     <span className="ml-auto shrink-0 rounded-full bg-primary/10 px-1.5 py-0.5 text-[10px] font-medium leading-none text-primary">
-      当前
+      {t('common:providerBalance.current')}
     </span>
   )
 

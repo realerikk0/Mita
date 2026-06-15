@@ -42,7 +42,15 @@ vi.mock('@/components/ui/kbd', () => ({
 }))
 
 vi.mock('@/i18n/react-i18next-compat', () => ({
-  useTranslation: () => ({ t: (key: string) => key }),
+  useTranslation: () => ({
+    t: (key: string) => {
+      const translations: Record<string, string> = {
+        'common:providerBalance.badgeLabel': '余额',
+        'common:providerBalance.quotaPoints': '额度点',
+      }
+      return translations[key] ?? key
+    },
+  }),
 }))
 
 vi.mock('@/containers/PlatformMetaKey', () => ({
@@ -114,7 +122,6 @@ describe('NavMain provider balance', () => {
         unit: 'quota',
         fetchedAt: 1781260326,
         accountBalance: { available: 38563951 },
-        converted: { usdAvailable: 77.127902 },
       },
       loading: false,
       error: null,
@@ -128,6 +135,6 @@ describe('NavMain provider balance', () => {
     const settingsLink = screen.getByRole('link', {
       name: /common:settings/,
     })
-    expect(settingsLink).toHaveTextContent('余额 $77.13')
+    expect(settingsLink).toHaveTextContent('余额 38,563,951 额度点')
   })
 })

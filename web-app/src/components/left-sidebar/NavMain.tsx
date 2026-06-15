@@ -216,9 +216,10 @@ export function NavMain() {
     currentProvider,
     Boolean(currentProvider && providerHasRemoteApiKeys(currentProvider))
   )
-  const settingsBalanceLabel = getProviderBalanceBadgeLabel(
-    currentProviderBalance
-  )
+  const settingsBalanceLabel = getProviderBalanceBadgeLabel(currentProviderBalance, {
+    balancePrefix: t('common:providerBalance.badgeLabel'),
+    quotaUnitLabel: t('common:providerBalance.quotaPoints'),
+  })
   const { open: searchOpen, setOpen: setSearchOpen } = useSearchDialog()
   const { open: projectDialogOpen, setOpen: setProjectDialogOpen } =
     useProjectDialog()

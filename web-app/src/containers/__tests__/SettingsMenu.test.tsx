@@ -23,7 +23,12 @@ vi.mock('@tanstack/react-router', () => ({
 
 vi.mock('@/i18n/react-i18next-compat', () => ({
   useTranslation: () => ({
-    t: (key: string) => key,
+    t: (key: string) => {
+      const translations: Record<string, string> = {
+        'common:providerBalance.current': '当前',
+      }
+      return translations[key] ?? key
+    },
   }),
 }))
 

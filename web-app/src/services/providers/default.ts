@@ -14,12 +14,11 @@ export class DefaultProvidersService implements ProvidersService {
   async fetchModelsFromProvider(
     provider: ModelProvider
   ): Promise<ProviderModelDescriptor[]> {
-    console.log('fetchModelsFromProvider called with provider:', provider)
+    void provider
     return []
   }
 
   async fetchProviderBalance(provider: ModelProvider): Promise<ProviderBalanceStatus> {
-    console.log('fetchProviderBalance called with provider:', provider)
     return {
       state: 'unsupported',
       provider: provider.provider,
@@ -28,7 +27,8 @@ export class DefaultProvidersService implements ProvidersService {
   }
 
   async updateSettings(providerName: string, settings: ProviderSetting[]): Promise<void> {
-    console.log('updateSettings called:', { providerName, settings })
+    void providerName
+    void settings
     // No-op - not implemented in default service
   }
 
