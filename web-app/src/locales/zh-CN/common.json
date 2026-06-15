@@ -660,5 +660,43 @@
     "manageTokens": "管理令牌",
     "linksUnavailable": "该提供商未返回充值或令牌管理链接。",
     "refreshModelsTitle": "无法刷新模型：令牌额度已用尽"
+  },
+  "providerBalance": {
+    "title": "余额",
+    "description": "查询当前供应商的账户余额和 Key 状态。",
+    "loading": "正在查询余额",
+    "notFetched": "尚未查询余额。",
+    "refresh": "刷新",
+    "retry": "重试",
+    "topup": "去充值",
+    "openConsole": "打开控制台",
+    "openBillingConsole": "打开账单控制台",
+    "needsManagementTitle": "需要管理权限",
+    "unsupportedTitle": "不支持自动余额查询",
+    "errorTitle": "余额查询失败",
+    "availableBalance": "可用余额",
+    "accountUnavailableTitle": "无法获取账户余额",
+    "keyLimitOnly": "仅获取到 Key 限额信息",
+    "unlimitedKey": "不限额 Key",
+    "keyLimitRemaining": "此 Key 限额剩余 {{value}}",
+    "keyStatus": "Key {{status}}",
+    "accountUsed": "账户已用",
+    "keyUsed": "Key 已用",
+    "updatedAt": "更新时间",
+    "sourceNote": "{{provider}} 的主余额来自账户钱包；Key 限额只用于解释当前密钥状态。",
+    "quotaPoints": "额度点",
+    "badgeLabel": "余额",
+    "current": "当前",
+    "tokenStatus": {
+      "normal": "正常",
+      "disabled": "已禁用",
+      "expired": "已过期",
+      "exhausted": "已耗尽",
+      "unknown": "状态 {{status}}"
+    },
+    "notices": {
+      "openrouterOverdrawn": "已透支 {{amount}}",
+      "deepseekUnavailable": "账户不可用"
+    }
   }
 }

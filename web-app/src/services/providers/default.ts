@@ -4,6 +4,7 @@
 
 import type { ProvidersService } from './types'
 import type { ProviderModelDescriptor } from '@/lib/provider-models'
+import type { ProviderBalanceStatus } from './types'
 
 export class DefaultProvidersService implements ProvidersService {
   async getProviders(): Promise<ModelProvider[]> {
@@ -13,12 +14,21 @@ export class DefaultProvidersService implements ProvidersService {
   async fetchModelsFromProvider(
     provider: ModelProvider
   ): Promise<ProviderModelDescriptor[]> {
-    console.log('fetchModelsFromProvider called with provider:', provider)
+    void provider
     return []
   }
 
+  async fetchProviderBalance(provider: ModelProvider): Promise<ProviderBalanceStatus> {
+    return {
+      state: 'unsupported',
+      provider: provider.provider,
+      reason: 'Automatic balance lookup is only available in the desktop provider service.',
+    }
+  }
+
   async updateSettings(providerName: string, settings: ProviderSetting[]): Promise<void> {
-    console.log('updateSettings called:', { providerName, settings })
+    void providerName
+    void settings
     // No-op - not implemented in default service
   }
 

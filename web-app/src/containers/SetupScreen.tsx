@@ -26,10 +26,10 @@ import { toast } from 'sonner'
 import HeaderPage from './HeaderPage'
 
 const DEFAULT_PROVIDER = 'jingxing'
-const JINGXING_HOME_URL = 'https://jingxing.uk/'
+const BIYUAN_CONSOLE_URL = 'https://api.biyuan.ai/console'
 
 const providerLabels: Record<string, string> = {
-  jingxing: 'Jingxing',
+  jingxing: '彼源 AI',
   openai: 'OpenAI',
   anthropic: 'Anthropic',
   openrouter: 'OpenRouter',
@@ -44,7 +44,7 @@ const providerLabels: Record<string, string> = {
 }
 
 const providerHints: Record<string, string> = {
-  jingxing: '推荐：使用井陉统一入口，一次配置即可使用聚合模型。',
+  jingxing: '推荐：使用彼源 AI 统一入口，一次配置即可使用聚合模型。',
   openrouter: '适合直接使用 OpenRouter 模型路由。',
   openai: '适合直接使用 OpenAI 官方 API。',
   anthropic: '适合直接使用 Claude 官方 API。',
@@ -311,11 +311,11 @@ function SetupScreen() {
                 {provider.provider === DEFAULT_PROVIDER && (
                   <a
                     className="inline-flex items-center gap-1 font-medium text-primary hover:underline"
-                    href={JINGXING_HOME_URL}
+                    href={BIYUAN_CONSOLE_URL}
                     target="_blank"
                     rel="noopener noreferrer"
                   >
-                    没有井陉账号？前往注册并充值
+                    没有彼源 AI 账号？前往注册并充值
                     <ExternalLink className="size-3" />
                   </a>
                 )}

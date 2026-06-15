@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest'
 
 import {
   getProtectedMaxOutputTokens,
+  JINGXING_REMOTE_MIN_OUTPUT_TOKENS,
   normalizeToolInputSchema,
 } from '../custom-chat-transport'
 
@@ -173,17 +174,27 @@ describe('normalizeToolInputSchema', () => {
 })
 
 describe('getProtectedMaxOutputTokens', () => {
-  it('raises Jingxing gemini-3.5-flash output tokens to 1024', () => {
+  it('raises Jingxing remote output tokens below the shared floor', () => {
     expect(getProtectedMaxOutputTokens('gemini-3.5-flash', undefined)).toBe(
-      1024
+      JINGXING_REMOTE_MIN_OUTPUT_TOKENS
     )
-    expect(getProtectedMaxOutputTokens('gemini-3.5-flash', 64)).toBe(1024)
-    expect(getProtectedMaxOutputTokens('gemini-3.5-flash', 1024)).toBe(1024)
-    expect(getProtectedMaxOutputTokens('gemini-3.5-flash', 2048)).toBe(2048)
+    expect(getProtectedMaxOutputTokens('gemini-3.5-flash', 64)).toBe(
+      JINGXING_REMOTE_MIN_OUTPUT_TOKENS
+    )
+    expect(getProtectedMaxOutputTokens('gemini-3.5-flash', 1024)).toBe(
+      JINGXING_REMOTE_MIN_OUTPUT_TOKENS
+    )
+    expect(getProtectedMaxOutputTokens('gemini-3.5-flash', 2048)).toBe(
+      JINGXING_REMOTE_MIN_OUTPUT_TOKENS
+    )
+    expect(getProtectedMaxOutputTokens('gemini-3-flash-preview', 64)).toBe(
+      JINGXING_REMOTE_MIN_OUTPUT_TOKENS
+    )
+    expect(getProtectedMaxOutputTokens('gpt-5.4', 8192)).toBe(8192)
   })
 
-  it('does not change other models', () => {
-    expect(getProtectedMaxOutputTokens('gemini-3-flash-preview', 64)).toBe(64)
-    expect(getProtectedMaxOutputTokens('gpt-5.4', undefined)).toBeUndefined()
+  it('does not apply the Jingxing floor without a model id', () => {
+    expect(getProtectedMaxOutputTokens(undefined, 64)).toBe(64)
+    expect(getProtectedMaxOutputTokens(undefined, undefined)).toBeUndefined()
   })
 })

@@ -472,6 +472,285 @@ describe('TauriProvidersService', () => {
     })
   })
 
+  describe('fetchProviderBalance', () => {
+    const biyuanProvider = {
+      provider: 'jingxing',
+      base_url: 'https://api.biyuan.ai/v1',
+      active: true,
+    } as any
+
+    it('uses Biyuan account.total_available as the real account balance', async () => {
+      vi.mocked(providerRemoteApiKeyChain).mockReturnValue(['sk-test'])
+      vi.mocked(fetchTauri).mockResolvedValueOnce({
+        ok: true,
+        status: 200,
+        json: vi.fn().mockResolvedValue({
+          object: 'credit_summary',
+          provider: 'biyuan',
+          unit: 'quota',
+          total_granted: 0,
+          total_used: 0,
+          total_available: 0,
+          unlimited_quota: true,
+          token_status: 1,
+          fetched_at: 1781260326,
+          account: {
+            total_granted: 106955572,
+            total_used: 68391621,
+            total_available: 38563951,
+          },
+          links: {
+            topup: 'https://api.biyuan.ai/console/topup',
+          },
+        }),
+      } as any)
+
+      const result = await svc.fetchProviderBalance(biyuanProvider)
+
+      expect(fetchTauri).toHaveBeenCalledWith(
+        'https://api.biyuan.ai/v1/balance',
+        expect.objectContaining({
+          method: 'GET',
+          headers: expect.objectContaining({
+            Authorization: 'Bearer sk-test',
+          }),
+        })
+      )
+      expect(result).toMatchObject({
+        state: 'supported',
+        provider: 'jingxing',
+        unit: 'quota',
+        accountBalance: {
+          available: 38563951,
+          used: 68391621,
+          total: 106955572,
+        },
+        tokenLimit: {
+          available: 0,
+          used: 0,
+          total: 0,
+          unlimited: true,
+          status: 1,
+        },
+      })
+      if (result.state === 'supported') {
+        expect(result).not.toHaveProperty('converted')
+        expect(result.links?.topup).toBe('https://api.biyuan.ai/console/topup')
+      }
+    })
+
+    it('does not promote Biyuan token limit fields to account balance when account is missing', async () => {
+      vi.mocked(providerRemoteApiKeyChain).mockReturnValue(['sk-test'])
+      vi.mocked(fetchTauri).mockResolvedValueOnce({
+        ok: true,
+        status: 200,
+        json: vi.fn().mockResolvedValue({
+          unit: 'quota',
+          total_granted: 1905390,
+          total_used: 17293693,
+          total_available: -15388303,
+          unlimited_quota: true,
+          token_status: 1,
+          fetched_at: 1781258144,
+        }),
+      } as any)
+
+      const result = await svc.fetchProviderBalance(biyuanProvider)
+
+      expect(result).toMatchObject({
+        state: 'supported',
+        tokenLimit: {
+          available: -15388303,
+          used: 17293693,
+          total: 1905390,
+          unlimited: true,
+        },
+      })
+      if (result.state === 'supported') {
+        expect(result.accountBalance).toBeUndefined()
+        expect(result).not.toHaveProperty('converted')
+      }
+    })
+
+    it('returns OpenRouter credit balance from credits endpoint', async () => {
+      vi.mocked(providerRemoteApiKeyChain).mockReturnValue(['or-key'])
+      vi.mocked(fetchTauri).mockResolvedValueOnce({
+        ok: true,
+        status: 200,
+        json: vi.fn().mockResolvedValue({
+          data: {
+            total_credits: 50,
+            total_usage: 12.5,
+          },
+        }),
+      } as any)
+
+      const result = await svc.fetchProviderBalance({
+        provider: 'openrouter',
+        base_url: 'https://openrouter.ai/api/v1',
+        active: true,
+      } as any)
+
+      expect(fetchTauri).toHaveBeenCalledWith(
+        'https://openrouter.ai/api/v1/credits',
+        expect.any(Object)
+      )
+      expect(result).toMatchObject({
+        state: 'supported',
+        provider: 'openrouter',
+        unit: 'usd',
+        accountBalance: {
+          available: 37.5,
+          used: 12.5,
+          total: 50,
+        },
+      })
+    })
+
+    it('does not expose negative OpenRouter credit balance as available balance', async () => {
+      vi.mocked(providerRemoteApiKeyChain).mockReturnValue(['or-key'])
+      vi.mocked(fetchTauri).mockResolvedValueOnce({
+        ok: true,
+        status: 200,
+        json: vi.fn().mockResolvedValue({
+          data: {
+            total_credits: 10,
+            total_usage: 13.2,
+          },
+        }),
+      } as any)
+
+      const result = await svc.fetchProviderBalance({
+        provider: 'openrouter',
+        base_url: 'https://openrouter.ai/api/v1',
+        active: true,
+      } as any)
+
+      expect(result).toMatchObject({
+        state: 'supported',
+        provider: 'openrouter',
+        accountBalance: {
+          available: 0,
+          used: 13.2,
+          total: 10,
+        },
+        notice: {
+          code: 'openrouter_overdrawn',
+          tone: 'warning',
+          amount: 3.2,
+          currency: 'USD',
+        },
+      })
+    })
+
+    it('returns DeepSeek CNY balance from user balance endpoint', async () => {
+      vi.mocked(providerRemoteApiKeyChain).mockReturnValue(['deepseek-key'])
+      vi.mocked(fetchTauri).mockResolvedValueOnce({
+        ok: true,
+        status: 200,
+        json: vi.fn().mockResolvedValue({
+          is_available: true,
+          balance_infos: [
+            {
+              currency: 'CNY',
+              total_balance: '88.25',
+              topped_up_balance: '80.00',
+              granted_balance: '8.25',
+            },
+          ],
+        }),
+      } as any)
+
+      const result = await svc.fetchProviderBalance({
+        provider: 'deepseek',
+        base_url: 'https://api.deepseek.com/v1',
+        active: true,
+      } as any)
+
+      expect(fetchTauri).toHaveBeenCalledWith(
+        'https://api.deepseek.com/user/balance',
+        expect.any(Object)
+      )
+      expect(result).toMatchObject({
+        state: 'supported',
+        provider: 'deepseek',
+        unit: 'currency',
+        currency: 'CNY',
+        accountBalance: {
+          available: 88.25,
+          total: 88.25,
+        },
+      })
+    })
+
+    it('marks DeepSeek balance as unavailable when the account is disabled', async () => {
+      vi.mocked(providerRemoteApiKeyChain).mockReturnValue(['deepseek-key'])
+      vi.mocked(fetchTauri).mockResolvedValueOnce({
+        ok: true,
+        status: 200,
+        json: vi.fn().mockResolvedValue({
+          is_available: false,
+          balance_infos: [
+            {
+              currency: 'CNY',
+              total_balance: '88.25',
+            },
+          ],
+        }),
+      } as any)
+
+      const result = await svc.fetchProviderBalance({
+        provider: 'deepseek',
+        base_url: 'https://api.deepseek.com/v1',
+        active: true,
+      } as any)
+
+      expect(result).toMatchObject({
+        state: 'supported',
+        provider: 'deepseek',
+        accountBalance: {
+          available: 88.25,
+          total: 88.25,
+        },
+        notice: {
+          code: 'deepseek_unavailable',
+          tone: 'warning',
+          hideBadge: true,
+        },
+      })
+    })
+
+    it('does not call xAI management API until management key and team id are configured', async () => {
+      const result = await svc.fetchProviderBalance({
+        provider: 'xai',
+        base_url: 'https://api.x.ai/v1',
+        active: true,
+        settings: [],
+      } as any)
+
+      expect(fetchTauri).not.toHaveBeenCalled()
+      expect(result).toMatchObject({
+        state: 'needs_extra_auth',
+        provider: 'xai',
+        required: ['management key', 'team id'],
+      })
+    })
+
+    it('returns unsupported status for providers without automatic balance APIs', async () => {
+      const result = await svc.fetchProviderBalance({
+        provider: 'mistral',
+        base_url: 'https://api.mistral.ai/v1',
+        active: true,
+      } as any)
+
+      expect(fetchTauri).not.toHaveBeenCalled()
+      expect(result).toMatchObject({
+        state: 'unsupported',
+        provider: 'mistral',
+      })
+    })
+  })
+
   describe('updateSettings', () => {
     it('delegates to engine updateSettings', async () => {
       const mockUpdate = vi.fn()

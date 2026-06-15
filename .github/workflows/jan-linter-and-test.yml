@@ -67,7 +67,11 @@ jobs:
 
       - name: Run test coverage
         run: |
-          yarn test:coverage
+          yarn test:coverage || {
+            echo "::warning::Base branch TypeScript coverage failed; continuing without a TS baseline."
+            mkdir -p coverage
+            printf 'TN:\n' > coverage/lcov.info
+          }
 
       - name: Upload code coverage for ref branch
         uses: actions/upload-artifact@v4
@@ -96,11 +100,22 @@ jobs:
         run: |
           TRIPLE=$(rustc -vV | awk '/^host:/ { print $2 }')
           mkdir -p src-tauri/resources/bin src-tauri/resources/pre-install src-tauri/icons
+          mkdir -p src-tauri/resources/embedding-models src-tauri/resources/ms-playwright
+          mkdir -p src-tauri/resources/node_modules/playwright src-tauri/resources/node_modules/playwright-core
+          mkdir -p src-tauri/resources/computer-agent-runner
           touch src-tauri/resources/pre-install/.gitkeep
+          touch src-tauri/resources/embedding-models/.gitkeep
+          touch src-tauri/resources/ms-playwright/.gitkeep
+          touch src-tauri/resources/node_modules/playwright/.gitkeep
+          touch src-tauri/resources/node_modules/playwright-core/.gitkeep
+          touch src-tauri/resources/computer-agent-runner/.gitkeep
           touch src-tauri/resources/LICENSE
           touch src-tauri/resources/bin/mita-cli
+          touch src-tauri/resources/bin/mita-web-research-mcp.mjs
+          chmod +x src-tauri/resources/bin/mita-cli src-tauri/resources/bin/mita-web-research-mcp.mjs
           for bin in uv bun; do
             touch "src-tauri/resources/bin/${bin}-${TRIPLE}"
+            chmod +x "src-tauri/resources/bin/${bin}-${TRIPLE}"
           done
           # Icons are gitignored; generate_context!() requires them at compile time
           for icon in 32x32.png 128x128.png 128x128@2x.png icon.icns icon.ico; do
@@ -110,11 +125,16 @@ jobs:
       - name: Run Rust test coverage
         run: |
           cargo llvm-cov clean --workspace --manifest-path src-tauri/Cargo.toml
-          cargo llvm-cov --no-report --manifest-path src-tauri/Cargo.toml --no-default-features --features test-tauri -- --test-threads=1
-          cargo llvm-cov --no-report --manifest-path src-tauri/plugins/tauri-plugin-hardware/Cargo.toml
-          cargo llvm-cov --no-report --manifest-path src-tauri/plugins/tauri-plugin-llamacpp/Cargo.toml
-          cargo llvm-cov --no-report --manifest-path src-tauri/utils/Cargo.toml
-          cargo llvm-cov report --lcov --output-path rust-lcov.info --manifest-path src-tauri/Cargo.toml
+          {
+            cargo llvm-cov --no-report --manifest-path src-tauri/Cargo.toml --no-default-features --features test-tauri -- --test-threads=1
+            cargo llvm-cov --no-report --manifest-path src-tauri/plugins/tauri-plugin-hardware/Cargo.toml
+            cargo llvm-cov --no-report --manifest-path src-tauri/plugins/tauri-plugin-llamacpp/Cargo.toml
+            cargo llvm-cov --no-report --manifest-path src-tauri/utils/Cargo.toml
+            cargo llvm-cov report --lcov --output-path rust-lcov.info --manifest-path src-tauri/Cargo.toml
+          } || {
+            echo "::warning::Base branch Rust coverage failed; continuing without a Rust baseline."
+            printf 'TN:\n' > rust-lcov.info
+          }
 
       - name: Upload Rust code coverage for ref branch
         uses: actions/upload-artifact@v4
@@ -296,7 +316,8 @@ jobs:
 
       - name: Linter and test
         run: |
-          export DISPLAY=$(w -h | awk 'NR==1 {print $2}')
+          DISPLAY=$(w -h | awk 'NR==1 {print $2}')
+          export DISPLAY
           echo -e "Display ID: $DISPLAY"
           make test
 
@@ -372,15 +393,23 @@ jobs:
           path: base-rust-cov
 
       - name: Merge base branch coverage reports
+        id: base-coverage
         run: |
-          if [ -f ./base-rust-cov/rust-lcov.info ]; then
+          if [ ! -f ./lcov.info ] || ! grep -q '^SF:' ./lcov.info; then
+            echo "::warning::Base TypeScript coverage is unavailable; skipping coverage delta report."
+            printf 'TN:\n' > base-merged-lcov.info
+            echo "available=false" >> "$GITHUB_OUTPUT"
+          elif [ -f ./base-rust-cov/rust-lcov.info ] && grep -q '^SF:' ./base-rust-cov/rust-lcov.info; then
             cat ./lcov.info ./base-rust-cov/rust-lcov.info > base-merged-lcov.info
+            echo "available=true" >> "$GITHUB_OUTPUT"
           else
             echo "Rust base coverage not available, using TS-only coverage"
             cp ./lcov.info base-merged-lcov.info
+            echo "available=true" >> "$GITHUB_OUTPUT"
           fi
 
       - name: Generate Code Coverage report
+        if: steps.base-coverage.outputs.available == 'true'
         id: code-coverage
         uses: barecheck/code-coverage-action@v1
         with:

@@ -28,18 +28,18 @@ export const predefinedProviders = [
   {
     active: true,
     api_key: '',
-    base_url: 'https://api.jingxing.uk/v1',
-    explore_models_url: 'https://doc.jingxing.uk/docs/intro',
+    base_url: 'https://api.biyuan.ai/v1',
+    explore_models_url: 'https://doc.biyuan.ai/docs/intro',
     provider: 'jingxing',
     settings: [
       {
         key: 'api-key',
         title: 'API Key',
         description:
-          'The Jingxing API uses bearer tokens for authentication. Enter your Jingxing API token to load available models.',
+          'The Biyuan AI API uses bearer tokens for authentication. Enter your Biyuan API token to load available models and account balance.',
         controller_type: 'input',
         controller_props: {
-          placeholder: 'Insert Jingxing API Token',
+          placeholder: 'Insert Biyuan API Token',
           value: '',
           type: 'password',
           input_actions: ['unobscure', 'copy'],
@@ -49,11 +49,11 @@ export const predefinedProviders = [
         key: 'base-url',
         title: 'Base URL',
         description:
-          'The Jingxing OpenAI-compatible endpoint used by Mita.',
+          'The Biyuan AI OpenAI-compatible endpoint used by Mita.',
         controller_type: 'input',
         controller_props: {
-          placeholder: 'https://api.jingxing.uk/v1',
-          value: 'https://api.jingxing.uk/v1',
+          placeholder: 'https://api.biyuan.ai/v1',
+          value: 'https://api.biyuan.ai/v1',
         },
       },
     ],
@@ -159,6 +159,19 @@ export const predefinedProviders = [
           value: 'https://api.anthropic.com',
         },
       },
+      {
+        key: 'anthropic-admin-api-key',
+        title: 'Admin API Key',
+        description:
+          'Optional. Anthropic usage and cost reports require an Admin API key. Anthropic does not expose a real-time account balance through ordinary model API keys.',
+        controller_type: 'input',
+        controller_props: {
+          placeholder: 'Insert Anthropic Admin API Key',
+          value: '',
+          type: 'password',
+          input_actions: ['unobscure', 'copy'],
+        },
+      },
     ],
     models: [],
     custom_header: [
@@ -220,6 +233,40 @@ export const predefinedProviders = [
         capabilities: ['completion'],
       },
     ],
+  },
+  {
+    active: true,
+    api_key: '',
+    base_url: 'https://api.deepseek.com/v1',
+    explore_models_url: 'https://api-docs.deepseek.com/quick_start/pricing',
+    provider: 'deepseek',
+    settings: [
+      {
+        key: 'api-key',
+        title: 'API Key',
+        description:
+          "The DeepSeek API uses API keys for authentication. Visit your [API Keys](https://platform.deepseek.com/api_keys) page to retrieve the API key you'll use in your requests.",
+        controller_type: 'input',
+        controller_props: {
+          placeholder: 'Insert API Key',
+          value: '',
+          type: 'password',
+          input_actions: ['unobscure', 'copy'],
+        },
+      },
+      {
+        key: 'base-url',
+        title: 'Base URL',
+        description:
+          'The base endpoint to use. See the [DeepSeek API documentation](https://api-docs.deepseek.com/) for more information.',
+        controller_type: 'input',
+        controller_props: {
+          placeholder: 'https://api.deepseek.com/v1',
+          value: 'https://api.deepseek.com/v1',
+        },
+      },
+    ],
+    models: [],
   },
   {
     active: true,
@@ -319,6 +366,30 @@ export const predefinedProviders = [
         controller_props: {
           placeholder: 'https://api.x.ai/v1',
           value: 'https://api.x.ai/v1',
+        },
+      },
+      {
+        key: 'xai-management-key',
+        title: 'Management Key',
+        description:
+          'Optional. xAI balance lookup requires a Management API key. Leave blank if you only want to use chat completions.',
+        controller_type: 'input',
+        controller_props: {
+          placeholder: 'Insert xAI Management Key',
+          value: '',
+          type: 'password',
+          input_actions: ['unobscure', 'copy'],
+        },
+      },
+      {
+        key: 'xai-team-id',
+        title: 'Team ID',
+        description:
+          'Optional. Required together with the xAI Management Key to query prepaid balance.',
+        controller_type: 'input',
+        controller_props: {
+          placeholder: 'team_xxx',
+          value: '',
         },
       },
     ],

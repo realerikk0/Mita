@@ -81,6 +81,7 @@ import { useWebSearch } from '@/hooks/useWebSearch'
 import { generateThreadTitle } from '@/lib/thread-title-summarizer'
 import { ModelFactory } from '@/lib/model-factory'
 import { providerQuotaErrorFromUnknown } from '@/lib/provider-quota-error'
+import { notifyProviderBalanceMayHaveChanged } from '@/hooks/useProviderBalance'
 import {
   DEFAULT_COMPACT_RECENT_TOKEN_LIMIT,
   compactThreadMessages,
@@ -681,6 +682,7 @@ Tool result communication:
   const setContinueFromContentRef = useRef<((content: string) => void) | null>(
     null
   )
+  const lastQuotaBalanceRefreshKeyRef = useRef('')
 
   // Use the AI SDK chat hook
   const {
@@ -2459,8 +2461,29 @@ Tool result communication:
     return undefined
   }, [effectiveStatus, sessionData.tools.length, t, threadId, threadModel])
   const activeError = error ?? contextLimitError
-  const quotaError = providerQuotaErrorFromUnknown(activeError)
+  const quotaError = useMemo(
+    () => providerQuotaErrorFromUnknown(activeError),
+    [activeError]
+  )
   const activeErrorMessage = quotaError?.message ?? activeError?.message
+
+  useEffect(() => {
+    if (!quotaError) return
+
+    const providerName = selectedProvider || quotaError.providerName
+    if (!providerName) return
+
+    const refreshKey = [
+      providerName,
+      quotaError.status,
+      quotaError.code ?? '',
+      quotaError.message,
+    ].join('|')
+    if (lastQuotaBalanceRefreshKeyRef.current === refreshKey) return
+
+    lastQuotaBalanceRefreshKeyRef.current = refreshKey
+    notifyProviderBalanceMayHaveChanged(providerName)
+  }, [quotaError, selectedProvider])
 
   const messageItems = (
     <>

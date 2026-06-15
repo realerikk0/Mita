@@ -932,20 +932,20 @@ describe('mita teams runtime', () => {
           provider: 'jingxing',
           api_key: 'sk-jingxing',
           settings: [],
-          models: [{ id: 'claude-opus-4-7', displayName: 'Claude Opus' }],
+          models: [{ id: 'basic-chat-model', displayName: 'Basic Chat' }],
         },
       ],
       selectedProvider: 'jingxing',
       selectedModel: {
-        id: 'claude-opus-4-7',
-        displayName: 'Claude Opus',
+        id: 'basic-chat-model',
+        displayName: 'Basic Chat',
       },
     })
 
     try {
       const config = createDefaultMitaTeamsConfig({
         provider: 'jingxing',
-        id: 'claude-opus-4-7',
+        id: 'basic-chat-model',
       })
       const roleCalls: Array<{
         prompt: string
