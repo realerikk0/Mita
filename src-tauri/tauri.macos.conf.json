@@ -43,7 +43,10 @@
     ],
     "externalBin": ["resources/bin/bun", "resources/bin/uv"],
     "macOS": {
-      "entitlements": "./Entitlements.plist"
+      "entitlements": "./Entitlements.plist",
+      "hardenedRuntime": true,
+      "signingIdentity": "Developer ID Application: LILYN DYNAMICS (7NZP53ZJ4D)",
+      "providerShortName": "7NZP53ZJ4D"
     }
   }
 }

@@ -5,6 +5,7 @@ REPORT_PORTAL_API_KEY ?= ""
 REPORT_PORTAL_PROJECT_NAME ?= ""
 REPORT_PORTAL_LAUNCH_NAME ?= "Mita App"
 REPORT_PORTAL_DESCRIPTION ?= "Mita App report"
+MACOS_SIGNING_IDENTITY ?= Developer ID Application: LILYN DYNAMICS (7NZP53ZJ4D)
 
 # Detect OS
 ifeq ($(OS),Windows_NT)
@@ -158,17 +159,19 @@ ifeq ($(DETECTED_OS),Darwin)
 	chmod +x src-tauri/resources/bin/mlx-server; \
 	echo "MLX server built and copied successfully"; \
 	echo "Checking for code signing identity..."; \
-	SIGNING_IDENTITY=$$(security find-identity -v -p codesigning | grep "Developer ID Application" | head -1 | sed 's/.*"\(.*\)".*/\1/'); \
-	if [ -n "$$SIGNING_IDENTITY" ]; then \
+	SIGNING_IDENTITY="$${APPLE_SIGNING_IDENTITY:-$(MACOS_SIGNING_IDENTITY)}"; \
+	if security find-identity -v -p codesigning | grep -F "\"$$SIGNING_IDENTITY\"" >/dev/null; then \
 		echo "Signing mlx-server with identity: $$SIGNING_IDENTITY"; \
 		codesign --force --options runtime --timestamp --sign "$$SIGNING_IDENTITY" src-tauri/resources/bin/mlx-server; \
-		if [ -d "src-tauri/resources/bin/mlx-swift_Cmlx.bundle" ]; then \
+		if [ -f "src-tauri/resources/bin/mlx-swift_Cmlx.bundle/Contents/Info.plist" ]; then \
 			echo "Signing mlx-swift_Cmlx.bundle..."; \
 			codesign --force --options runtime --timestamp --sign "$$SIGNING_IDENTITY" --deep src-tauri/resources/bin/mlx-swift_Cmlx.bundle; \
+		else \
+			echo "Skipping empty mlx-swift_Cmlx.bundle placeholder"; \
 		fi; \
 		echo "Code signing completed successfully"; \
 	else \
-		echo "Warning: No Developer ID Application identity found. Skipping code signing (notarization will fail)."; \
+		echo "Warning: Developer ID identity not found: $$SIGNING_IDENTITY. Skipping code signing (notarization will fail)."; \
 	fi
 else
 	@echo "Skipping MLX server build (macOS only)"
@@ -207,13 +210,13 @@ ifeq ($(DETECTED_OS),Darwin)
 	chmod +x src-tauri/target/universal-apple-darwin/release/mita-computer-agent-runner
 
 	echo "Checking for code signing identity..."; \
-	SIGNING_IDENTITY=$$(security find-identity -v -p codesigning | grep "Developer ID Application" | head -1 | sed 's/.*"\(.*\)".*/\1/'); \
-	if [ -n "$$SIGNING_IDENTITY" ]; then \
+	SIGNING_IDENTITY="$${APPLE_SIGNING_IDENTITY:-$(MACOS_SIGNING_IDENTITY)}"; \
+	if security find-identity -v -p codesigning | grep -F "\"$$SIGNING_IDENTITY\"" >/dev/null; then \
 		echo "Signing mita-cli with identity: $$SIGNING_IDENTITY"; \
 		codesign --force --options runtime --timestamp --sign "$$SIGNING_IDENTITY" src-tauri/resources/bin/mita-cli; \
 		echo "Code signing completed successfully"; \
 	else \
-		echo "Warning: No Developer ID Application identity found. Skipping code signing (notarization will fail)."; \
+		echo "Warning: Developer ID identity not found: $$SIGNING_IDENTITY. Skipping code signing (notarization will fail)."; \
 	fi
 
 	cp src-tauri/resources/bin/mita-cli src-tauri/target/universal-apple-darwin/release/mita-cli
