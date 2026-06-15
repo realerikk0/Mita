@@ -1,11 +1,15 @@
 name: Linter & Test
 on:
   workflow_dispatch:
+  schedule:
+    # Nightly full CI at 02:00 Asia/Shanghai.
+    - cron: '0 18 * * *'
   push:
     branches:
       - mita-main
+      - release/**
     paths:
-      - .github/workflows/mita-linter-and-test.yml
+      - '.github/workflows/jan-linter-and-test.yml'
       - 'web/**'
       - 'joi/**'
       - 'package.json'
@@ -13,6 +17,9 @@ on:
       - 'yarn.lock'
       - 'core/**'
       - 'extensions/**'
+      - 'scripts/**'
+      - 'src-tauri/**'
+      - 'web-app/**'
       - '!README.md'
       - 'Makefile'
 
@@ -21,7 +28,7 @@ on:
       - mita-main
       - release/**
     paths:
-      - .github/workflows/mita-linter-and-test.yml
+      - '.github/workflows/jan-linter-and-test.yml'
       - 'web/**'
       - 'joi/**'
       - 'package.json'
@@ -30,13 +37,96 @@ on:
       - 'Makefile'
       - 'extensions/**'
       - 'core/**'
+      - 'scripts/**'
       - 'src-tauri/**'
       - 'web-app/**'
       - '!README.md'
 
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
 jobs:
+  ci-scope:
+    name: Detect CI scope
+    runs-on: ubuntu-latest
+    outputs:
+      full_ci: ${{ steps.scope.outputs.full_ci }}
+      changed_files: ${{ steps.scope.outputs.changed_files }}
+    steps:
+      - name: Getting the repo
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Detect changed files
+        id: scope
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          if [ "${{ github.event_name }}" != "pull_request" ]; then
+            echo "full_ci=true" >> "$GITHUB_OUTPUT"
+            echo "changed_files=non-pr event" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          git fetch --no-tags --depth=1 origin "${{ github.base_ref }}:refs/remotes/origin/${{ github.base_ref }}"
+          changed_files="$(git diff --name-only "origin/${{ github.base_ref }}"...HEAD)"
+
+          echo "Changed files:"
+          printf '%s\n' "$changed_files"
+
+          {
+            echo 'changed_files<<EOF'
+            printf '%s\n' "$changed_files"
+            echo 'EOF'
+          } >> "$GITHUB_OUTPUT"
+
+          if printf '%s\n' "$changed_files" | grep -Eq '^(\.github/workflows/|Makefile|package\.json|yarn\.lock|core/|extensions/|scripts/|src-tauri/)'; then
+            echo "full_ci=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "full_ci=false" >> "$GITHUB_OUTPUT"
+          fi
+
+  quick-pr-check:
+    name: Fast PR check
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: Getting the repo
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Installing node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: Config Yarn
+        run: |
+          corepack enable
+          corepack prepare yarn@4.5.3 --activate
+          yarn --version
+          yarn config set -H enableImmutableInstalls false
+
+      - name: Install dependencies
+        run: yarn install
+
+      - name: Lint web app
+        run: yarn lint
+
+      - name: Test web app
+        run: yarn test:web
+
+      - name: Build web app
+        run: yarn build:web
+
   base_branch_cov:
-    if: github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository
+    needs: ci-scope
+    if: github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository && needs.ci-scope.outputs.full_ci == 'true'
     runs-on: ubuntu-latest
     continue-on-error: true
     steps:
@@ -80,7 +170,8 @@ jobs:
           path: coverage/lcov.info
 
   base_branch_rust_cov:
-    if: github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository
+    needs: ci-scope
+    if: github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository && needs.ci-scope.outputs.full_ci == 'true'
     runs-on: ubuntu-latest
     continue-on-error: true
     steps:
@@ -143,8 +234,10 @@ jobs:
           path: rust-lcov.info
 
   test-on-macos:
+    needs: ci-scope
     runs-on: 'macos-latest'
-    if: github.event_name == 'pull_request' || github.event_name == 'push' || github.event_name == 'workflow_dispatch'
+    if: needs.ci-scope.outputs.full_ci == 'true'
+    timeout-minutes: 45
     steps:
       - name: Getting the repo
         uses: actions/checkout@v4
@@ -179,12 +272,14 @@ jobs:
           CSC_IDENTITY_AUTO_DISCOVERY: 'false'
 
   test-on-windows:
-    if: github.event_name == 'push'
+    needs: ci-scope
+    if: needs.ci-scope.outputs.full_ci == 'true' && github.event_name == 'push'
     strategy:
       fail-fast: false
       matrix:
         antivirus-tools: ['mcafee', 'bit-defender']
     runs-on: windows-desktop-${{ matrix.antivirus-tools }}
+    timeout-minutes: 45
     steps:
       - name: Getting the repo
         uses: actions/checkout@v4
@@ -222,8 +317,10 @@ jobs:
           make test
 
   test-on-windows-pr:
-    if: github.event_name == 'pull_request' || github.event_name == 'workflow_dispatch'
+    needs: ci-scope
+    if: needs.ci-scope.outputs.full_ci == 'true' && github.event_name != 'push'
     runs-on: 'windows-latest'
+    timeout-minutes: 45
     steps:
       - name: Getting the repo
         uses: actions/checkout@v4
@@ -272,8 +369,10 @@ jobs:
           NODE_OPTIONS: '--max-old-space-size=2048'
 
   test-on-ubuntu:
+    needs: ci-scope
     runs-on: ${{ (github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name != github.repository) && 'ubuntu-latest' || 'ubuntu-latest' }}
-    if: github.event_name == 'pull_request' || github.event_name == 'push' || github.event_name == 'workflow_dispatch'
+    if: needs.ci-scope.outputs.full_ci == 'true'
+    timeout-minutes: 45
     steps:
       - name: Getting the repo
         uses: actions/checkout@v4
@@ -329,9 +428,9 @@ jobs:
           retention-days: 2
 
   coverage-check:
-    if: github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository
+    if: github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository && needs.ci-scope.outputs.full_ci == 'true'
     runs-on: ubuntu-latest
-    needs: [base_branch_cov, base_branch_rust_cov]
+    needs: [ci-scope, base_branch_cov, base_branch_rust_cov]
     continue-on-error: true
     steps:
       - name: Getting the repo
