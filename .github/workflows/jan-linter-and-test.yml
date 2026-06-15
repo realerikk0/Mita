@@ -521,3 +521,55 @@ jobs:
           base-lcov-file: './base-merged-lcov.info'
           send-summary-comment: true
           show-annotations: 'warning'
+
+  pr-ci-gate:
+    name: PR CI Gate
+    if: ${{ always() && github.event_name == 'pull_request' }}
+    runs-on: ubuntu-latest
+    needs:
+      - ci-scope
+      - quick-pr-check
+      - test-on-macos
+      - test-on-ubuntu
+      - test-on-windows-pr
+      - coverage-check
+    steps:
+      - name: Check required PR CI results
+        shell: bash
+        env:
+          FULL_CI: ${{ needs.ci-scope.outputs.full_ci }}
+          SCOPE_RESULT: ${{ needs.ci-scope.result }}
+          FAST_RESULT: ${{ needs.quick-pr-check.result }}
+          MACOS_RESULT: ${{ needs.test-on-macos.result }}
+          UBUNTU_RESULT: ${{ needs.test-on-ubuntu.result }}
+          WINDOWS_PR_RESULT: ${{ needs.test-on-windows-pr.result }}
+          COVERAGE_RESULT: ${{ needs.coverage-check.result }}
+        run: |
+          set -euo pipefail
+
+          failed=0
+
+          require_success() {
+            local name="$1"
+            local result="$2"
+
+            if [ "$result" != "success" ]; then
+              echo "::error::${name} must pass, got '${result:-missing}'."
+              failed=1
+            fi
+          }
+
+          require_success "Detect CI scope" "$SCOPE_RESULT"
+          require_success "Fast PR check" "$FAST_RESULT"
+
+          if [ "$FULL_CI" = "true" ]; then
+            require_success "test-on-macos" "$MACOS_RESULT"
+            require_success "test-on-ubuntu" "$UBUNTU_RESULT"
+            require_success "test-on-windows-pr" "$WINDOWS_PR_RESULT"
+          else
+            echo "full_ci=false; full platform jobs are not required for this PR."
+          fi
+
+          echo "coverage-check result: ${COVERAGE_RESULT:-missing}"
+
+          exit "$failed"
