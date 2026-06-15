@@ -10,6 +10,11 @@ import { basename, extname, join, relative } from 'node:path'
 const EXPECTED_IDENTITY = 'Developer ID Application: LILYN DYNAMICS (7NZP53ZJ4D)'
 const root = process.cwd()
 const resourcesRoot = join(root, 'src-tauri', 'resources')
+const universalTargetRoot = join(root, 'src-tauri', 'target', 'universal-apple-darwin', 'release')
+const extraMachOPaths = [
+  join(universalTargetRoot, 'mita-cli'),
+  join(universalTargetRoot, 'mita-computer-agent-runner'),
+]
 const entitlements = join(root, 'src-tauri', 'Entitlements.plist')
 const dryRun = process.argv.includes('--dry-run')
 
@@ -169,6 +174,19 @@ const machOFiles = walkFiles(resourcesRoot)
   .filter(isLikelyBinaryCandidate)
   .filter(isMachO)
   .sort((a, b) => a.localeCompare(b))
+
+for (const filePath of extraMachOPaths) {
+  if (
+    existsSync(filePath) &&
+    isLikelyBinaryCandidate(filePath) &&
+    isMachO(filePath) &&
+    !machOFiles.includes(filePath)
+  ) {
+    machOFiles.push(filePath)
+  }
+}
+
+machOFiles.sort((a, b) => a.localeCompare(b))
 
 const codeDirectories = walkCodeDirectories(resourcesRoot).sort(
   (a, b) => b.length - a.length,
