@@ -28,14 +28,21 @@ const DialogAppUpdater = () => {
   const hasKnownDownloadSize = updateState.totalBytes > 0
   const releaseNotesContent = updateState.updateInfo?.body || release?.body
   const showNightlyFallback = isNightly && !isBeta && !releaseNotesContent
-  const updateProgressRingStyle = updateState.isDownloading
+  const updateButtonFillStyle = updateState.isDownloading
     ? ({
-        '--app-update-progress': hasKnownDownloadSize
-          ? `${progressPercent}%`
-          : '0%',
-        background: hasKnownDownloadSize
-          ? 'conic-gradient(#2563eb var(--app-update-progress), rgba(37, 99, 235, 0.18) 0)'
-          : 'linear-gradient(90deg, rgba(37, 99, 235, 0.2), rgba(37, 99, 235, 0.95), rgba(37, 99, 235, 0.2))',
+        width: hasKnownDownloadSize ? `${progressPercent}%` : '0%',
+      } as CSSProperties)
+    : undefined
+  const updateButtonLabelStyle = updateState.isDownloading
+    ? ({
+        backgroundImage: `linear-gradient(90deg, var(--primary-foreground) 0 ${
+          hasKnownDownloadSize ? progressPercent : 0
+        }%, var(--foreground) ${
+          hasKnownDownloadSize ? progressPercent : 0
+        }% 100%)`,
+        backgroundClip: 'text',
+        WebkitBackgroundClip: 'text',
+        color: 'transparent',
       } as CSSProperties)
     : undefined
   const updateButtonLabel = updateState.isInstalling
@@ -83,7 +90,7 @@ const DialogAppUpdater = () => {
             'fixed z-50 bottom-3 right-3 bg-background flex items-center justify-center border rounded-lg shadow-md'
           )}
         >
-          <div className="px-2 py-4">
+          <div className="w-[400px] max-w-[calc(100vw-2rem)] px-2 py-4">
             <div className="px-4">
               <div className="flex items-start gap-2">
                 <IconDownload
@@ -106,7 +113,7 @@ const DialogAppUpdater = () => {
             </div>
 
             {showReleaseNotes && (
-              <div className="max-h-[500px] p-4 w-[400px] overflow-y-scroll  text-sm font-normal leading-relaxed">
+              <div className="max-h-[500px] p-4 w-full overflow-y-scroll  text-sm font-normal leading-relaxed">
                 {showNightlyFallback ? (
                   <p className="text-sm font-normal">
                     {t('updater:nightlyBuild')}
@@ -150,32 +157,50 @@ const DialogAppUpdater = () => {
                   >
                     {t('updater:remindMeLater')}
                   </Button>
-                  <span
+                  <Button
                     data-testid={
                       updateState.isDownloading
-                        ? 'app-update-progress-ring'
+                        ? 'app-update-progress-button'
                         : undefined
                     }
+                    onClick={handleUpdate}
+                    disabled={
+                      updateState.isDownloading || updateState.isInstalling
+                    }
+                    aria-busy={
+                      updateState.isDownloading || updateState.isInstalling
+                    }
                     className={cn(
-                      'inline-flex rounded-full',
-                      updateState.isDownloading && 'p-[2px]'
+                      updateState.isDownloading &&
+                        'relative min-w-[8.5rem] overflow-hidden border border-primary/25 bg-primary/10 text-foreground shadow-none disabled:opacity-100 hover:bg-primary/10 dark:border-primary/30 dark:bg-primary/20 dark:hover:bg-primary/20'
                     )}
-                    style={updateProgressRingStyle}
+                    size="sm"
                   >
-                    <Button
-                      onClick={handleUpdate}
-                      disabled={
-                        updateState.isDownloading || updateState.isInstalling
-                      }
-                      aria-busy={
-                        updateState.isDownloading || updateState.isInstalling
-                      }
-                      className={cn(updateState.isDownloading && 'relative z-10')}
-                      size="sm"
-                    >
-                      {updateButtonLabel}
-                    </Button>
-                  </span>
+                    {updateState.isDownloading && (
+                      <>
+                        <span
+                          aria-hidden="true"
+                          data-testid="app-update-button-fill"
+                          className="absolute inset-y-0 left-0 bg-primary transition-[width] duration-300 ease-out"
+                          style={updateButtonFillStyle}
+                        />
+                        <span
+                          aria-hidden="true"
+                          className="invisible"
+                        >
+                          {updateButtonLabel}
+                        </span>
+                        <span
+                          data-testid="app-update-button-label"
+                          className="pointer-events-none absolute inset-0 z-20 flex items-center justify-center transition-[background-image] duration-300 ease-out"
+                          style={updateButtonLabelStyle}
+                        >
+                          {updateButtonLabel}
+                        </span>
+                      </>
+                    )}
+                    {!updateState.isDownloading && updateButtonLabel}
+                  </Button>
                 </div>
               </div>
             </div>

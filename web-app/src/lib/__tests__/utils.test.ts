@@ -5,6 +5,7 @@ import {
   getReadableLanguageName,
   toGigabytes,
   formatMegaBytes,
+  formatBytes,
   formatDuration,
   getModelDisplayName,
   getModelLogoProvider,
@@ -165,6 +166,20 @@ describe('formatMegaBytes', () => {
   it('handles zero and small values', () => {
     expect(formatMegaBytes(0)).toBe('0.00 GB')
     expect(formatMegaBytes(1)).toBe('0.00 GB')
+  })
+})
+
+describe('formatBytes', () => {
+  it('formats bytes with compact adaptive units', () => {
+    expect(formatBytes(0)).toBe('0 B')
+    expect(formatBytes(420)).toBe('420 B')
+    expect(formatBytes(1024)).toBe('1 KB')
+    expect(formatBytes(1536)).toBe('1.5 KB')
+    expect(formatBytes(1024 ** 2)).toBe('1 MB')
+    expect(formatBytes(1024 ** 3 * 1.25)).toBe('1.25 GB')
+    expect(formatBytes(-500)).toBe('0 B')
+    expect(formatBytes(Infinity)).toBe('0 B')
+    expect(formatBytes(NaN)).toBe('0 B')
   })
 })
 

@@ -7,6 +7,11 @@ type ProviderBalanceCacheEntry = {
   timestamp: number
 }
 
+type SupportedProviderBalanceWithRaw = Extract<
+  ProviderBalanceStatus,
+  { state: 'supported' }
+> & { raw?: unknown }
+
 type UseProviderBalanceState = {
   balance: ProviderBalanceStatus | null
   loading: boolean
@@ -15,7 +20,10 @@ type UseProviderBalanceState = {
 }
 
 const BALANCE_CACHE_DURATION = 60 * 1000
+const BALANCE_STORAGE_MAX_AGE = 24 * 60 * 60 * 1000
+const BALANCE_STORAGE_MAX_ENTRIES = 20
 const PROVIDER_BALANCE_REFRESH_EVENT = 'mita-provider-balance-refresh'
+const BALANCE_STORAGE_PREFIX = 'mita-provider-balance-cache:'
 const balanceCache = new Map<string, ProviderBalanceCacheEntry>()
 const balanceRequests = new Map<string, Promise<ProviderBalanceStatus>>()
 
@@ -63,6 +71,172 @@ function providerBalanceCacheKey(provider?: ModelProvider) {
   ].join('|')
 }
 
+function providerBalanceStorageKey(cacheKey: string) {
+  return `${BALANCE_STORAGE_PREFIX}${cacheKey}`
+}
+
+function isCacheEntry(value: unknown): value is ProviderBalanceCacheEntry {
+  if (!value || typeof value !== 'object') return false
+  const record = value as Record<string, unknown>
+  return (
+    typeof record.timestamp === 'number' &&
+    Number.isFinite(record.timestamp) &&
+    Boolean(record.balance) &&
+    typeof record.balance === 'object'
+  )
+}
+
+function balanceHasPersistedRawPayload(
+  balance: ProviderBalanceStatus
+): balance is SupportedProviderBalanceWithRaw {
+  return (
+    balance.state === 'supported' &&
+    Object.prototype.hasOwnProperty.call(balance, 'raw')
+  )
+}
+
+function sanitizeBalanceForStorage(
+  balance: ProviderBalanceStatus
+): ProviderBalanceStatus {
+  if (!balanceHasPersistedRawPayload(balance)) return balance
+  const safeBalance = { ...balance }
+  delete safeBalance.raw
+  return safeBalance
+}
+
+function readProviderBalanceCache(cacheKey: string) {
+  const memoryEntry = balanceCache.get(cacheKey)
+  if (memoryEntry) {
+    if (Date.now() - memoryEntry.timestamp <= BALANCE_STORAGE_MAX_AGE) {
+      return memoryEntry
+    }
+    balanceCache.delete(cacheKey)
+  }
+  if (!cacheKey || typeof window === 'undefined') return undefined
+
+  try {
+    const serialized = window.localStorage.getItem(
+      providerBalanceStorageKey(cacheKey)
+    )
+    if (!serialized) return undefined
+    const parsed = JSON.parse(serialized)
+    if (!isCacheEntry(parsed)) return undefined
+    if (Date.now() - parsed.timestamp > BALANCE_STORAGE_MAX_AGE) {
+      window.localStorage.removeItem(providerBalanceStorageKey(cacheKey))
+      return undefined
+    }
+    const needsMigration = balanceHasPersistedRawPayload(parsed.balance)
+    const safeEntry = needsMigration
+      ? {
+          ...parsed,
+          balance: sanitizeBalanceForStorage(parsed.balance),
+        }
+      : parsed
+    balanceCache.set(cacheKey, safeEntry)
+    if (needsMigration) {
+      try {
+        window.localStorage.setItem(
+          providerBalanceStorageKey(cacheKey),
+          JSON.stringify(safeEntry)
+        )
+      } catch {
+        // Keep the in-memory cache even if persisted cache cleanup fails.
+      }
+    }
+    return safeEntry
+  } catch {
+    return undefined
+  }
+}
+
+function providerBalanceStorageEntries() {
+  if (typeof window === 'undefined') return []
+
+  const keys = Array.from(
+    { length: window.localStorage.length },
+    (_, index) => window.localStorage.key(index)
+  ).filter((key): key is string =>
+    Boolean(key?.startsWith(BALANCE_STORAGE_PREFIX))
+  )
+
+  const entries: Array<{ key: string; timestamp: number }> = []
+  for (const key of keys) {
+    try {
+      const serialized = window.localStorage.getItem(key)
+      if (!serialized) continue
+      const parsed = JSON.parse(serialized)
+      if (!isCacheEntry(parsed)) {
+        window.localStorage.removeItem(key)
+        continue
+      }
+      entries.push({ key, timestamp: parsed.timestamp })
+    } catch {
+      window.localStorage.removeItem(key)
+    }
+  }
+  return entries
+}
+
+function pruneProviderBalanceStorage() {
+  if (typeof window === 'undefined') return
+
+  const now = Date.now()
+  const freshEntries = providerBalanceStorageEntries().filter((entry) => {
+    if (now - entry.timestamp <= BALANCE_STORAGE_MAX_AGE) return true
+    window.localStorage.removeItem(entry.key)
+    return false
+  })
+
+  freshEntries
+    .sort((a, b) => b.timestamp - a.timestamp)
+    .slice(BALANCE_STORAGE_MAX_ENTRIES)
+    .forEach((entry) => {
+      window.localStorage.removeItem(entry.key)
+    })
+}
+
+function writeProviderBalanceCache(
+  cacheKey: string,
+  entry: ProviderBalanceCacheEntry
+) {
+  const safeEntry = {
+    ...entry,
+    balance: sanitizeBalanceForStorage(entry.balance),
+  }
+  balanceCache.set(cacheKey, safeEntry)
+  if (!cacheKey || typeof window === 'undefined') return
+
+  try {
+    window.localStorage.setItem(
+      providerBalanceStorageKey(cacheKey),
+      JSON.stringify(safeEntry)
+    )
+    pruneProviderBalanceStorage()
+  } catch {
+    // Best-effort cache only; balance lookup should not fail because storage is full.
+  }
+}
+
+function clearProviderBalanceStorage(providerName?: string) {
+  if (typeof window === 'undefined') return
+
+  try {
+    for (let index = window.localStorage.length - 1; index >= 0; index -= 1) {
+      const key = window.localStorage.key(index)
+      if (!key?.startsWith(BALANCE_STORAGE_PREFIX)) continue
+      if (
+        providerName &&
+        !key.startsWith(`${BALANCE_STORAGE_PREFIX}${providerName}|`)
+      ) {
+        continue
+      }
+      window.localStorage.removeItem(key)
+    }
+  } catch {
+    // Ignore storage cleanup failures; in-memory cache is still cleared below.
+  }
+}
+
 export function notifyProviderBalanceMayHaveChanged(providerName?: string) {
   if (providerName) {
     for (const key of balanceCache.keys()) {
@@ -79,6 +253,7 @@ export function notifyProviderBalanceMayHaveChanged(providerName?: string) {
     balanceCache.clear()
     balanceRequests.clear()
   }
+  clearProviderBalanceStorage(providerName)
 
   if (typeof window === 'undefined') return
   window.dispatchEvent(
@@ -110,7 +285,7 @@ export function useProviderBalance(
         return
       }
 
-      const cached = balanceCache.get(cacheKey)
+      const cached = readProviderBalanceCache(cacheKey)
       if (!force && cached && Date.now() - cached.timestamp < BALANCE_CACHE_DURATION) {
         setBalance(cached.balance)
         setError(null)
@@ -118,6 +293,9 @@ export function useProviderBalance(
         return
       }
 
+      if (cached) {
+        setBalance(cached.balance)
+      }
       setLoading(true)
       setError(null)
 
@@ -145,7 +323,7 @@ export function useProviderBalance(
 
         setBalance(result)
         if (result.state === 'supported') {
-          balanceCache.set(cacheKey, {
+          writeProviderBalanceCache(cacheKey, {
             balance: result,
             timestamp: Date.now(),
           })

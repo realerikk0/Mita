@@ -268,6 +268,24 @@ export function formatMegaBytes(mb: number) {
   }
 }
 
+export function formatBytes(bytes: number) {
+  const units = ['B', 'KB', 'MB', 'GB', 'TB']
+  let value = Number.isFinite(bytes) && bytes > 0 ? bytes : 0
+  let unitIndex = 0
+
+  while (value >= 1024 && unitIndex < units.length - 1) {
+    value /= 1024
+    unitIndex += 1
+  }
+
+  const formatted =
+    unitIndex === 0
+      ? Math.round(value).toString()
+      : Number(value.toFixed(2)).toString()
+
+  return `${formatted} ${units[unitIndex]}`
+}
+
 export function isDev() {
   return window.location.host.startsWith('localhost:')
 }

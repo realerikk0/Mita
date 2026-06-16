@@ -16,6 +16,21 @@ import { useNavigate } from '@tanstack/react-router'
 import { route } from '@/constants/routes'
 import { DownloadIcon } from 'lucide-react'
 import { Button } from '@/components/ui/button'
+import { cn, formatBytes } from '@/lib/utils'
+
+function getDownloadProgressLabel(
+  progress: number,
+  current: number,
+  total: number
+) {
+  if (total > 0) return `${Math.round(progress * 100)}%`
+  return current > 0 ? 'Downloading...' : 'Initializing download...'
+}
+
+function getDownloadSizeLabel(current: number, total: number) {
+  if (total > 0) return `${formatBytes(current)} / ${formatBytes(total)}`
+  return current > 0 ? formatBytes(current) : ''
+}
 
 export function DownloadManagement() {
   const { t } = useTranslation()
@@ -352,11 +367,6 @@ export function DownloadManagement() {
     onAppUpdateDownloadError,
   ])
 
-  function renderGB(bytes: number): string {
-    const gb = bytes / 1024 ** 3
-    return ((gb * 100) / 100).toFixed(2)
-  }
-
   return (
     <>
       <Popover open={isPopoverOpen} onOpenChange={setIsPopoverOpen}>
@@ -411,17 +421,30 @@ export function DownloadManagement() {
                       </div>
                       <div className="relative z-40">
                         <Progress
-                          value={appUpdateState.downloadProgress * 100}
-                          className="my-2 h-6 bg-muted-foreground/10 relative rounded-md"
+                          value={
+                            appUpdateState.totalBytes > 0
+                              ? appUpdateState.downloadProgress * 100
+                              : 100
+                          }
+                          className={cn(
+                            'my-2 h-6 bg-muted-foreground/10 relative rounded-md',
+                            appUpdateState.totalBytes <= 0 &&
+                              '[&_[data-slot=progress-indicator]]:animate-pulse [&_[data-slot=progress-indicator]]:bg-primary/50'
+                          )}
                         />
                         <div className="absolute w-full top-1/2 transform -translate-y-1/2 flex items-center justify-between px-2">
                           <p className="text-xs">
-                            {Math.round(appUpdateState.downloadProgress * 100)}
-                            %
+                            {getDownloadProgressLabel(
+                              appUpdateState.downloadProgress,
+                              appUpdateState.downloadedBytes,
+                              appUpdateState.totalBytes
+                            )}
                           </p>
                           <p className="text-xs">
-                            {`${renderGB(appUpdateState.downloadedBytes)} / ${renderGB(appUpdateState.totalBytes)}`}{' '}
-                            GB
+                            {getDownloadSizeLabel(
+                              appUpdateState.downloadedBytes,
+                              appUpdateState.totalBytes
+                            )}
                           </p>
                         </div>
                       </div>
@@ -476,23 +499,28 @@ export function DownloadManagement() {
                       </div>
                       <div className="relative z-40">
                         <Progress
-                          value={download.progress * 100}
-                          className="my-2 h-6 bg-muted-foreground/10 relative rounded-md"
+                          value={
+                            download.total > 0 ? download.progress * 100 : 100
+                          }
+                          className={cn(
+                            'my-2 h-6 bg-muted-foreground/10 relative rounded-md',
+                            download.total <= 0 &&
+                              '[&_[data-slot=progress-indicator]]:animate-pulse [&_[data-slot=progress-indicator]]:bg-primary/50'
+                          )}
                         />
                         <div className="absolute w-full top-1/2 transform -translate-y-1/2 flex items-center justify-between px-2">
                           <p className="text-xs">
-                            {download.total > 0
-                              ? `${Math.round(download.progress * 100)}%`
-                              : download.current > 0
-                                ? 'Downloading...'
-                                : 'Initializing download...'}
+                            {getDownloadProgressLabel(
+                              download.progress,
+                              download.current,
+                              download.total
+                            )}
                           </p>
                           <p className="text-xs">
-                            {download.total > 0
-                              ? `${renderGB(download.current)} / ${renderGB(download.total)} GB`
-                              : download.current > 0
-                                ? `${renderGB(download.current)} GB`
-                                : ''}
+                            {getDownloadSizeLabel(
+                              download.current,
+                              download.total
+                            )}
                           </p>
                         </div>
                       </div>

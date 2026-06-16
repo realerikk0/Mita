@@ -1,14 +1,26 @@
 import type { ProviderBalanceStatus } from '@/services/providers/types'
+import {
+  BIYUAN_PROVIDER_NAMES,
+  BIYUAN_QUOTA_POINTS_PER_USD,
+} from '@/constants/biyuan'
 
 type ProviderBalanceLabelOptions = {
   balancePrefix?: string
   quotaUnitLabel?: string
 }
 
-function formatMoney(value: number, currency = 'USD') {
+export function formatProviderMoney(value: number, currency = 'USD') {
   return new Intl.NumberFormat('en-US', {
     style: 'currency',
     currency,
+    minimumFractionDigits: 2,
+    maximumFractionDigits: 2,
+  }).format(value)
+}
+
+export function formatDecimalAmount(value: number) {
+  return new Intl.NumberFormat('en-US', {
+    minimumFractionDigits: 2,
     maximumFractionDigits: 2,
   }).format(value)
 }
@@ -19,16 +31,41 @@ function formatWholeNumber(value: number) {
   }).format(value)
 }
 
+export function isBiyuanQuotaBalance(balance: ProviderBalanceStatus) {
+  return (
+    balance.state === 'supported' &&
+    balance.unit === 'quota' &&
+    (BIYUAN_PROVIDER_NAMES as readonly string[]).includes(balance.provider)
+  )
+}
+
+export function formatBiyuanQuotaAsUsd(value: number) {
+  return formatProviderMoney(value / BIYUAN_QUOTA_POINTS_PER_USD, 'USD')
+}
+
 export function providerBalancePrimaryLabel(
   balance: ProviderBalanceStatus,
   options: ProviderBalanceLabelOptions = {}
 ) {
-  if (balance.state !== 'supported' || !balance.accountBalance) return null
+  if (balance.state !== 'supported') return null
+  if (balance.moneyBalance) {
+    const currency = balance.moneyBalance.currency ?? balance.currency
+    return currency
+      ? formatProviderMoney(balance.moneyBalance.available, currency)
+      : formatDecimalAmount(balance.moneyBalance.available)
+  }
+  if (!balance.accountBalance) return null
+  if (isBiyuanQuotaBalance(balance)) {
+    return formatBiyuanQuotaAsUsd(balance.accountBalance.available)
+  }
   if (balance.unit === 'usd') {
-    return formatMoney(balance.accountBalance.available, 'USD')
+    return formatProviderMoney(balance.accountBalance.available, 'USD')
   }
   if (balance.unit === 'currency') {
-    return formatMoney(balance.accountBalance.available, balance.currency ?? 'USD')
+    return formatProviderMoney(
+      balance.accountBalance.available,
+      balance.currency ?? 'USD'
+    )
   }
   const formatted = formatWholeNumber(balance.accountBalance.available)
   if (balance.unit === 'quota') {
@@ -44,7 +81,6 @@ export function getProviderBalanceBadgeLabel(
   if (
     !balance ||
     balance.state !== 'supported' ||
-    !balance.accountBalance ||
     balance.notice?.hideBadge
   ) {
     return null
