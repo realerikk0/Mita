@@ -1,4 +1,8 @@
 {
+  "loopDetected": {
+    "title": "Stopped a repeating tool loop",
+    "description": "The model kept making the same tool call without progress, so automatic follow-up was paused. Send a new message to continue."
+  },
   "welcome": "Hi, how are you?",
   "description": "What would you like me to do?",
   "temporaryChat": "Temporary Chat",

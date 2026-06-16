@@ -1,4 +1,8 @@
 {
+  "loopDetected": {
+    "title": "已停止重复的工具调用循环",
+    "description": "模型一直在重复同一个工具调用且没有进展，已暂停自动续跑。发送新消息即可继续。"
+  },
   "welcome": "嗨，你好吗？",
   "description": "需要我做什么呢？",
   "descriptionVariants": [
