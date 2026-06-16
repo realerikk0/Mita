@@ -9,7 +9,8 @@
     "lint": "eslint .",
     "preview": "vite preview",
     "test": "cross-env NODE_OPTIONS=--max-old-space-size=4096 vitest --run",
-    "test:coverage": "cross-env NODE_OPTIONS=--max-old-space-size=4096 vitest --coverage --run"
+    "test:coverage": "cross-env NODE_OPTIONS=--max-old-space-size=4096 vitest --coverage --run",
+    "test:integration": "cross-env RUN_INTEGRATION=1 NODE_OPTIONS=--max-old-space-size=4096 vitest --run src/lib/__tests__/integration"
   },
   "dependencies": {
     "@ai-sdk/anthropic": "^2.0.0",

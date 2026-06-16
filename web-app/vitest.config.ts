@@ -1,4 +1,5 @@
 import { defineConfig } from 'vitest/config'
+import { configDefaults } from 'vitest/config'
 import react from '@vitejs/plugin-react'
 import path from 'path'
 
@@ -9,6 +10,15 @@ export default defineConfig({
     setupFiles: ['./src/test/setup.ts'],
     globals: true,
     css: true,
+    // Provider integration tests hit a real endpoint and are slow/networked.
+    // Excluded from the default run; enable with RUN_INTEGRATION=1 (see
+    // `yarn test:integration`). They also self-skip when creds are absent.
+    exclude: [
+      ...configDefaults.exclude,
+      ...(process.env.RUN_INTEGRATION
+        ? []
+        : ['**/*.integration.test.ts']),
+    ],
     coverage: {
       reporter: ['text', 'json', 'html', 'lcov'],
       include: ['src/**/*.{ts,tsx}'],
