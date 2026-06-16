@@ -286,6 +286,12 @@ const DOWNLOAD_MIME_EXTENSIONS: Record<string, string> = {
   'image/webp': 'webp',
   'video/mp4': 'mp4',
 }
+const SEGMENTED_CONTROL_CLASS =
+  'rounded-lg border border-border/60 bg-muted p-1 text-muted-foreground dark:border-white/10 dark:bg-white/10'
+const SEGMENTED_OPTION_CLASS =
+  'h-7 rounded-md px-3 text-xs text-muted-foreground transition-colors hover:text-foreground'
+const SEGMENTED_OPTION_ACTIVE_CLASS =
+  'bg-background text-foreground shadow-sm dark:bg-neutral-950'
 const imageT = (
   t: TranslationFn,
   key: string,
@@ -1268,7 +1274,7 @@ function StoryboardStepper({
             >
               <span
                 className={cn(
-                  'flex size-6 items-center justify-center rounded-full border border-transparent bg-[#f3f3f2] font-mono text-xs font-semibold text-muted-foreground transition-colors',
+                  'flex size-6 items-center justify-center rounded-full border border-transparent bg-muted font-mono text-xs font-semibold text-muted-foreground transition-colors dark:bg-white/10',
                   index === activeIndex && 'bg-[#f36f4f] text-white',
                   done && 'bg-emerald-500/10 text-emerald-600'
                 )}
@@ -2807,15 +2813,15 @@ function StoryboardVideoMode({
                   <span className="text-xs text-muted-foreground">
                     {imageT(t, 'storyboard.consistencyLabel')}
                   </span>
-                  <div className="flex rounded-lg bg-[#eef0f3] p-1">
+                  <div className={cn('flex', SEGMENTED_CONTROL_CLASS)}>
                     {STORYBOARD_CONSISTENCY_OPTIONS.map((item) => (
                       <button
                         key={item.value}
                         type="button"
                         className={cn(
-                          'h-7 rounded-md px-3 text-xs',
+                          SEGMENTED_OPTION_CLASS,
                           settings.consistency === item.value &&
-                            'bg-background shadow-sm'
+                            SEGMENTED_OPTION_ACTIVE_CLASS
                         )}
                         onClick={() =>
                           updateSettings({ consistency: item.value })
@@ -2840,7 +2846,7 @@ function StoryboardVideoMode({
                       className={cn(
                         'min-h-[50px] rounded-lg border bg-background px-3 py-2 text-left transition-colors',
                         settings.template === template.value &&
-                          'border-[#f36f4f] bg-[#fff0eb] text-[#e25f43]'
+                          'border-[#f36f4f] bg-[#fff0eb] text-[#e25f43] dark:bg-[#f36f4f]/15 dark:text-[#ffb29f]'
                       )}
                       onClick={() =>
                         updateSettings({ template: template.value })
@@ -2874,14 +2880,15 @@ function StoryboardVideoMode({
                   <span className="text-xs text-muted-foreground">
                     {imageT(t, 'storyboard.aspectRatio')}
                   </span>
-                  <div className="flex rounded-lg bg-[#eef0f3] p-1">
+                  <div className={cn('flex', SEGMENTED_CONTROL_CLASS)}>
                     {STORYBOARD_ASPECT_OPTIONS.map((item) => (
                       <button
                         key={item}
                         type="button"
                         className={cn(
-                          'h-7 rounded-md px-3 text-xs',
-                          settings.aspect === item && 'bg-background shadow-sm'
+                          SEGMENTED_OPTION_CLASS,
+                          settings.aspect === item &&
+                            SEGMENTED_OPTION_ACTIVE_CLASS
                         )}
                         onClick={() => updateSettings({ aspect: item })}
                       >
@@ -2895,15 +2902,15 @@ function StoryboardVideoMode({
                   <span className="text-xs text-muted-foreground">
                     {imageT(t, 'storyboard.resolution')}
                   </span>
-                  <div className="flex rounded-lg bg-[#eef0f3] p-1">
+                  <div className={cn('flex', SEGMENTED_CONTROL_CLASS)}>
                     {QUALITY_OPTIONS.map((option) => (
                       <button
                         key={option.value}
                         type="button"
                         className={cn(
-                          'h-7 rounded-md px-3 text-xs',
+                          SEGMENTED_OPTION_CLASS,
                           settings.qualityPreset === option.value &&
-                            'bg-background shadow-sm'
+                            SEGMENTED_OPTION_ACTIVE_CLASS
                         )}
                         onClick={() =>
                           updateSettings({ qualityPreset: option.value })
@@ -3205,15 +3212,17 @@ function StoryboardVideoMode({
                 <span className="text-xs text-muted-foreground">
                   {imageT(t, 'storyboard.aspectRatio')}
                 </span>
-                <div className="grid grid-cols-3 rounded-lg bg-[#eef0f3] p-1">
+                <div
+                  className={cn('grid grid-cols-3', SEGMENTED_CONTROL_CLASS)}
+                >
                   {VIDEO_ASPECT_OPTIONS.map((item) => (
                     <button
                       key={item}
                       type="button"
                       className={cn(
-                        'h-7 rounded-md px-3 text-xs',
+                        SEGMENTED_OPTION_CLASS,
                         videoSettings.ratio === item &&
-                          'bg-background shadow-sm'
+                          SEGMENTED_OPTION_ACTIVE_CLASS
                       )}
                       onClick={() => updateVideoSettings({ ratio: item })}
                     >
@@ -3279,15 +3288,15 @@ function StoryboardVideoMode({
                 <span className="text-xs text-muted-foreground">
                   {imageT(t, 'storyboard.resolution')}
                 </span>
-                <div className="flex rounded-lg bg-[#eef0f3] p-1">
+                <div className={cn('flex', SEGMENTED_CONTROL_CLASS)}>
                   {VIDEO_RESOLUTION_OPTIONS.map((item) => (
                     <button
                       key={item}
                       type="button"
                       className={cn(
-                        'h-7 rounded-md px-3 text-xs',
+                        SEGMENTED_OPTION_CLASS,
                         videoSettings.resolution === item &&
-                          'bg-background shadow-sm'
+                          SEGMENTED_OPTION_ACTIVE_CLASS
                       )}
                       onClick={() => updateVideoSettings({ resolution: item })}
                     >
@@ -3300,14 +3309,15 @@ function StoryboardVideoMode({
                 <span className="text-xs text-muted-foreground">
                   {imageT(t, 'storyboard.fps')}
                 </span>
-                <div className="flex rounded-lg bg-[#eef0f3] p-1">
+                <div className={cn('flex', SEGMENTED_CONTROL_CLASS)}>
                   {([24, 30, 60] as const).map((item) => (
                     <button
                       key={item}
                       type="button"
                       className={cn(
-                        'h-7 rounded-md px-3 text-xs',
-                        videoSettings.fps === item && 'bg-background shadow-sm'
+                        SEGMENTED_OPTION_CLASS,
+                        videoSettings.fps === item &&
+                          SEGMENTED_OPTION_ACTIVE_CLASS
                       )}
                       onClick={() => updateVideoSettings({ fps: item })}
                     >
@@ -3573,7 +3583,7 @@ function Images() {
 
   const mediaModeSwitch = (
     <div className="relative z-30 flex h-full w-full items-center">
-      <div className="relative z-40 inline-flex shrink-0 gap-0.5 rounded-[9px] bg-[#f3f3f2] p-[3px] shadow-[0_0_0_0.5px_rgba(0,0,0,0.08)]">
+      <div className="relative z-40 inline-flex shrink-0 gap-0.5 rounded-[9px] border border-border/60 bg-muted p-[3px] shadow-[0_0_0_0.5px_rgba(0,0,0,0.08)] dark:border-white/10 dark:bg-white/10 dark:shadow-none">
         {(
           [
             {
@@ -3606,7 +3616,7 @@ function Images() {
             className={cn(
               'flex h-7 items-center gap-[7px] rounded-[7px] px-[13px] text-[13px] transition-colors',
               mediaMode === value
-                ? 'bg-white font-semibold text-foreground shadow-[0_1px_2px_rgba(0,0,0,0.10),0_0_0_0.5px_rgba(0,0,0,0.04)]'
+                ? 'bg-background font-semibold text-foreground shadow-[0_1px_2px_rgba(0,0,0,0.10),0_0_0_0.5px_rgba(0,0,0,0.04)] dark:bg-neutral-950 dark:shadow-none'
                 : 'text-muted-foreground hover:text-foreground',
               disabled &&
                 'cursor-not-allowed opacity-45 hover:text-muted-foreground'
@@ -3620,7 +3630,7 @@ function Images() {
             {badge && (
               <span
                 aria-hidden="true"
-                className="rounded-[5px] bg-[#fff0eb] px-1.5 py-0.5 text-[10px] font-bold leading-none text-[#f36f4f]"
+                className="rounded-[5px] bg-[#fff0eb] px-1.5 py-0.5 text-[10px] font-bold leading-none text-[#f36f4f] dark:bg-[#f36f4f]/15 dark:text-[#ffb29f]"
               >
                 {badge}
               </span>
