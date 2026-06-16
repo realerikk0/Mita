@@ -25,7 +25,6 @@ import {
 } from '@/lib/provider-quota-error'
 import {
   BIYUAN_BALANCE_URL,
-  BIYUAN_DEFAULT_BASE_URL,
   BIYUAN_PROVIDER_NAMES,
   BIYUAN_QUOTA_POINTS_PER_USD,
 } from '@/constants/biyuan'
@@ -137,7 +136,7 @@ function balanceBaseUrl(provider: ModelProvider) {
 
 function biyuanBalanceUrl(provider: ModelProvider) {
   const baseUrl = balanceBaseUrl(provider)
-  if (!baseUrl || baseUrl === BIYUAN_DEFAULT_BASE_URL) {
+  if (!baseUrl) {
     return BIYUAN_BALANCE_URL
   }
   if (/\/v1$/i.test(baseUrl)) {

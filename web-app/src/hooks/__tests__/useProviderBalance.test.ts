@@ -44,6 +44,57 @@ function storageKeys() {
   ).filter((key): key is string => Boolean(key))
 }
 
+function hashString(value: string) {
+  let hash = 0
+  for (let i = 0; i < value.length; i += 1) {
+    hash = (hash << 5) - hash + value.charCodeAt(i)
+    hash |= 0
+  }
+  return Math.abs(hash).toString(36)
+}
+
+function storageKeyForProvider(provider: ModelProvider) {
+  const settingsFingerprint = provider.settings
+    ?.filter((setting) =>
+      [
+        'api-key',
+        'management-key',
+        'xai-management-key',
+        'team-id',
+        'xai-team-id',
+        'admin-api-key',
+        'anthropic-admin-api-key',
+      ].includes(setting.key)
+    )
+    .map((setting) => `${setting.key}:${setting.controller_props.value ?? ''}`)
+    .join('|') ?? ''
+
+  return [
+    'mita-provider-balance-cache:',
+    provider.provider,
+    '|',
+    provider.base_url ?? '',
+    '|',
+    hashString(
+      [
+        provider.api_key ?? '',
+        ...(provider.api_key_fallbacks ?? []),
+        settingsFingerprint,
+      ].join('|')
+    ),
+  ].join('')
+}
+
+function storedBalanceEntry(
+  balance: ProviderBalanceStatus,
+  timestamp = Date.now()
+) {
+  return JSON.stringify({
+    balance,
+    timestamp,
+  })
+}
+
 describe('useProviderBalance', () => {
   beforeEach(() => {
     fetchProviderBalance.mockReset()
@@ -145,7 +196,7 @@ describe('useProviderBalance', () => {
     ).toBe(false)
   })
 
-  it('uses the client cache write time for freshness checks', async () => {
+  it('uses the client write time for fresh in-memory cache checks', async () => {
     fetchProviderBalance.mockResolvedValue(balanceFor('provider-a'))
     const provider = providerFor('provider-a')
 
@@ -187,13 +238,87 @@ describe('useProviderBalance', () => {
     expect(cached.balance.raw).toBeUndefined()
   })
 
+  it('migrates old stored balances with raw payloads on read', async () => {
+    const provider = providerFor('provider-a')
+    const cacheKey = storageKeyForProvider(provider)
+    localStorage.setItem(
+      cacheKey,
+      storedBalanceEntry({
+        ...balanceFor('provider-a'),
+        raw: {
+          account: 'old upstream payload',
+        },
+      })
+    )
+
+    const { result } = renderHook(() => useProviderBalance(provider))
+
+    await waitFor(() =>
+      expect(result.current.balance?.state).toBe('supported')
+    )
+    expect(fetchProviderBalance).not.toHaveBeenCalled()
+    expect(result.current.balance).not.toHaveProperty('raw')
+    const cached = JSON.parse(localStorage.getItem(cacheKey) ?? '{}')
+    expect(cached.balance.raw).toBeUndefined()
+  })
+
+  it('ignores and removes stored balances older than the max storage age', async () => {
+    const provider = providerFor('provider-a')
+    const cacheKey = storageKeyForProvider(provider)
+    localStorage.setItem(
+      cacheKey,
+      storedBalanceEntry(
+        balanceFor('provider-a'),
+        Date.now() - 24 * 60 * 60 * 1000 - 1
+      )
+    )
+    fetchProviderBalance.mockResolvedValue({
+      state: 'unsupported',
+      provider: 'provider-a',
+      reason: 'No balance endpoint.',
+    })
+
+    const { result } = renderHook(() => useProviderBalance(provider))
+
+    await waitFor(() =>
+      expect(result.current.balance?.state).toBe('unsupported')
+    )
+    expect(fetchProviderBalance).toHaveBeenCalledTimes(1)
+    expect(localStorage.getItem(cacheKey)).toBeNull()
+  })
+
+  it('prunes old provider balance storage entries and invalid entries', async () => {
+    const now = Date.now()
+    for (let index = 0; index < 21; index += 1) {
+      localStorage.setItem(
+        `mita-provider-balance-cache:seed-${index}|url|hash`,
+        storedBalanceEntry(balanceFor(`seed-${index}`), now - 10_000 + index)
+      )
+    }
+    const invalidKey = 'mita-provider-balance-cache:invalid|url|hash'
+    localStorage.setItem(invalidKey, '{bad json')
+    fetchProviderBalance.mockResolvedValue(balanceFor('provider-a'))
+    const provider = providerFor('provider-a')
+
+    const { result } = renderHook(() => useProviderBalance(provider))
+
+    await waitFor(() =>
+      expect(result.current.balance?.state).toBe('supported')
+    )
+    const cacheKeys = storageKeys().filter((key) =>
+      key.startsWith('mita-provider-balance-cache:')
+    )
+    expect(cacheKeys).toHaveLength(20)
+    expect(cacheKeys).toContain(storageKeyForProvider(provider))
+    expect(localStorage.getItem('mita-provider-balance-cache:seed-0|url|hash'))
+      .toBeNull()
+    expect(localStorage.getItem(invalidKey)).toBeNull()
+  })
+
   it('only clears the selected provider balance storage prefix', () => {
     const providerAKey = 'mita-provider-balance-cache:provider-a|hash'
     const providerABKey = 'mita-provider-balance-cache:provider-ab|hash'
-    const cached = JSON.stringify({
-      balance: balanceFor('provider-a'),
-      timestamp: Date.now(),
-    })
+    const cached = storedBalanceEntry(balanceFor('provider-a'))
     localStorage.setItem(providerAKey, cached)
     localStorage.setItem(providerABKey, cached)
 

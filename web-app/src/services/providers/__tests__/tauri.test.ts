@@ -582,6 +582,56 @@ describe('TauriProvidersService', () => {
       })
     })
 
+    it('falls back to the default Biyuan balance endpoint when base_url is empty', async () => {
+      vi.mocked(providerRemoteApiKeyChain).mockReturnValue(['sk-test'])
+      vi.mocked(fetchTauri).mockResolvedValueOnce({
+        ok: true,
+        status: 200,
+        json: vi.fn().mockResolvedValue({
+          unit: 'quota',
+          fetched_at: 1781260326,
+          account: {
+            total_available: 500000,
+          },
+        }),
+      } as any)
+
+      await svc.fetchProviderBalance({
+        ...biyuanProvider,
+        base_url: '',
+      })
+
+      expect(fetchTauri).toHaveBeenCalledWith(
+        'https://api.biyuan.ai/v1/balance',
+        expect.any(Object)
+      )
+    })
+
+    it('appends /v1/balance for Biyuan custom base_url values without /v1', async () => {
+      vi.mocked(providerRemoteApiKeyChain).mockReturnValue(['sk-test'])
+      vi.mocked(fetchTauri).mockResolvedValueOnce({
+        ok: true,
+        status: 200,
+        json: vi.fn().mockResolvedValue({
+          unit: 'quota',
+          fetched_at: 1781260326,
+          account: {
+            total_available: 500000,
+          },
+        }),
+      } as any)
+
+      await svc.fetchProviderBalance({
+        ...biyuanProvider,
+        base_url: 'https://proxy.example.com/openai',
+      })
+
+      expect(fetchTauri).toHaveBeenCalledWith(
+        'https://proxy.example.com/openai/v1/balance',
+        expect.any(Object)
+      )
+    })
+
     it('retries Biyuan server errors before returning balance', async () => {
       vi.useFakeTimers()
       try {
@@ -701,6 +751,9 @@ describe('TauriProvidersService', () => {
           message,
           ...(retryable === undefined ? {} : { retryable }),
         })
+        if (retryable === undefined) {
+          expect(result).not.toHaveProperty('retryable')
+        }
       }
     )
 

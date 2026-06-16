@@ -7,6 +7,11 @@ type ProviderBalanceCacheEntry = {
   timestamp: number
 }
 
+type SupportedProviderBalanceWithRaw = Extract<
+  ProviderBalanceStatus,
+  { state: 'supported' }
+> & { raw?: unknown }
+
 type UseProviderBalanceState = {
   balance: ProviderBalanceStatus | null
   loading: boolean
@@ -81,10 +86,19 @@ function isCacheEntry(value: unknown): value is ProviderBalanceCacheEntry {
   )
 }
 
+function balanceHasPersistedRawPayload(
+  balance: ProviderBalanceStatus
+): balance is SupportedProviderBalanceWithRaw {
+  return (
+    balance.state === 'supported' &&
+    Object.prototype.hasOwnProperty.call(balance, 'raw')
+  )
+}
+
 function sanitizeBalanceForStorage(
   balance: ProviderBalanceStatus
 ): ProviderBalanceStatus {
-  if (balance.state !== 'supported') return balance
+  if (!balanceHasPersistedRawPayload(balance)) return balance
   const safeBalance = { ...balance }
   delete safeBalance.raw
   return safeBalance
@@ -111,18 +125,23 @@ function readProviderBalanceCache(cacheKey: string) {
       window.localStorage.removeItem(providerBalanceStorageKey(cacheKey))
       return undefined
     }
-    const safeEntry = {
-      ...parsed,
-      balance: sanitizeBalanceForStorage(parsed.balance),
-    }
+    const needsMigration = balanceHasPersistedRawPayload(parsed.balance)
+    const safeEntry = needsMigration
+      ? {
+          ...parsed,
+          balance: sanitizeBalanceForStorage(parsed.balance),
+        }
+      : parsed
     balanceCache.set(cacheKey, safeEntry)
-    try {
-      window.localStorage.setItem(
-        providerBalanceStorageKey(cacheKey),
-        JSON.stringify(safeEntry)
-      )
-    } catch {
-      // Keep the in-memory cache even if persisted cache cleanup fails.
+    if (needsMigration) {
+      try {
+        window.localStorage.setItem(
+          providerBalanceStorageKey(cacheKey),
+          JSON.stringify(safeEntry)
+        )
+      } catch {
+        // Keep the in-memory cache even if persisted cache cleanup fails.
+      }
     }
     return safeEntry
   } catch {
