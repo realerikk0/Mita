@@ -392,7 +392,13 @@ export async function compactMessages(
     return trimResult
   }
 
-  const droppedMessages = messages.slice(0, trimResult.trimmedCount)
+  // Kept messages are NOT necessarily a contiguous suffix: a pinned system
+  // summary is retained out of order. Derive the dropped set by difference
+  // (trimMessages preserves message identity) instead of assuming the first N
+  // were dropped — otherwise an already-present summary would be re-summarized
+  // and a genuinely dropped middle turn would be lost.
+  const keptMessages = new Set(trimResult.messages)
+  const droppedMessages = messages.filter((m) => !keptMessages.has(m))
 
   // Build conversation text from dropped messages
   const conversationText = droppedMessages

@@ -11,6 +11,7 @@ export type MitaAnalyticsEventName =
   | 'message_sent'
   | 'assistant_response_started'
   | 'assistant_response_completed'
+  | 'assistant_step_completed'
   | 'assistant_response_failed'
   | 'generation_cancelled'
   | 'message_regenerated'
