@@ -6,6 +6,7 @@ import {
 } from '@janhq/core'
 import { generateId, generateText, type LanguageModel } from 'ai'
 import {
+  DEFAULT_CHARS_PER_TOKEN,
   buildCompactPrompt,
   estimateThreadMessageTokens,
   estimateTokens,
@@ -71,6 +72,8 @@ export interface AutoCompactCheckOptions {
   systemPrompt?: string
   maxContextTokens: number
   threshold?: number
+  /** Per-model calibrated chars-per-token (see token-calibration-store). */
+  charsPerToken?: number
 }
 
 export function parseCompactCommand(input: string):
@@ -128,6 +131,7 @@ export function shouldAutoCompactThread({
   systemPrompt,
   maxContextTokens,
   threshold = DEFAULT_AUTO_COMPACT_THRESHOLD,
+  charsPerToken = DEFAULT_CHARS_PER_TOKEN,
 }: AutoCompactCheckOptions): {
   shouldCompact: boolean
   tokenEstimate: number
@@ -139,11 +143,12 @@ export function shouldAutoCompactThread({
   const activeMessages = getVisibleThreadMessages(messages)
   const tokenEstimate =
     activeMessages.reduce(
-      (total, message) => total + estimateThreadMessageTokens(message),
+      (total, message) =>
+        total + estimateThreadMessageTokens(message, charsPerToken),
       0
     ) +
-    estimateTokens(incomingText ?? '') +
-    estimateTokens(systemPrompt ?? '')
+    estimateTokens(incomingText ?? '', charsPerToken) +
+    estimateTokens(systemPrompt ?? '', charsPerToken)
 
   return {
     shouldCompact: maxContextTokens > 0 && tokenEstimate >= tokenLimit,

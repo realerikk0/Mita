@@ -69,16 +69,22 @@ export function getToolAwareSystemMessage(
     searchDecision?: SearchDecision
   }
 ): string {
-  const toolAwareInstructions =
-    options.structuredToolsEnabled || options.nativeWebSearchEnabled
-      ? instructions
-      : redactUnavailableToolHints(instructions)
+  // Normalize the base instructions the SAME way regardless of the tool/search
+  // toggles, so the system prefix is byte-stable across turns and can be
+  // prompt-cached (see Anthropic cacheControl in the transport). The legacy
+  // hint redaction only rewrites tool guidance to conditional-safe phrasing
+  // ("use tools only when available") and is a no-op on the modern prompt, so
+  // applying it unconditionally does not change tool behavior.
+  const baseInstructions = redactUnavailableToolHints(instructions)
 
+  // The per-turn search contract is intentionally dynamic: it only appends when
+  // native search is active this turn, and will (correctly) bust the cache on
+  // those turns only.
   if (options.nativeWebSearchEnabled && options.searchDecision?.enabled) {
-    return appendSearchContract(toolAwareInstructions, options.searchDecision)
+    return appendSearchContract(baseInstructions, options.searchDecision)
   }
 
-  return toolAwareInstructions
+  return baseInstructions
 }
 
 export function appendSearchContract(

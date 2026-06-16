@@ -74,4 +74,16 @@ You have tools to search for and access real-time, up-to-date data. Use them whe
       })
     ).not.toContain('Search contract:')
   })
+
+  it('is byte-stable across tool toggles so the prefix stays cacheable', () => {
+    const withTools = getToolAwareSystemMessage(MITA_ASSISTANT_INSTRUCTIONS, {
+      structuredToolsEnabled: true,
+      nativeWebSearchEnabled: false,
+    })
+    const withoutTools = getToolAwareSystemMessage(MITA_ASSISTANT_INSTRUCTIONS, {
+      structuredToolsEnabled: false,
+      nativeWebSearchEnabled: false,
+    })
+    expect(withTools).toBe(withoutTools)
+  })
 })

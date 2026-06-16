@@ -29,6 +29,7 @@ export const localStorageKey = {
   agentMode: 'agent-mode',
   latestMitaModel: 'latest-mita-model',
   webSearch: 'mita-web-search',
+  tokenCalibration: 'token-calibration',
 }
 
 export const CACHE_EXPIRY_MS = 1000 * 60 * 60 * 24
