@@ -475,7 +475,7 @@ describe('TauriProvidersService', () => {
   describe('fetchProviderBalance', () => {
     const biyuanProvider = {
       provider: 'jingxing',
-      base_url: 'https://api.biyuan.ai/v1',
+      base_url: 'https://api.jingxing.uk/v1',
       active: true,
     } as any
 
@@ -525,6 +525,12 @@ describe('TauriProvidersService', () => {
           used: 68391621,
           total: 106955572,
         },
+        moneyBalance: {
+          available: 77.127902,
+          used: 136.783242,
+          total: 213.911144,
+          currency: 'USD',
+        },
         tokenLimit: {
           available: 0,
           used: 0,
@@ -536,6 +542,49 @@ describe('TauriProvidersService', () => {
       if (result.state === 'supported') {
         expect(result).not.toHaveProperty('converted')
         expect(result.links?.topup).toBe('https://api.biyuan.ai/console/topup')
+      }
+    })
+
+    it('retries Biyuan server errors before returning balance', async () => {
+      vi.useFakeTimers()
+      try {
+        vi.mocked(providerRemoteApiKeyChain).mockReturnValue(['sk-test'])
+        vi.mocked(fetchTauri)
+          .mockResolvedValueOnce({
+            ok: false,
+            status: 502,
+            statusText: 'Bad Gateway',
+          } as any)
+          .mockResolvedValueOnce({
+            ok: true,
+            status: 200,
+            json: vi.fn().mockResolvedValue({
+              unit: 'quota',
+              unlimited_quota: true,
+              token_status: 1,
+              fetched_at: 1781260326,
+              account: {
+                total_granted: 500000,
+                total_used: 0,
+                total_available: 500000,
+              },
+            }),
+          } as any)
+
+        const resultPromise = svc.fetchProviderBalance(biyuanProvider)
+        await vi.advanceTimersByTimeAsync(300)
+        const result = await resultPromise
+
+        expect(fetchTauri).toHaveBeenCalledTimes(2)
+        expect(result).toMatchObject({
+          state: 'supported',
+          moneyBalance: {
+            available: 1,
+            currency: 'USD',
+          },
+        })
+      } finally {
+        vi.useRealTimers()
       }
     })
 

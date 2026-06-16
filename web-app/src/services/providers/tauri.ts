@@ -14,6 +14,7 @@ import { getModelCapabilities } from '@/lib/models'
 import type { ProviderModelDescriptor } from '@/lib/provider-models'
 import type {
   ProviderBalanceLinks,
+  ProviderMoneyBalanceTotals,
   ProviderBalanceStatus,
   ProviderBalanceTotals,
 } from './types'
@@ -49,9 +50,17 @@ const connectionErrorFragments = [
 ]
 
 const BALANCE_REQUEST_TIMEOUT_MS = 15_000
+const BALANCE_SERVER_ERROR_MAX_ATTEMPTS = 3
+const BALANCE_SERVER_ERROR_RETRY_BASE_MS = 300
+const BIYUAN_BALANCE_URL = 'https://api.biyuan.ai/v1/balance'
+const BIYUAN_QUOTA_POINTS_PER_USD = 500_000
 
 function errorMessageFromUnknown(error: unknown) {
   return error instanceof Error ? error.message : 'Unknown error'
+}
+
+function delay(ms: number) {
+  return new Promise((resolve) => setTimeout(resolve, ms))
 }
 
 function includesAnyFragment(message: string, fragments: string[]) {
@@ -123,10 +132,7 @@ function balanceBaseUrl(provider: ModelProvider) {
 }
 
 function biyuanBalanceUrl(provider: ModelProvider) {
-  const baseUrl = balanceBaseUrl(provider)
-  if (!baseUrl) return ''
-  if (/\/v1$/i.test(baseUrl)) return joinUrl(baseUrl, '/balance')
-  return joinUrl(baseUrl, '/v1/balance')
+  return isBiyuanProvider(provider) ? BIYUAN_BALANCE_URL : ''
 }
 
 function deepSeekBalanceUrl(provider: ModelProvider) {
@@ -159,6 +165,23 @@ function totalsFromRecord(
     available,
     ...(used !== undefined ? { used } : {}),
     ...(total !== undefined ? { total } : {}),
+  }
+}
+
+function moneyTotalsFromBiyuanQuota(
+  quotaTotals?: ProviderBalanceTotals
+): ProviderMoneyBalanceTotals | undefined {
+  if (!quotaTotals) return undefined
+
+  return {
+    available: quotaTotals.available / BIYUAN_QUOTA_POINTS_PER_USD,
+    ...(quotaTotals.used !== undefined
+      ? { used: quotaTotals.used / BIYUAN_QUOTA_POINTS_PER_USD }
+      : {}),
+    ...(quotaTotals.total !== undefined
+      ? { total: quotaTotals.total / BIYUAN_QUOTA_POINTS_PER_USD }
+      : {}),
+    currency: 'USD',
   }
 }
 
@@ -524,67 +547,89 @@ export class TauriProvidersService extends DefaultProvidersService {
       headers['x-api-key'] = apiKey
     }
 
-    const controller = new AbortController()
-    let timedOut = false
-    const timeoutId = setTimeout(() => {
-      timedOut = true
-      controller.abort()
-    }, BALANCE_REQUEST_TIMEOUT_MS)
+    for (
+      let attempt = 0;
+      attempt < BALANCE_SERVER_ERROR_MAX_ATTEMPTS;
+      attempt += 1
+    ) {
+      const controller = new AbortController()
+      let timedOut = false
+      const timeoutId = setTimeout(() => {
+        timedOut = true
+        controller.abort()
+      }, BALANCE_REQUEST_TIMEOUT_MS)
 
-    try {
-      const response = await fetchTauri(url, {
-        method: 'GET',
-        headers,
-        signal: controller.signal,
-      })
+      try {
+        const response = await fetchTauri(url, {
+          method: 'GET',
+          headers,
+          signal: controller.signal,
+        })
 
-      if (!response.ok) {
-        if (response.status === 401) {
+        if (!response.ok) {
+          if (
+            response.status >= 500 &&
+            attempt < BALANCE_SERVER_ERROR_MAX_ATTEMPTS - 1
+          ) {
+            await delay(
+              BALANCE_SERVER_ERROR_RETRY_BASE_MS * 2 ** attempt
+            )
+            continue
+          }
+          if (response.status === 401) {
+            return {
+              state: 'error',
+              provider: provider.provider,
+              status: 401,
+              message: 'API key is missing or invalid. Please re-enter the key.',
+            }
+          }
+          if (response.status === 403) {
+            return {
+              state: 'error',
+              provider: provider.provider,
+              status: 403,
+              message: 'The account is forbidden. Please contact the provider.',
+            }
+          }
+          if (response.status === 429) {
+            return {
+              state: 'error',
+              provider: provider.provider,
+              status: 429,
+              retryable: true,
+              message: 'Balance lookup is rate limited.',
+            }
+          }
           return {
             state: 'error',
             provider: provider.provider,
-            status: 401,
-            message: 'API key is missing or invalid.',
+            status: response.status,
+            retryable: response.status >= 500,
+            message: `Balance lookup failed: ${response.status} ${response.statusText}`,
           }
         }
-        if (response.status === 403) {
-          return {
-            state: 'error',
-            provider: provider.provider,
-            status: 403,
-            message: 'The account is forbidden or the key lacks permission.',
-          }
-        }
-        if (response.status === 429) {
-          return {
-            state: 'error',
-            provider: provider.provider,
-            status: 429,
-            retryable: true,
-            message: 'Balance lookup is rate limited.',
-          }
-        }
+
+        return { json: await response.json() }
+      } catch (error) {
         return {
           state: 'error',
           provider: provider.provider,
-          status: response.status,
-          retryable: response.status >= 500,
-          message: `Balance lookup failed: ${response.status} ${response.statusText}`,
+          retryable: true,
+          message: timedOut
+            ? 'Balance lookup timed out. Please try again.'
+            : errorMessageFromUnknown(error),
         }
+      } finally {
+        clearTimeout(timeoutId)
       }
+    }
 
-      return { json: await response.json() }
-    } catch (error) {
-      return {
-        state: 'error',
-        provider: provider.provider,
-        retryable: true,
-        message: timedOut
-          ? 'Balance lookup timed out. Please try again.'
-          : errorMessageFromUnknown(error),
-      }
-    } finally {
-      clearTimeout(timeoutId)
+    return {
+      state: 'error',
+      provider: provider.provider,
+      retryable: true,
+      message: 'Balance lookup failed after retrying server errors.',
     }
   }
 
@@ -617,6 +662,7 @@ export class TauriProvidersService extends DefaultProvidersService {
         used: 'total_used',
         total: 'total_granted',
       })
+      const moneyBalance = moneyTotalsFromBiyuanQuota(account)
 
       return {
         state: 'supported',
@@ -624,6 +670,7 @@ export class TauriProvidersService extends DefaultProvidersService {
         unit: 'quota',
         fetchedAt: numericValue(data.fetched_at) ?? Math.floor(Date.now() / 1000),
         ...(account ? { accountBalance: account } : {}),
+        ...(moneyBalance ? { moneyBalance } : {}),
         tokenLimit: tokenLimitFromBiyuan(data),
         links: linksFromUnknown(data.links),
         raw: result.json,

@@ -16,6 +16,7 @@ type UseProviderBalanceState = {
 
 const BALANCE_CACHE_DURATION = 60 * 1000
 const PROVIDER_BALANCE_REFRESH_EVENT = 'mita-provider-balance-refresh'
+const BALANCE_STORAGE_PREFIX = 'mita-provider-balance-cache:'
 const balanceCache = new Map<string, ProviderBalanceCacheEntry>()
 const balanceRequests = new Map<string, Promise<ProviderBalanceStatus>>()
 
@@ -63,6 +64,88 @@ function providerBalanceCacheKey(provider?: ModelProvider) {
   ].join('|')
 }
 
+function providerBalanceStorageKey(cacheKey: string) {
+  return `${BALANCE_STORAGE_PREFIX}${cacheKey}`
+}
+
+function isCacheEntry(value: unknown): value is ProviderBalanceCacheEntry {
+  if (!value || typeof value !== 'object') return false
+  const record = value as Record<string, unknown>
+  return (
+    typeof record.timestamp === 'number' &&
+    Number.isFinite(record.timestamp) &&
+    Boolean(record.balance) &&
+    typeof record.balance === 'object'
+  )
+}
+
+function readProviderBalanceCache(cacheKey: string) {
+  const memoryEntry = balanceCache.get(cacheKey)
+  if (memoryEntry) return memoryEntry
+  if (!cacheKey || typeof window === 'undefined') return undefined
+
+  try {
+    const serialized = window.localStorage.getItem(
+      providerBalanceStorageKey(cacheKey)
+    )
+    if (!serialized) return undefined
+    const parsed = JSON.parse(serialized)
+    if (!isCacheEntry(parsed)) return undefined
+    balanceCache.set(cacheKey, parsed)
+    return parsed
+  } catch {
+    return undefined
+  }
+}
+
+function cacheTimestampFromBalance(balance: ProviderBalanceStatus) {
+  if (
+    balance.state === 'supported' &&
+    Number.isFinite(balance.fetchedAt) &&
+    balance.fetchedAt > 0
+  ) {
+    return balance.fetchedAt * 1000
+  }
+  return Date.now()
+}
+
+function writeProviderBalanceCache(
+  cacheKey: string,
+  entry: ProviderBalanceCacheEntry
+) {
+  balanceCache.set(cacheKey, entry)
+  if (!cacheKey || typeof window === 'undefined') return
+
+  try {
+    window.localStorage.setItem(
+      providerBalanceStorageKey(cacheKey),
+      JSON.stringify(entry)
+    )
+  } catch {
+    // Best-effort cache only; balance lookup should not fail because storage is full.
+  }
+}
+
+function clearProviderBalanceStorage(providerName?: string) {
+  if (typeof window === 'undefined') return
+
+  try {
+    for (let index = window.localStorage.length - 1; index >= 0; index -= 1) {
+      const key = window.localStorage.key(index)
+      if (!key?.startsWith(BALANCE_STORAGE_PREFIX)) continue
+      if (
+        providerName &&
+        !key.startsWith(`${BALANCE_STORAGE_PREFIX}${providerName}|`)
+      ) {
+        continue
+      }
+      window.localStorage.removeItem(key)
+    }
+  } catch {
+    // Ignore storage cleanup failures; in-memory cache is still cleared below.
+  }
+}
+
 export function notifyProviderBalanceMayHaveChanged(providerName?: string) {
   if (providerName) {
     for (const key of balanceCache.keys()) {
@@ -79,6 +162,7 @@ export function notifyProviderBalanceMayHaveChanged(providerName?: string) {
     balanceCache.clear()
     balanceRequests.clear()
   }
+  clearProviderBalanceStorage(providerName)
 
   if (typeof window === 'undefined') return
   window.dispatchEvent(
@@ -110,7 +194,7 @@ export function useProviderBalance(
         return
       }
 
-      const cached = balanceCache.get(cacheKey)
+      const cached = readProviderBalanceCache(cacheKey)
       if (!force && cached && Date.now() - cached.timestamp < BALANCE_CACHE_DURATION) {
         setBalance(cached.balance)
         setError(null)
@@ -118,6 +202,9 @@ export function useProviderBalance(
         return
       }
 
+      if (cached) {
+        setBalance(cached.balance)
+      }
       setLoading(true)
       setError(null)
 
@@ -145,9 +232,9 @@ export function useProviderBalance(
 
         setBalance(result)
         if (result.state === 'supported') {
-          balanceCache.set(cacheKey, {
+          writeProviderBalanceCache(cacheKey, {
             balance: result,
-            timestamp: Date.now(),
+            timestamp: cacheTimestampFromBalance(result),
           })
         }
       } catch (err) {

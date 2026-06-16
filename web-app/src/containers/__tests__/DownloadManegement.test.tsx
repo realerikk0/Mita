@@ -168,6 +168,20 @@ describe('DownloadManagement', () => {
     render(<DownloadManagement />)
     expect(screen.getByText('App Update')).toBeInTheDocument()
     expect(screen.getByText('50%')).toBeInTheDocument()
+    expect(screen.getByText('1 KB / 2 KB')).toBeInTheDocument()
+  })
+
+  it('shows initializing for App Update before total size is known', () => {
+    hoisted.updateState = {
+      isDownloading: true,
+      downloadProgress: 0,
+      downloadedBytes: 0,
+      totalBytes: 0,
+    }
+    render(<DownloadManagement />)
+    expect(screen.getByText('App Update')).toBeInTheDocument()
+    expect(screen.getByText('Initializing download...')).toBeInTheDocument()
+    expect(screen.queryByText('0%')).not.toBeInTheDocument()
   })
 
   it('cancels llamacpp download via extension manager', () => {

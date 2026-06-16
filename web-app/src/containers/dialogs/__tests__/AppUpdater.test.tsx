@@ -110,7 +110,7 @@ describe('DialogAppUpdater', () => {
     expect(screen.getByTestId('markdown')).toHaveTextContent('Fallback GitHub notes')
   })
 
-  it('renders a thin progress ring around the update button while downloading', () => {
+  it('renders left-to-right progress fill inside the update button while downloading', () => {
     h.updateState.isDownloading = true
     h.updateState.downloadProgress = 0.42
     h.updateState.downloadedBytes = 420
@@ -118,9 +118,51 @@ describe('DialogAppUpdater', () => {
 
     render(<DialogAppUpdater />)
 
-    const ring = screen.getByTestId('app-update-progress-ring')
-    expect(ring).toHaveStyle({ '--app-update-progress': '42%' })
-    expect(ring).toHaveClass('p-[2px]')
-    expect(screen.getByRole('button', { name: 'updater:downloading 42%' })).toBeDisabled()
+    const button = screen.getByRole('button', { name: 'updater:downloading 42%' })
+    const fill = screen.getByTestId('app-update-button-fill')
+    const label = screen.getByTestId('app-update-button-label')
+
+    expect(button).toBeDisabled()
+    expect(screen.getByTestId('app-update-progress-button')).toBe(button)
+    expect(fill).toHaveClass('bg-primary')
+    expect(fill).toHaveStyle({ width: '42%' })
+    expect(label.getAttribute('style')).toContain(
+      'var(--primary-foreground) 0 42%'
+    )
+    expect(label.getAttribute('style')).toContain(
+      'var(--foreground) 42% 100%'
+    )
+    expect(
+      screen.queryByTestId('app-update-button-fill-label')
+    ).not.toBeInTheDocument()
+    expect(screen.queryByTestId('app-update-progress-ring')).not.toBeInTheDocument()
+    expect(
+      screen.queryByTestId('app-update-progress-meter')
+    ).not.toBeInTheDocument()
+    expect(
+      screen.queryByTestId('app-update-progress-details')
+    ).not.toBeInTheDocument()
+  })
+
+  it('keeps the update button fill empty until a total download size is known', () => {
+    h.updateState.isDownloading = true
+    h.updateState.downloadProgress = 0
+    h.updateState.downloadedBytes = 420
+    h.updateState.totalBytes = 0
+
+    render(<DialogAppUpdater />)
+
+    expect(screen.getByTestId('app-update-button-fill')).toHaveStyle({
+      width: '0%',
+    })
+    expect(screen.getByTestId('app-update-button-label').getAttribute('style')).toContain(
+      'var(--primary-foreground) 0 0%'
+    )
+    expect(
+      screen.getByRole('button', { name: 'updater:downloading' })
+    ).toBeDisabled()
+    expect(
+      screen.queryByTestId('app-update-progress-meter')
+    ).not.toBeInTheDocument()
   })
 })

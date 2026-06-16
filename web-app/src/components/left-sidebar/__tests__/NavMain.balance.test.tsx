@@ -122,6 +122,7 @@ describe('NavMain provider balance', () => {
         unit: 'quota',
         fetchedAt: 1781260326,
         accountBalance: { available: 38563951 },
+        moneyBalance: { available: 77.127902, currency: 'USD' },
       },
       loading: false,
       error: null,
@@ -135,6 +136,28 @@ describe('NavMain provider balance', () => {
     const settingsLink = screen.getByRole('link', {
       name: /common:settings/,
     })
-    expect(settingsLink).toHaveTextContent('余额 38,563,951 额度点')
+    expect(settingsLink).toHaveTextContent('余额 $77.13')
+  })
+
+  it('derives current provider money from quota points when available money is missing', () => {
+    vi.mocked(useProviderBalance).mockReturnValue({
+      balance: {
+        state: 'supported',
+        provider: 'jingxing',
+        unit: 'quota',
+        fetchedAt: 1781260326,
+        accountBalance: { available: 38563951 },
+      },
+      loading: false,
+      error: null,
+      refetch: vi.fn(),
+    })
+
+    render(<NavMain />)
+
+    const settingsLink = screen.getByRole('link', {
+      name: /common:settings/,
+    })
+    expect(settingsLink).toHaveTextContent('余额 $77.13')
   })
 })

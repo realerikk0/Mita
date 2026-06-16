@@ -16,12 +16,18 @@ vi.mock('@/i18n/react-i18next-compat', () => ({
         'common:providerBalance.needsManagementTitle': '需要管理权限',
         'common:providerBalance.notices.openrouterOverdrawn': '已透支 {{amount}}',
         'common:providerBalance.notices.deepseekUnavailable': '账户不可用',
+        'common:providerBalance.keyLimitRemaining': '此 Key 限额剩余 {{value}}',
+        'common:providerBalance.accountUsed': '账户已用',
+        'common:providerBalance.keyUsed': 'Key 已用',
         'common:providerBalance.updatedAt': '更新时间',
         'common:providerBalance.refresh': '刷新',
         'common:providerBalance.topup': '去充值',
         'common:providerBalance.sourceNote':
           '{{provider}} 的主余额来自账户钱包；Key 限额只用于解释当前密钥状态。',
         'common:providerBalance.tokenStatus.normal': '正常',
+        'common:providerBalance.tokenStatus.disabled': '已禁用',
+        'common:providerBalance.tokenStatus.expired': '已过期',
+        'common:providerBalance.tokenStatus.exhausted': '已耗尽',
         'common:providerBalance.keyStatus': 'Key {{status}}',
       }
       return (translations[key] ?? key).replace(/\{\{(\w+)\}\}/g, (_, name) =>
@@ -41,6 +47,12 @@ const biyuanWithAccount: ProviderBalanceStatus = {
     used: 68391621,
     total: 106955572,
   },
+  moneyBalance: {
+    available: 77.127902,
+    used: 136.783242,
+    total: 213.911144,
+    currency: 'USD',
+  },
   tokenLimit: {
     available: 0,
     used: 0,
@@ -54,7 +66,7 @@ const biyuanWithAccount: ProviderBalanceStatus = {
 }
 
 describe('ProviderBalanceCard', () => {
-  it('renders Biyuan account balance as the main value and marks unlimited keys', () => {
+  it('renders Biyuan available money as the main value and marks unlimited keys', () => {
     render(
       <ProviderBalanceContent
         provider={{ provider: 'jingxing' } as ModelProvider}
@@ -65,9 +77,74 @@ describe('ProviderBalanceCard', () => {
     )
 
     expect(screen.getByText('可用余额')).toBeInTheDocument()
-    expect(screen.getByText('38,563,951 额度点')).toBeInTheDocument()
+    expect(screen.getByText('$77.13')).toBeInTheDocument()
+    expect(screen.queryByText('38,563,951 额度点')).not.toBeInTheDocument()
     expect(screen.getByText('不限额 Key')).toBeInTheDocument()
     expect(screen.queryByText('0 额度点')).not.toBeInTheDocument()
+    expect(screen.getByText('$136.78')).toBeInTheDocument()
+    expect(screen.getByRole('link', { name: /去充值/ })).toHaveAttribute(
+      'href',
+      'https://api.biyuan.ai/console/topup'
+    )
+  })
+
+  it('derives Biyuan available money from quota points when money balance is missing', () => {
+    render(
+      <ProviderBalanceContent
+        provider={{ provider: 'jingxing' } as ModelProvider}
+        balance={{
+          ...biyuanWithAccount,
+          moneyBalance: undefined,
+        }}
+        loading={false}
+        onRefresh={() => undefined}
+      />
+    )
+
+    expect(screen.getByText('$77.13')).toBeInTheDocument()
+    expect(screen.queryByText('38,563,951 额度点')).not.toBeInTheDocument()
+  })
+
+  it('falls back to quota points for unknown quota providers', () => {
+    render(
+      <ProviderBalanceContent
+        provider={{ provider: 'custom-quota' } as ModelProvider}
+        balance={{
+          ...biyuanWithAccount,
+          provider: 'custom-quota',
+          moneyBalance: undefined,
+        }}
+        loading={false}
+        onRefresh={() => undefined}
+      />
+    )
+
+    expect(screen.getByText('38,563,951 额度点')).toBeInTheDocument()
+  })
+
+  it('keeps showing Biyuan balance for limited or exhausted keys', () => {
+    render(
+      <ProviderBalanceContent
+        provider={{ provider: 'jingxing' } as ModelProvider}
+        balance={{
+          ...biyuanWithAccount,
+          tokenLimit: {
+            available: 500000,
+            used: 250000,
+            total: 750000,
+            unlimited: false,
+            status: 4,
+          },
+        }}
+        loading={false}
+        onRefresh={() => undefined}
+      />
+    )
+
+    expect(screen.getByText('$77.13')).toBeInTheDocument()
+    expect(screen.getByText('此 Key 限额剩余 $1.00')).toBeInTheDocument()
+    expect(screen.getByText('Key 已耗尽')).toBeInTheDocument()
+    expect(screen.getByText('$0.50')).toBeInTheDocument()
   })
 
   it('explains missing Biyuan account balance only in settings content', () => {
@@ -135,12 +212,60 @@ describe('ProviderBalanceCard', () => {
     ).toBeNull()
   })
 
-  it('creates a compact chat badge label from real account balance', () => {
+  it('creates a compact chat badge label from available money first', () => {
     expect(
       getProviderBalanceBadgeLabel(biyuanWithAccount, {
         balancePrefix: '余额',
         quotaUnitLabel: '额度点',
       })
+    ).toBe('余额 $77.13')
+  })
+
+  it('formats available money with two decimals when currency is omitted', () => {
+    expect(
+      getProviderBalanceBadgeLabel(
+        {
+          ...biyuanWithAccount,
+          moneyBalance: {
+            available: 77.127902,
+          },
+        },
+        {
+          balancePrefix: '余额',
+          quotaUnitLabel: '额度点',
+        }
+      )
+    ).toBe('余额 77.13')
+  })
+
+  it('derives compact Biyuan chat badge labels from quota points', () => {
+    expect(
+      getProviderBalanceBadgeLabel(
+        {
+          ...biyuanWithAccount,
+          moneyBalance: undefined,
+        },
+        {
+          balancePrefix: '余额',
+          quotaUnitLabel: '额度点',
+        }
+      )
+    ).toBe('余额 $77.13')
+  })
+
+  it('falls back to quota points for compact unknown quota badge labels', () => {
+    expect(
+      getProviderBalanceBadgeLabel(
+        {
+          ...biyuanWithAccount,
+          provider: 'custom-quota',
+          moneyBalance: undefined,
+        },
+        {
+          balancePrefix: '余额',
+          quotaUnitLabel: '额度点',
+        }
+      )
     ).toBe('余额 38,563,951 额度点')
   })
 

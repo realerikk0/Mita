@@ -24,6 +24,8 @@ const tokenStatusLabelKeys: Record<number, string> = {
   4: 'common:providerBalance.tokenStatus.exhausted',
 }
 
+const BIYUAN_QUOTA_POINTS_PER_USD = 500_000
+
 function formatInteger(value?: number) {
   if (value === undefined || !Number.isFinite(value)) return '-'
   return new Intl.NumberFormat('en-US', { maximumFractionDigits: 0 }).format(value)
@@ -41,6 +43,7 @@ function formatMoney(value: number, currency = 'USD') {
   return new Intl.NumberFormat('en-US', {
     style: 'currency',
     currency,
+    minimumFractionDigits: 2,
     maximumFractionDigits: 2,
   }).format(value)
 }
@@ -58,6 +61,25 @@ function providerDisplayUnit(balance: ProviderBalanceStatus, t: TranslationFn) {
   if (balance.currency) return balance.currency
   if (balance.unit === 'usd') return 'USD'
   return balance.unit
+}
+
+function isBiyuanQuotaBalance(balance: ProviderBalanceStatus) {
+  return (
+    balance.state === 'supported' &&
+    balance.unit === 'quota' &&
+    ['biyuan', 'jingxing'].includes(balance.provider)
+  )
+}
+
+function formatProviderBalanceValue(
+  value: number,
+  balance: ProviderBalanceStatus,
+  displayUnit: string
+) {
+  if (isBiyuanQuotaBalance(balance)) {
+    return formatMoney(value / BIYUAN_QUOTA_POINTS_PER_USD, 'USD')
+  }
+  return `${formatInteger(value)} ${displayUnit}`
 }
 
 function providerNoticeLabel(balance: ProviderBalanceStatus, t: TranslationFn) {
@@ -211,10 +233,10 @@ export function ProviderBalanceContent({
     )
   }
 
-  const hasAccountBalance = Boolean(balance.accountBalance)
   const quotaUnitLabel = t('common:providerBalance.quotaPoints')
   const displayUnit = providerDisplayUnit(balance, t)
   const primary = providerBalancePrimaryLabel(balance, { quotaUnitLabel })
+  const hasAvailableBalance = Boolean(primary)
   const topupLink = balance.links?.topup
   const tokenLimit = balance.tokenLimit
   const tokenStatus = tokenStatusLabel(tokenLimit?.status, t)
@@ -222,7 +244,7 @@ export function ProviderBalanceContent({
 
   return (
     <div className="space-y-4">
-      {hasAccountBalance ? (
+      {hasAvailableBalance ? (
         <div className="space-y-1">
           <div className="text-sm text-muted-foreground">
             {t('common:providerBalance.availableBalance')}
@@ -254,7 +276,11 @@ export function ProviderBalanceContent({
         {!tokenLimit?.unlimited && tokenLimit?.available !== undefined && (
           <StatusPill>
             {t('common:providerBalance.keyLimitRemaining', {
-              value: formatInteger(tokenLimit.available),
+              value: formatProviderBalanceValue(
+                tokenLimit.available,
+                balance,
+                displayUnit
+              ),
             })}
           </StatusPill>
         )}
@@ -269,13 +295,21 @@ export function ProviderBalanceContent({
         {balance.accountBalance?.used !== undefined && (
           <DetailRow
             label={t('common:providerBalance.accountUsed')}
-            value={`${formatInteger(balance.accountBalance.used)} ${displayUnit}`}
+            value={formatProviderBalanceValue(
+              balance.accountBalance.used,
+              balance,
+              displayUnit
+            )}
           />
         )}
         {!tokenLimit?.unlimited && tokenLimit?.used !== undefined && (
           <DetailRow
             label={t('common:providerBalance.keyUsed')}
-            value={`${formatInteger(tokenLimit.used)} ${displayUnit}`}
+            value={formatProviderBalanceValue(
+              tokenLimit.used,
+              balance,
+              displayUnit
+            )}
           />
         )}
         <DetailRow

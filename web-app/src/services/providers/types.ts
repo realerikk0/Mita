@@ -10,6 +10,10 @@ export type ProviderBalanceTotals = {
   total?: number
 }
 
+export type ProviderMoneyBalanceTotals = ProviderBalanceTotals & {
+  currency?: string
+}
+
 export type ProviderTokenLimit = ProviderBalanceTotals & {
   unlimited?: boolean
   status?: number
@@ -40,6 +44,7 @@ export type SupportedProviderBalance = {
   currency?: string
   fetchedAt: number
   accountBalance?: ProviderBalanceTotals
+  moneyBalance?: ProviderMoneyBalanceTotals
   tokenLimit?: ProviderTokenLimit
   notice?: ProviderBalanceNotice
   links?: ProviderBalanceLinks
