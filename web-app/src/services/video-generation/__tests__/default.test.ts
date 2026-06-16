@@ -217,6 +217,43 @@ describe('DefaultVideoGenerationService', () => {
     })
   })
 
+  it('prefers explicit video URLs over generic content URLs', async () => {
+    const fetchMock = vi.fn().mockResolvedValueOnce(
+      new Response(
+        JSON.stringify({
+          code: 'success',
+          data: {
+            task_id: 'video-task-3',
+            status: 'completed',
+            progress: 100,
+            content: {
+              url: 'https://cdn.example.test/thumbnail.jpg',
+            },
+            video_url: 'https://cdn.example.test/video.mp4',
+          },
+        }),
+        { status: 200, headers: { 'content-type': 'application/json' } }
+      )
+    )
+    vi.stubGlobal('fetch', fetchMock)
+
+    const service = new DefaultVideoGenerationService({
+      pollIntervalMs: 0,
+      timeoutMs: 1000,
+    })
+    const task = await service.pollVideoTask({
+      provider,
+      model,
+      taskId: 'video-task-3',
+    })
+
+    expect(task).toMatchObject({
+      id: 'video-task-3',
+      status: 'succeeded',
+      videoUrl: 'https://cdn.example.test/video.mp4',
+    })
+  })
+
   it('keeps the gateway task id when poll responses include internal ids', async () => {
     const fetchMock = vi.fn().mockResolvedValueOnce(
       new Response(

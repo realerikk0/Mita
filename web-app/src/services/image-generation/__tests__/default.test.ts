@@ -29,6 +29,11 @@ const geminiModel = {
   capabilities: [ModelCapabilities.IMAGE_GENERATION],
 } as Model
 
+const seedreamModel = {
+  id: 'doubao-seedream-4-5-251128',
+  capabilities: [ModelCapabilities.IMAGE_GENERATION],
+} as Model
+
 const sourceAsset = {
   id: 'asset-1',
   prompt: 'source image',
@@ -414,6 +419,93 @@ describe('DefaultImageGenerationService', () => {
     expect(init.body.get('response_format')).toBeNull()
     expect(init.body.get('image')).toBeTruthy()
     expect(result[0].b64Json).toBe('ZWRpdA==')
+  })
+
+  it('keeps response_format for Jingxing non-gpt image edits', async () => {
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(
+        new Response(new Uint8Array([1, 2, 3]), {
+          status: 200,
+          headers: { 'content-type': 'image/png' },
+        })
+      )
+      .mockResolvedValueOnce(
+        new Response(
+          JSON.stringify({
+            data: [{ b64_json: 'ZWRpdA==' }],
+          }),
+          { status: 200, headers: { 'content-type': 'application/json' } }
+        )
+      )
+
+    vi.stubGlobal('fetch', fetchMock)
+
+    const service = new DefaultImageGenerationService()
+    await service.generateImages({
+      provider: {
+        ...provider,
+        provider: 'jingxing',
+        base_url: 'https://api.jingxing.uk/v1',
+      },
+      model: seedreamModel,
+      prompt: 'make it glass',
+      ratio: '1:1',
+      qualityPreset: 'sd',
+      count: 1,
+      mode: 'edit',
+      sourceAssets: [sourceAsset],
+    })
+
+    expect(fetchMock.mock.calls[1][0]).toBe(
+      'https://api.jingxing.uk/v1/images/edits/async'
+    )
+    const init = fetchMock.mock.calls[1][1] as RequestInit & { body: FormData }
+    expect(init.body.get('model')).toBe('doubao-seedream-4-5-251128')
+    expect(init.body.get('response_format')).toBe('b64_json')
+  })
+
+  it('omits response_format for Biyuan non-gpt image edits', async () => {
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(
+        new Response(new Uint8Array([1, 2, 3]), {
+          status: 200,
+          headers: { 'content-type': 'image/png' },
+        })
+      )
+      .mockResolvedValueOnce(
+        new Response(
+          JSON.stringify({
+            data: [{ b64_json: 'ZWRpdA==' }],
+          }),
+          { status: 200, headers: { 'content-type': 'application/json' } }
+        )
+      )
+
+    vi.stubGlobal('fetch', fetchMock)
+
+    const service = new DefaultImageGenerationService()
+    await service.generateImages({
+      provider: {
+        ...provider,
+        base_url: 'https://api.biyuan.ai/v1',
+      },
+      model: seedreamModel,
+      prompt: 'make it glass',
+      ratio: '1:1',
+      qualityPreset: 'sd',
+      count: 1,
+      mode: 'edit',
+      sourceAssets: [sourceAsset],
+    })
+
+    expect(fetchMock.mock.calls[1][0]).toBe(
+      'https://api.biyuan.ai/v1/images/edits'
+    )
+    const init = fetchMock.mock.calls[1][1] as RequestInit & { body: FormData }
+    expect(init.body.get('model')).toBe('doubao-seedream-4-5-251128')
+    expect(init.body.get('response_format')).toBeNull()
   })
 
   it('preserves the reference asset MIME type when the local fetch omits it', async () => {
