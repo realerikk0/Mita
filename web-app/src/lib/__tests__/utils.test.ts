@@ -177,6 +177,9 @@ describe('formatBytes', () => {
     expect(formatBytes(1536)).toBe('1.5 KB')
     expect(formatBytes(1024 ** 2)).toBe('1 MB')
     expect(formatBytes(1024 ** 3 * 1.25)).toBe('1.25 GB')
+    expect(formatBytes(-500)).toBe('0 B')
+    expect(formatBytes(Infinity)).toBe('0 B')
+    expect(formatBytes(NaN)).toBe('0 B')
   })
 })
 

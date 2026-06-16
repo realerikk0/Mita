@@ -23,6 +23,12 @@ import {
   parseProviderErrorResponse,
   providerQuotaErrorFromUnknown,
 } from '@/lib/provider-quota-error'
+import {
+  BIYUAN_BALANCE_URL,
+  BIYUAN_DEFAULT_BASE_URL,
+  BIYUAN_PROVIDER_NAMES,
+  BIYUAN_QUOTA_POINTS_PER_USD,
+} from '@/constants/biyuan'
 
 const tlsCertificateErrorFragments = [
   'certificate',
@@ -52,8 +58,6 @@ const connectionErrorFragments = [
 const BALANCE_REQUEST_TIMEOUT_MS = 15_000
 const BALANCE_SERVER_ERROR_MAX_ATTEMPTS = 3
 const BALANCE_SERVER_ERROR_RETRY_BASE_MS = 300
-const BIYUAN_BALANCE_URL = 'https://api.biyuan.ai/v1/balance'
-const BIYUAN_QUOTA_POINTS_PER_USD = 500_000
 
 function errorMessageFromUnknown(error: unknown) {
   return error instanceof Error ? error.message : 'Unknown error'
@@ -132,7 +136,14 @@ function balanceBaseUrl(provider: ModelProvider) {
 }
 
 function biyuanBalanceUrl(provider: ModelProvider) {
-  return isBiyuanProvider(provider) ? BIYUAN_BALANCE_URL : ''
+  const baseUrl = balanceBaseUrl(provider)
+  if (!baseUrl || baseUrl === BIYUAN_DEFAULT_BASE_URL) {
+    return BIYUAN_BALANCE_URL
+  }
+  if (/\/v1$/i.test(baseUrl)) {
+    return joinUrl(baseUrl, '/balance')
+  }
+  return joinUrl(baseUrl, '/v1/balance')
 }
 
 function deepSeekBalanceUrl(provider: ModelProvider) {
@@ -218,8 +229,7 @@ function tokenLimitFromBiyuan(data: Record<string, unknown>) {
 function isBiyuanProvider(provider: ModelProvider) {
   const baseUrl = provider.base_url ?? ''
   return (
-    provider.provider === 'jingxing' ||
-    provider.provider === 'biyuan' ||
+    (BIYUAN_PROVIDER_NAMES as readonly string[]).includes(provider.provider) ||
     baseUrl.includes('api.biyuan.ai') ||
     baseUrl.includes('api.jingxing')
   )
@@ -542,6 +552,7 @@ export class TauriProvidersService extends DefaultProvidersService {
       Authorization: `Bearer ${apiKey}`,
       ...extraHeaders,
     }
+    let lastServerError: { status: number; statusText: string } | undefined
 
     if (apiKey) {
       headers['x-api-key'] = apiKey
@@ -567,14 +578,18 @@ export class TauriProvidersService extends DefaultProvidersService {
         })
 
         if (!response.ok) {
-          if (
-            response.status >= 500 &&
-            attempt < BALANCE_SERVER_ERROR_MAX_ATTEMPTS - 1
-          ) {
-            await delay(
-              BALANCE_SERVER_ERROR_RETRY_BASE_MS * 2 ** attempt
-            )
-            continue
+          if (response.status >= 500) {
+            lastServerError = {
+              status: response.status,
+              statusText: response.statusText,
+            }
+            if (attempt < BALANCE_SERVER_ERROR_MAX_ATTEMPTS - 1) {
+              await delay(
+                BALANCE_SERVER_ERROR_RETRY_BASE_MS * 2 ** attempt
+              )
+              continue
+            }
+            break
           }
           if (response.status === 401) {
             return {
@@ -628,8 +643,11 @@ export class TauriProvidersService extends DefaultProvidersService {
     return {
       state: 'error',
       provider: provider.provider,
+      ...(lastServerError ? { status: lastServerError.status } : {}),
       retryable: true,
-      message: 'Balance lookup failed after retrying server errors.',
+      message: lastServerError
+        ? `Balance lookup failed after retrying server errors: ${lastServerError.status} ${lastServerError.statusText}`
+        : 'Balance lookup failed after retrying server errors.',
     }
   }
 

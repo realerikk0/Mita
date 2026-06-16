@@ -4,7 +4,12 @@ import { Card } from '@/containers/Card'
 import { cn, getProviderTitle } from '@/lib/utils'
 import { useProviderBalance } from '@/hooks/useProviderBalance'
 import type { ProviderBalanceStatus } from '@/services/providers/types'
-import { providerBalancePrimaryLabel } from '@/lib/provider-balance-display'
+import {
+  formatBiyuanQuotaAsUsd,
+  formatProviderMoney,
+  isBiyuanQuotaBalance,
+  providerBalancePrimaryLabel,
+} from '@/lib/provider-balance-display'
 import { useTranslation } from '@/i18n/react-i18next-compat'
 
 type TranslationFn = (key: string, options?: Record<string, unknown>) => string
@@ -24,8 +29,6 @@ const tokenStatusLabelKeys: Record<number, string> = {
   4: 'common:providerBalance.tokenStatus.exhausted',
 }
 
-const BIYUAN_QUOTA_POINTS_PER_USD = 500_000
-
 function formatInteger(value?: number) {
   if (value === undefined || !Number.isFinite(value)) return '-'
   return new Intl.NumberFormat('en-US', { maximumFractionDigits: 0 }).format(value)
@@ -37,15 +40,6 @@ function formatTimeFromUnixSeconds(value?: number) {
     hour: '2-digit',
     minute: '2-digit',
   }).format(new Date(value * 1000))
-}
-
-function formatMoney(value: number, currency = 'USD') {
-  return new Intl.NumberFormat('en-US', {
-    style: 'currency',
-    currency,
-    minimumFractionDigits: 2,
-    maximumFractionDigits: 2,
-  }).format(value)
 }
 
 function tokenStatusLabel(status: number | undefined, t: TranslationFn) {
@@ -63,21 +57,13 @@ function providerDisplayUnit(balance: ProviderBalanceStatus, t: TranslationFn) {
   return balance.unit
 }
 
-function isBiyuanQuotaBalance(balance: ProviderBalanceStatus) {
-  return (
-    balance.state === 'supported' &&
-    balance.unit === 'quota' &&
-    ['biyuan', 'jingxing'].includes(balance.provider)
-  )
-}
-
 function formatProviderBalanceValue(
   value: number,
   balance: ProviderBalanceStatus,
   displayUnit: string
 ) {
   if (isBiyuanQuotaBalance(balance)) {
-    return formatMoney(value / BIYUAN_QUOTA_POINTS_PER_USD, 'USD')
+    return formatBiyuanQuotaAsUsd(value)
   }
   return `${formatInteger(value)} ${displayUnit}`
 }
@@ -86,7 +72,7 @@ function providerNoticeLabel(balance: ProviderBalanceStatus, t: TranslationFn) {
   if (balance.state !== 'supported' || !balance.notice) return undefined
   if (balance.notice.code === 'openrouter_overdrawn') {
     return t('common:providerBalance.notices.openrouterOverdrawn', {
-      amount: formatMoney(
+      amount: formatProviderMoney(
         balance.notice.amount ?? 0,
         balance.notice.currency ?? balance.currency ?? 'USD'
       ),
@@ -295,11 +281,18 @@ export function ProviderBalanceContent({
         {balance.accountBalance?.used !== undefined && (
           <DetailRow
             label={t('common:providerBalance.accountUsed')}
-            value={formatProviderBalanceValue(
-              balance.accountBalance.used,
-              balance,
-              displayUnit
-            )}
+            value={
+              balance.moneyBalance?.used !== undefined
+                ? formatProviderMoney(
+                    balance.moneyBalance.used,
+                    balance.moneyBalance.currency ?? balance.currency ?? 'USD'
+                  )
+                : formatProviderBalanceValue(
+                    balance.accountBalance.used,
+                    balance,
+                    displayUnit
+                  )
+            }
           />
         )}
         {!tokenLimit?.unlimited && tokenLimit?.used !== undefined && (

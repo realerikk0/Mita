@@ -475,7 +475,7 @@ describe('TauriProvidersService', () => {
   describe('fetchProviderBalance', () => {
     const biyuanProvider = {
       provider: 'jingxing',
-      base_url: 'https://api.jingxing.uk/v1',
+      base_url: 'https://api.biyuan.ai/v1',
       active: true,
     } as any
 
@@ -545,6 +545,43 @@ describe('TauriProvidersService', () => {
       }
     })
 
+    it('derives the Biyuan balance endpoint from custom base_url', async () => {
+      vi.mocked(providerRemoteApiKeyChain).mockReturnValue(['sk-test'])
+      vi.mocked(fetchTauri).mockResolvedValueOnce({
+        ok: true,
+        status: 200,
+        json: vi.fn().mockResolvedValue({
+          unit: 'quota',
+          unlimited_quota: true,
+          token_status: 1,
+          fetched_at: 1781260326,
+          account: {
+            total_available: 500000,
+          },
+        }),
+      } as any)
+
+      const result = await svc.fetchProviderBalance({
+        ...biyuanProvider,
+        base_url: 'https://proxy.example.com/openai/v1',
+      })
+
+      expect(fetchTauri).toHaveBeenCalledWith(
+        'https://proxy.example.com/openai/v1/balance',
+        expect.objectContaining({
+          headers: expect.objectContaining({
+            Authorization: 'Bearer sk-test',
+          }),
+        })
+      )
+      expect(result).toMatchObject({
+        state: 'supported',
+        accountBalance: {
+          available: 500000,
+        },
+      })
+    })
+
     it('retries Biyuan server errors before returning balance', async () => {
       vi.useFakeTimers()
       try {
@@ -587,6 +624,85 @@ describe('TauriProvidersService', () => {
         vi.useRealTimers()
       }
     })
+
+    it('returns a retryable error after exhausting Biyuan server error retries', async () => {
+      vi.useFakeTimers()
+      try {
+        vi.mocked(providerRemoteApiKeyChain).mockReturnValue(['sk-test'])
+        vi.mocked(fetchTauri)
+          .mockResolvedValueOnce({
+            ok: false,
+            status: 502,
+            statusText: 'Bad Gateway',
+          } as any)
+          .mockResolvedValueOnce({
+            ok: false,
+            status: 503,
+            statusText: 'Service Unavailable',
+          } as any)
+          .mockResolvedValueOnce({
+            ok: false,
+            status: 500,
+            statusText: 'Internal Server Error',
+          } as any)
+
+        const resultPromise = svc.fetchProviderBalance(biyuanProvider)
+        await vi.advanceTimersByTimeAsync(300)
+        await vi.advanceTimersByTimeAsync(600)
+        const result = await resultPromise
+
+        expect(fetchTauri).toHaveBeenCalledTimes(3)
+        expect(result).toMatchObject({
+          state: 'error',
+          provider: 'jingxing',
+          status: 500,
+          retryable: true,
+        })
+        if (result.state === 'error') {
+          expect(result.message).toContain(
+            'Balance lookup failed after retrying server errors'
+          )
+        }
+      } finally {
+        vi.useRealTimers()
+      }
+    })
+
+    it.each([
+      [
+        401,
+        'Unauthorized',
+        'API key is missing or invalid. Please re-enter the key.',
+        undefined,
+      ],
+      [
+        403,
+        'Forbidden',
+        'The account is forbidden. Please contact the provider.',
+        undefined,
+      ],
+      [429, 'Too Many Requests', 'Balance lookup is rate limited.', true],
+    ])(
+      'maps Biyuan balance endpoint HTTP %s errors',
+      async (status, statusText, message, retryable) => {
+        vi.mocked(providerRemoteApiKeyChain).mockReturnValue(['sk-test'])
+        vi.mocked(fetchTauri).mockResolvedValueOnce({
+          ok: false,
+          status,
+          statusText,
+        } as any)
+
+        const result = await svc.fetchProviderBalance(biyuanProvider)
+
+        expect(result).toMatchObject({
+          state: 'error',
+          provider: 'jingxing',
+          status,
+          message,
+          ...(retryable === undefined ? {} : { retryable }),
+        })
+      }
+    )
 
     it('does not promote Biyuan token limit fields to account balance when account is missing', async () => {
       vi.mocked(providerRemoteApiKeyChain).mockReturnValue(['sk-test'])

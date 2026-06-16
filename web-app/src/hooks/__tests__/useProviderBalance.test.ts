@@ -145,6 +145,66 @@ describe('useProviderBalance', () => {
     ).toBe(false)
   })
 
+  it('uses the client cache write time for freshness checks', async () => {
+    fetchProviderBalance.mockResolvedValue(balanceFor('provider-a'))
+    const provider = providerFor('provider-a')
+
+    const first = renderHook(() => useProviderBalance(provider))
+
+    await waitFor(() =>
+      expect(first.result.current.balance?.state).toBe('supported')
+    )
+    first.unmount()
+
+    const second = renderHook(() => useProviderBalance(provider))
+
+    await waitFor(() =>
+      expect(second.result.current.balance?.state).toBe('supported')
+    )
+    expect(fetchProviderBalance).toHaveBeenCalledTimes(1)
+  })
+
+  it('does not persist raw balance payloads to local storage', async () => {
+    fetchProviderBalance.mockResolvedValue({
+      ...balanceFor('provider-a'),
+      raw: {
+        account: 'full upstream payload',
+      },
+    })
+    const provider = providerFor('provider-a')
+
+    const { result } = renderHook(() => useProviderBalance(provider))
+
+    await waitFor(() =>
+      expect(result.current.balance?.state).toBe('supported')
+    )
+
+    const cacheKey = storageKeys().find((key) =>
+      key.startsWith('mita-provider-balance-cache:provider-a|')
+    )
+    expect(cacheKey).toBeDefined()
+    const cached = JSON.parse(localStorage.getItem(cacheKey!) ?? '{}')
+    expect(cached.balance.raw).toBeUndefined()
+  })
+
+  it('only clears the selected provider balance storage prefix', () => {
+    const providerAKey = 'mita-provider-balance-cache:provider-a|hash'
+    const providerABKey = 'mita-provider-balance-cache:provider-ab|hash'
+    const cached = JSON.stringify({
+      balance: balanceFor('provider-a'),
+      timestamp: Date.now(),
+    })
+    localStorage.setItem(providerAKey, cached)
+    localStorage.setItem(providerABKey, cached)
+
+    act(() => {
+      notifyProviderBalanceMayHaveChanged('provider-a')
+    })
+
+    expect(localStorage.getItem(providerAKey)).toBeNull()
+    expect(localStorage.getItem(providerABKey)).toBe(cached)
+  })
+
   it('shows cached balances while a forced refresh is rate limited', async () => {
     fetchProviderBalance
       .mockResolvedValueOnce(balanceFor('provider-a'))

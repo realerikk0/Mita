@@ -15,6 +15,8 @@ type UseProviderBalanceState = {
 }
 
 const BALANCE_CACHE_DURATION = 60 * 1000
+const BALANCE_STORAGE_MAX_AGE = 24 * 60 * 60 * 1000
+const BALANCE_STORAGE_MAX_ENTRIES = 20
 const PROVIDER_BALANCE_REFRESH_EVENT = 'mita-provider-balance-refresh'
 const BALANCE_STORAGE_PREFIX = 'mita-provider-balance-cache:'
 const balanceCache = new Map<string, ProviderBalanceCacheEntry>()
@@ -79,9 +81,23 @@ function isCacheEntry(value: unknown): value is ProviderBalanceCacheEntry {
   )
 }
 
+function sanitizeBalanceForStorage(
+  balance: ProviderBalanceStatus
+): ProviderBalanceStatus {
+  if (balance.state !== 'supported') return balance
+  const safeBalance = { ...balance }
+  delete safeBalance.raw
+  return safeBalance
+}
+
 function readProviderBalanceCache(cacheKey: string) {
   const memoryEntry = balanceCache.get(cacheKey)
-  if (memoryEntry) return memoryEntry
+  if (memoryEntry) {
+    if (Date.now() - memoryEntry.timestamp <= BALANCE_STORAGE_MAX_AGE) {
+      return memoryEntry
+    }
+    balanceCache.delete(cacheKey)
+  }
   if (!cacheKey || typeof window === 'undefined') return undefined
 
   try {
@@ -91,36 +107,92 @@ function readProviderBalanceCache(cacheKey: string) {
     if (!serialized) return undefined
     const parsed = JSON.parse(serialized)
     if (!isCacheEntry(parsed)) return undefined
-    balanceCache.set(cacheKey, parsed)
-    return parsed
+    if (Date.now() - parsed.timestamp > BALANCE_STORAGE_MAX_AGE) {
+      window.localStorage.removeItem(providerBalanceStorageKey(cacheKey))
+      return undefined
+    }
+    const safeEntry = {
+      ...parsed,
+      balance: sanitizeBalanceForStorage(parsed.balance),
+    }
+    balanceCache.set(cacheKey, safeEntry)
+    try {
+      window.localStorage.setItem(
+        providerBalanceStorageKey(cacheKey),
+        JSON.stringify(safeEntry)
+      )
+    } catch {
+      // Keep the in-memory cache even if persisted cache cleanup fails.
+    }
+    return safeEntry
   } catch {
     return undefined
   }
 }
 
-function cacheTimestampFromBalance(balance: ProviderBalanceStatus) {
-  if (
-    balance.state === 'supported' &&
-    Number.isFinite(balance.fetchedAt) &&
-    balance.fetchedAt > 0
-  ) {
-    return balance.fetchedAt * 1000
+function providerBalanceStorageEntries() {
+  if (typeof window === 'undefined') return []
+
+  const keys = Array.from(
+    { length: window.localStorage.length },
+    (_, index) => window.localStorage.key(index)
+  ).filter((key): key is string =>
+    Boolean(key?.startsWith(BALANCE_STORAGE_PREFIX))
+  )
+
+  const entries: Array<{ key: string; timestamp: number }> = []
+  for (const key of keys) {
+    try {
+      const serialized = window.localStorage.getItem(key)
+      if (!serialized) continue
+      const parsed = JSON.parse(serialized)
+      if (!isCacheEntry(parsed)) {
+        window.localStorage.removeItem(key)
+        continue
+      }
+      entries.push({ key, timestamp: parsed.timestamp })
+    } catch {
+      window.localStorage.removeItem(key)
+    }
   }
-  return Date.now()
+  return entries
+}
+
+function pruneProviderBalanceStorage() {
+  if (typeof window === 'undefined') return
+
+  const now = Date.now()
+  const freshEntries = providerBalanceStorageEntries().filter((entry) => {
+    if (now - entry.timestamp <= BALANCE_STORAGE_MAX_AGE) return true
+    window.localStorage.removeItem(entry.key)
+    return false
+  })
+
+  freshEntries
+    .sort((a, b) => b.timestamp - a.timestamp)
+    .slice(BALANCE_STORAGE_MAX_ENTRIES)
+    .forEach((entry) => {
+      window.localStorage.removeItem(entry.key)
+    })
 }
 
 function writeProviderBalanceCache(
   cacheKey: string,
   entry: ProviderBalanceCacheEntry
 ) {
-  balanceCache.set(cacheKey, entry)
+  const safeEntry = {
+    ...entry,
+    balance: sanitizeBalanceForStorage(entry.balance),
+  }
+  balanceCache.set(cacheKey, safeEntry)
   if (!cacheKey || typeof window === 'undefined') return
 
   try {
     window.localStorage.setItem(
       providerBalanceStorageKey(cacheKey),
-      JSON.stringify(entry)
+      JSON.stringify(safeEntry)
     )
+    pruneProviderBalanceStorage()
   } catch {
     // Best-effort cache only; balance lookup should not fail because storage is full.
   }
@@ -234,7 +306,7 @@ export function useProviderBalance(
         if (result.state === 'supported') {
           writeProviderBalanceCache(cacheKey, {
             balance: result,
-            timestamp: cacheTimestampFromBalance(result),
+            timestamp: Date.now(),
           })
         }
       } catch (err) {
