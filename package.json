@@ -55,7 +55,7 @@
     "build:core": "cd core && yarn build && yarn pack",
     "build:web": "yarn workspace @janhq/core build && yarn workspace @janhq/web-app build",
     "build:extensions": "rimraf ./pre-install/*.tgz || true && yarn workspace @janhq/core build && yarn build:tauri:plugin:api && cd extensions && yarn install && cd .. && run-script-os && yarn smoke:preinstall-extensions",
-    "build:extensions:darwin": "cd extensions && yarn workspaces foreach -Apt run build:publish",
+    "build:extensions:darwin": "cd extensions && yarn workspaces foreach -Apt --exclude @janhq/foundation-models-extension run build:publish",
     "build:extensions:win32": "cd extensions && yarn workspaces foreach -Apt --exclude @janhq/mlx-extension --exclude @janhq/foundation-models-extension run build:publish",
     "build:extensions:linux": "cd extensions && yarn workspaces foreach -Apt --exclude @janhq/mlx-extension --exclude @janhq/foundation-models-extension run build:publish",
     "prepare": "husky"
