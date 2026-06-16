@@ -161,6 +161,27 @@ describe('compact-thread helpers', () => {
     expect(result.shouldCompact).toBe(true)
   })
 
+  it('uses the calibrated chars-per-token for the threshold decision', () => {
+    const messages = [
+      makeMessage('1', ChatCompletionRole.User, 'A'.repeat(1_000)),
+      makeMessage('2', ChatCompletionRole.Assistant, 'B'.repeat(1_000)),
+    ]
+    const opts = {
+      messages,
+      incomingText: 'C'.repeat(1_000),
+      maxContextTokens: 1_200,
+      threshold: 0.5, // tokenLimit = 600
+    }
+    // Default 3.5 chars/token → estimate ~866, over the 600 limit.
+    expect(shouldAutoCompactThread(opts).shouldCompact).toBe(true)
+    // A token-denser model (6 chars/token) → estimate ~509, under the limit.
+    const calibrated = shouldAutoCompactThread({ ...opts, charsPerToken: 6 })
+    expect(calibrated.shouldCompact).toBe(false)
+    expect(calibrated.tokenEstimate).toBeLessThan(
+      shouldAutoCompactThread(opts).tokenEstimate
+    )
+  })
+
   it('creates a summary message and archives compacted source messages', async () => {
     const messages = [
       makeMessage('1', ChatCompletionRole.User, 'old user'),

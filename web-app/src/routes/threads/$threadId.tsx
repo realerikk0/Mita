@@ -38,6 +38,17 @@ import {
   type ChatStatus,
 } from 'ai'
 import type { UIMessage } from '@ai-sdk/react'
+import {
+  shouldContinueLoop,
+  MAX_MCP_TOOL_FOLLOW_UP_ROUNDS,
+} from '@/lib/agent-loop/loop-policy'
+// Re-exported for backward compatibility with existing importers/tests that
+// referenced these from the route module. Source of truth is loop-policy.
+export {
+  MAX_MCP_TOOL_FOLLOW_UP_ROUNDS,
+  countToolCallAssistantRoundsSinceLastUser,
+  isWithinMcpToolFollowUpLimit,
+} from '@/lib/agent-loop/loop-policy'
 import { useChatSessions } from '@/stores/chat-session-store'
 import {
   convertThreadMessagesToUIMessages,
@@ -77,6 +88,7 @@ import { Shimmer } from '@/components/ai-elements/shimmer'
 import { useAgentMode } from '@/hooks/useAgentMode'
 import { useAutoRunStore } from '@/stores/auto-run-store'
 import { useMessageQueue } from '@/stores/message-queue-store'
+import { useTokenCalibration } from '@/stores/token-calibration-store'
 import { useWebSearch } from '@/hooks/useWebSearch'
 import { generateThreadTitle } from '@/lib/thread-title-summarizer'
 import { ModelFactory } from '@/lib/model-factory'
@@ -126,7 +138,8 @@ const CHAT_STATUS = {
 // Title summarization constants
 const MAX_TITLE_SUMMARIZATION_ATTEMPTS = 3
 const TITLE_SUMMARIZATION_MIN_LENGTH = 50
-export const MAX_MCP_TOOL_FOLLOW_UP_ROUNDS = 5
+// Max context-limit prefill continuations per user turn before surfacing an error.
+const MAX_CONTINUATION_ATTEMPTS = 2
 
 function numericParam(value: unknown): number | undefined {
   const parsed = typeof value === 'number' ? value : Number(value)
@@ -161,41 +174,15 @@ function getConfiguredMaxContextTokens(
   return modelContext ?? 0
 }
 
+function getConfiguredMaxToolRounds(
+  parameters: Record<string, unknown>
+): number {
+  const explicit = numericParam(parameters.max_tool_rounds)
+  return explicit ?? MAX_MCP_TOOL_FOLLOW_UP_ROUNDS
+}
+
 const createAutoRunPrompt = (round: number, maxRounds: number) =>
   `继续执行主人交代的任务，给出下一步结果；当前为第 ${round} / ${maxRounds} 轮。保持安静、直接、可执行。`
-
-function messageHasToolCallPart(message: UIMessage): boolean {
-  const parts = Array.isArray(message.parts) ? message.parts : []
-
-  return parts.some((part) => {
-    if (!part || typeof part !== 'object') return false
-    const type = (part as { type?: string }).type
-    return typeof type === 'string' && type.startsWith('tool-')
-  })
-}
-
-export function countToolCallAssistantRoundsSinceLastUser(
-  messages: UIMessage[]
-): number {
-  let rounds = 0
-
-  for (let index = messages.length - 1; index >= 0; index--) {
-    const message = messages[index]
-    if (message.role === 'user') break
-    if (message.role === 'assistant' && messageHasToolCallPart(message)) {
-      rounds++
-    }
-  }
-
-  return rounds
-}
-
-export function isWithinMcpToolFollowUpLimit(
-  messages: UIMessage[],
-  maxRounds = MAX_MCP_TOOL_FOLLOW_UP_ROUNDS
-): boolean {
-  return countToolCallAssistantRoundsSinceLastUser(messages) < maxRounds
-}
 
 const COMPUTER_AGENT_TOOL_PREFIX = 'computer_agent_'
 const LEGACY_COMPUTER_TOOL_PREFIX = 'computer_'
@@ -396,23 +383,44 @@ function ThreadDetail() {
   } | null>(null)
   const autoRunSendingRef = useRef(false)
   const [autoRunPanelVisible, setAutoRunPanelVisible] = useState(true)
+  // Set to the assistant message id that tripped the monotony circuit-breaker;
+  // a one-shot toast is fired from an effect so it picks up the latest `t`.
+  const [loopDetectedMessageId, setLoopDetectedMessageId] = useState<
+    string | null
+  >(null)
 
-  // Check if we should follow up with tool calls (respects abort signal)
+  // Decide whether to auto-send a tool follow-up. Thin adapter over the
+  // centralized loop policy; reads the per-assistant round budget imperatively
+  // (same pattern as max_context_tokens) so the callback stays dependency-free.
   const followUpMessage = useCallback(
     ({ messages }: { messages: UIMessage[] }) => {
-      if (
-        !toolCallAbortController.current ||
-        toolCallAbortController.current?.signal.aborted
-      ) {
-        return false
+      const maxRounds = getConfiguredMaxToolRounds(
+        useAssistant.getState().currentAssistant?.parameters ?? {}
+      )
+      const decision = shouldContinueLoop({
+        messages,
+        hasCompleteToolCalls: lastAssistantMessageIsCompleteWithToolCalls({
+          messages,
+        }),
+        abortSignal: toolCallAbortController.current?.signal ?? null,
+        maxRounds,
+      })
+      if (decision.reason === 'loop-detected') {
+        setLoopDetectedMessageId(messages[messages.length - 1]?.id ?? null)
       }
-      if (!lastAssistantMessageIsCompleteWithToolCalls({ messages })) {
-        return false
-      }
-      return isWithinMcpToolFollowUpLimit(messages)
+      return decision.continue
     },
     []
   )
+
+  // Advisory notice when the loop stopped because the model kept repeating the
+  // same tool call. Stopping happens in the policy; this only informs the user.
+  useEffect(() => {
+    if (!loopDetectedMessageId) return
+    toast.warning(t('chat:loopDetected.title'), {
+      description: t('chat:loopDetected.description'),
+    })
+  }, [loopDetectedMessageId, t])
 
   // Subscribe directly to the thread data to ensure updates when model changes
   const thread = useThreads(useShallow((state) => state.threads[threadId]))
@@ -683,6 +691,9 @@ Tool result communication:
     null
   )
   const lastQuotaBalanceRefreshKeyRef = useRef('')
+  // Bounds the context-limit prefill continuation so a model that keeps hitting
+  // 'length' cannot loop forever. Reset at the start of each new user turn.
+  const continuationAttemptsRef = useRef(0)
 
   // Use the AI SDK chat hook
   const {
@@ -754,7 +765,10 @@ Tool result communication:
           const autoIncrease =
             selectedModelState?.settings?.auto_increase_ctx_len
               ?.controller_props?.value ?? true
-          if (autoIncrease) {
+          const canContinue =
+            continuationAttemptsRef.current < MAX_CONTINUATION_ATTEMPTS
+          if (autoIncrease && canContinue) {
+            continuationAttemptsRef.current += 1
             const partialText = message.parts
               .filter((p) => p.type === 'text')
               .map((p) => (p as { type: 'text'; text: string }).text)
@@ -766,6 +780,8 @@ Tool result communication:
             }
             handleContextSizeIncreaseRef.current?.()
           } else {
+            // Either auto-increase is off, or we exhausted the continuation
+            // budget for this turn — stop looping and surface the limit.
             setContextLimitError(new Error(OUT_OF_CONTEXT_SIZE))
           }
         }
@@ -1249,6 +1265,9 @@ Tool result communication:
         systemPrompt: systemMessage,
         maxContextTokens,
         threshold,
+        charsPerToken: useTokenCalibration
+          .getState()
+          .getCharsPerToken(selectedModelState?.id),
       })
       if (!check.shouldCompact) return false
 
@@ -1462,6 +1481,10 @@ Tool result communication:
       options: SendMessageOptions = {}
     ) => {
       resetSettledChatStatus()
+      // New user turn: reset per-turn loop budgets so the previous turn's
+      // continuation count / loop notice don't carry over.
+      continuationAttemptsRef.current = 0
+      setLoopDetectedMessageId(null)
       // Cancel any in-flight title summarization so it doesn't compete with this request
       titleAbortRef.current?.abort()
       titleAbortRef.current = null

@@ -5,6 +5,7 @@ import {
   type ChatRequestOptions,
   type ChatTransport,
   type LanguageModel,
+  type ModelMessage,
   type UIMessageChunk,
   type Tool,
   type LanguageModelUsage,
@@ -28,8 +29,10 @@ import {
   trimMessages,
   compactMessages,
   estimateTokens,
+  totalMessageChars,
   type ContextManagerConfig,
 } from './context-manager'
+import { useTokenCalibration } from '@/stores/token-calibration-store'
 import { isArchivedCompactMessage } from './compact-thread'
 import { mcpOrchestrator } from '@/lib/mcp-orchestrator'
 import { isRouterModelSelectable } from '@/lib/mcp-router-model-filter'
@@ -621,6 +624,11 @@ export class CustomChatTransport implements ChatTransport<UIMessage> {
       inferenceParams.auto_compact === true ||
       inferenceParams.auto_compact === 'true'
 
+    // Per-model calibrated chars-per-token (falls back to the default prior for
+    // unknown / not-yet-observed / non-usage-reporting models).
+    const charsPerToken =
+      useTokenCalibration.getState().getCharsPerToken(modelId)
+
     // Auto-trim or auto-compact conversation history when max_context_tokens is configured
     let effectiveMessages = compactVisibleMessages
     if (maxContextTokens > 0) {
@@ -631,7 +639,7 @@ export class CustomChatTransport implements ChatTransport<UIMessage> {
       }
 
       const systemPromptTokens = this.systemMessage
-        ? estimateTokens(this.systemMessage) + 4
+        ? estimateTokens(this.systemMessage, charsPerToken) + 4
         : 0
 
       if (autoCompact && this.model) {
@@ -639,7 +647,8 @@ export class CustomChatTransport implements ChatTransport<UIMessage> {
           compactVisibleMessages,
           contextConfig,
           this.model,
-          systemPromptTokens
+          systemPromptTokens,
+          charsPerToken
         )
         effectiveMessages = compactResult.messages
         if (compactResult.trimmedCount > 0) {
@@ -652,7 +661,8 @@ export class CustomChatTransport implements ChatTransport<UIMessage> {
         const trimResult = trimMessages(
           compactVisibleMessages,
           contextConfig,
-          systemPromptTokens
+          systemPromptTokens,
+          charsPerToken
         )
         effectiveMessages = trimResult.messages
         if (trimResult.trimmedCount > 0) {
@@ -662,6 +672,12 @@ export class CustomChatTransport implements ChatTransport<UIMessage> {
         }
       }
     }
+
+    // Baseline for calibration: characters we are about to send (system prompt
+    // + post-trim messages). Compared against the provider's real input-token
+    // count at finish to refine this model's chars-per-token estimate.
+    const calibrationInputChars =
+      (this.systemMessage?.length ?? 0) + totalMessageChars(effectiveMessages)
 
     const mappedMessages = this.mapUserInlineAttachments(effectiveMessages)
     const hasTools = Object.keys(this.tools).length > 0
@@ -754,6 +770,25 @@ export class CustomChatTransport implements ChatTransport<UIMessage> {
       ? [...baseMessages, { role: 'assistant' as const, content: continueContent }]
       : baseMessages
 
+    // Prompt caching (Anthropic only): pass the (now byte-stable) system prompt
+    // as a cached system message so its tokens are written once and re-read on
+    // subsequent turns. A no-op for other providers / local models, which keep
+    // the plain `system` string. cacheControl is ignored by openai-compatible.
+    const isAnthropic = effectiveProviderName === 'anthropic'
+    const cachedSystemMessage: ModelMessage | null =
+      isAnthropic && systemMessage
+        ? {
+            role: 'system',
+            content: systemMessage,
+            providerOptions: {
+              anthropic: { cacheControl: { type: 'ephemeral' } },
+            },
+          }
+        : null
+    const streamMessages: ModelMessage[] = cachedSystemMessage
+      ? [cachedSystemMessage, ...modelMessages]
+      : modelMessages
+
     // Include tools only if we have tools loaded AND model supports them
 
     // Track stream timing and token count for token speed calculation
@@ -761,12 +796,28 @@ export class CustomChatTransport implements ChatTransport<UIMessage> {
 
     const result = streamText({
       model: this.model,
-      messages: modelMessages,
+      messages: streamMessages,
       abortSignal: options.abortSignal,
       tools: streamTextToolsEnabled ? this.tools : undefined,
       toolChoice: streamTextToolsEnabled ? 'auto' : undefined,
-      system: systemMessage,
+      // Anthropic carries the system prompt as a cached message above; everyone
+      // else passes it as the plain system string.
+      ...(cachedSystemMessage ? {} : { system: systemMessage }),
       ...(maxOutputTokens !== undefined ? { maxTokens: maxOutputTokens } : {}),
+      // Per-step observability. Tool execution lives in the route (not in
+      // streamText), so this fires roughly once per request; it gives a
+      // step-boundary record of usage / tool calls / finish reason that the
+      // loop previously lacked. Cross-round aggregation happens in the route.
+      onStepFinish: (step) => {
+        trackMitaEvent('assistant_step_completed', {
+          provider_id: providerId,
+          model_id: modelId,
+          finish_reason: step.finishReason,
+          tool_calls: step.toolCalls?.length ?? 0,
+          input_tokens: step.usage?.inputTokens,
+          output_tokens: step.usage?.outputTokens,
+        })
+      },
     })
 
     let tokensPerSecond = 0
@@ -826,7 +877,16 @@ export class CustomChatTransport implements ChatTransport<UIMessage> {
             output_tokens: outputTokens,
             total_tokens:
               usage?.totalTokens ?? (inputTokens ?? 0) + outputTokens,
+            // Cache-read tokens (prompt caching); undefined when not cached.
+            cached_input_tokens: usage?.cachedInputTokens,
           })
+          // Feed the real input-token count back into the per-model chars-per-token
+          // estimate so future trimming/compaction decisions get more accurate.
+          if (typeof inputTokens === 'number' && inputTokens > 0) {
+            useTokenCalibration
+              .getState()
+              .recordSample(modelId, calibrationInputChars, inputTokens)
+          }
           trackMitaEvent('stream_latency_recorded', {
             provider_id: providerId,
             model_id: modelId,

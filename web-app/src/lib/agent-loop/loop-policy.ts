@@ -1,0 +1,233 @@
+//
+// loop-policy.ts
+//
+// Centralizes the automatic tool-follow-up loop policy for the chat route.
+//
+// Background: the multi-step agent loop in this app is driven by the AI SDK
+// React layer via `useChat({ sendAutomaticallyWhen })`. After an assistant turn
+// that contains tool calls is executed, the route decides whether to
+// automatically re-send so the model can continue. That decision used to be
+// inlined in the route as a set of ad-hoc conditions plus a hard-coded round
+// cap. This module makes the policy explicit, testable, and configurable.
+//
+// It intentionally depends only on the `UIMessage` *type* (erased at build
+// time), so it stays free of any AI SDK runtime import and is cheap to unit
+// test in isolation.
+//
+
+import type { UIMessage } from '@ai-sdk/react'
+
+/** Default cap on automatic tool follow-up rounds per user message. */
+export const MAX_MCP_TOOL_FOLLOW_UP_ROUNDS = 5
+
+/**
+ * Why the loop stopped (or that it should continue). Discriminated so callers
+ * can branch on the reason — e.g. surface a banner for a future
+ * 'loop-detected', stay silent for 'no-tool-calls'.
+ */
+export type LoopStopReason =
+  | 'aborted'
+  | 'no-tool-calls'
+  | 'loop-detected'
+  | 'round-limit'
+  | 'continue'
+
+/**
+ * Default window for the monotony circuit-breaker: if this many consecutive
+ * tool-call-only assistant rounds repeat the exact same tool call(s), the loop
+ * is considered stuck. 2 = two identical calls back-to-back.
+ */
+export const DEFAULT_MONOTONY_WINDOW = 2
+
+export interface LoopDecision {
+  /** Whether the route should auto-send a follow-up message. */
+  continue: boolean
+  /** Why the loop is continuing or stopping. */
+  reason: LoopStopReason
+}
+
+export interface ShouldContinueLoopInput {
+  /** The current message list (as the AI SDK sees it). */
+  messages: UIMessage[]
+  /**
+   * Whether the latest assistant message is a *complete* set of tool calls.
+   * Computed by the caller from the SDK helper
+   * (`lastAssistantMessageIsCompleteWithToolCalls`) so this module stays
+   * SDK-runtime-free.
+   */
+  hasCompleteToolCalls: boolean
+  /**
+   * Abort signal for the in-flight tool-call sequence. `null`/`undefined` means
+   * there is no active controller, which is treated as aborted (the loop must
+   * not auto-continue without a live controller).
+   */
+  abortSignal?: AbortSignal | null
+  /** Max automatic tool follow-up rounds per user message. Defaults to {@link MAX_MCP_TOOL_FOLLOW_UP_ROUNDS}. */
+  maxRounds?: number
+  /**
+   * Number of consecutive identical tool-call-only rounds that trips the
+   * monotony circuit-breaker. Defaults to {@link DEFAULT_MONOTONY_WINDOW}.
+   * Set to a value < 2 to disable monotony detection.
+   */
+  monotonyWindow?: number
+}
+
+function messageHasToolCallPart(message: UIMessage): boolean {
+  const parts = Array.isArray(message.parts) ? message.parts : []
+
+  return parts.some((part) => {
+    if (!part || typeof part !== 'object') return false
+    const type = (part as { type?: string }).type
+    return typeof type === 'string' && type.startsWith('tool-')
+  })
+}
+
+function messageHasNonEmptyText(message: UIMessage): boolean {
+  const parts = Array.isArray(message.parts) ? message.parts : []
+
+  return parts.some((part) => {
+    if (!part || typeof part !== 'object') return false
+    const candidate = part as { type?: string; text?: unknown }
+    return (
+      candidate.type === 'text' &&
+      typeof candidate.text === 'string' &&
+      candidate.text.trim().length > 0
+    )
+  })
+}
+
+/** Deterministic stringify (sorted keys) so equal inputs hash equal regardless of key order. */
+function stableStringify(value: unknown): string {
+  if (value === null || value === undefined) return 'null'
+  if (typeof value !== 'object') return JSON.stringify(value) ?? 'null'
+  if (Array.isArray(value)) {
+    return `[${value.map(stableStringify).join(',')}]`
+  }
+  const record = value as Record<string, unknown>
+  const keys = Object.keys(record).sort()
+  return `{${keys
+    .map((key) => `${JSON.stringify(key)}:${stableStringify(record[key])}`)
+    .join(',')}}`
+}
+
+/**
+ * Build a stable signature of all tool-call parts in a message
+ * (`tool-name` + canonicalized input). Returns null when the message has no
+ * extractable tool call. Order-independent across multiple tool calls.
+ */
+function toolCallSignature(message: UIMessage): string | null {
+  const parts = Array.isArray(message.parts) ? message.parts : []
+  const signatures: string[] = []
+
+  for (const part of parts) {
+    if (!part || typeof part !== 'object') continue
+    const candidate = part as { type?: string; input?: unknown }
+    if (typeof candidate.type === 'string' && candidate.type.startsWith('tool-')) {
+      signatures.push(`${candidate.type}\u0000${stableStringify(candidate.input)}`)
+    }
+  }
+
+  if (signatures.length === 0) return null
+  signatures.sort()
+  return signatures.join('\u0001')
+}
+
+/**
+ * Detect a stuck loop: the most recent `windowSize` assistant rounds are all
+ * tool-call-only (no text progress) AND issue byte-identical tool calls. Any
+ * text output or differing input breaks the window — those are signs of
+ * genuine progress, not a loop. Requires identical input (not just tool name)
+ * so legitimately repeated tools (e.g. polling with changing args) don't trip.
+ */
+export function detectToolCallMonotony(
+  messages: UIMessage[],
+  windowSize: number = DEFAULT_MONOTONY_WINDOW
+): boolean {
+  if (windowSize < 2) return false
+
+  const signatures: string[] = []
+  for (let index = messages.length - 1; index >= 0; index--) {
+    const message = messages[index]
+    if (message.role === 'user') break
+    if (message.role !== 'assistant') continue
+
+    // Text output (with or without a tool call) means the model made progress.
+    if (!messageHasToolCallPart(message) || messageHasNonEmptyText(message)) break
+
+    const signature = toolCallSignature(message)
+    if (signature === null) break
+
+    signatures.push(signature)
+    if (signatures.length >= windowSize) break
+  }
+
+  return (
+    signatures.length >= windowSize &&
+    signatures.every((signature) => signature === signatures[0])
+  )
+}
+
+/**
+ * Count consecutive assistant messages that contain tool calls since the most
+ * recent user message. Each such assistant message is one automatic follow-up
+ * "round".
+ */
+export function countToolCallAssistantRoundsSinceLastUser(
+  messages: UIMessage[]
+): number {
+  let rounds = 0
+
+  for (let index = messages.length - 1; index >= 0; index--) {
+    const message = messages[index]
+    if (message.role === 'user') break
+    if (message.role === 'assistant' && messageHasToolCallPart(message)) {
+      rounds++
+    }
+  }
+
+  return rounds
+}
+
+export function isWithinMcpToolFollowUpLimit(
+  messages: UIMessage[],
+  maxRounds = MAX_MCP_TOOL_FOLLOW_UP_ROUNDS
+): boolean {
+  return countToolCallAssistantRoundsSinceLastUser(messages) < maxRounds
+}
+
+/**
+ * Decide whether the chat route should automatically send a tool follow-up
+ * message. This is the single source of truth for the loop policy; the route's
+ * `sendAutomaticallyWhen` callback is a thin adapter over it.
+ *
+ * Order matters: abort is checked first (a cancelled run must never continue),
+ * then whether there are tool calls to follow up on, then the round budget.
+ */
+export function shouldContinueLoop(input: ShouldContinueLoopInput): LoopDecision {
+  const {
+    messages,
+    hasCompleteToolCalls,
+    abortSignal,
+    maxRounds = MAX_MCP_TOOL_FOLLOW_UP_ROUNDS,
+    monotonyWindow = DEFAULT_MONOTONY_WINDOW,
+  } = input
+
+  if (!abortSignal || abortSignal.aborted) {
+    return { continue: false, reason: 'aborted' }
+  }
+
+  if (!hasCompleteToolCalls) {
+    return { continue: false, reason: 'no-tool-calls' }
+  }
+
+  // Stop a stuck loop before burning the full round budget.
+  if (detectToolCallMonotony(messages, monotonyWindow)) {
+    return { continue: false, reason: 'loop-detected' }
+  }
+
+  if (!isWithinMcpToolFollowUpLimit(messages, maxRounds)) {
+    return { continue: false, reason: 'round-limit' }
+  }
+
+  return { continue: true, reason: 'continue' }
+}

@@ -5,15 +5,20 @@ import type { ThreadMessage } from '@janhq/core'
 /**
  * Approximate token count using a character-based heuristic.
  *
- * On average, 1 token ≈ 4 characters for English text across most
- * tokenizers (GPT, Claude, etc.). This is intentionally conservative
- * so the trimmer leaves a safety margin.
+ * Default: 1 token ≈ 3.5 characters (conservative, leaves a safety margin).
+ * Callers may pass a per-model calibrated value (see token-calibration-store)
+ * once real usage has been observed; otherwise this default is used as a
+ * cold-start prior and as the fallback for models that don't report usage
+ * (e.g. some local models).
  */
-const CHARS_PER_TOKEN = 3.5
+export const DEFAULT_CHARS_PER_TOKEN = 3.5
 
-export function estimateTokens(text: string): number {
+export function estimateTokens(
+  text: string,
+  charsPerToken: number = DEFAULT_CHARS_PER_TOKEN
+): number {
   if (!text) return 0
-  return Math.ceil(text.length / CHARS_PER_TOKEN)
+  return Math.ceil(text.length / charsPerToken)
 }
 
 function messageToText(message: UIMessage): string {
@@ -40,10 +45,18 @@ function messageToText(message: UIMessage): string {
   return parts.join('\n')
 }
 
-export function estimateMessageTokens(message: UIMessage): number {
+export function estimateMessageTokens(
+  message: UIMessage,
+  charsPerToken: number = DEFAULT_CHARS_PER_TOKEN
+): number {
   const text = messageToText(message)
   // Add a small overhead per message for role/formatting tokens
-  return estimateTokens(text) + 4
+  return estimateTokens(text, charsPerToken) + 4
+}
+
+/** Total character count of messages, using the same text basis as the estimator. */
+export function totalMessageChars(messages: UIMessage[]): number {
+  return messages.reduce((sum, message) => sum + messageToText(message).length, 0)
 }
 
 function threadMessageToText(message: ThreadMessage): string {
@@ -66,8 +79,11 @@ function threadMessageToText(message: ThreadMessage): string {
   return parts.join('\n')
 }
 
-export function estimateThreadMessageTokens(message: ThreadMessage): number {
-  return estimateTokens(threadMessageToText(message)) + 4
+export function estimateThreadMessageTokens(
+  message: ThreadMessage,
+  charsPerToken: number = DEFAULT_CHARS_PER_TOKEN
+): number {
+  return estimateTokens(threadMessageToText(message), charsPerToken) + 4
 }
 
 export const MITA_COMPACT_PROMPT_TEMPLATE = `You are performing MITA CONTEXT COMPACTION.
@@ -191,19 +207,71 @@ export interface TrimResult {
   compactedSummary?: string
 }
 
+interface MessageUnit {
+  messages: UIMessage[]
+  tokens: number
+  /** System-only units (e.g. an injected compaction summary) are always kept. */
+  pinned: boolean
+}
+
+function isUnitHeader(role: string): boolean {
+  return role === 'user' || role === 'system'
+}
+
+/**
+ * Group messages into atomic conversation units so trimming never splits a
+ * tool call from its result (or an assistant answer from the user turn that
+ * prompted it). A unit starts at a user/system message and absorbs the
+ * following assistant/tool messages until the next user/system message.
+ * Leading assistant/tool messages with no header form their own unit.
+ *
+ * This matters because `convertToModelMessages` expands a tool call and its
+ * result into separate model messages; dropping one without the other yields a
+ * provider error (e.g. Anthropic "tool_use without tool_result"). Keeping whole
+ * units also guarantees the trimmed window starts at a user/system boundary.
+ */
+function groupIntoUnits(
+  messages: UIMessage[],
+  charsPerToken: number
+): MessageUnit[] {
+  const units: MessageUnit[] = []
+
+  for (const message of messages) {
+    const startNew = units.length === 0 || isUnitHeader(message.role)
+    if (startNew) {
+      units.push({
+        messages: [message],
+        tokens: estimateMessageTokens(message, charsPerToken),
+        pinned: message.role === 'system',
+      })
+    } else {
+      const unit = units[units.length - 1]
+      unit.messages.push(message)
+      unit.tokens += estimateMessageTokens(message, charsPerToken)
+    }
+  }
+
+  return units
+}
+
 /**
  * Trim messages to fit within the context budget.
  *
  * Strategy:
- * 1. Always keep the system prompt (counted separately) and the most recent message
- * 2. Walk backwards from the newest message, accumulating tokens
- * 3. Drop the oldest messages that don't fit
- * 4. Never drop the first user message if it would leave no context
+ * 1. Always keep the system prompt (counted separately).
+ * 2. Group messages into atomic conversation units (a user/system turn plus its
+ *    following assistant/tool messages) so tool-call/result pairs are never
+ *    split and the window starts at a user/system boundary.
+ * 3. Always keep system-only units (e.g. an injected compaction summary).
+ * 4. Walk units backwards from the newest, keeping whole units that fit; drop
+ *    the oldest units that don't.
+ * 5. Never drop the newest unit, even if it alone exceeds the budget.
  */
 export function trimMessages(
   messages: UIMessage[],
   config: ContextManagerConfig,
-  systemPromptTokens: number = 0
+  systemPromptTokens: number = 0,
+  charsPerToken: number = DEFAULT_CHARS_PER_TOKEN
 ): TrimResult {
   const { maxContextTokens, maxOutputTokens } = config
 
@@ -216,29 +284,41 @@ export function trimMessages(
     return { messages: messages.slice(-1), trimmedCount: messages.length - 1 }
   }
 
-  // Estimate tokens for each message
-  const estimates = messages.map((msg) => ({
-    message: msg,
-    tokens: estimateMessageTokens(msg),
-  }))
+  const units = groupIntoUnits(messages, charsPerToken)
+  const keptUnitIndices = new Set<number>()
 
-  // Walk backwards, accumulating tokens
+  // Pinned (system summary) units are always kept; count them against the
+  // budget up front.
   let totalTokens = 0
-  const kept: UIMessage[] = []
+  units.forEach((unit, index) => {
+    if (unit.pinned) {
+      keptUnitIndices.add(index)
+      totalTokens += unit.tokens
+    }
+  })
 
-  for (let i = estimates.length - 1; i >= 0; i--) {
-    const { message, tokens } = estimates[i]
-    if (totalTokens + tokens > inputBudget && kept.length > 0) {
+  // Keep a contiguous suffix of the newest units that fit. Always keep the
+  // newest unit (the floor), even if it alone exceeds the budget.
+  let keptAnyTurn = false
+  for (let index = units.length - 1; index >= 0; index--) {
+    const unit = units[index]
+    if (unit.pinned) continue
+    const fits = totalTokens + unit.tokens <= inputBudget
+    if (!fits && keptAnyTurn) {
       break
     }
-    totalTokens += tokens
-    kept.unshift(message)
+    totalTokens += unit.tokens
+    keptUnitIndices.add(index)
+    keptAnyTurn = true
   }
 
-  // Ensure we always have at least the last message
-  if (kept.length === 0 && messages.length > 0) {
-    kept.push(messages[messages.length - 1])
-  }
+  // Reassemble kept units in original order.
+  const kept: UIMessage[] = []
+  units.forEach((unit, index) => {
+    if (keptUnitIndices.has(index)) {
+      kept.push(...unit.messages)
+    }
+  })
 
   return {
     messages: kept,
@@ -252,6 +332,38 @@ const COMPACT_SYSTEM_PROMPT =
   'Keep the summary under 500 words.'
 
 /**
+ * Re-fit kept messages around a freshly generated summary. The summary is
+ * always prepended (dropping it defeats compaction); its budget is reserved up
+ * front. Prefer the provider's REAL summary token count when available, falling
+ * back to a calibrated char estimate of the summary text.
+ */
+export function refitAroundSummary(
+  summaryMessage: UIMessage,
+  keptMessages: UIMessage[],
+  config: ContextManagerConfig,
+  systemPromptTokens: number,
+  charsPerToken: number = DEFAULT_CHARS_PER_TOKEN,
+  summaryTokensOverride?: number
+): { messages: UIMessage[]; trimmedCount: number } {
+  const summaryTokens =
+    typeof summaryTokensOverride === 'number' && summaryTokensOverride > 0
+      ? summaryTokensOverride
+      : estimateMessageTokens(summaryMessage, charsPerToken)
+
+  const refit = trimMessages(
+    keptMessages,
+    config,
+    systemPromptTokens + summaryTokens,
+    charsPerToken
+  )
+
+  return {
+    messages: [summaryMessage, ...refit.messages],
+    trimmedCount: refit.trimmedCount,
+  }
+}
+
+/**
  * Summarize older messages that would be trimmed, then prepend the summary
  * as a system-style user message so the model retains context.
  */
@@ -259,7 +371,8 @@ export async function compactMessages(
   messages: UIMessage[],
   config: ContextManagerConfig,
   model: LanguageModel,
-  systemPromptTokens: number = 0
+  systemPromptTokens: number = 0,
+  charsPerToken: number = DEFAULT_CHARS_PER_TOKEN
 ): Promise<TrimResult> {
   const { maxContextTokens, maxOutputTokens } = config
 
@@ -273,13 +386,19 @@ export async function compactMessages(
   }
 
   // First figure out which messages would be kept/dropped
-  const trimResult = trimMessages(messages, config, systemPromptTokens)
+  const trimResult = trimMessages(messages, config, systemPromptTokens, charsPerToken)
 
   if (trimResult.trimmedCount === 0) {
     return trimResult
   }
 
-  const droppedMessages = messages.slice(0, trimResult.trimmedCount)
+  // Kept messages are NOT necessarily a contiguous suffix: a pinned system
+  // summary is retained out of order. Derive the dropped set by difference
+  // (trimMessages preserves message identity) instead of assuming the first N
+  // were dropped — otherwise an already-present summary would be re-summarized
+  // and a genuinely dropped middle turn would be lost.
+  const keptMessages = new Set(trimResult.messages)
+  const droppedMessages = messages.filter((m) => !keptMessages.has(m))
 
   // Build conversation text from dropped messages
   const conversationText = droppedMessages
@@ -302,9 +421,11 @@ export async function compactMessages(
   const summaryOutputTokens = 512
   const summaryBudgetTokens = Math.max(
     1024,
-    maxContextTokens - summaryOutputTokens - estimateTokens(COMPACT_SYSTEM_PROMPT)
+    maxContextTokens -
+      summaryOutputTokens -
+      estimateTokens(COMPACT_SYSTEM_PROMPT, charsPerToken)
   )
-  const maxExcerptChars = Math.floor(summaryBudgetTokens * CHARS_PER_TOKEN)
+  const maxExcerptChars = Math.floor(summaryBudgetTokens * charsPerToken)
 
   const truncated =
     conversationText.length > maxExcerptChars
@@ -312,7 +433,7 @@ export async function compactMessages(
       : conversationText
 
   try {
-    const { text: summary } = await generateText({
+    const { text: summary, usage } = await generateText({
       model,
       system: COMPACT_SYSTEM_PROMPT,
       prompt: `Summarize this conversation excerpt:\n\n${truncated}`,
@@ -332,12 +453,17 @@ export async function compactMessages(
       ],
     }
 
-    // Re-trim: the summary message itself consumes tokens, so the combined
-    // set (summary + kept messages) may exceed the input budget. Run
-    // trimMessages again on the merged list to guarantee we stay within
-    // the context window.
-    const merged = [summaryMessage, ...trimResult.messages]
-    const refit = trimMessages(merged, config, systemPromptTokens)
+    // The summary consumes budget too. Prefer the provider's REAL output-token
+    // count over a char estimate; reserve it as fixed prefix budget and re-trim
+    // only the kept conversation around it.
+    const refit = refitAroundSummary(
+      summaryMessage,
+      trimResult.messages,
+      config,
+      systemPromptTokens,
+      charsPerToken,
+      usage?.outputTokens
+    )
 
     return {
       messages: refit.messages,

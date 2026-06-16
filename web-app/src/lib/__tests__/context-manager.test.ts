@@ -3,14 +3,16 @@ import type { UIMessage } from '@ai-sdk/react'
 import {
   estimateTokens,
   estimateMessageTokens,
+  totalMessageChars,
   trimMessages,
   compactMessages,
+  refitAroundSummary,
   type ContextManagerConfig,
 } from '../context-manager'
 
 function makeMessage(
   id: string,
-  role: 'user' | 'assistant',
+  role: 'user' | 'assistant' | 'system',
   text: string
 ): UIMessage {
   return {
@@ -18,6 +20,40 @@ function makeMessage(
     role,
     parts: [{ type: 'text' as const, text }],
   }
+}
+
+// An assistant message carrying a tool call + its result in one part.
+function makeToolMessage(id: string, name = 'web_search', filler = ''): UIMessage {
+  return {
+    id,
+    role: 'assistant',
+    parts: [
+      {
+        type: `tool-${name}` as const,
+        toolCallId: id,
+        state: 'output-available',
+        input: { q: id },
+        output: `result ${id} ${filler}`,
+      },
+    ],
+  } as UIMessage
+}
+
+// A standalone tool-result message (call and result stored separately).
+function makeToolResultMessage(id: string, callId: string): UIMessage {
+  return {
+    id,
+    role: 'assistant',
+    parts: [
+      {
+        type: 'tool-web_search' as const,
+        toolCallId: callId,
+        state: 'output-available',
+        input: { q: callId },
+        output: `result for ${callId}`,
+      },
+    ],
+  } as UIMessage
 }
 
 describe('estimateTokens', () => {
@@ -163,6 +199,137 @@ describe('trimMessages', () => {
     for (let i = 1; i < ids.length; i++) {
       expect(Number(ids[i])).toBeGreaterThan(Number(ids[i - 1]))
     }
+  })
+})
+
+describe('calibrated chars-per-token', () => {
+  it('estimateTokens honors a custom chars-per-token', () => {
+    expect(estimateTokens('A'.repeat(70))).toBe(20) // default 3.5
+    expect(estimateTokens('A'.repeat(70), 7)).toBe(10)
+  })
+
+  it('estimateMessageTokens honors a custom chars-per-token', () => {
+    const msg = makeMessage('1', 'user', 'A'.repeat(70))
+    expect(estimateMessageTokens(msg)).toBe(24) // 20 + 4
+    expect(estimateMessageTokens(msg, 7)).toBe(14) // 10 + 4
+  })
+
+  it('totalMessageChars sums the estimator text basis', () => {
+    const messages = [
+      makeMessage('1', 'user', 'hello'), // 5
+      makeMessage('2', 'assistant', 'world!'), // 6
+    ]
+    expect(totalMessageChars(messages)).toBe(11)
+  })
+
+  it('a larger chars-per-token keeps more messages (fewer estimated tokens)', () => {
+    const messages = [
+      makeMessage('u1', 'user', 'A'.repeat(350)),
+      makeMessage('u2', 'user', 'A'.repeat(350)),
+    ]
+    const config: ContextManagerConfig = {
+      maxContextTokens: 200,
+      maxOutputTokens: 50,
+      autoCompact: false,
+    }
+    // Default 3.5: each ~104 tokens → only the newest fits in 150.
+    expect(trimMessages(messages, config).messages.map((m) => m.id)).toEqual([
+      'u2',
+    ])
+    // Calibrated 7: each ~54 tokens → both fit.
+    expect(
+      trimMessages(messages, config, 0, 7).messages.map((m) => m.id)
+    ).toEqual(['u1', 'u2'])
+  })
+})
+
+describe('trimMessages tool-call/result pairing', () => {
+  const tightConfig: ContextManagerConfig = {
+    maxContextTokens: 200,
+    maxOutputTokens: 50,
+    autoCompact: false,
+  }
+
+  it('never leaves a dangling tool/assistant turn at the window start', () => {
+    // Old per-message trimming would keep [a1(tool), u2, a2] and drop u1,
+    // orphaning the tool turn. Turn-grouping drops the whole [u1, a1] turn.
+    const messages = [
+      makeMessage('u1', 'user', 'U'.repeat(2000)), // huge → its turn is dropped
+      makeToolMessage('a1'), // small tool turn that would otherwise dangle
+      makeMessage('u2', 'user', 'hi'),
+      makeMessage('a2', 'assistant', 'ok'),
+    ]
+    const result = trimMessages(messages, tightConfig)
+    expect(result.messages.map((m) => m.id)).toEqual(['u2', 'a2'])
+    expect(result.messages[0].role).toBe('user')
+  })
+
+  it('keeps a multi-message tool turn intact (call + result together)', () => {
+    const messages = [
+      makeMessage('u0', 'user', 'U'.repeat(2000)), // dropped whole
+      makeMessage('a0', 'assistant', 'A'.repeat(2000)),
+      makeMessage('u1', 'user', 'go'),
+      makeToolMessage('a1'),
+      makeToolResultMessage('r1', 'a1'),
+    ]
+    const result = trimMessages(messages, tightConfig)
+    expect(result.messages.map((m) => m.id)).toEqual(['u1', 'a1', 'r1'])
+    expect(result.messages[0].role).toBe('user')
+  })
+
+  it('always keeps a pinned system summary while trimming old turns', () => {
+    const messages = [
+      makeMessage('sum', 'system', '[summary] ' + 'S'.repeat(100)),
+      makeMessage('u1', 'user', 'U'.repeat(2000)), // old turn → dropped
+      makeMessage('a1', 'assistant', 'A'.repeat(2000)),
+      makeMessage('u2', 'user', 'hi'),
+      makeMessage('a2', 'assistant', 'ok'),
+    ]
+    const result = trimMessages(messages, tightConfig)
+    const ids = result.messages.map((m) => m.id)
+    expect(ids).toContain('sum') // pinned summary survives
+    expect(ids).toContain('u2')
+    expect(ids).toContain('a2')
+    expect(ids).not.toContain('u1')
+    expect(ids).not.toContain('a1')
+  })
+})
+
+describe('refitAroundSummary (real-usage re-trim)', () => {
+  const config: ContextManagerConfig = {
+    maxContextTokens: 300,
+    maxOutputTokens: 50,
+    autoCompact: false,
+  }
+  const summary = makeMessage('sum', 'system', 'x') // tiny summary text
+  const kept = [
+    makeMessage('u1', 'user', 'A'.repeat(350)), // ~104 tokens
+    makeMessage('u2', 'user', 'A'.repeat(350)), // ~104 tokens
+  ]
+
+  it('always keeps the summary first', () => {
+    const res = refitAroundSummary(summary, kept, config, 0)
+    expect(res.messages[0].id).toBe('sum')
+  })
+
+  it('uses the char estimate of the summary when no real usage is given', () => {
+    // inputBudget 250 − tiny summary estimate (~5) → both kept turns fit.
+    const res = refitAroundSummary(summary, kept, config, 0)
+    expect(res.messages.map((m) => m.id)).toEqual(['sum', 'u1', 'u2'])
+    expect(res.trimmedCount).toBe(0)
+  })
+
+  it('reserves the real summary token count, trimming more aggressively', () => {
+    // A real outputTokens of 150 reserves far more than the summary text would
+    // estimate, so only the newest kept turn survives.
+    const res = refitAroundSummary(summary, kept, config, 0, 3.5, 150)
+    expect(res.messages.map((m) => m.id)).toEqual(['sum', 'u2'])
+    expect(res.trimmedCount).toBe(1)
+  })
+
+  it('ignores a non-positive usage override and falls back to the estimate', () => {
+    const res = refitAroundSummary(summary, kept, config, 0, 3.5, 0)
+    expect(res.messages.map((m) => m.id)).toEqual(['sum', 'u1', 'u2'])
   })
 })
 
