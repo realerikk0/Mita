@@ -48,7 +48,8 @@ desktop = [
     "deep-link",
     "hardware",
     "mlx",
-    "foundation-models"
+    # Keep Foundation Models opt-in: fm-rs strongly links the macOS 26
+    # FoundationModels.framework, which prevents launch on older macOS.
 ]
 mobile = [
     "tauri/protocol-asset",
