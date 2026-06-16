@@ -179,4 +179,81 @@ describe('DefaultVideoGenerationService', () => {
       videoUrl: 'https://cdn.example.test/video.mp4',
     })
   })
+
+  it('extracts gateway result_url videos from completed tasks', async () => {
+    const fetchMock = vi.fn().mockResolvedValueOnce(
+      new Response(
+        JSON.stringify({
+          code: 'success',
+          data: {
+            task_id: 'video-task-2',
+            status: 'completed',
+            progress: 100,
+            result_url: 'https://cdn.example.test/gateway-video.mp4',
+            usage: { total_tokens: 18000 },
+          },
+        }),
+        { status: 200, headers: { 'content-type': 'application/json' } }
+      )
+    )
+    vi.stubGlobal('fetch', fetchMock)
+
+    const service = new DefaultVideoGenerationService({
+      pollIntervalMs: 0,
+      timeoutMs: 1000,
+    })
+    const task = await service.pollVideoTask({
+      provider,
+      model,
+      taskId: 'video-task-2',
+    })
+
+    expect(task).toMatchObject({
+      id: 'video-task-2',
+      status: 'succeeded',
+      progress: 100,
+      videoUrl: 'https://cdn.example.test/gateway-video.mp4',
+      usage: { total_tokens: 18000 },
+    })
+  })
+
+  it('keeps the gateway task id when poll responses include internal ids', async () => {
+    const fetchMock = vi.fn().mockResolvedValueOnce(
+      new Response(
+        JSON.stringify({
+          code: 'success',
+          data: {
+            id: 331,
+            task_id: 'task_NwzHF8LSrlf45wYjxEy7fsl4hNY9H0Gi',
+            status: 'SUCCESS',
+            progress: '100%',
+            data: {
+              id: 'cgt-20260616174259-bnnbb',
+              status: 'succeeded',
+              result_url: 'https://cdn.example.test/biyuan-video.mp4',
+            },
+          },
+        }),
+        { status: 200, headers: { 'content-type': 'application/json' } }
+      )
+    )
+    vi.stubGlobal('fetch', fetchMock)
+
+    const service = new DefaultVideoGenerationService({
+      pollIntervalMs: 0,
+      timeoutMs: 1000,
+    })
+    const task = await service.pollVideoTask({
+      provider,
+      model,
+      taskId: 'task_NwzHF8LSrlf45wYjxEy7fsl4hNY9H0Gi',
+    })
+
+    expect(task).toMatchObject({
+      id: 'task_NwzHF8LSrlf45wYjxEy7fsl4hNY9H0Gi',
+      status: 'succeeded',
+      progress: 100,
+      videoUrl: 'https://cdn.example.test/biyuan-video.mp4',
+    })
+  })
 })

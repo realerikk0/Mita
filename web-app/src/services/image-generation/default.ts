@@ -169,11 +169,18 @@ export class DefaultImageGenerationService implements ImageGenerationService {
       quality: apiQualityForPreset(request.qualityPreset, request.model.id),
     }
 
-    if (!this.isJingxingProvider(request.provider)) {
+    if (this.shouldRequestResponseFormat(request.provider)) {
       body.response_format = 'b64_json'
     }
 
     return body
+  }
+
+  private shouldRequestResponseFormat(provider: ModelProvider) {
+    const baseUrl = provider.base_url?.toLowerCase() ?? ''
+    return (
+      !this.isJingxingProvider(provider) && !baseUrl.includes('api.biyuan.ai')
+    )
   }
 
   private isJingxingProvider(provider: ModelProvider) {
@@ -475,7 +482,10 @@ export class DefaultImageGenerationService implements ImageGenerationService {
         request.provider.base_url
       )
     )
-    if (!isGptImageModel(request.model.id)) {
+    if (
+      !isGptImageModel(request.model.id) &&
+      this.shouldRequestResponseFormat(request.provider)
+    ) {
       form.append('response_format', 'b64_json')
     }
 

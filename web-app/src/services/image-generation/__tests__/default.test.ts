@@ -124,6 +124,43 @@ describe('DefaultImageGenerationService', () => {
     ])
   })
 
+  it('omits response_format for Biyuan image generation', async () => {
+    const fetchMock = vi.fn().mockResolvedValueOnce(
+      new Response(
+        JSON.stringify({
+          data: [{ b64_json: 'aGVsbG8=' }],
+        }),
+        { status: 200, headers: { 'content-type': 'application/json' } }
+      )
+    )
+    vi.stubGlobal('fetch', fetchMock)
+
+    const service = new DefaultImageGenerationService()
+    const result = await service.generateImages({
+      provider: {
+        ...provider,
+        base_url: 'https://api.biyuan.ai/v1',
+      },
+      model,
+      prompt: 'moonlit desk',
+      ratio: '1:1',
+      qualityPreset: 'hd',
+      count: 1,
+      mode: 'generate',
+    })
+
+    const init = fetchMock.mock.calls[0][1] as RequestInit & { body: string }
+    expect(JSON.parse(init.body)).toMatchObject({
+      model: 'gpt-image-2',
+      prompt: 'moonlit desk',
+      n: 1,
+      size: '1024x1024',
+      quality: 'high',
+    })
+    expect(JSON.parse(init.body)).not.toHaveProperty('response_format')
+    expect(result[0].b64Json).toBe('aGVsbG8=')
+  })
+
   it('stops generation key fallback when provider reports quota exhaustion', async () => {
     const fetchMock = vi.fn().mockResolvedValueOnce(quotaResponse())
 

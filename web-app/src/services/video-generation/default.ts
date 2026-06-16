@@ -24,21 +24,55 @@ type RawVideoResponse = {
   progress?: string | number
   url?: string
   video_url?: string
+  result_url?: string
   last_frame_url?: string
   metadata?: {
     url?: string
     video_url?: string
-  }
-  content?: {
-    video_url?: string
+    result_url?: string
     last_frame_url?: string
   }
+  content?: {
+    url?: string
+    video_url?: string
+    result_url?: string
+    last_frame_url?: string
+  }
+  video?: {
+    url?: string
+    video_url?: string
+    result_url?: string
+  }
+  output?: RawVideoUrlCandidate
+  outputs?: RawVideoUrlCandidate
+  result?: RawVideoUrlCandidate
   data?: RawVideoResponse
   usage?: unknown
   error?: { message?: string } | string
   message?: string
   code?: string
 }
+
+type RawVideoUrlObject = Pick<
+  RawVideoResponse,
+  | 'url'
+  | 'video_url'
+  | 'result_url'
+  | 'last_frame_url'
+  | 'metadata'
+  | 'content'
+  | 'video'
+  | 'output'
+  | 'outputs'
+  | 'result'
+>
+
+type RawVideoUrlCandidate =
+  | string
+  | RawVideoUrlObject
+  | Array<string | RawVideoUrlObject>
+  | null
+  | undefined
 
 type JsonResponseResult = {
   json: RawVideoResponse
@@ -282,7 +316,12 @@ export class DefaultVideoGenerationService implements VideoGenerationService {
   private parseVideoTask(response: RawVideoResponse): VideoGenerationTask {
     const wrapper = this.wrapperData(response)
     const task = wrapper?.data ?? response.data ?? response
-    const id = task.task_id || task.id || wrapper?.task_id || response.task_id || response.id
+    const id =
+      wrapper?.task_id ||
+      response.task_id ||
+      task.task_id ||
+      task.id ||
+      response.id
     if (!id) throw new Error('Video response did not include a task id')
 
     const status = this.videoStatus(
@@ -292,17 +331,73 @@ export class DefaultVideoGenerationService implements VideoGenerationService {
       id,
       status,
       progress: this.videoProgress(task.progress ?? wrapper?.progress ?? response.progress, status),
-      videoUrl:
-        task.content?.video_url ||
-        task.metadata?.url ||
-        task.metadata?.video_url ||
-        task.video_url ||
-        task.url ||
-        response.metadata?.url,
-      lastFrameUrl: task.content?.last_frame_url || task.last_frame_url,
+      videoUrl: this.firstVideoUrl(
+        task.content,
+        task.metadata,
+        task.video,
+        task.video_url,
+        task.result_url,
+        task.url,
+        task.output,
+        task.outputs,
+        task.result,
+        wrapper?.content,
+        wrapper?.metadata,
+        wrapper?.video,
+        wrapper?.video_url,
+        wrapper?.result_url,
+        wrapper?.url,
+        wrapper?.output,
+        wrapper?.outputs,
+        wrapper?.result,
+        response.content,
+        response.metadata,
+        response.video,
+        response.video_url,
+        response.result_url,
+        response.url,
+        response.output,
+        response.outputs,
+        response.result
+      ),
+      lastFrameUrl: this.firstVideoUrl(
+        task.content?.last_frame_url,
+        task.metadata?.last_frame_url,
+        task.last_frame_url,
+        wrapper?.last_frame_url,
+        response.last_frame_url
+      ),
       usage: task.usage ?? wrapper?.usage ?? response.usage,
       raw: response,
     }
+  }
+
+  private firstVideoUrl(...candidates: RawVideoUrlCandidate[]) {
+    for (const candidate of candidates) {
+      const url = this.videoUrlFromCandidate(candidate)
+      if (url) return url
+    }
+    return undefined
+  }
+
+  private videoUrlFromCandidate(
+    candidate: RawVideoUrlCandidate
+  ): string | undefined {
+    if (!candidate) return undefined
+    if (typeof candidate === 'string') return candidate
+    if (Array.isArray(candidate)) return this.firstVideoUrl(...candidate)
+
+    return this.firstVideoUrl(
+      candidate.video_url,
+      candidate.result_url,
+      candidate.url,
+      candidate.content,
+      candidate.metadata,
+      candidate.video,
+      candidate.output,
+      candidate.outputs,
+      candidate.result
+    )
   }
 
   private wrapperData(response: RawVideoResponse) {
