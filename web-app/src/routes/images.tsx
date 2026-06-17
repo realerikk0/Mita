@@ -1915,6 +1915,7 @@ function StoryboardSheetPreview({
   onSelectVersion,
   onOpenPreview,
   onOpenEditor,
+  onAssetError,
 }: {
   shots: StoryboardShot[]
   story: string
@@ -1927,6 +1928,7 @@ function StoryboardSheetPreview({
   onSelectVersion: (id: string) => void
   onOpenPreview: () => void
   onOpenEditor: () => void
+  onAssetError?: () => void
 }) {
   const { t } = useTranslation()
 
@@ -1943,6 +1945,7 @@ function StoryboardSheetPreview({
               src={assetSrc(asset)}
               alt={asset.prompt}
               className="max-h-[620px] w-full object-contain"
+              onError={onAssetError}
             />
             <span className="absolute right-3 top-3 inline-flex items-center gap-1 rounded-lg bg-background/95 px-3 py-1.5 text-xs font-medium opacity-0 shadow transition-opacity group-hover:opacity-100">
               <Eye className="size-3.5" />
@@ -2122,6 +2125,23 @@ function StoryboardVideoMode({
   )
   const [storyboardPreviewOpen, setStoryboardPreviewOpen] = useState(false)
   const [storyboardEditorOpen, setStoryboardEditorOpen] = useState(false)
+  // Inline media whose underlying file is gone (deleted from history, expired
+  // URL, etc.) is dropped on load error so a deleted asset never lingers as a
+  // broken frame, and the persisted session self-heals on the next save.
+  const [failedAssetIds, setFailedAssetIds] = useState<Set<string>>(
+    () => new Set()
+  )
+  const markAssetFailed = useCallback((id?: string) => {
+    if (!id) return
+    setFailedAssetIds((prev) => (prev.has(id) ? prev : new Set(prev).add(id)))
+  }, [])
+  const handleStoryboardImageError = useCallback(() => {
+    // The storyboard image file is gone — reset the composition to the start.
+    setStoryboardAsset(undefined)
+    setStoryboardVersions([])
+    setActiveStoryboardVersionId('')
+    setStage('compose')
+  }, [])
   // In-flight video generation lives in a global, persisted store so it
   // survives leaving the view, switching projects, and even an app restart.
   const taskKey = storyboardAsset?.id ?? ''
@@ -2140,12 +2160,17 @@ function StoryboardVideoMode({
   const restoredVideoAsset =
     initialSession?.videoAsset &&
     storyboardAsset &&
+    !failedAssetIds.has(initialSession.videoAsset.id) &&
     initialSession.videoAsset.sourceAssetIds?.includes(storyboardAsset.id)
       ? initialSession.videoAsset
       : undefined
   // Keep the last finished video for persistence even while a new run is in
   // flight, but hide it from the player so the progress bar shows instead.
-  const lastVideoAsset = videoRuntime?.asset ?? restoredVideoAsset
+  const candidateVideoAsset = videoRuntime?.asset ?? restoredVideoAsset
+  const lastVideoAsset =
+    candidateVideoAsset && failedAssetIds.has(candidateVideoAsset.id)
+      ? undefined
+      : candidateVideoAsset
   const videoAsset = videoStatus === 'running' ? undefined : lastVideoAsset
   const progressStartedAt = videoRuntime?.startedAt ?? pendingTask?.startedAt
   const progressEstimateMs = videoRuntime?.estimateMs ?? pendingTask?.estimateMs
@@ -2857,6 +2882,11 @@ function StoryboardVideoMode({
                           src={assetSrc(asset)}
                           alt={asset.prompt}
                           className="size-full object-cover"
+                          onError={() =>
+                            setReferenceAssets((prev) =>
+                              prev.filter((item) => item.id !== asset.id)
+                            )
+                          }
                         />
                       ) : (
                         <div className="flex size-full items-center justify-center">
@@ -3157,6 +3187,7 @@ function StoryboardVideoMode({
               onSelectVersion={selectStoryboardVersion}
               onOpenPreview={() => setStoryboardPreviewOpen(true)}
               onOpenEditor={() => setStoryboardEditorOpen(true)}
+              onAssetError={handleStoryboardImageError}
             />
             {storyboardAsset && (
               <div className="flex flex-wrap items-center gap-2">
@@ -3233,6 +3264,7 @@ function StoryboardVideoMode({
                 src={assetSrc(storyboardAsset)}
                 alt={storyboardAsset.prompt}
                 className="h-14 w-24 rounded object-cover"
+                onError={handleStoryboardImageError}
               />
               <div className="min-w-0 text-sm">
                 <div className="font-medium">
@@ -3269,7 +3301,12 @@ function StoryboardVideoMode({
                   style={{ aspectRatio: videoSettings.ratio.replace(':', '/') }}
                 >
                   {videoAsset && videoSrc ? (
-                    <video controls src={videoSrc} className="size-full" />
+                    <video
+                      controls
+                      src={videoSrc}
+                      className="size-full"
+                      onError={() => markAssetFailed(videoAsset.id)}
+                    />
                   ) : videoStatus === 'running' ? (
                     <div className="flex w-2/3 flex-col items-center gap-3">
                       <Film className="size-7 animate-pulse text-[#f36f4f]" />
