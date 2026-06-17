@@ -296,4 +296,59 @@ describe('useVideoGenerationStore', () => {
       useVideoGenerationStore.getState().runtime['sb1']?.asset?.path
     ).toBe('/mock/video-assets/asset-B/video.mp4')
   })
+
+  it('does not orphan a persisted task when a superseded run resolves late', async () => {
+    let resolveGenA: (value: unknown) => void = () => {}
+    const genA = new Promise((resolve) => {
+      resolveGenA = resolve
+    })
+    const hub = {
+      generateVideo: vi
+        .fn()
+        .mockReturnValueOnce(genA) // run A's generateVideo hangs
+        .mockResolvedValueOnce({ id: 'task-B', status: 'queued' }),
+      pollVideoTask: vi.fn().mockResolvedValue({
+        id: 'task-B',
+        status: 'succeeded',
+        videoUrl: 'https://cdn.example.test/B.mp4',
+        usage: {},
+      }),
+      saveVideoAsset: vi
+        .fn()
+        .mockImplementation((request: Record<string, unknown>) =>
+          Promise.resolve({
+            ...request,
+            createdAt: '2026-06-17T00:00:00Z',
+            path: `/mock/video-assets/${request.id}/video.mp4`,
+            fileName: 'video.mp4',
+          })
+        ),
+    }
+
+    // Run A starts; its generateVideo hangs (nothing persisted yet).
+    useVideoGenerationStore.getState().start(baseInput('sb1'), hub as never)
+    await vi.waitFor(() =>
+      expect(hub.generateVideo).toHaveBeenCalledTimes(1)
+    )
+
+    // Run B supersedes A (start aborts A's controller) and completes.
+    useVideoGenerationStore
+      .getState()
+      .start({ ...baseInput('sb1'), assetId: 'asset-B' }, hub as never)
+    await vi.waitFor(() =>
+      expect(
+        useVideoGenerationStore.getState().runtime['sb1']?.status
+      ).toBe('succeeded')
+    )
+    expect(useVideoGenerationStore.getState().tasks['sb1']).toBeUndefined()
+
+    // A's generateVideo resolves late (its fetch raced the abort and won) — it
+    // must NOT re-persist an orphaned task that resumeAll would later resume.
+    resolveGenA({ id: 'task-A', status: 'queued' })
+    await Promise.resolve()
+    await Promise.resolve()
+    await Promise.resolve()
+
+    expect(useVideoGenerationStore.getState().tasks['sb1']).toBeUndefined()
+  })
 })

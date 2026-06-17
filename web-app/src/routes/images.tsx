@@ -2135,12 +2135,31 @@ function StoryboardVideoMode({
     if (!id) return
     setFailedAssetIds((prev) => (prev.has(id) ? prev : new Set(prev).add(id)))
   }, [])
+  const storyboardStateRef = useRef({
+    asset: storyboardAsset,
+    versions: storyboardVersions,
+  })
+  storyboardStateRef.current = {
+    asset: storyboardAsset,
+    versions: storyboardVersions,
+  }
   const handleStoryboardImageError = useCallback(() => {
-    // The storyboard image file is gone — reset the composition to the start.
-    setStoryboardAsset(undefined)
-    setStoryboardVersions([])
-    setActiveStoryboardVersionId('')
-    setStage('compose')
+    // The active storyboard image file is gone. Drop only that version and fall
+    // back to a surviving one; reset to compose only if none remain on disk.
+    const { asset, versions } = storyboardStateRef.current
+    if (!asset) return
+    const survivors = versions.filter((version) => version.asset.id !== asset.id)
+    if (survivors.length === 0) {
+      setStoryboardAsset(undefined)
+      setStoryboardVersions([])
+      setActiveStoryboardVersionId('')
+      setStage('compose')
+      return
+    }
+    const next = survivors[0]!
+    setStoryboardVersions(survivors)
+    setStoryboardAsset(next.asset)
+    setActiveStoryboardVersionId(next.id)
   }, [])
   // In-flight video generation lives in a global, persisted store so it
   // survives leaving the view, switching projects, and even an app restart.
@@ -3636,7 +3655,11 @@ function Images() {
     // Explicit history/deep-link params win; otherwise resume the last mode.
     if (search.media === 'storyboard' || search.videoId) return 'storyboard'
     if (search.media === 'image' || search.assetId) return 'image'
-    return useStoryboardSessionStore.getState().mediaMode ?? 'image'
+    const persisted = useStoryboardSessionStore.getState().mediaMode
+    // Only the user-reachable modes restore; ignore stale/disabled values.
+    return persisted === 'storyboard' || persisted === 'image'
+      ? persisted
+      : 'image'
   })
   const [selectedModelKey, setSelectedModelKey] = useState('')
   const [prompt, setPrompt] = useState('')

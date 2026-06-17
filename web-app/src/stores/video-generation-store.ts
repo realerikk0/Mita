@@ -27,6 +27,8 @@ const MAX_RESUMABLE_AGE_MS = 24 * 60 * 60 * 1000
 const VIDEO_GENERATION_FAILED = 'Video generation failed'
 const VIDEO_GENERATION_NO_URL =
   'Video generation finished without a playable video URL'
+const VIDEO_PROVIDER_UNAVAILABLE =
+  'Video provider unavailable — reconnect it to resume, or generate again'
 
 type VideoHub = Pick<
   VideoGenerationService,
@@ -256,6 +258,11 @@ export const useVideoGenerationStore = create<VideoGenerationStoreState>()(
             return
           }
 
+          // A regenerate/reset may have superseded this run while generateVideo
+          // was in flight — its fetch can resolve even after abort. Bail before
+          // persisting so we don't orphan the newer run's descriptor.
+          if (isSuperseded(input.key, controller)) return
+
           // Persist now that we have a provider task id to resume from.
           setPersisted(input.key, {
             key: input.key,
@@ -315,9 +322,21 @@ export const useVideoGenerationStore = create<VideoGenerationStoreState>()(
           const model = provider?.models.find(
             (item) => (item.id ?? item.model) === persisted.modelId
           )
-          // Provider/model not loaded yet — leave persisted so a later
-          // resumeAll (e.g. once providers hydrate) can pick it up.
-          if (!provider || !model) continue
+          if (!provider) {
+            // Provider was removed/disconnected. Surface a recoverable failed
+            // state (instead of a permanent fake 'running' with Generate
+            // disabled) but keep the task so it resumes if the provider returns.
+            setRuntime(key, {
+              status: 'failed',
+              startedAt: persisted.startedAt,
+              estimateMs: persisted.estimateMs,
+              error: VIDEO_PROVIDER_UNAVAILABLE,
+            })
+            continue
+          }
+          // Model may still be loading (provider refresh second wave) — leave
+          // persisted so a later resumeAll picks it up.
+          if (!model) continue
 
           setRuntime(key, {
             status: 'running',

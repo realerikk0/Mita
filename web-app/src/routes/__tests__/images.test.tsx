@@ -1585,6 +1585,110 @@ describe('Images route', () => {
     )
   })
 
+  it('falls back to a surviving version when the active storyboard image fails', async () => {
+    h.providers = [
+      {
+        provider: 'jingxing',
+        base_url: 'https://api.jingxing.uk/v1',
+        settings: [],
+        models: [
+          {
+            id: 'gpt-image-2',
+            capabilities: [ModelCapabilities.IMAGE_GENERATION],
+          },
+        ],
+      },
+    ]
+    const original: any = {
+      id: 'img-original',
+      prompt: 'orig',
+      mode: 'generate',
+      provider: 'jingxing',
+      model: 'gpt-image-2',
+      ratio: '16:9',
+      size: '',
+      quality: 'sd',
+      sourceAssetIds: [],
+      createdAt: '2026-06-01T00:00:00Z',
+      status: 'succeeded',
+      path: '/mock/mita/image-assets/img-original/image.png',
+      fileName: 'image.png',
+      mimeType: 'image/png',
+      assetKind: 'storyboard',
+    }
+    const edited: any = {
+      ...original,
+      id: 'img-edited',
+      prompt: 'edited',
+      path: '/mock/mita/image-assets/img-edited/image.png',
+    }
+    useStoryboardSessionStore.getState().save({
+      stage: 'storyboard',
+      story: 'a tale',
+      settings: {
+        style: 'cinematic',
+        aspect: '16:9',
+        qualityPreset: 'sd',
+        variantCount: 1,
+        template: 'plain',
+        consistency: 'standard',
+      },
+      videoSettings: {
+        ratio: '16:9',
+        resolution: '1080p',
+        duration: 8,
+        fps: 30,
+        camera: 'auto',
+        motion: 55,
+        generateAudio: true,
+      },
+      shots: [],
+      promptTabs: [],
+      activePromptTabId: '',
+      storyboardStatus: 'succeeded',
+      storyboardAsset: original,
+      storyboardVersions: [
+        {
+          id: 'v-original',
+          label: 'Original',
+          kind: 'original',
+          createdAt: '2026-06-01T00:00:00Z',
+          asset: original,
+        },
+        {
+          id: 'v-edited',
+          label: 'Edit 1',
+          kind: 'edited',
+          createdAt: '2026-06-01T00:01:00Z',
+          asset: edited,
+        },
+      ],
+      activeStoryboardVersionId: 'v-original',
+      referenceAssets: [],
+      selectedVideoModelKey: '',
+      videoAsset: undefined,
+    } as any)
+    useStoryboardSessionStore.getState().setMediaMode('storyboard')
+
+    renderComponent()
+    await waitFor(() => expect(h.listAssets).toHaveBeenCalled())
+    expect(await screen.findByText('Storyboard ready')).toBeInTheDocument()
+
+    // The active (Original) image file is gone -> load error.
+    const img = document.querySelector('img.object-contain') as HTMLImageElement
+    await act(async () => {
+      fireEvent.error(img)
+    })
+
+    // Stays in storyboard (not reset to compose) and falls back to the Edited
+    // version; only the deleted Original version is dropped.
+    expect(screen.getByText('Storyboard ready')).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Edit 1' })).toBeInTheDocument()
+    expect(
+      screen.queryByRole('button', { name: 'Original' })
+    ).not.toBeInTheDocument()
+  })
+
   it('lets storyboard mode switch image models, layout, consistency, and references', async () => {
     h.providers = [
       {
