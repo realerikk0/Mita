@@ -49,6 +49,15 @@ export class DefaultStoryboardGenerationService
 
   private breakdownBody(request: StoryboardBreakdownRequest) {
     const isPlainImage = request.template === 'plain'
+    const shotCount = Math.max(1, Math.round(request.shotCount))
+    const storyboardImageContract = isPlainImage
+      ? undefined
+      : [
+          `The image prompt must require exactly ${shotCount} storyboard panels.`,
+          'Do not merge, skip, or add panels.',
+          `Keep every shot separately framed and visible in one ${request.aspect} image.`,
+          'Avoid asking the image model to render captions, subtitles, watermarks, UI text, or messy typography unless the story explicitly requires text.',
+        ].join(' ')
     return {
       model: request.model.id,
       messages: [
@@ -61,19 +70,20 @@ export class DefaultStoryboardGenerationService
           role: 'user',
           content: JSON.stringify({
             task: isPlainImage
-              ? 'Break the story into editable video shots and one image-generation prompt for a single plain image. Do not add storyboard layout, panel, grid, table, board, numbering, label, or typography instructions.'
-              : 'Break the story into editable video storyboard shots and one image-generation prompt for a numbered storyboard sheet.',
+              ? `Break the story into exactly ${shotCount} shots for an editable video plan and one image-generation prompt for a single plain image. Do not add storyboard layout, panel, grid, table, board, numbering, label, or typography instructions.`
+              : `Break the story into exactly ${shotCount} shots for an editable video storyboard and one image-generation prompt for a numbered storyboard sheet.`,
             schema: {
               shots:
-                'Array of objects with title, camera, prompt, and duration fields.',
+                `Exactly ${shotCount} objects with title, camera, prompt, and duration fields.`,
               storyboardPrompt: isPlainImage
                 ? 'Single prompt for generating one plain image with no extra layout instructions.'
-                : 'Single prompt for generating one numbered storyboard image containing all shots.',
+                : `Single prompt for generating one numbered storyboard image containing exactly ${shotCount} storyboard panels, one panel per shot.`,
             },
+            storyboardImageContract,
             story: request.story,
             style: request.style,
             aspect: request.aspect,
-            shotCount: request.shotCount,
+            shotCount,
             template: request.template,
             continuityRules: request.systemPrompt,
             durationPerShot: request.durationPerShot,

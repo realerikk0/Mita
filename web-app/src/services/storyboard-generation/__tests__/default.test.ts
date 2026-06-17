@@ -68,6 +68,14 @@ describe('DefaultStoryboardGenerationService', () => {
       model: 'gpt-5-mini',
       temperature: 0.4,
     })
+    const body = JSON.parse(init.body)
+    const userMessage = JSON.parse(body.messages[1].content)
+    expect(userMessage.task).toContain('exactly 4 shots')
+    expect(userMessage.schema.shots).toContain('Exactly 4')
+    expect(userMessage.schema.storyboardPrompt).toContain('exactly 4')
+    expect(userMessage.storyboardImageContract).toContain(
+      'exactly 4 storyboard panels'
+    )
     expect(result).toMatchObject({
       shots: [
         {
