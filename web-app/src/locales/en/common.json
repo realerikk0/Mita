@@ -267,6 +267,9 @@
         "failed": "Failed"
       }
     },
+    "deleteImageTitle": "Delete image?",
+    "deleteVideoTitle": "Delete video?",
+    "deleteMediaDescription": "This will permanently delete this generated media file from disk. This action cannot be undone.",
     "addReferenceImage": "Add reference image",
     "removeReferenceImage": "Remove {{prompt}}",
     "pastedReferenceImage": "Pasted reference image",

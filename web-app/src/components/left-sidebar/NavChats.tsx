@@ -14,6 +14,16 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu"
+import { Button } from "@/components/ui/button"
+import {
+  Dialog,
+  DialogClose,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog"
 import {
   ImagePlus,
   MessageCircle,
@@ -26,7 +36,7 @@ import {
   Video,
   type LucideIcon,
 } from "lucide-react"
-import { useEffect, useMemo, useState, type ReactNode } from "react"
+import { useEffect, useMemo, useRef, useState, type ReactNode } from "react"
 import { useTranslation } from '@/i18n/react-i18next-compat'
 import { useThreads } from "@/hooks/useThreads"
 import { DeleteAllThreadsDialog } from "@/containers/dialogs/DeleteAllThreadsDialog"
@@ -144,9 +154,17 @@ function HistoryItem({
   const { t } = useTranslation()
   const [renameOpen, setRenameOpen] = useState(false)
   const [deleteOpen, setDeleteOpen] = useState(false)
+  const [mediaDeleteOpen, setMediaDeleteOpen] = useState(false)
+  const mediaDeleteButtonRef = useRef<HTMLButtonElement>(null)
   const Icon = entry.icon
   const isThreadEntry = isThreadHistoryEntry(entry)
   const isPinned = isPinnedHistoryEntry(entry)
+  const mediaEntry = entry.kind === 'media' ? entry : null
+  const confirmMediaDelete = () => {
+    if (!mediaEntry) return
+    void onDeleteMedia(mediaEntry)
+    setMediaDeleteOpen(false)
+  }
   const content = (
     <>
       <Icon className="size-4 shrink-0 text-foreground/70" />
@@ -206,7 +224,7 @@ function HistoryItem({
           ) : (
             <DropdownMenuItem
               variant="destructive"
-              onSelect={() => onDeleteMedia(entry)}
+              onSelect={() => setMediaDeleteOpen(true)}
             >
               <Trash2 className="size-4" />
               <span>{t('common:delete')}</span>
@@ -232,6 +250,44 @@ function HistoryItem({
             withoutTrigger
           />
         </>
+      )}
+      {mediaEntry && (
+        <Dialog open={mediaDeleteOpen} onOpenChange={setMediaDeleteOpen}>
+          <DialogContent
+            onOpenAutoFocus={(event) => {
+              event.preventDefault()
+              mediaDeleteButtonRef.current?.focus()
+            }}
+          >
+            <DialogHeader>
+              <DialogTitle>
+                {mediaEntry.mediaType === 'video'
+                  ? t('common:imageGeneration.deleteVideoTitle')
+                  : t('common:imageGeneration.deleteImageTitle')}
+              </DialogTitle>
+              <DialogDescription>
+                {t('common:imageGeneration.deleteMediaDescription')}
+              </DialogDescription>
+              <DialogFooter className="flex flex-col-reverse sm:flex-row sm:justify-end gap-2">
+                <DialogClose asChild>
+                  <Button variant="ghost" size="sm" className="w-full sm:w-auto">
+                    {t('common:cancel')}
+                  </Button>
+                </DialogClose>
+                <Button
+                  ref={mediaDeleteButtonRef}
+                  variant="destructive"
+                  onClick={confirmMediaDelete}
+                  size="sm"
+                  className="w-full sm:w-auto"
+                  aria-label={`${t('common:delete')} ${mediaEntry.title}`}
+                >
+                  {t('common:delete')}
+                </Button>
+              </DialogFooter>
+            </DialogHeader>
+          </DialogContent>
+        </Dialog>
       )}
     </SidebarMenuItem>
   )

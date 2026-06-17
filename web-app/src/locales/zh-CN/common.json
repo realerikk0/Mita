@@ -262,6 +262,9 @@
         "failed": "失败"
       }
     },
+    "deleteImageTitle": "删除图片？",
+    "deleteVideoTitle": "删除视频？",
+    "deleteMediaDescription": "这会从磁盘永久删除该生成媒体文件，且无法撤销。",
     "addReferenceImage": "添加参考图",
     "removeReferenceImage": "移除 {{prompt}}",
     "pastedReferenceImage": "粘贴的参考图",

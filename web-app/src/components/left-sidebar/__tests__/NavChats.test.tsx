@@ -46,6 +46,10 @@ vi.mock('@/i18n/react-i18next-compat', () => ({
           'Failed to delete image asset',
         'common:imageGeneration.toast.deleteVideoAssetFailed':
           'Failed to delete video asset',
+        'common:imageGeneration.deleteImageTitle': 'Delete image?',
+        'common:imageGeneration.deleteVideoTitle': 'Delete video?',
+        'common:imageGeneration.deleteMediaDescription':
+          'This will permanently delete this generated media file from disk. This action cannot be undone.',
         'common:recents': 'Recents',
         'common:rename': 'Rename',
         'common:delete': 'Delete',
@@ -108,6 +112,16 @@ vi.mock('@/components/ui/dropdown-menu', () => {
     DropdownMenuTrigger: Passthrough,
   }
 })
+
+vi.mock('@/components/ui/dialog', () => ({
+  Dialog: ({ children, open }: any) => (open ? <div>{children}</div> : null),
+  DialogClose: ({ children }: any) => <>{children}</>,
+  DialogContent: ({ children }: any) => <div>{children}</div>,
+  DialogDescription: ({ children }: any) => <p>{children}</p>,
+  DialogFooter: ({ children }: any) => <div>{children}</div>,
+  DialogHeader: ({ children }: any) => <div>{children}</div>,
+  DialogTitle: ({ children }: any) => <h3>{children}</h3>,
+}))
 
 vi.mock('@/containers/dialogs/DeleteAllThreadsDialog', () => ({
   DeleteAllThreadsDialog: () => null,
@@ -295,6 +309,11 @@ describe('NavChats history stream', () => {
 
     fireEvent.click(screen.getByRole('button', { name: /Delete/i }))
 
+    expect(h.deleteAsset).not.toHaveBeenCalled()
+    expect(screen.getByText('Delete image?')).toBeInTheDocument()
+
+    fireEvent.click(screen.getByRole('button', { name: 'Delete delete this image' }))
+
     await waitFor(() => {
       expect(h.deleteAsset).toHaveBeenCalledWith('image-delete')
     })
@@ -321,6 +340,11 @@ describe('NavChats history stream', () => {
 
     fireEvent.click(screen.getByRole('button', { name: /Delete/i }))
 
+    expect(h.deleteVideoAsset).not.toHaveBeenCalled()
+    expect(screen.getByText('Delete video?')).toBeInTheDocument()
+
+    fireEvent.click(screen.getByRole('button', { name: 'Delete delete this video' }))
+
     await waitFor(() => {
       expect(h.deleteVideoAsset).toHaveBeenCalledWith('video-delete')
     })
@@ -346,6 +370,12 @@ describe('NavChats history stream', () => {
       expect(await screen.findByText('video delete fails')).toBeInTheDocument()
 
       fireEvent.click(screen.getByRole('button', { name: /Delete/i }))
+
+      expect(h.deleteVideoAsset).not.toHaveBeenCalled()
+
+      fireEvent.click(
+        screen.getByRole('button', { name: 'Delete video delete fails' })
+      )
 
       await waitFor(() => {
         expect(h.deleteVideoAsset).toHaveBeenCalledWith('video-fail')
