@@ -728,12 +728,58 @@ function buildStoryboardPrompt(
 
   return [
     `创建一张 ${settings.aspect}「${templateLabel}」，整体呈现 ${settings.style} 风格。`,
-    `在单张图片内清晰排列 ${shots.length} 个编号分镜，每格标注镜头编号、运镜方式和一句画面描述。`,
+    `根据下方 ${shots.length} 个编号镜头创建清晰分格的故事板画面。`,
     `故事：${story.trim()}`,
     `镜头一致性：${consistencyPrompt}`,
     '排版专业、结构清晰、分区明确，避免文字混乱、低质拼贴、角色不一致。',
+    '编号镜头：',
     shotLines,
   ].join('\n')
+}
+
+function buildStoryboardFrameContract(
+  shots: StoryboardShot[],
+  options: { includeShotList?: boolean } = {}
+) {
+  const shotCount = Math.max(1, shots.length)
+  const shotLines = shots
+    .map(
+      (shot, index) =>
+        `${index + 1}. ${shot.title}: ${shot.camera}. ${shot.prompt}`
+    )
+    .join('\n')
+
+  return [
+    `分镜数量硬性要求：必须且只能包含 ${shotCount} 个分镜 / exactly ${shotCount} storyboard panels。`,
+    `不要合并、遗漏或新增分镜；不要生成单一海报、单一场景或少于/多于 ${shotCount} 格的拼图。`,
+    '每个分镜都要有清楚边界，按从左到右、从上到下的顺序呈现；除非用户明确要求文字，否则不要在画面内渲染字幕、水印、说明文字或杂乱排版。',
+    options.includeShotList ? '分镜清单：' : '分镜清单见上方编号镜头。',
+    ...(options.includeShotList ? [shotLines] : []),
+  ].join('\n')
+}
+
+function buildStoryboardImagePrompt(
+  story: string,
+  settings: StoryboardSettings,
+  shots: StoryboardShot[],
+  draftPrompt?: string
+) {
+  if (settings.template === 'plain') {
+    return (
+      draftPrompt?.trim() ||
+      story.trim() ||
+      buildStoryboardPrompt(story, settings, shots)
+    )
+  }
+
+  const trimmedDraftPrompt = draftPrompt?.trim()
+  const basePrompt =
+    trimmedDraftPrompt || buildStoryboardPrompt(story, settings, shots)
+  const frameContract = buildStoryboardFrameContract(shots, {
+    includeShotList: Boolean(trimmedDraftPrompt),
+  })
+
+  return `${basePrompt}\n\n${frameContract}`
 }
 
 function buildVideoPrompt(
@@ -2342,8 +2388,12 @@ function StoryboardVideoMode({
               ),
             })
           )
-    const prompt =
-      story.trim() || buildStoryboardPrompt(story, settings, nextShots)
+    const prompt = buildStoryboardImagePrompt(
+      story,
+      settings,
+      nextShots,
+      activePromptTab ? story : undefined
+    )
     const sourceAssets =
       referenceAssets.length > 0 && selectedImageModelCanUseReferences
         ? referenceAssets
