@@ -35,6 +35,18 @@ const h = vi.hoisted(() => ({
   openExternalUrl: vi.fn(),
   convertFileSrc: vi.fn((path: string) => `asset://${path}`),
   copyFile: vi.fn(),
+  navigate: vi.fn((options: any) => {
+    const nextSearch =
+      typeof options?.search === 'function'
+        ? options.search(h.search)
+        : options?.search
+
+    if (nextSearch && typeof nextSearch === 'object') {
+      h.search = Object.fromEntries(
+        Object.entries(nextSearch).filter(([, value]) => value !== undefined)
+      )
+    }
+  }),
   toast: {
     success: vi.fn(),
     error: vi.fn(),
@@ -60,6 +72,7 @@ vi.mock('sonner', () => ({
 vi.mock('@tanstack/react-router', () => ({
   createFileRoute: () => (config: any) => ({ ...config, id: '/images' }),
   useSearch: () => h.search,
+  useNavigate: () => h.navigate,
   Link: ({ children, to }: any) => <a href={to}>{children}</a>,
 }))
 
@@ -380,6 +393,7 @@ describe('Images route', () => {
     h.revealItemInDir.mockResolvedValue(undefined)
     h.openExternalUrl.mockResolvedValue(undefined)
     h.copyFile.mockResolvedValue(undefined)
+    h.navigate.mockClear()
     h.toast.success.mockClear()
     h.toast.error.mockClear()
     h.search = {}
@@ -1416,6 +1430,100 @@ describe('Images route', () => {
     expect(screen.getAllByAltText('moon desk').at(-1)).toHaveAttribute(
       'src',
       'asset:///tmp/asset.png'
+    )
+  })
+
+  it('does not reopen a closed history image preview after storyboard assets are saved', async () => {
+    h.providers = [
+      {
+        provider: 'jingxing',
+        base_url: 'https://api.jingxing.uk/v1',
+        settings: [],
+        models: [
+          {
+            id: 'gpt-image-2',
+            capabilities: [ModelCapabilities.IMAGE_GENERATION],
+          },
+          {
+            id: 'seedance-2.0',
+            capabilities: [ModelCapabilities.VIDEO_GENERATION],
+          },
+        ],
+      },
+    ]
+    h.search = { media: 'image', assetId: 'asset-1' }
+    h.listAssets.mockResolvedValue([
+      {
+        id: 'asset-1',
+        prompt: 'stale rain courier storyboard',
+        mode: 'generate',
+        provider: 'jingxing',
+        model: 'gpt-image-2',
+        ratio: '16:9',
+        size: '1024x576',
+        quality: 'high',
+        sourceAssetIds: [],
+        createdAt: '2026-05-11T00:00:00Z',
+        status: 'succeeded',
+        path: '/tmp/stale-storyboard.png',
+        fileName: 'image.png',
+        mimeType: 'image/png',
+        assetKind: 'storyboard',
+      },
+    ])
+    h.generateImages.mockResolvedValueOnce([
+      {
+        b64Json: 'aGVsbG8=',
+        mimeType: 'image/png',
+        revisedPrompt: 'fresh storyboard',
+      },
+    ])
+    h.saveAsset.mockImplementation((request: any) =>
+      Promise.resolve({
+        ...request,
+        createdAt: '2026-06-04T00:00:00Z',
+        path: `/mock/mita/image-assets/${request.id}/image.png`,
+        fileName: 'image.png',
+      })
+    )
+    vi.stubGlobal(
+      'Image',
+      class {
+        naturalWidth = 1536
+        naturalHeight = 864
+        onload?: () => void
+        set src(_value: string) {
+          this.onload?.()
+        }
+      }
+    )
+
+    renderComponent()
+
+    expect(await screen.findByText('Image preview')).toBeInTheDocument()
+    expect(screen.getAllByAltText('stale rain courier storyboard').at(-1))
+      .toHaveAttribute('src', 'asset:///tmp/stale-storyboard.png')
+
+    fireEvent.click(screen.getByRole('button', { name: 'Close' }))
+    await waitFor(() =>
+      expect(screen.queryByText('Image preview')).not.toBeInTheDocument()
+    )
+    expect(h.navigate).toHaveBeenCalledWith(
+      expect.objectContaining({
+        to: '/images',
+        replace: true,
+      })
+    )
+
+    fireEvent.click(screen.getByRole('button', { name: 'Storyboard video' }))
+    fireEvent.click(
+      screen.getByRole('button', { name: 'Generate storyboard image' })
+    )
+
+    await waitFor(() => expect(h.saveAsset).toHaveBeenCalled())
+    expect(await screen.findByText('Storyboard ready')).toBeInTheDocument()
+    await waitFor(() =>
+      expect(screen.queryByText('Image preview')).not.toBeInTheDocument()
     )
   })
 

@@ -1,4 +1,9 @@
-import { createFileRoute, Link, useSearch } from '@tanstack/react-router'
+import {
+  createFileRoute,
+  Link,
+  useNavigate,
+  useSearch,
+} from '@tanstack/react-router'
 import {
   ArrowLeft,
   ArrowRight,
@@ -3476,6 +3481,7 @@ function StoryboardVideoMode({
 function Images() {
   const { t } = useTranslation()
   const search = useSearch({ from: Route.id })
+  const navigate = useNavigate()
   const serviceHub = useServiceHub()
   const providers = useModelProvider((state) => state.providers)
   const imageModels = useMemo(() => getImageModels(providers), [providers])
@@ -3525,6 +3531,20 @@ function Images() {
   const [previewVideoAsset, setPreviewVideoAsset] =
     useState<VideoAssetRecord | null>(null)
   const [contextMenu, setContextMenu] = useState<AssetContextMenuState>(null)
+
+  const clearMediaHistorySearch = useCallback(() => {
+    if (!search.media && !search.assetId && !search.videoId) return
+
+    void navigate({
+      to: route.images as '/images',
+      replace: true,
+      search: {
+        media: undefined,
+        assetId: undefined,
+        videoId: undefined,
+      },
+    })
+  }, [navigate, search.assetId, search.media, search.videoId])
 
   useEffect(() => {
     if (search.media === 'storyboard' || search.videoId) {
@@ -3672,7 +3692,10 @@ function Images() {
                 'cursor-not-allowed opacity-45 hover:text-muted-foreground'
             )}
             onClick={() => {
-              if (!disabled) setMediaMode(value)
+              if (!disabled) {
+                clearMediaHistorySearch()
+                setMediaMode(value)
+              }
             }}
           >
             <Icon className="size-[15px]" />
@@ -4985,7 +5008,10 @@ function Images() {
       <Dialog
         open={Boolean(previewAsset)}
         onOpenChange={(open) => {
-          if (!open) setPreviewAsset(null)
+          if (!open) {
+            setPreviewAsset(null)
+            clearMediaHistorySearch()
+          }
         }}
       >
         <DialogContent
@@ -5012,7 +5038,10 @@ function Images() {
       <Dialog
         open={Boolean(previewVideoAsset)}
         onOpenChange={(open) => {
-          if (!open) setPreviewVideoAsset(null)
+          if (!open) {
+            setPreviewVideoAsset(null)
+            clearMediaHistorySearch()
+          }
         }}
       >
         <DialogContent
