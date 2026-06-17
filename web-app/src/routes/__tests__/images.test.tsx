@@ -889,11 +889,104 @@ describe('Images route', () => {
     const prompt = h.generateImages.mock.calls.at(-1)?.[0].prompt
     expect(prompt).toContain('必须且只能包含 6 个分镜')
     expect(prompt).toContain('exactly 6 storyboard panels')
+    expect(prompt).toContain('\n\n分镜数量硬性要求')
+    expect(prompt).toContain('分镜清单')
     expect(prompt).toContain('1. 镜头 1')
     expect(prompt).toContain('6. 镜头 6')
-    expect(prompt).not.toBe(
-      'A gold robot wakes in a neon city, crosses a corridor, and reaches a rooftop.'
+    expect(prompt.match(/exactly 6 storyboard panels/g)).toHaveLength(1)
+  })
+
+  it('appends the shot-count contract to optimized non-plain storyboard prompts', async () => {
+    h.providers = [
+      {
+        provider: 'jingxing',
+        base_url: 'https://api.jingxing.uk/v1',
+        settings: [],
+        models: [
+          {
+            id: 'gpt-5-mini',
+            capabilities: [ModelCapabilities.COMPLETION],
+          },
+          {
+            id: 'gpt-image-2',
+            capabilities: [ModelCapabilities.IMAGE_GENERATION],
+          },
+        ],
+      },
+    ]
+    h.generateImages.mockResolvedValueOnce([
+      {
+        b64Json: 'aGVsbG8=',
+        mimeType: 'image/png',
+        revisedPrompt: 'storyboard',
+      },
+    ])
+    h.saveAsset.mockImplementation((request: any) =>
+      Promise.resolve({
+        ...request,
+        createdAt: '2026-06-04T00:00:00Z',
+        path: `/mock/mita/image-assets/${request.id}/image.png`,
+        fileName: 'image.png',
+      })
     )
+    h.breakdownStoryboard.mockResolvedValue({
+      shots: [
+        {
+          title: 'Wake',
+          camera: 'Slow push in',
+          prompt: 'A gold robot wakes in a neon city.',
+          duration: 5,
+        },
+        {
+          title: 'Cross',
+          camera: 'Tracking shot',
+          prompt: 'The gold robot crosses a glowing corridor.',
+          duration: 5,
+        },
+      ],
+      storyboardPrompt: 'LLM cinematic storyboard prompt.',
+    })
+    vi.stubGlobal(
+      'Image',
+      class {
+        naturalWidth = 0
+        naturalHeight = 0
+        onerror?: () => void
+        set src(_value: string) {
+          this.onerror?.()
+        }
+      }
+    )
+
+    renderComponent()
+
+    await waitFor(() => expect(h.listAssets).toHaveBeenCalled())
+    fireEvent.click(screen.getByRole('button', { name: 'Storyboard video' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Optimize prompt' }))
+
+    await waitFor(() =>
+      expect(h.breakdownStoryboard).toHaveBeenCalledWith(
+        expect.objectContaining({
+          shotCount: 6,
+          template: 'board',
+        })
+      )
+    )
+    expect(
+      await screen.findByDisplayValue('LLM cinematic storyboard prompt.')
+    ).toBeInTheDocument()
+    fireEvent.click(
+      screen.getByRole('button', { name: 'Generate storyboard image' })
+    )
+
+    await waitFor(() => expect(h.generateImages).toHaveBeenCalled())
+    const prompt = h.generateImages.mock.calls.at(-1)?.[0].prompt
+    expect(prompt).toContain('LLM cinematic storyboard prompt.')
+    expect(prompt).toContain('\n\n分镜数量硬性要求')
+    expect(prompt).toContain('分镜清单：')
+    expect(prompt).toContain('1. Wake: Slow push in.')
+    expect(prompt).toContain('6. 镜头 6')
+    expect(prompt.match(/exactly 6 storyboard panels/g)).toHaveLength(1)
   })
 
   it('downloads a generated storyboard without navigating away from the app', async () => {

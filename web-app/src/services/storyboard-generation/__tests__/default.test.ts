@@ -130,5 +130,132 @@ describe('DefaultStoryboardGenerationService', () => {
     expect(userMessage.task).toContain('Do not add storyboard layout')
     expect(userMessage.task).not.toContain('numbered storyboard sheet')
     expect(userMessage.schema.storyboardPrompt).toContain('no extra layout')
+    expect(userMessage).not.toHaveProperty('storyboardImageContract')
+  })
+
+  it('uses the same normalized fractional shot count in prompts and parsing', async () => {
+    const fetchMock = vi.fn().mockResolvedValueOnce(
+      new Response(
+        JSON.stringify({
+          choices: [
+            {
+              message: {
+                content: JSON.stringify({
+                  shots: [
+                    {
+                      title: 'One',
+                      camera: 'Wide',
+                      prompt: 'First beat.',
+                    },
+                    {
+                      title: 'Two',
+                      camera: 'Push in',
+                      prompt: 'Second beat.',
+                    },
+                    {
+                      title: 'Three',
+                      camera: 'Close up',
+                      prompt: 'Third beat.',
+                    },
+                    {
+                      title: 'Four',
+                      camera: 'Orbit',
+                      prompt: 'Fourth beat.',
+                    },
+                  ],
+                  storyboardPrompt: 'Create exactly three panels.',
+                }),
+              },
+            },
+          ],
+        }),
+        { status: 200, headers: { 'content-type': 'application/json' } }
+      )
+    )
+    vi.stubGlobal('fetch', fetchMock)
+
+    const service = new DefaultStoryboardGenerationService()
+    const result = await service.breakdownStoryboard({
+      provider,
+      model,
+      story: 'Four beats.',
+      style: 'Cinematic',
+      aspect: '16:9',
+      shotCount: 2.6,
+      template: 'board',
+      systemPrompt: 'Keep character identity consistent.',
+      durationPerShot: 5,
+    })
+
+    const init = fetchMock.mock.calls[0][1] as RequestInit & {
+      body: string
+    }
+    const body = JSON.parse(init.body)
+    const userMessage = JSON.parse(body.messages[1].content)
+
+    expect(userMessage.task).toContain('exactly 3 shots')
+    expect(userMessage.shotCount).toBe(3)
+    expect(result.shots).toHaveLength(3)
+    expect(result.shots.map((shot) => shot.title)).toEqual([
+      'One',
+      'Two',
+      'Three',
+    ])
+  })
+
+  it('falls back to one shot when the requested shot count is not finite', async () => {
+    const fetchMock = vi.fn().mockResolvedValueOnce(
+      new Response(
+        JSON.stringify({
+          choices: [
+            {
+              message: {
+                content: JSON.stringify({
+                  shots: [
+                    {
+                      title: 'One',
+                      camera: 'Wide',
+                      prompt: 'First beat.',
+                    },
+                    {
+                      title: 'Two',
+                      camera: 'Push in',
+                      prompt: 'Second beat.',
+                    },
+                  ],
+                  storyboardPrompt: 'Create one panel.',
+                }),
+              },
+            },
+          ],
+        }),
+        { status: 200, headers: { 'content-type': 'application/json' } }
+      )
+    )
+    vi.stubGlobal('fetch', fetchMock)
+
+    const service = new DefaultStoryboardGenerationService()
+    const result = await service.breakdownStoryboard({
+      provider,
+      model,
+      story: 'Two beats.',
+      style: 'Cinematic',
+      aspect: '16:9',
+      shotCount: Number.NaN,
+      template: 'board',
+      systemPrompt: 'Keep character identity consistent.',
+      durationPerShot: 5,
+    })
+
+    const init = fetchMock.mock.calls[0][1] as RequestInit & {
+      body: string
+    }
+    const body = JSON.parse(init.body)
+    const userMessage = JSON.parse(body.messages[1].content)
+
+    expect(userMessage.task).toContain('exactly 1 shots')
+    expect(userMessage.storyboardImageContract).not.toContain('NaN')
+    expect(userMessage.shotCount).toBe(1)
+    expect(result.shots).toHaveLength(1)
   })
 })

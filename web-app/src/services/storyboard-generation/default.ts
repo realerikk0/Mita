@@ -49,7 +49,7 @@ export class DefaultStoryboardGenerationService
 
   private breakdownBody(request: StoryboardBreakdownRequest) {
     const isPlainImage = request.template === 'plain'
-    const shotCount = Math.max(1, Math.round(request.shotCount))
+    const shotCount = this.normalizedShotCount(request.shotCount)
     const storyboardImageContract = isPlainImage
       ? undefined
       : [
@@ -99,6 +99,11 @@ export class DefaultStoryboardGenerationService
       temperature: 0.4,
       max_tokens: 1800,
     }
+  }
+
+  private normalizedShotCount(value: unknown) {
+    const rounded = Math.round(Number(value))
+    return Number.isFinite(rounded) && rounded > 0 ? rounded : 1
   }
 
   private chatCompletionsEndpoint(provider: ModelProvider) {
@@ -164,8 +169,9 @@ export class DefaultStoryboardGenerationService
       : Array.isArray(parsedRecord?.shots)
         ? parsedRecord.shots
         : []
+    const shotCount = this.normalizedShotCount(request.shotCount)
     const shots = sourceShots
-      .slice(0, Math.max(1, request.shotCount))
+      .slice(0, shotCount)
       .map((shot, index) =>
         this.normalizeShot(shot, index, request.durationPerShot)
       )
