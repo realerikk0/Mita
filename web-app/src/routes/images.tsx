@@ -83,7 +83,7 @@ import {
   type ImageQualityPreset,
   type ImageRatio,
 } from '@/lib/image-generation'
-import { getVideoModels, videoFileExtension } from '@/lib/video-generation'
+import { getVideoModels } from '@/lib/video-generation'
 import {
   cn,
   getModelDisplayName,
@@ -113,6 +113,8 @@ import {
   type ImageTaskGroup,
   useImageGenerationStore,
 } from '@/stores/image-generation-store'
+import { useVideoGenerationStore } from '@/stores/video-generation-store'
+import { useStoryboardSessionStore } from '@/stores/storyboard-session-store'
 import type {
   VideoAssetRecord,
   VideoGenerationStatus,
@@ -204,7 +206,7 @@ type ModelPickerOption = {
   model: Model
 }
 
-type MediaMode = 'image' | 'storyboard' | 'long-video'
+export type MediaMode = 'image' | 'storyboard' | 'long-video'
 
 type StoryboardStage = 'compose' | 'storyboard' | 'video'
 
@@ -259,6 +261,24 @@ type StoryboardAssetVersion = {
   asset: ImageAssetRecord
   kind: 'original' | 'edited'
   createdAt: string
+}
+
+/** Serialisable snapshot of a storyboard editing session for restore. */
+export type StoryboardSession = {
+  stage: StoryboardStage
+  story: string
+  settings: StoryboardSettings
+  videoSettings: VideoSettings
+  shots: StoryboardShot[]
+  promptTabs: StoryPromptTab[]
+  activePromptTabId: string
+  storyboardStatus: ImageGenerationStatus | 'idle'
+  storyboardAsset?: ImageAssetRecord
+  storyboardVersions: StoryboardAssetVersion[]
+  activeStoryboardVersionId: string
+  referenceAssets: ImageAssetRecord[]
+  selectedVideoModelKey: string
+  videoAsset?: VideoAssetRecord
 }
 
 type StoryboardEditorTool = 'pen' | 'rect' | 'crop'
@@ -2050,43 +2070,166 @@ function StoryboardVideoMode({
   onAssetSaved: (asset: ImageAssetRecord) => void
 }) {
   const { t } = useTranslation()
-  const [stage, setStage] = useState<StoryboardStage>('compose')
+  // Restore the full editing session (story, shots, prompts, storyboard image,
+  // references, finished video) captured before the view/app last closed.
+  const [initialSession] = useState(() =>
+    useStoryboardSessionStore.getState().session
+  )
+  const [stage, setStage] = useState<StoryboardStage>(
+    () => initialSession?.stage ?? 'compose'
+  )
   const [story, setStory] = useState(
-    'A gold robot wakes in a neon city, crosses a corridor, and reaches a rooftop.'
+    () =>
+      initialSession?.story ??
+      'A gold robot wakes in a neon city, crosses a corridor, and reaches a rooftop.'
   )
   const [storyUndoStack, setStoryUndoStack] = useState<string[]>([])
   const [storyRedoStack, setStoryRedoStack] = useState<string[]>([])
-  const [settings, setSettings] = useState<StoryboardSettings>(() =>
-    defaultStoryboardSettings()
+  const [settings, setSettings] = useState<StoryboardSettings>(
+    () => initialSession?.settings ?? defaultStoryboardSettings()
   )
-  const [videoSettings, setVideoSettings] = useState<VideoSettings>(() =>
-    defaultVideoSettings()
+  const [videoSettings, setVideoSettings] = useState<VideoSettings>(
+    () => initialSession?.videoSettings ?? defaultVideoSettings()
   )
-  const [shots, setShots] = useState<StoryboardShot[]>([])
-  const [promptTabs, setPromptTabs] = useState<StoryPromptTab[]>([])
-  const [activePromptTabId, setActivePromptTabId] = useState('')
+  const [shots, setShots] = useState<StoryboardShot[]>(
+    () => initialSession?.shots ?? []
+  )
+  const [promptTabs, setPromptTabs] = useState<StoryPromptTab[]>(
+    () => initialSession?.promptTabs ?? []
+  )
+  const [activePromptTabId, setActivePromptTabId] = useState(
+    () => initialSession?.activePromptTabId ?? ''
+  )
   const [breakdownStatus, setBreakdownStatus] = useState<'idle' | 'running'>(
     'idle'
   )
   const [storyboardStatus, setStoryboardStatus] = useState<
     ImageGenerationStatus | 'idle'
-  >('idle')
+  >(() =>
+    initialSession?.storyboardStatus &&
+    initialSession.storyboardStatus !== 'running'
+      ? initialSession.storyboardStatus
+      : 'idle'
+  )
   const [storyboardAsset, setStoryboardAsset] = useState<
     ImageAssetRecord | undefined
-  >()
+  >(() => initialSession?.storyboardAsset)
   const [storyboardVersions, setStoryboardVersions] = useState<
     StoryboardAssetVersion[]
-  >([])
-  const [activeStoryboardVersionId, setActiveStoryboardVersionId] = useState('')
+  >(() => initialSession?.storyboardVersions ?? [])
+  const [activeStoryboardVersionId, setActiveStoryboardVersionId] = useState(
+    () => initialSession?.activeStoryboardVersionId ?? ''
+  )
   const [storyboardPreviewOpen, setStoryboardPreviewOpen] = useState(false)
   const [storyboardEditorOpen, setStoryboardEditorOpen] = useState(false)
-  const [videoStatus, setVideoStatus] =
-    useState<VideoGenerationStatus>('queued')
-  const [videoProgress, setVideoProgress] = useState(0)
-  const [videoAsset, setVideoAsset] = useState<VideoAssetRecord | undefined>()
-  const [referenceAssets, setReferenceAssets] = useState<ImageAssetRecord[]>([])
+  // In-flight video generation lives in a global, persisted store so it
+  // survives leaving the view, switching projects, and even an app restart.
+  const taskKey = storyboardAsset?.id ?? ''
+  const videoRuntime = useVideoGenerationStore((state) =>
+    taskKey ? state.runtime[taskKey] : undefined
+  )
+  // The persisted task exists from store hydration onward — before resumeAll has
+  // built a runtime after a restart — so use it as the source of "in flight".
+  const pendingTask = useVideoGenerationStore((state) =>
+    taskKey ? state.tasks[taskKey] : undefined
+  )
+  const videoStatus: VideoGenerationStatus =
+    videoRuntime?.status ?? (pendingTask ? 'running' : 'queued')
+  // After a restart the runtime is empty; fall back to the finished video saved
+  // in the restored session (matched to this storyboard) so it shows inline.
+  const restoredVideoAsset =
+    initialSession?.videoAsset &&
+    storyboardAsset &&
+    initialSession.videoAsset.sourceAssetIds?.includes(storyboardAsset.id)
+      ? initialSession.videoAsset
+      : undefined
+  // Keep the last finished video for persistence even while a new run is in
+  // flight, but hide it from the player so the progress bar shows instead.
+  const lastVideoAsset = videoRuntime?.asset ?? restoredVideoAsset
+  const videoAsset = videoStatus === 'running' ? undefined : lastVideoAsset
+  const progressStartedAt = videoRuntime?.startedAt ?? pendingTask?.startedAt
+  const progressEstimateMs = videoRuntime?.estimateMs ?? pendingTask?.estimateMs
+  const [videoNowMs, setVideoNowMs] = useState(() => Date.now())
+  useEffect(() => {
+    if (videoStatus !== 'running') return
+    const id = window.setInterval(() => setVideoNowMs(Date.now()), 1000)
+    return () => window.clearInterval(id)
+  }, [videoStatus])
+  // Providers expose no real progress (a fixed 50% while running), so the bar
+  // is estimated from elapsed time and snaps to 100% when the asset lands.
+  const videoProgress = useMemo(() => {
+    if (videoStatus === 'succeeded') return 100
+    if (videoStatus !== 'running' || !progressStartedAt || !progressEstimateMs) {
+      return 0
+    }
+    const elapsed = videoNowMs - progressStartedAt
+    return Math.min(
+      90,
+      Math.max(0, Math.round((elapsed / progressEstimateMs) * 90))
+    )
+  }, [videoStatus, videoNowMs, progressStartedAt, progressEstimateMs])
+  const [referenceAssets, setReferenceAssets] = useState<ImageAssetRecord[]>(
+    () => initialSession?.referenceAssets ?? []
+  )
   const [referenceAssetsLoading, setReferenceAssetsLoading] = useState(false)
-  const [selectedVideoModelKey, setSelectedVideoModelKey] = useState('')
+  const [selectedVideoModelKey, setSelectedVideoModelKey] = useState(
+    () => initialSession?.selectedVideoModelKey ?? ''
+  )
+
+  // Snapshot of the editing session to persist for later restore. A `running`
+  // storyboard image status is normalised so it never sticks; `lastVideoAsset`
+  // keeps the finished video even while a new run is in flight.
+  const sessionSnapshot = useMemo<StoryboardSession>(
+    () => ({
+      stage,
+      story,
+      settings,
+      videoSettings,
+      shots,
+      promptTabs,
+      activePromptTabId,
+      storyboardStatus:
+        storyboardStatus === 'running' ? 'idle' : storyboardStatus,
+      storyboardAsset,
+      storyboardVersions,
+      activeStoryboardVersionId,
+      referenceAssets,
+      selectedVideoModelKey,
+      videoAsset: lastVideoAsset,
+    }),
+    [
+      stage,
+      story,
+      settings,
+      videoSettings,
+      shots,
+      promptTabs,
+      activePromptTabId,
+      storyboardStatus,
+      storyboardAsset,
+      storyboardVersions,
+      activeStoryboardVersionId,
+      referenceAssets,
+      selectedVideoModelKey,
+      lastVideoAsset,
+    ]
+  )
+  const sessionSnapshotRef = useRef(sessionSnapshot)
+  sessionSnapshotRef.current = sessionSnapshot
+  // Debounce writes so typing the story doesn't serialise to localStorage every
+  // keystroke; flush the latest snapshot on unmount so nothing is lost.
+  useEffect(() => {
+    const id = window.setTimeout(
+      () => useStoryboardSessionStore.getState().save(sessionSnapshot),
+      400
+    )
+    return () => window.clearTimeout(id)
+  }, [sessionSnapshot])
+  useEffect(
+    () => () =>
+      useStoryboardSessionStore.getState().save(sessionSnapshotRef.current),
+    []
+  )
 
   const textModel = textModels[0]
   const videoModel = useMemo(
@@ -2480,72 +2623,34 @@ function StoryboardVideoMode({
     videoSettings.duration,
   ])
 
-  const generateVideo = useCallback(async () => {
+  const generateVideo = useCallback(() => {
     if (!videoModel || !storyboardAsset) return
 
-    setVideoStatus('running')
-    setVideoProgress(0)
-    try {
-      const prompt = buildVideoPrompt(story, shots, videoSettings)
-      const task = await serviceHub.videoGeneration().generateVideo({
+    const prompt = buildVideoPrompt(story, shots, videoSettings)
+    // Hand off to the background store: it submits, polls, downloads and saves
+    // independently of this component, and reports back through `videoRuntime`.
+    useVideoGenerationStore.getState().start(
+      {
+        key: storyboardAsset.id,
+        assetId: createId(),
         provider: videoModel.provider,
         model: videoModel.model,
         prompt,
         ratio: videoSettings.ratio,
-        duration: totalDuration || videoSettings.duration,
         resolution: videoSettings.resolution,
+        duration: totalDuration || videoSettings.duration,
         fps: videoSettings.fps,
         generateAudio: videoSettings.generateAudio,
         sourceAsset: storyboardAsset,
-      })
-      setVideoStatus(task.status)
-      setVideoProgress(task.progress)
-      const finalTask =
-        task.status === 'succeeded'
-          ? task
-          : await serviceHub.videoGeneration().pollVideoTask({
-              provider: videoModel.provider,
-              model: videoModel.model,
-              taskId: task.id,
-            })
-      setVideoStatus(finalTask.status)
-      setVideoProgress(finalTask.progress)
-      if (finalTask.status !== 'succeeded' || !finalTask.videoUrl) return
-
-      const saved = await serviceHub.videoGeneration().saveVideoAsset({
-        id: createId(),
-        prompt,
-        provider: videoModel.provider.provider,
-        model: videoModel.model.id,
-        ratio: videoSettings.ratio,
-        resolution: videoSettings.resolution,
-        duration: totalDuration || videoSettings.duration,
-        fps: videoSettings.fps,
         sourceAssetIds: [storyboardAsset.id],
-        usage: finalTask.usage,
-        status: 'succeeded',
-        mimeType: 'video/mp4',
-        videoUrl: finalTask.videoUrl,
-        extension: videoFileExtension('video/mp4'),
-        assetKind: 'storyboard',
-      })
-      setVideoAsset(saved)
-      window.dispatchEvent(new Event('mita-media-history-updated'))
-    } catch (error) {
-      console.error('Failed to generate video:', error)
-      setVideoStatus('failed')
-      toast.error(
-        error instanceof Error
-          ? error.message
-          : imageT(t, 'errors.generationFailed')
-      )
-    }
+      },
+      serviceHub.videoGeneration()
+    )
   }, [
     serviceHub,
     shots,
     storyboardAsset,
     story,
-    t,
     totalDuration,
     videoModel,
     videoSettings,
@@ -3490,9 +3595,12 @@ function Images() {
     [providers]
   )
   const videoModels = useMemo(() => getVideoModels(providers), [providers])
-  const [mediaMode, setMediaMode] = useState<MediaMode>(() =>
-    search.media === 'storyboard' || search.videoId ? 'storyboard' : 'image'
-  )
+  const [mediaMode, setMediaMode] = useState<MediaMode>(() => {
+    // Explicit history/deep-link params win; otherwise resume the last mode.
+    if (search.media === 'storyboard' || search.videoId) return 'storyboard'
+    if (search.media === 'image' || search.assetId) return 'image'
+    return useStoryboardSessionStore.getState().mediaMode ?? 'image'
+  })
   const [selectedModelKey, setSelectedModelKey] = useState('')
   const [prompt, setPrompt] = useState('')
   const [ratio, setRatio] = useState<ImageRatio>('1:1')
@@ -3556,6 +3664,11 @@ function Images() {
       setMediaMode('image')
     }
   }, [search.assetId, search.media, search.videoId])
+
+  // Remember the active media mode so a fresh visit lands where the user left.
+  useEffect(() => {
+    useStoryboardSessionStore.getState().setMediaMode(mediaMode)
+  }, [mediaMode])
 
   useEffect(() => {
     if (imageModels.length === 0) {

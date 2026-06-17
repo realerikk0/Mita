@@ -1,0 +1,349 @@
+import { create } from 'zustand'
+import { createJSONStorage, persist } from 'zustand/middleware'
+import { toast } from 'sonner'
+
+import { getServiceHub } from '@/hooks/useServiceHub'
+import { useModelProvider } from '@/hooks/useModelProvider'
+import { videoFileExtension } from '@/lib/video-generation'
+import type { ImageRatio } from '@/lib/image-generation'
+import type { ImageAssetRecord } from '@/services/image-generation/types'
+import type {
+  VideoAssetRecord,
+  VideoGenerationService,
+  VideoGenerationStatus,
+  VideoResolution,
+} from '@/services/video-generation/types'
+
+/**
+ * Seedance / Biyuan report no real progress (a fixed `50%` while running), so we
+ * approximate the bar from elapsed time. Two real runs of a 6s/720p clip took
+ * ~8-9 minutes, i.e. roughly 90 seconds of render per second of video.
+ */
+const RENDER_MS_PER_VIDEO_SECOND = 90_000
+const MIN_ESTIMATE_MS = 60_000
+/** Drop persisted tasks older than the provider's signed-URL lifetime (24h). */
+const MAX_RESUMABLE_AGE_MS = 24 * 60 * 60 * 1000
+
+const VIDEO_GENERATION_FAILED = 'Video generation failed'
+const VIDEO_GENERATION_NO_URL =
+  'Video generation finished without a playable video URL'
+
+type VideoHub = Pick<
+  VideoGenerationService,
+  'generateVideo' | 'pollVideoTask' | 'saveVideoAsset'
+>
+
+/** Minimal, serialisable info needed to resume a task after an app restart. */
+export type PersistedVideoTask = {
+  /** One in-flight video per storyboard image — keyed by its asset id. */
+  key: string
+  /** Pre-generated id for the saved asset so resume stays idempotent. */
+  assetId: string
+  taskId: string
+  providerName: string
+  modelId: string
+  prompt: string
+  ratio: ImageRatio
+  resolution: VideoResolution
+  duration: number
+  fps: number
+  sourceAssetIds: string[]
+  startedAt: number
+  estimateMs: number
+}
+
+/** Live, in-memory state surfaced to the UI (never persisted). */
+export type VideoRuntime = {
+  status: VideoGenerationStatus
+  startedAt?: number
+  estimateMs?: number
+  asset?: VideoAssetRecord
+  error?: string
+}
+
+export type StartVideoTaskInput = {
+  key: string
+  assetId: string
+  provider: ModelProvider
+  model: Model
+  prompt: string
+  ratio: ImageRatio
+  resolution: VideoResolution
+  duration: number
+  fps: number
+  generateAudio: boolean
+  sourceAsset: ImageAssetRecord
+  sourceAssetIds: string[]
+}
+
+type VideoGenerationStoreState = {
+  /** Resumable in-flight tasks (persisted to localStorage). */
+  tasks: Record<string, PersistedVideoTask>
+  /** Live status/progress/asset per task key (in-memory only). */
+  runtime: Record<string, VideoRuntime>
+  start: (input: StartVideoTaskInput, hub: VideoHub) => void
+  cancel: (key: string) => void
+  /** Re-attach poll loops for tasks persisted before an app restart. */
+  resumeAll: () => void
+  reset: () => void
+}
+
+const runners = new Map<string, AbortController>()
+
+function estimateMsFor(durationSeconds: number) {
+  return Math.max(MIN_ESTIMATE_MS, durationSeconds * RENDER_MS_PER_VIDEO_SECOND)
+}
+
+function setRuntime(key: string, patch: Partial<VideoRuntime>) {
+  useVideoGenerationStore.setState((state) => ({
+    runtime: {
+      ...state.runtime,
+      [key]: { ...state.runtime[key], ...patch } as VideoRuntime,
+    },
+  }))
+}
+
+function setPersisted(key: string, task: PersistedVideoTask) {
+  useVideoGenerationStore.setState((state) => ({
+    tasks: { ...state.tasks, [key]: task },
+  }))
+}
+
+function removePersisted(key: string) {
+  useVideoGenerationStore.setState((state) => {
+    if (!(key in state.tasks)) return {}
+    // eslint-disable-next-line @typescript-eslint/no-unused-vars
+    const { [key]: _, ...rest } = state.tasks
+    return { tasks: rest }
+  })
+}
+
+function clearRuntime(key: string) {
+  useVideoGenerationStore.setState((state) => {
+    if (!(key in state.runtime)) return {}
+    // eslint-disable-next-line @typescript-eslint/no-unused-vars
+    const { [key]: _, ...rest } = state.runtime
+    return { runtime: rest }
+  })
+}
+
+/** True once this run has been aborted or replaced by a newer run for the key. */
+function isSuperseded(key: string, controller: AbortController) {
+  return controller.signal.aborted || runners.get(key) !== controller
+}
+
+/**
+ * Poll the provider until the task reaches a terminal state, then download and
+ * persist the asset. Shared by the initial `start` and post-restart `resumeAll`.
+ */
+async function finishTask(
+  key: string,
+  provider: ModelProvider,
+  model: Model,
+  hub: VideoHub,
+  controller: AbortController,
+  initialTask?: { status: VideoGenerationStatus; videoUrl?: string; usage?: unknown }
+) {
+  try {
+    const persisted = useVideoGenerationStore.getState().tasks[key]
+    if (!persisted) return
+
+    const finalTask =
+      initialTask && initialTask.status === 'succeeded'
+        ? initialTask
+        : await hub.pollVideoTask({
+            provider,
+            model,
+            taskId: persisted.taskId,
+            signal: controller.signal,
+          })
+
+    if (finalTask.status !== 'succeeded') {
+      throw new Error(VIDEO_GENERATION_FAILED)
+    }
+    if (!finalTask.videoUrl) {
+      throw new Error(VIDEO_GENERATION_NO_URL)
+    }
+
+    const saved = await hub.saveVideoAsset({
+      id: persisted.assetId,
+      prompt: persisted.prompt,
+      provider: persisted.providerName,
+      model: persisted.modelId,
+      ratio: persisted.ratio,
+      resolution: persisted.resolution,
+      duration: persisted.duration,
+      fps: persisted.fps,
+      sourceAssetIds: persisted.sourceAssetIds,
+      usage: finalTask.usage,
+      status: 'succeeded',
+      mimeType: 'video/mp4',
+      videoUrl: finalTask.videoUrl,
+      extension: videoFileExtension('video/mp4'),
+      assetKind: 'storyboard',
+    })
+
+    // saveVideoAsset is an un-abortable download; a regenerate/reset may have
+    // superseded this run while it was in flight — don't clobber the newer run.
+    if (isSuperseded(key, controller)) return
+    setRuntime(key, { status: 'succeeded', asset: saved, error: undefined })
+    removePersisted(key)
+    window.dispatchEvent(new Event('mita-media-history-updated'))
+  } catch (error) {
+    // Aborted/superseded runs (cancel()/reset()/regenerate) already cleaned up
+    // and may have started a newer run for this key — don't touch state.
+    if (isSuperseded(key, controller)) return
+    console.error('Video generation failed:', error)
+    const message = error instanceof Error ? error.message : VIDEO_GENERATION_FAILED
+    setRuntime(key, { status: 'failed', error: message })
+    toast.error(message)
+    removePersisted(key)
+  } finally {
+    // Only release the slot if a newer run hasn't already claimed this key.
+    if (runners.get(key) === controller) runners.delete(key)
+  }
+}
+
+export const useVideoGenerationStore = create<VideoGenerationStoreState>()(
+  persist(
+    (set, get) => ({
+      tasks: {},
+      runtime: {},
+
+      start: (input, hub) => {
+        // Abort any earlier attempt for this storyboard before restarting.
+        get().cancel(input.key)
+
+        const startedAt = Date.now()
+        const estimateMs = estimateMsFor(input.duration)
+        setRuntime(input.key, {
+          status: 'running',
+          startedAt,
+          estimateMs,
+          asset: undefined,
+          error: undefined,
+        })
+
+        const controller = new AbortController()
+        runners.set(input.key, controller)
+
+        void (async () => {
+          let initialTask
+          try {
+            initialTask = await hub.generateVideo({
+              provider: input.provider,
+              model: input.model,
+              prompt: input.prompt,
+              ratio: input.ratio,
+              duration: input.duration,
+              resolution: input.resolution,
+              fps: input.fps,
+              generateAudio: input.generateAudio,
+              sourceAsset: input.sourceAsset,
+              signal: controller.signal,
+            })
+          } catch (error) {
+            if (!controller.signal.aborted) {
+              console.error('Video generation failed:', error)
+              const message =
+                error instanceof Error ? error.message : VIDEO_GENERATION_FAILED
+              setRuntime(input.key, { status: 'failed', error: message })
+              toast.error(message)
+            }
+            if (runners.get(input.key) === controller) {
+              runners.delete(input.key)
+            }
+            return
+          }
+
+          // Persist now that we have a provider task id to resume from.
+          setPersisted(input.key, {
+            key: input.key,
+            assetId: input.assetId,
+            taskId: initialTask.id,
+            providerName: input.provider.provider,
+            modelId: input.model.id,
+            prompt: input.prompt,
+            ratio: input.ratio,
+            resolution: input.resolution,
+            duration: input.duration,
+            fps: input.fps,
+            sourceAssetIds: input.sourceAssetIds,
+            startedAt,
+            estimateMs,
+          })
+
+          await finishTask(
+            input.key,
+            input.provider,
+            input.model,
+            hub,
+            controller,
+            initialTask
+          )
+        })()
+      },
+
+      cancel: (key) => {
+        runners.get(key)?.abort()
+        runners.delete(key)
+        removePersisted(key)
+        clearRuntime(key)
+      },
+
+      resumeAll: () => {
+        const tasks = get().tasks
+        const keys = Object.keys(tasks)
+        if (keys.length === 0) return
+
+        const providers = useModelProvider.getState().providers
+        const hub = getServiceHub().videoGeneration()
+        const now = Date.now()
+
+        for (const key of keys) {
+          if (runners.has(key)) continue
+          const persisted = tasks[key]!
+
+          if (now - persisted.startedAt > MAX_RESUMABLE_AGE_MS) {
+            removePersisted(key)
+            continue
+          }
+
+          const provider = providers.find(
+            (item) => item.provider === persisted.providerName
+          )
+          const model = provider?.models.find(
+            (item) => (item.id ?? item.model) === persisted.modelId
+          )
+          // Provider/model not loaded yet — leave persisted so a later
+          // resumeAll (e.g. once providers hydrate) can pick it up.
+          if (!provider || !model) continue
+
+          setRuntime(key, {
+            status: 'running',
+            startedAt: persisted.startedAt,
+            estimateMs: persisted.estimateMs,
+            asset: undefined,
+            error: undefined,
+          })
+
+          const controller = new AbortController()
+          runners.set(key, controller)
+          void finishTask(key, provider, model as Model, hub, controller)
+        }
+      },
+
+      reset: () => {
+        runners.forEach((controller) => controller.abort())
+        runners.clear()
+        set({ tasks: {}, runtime: {} })
+      },
+    }),
+    {
+      name: 'mita-video-generation-tasks',
+      storage: createJSONStorage(() => localStorage),
+      // Only the resumable task descriptors are durable; runtime is rebuilt.
+      partialize: (state) => ({ tasks: state.tasks }),
+    }
+  )
+)

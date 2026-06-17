@@ -293,4 +293,65 @@ describe('DefaultVideoGenerationService', () => {
       videoUrl: 'https://cdn.example.test/biyuan-video.mp4',
     })
   })
+
+  it('treats wrapped gateway IN_PROGRESS status as authoritative', async () => {
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(
+        new Response(
+          JSON.stringify({
+            code: 'success',
+            data: {
+              id: 347,
+              task_id: 'task_qecdOVrdcrHojeJvDcEpjmifGiykse5K',
+              status: 'IN_PROGRESS',
+              progress: '50%',
+              data: {
+                id: 'cgt-20260617185000-biyuan',
+                status: 'succeeded',
+              },
+            },
+          }),
+          { status: 200, headers: { 'content-type': 'application/json' } }
+        )
+      )
+      .mockResolvedValueOnce(
+        new Response(
+          JSON.stringify({
+            code: 'success',
+            data: {
+              id: 347,
+              task_id: 'task_qecdOVrdcrHojeJvDcEpjmifGiykse5K',
+              status: 'SUCCESS',
+              progress: '100%',
+              data: {
+                id: 'cgt-20260617185000-biyuan',
+                status: 'succeeded',
+                result_url: 'https://cdn.example.test/biyuan-video.mp4',
+              },
+            },
+          }),
+          { status: 200, headers: { 'content-type': 'application/json' } }
+        )
+      )
+    vi.stubGlobal('fetch', fetchMock)
+
+    const service = new DefaultVideoGenerationService({
+      pollIntervalMs: 0,
+      timeoutMs: 1000,
+    })
+    const task = await service.pollVideoTask({
+      provider,
+      model,
+      taskId: 'task_qecdOVrdcrHojeJvDcEpjmifGiykse5K',
+    })
+
+    expect(fetchMock).toHaveBeenCalledTimes(2)
+    expect(task).toMatchObject({
+      id: 'task_qecdOVrdcrHojeJvDcEpjmifGiykse5K',
+      status: 'succeeded',
+      progress: 100,
+      videoUrl: 'https://cdn.example.test/biyuan-video.mp4',
+    })
+  })
 })

@@ -325,12 +325,12 @@ export class DefaultVideoGenerationService implements VideoGenerationService {
     if (!id) throw new Error('Video response did not include a task id')
 
     const status = this.videoStatus(
-      task.status || wrapper?.status || response.status
+      wrapper?.status || response.status || task.status
     )
     return {
       id,
       status,
-      progress: this.videoProgress(task.progress ?? wrapper?.progress ?? response.progress, status),
+      progress: this.videoProgress(wrapper?.progress ?? response.progress ?? task.progress, status),
       videoUrl: this.firstVideoUrl(
         task.video_url,
         task.result_url,

@@ -14,6 +14,8 @@ import { ModelCapabilities } from '@/types/models'
 import { ProviderQuotaError } from '@/lib/provider-quota-error'
 import { ImageGenerationRequestError } from '@/lib/image-generation-errors'
 import { useImageGenerationStore } from '@/stores/image-generation-store'
+import { useVideoGenerationStore } from '@/stores/video-generation-store'
+import { useStoryboardSessionStore } from '@/stores/storyboard-session-store'
 
 const h = vi.hoisted(() => ({
   providers: [] as any[],
@@ -372,8 +374,11 @@ describe('Images route', () => {
   })
 
   beforeEach(() => {
+    localStorage.clear()
     act(() => {
       useImageGenerationStore.getState().reset()
+      useVideoGenerationStore.getState().reset()
+      useStoryboardSessionStore.getState().clear()
     })
     vi.clearAllMocks()
     h.providers = []
@@ -1286,6 +1291,154 @@ describe('Images route', () => {
     ).toBeInTheDocument()
     expect(screen.getByText('15,000 tokens')).toBeInTheDocument()
     expect(screen.getByText('Download video')).toBeInTheDocument()
+  })
+
+  it('reports storyboard video tasks that finish without a video URL', async () => {
+    h.providers = [
+      {
+        provider: 'jingxing',
+        base_url: 'https://api.jingxing.uk/v1',
+        settings: [],
+        models: [
+          {
+            id: 'gpt-image-2',
+            capabilities: [ModelCapabilities.IMAGE_GENERATION],
+          },
+          {
+            id: 'seedance-2.0',
+            capabilities: [ModelCapabilities.VIDEO_GENERATION],
+          },
+        ],
+      },
+    ]
+    h.generateImages.mockResolvedValueOnce([
+      {
+        b64Json: 'aGVsbG8=',
+        mimeType: 'image/png',
+        revisedPrompt: 'storyboard',
+      },
+    ])
+    h.saveAsset.mockImplementation((request: any) =>
+      Promise.resolve({
+        ...request,
+        createdAt: '2026-06-04T00:00:00Z',
+        path: `/mock/mita/image-assets/${request.id}/image.png`,
+        fileName: 'image.png',
+      })
+    )
+    h.generateVideo.mockResolvedValueOnce({
+      id: 'video-task-1',
+      status: 'succeeded',
+      progress: 100,
+    })
+    vi.stubGlobal(
+      'Image',
+      class {
+        naturalWidth = 0
+        naturalHeight = 0
+        onerror?: () => void
+        set src(_value: string) {
+          this.onerror?.()
+        }
+      }
+    )
+
+    renderComponent()
+
+    await waitFor(() => expect(h.listAssets).toHaveBeenCalled())
+    fireEvent.click(screen.getByRole('button', { name: 'Storyboard video' }))
+    fireEvent.click(
+      screen.getByRole('button', { name: 'Generate storyboard image' })
+    )
+
+    expect(await screen.findByText('Storyboard ready')).toBeInTheDocument()
+    fireEvent.click(
+      screen.getByRole('button', { name: /Next .* generate video/ })
+    )
+    fireEvent.click(screen.getByRole('button', { name: 'Generate video' }))
+
+    await waitFor(() =>
+      expect(h.toast.error).toHaveBeenCalledWith(
+        'Video generation finished without a playable video URL'
+      )
+    )
+    expect(h.saveVideoAsset).not.toHaveBeenCalled()
+  })
+
+  it('restores the storyboard editing session after leaving and returning', async () => {
+    h.providers = [
+      {
+        provider: 'jingxing',
+        base_url: 'https://api.jingxing.uk/v1',
+        settings: [],
+        models: [
+          {
+            id: 'gpt-image-2',
+            capabilities: [ModelCapabilities.IMAGE_GENERATION],
+          },
+        ],
+      },
+    ]
+    h.generateImages.mockResolvedValueOnce([
+      {
+        b64Json: 'aGVsbG8=',
+        mimeType: 'image/png',
+        revisedPrompt: 'storyboard',
+      },
+    ])
+    h.saveAsset.mockImplementation((request: any) =>
+      Promise.resolve({
+        ...request,
+        createdAt: '2026-06-04T00:00:00Z',
+        path: `/mock/mita/image-assets/${request.id}/image.png`,
+        fileName: 'image.png',
+      })
+    )
+    vi.stubGlobal(
+      'Image',
+      class {
+        naturalWidth = 0
+        naturalHeight = 0
+        onerror?: () => void
+        set src(_value: string) {
+          this.onerror?.()
+        }
+      }
+    )
+
+    let firstRender: ReturnType<typeof render> | undefined
+    await act(async () => {
+      firstRender = renderComponent()
+    })
+    await waitFor(() => expect(h.listAssets).toHaveBeenCalled())
+    fireEvent.click(screen.getByRole('button', { name: 'Storyboard video' }))
+    fireEvent.change(
+      screen.getByPlaceholderText(
+        'Describe the single video you want in one sentence.'
+      ),
+      { target: { value: 'A robot story worth remembering.' } }
+    )
+    fireEvent.click(
+      screen.getByRole('button', { name: 'Generate storyboard image' })
+    )
+    expect(await screen.findByText('Storyboard ready')).toBeInTheDocument()
+
+    const generateCallsBefore = h.generateImages.mock.calls.length
+
+    // Leave the view entirely (unmount), then return with a fresh mount.
+    await act(async () => {
+      firstRender?.unmount()
+    })
+    await act(async () => {
+      renderComponent()
+    })
+    await waitFor(() => expect(h.listAssets).toHaveBeenCalled())
+
+    // Lands back in storyboard mode (no re-click) with the storyboard image and
+    // its version restored, and no re-generation.
+    expect(await screen.findByText('Storyboard ready')).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Original' })).toBeInTheDocument()
+    expect(h.generateImages.mock.calls.length).toBe(generateCallsBefore)
   })
 
   it('lets storyboard mode switch image models, layout, consistency, and references', async () => {
