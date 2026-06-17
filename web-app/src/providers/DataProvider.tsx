@@ -1,4 +1,5 @@
 import { useModelProvider } from '@/hooks/useModelProvider'
+import { useVideoGenerationStore } from '@/stores/video-generation-store'
 
 import { Button } from '@/components/ui/button'
 import {
@@ -484,6 +485,17 @@ export function DataProvider() {
   useEffect(() => {
     syncRemoteProviders()
   }, [providers])
+
+  // Resume any storyboard video generation that was still running when the app
+  // last closed, regardless of which view the user opens first. Re-runs whenever
+  // providers change (e.g. the startup model refresh's second wave) so a task
+  // whose provider/model loads late still gets picked up; resumeAll is
+  // idempotent (it skips tasks that already have a live runner).
+  const videoResumeProviders = useModelProvider((state) => state.providers)
+  useEffect(() => {
+    if (videoResumeProviders.length === 0) return
+    useVideoGenerationStore.getState().resumeAll()
+  }, [videoResumeProviders])
 
   // Check for app updates - initial check and periodic interval
   useEffect(() => {
