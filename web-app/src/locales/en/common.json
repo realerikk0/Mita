@@ -103,6 +103,7 @@
       "waitForReferenceImport": "Reference image is still importing. Try again in a moment.",
       "importReferenceFailed": "Failed to import reference image",
       "deleteAssetFailed": "Failed to delete image asset",
+      "deleteVideoAssetFailed": "Failed to delete video asset",
       "revealAssetFailed": "Failed to reveal image asset",
       "promptCopied": "Prompt copied",
       "referenceLimitReached": "You can use up to {{count}} reference images.",
@@ -266,6 +267,9 @@
         "failed": "Failed"
       }
     },
+    "deleteImageTitle": "Delete image?",
+    "deleteVideoTitle": "Delete video?",
+    "deleteMediaDescription": "This will permanently delete this generated media file from disk. This action cannot be undone.",
     "addReferenceImage": "Add reference image",
     "removeReferenceImage": "Remove {{prompt}}",
     "pastedReferenceImage": "Pasted reference image",

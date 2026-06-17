@@ -14,6 +14,16 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu"
+import { Button } from "@/components/ui/button"
+import {
+  Dialog,
+  DialogClose,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog"
 import {
   ImagePlus,
   MessageCircle,
@@ -26,7 +36,7 @@ import {
   Video,
   type LucideIcon,
 } from "lucide-react"
-import { useEffect, useMemo, useState, type ReactNode } from "react"
+import { useEffect, useMemo, useRef, useState, type ReactNode } from "react"
 import { useTranslation } from '@/i18n/react-i18next-compat'
 import { useThreads } from "@/hooks/useThreads"
 import { DeleteAllThreadsDialog } from "@/containers/dialogs/DeleteAllThreadsDialog"
@@ -37,6 +47,7 @@ import type { VideoAssetRecord } from "@/services/video-generation/types"
 import { Link } from "@tanstack/react-router"
 import { route } from "@/constants/routes"
 import { DeleteThreadDialog, RenameThreadDialog } from "@/containers/dialogs"
+import { toast } from "sonner"
 
 type HistoryEntry =
   | {
@@ -53,6 +64,7 @@ type HistoryEntry =
   | {
       id: string
       kind: 'media'
+      mediaType: 'image' | 'video'
       title: string
       updatedAt: number
       icon: LucideIcon
@@ -63,6 +75,8 @@ type HistoryEntry =
         videoId?: string
       }
     }
+
+type MediaHistoryEntry = Extract<HistoryEntry, { kind: 'media' }>
 
 function timestampFromIso(value?: string) {
   if (!value) return 0
@@ -129,18 +143,28 @@ function HistoryItem({
   onTogglePin,
   onRename,
   onDelete,
+  onDeleteMedia,
 }: {
   entry: HistoryEntry
   onTogglePin: (threadId: string) => void
   onRename: (threadId: string, title: string) => void
   onDelete: (threadId: string) => void
+  onDeleteMedia: (entry: MediaHistoryEntry) => void
 }) {
   const { t } = useTranslation()
   const [renameOpen, setRenameOpen] = useState(false)
   const [deleteOpen, setDeleteOpen] = useState(false)
+  const [mediaDeleteOpen, setMediaDeleteOpen] = useState(false)
+  const mediaDeleteButtonRef = useRef<HTMLButtonElement>(null)
   const Icon = entry.icon
   const isThreadEntry = isThreadHistoryEntry(entry)
   const isPinned = isPinnedHistoryEntry(entry)
+  const mediaEntry = entry.kind === 'media' ? entry : null
+  const confirmMediaDelete = () => {
+    if (!mediaEntry) return
+    void onDeleteMedia(mediaEntry)
+    setMediaDeleteOpen(false)
+  }
   const content = (
     <>
       <Icon className="size-4 shrink-0 text-foreground/70" />
@@ -155,7 +179,7 @@ function HistoryItem({
 
   return (
     <SidebarMenuItem>
-      <SidebarMenuButton asChild className={isThreadEntry ? 'pr-8' : undefined}>
+      <SidebarMenuButton asChild className="pr-8">
         {entry.kind === 'media' ? (
           <Link to={entry.to} search={entry.search}>
             {content}
@@ -166,38 +190,48 @@ function HistoryItem({
           </Link>
         )}
       </SidebarMenuButton>
-      {isThreadEntry && (
-        <DropdownMenu>
-          <DropdownMenuTrigger asChild>
-            <SidebarMenuAction showOnHover className="hover:bg-sidebar-foreground/8">
-              <MoreHorizontal />
-              <span className="sr-only">More</span>
-            </SidebarMenuAction>
-          </DropdownMenuTrigger>
-          <DropdownMenuContent className="w-44" side="right" align="start">
-            <DropdownMenuItem onSelect={() => onTogglePin(entry.id)}>
-              {isPinned ? (
-                <PinOff className="size-4" />
-              ) : (
-                <Pin className="size-4" />
-              )}
-              <span>{isPinned ? t('common:unpin') : t('common:pinToTop')}</span>
-            </DropdownMenuItem>
-            <DropdownMenuItem onSelect={() => setRenameOpen(true)}>
-              <Pencil className="size-4" />
-              <span>{t('common:rename')}</span>
-            </DropdownMenuItem>
-            <DropdownMenuSeparator />
+      <DropdownMenu>
+        <DropdownMenuTrigger asChild>
+          <SidebarMenuAction showOnHover className="hover:bg-sidebar-foreground/8">
+            <MoreHorizontal />
+            <span className="sr-only">More</span>
+          </SidebarMenuAction>
+        </DropdownMenuTrigger>
+        <DropdownMenuContent className="w-44" side="right" align="start">
+          {isThreadEntry ? (
+            <>
+              <DropdownMenuItem onSelect={() => onTogglePin(entry.id)}>
+                {isPinned ? (
+                  <PinOff className="size-4" />
+                ) : (
+                  <Pin className="size-4" />
+                )}
+                <span>{isPinned ? t('common:unpin') : t('common:pinToTop')}</span>
+              </DropdownMenuItem>
+              <DropdownMenuItem onSelect={() => setRenameOpen(true)}>
+                <Pencil className="size-4" />
+                <span>{t('common:rename')}</span>
+              </DropdownMenuItem>
+              <DropdownMenuSeparator />
+              <DropdownMenuItem
+                variant="destructive"
+                onSelect={() => setDeleteOpen(true)}
+              >
+                <Trash2 className="size-4" />
+                <span>{t('common:delete')}</span>
+              </DropdownMenuItem>
+            </>
+          ) : (
             <DropdownMenuItem
               variant="destructive"
-              onSelect={() => setDeleteOpen(true)}
+              onSelect={() => setMediaDeleteOpen(true)}
             >
               <Trash2 className="size-4" />
               <span>{t('common:delete')}</span>
             </DropdownMenuItem>
-          </DropdownMenuContent>
-        </DropdownMenu>
-      )}
+          )}
+        </DropdownMenuContent>
+      </DropdownMenu>
       {isThreadEntry && (
         <>
           <RenameThreadDialog
@@ -217,6 +251,44 @@ function HistoryItem({
           />
         </>
       )}
+      {mediaEntry && (
+        <Dialog open={mediaDeleteOpen} onOpenChange={setMediaDeleteOpen}>
+          <DialogContent
+            onOpenAutoFocus={(event) => {
+              event.preventDefault()
+              mediaDeleteButtonRef.current?.focus()
+            }}
+          >
+            <DialogHeader>
+              <DialogTitle>
+                {mediaEntry.mediaType === 'video'
+                  ? t('common:imageGeneration.deleteVideoTitle')
+                  : t('common:imageGeneration.deleteImageTitle')}
+              </DialogTitle>
+              <DialogDescription>
+                {t('common:imageGeneration.deleteMediaDescription')}
+              </DialogDescription>
+            </DialogHeader>
+            <DialogFooter className="flex flex-col-reverse sm:flex-row sm:justify-end gap-2">
+              <DialogClose asChild>
+                <Button variant="ghost" size="sm" className="w-full sm:w-auto">
+                  {t('common:cancel')}
+                </Button>
+              </DialogClose>
+              <Button
+                ref={mediaDeleteButtonRef}
+                variant="destructive"
+                onClick={confirmMediaDelete}
+                size="sm"
+                className="w-full sm:w-auto"
+                aria-label={`${t('common:delete')} ${mediaEntry.title}`}
+              >
+                {t('common:delete')}
+              </Button>
+            </DialogFooter>
+          </DialogContent>
+        </Dialog>
+      )}
     </SidebarMenuItem>
   )
 }
@@ -232,6 +304,7 @@ export function NavChats() {
   const toggleThreadPinned = useThreads((state) => state.toggleThreadPinned)
   const imageAssets = useImageGenerationStore((state) => state.assets)
   const setImageAssets = useImageGenerationStore((state) => state.setAssets)
+  const removeImageAsset = useImageGenerationStore((state) => state.removeAsset)
   const [dropdownOpen, setDropdownOpen] = useState(false)
   const [videoAssets, setVideoAssets] = useState<VideoAssetRecord[]>([])
 
@@ -276,6 +349,28 @@ export function NavChats() {
     }
   }, [serviceHub, setImageAssets])
 
+  const deleteMediaEntry = async (entry: MediaHistoryEntry) => {
+    try {
+      if (entry.mediaType === 'image') {
+        await serviceHub.imageGeneration().deleteAsset(entry.id)
+        removeImageAsset(entry.id)
+      } else {
+        await serviceHub.videoGeneration().deleteVideoAsset(entry.id)
+        setVideoAssets((current) =>
+          current.filter((asset) => asset.id !== entry.id)
+        )
+      }
+      window.dispatchEvent(new Event('mita-media-history-updated'))
+    } catch (error) {
+      console.error('Failed to delete media history entry:', error)
+      toast.error(
+        entry.mediaType === 'video'
+          ? t('common:imageGeneration.toast.deleteVideoAssetFailed')
+          : t('common:imageGeneration.toast.deleteAssetFailed')
+      )
+    }
+  }
+
   const historyEntries = useMemo<HistoryEntry[]>(() => {
     const threadEntries: HistoryEntry[] = threadsWithoutProject.map((thread) => {
       const team = isMitaTeamsThread(thread)
@@ -297,6 +392,7 @@ export function NavChats() {
       .map((asset) => ({
         id: asset.id,
         kind: 'media',
+        mediaType: 'image',
         title: mediaTitle(asset, t('common:newMedia')),
         updatedAt: timestampFromIso(asset.createdAt),
         icon: ImagePlus,
@@ -310,6 +406,7 @@ export function NavChats() {
     const videoEntries: HistoryEntry[] = videoAssets.map((asset) => ({
       id: asset.id,
       kind: 'media',
+      mediaType: 'video',
       title: mediaTitle(asset, t('common:imageGeneration.mode.storyboardVideo')),
       updatedAt: timestampFromIso(asset.createdAt),
       icon: Video,
@@ -368,6 +465,7 @@ export function NavChats() {
                 onTogglePin={toggleThreadPinned}
                 onRename={renameThread}
                 onDelete={deleteThread}
+                onDeleteMedia={deleteMediaEntry}
               />
             ))}
             {recentEntries.length > 0 && (
@@ -382,6 +480,7 @@ export function NavChats() {
             onTogglePin={toggleThreadPinned}
             onRename={renameThread}
             onDelete={deleteThread}
+            onDeleteMedia={deleteMediaEntry}
           />
         ))}
       </SidebarMenu>

@@ -11,7 +11,10 @@ const h = vi.hoisted(() => ({
   videoAssets: [] as any[],
   deleteAllThreads: vi.fn(),
   deleteThread: vi.fn(),
+  deleteAsset: vi.fn(),
+  deleteVideoAsset: vi.fn(),
   renameThread: vi.fn(),
+  toastError: vi.fn(),
   toggleThreadPinned: vi.fn(),
 }))
 
@@ -39,11 +42,25 @@ vi.mock('@/i18n/react-i18next-compat', () => ({
         'common:newMedia': 'New Media',
         'common:newThread': 'New Thread',
         'common:imageGeneration.mode.storyboardVideo': 'Storyboard video',
+        'common:imageGeneration.toast.deleteAssetFailed':
+          'Failed to delete image asset',
+        'common:imageGeneration.toast.deleteVideoAssetFailed':
+          'Failed to delete video asset',
+        'common:imageGeneration.deleteImageTitle': 'Delete image?',
+        'common:imageGeneration.deleteVideoTitle': 'Delete video?',
+        'common:imageGeneration.deleteMediaDescription':
+          'This will permanently delete this generated media file from disk. This action cannot be undone.',
         'common:recents': 'Recents',
         'common:rename': 'Rename',
         'common:delete': 'Delete',
       })[key] ?? key,
   }),
+}))
+
+vi.mock('sonner', () => ({
+  toast: {
+    error: h.toastError,
+  },
 }))
 
 vi.mock('@/hooks/useThreads', () => ({
@@ -62,9 +79,11 @@ vi.mock('@/hooks/useServiceHub', () => ({
   useServiceHub: () => ({
     imageGeneration: () => ({
       listAssets: vi.fn().mockResolvedValue(h.imageAssets),
+      deleteAsset: h.deleteAsset,
     }),
     videoGeneration: () => ({
       listVideoAssets: vi.fn().mockResolvedValue(h.videoAssets),
+      deleteVideoAsset: h.deleteVideoAsset,
     }),
   }),
 }))
@@ -94,6 +113,20 @@ vi.mock('@/components/ui/dropdown-menu', () => {
   }
 })
 
+vi.mock('@/components/ui/dialog', () => ({
+  Dialog: ({ children, open }: any) => (open ? <div>{children}</div> : null),
+  DialogClose: ({ children }: any) => <>{children}</>,
+  DialogContent: ({ children }: any) => <div>{children}</div>,
+  DialogDescription: ({ children }: any) => <p>{children}</p>,
+  DialogFooter: ({ children }: any) => (
+    <footer data-testid="media-delete-dialog-footer">{children}</footer>
+  ),
+  DialogHeader: ({ children }: any) => (
+    <header data-testid="media-delete-dialog-header">{children}</header>
+  ),
+  DialogTitle: ({ children }: any) => <h3>{children}</h3>,
+}))
+
 vi.mock('@/containers/dialogs/DeleteAllThreadsDialog', () => ({
   DeleteAllThreadsDialog: () => null,
 }))
@@ -119,7 +152,12 @@ describe('NavChats history stream', () => {
     h.videoAssets = []
     h.deleteAllThreads.mockClear()
     h.deleteThread.mockClear()
+    h.deleteAsset.mockReset()
+    h.deleteAsset.mockResolvedValue(undefined)
+    h.deleteVideoAsset.mockReset()
+    h.deleteVideoAsset.mockResolvedValue(undefined)
     h.renameThread.mockClear()
+    h.toastError.mockClear()
     h.toggleThreadPinned.mockClear()
     useImageGenerationStore.getState().reset()
   })
@@ -254,5 +292,104 @@ describe('NavChats history stream', () => {
     expect(await screen.findByText('image only')).toBeInTheDocument()
     expect(screen.queryByRole('button', { name: /Pin to top/i })).not.toBeInTheDocument()
     expect(screen.queryByRole('button', { name: /Unpin/i })).not.toBeInTheDocument()
+  })
+
+  it('deletes generated image history entries from the sidebar row menu', async () => {
+    h.imageAssets = [
+      {
+        id: 'image-delete',
+        prompt: 'delete this image',
+        createdAt: '2026-06-06T00:00:00Z',
+        assetKind: 'generated',
+      },
+    ]
+    h.deleteAsset.mockImplementation(async () => {
+      h.imageAssets = []
+    })
+
+    render(<NavChats />)
+
+    expect(await screen.findByText('delete this image')).toBeInTheDocument()
+
+    fireEvent.click(screen.getByRole('button', { name: /Delete/i }))
+
+    expect(h.deleteAsset).not.toHaveBeenCalled()
+    expect(screen.getByText('Delete image?')).toBeInTheDocument()
+    expect(screen.getByTestId('media-delete-dialog-footer').parentElement).not.toBe(
+      screen.getByTestId('media-delete-dialog-header')
+    )
+
+    fireEvent.click(screen.getByRole('button', { name: 'Delete delete this image' }))
+
+    await waitFor(() => {
+      expect(h.deleteAsset).toHaveBeenCalledWith('image-delete')
+    })
+    await waitFor(() => {
+      expect(screen.queryByText('delete this image')).not.toBeInTheDocument()
+    })
+  })
+
+  it('deletes generated video history entries from the sidebar row menu', async () => {
+    h.videoAssets = [
+      {
+        id: 'video-delete',
+        prompt: 'delete this video',
+        createdAt: '2026-06-06T00:00:00Z',
+      },
+    ]
+    h.deleteVideoAsset.mockImplementation(async () => {
+      h.videoAssets = []
+    })
+
+    render(<NavChats />)
+
+    expect(await screen.findByText('delete this video')).toBeInTheDocument()
+
+    fireEvent.click(screen.getByRole('button', { name: /Delete/i }))
+
+    expect(h.deleteVideoAsset).not.toHaveBeenCalled()
+    expect(screen.getByText('Delete video?')).toBeInTheDocument()
+
+    fireEvent.click(screen.getByRole('button', { name: 'Delete delete this video' }))
+
+    await waitFor(() => {
+      expect(h.deleteVideoAsset).toHaveBeenCalledWith('video-delete')
+    })
+    await waitFor(() => {
+      expect(screen.queryByText('delete this video')).not.toBeInTheDocument()
+    })
+  })
+
+  it('shows video-specific copy when deleting a video history entry fails', async () => {
+    const consoleError = vi.spyOn(console, 'error').mockImplementation(() => {})
+    h.videoAssets = [
+      {
+        id: 'video-fail',
+        prompt: 'video delete fails',
+        createdAt: '2026-06-06T00:00:00Z',
+      },
+    ]
+    h.deleteVideoAsset.mockRejectedValue(new Error('nope'))
+
+    try {
+      render(<NavChats />)
+
+      expect(await screen.findByText('video delete fails')).toBeInTheDocument()
+
+      fireEvent.click(screen.getByRole('button', { name: /Delete/i }))
+
+      expect(h.deleteVideoAsset).not.toHaveBeenCalled()
+
+      fireEvent.click(
+        screen.getByRole('button', { name: 'Delete video delete fails' })
+      )
+
+      await waitFor(() => {
+        expect(h.deleteVideoAsset).toHaveBeenCalledWith('video-fail')
+      })
+      expect(h.toastError).toHaveBeenCalledWith('Failed to delete video asset')
+    } finally {
+      consoleError.mockRestore()
+    }
   })
 })
