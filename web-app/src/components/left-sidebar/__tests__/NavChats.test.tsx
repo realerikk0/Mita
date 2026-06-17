@@ -118,8 +118,12 @@ vi.mock('@/components/ui/dialog', () => ({
   DialogClose: ({ children }: any) => <>{children}</>,
   DialogContent: ({ children }: any) => <div>{children}</div>,
   DialogDescription: ({ children }: any) => <p>{children}</p>,
-  DialogFooter: ({ children }: any) => <div>{children}</div>,
-  DialogHeader: ({ children }: any) => <div>{children}</div>,
+  DialogFooter: ({ children }: any) => (
+    <footer data-testid="media-delete-dialog-footer">{children}</footer>
+  ),
+  DialogHeader: ({ children }: any) => (
+    <header data-testid="media-delete-dialog-header">{children}</header>
+  ),
   DialogTitle: ({ children }: any) => <h3>{children}</h3>,
 }))
 
@@ -311,6 +315,9 @@ describe('NavChats history stream', () => {
 
     expect(h.deleteAsset).not.toHaveBeenCalled()
     expect(screen.getByText('Delete image?')).toBeInTheDocument()
+    expect(screen.getByTestId('media-delete-dialog-footer').parentElement).not.toBe(
+      screen.getByTestId('media-delete-dialog-header')
+    )
 
     fireEvent.click(screen.getByRole('button', { name: 'Delete delete this image' }))
 

@@ -268,24 +268,24 @@ function HistoryItem({
               <DialogDescription>
                 {t('common:imageGeneration.deleteMediaDescription')}
               </DialogDescription>
-              <DialogFooter className="flex flex-col-reverse sm:flex-row sm:justify-end gap-2">
-                <DialogClose asChild>
-                  <Button variant="ghost" size="sm" className="w-full sm:w-auto">
-                    {t('common:cancel')}
-                  </Button>
-                </DialogClose>
-                <Button
-                  ref={mediaDeleteButtonRef}
-                  variant="destructive"
-                  onClick={confirmMediaDelete}
-                  size="sm"
-                  className="w-full sm:w-auto"
-                  aria-label={`${t('common:delete')} ${mediaEntry.title}`}
-                >
-                  {t('common:delete')}
-                </Button>
-              </DialogFooter>
             </DialogHeader>
+            <DialogFooter className="flex flex-col-reverse sm:flex-row sm:justify-end gap-2">
+              <DialogClose asChild>
+                <Button variant="ghost" size="sm" className="w-full sm:w-auto">
+                  {t('common:cancel')}
+                </Button>
+              </DialogClose>
+              <Button
+                ref={mediaDeleteButtonRef}
+                variant="destructive"
+                onClick={confirmMediaDelete}
+                size="sm"
+                className="w-full sm:w-auto"
+                aria-label={`${t('common:delete')} ${mediaEntry.title}`}
+              >
+                {t('common:delete')}
+              </Button>
+            </DialogFooter>
           </DialogContent>
         </Dialog>
       )}
