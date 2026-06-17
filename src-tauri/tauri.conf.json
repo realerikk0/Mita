@@ -1,6 +1,6 @@
 {
   "$schema": "https://schema.tauri.app/config/2",
-  "productName": "Mita",
+  "productName": "Biyan",
   "version": "0.6.629",
   "identifier": "uk.jingxing.mita",
   "build": {
@@ -45,7 +45,7 @@
     },
     "deep-link": {
       "desktop": {
-        "schemes": ["mita"]
+        "schemes": ["biyan", "mita"]
       }
     },
     "updater": {

@@ -14,7 +14,7 @@ describe('NavMain', () => {
     expect(newImageItem?.shortcut).toBeTruthy()
   })
 
-  it('shows a shortcut for New Mita Teams', () => {
+  it('shows a shortcut for New Biyan Teams', () => {
     const items = getNavMainItems(vi.fn(), vi.fn(), vi.fn(), vi.fn(), vi.fn())
     const newMitaTeamsItem = items.find(
       (item) => item.title === 'common:newMitaTeams'

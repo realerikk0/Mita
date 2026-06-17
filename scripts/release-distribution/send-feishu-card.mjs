@@ -69,7 +69,7 @@ export const RELEASE_POSTER_LABEL = '宣传图：'
 
 export function buildFeishuCard(release, distribution = {}, options = {}) {
   const runUrl = options.runUrl ?? buildRunUrl()
-  const title = `Mita ${release.tagName} 发布完成`
+  const title = `Biyan ${release.tagName} 发布完成`
   const releaseTime = release.publishedAt || 'unknown'
   const dryRunPrefix = options.dryRun || distribution.dryRun ? '**Dry run**\n' : ''
   const downloadPageUrl =

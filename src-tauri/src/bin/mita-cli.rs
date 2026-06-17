@@ -1,6 +1,6 @@
-//! mita — headless CLI for Mita.
+//! mita — headless CLI for Biyan.
 //!
-//! Shares all core logic with the Mita desktop app.
+//! Shares all core logic with the Biyan desktop app.
 //! Build with: cargo build --features cli --bin mita-cli
 
 use std::collections::HashMap;
@@ -27,10 +27,10 @@ use std::path::PathBuf;
 #[command(
     name = "mita",
     about = "Serve local helper models and wire them to agents",
-    long_about = "Mita can run local helper models (LlamaCPP / MLX) and expose them via an\n\
+    long_about = "Biyan can run local helper models (LlamaCPP / MLX) and expose them via an\n\
 OpenAI-compatible API, then wires AI coding agent like Claude Code\n\
 directly to your own hardware — no cloud account, no usage fees, full privacy.\n\n\
-Models downloaded in the Mita desktop app are automatically available here.",
+Models downloaded in the Biyan desktop app are automatically available here.",
     after_help = "Examples:\n  \
   mita launch claude                                      # pick a model, then run Claude Code against it\n  \
   mita launch claude --model owner/model-gguf             # use a specific model\n  \
@@ -66,7 +66,7 @@ enum Commands {
         /// Model ID to load (omit to pick interactively)
         #[arg(long)]
         model: Option<String>,
-        /// Path to the inference binary (auto-discovered from Mita data folder when omitted)
+        /// Path to the inference binary (auto-discovered from Biyan data folder when omitted)
         #[arg(long)]
         bin: Option<String>,
         /// Port the model server listens on
@@ -91,13 +91,13 @@ enum Commands {
         #[arg(long, default_value_t = false)]
         select: bool,
     },
-    /// List and inspect conversation threads saved by the Mita app
+    /// List and inspect conversation threads saved by the Biyan app
     #[command(display_order = 10)]
     Threads {
         #[command(subcommand)]
         cmd: ThreadsCommands,
     },
-    /// List and load models installed in the Mita data folder
+    /// List and load models installed in the Biyan data folder
     #[command(display_order = 11)]
     Models {
         #[command(subcommand)]
@@ -137,7 +137,7 @@ struct ServeArgs {
     /// Path to the GGUF file (auto-resolved from model.yml when omitted)
     #[arg(long)]
     model_path: Option<String>,
-    /// Path to the inference binary (auto-discovered from Mita data folder when omitted)
+    /// Path to the inference binary (auto-discovered from Biyan data folder when omitted)
     #[arg(long)]
     bin: Option<String>,
     /// Port the model server listens on (0 = pick a random free port)
@@ -185,7 +185,7 @@ struct ServeArgs {
 
 #[derive(Subcommand)]
 enum ModelsCommands {
-    /// Print all installed models as JSON (from the Mita data folder)
+    /// Print all installed models as JSON (from the Biyan data folder)
     List {
         /// Filter by engine: llamacpp, mlx, or all
         #[arg(long, default_value = "all")]
@@ -204,7 +204,7 @@ enum ModelsCommands {
         /// Path to the MLX model directory (auto-resolved from model.yml when omitted)
         #[arg(long)]
         model_path: Option<String>,
-        /// Path to the mlx-server binary (auto-discovered from Mita.app when omitted)
+        /// Path to the mlx-server binary (auto-discovered from Biyan.app when omitted)
         #[arg(long)]
         bin: Option<String>,
         /// Port the model server listens on (0 = pick a random free port)
@@ -420,7 +420,7 @@ async fn handle_models(cmd: ModelsCommands) {
                     None => {
                         eprintln!(
                             "Error: mlx-server binary not found. \
-                            Install Mita or pass --bin <path>."
+                            Install Biyan or pass --bin <path>."
                         );
                         std::process::exit(1);
                     }
@@ -594,7 +594,7 @@ async fn auto_download_hf_model(repo_id: &str, select_quantization: bool) -> Str
     });
 
     dl_pb.finish_and_clear();
-    eprintln!("  ✓ Saved to Mita data folder\n");
+    eprintln!("  ✓ Saved to Biyan data folder\n");
 
     model_id
 }
@@ -932,7 +932,7 @@ async fn handle_serve(args: ServeArgs) {
                 Some(p) => p.to_string_lossy().into_owned(),
                 None => {
                     finish_progress(pb, "✗ mlx-server binary not found");
-                    eprintln!("Install Mita or pass --bin <path>.");
+                    eprintln!("Install Biyan or pass --bin <path>.");
                     std::process::exit(1);
                 }
             },
@@ -983,7 +983,7 @@ async fn handle_serve(args: ServeArgs) {
                 Some(p) => p.to_string_lossy().into_owned(),
                 None => {
                     finish_progress(pb, "✗ llama-server binary not found");
-                    eprintln!("Install a backend from Mita settings or pass --bin <path>.");
+                    eprintln!("Install a backend from Biyan settings or pass --bin <path>.");
                     std::process::exit(1);
                 }
             },
@@ -1223,7 +1223,7 @@ async fn handle_launch(
 // ── openclaw config writer ─────────────────────────────────────────────────
 
 /// Write (or merge into) `~/.openclaw/openclaw.json` so that openclaw uses
-/// the local Mita server as its provider and selects `model_id` by default.
+/// the local Biyan server as its provider and selects `model_id` by default.
 ///
 /// The "mita" provider entry is always overwritten with the current server
 /// address and key. All other config values are preserved.
@@ -1319,7 +1319,7 @@ async fn start_model_server(
                 Some(p) => p,
                 None => {
                     finish_progress(pb, "✗ mlx-server binary not found");
-                    eprintln!("Install Mita or pass --bin <path>.");
+                    eprintln!("Install Biyan or pass --bin <path>.");
                     std::process::exit(1);
                 }
             };
@@ -1364,7 +1364,7 @@ async fn start_model_server(
             Some(p) => p,
             None => {
                 finish_progress(pb, "✗ llama-server binary not found");
-                eprintln!("Install a backend from Mita settings or pass --bin <path>.");
+                eprintln!("Install a backend from Biyan settings or pass --bin <path>.");
                 std::process::exit(1);
             }
         };

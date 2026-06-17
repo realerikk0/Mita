@@ -137,9 +137,9 @@ describe('SetupScreen', () => {
     localStorage.clear()
   })
 
-  it('renders the Mita provider setup form with Biyuan selected by default', () => {
+  it('renders the Biyan provider setup form with Biyuan selected by default', () => {
     render(<SetupScreen />)
-    expect(screen.getByText('幂塔')).toBeInTheDocument()
+    expect(screen.getByText('彼岩')).toBeInTheDocument()
     expect(
       screen.getByText('安安静静地完成主人交代的工作')
     ).toBeInTheDocument()

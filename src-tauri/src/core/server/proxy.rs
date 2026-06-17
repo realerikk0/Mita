@@ -2786,7 +2786,7 @@ async fn start_server_internal(
             return Err(Box::new(e));
         }
     };
-    log::info!("Mita API server started on http://{addr}");
+    log::info!("Biyan API server started on http://{addr}");
 
     let server_task = tokio::spawn(async move {
         if let Err(e) = server.await {
@@ -2798,7 +2798,7 @@ async fn start_server_internal(
 
     *handle_guard = Some(server_task);
     let actual_port = addr.port();
-    log::info!("Mita API server started successfully on port {actual_port}");
+    log::info!("Biyan API server started successfully on port {actual_port}");
     Ok(actual_port)
 }
 
@@ -2810,7 +2810,7 @@ pub async fn stop_server(
     if let Some(handle) = handle_guard.take() {
         handle.abort();
         *handle_guard = None;
-        log::info!("Mita API server stopped");
+        log::info!("Biyan API server stopped");
     } else {
         log::debug!("Server was not running");
     }

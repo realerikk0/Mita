@@ -533,7 +533,7 @@ pub fn install_mita_cli_sync<R: Runtime>(
     let dest = resource_bin_dir.join(dest_bin_name);
 
     if !bundled.exists() && !dest.exists() {
-        return Err("Mita CLI binary not bundled with this version of Mita.".to_string());
+        return Err("Biyan CLI binary not bundled with this version of Biyan.".to_string());
     }
 
     #[cfg(windows)]
@@ -594,7 +594,7 @@ pub fn uninstall_mita_cli() -> Result<(), String> {
         if dest.exists() {
             std::fs::remove_file(&dest).map_err(|e| {
                 format!(
-                    "Failed to remove Mita CLI from {}: {}",
+                    "Failed to remove Biyan CLI from {}: {}",
                     dest.display(),
                     e
                 )

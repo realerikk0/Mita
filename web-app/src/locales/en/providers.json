@@ -61,7 +61,7 @@
   "enterNameForProvider": "Enter name for provider",
   "apiKeys": {
     "title": "API keys",
-    "description": "Enter your API key. You can add extra keys in Advanced, and Mita will try the next one automatically if a key fails.",
+    "description": "Enter your API key. You can add extra keys in Advanced, and Biyan will try the next one automatically if a key fails.",
     "placeholder": "sk-…\nsk-…",
     "primaryPlaceholder": "Enter primary API key",
     "keyPlaceholder": "Enter API key",
@@ -73,7 +73,7 @@
     "hideAdvanced": "Hide advanced",
     "oneKeyHint": "Optional fallback keys are configured in Advanced.",
     "retryHintPrefix": "Primary key is",
-    "retryHintSuffix": "Mita retries the next key only on",
+    "retryHintSuffix": "Biyan retries the next key only on",
     "addKey": "Add key",
     "removeKey": "Remove key"
   }

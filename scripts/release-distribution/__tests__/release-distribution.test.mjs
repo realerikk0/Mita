@@ -33,7 +33,7 @@ const feishuScript = path.resolve(here, '../send-feishu-card.mjs')
 function sampleRelease() {
   return {
     tagName: 'v1.2.3',
-    name: 'Mita v1.2.3',
+    name: 'Biyan v1.2.3',
     url: 'https://github.com/realerikk0/Mita/releases/tag/v1.2.3',
     publishedAt: '2026-05-15T08:00:00Z',
     body: [
@@ -48,18 +48,18 @@ function sampleRelease() {
     ].join('\n'),
     assets: [
       {
-        name: 'Mita_1.2.3_universal.dmg',
-        url: 'https://github.com/realerikk0/Mita/releases/download/v1.2.3/Mita_1.2.3_universal.dmg',
+        name: 'Biyan_1.2.3_universal.dmg',
+        url: 'https://github.com/realerikk0/Mita/releases/download/v1.2.3/Biyan_1.2.3_universal.dmg',
         size: 123,
       },
       {
-        name: 'Mita_1.2.3_x64-setup.exe',
-        url: 'https://github.com/realerikk0/Mita/releases/download/v1.2.3/Mita_1.2.3_x64-setup.exe',
+        name: 'Biyan_1.2.3_x64-setup.exe',
+        url: 'https://github.com/realerikk0/Mita/releases/download/v1.2.3/Biyan_1.2.3_x64-setup.exe',
         size: 456,
       },
       {
-        name: 'Mita_1.2.3_x64_en-US.msi',
-        url: 'https://github.com/realerikk0/Mita/releases/download/v1.2.3/Mita_1.2.3_x64_en-US.msi',
+        name: 'Biyan_1.2.3_x64_en-US.msi',
+        url: 'https://github.com/realerikk0/Mita/releases/download/v1.2.3/Biyan_1.2.3_x64_en-US.msi',
         size: 789,
       },
     ],
@@ -71,9 +71,9 @@ test('collectReleaseAssets requires one dmg, one exe, and one msi', () => {
 
   assert.equal(manifest.tagName, 'v1.2.3')
   assert.match(manifest.body, /Added visible desktop updater/)
-  assert.equal(manifest.assets.macosDmg.name, 'Mita_1.2.3_universal.dmg')
-  assert.equal(manifest.assets.windowsExe.name, 'Mita_1.2.3_x64-setup.exe')
-  assert.equal(manifest.assets.windowsMsi.name, 'Mita_1.2.3_x64_en-US.msi')
+  assert.equal(manifest.assets.macosDmg.name, 'Biyan_1.2.3_universal.dmg')
+  assert.equal(manifest.assets.windowsExe.name, 'Biyan_1.2.3_x64-setup.exe')
+  assert.equal(manifest.assets.windowsMsi.name, 'Biyan_1.2.3_x64_en-US.msi')
 })
 
 test('collectReleaseAssets fails when a required asset is missing', () => {
@@ -119,10 +119,10 @@ test('buildFeishuCard includes fixed release and download fields', () => {
   )
 
   const body = JSON.stringify(card)
-  assert.match(body, /Mita v1\.2\.3 发布完成/)
-  assert.match(body, /Mita_1\.2\.3_universal\.dmg/)
-  assert.match(body, /Mita_1\.2\.3_x64-setup\.exe/)
-  assert.match(body, /Mita_1\.2\.3_x64_en-US\.msi/)
+  assert.match(body, /Biyan v1\.2\.3 发布完成/)
+  assert.match(body, /Biyan_1\.2\.3_universal\.dmg/)
+  assert.match(body, /Biyan_1\.2\.3_x64-setup\.exe/)
+  assert.match(body, /Biyan_1\.2\.3_x64_en-US\.msi/)
   assert.match(body, /https:\/\/static\.mitapp\.cn\/mita\/download/)
   assert.match(body, /Added visible desktop updater/)
   assert.match(body, /Fixed updater CDN manifest parsing/)
@@ -137,15 +137,15 @@ test('buildDownloadManifest exposes GitHub fallback metadata without CDN options
   )
 
   assert.equal(manifest.schemaVersion, 1)
-  assert.equal(manifest.product, 'Mita')
+  assert.equal(manifest.product, 'Biyan')
   assert.equal(manifest.tagName, 'v1.2.3')
   assert.equal(manifest.version, '1.2.3')
   assert.equal(manifest.generatedAt, '2026-05-15T09:00:00.000Z')
   assert.equal(manifest.primaryDownload.type, 'github-release')
   assert.equal(manifest.primaryDownload.url, 'https://github.com/realerikk0/Mita/releases/tag/v1.2.3')
   assert.equal(manifest.primaryDownload.password, null)
-  assert.equal(manifest.github.macosDmg.name, 'Mita_1.2.3_universal.dmg')
-  assert.equal(manifest.github.windowsExe.name, 'Mita_1.2.3_x64-setup.exe')
+  assert.equal(manifest.github.macosDmg.name, 'Biyan_1.2.3_universal.dmg')
+  assert.equal(manifest.github.windowsExe.name, 'Biyan_1.2.3_x64-setup.exe')
 })
 
 test('buildDownloadManifest exposes Aliyun CDN platform URLs', () => {
@@ -165,15 +165,15 @@ test('buildDownloadManifest exposes Aliyun CDN platform URLs', () => {
   assert.equal(manifest.primaryDownload.url, 'https://static.mitapp.cn/mita/download')
   assert.equal(
     manifest.platforms.macos.url,
-    'https://static.mitapp.cn/mita/download/releases/v1.2.3/Mita_1.2.3_universal.dmg',
+    'https://static.mitapp.cn/mita/download/releases/v1.2.3/Biyan_1.2.3_universal.dmg',
   )
   assert.equal(
     manifest.platforms.windows.url,
-    'https://static.mitapp.cn/mita/download/releases/v1.2.3/Mita_1.2.3_x64-setup.exe',
+    'https://static.mitapp.cn/mita/download/releases/v1.2.3/Biyan_1.2.3_x64-setup.exe',
   )
   assert.equal(
     manifest.platforms.windowsMsi.url,
-    'https://static.mitapp.cn/mita/download/releases/v1.2.3/Mita_1.2.3_x64_en-US.msi',
+    'https://static.mitapp.cn/mita/download/releases/v1.2.3/Biyan_1.2.3_x64_en-US.msi',
   )
 })
 
@@ -195,10 +195,10 @@ test('buildDownloadPage redirects platform users to Aliyun CDN assets', () => {
   const page = buildDownloadPage({
     platforms: {
       macos: {
-        url: 'https://static.mitapp.cn/mita/download/releases/v1.2.3/Mita_1.2.3_universal.dmg',
+        url: 'https://static.mitapp.cn/mita/download/releases/v1.2.3/Biyan_1.2.3_universal.dmg',
       },
       windows: {
-        url: 'https://static.mitapp.cn/mita/download/releases/v1.2.3/Mita_1.2.3_x64-setup.exe',
+        url: 'https://static.mitapp.cn/mita/download/releases/v1.2.3/Biyan_1.2.3_x64-setup.exe',
       },
     },
   })
@@ -206,7 +206,7 @@ test('buildDownloadPage redirects platform users to Aliyun CDN assets', () => {
   assert.match(page, /Download for macOS/)
   assert.match(page, /Download for Windows/)
   assert.match(page, /Macintosh\|Mac OS X/)
-  assert.match(page, /https:\/\/static\.mitapp\.cn\/mita\/download\/releases\/v1\.2\.3\/Mita_1\.2\.3_x64-setup\.exe/)
+  assert.match(page, /https:\/\/static\.mitapp\.cn\/mita\/download\/releases\/v1\.2\.3\/Biyan_1\.2\.3_x64-setup\.exe/)
   assert.doesNotMatch(page, /http-equiv="refresh"/)
 })
 
@@ -341,7 +341,7 @@ test('send-feishu-card dry run renders app bot card, label, and poster payloads'
   assert.equal(payloads.length, 3)
   assert.equal(payloads[0].receive_id, 'oc_release_chat')
   assert.equal(payloads[0].msg_type, 'interactive')
-  assert.match(payloads[0].content, /Mita v1\.2\.3 发布完成/)
+  assert.match(payloads[0].content, /Biyan v1\.2\.3 发布完成/)
   assert.match(payloads[0].content, /https:\/\/static\.mitapp\.cn\/mita\/download/)
   assert.doesNotMatch(payloads[0].content, /img_v3_dry_run/)
   assert.doesNotMatch(payloads[0].content, /百度/)
@@ -443,7 +443,7 @@ test('generateReleasePoster writes image from Jingxing async task content', asyn
   assert.equal(body.model, 'gpt-image-2')
   assert.equal(body.size, '1024x1536')
   assert.equal(body.quality, 'medium')
-  assert.match(body.prompt, /Mita 桌面版新版本来啦/)
+  assert.match(body.prompt, /彼岩桌面版新版本来啦/)
   assert.match(body.prompt, /Added visible desktop updater/)
 })
 

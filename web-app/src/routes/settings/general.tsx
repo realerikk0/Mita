@@ -100,7 +100,7 @@ function General() {
       const s = await invoke<{ installed: boolean; path: string | null }>('install_mita_cli')
       setCliInstalled(s.installed)
       setCliPath(s.path)
-      toast.success(`Mita CLI installed to ${s.path}`)
+      toast.success(`Biyan CLI installed to ${s.path}`)
     } catch (e) {
       toast.error('Install failed', { description: String(e) })
     } finally {
@@ -114,7 +114,7 @@ function General() {
       await invoke('uninstall_mita_cli')
       setCliInstalled(false)
       setCliPath(null)
-      toast.success('Mita CLI uninstalled')
+      toast.success('Biyan CLI uninstalled')
     } catch (e) {
       toast.error('Uninstall failed', { description: String(e) })
     } finally {
@@ -421,7 +421,7 @@ function General() {
             <Card title="Advanced">
               {IS_TAURI && (
                 <CardItem
-                  title="Mita CLI"
+                  title="Biyan CLI"
                   description={
                     cliInstalled && cliPath
                       ? `Installed at ${cliPath} — use mita from your terminal to serve models.`

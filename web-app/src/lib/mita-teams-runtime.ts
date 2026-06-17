@@ -1084,7 +1084,7 @@ async function defaultGenerateDecisionText({
     label: 'Host',
     description: 'Coordinate the team.',
     prompt:
-      'You are the Mita Teams Orchestrator. Output compact valid JSON only.',
+      'You are the Biyan Teams Orchestrator. Output compact valid JSON only.',
     color: 'bg-primary',
     permission: 'tools',
     provider: model?.provider,
@@ -1097,7 +1097,7 @@ async function defaultGenerateDecisionText({
     prompt,
     abortSignal,
     system:
-      'You are the Mita Teams Orchestrator. Decide the next execution step. Output valid JSON only.',
+      'You are the Biyan Teams Orchestrator. Decide the next execution step. Output valid JSON only.',
   })
 
   return {
@@ -1217,10 +1217,10 @@ function hasReusableTeam(config: MitaTeamsConfig) {
 
 function renderTeamContinuityGuidance(preferTeamReuse: boolean) {
   if (!preferTeamReuse) {
-    return 'Team continuity: this appears to be a new Mita Teams task.'
+    return 'Team continuity: this appears to be a new Biyan Teams task.'
   }
 
-  return `Team continuity: this is a follow-up in an existing Mita Teams thread.
+  return `Team continuity: this is a follow-up in an existing Biyan Teams thread.
 - The current roles and channels are already configured; prefer reusing the configured team with call_roles.
 - Use configure_team only to add genuinely missing specialist roles or channels.
 - Do not recreate, rename, overwrite, or change the prompt/provider/model of existing roles.
@@ -1291,9 +1291,9 @@ function buildDecisionPrompt({
       (template) => template.id === config.taskTemplateId
     ) ?? MITA_TEAMS_TASK_TEMPLATES[0]
 
-  return `You are the Orchestrator for Mita Teams.
+  return `You are the Orchestrator for Biyan Teams.
 
-Thread title: ${threadTitle || 'Mita Teams'}
+Thread title: ${threadTitle || 'Biyan Teams'}
 Owner request or latest choice:
 ${userText}
 
@@ -1492,7 +1492,7 @@ function buildRolePrompt({
         ? 'You may request tool-backed checks or commands, but do not claim file writes.'
         : 'Read-only role: gather, analyze, critique, and summarize. Do not claim tool use, command execution, or file edits.'
 
-  return `You are ${role.name} in Mita Teams.
+  return `You are ${role.name} in Biyan Teams.
 
 Role prompt:
 ${role.prompt}
@@ -1554,7 +1554,7 @@ function buildPrivateRoleChatPrompt({
         ? 'You may suggest tool-backed checks, but do not claim tool execution.'
         : 'Read-only role: gather, analyze, critique, and summarize. Do not claim tool use, command execution, or file edits.'
 
-  return `You are ${role.name} in a private Mita Teams role chat.
+  return `You are ${role.name} in a private Biyan Teams role chat.
 
 This is a direct chat between the owner and ${role.name}. It is separate from channel-hosted team discussion. Do not simulate the Orchestrator, other roles, or a team run.
 
@@ -2349,7 +2349,7 @@ function applyTeamConfiguration({
     },
     runtime: appendMitaTeamsEvent(normalizedRuntime, {
       type: 'team_configured',
-      title: 'Mita Teams configured roles and channels',
+      title: 'Biyan Teams configured roles and channels',
       detail: decision.reason,
       roleId: MITA_TEAMS_ORCHESTRATOR_ROLE_ID,
       channelId: MITA_TEAMS_TASK_CHANNEL_ID,
@@ -2525,7 +2525,7 @@ function preferExistingTeamDecision(
       return {
         action: 'milestone',
         reason: decision.reason,
-        milestone: 'Mita Teams reused existing roles and channels.',
+        milestone: 'Biyan Teams reused existing roles and channels.',
       }
     }
     return {
@@ -2692,7 +2692,7 @@ function buildDecisionRepairPrompt(
   decisionPrompt: string,
   invalidText: string
 ) {
-  return `The previous Orchestrator response was not valid for the Mita Teams decision schema.
+  return `The previous Orchestrator response was not valid for the Biyan Teams decision schema.
 
 Original decision prompt:
 ${decisionPrompt}
@@ -2709,7 +2709,7 @@ function jsonFailureDecision(): MitaTeamsOrchestratorDecision {
     reason:
       'The Orchestrator response could not be parsed after one JSON repair attempt.',
     question:
-      'Mita Teams could not parse the coordinator decision. What should happen next?',
+      'Biyan Teams could not parse the coordinator decision. What should happen next?',
     options: [
       {
         id: 'retry',
@@ -2816,7 +2816,7 @@ function startRuntimeRun(
     },
     {
       type: 'run_started',
-      title: 'Mita Teams started',
+      title: 'Biyan Teams started',
       detail: `${config.roles.filter((role) => role.enabled).length} enabled roles`,
     }
   )
@@ -2890,12 +2890,12 @@ function completeRun(
       type: status === 'failed' ? 'run_failed' : 'run_completed',
       title:
         status === 'waiting-for-user'
-          ? 'Mita Teams is waiting for the owner'
+          ? 'Biyan Teams is waiting for the owner'
           : status === 'stopped'
-            ? 'Mita Teams stopped'
+            ? 'Biyan Teams stopped'
             : status === 'failed'
-              ? 'Mita Teams failed'
-              : 'Mita Teams completed',
+              ? 'Biyan Teams failed'
+              : 'Biyan Teams completed',
       detail,
     }
   )
@@ -3139,7 +3139,7 @@ async function runRoleCall({
       turnId,
       channelId: call.channelId,
       role: 'assistant',
-      content: `Mita Teams 角色运行失败：${message}`,
+      content: `Biyan Teams 角色运行失败：${message}`,
       model,
     })
     const current = nextRuntime.roleStates[role.id]
@@ -3368,11 +3368,11 @@ function synthesizeFinalResponse(
   }
   const memory = projectMemoryText(runtime.projectMemory)
   if (memory) {
-    return `Mita Teams 已到达一个可交付节点。\n\n${memory}`
+    return `Biyan Teams 已到达一个可交付节点。\n\n${memory}`
   }
   return outputs.length
-    ? `Mita Teams 已完成一轮协作。\n\n${renderRecentOutputs(outputs)}`
-    : 'Mita Teams 已准备好继续，但当前没有可合成的角色输出。'
+    ? `Biyan Teams 已完成一轮协作。\n\n${renderRecentOutputs(outputs)}`
+    : 'Biyan Teams 已准备好继续，但当前没有可合成的角色输出。'
 }
 
 type ExecutionDecision = Extract<
@@ -3401,7 +3401,7 @@ function approvedExecutionOwnerQuestionError(
     return undefined
   }
 
-  return `Mita Teams cannot ask the owner after plan approval. Blocking questions must be collected before proposing the plan. (${decision.action}: ${decision.question})`
+  return `Biyan Teams cannot ask the owner after plan approval. Blocking questions must be collected before proposing the plan. (${decision.action}: ${decision.question})`
 }
 
 function planRoleAssignment(
@@ -3463,7 +3463,7 @@ function planDraftFromExecutionDecision({
     title:
       decision.action === 'stop'
         ? 'Deliver coordinator response'
-        : 'Execute approved Mita Teams plan',
+        : 'Execute approved Biyan Teams plan',
     description:
       decision.action === 'stop' ? decision.finalResponse : decision.reason,
     roleId: MITA_TEAMS_ORCHESTRATOR_ROLE_ID,
@@ -3493,7 +3493,7 @@ function planDraftFromExecutionDecision({
         : undefined
     )
   })
-  const goal = userText || threadTitle || 'Mita Teams task'
+  const goal = userText || threadTitle || 'Biyan Teams task'
   const summary =
     decision.action === 'stop'
       ? decision.finalResponse || decision.reason
@@ -3534,7 +3534,7 @@ export async function runMitaTeamsPrivateRoleChat({
   if (!role) {
     return {
       config: workingConfig,
-      finalResponse: '未找到这个 Mita Teams 角色。',
+      finalResponse: '未找到这个 Biyan Teams 角色。',
       status: 'failed',
     }
   }
@@ -3675,7 +3675,7 @@ export async function runMitaTeamsPrivateRoleChat({
     const message = roleFailureMessage(
       error,
       role,
-      'Mita Teams role chat failed'
+      'Biyan Teams role chat failed'
     )
     const current = runtime.roleStates[role.id]
     runtime = updateRoleStreamMessageContent(
@@ -3708,7 +3708,7 @@ export async function runMitaTeamsPrivateRoleChat({
       {
         turnId,
         role: 'assistant',
-        content: `Mita Teams 角色私聊失败：${message}`,
+        content: `Biyan Teams 角色私聊失败：${message}`,
         model,
       }
     )
@@ -3779,7 +3779,7 @@ export async function runMitaTeamsRuntime({
     notify(runtime)
     return {
       config: workingConfig,
-      finalResponse: 'Mita Teams 已暂停。你可以输入“继续”让主持人接着推进。',
+      finalResponse: 'Biyan Teams 已暂停。你可以输入“继续”让主持人接着推进。',
       status: 'stopped',
     }
   }
@@ -3887,7 +3887,7 @@ export async function runMitaTeamsRuntime({
             userChoiceRequest: {
               id: stableId('plan-choice'),
               kind: 'plan_approval',
-              question: 'Review and approve the Mita Teams plan.',
+              question: 'Review and approve the Biyan Teams plan.',
               options: [
                 { id: 'approve', label: 'Approve and continue' },
                 { id: 'revise', label: 'Modify plan' },
@@ -3924,7 +3924,7 @@ export async function runMitaTeamsRuntime({
         if ((runtime.clarificationCount ?? 0) >= 3) {
           const fallbackPlan = createMitaTeamsPlanDraft(
             {
-              goal: userText || threadTitle || 'Mita Teams task',
+              goal: userText || threadTitle || 'Biyan Teams task',
               summary:
                 'The clarification limit was reached, so the coordinator prepared a plan from the available context.',
               scope: ['Use the available owner request and thread context.'],
@@ -3947,7 +3947,7 @@ export async function runMitaTeamsRuntime({
               ],
               executionOrder: ['Execute approved owner request'],
             },
-            userText || 'Mita Teams task',
+            userText || 'Biyan Teams task',
             runtime.planDraft?.version ?? 0
           )
           runtime = appendMitaTeamsEvent(
@@ -3958,7 +3958,7 @@ export async function runMitaTeamsRuntime({
               userChoiceRequest: {
                 id: stableId('plan-choice'),
                 kind: 'plan_approval',
-                question: 'Review and approve the Mita Teams plan.',
+                question: 'Review and approve the Biyan Teams plan.',
                 options: [
                   { id: 'approve', label: 'Approve and continue' },
                   { id: 'revise', label: 'Modify plan' },
@@ -4037,7 +4037,7 @@ export async function runMitaTeamsRuntime({
             userChoiceRequest: {
               id: stableId('plan-choice'),
               kind: 'plan_approval',
-              question: 'Review and approve the Mita Teams plan.',
+              question: 'Review and approve the Biyan Teams plan.',
               options: [
                 { id: 'approve', label: 'Approve and continue' },
                 { id: 'revise', label: 'Modify plan' },
@@ -4215,13 +4215,13 @@ export async function runMitaTeamsRuntime({
 
     const message = errorMessageFromUnknown(
       error,
-      'Mita Teams runtime failed'
+      'Biyan Teams runtime failed'
     )
     runtime = completeRun(runtime, 'failed', message)
     notify(runtime)
     return {
       config: workingConfig,
-      finalResponse: `Mita Teams 运行失败：${message}`,
+      finalResponse: `Biyan Teams 运行失败：${message}`,
       status: 'failed',
     }
   }

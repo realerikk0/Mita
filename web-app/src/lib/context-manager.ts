@@ -124,7 +124,7 @@ Preserve these categories, in this order:
 - Tell the next assistant how to resume without asking unnecessary recap questions.
 - State what should not be repeated or re-done.
 
-If an earlier Mita compact summary appears in the conversation, treat it as authoritative historical context and merge it into this new summary. Remove duplication, but do not drop durable decisions or unresolved tasks.
+If an earlier Biyan compact summary appears in the conversation, treat it as authoritative historical context and merge it into this new summary. Remove duplication, but do not drop durable decisions or unresolved tasks.
 
 If custom compact instructions are provided below, follow them with highest priority unless they conflict with preserving correctness:
 
@@ -188,7 +188,7 @@ export function mergeExistingSummaries(summaries: string[], newSummary: string):
   if (uniqueSummaries.length === 0) return newSummary.trim()
 
   return [
-    '# Previous Mita Compact Summaries',
+    '# Previous Biyan Compact Summaries',
     uniqueSummaries.join('\n\n---\n\n'),
     '# New Compact Summary',
     newSummary.trim(),

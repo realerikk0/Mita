@@ -57,7 +57,7 @@ export class TauriAppService extends DefaultAppService {
 
       return appConfiguration?.data_folder
     } catch (error) {
-      console.error('Failed to get Mita data folder:', error)
+      console.error('Failed to get Biyan data folder:', error)
       return undefined
     }
   }

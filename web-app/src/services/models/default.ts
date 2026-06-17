@@ -70,7 +70,7 @@ export class DefaultModelsService implements ModelsService {
 
       if (!response.ok) {
         console.error(
-          `Failed to fetch latest Mita model: ${response.status} ${response.statusText}`
+          `Failed to fetch latest Biyan model: ${response.status} ${response.statusText}`
         )
         return null
       }
@@ -80,7 +80,7 @@ export class DefaultModelsService implements ModelsService {
       const model: CatalogModel = Array.isArray(data) ? data[0] : data
       return model ?? null
     } catch (error) {
-      console.error('Error fetching latest Mita model:', error)
+      console.error('Error fetching latest Biyan model:', error)
       return null
     }
   }

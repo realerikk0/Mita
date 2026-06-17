@@ -48,7 +48,7 @@ async function validateExisting(filePath) {
 
 async function download(url) {
   const response = await fetch(url, {
-    headers: { 'user-agent': 'Mita embedding model preparer' },
+    headers: { 'user-agent': 'Biyan embedding model preparer' },
     redirect: 'follow',
   })
 

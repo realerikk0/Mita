@@ -424,7 +424,7 @@ pub async fn _download_files_internal(
     // Create progress tracker
     let progress_tracker = ProgressTracker::new(items, file_sizes.clone());
 
-    // save file under Mita data folder
+    // save file under Biyan data folder
     let mita_data_folder = get_mita_data_folder_path(app.clone());
 
     // Collect download tasks for parallel execution
@@ -450,7 +450,7 @@ pub async fn _download_files_internal(
 
         let task = tokio::spawn(async move {
             log::debug!(
-                "Downloading {} into Mita data folder {}",
+                "Downloading {} into Biyan data folder {}",
                 item_clone.url,
                 canonical_data.display()
             );
@@ -641,7 +641,7 @@ async fn download_single_file(
 
     // Log which URL is being used for download
     if actual_url != item.url {
-        log::info!("Downloading via Mita mirror: {}", actual_url);
+        log::info!("Downloading via Biyan mirror: {}", actual_url);
     }
 
     // If HEAD gave us no size, refine the running total from the GET response
@@ -748,15 +748,15 @@ pub async fn _get_maybe_resume_with_fallback(
 ) -> Result<(reqwest::Response, String), String> {
     // Try mirror URL first if applicable
     if let Some(mirror_url) = convert_to_mirror_url(url) {
-        log::info!("Attempting download from Mita mirror: {}", mirror_url);
+        log::info!("Attempting download from Biyan mirror: {}", mirror_url);
         match _get_maybe_resume_with_hmac(client, &mirror_url, start_bytes).await {
             Ok(resp) => {
-                log::info!("Successfully connected to Mita mirror");
+                log::info!("Successfully connected to Biyan mirror");
                 return Ok((resp, mirror_url));
             }
             Err(e) => {
                 log::warn!(
-                    "Mita mirror download failed: {}. Falling back to original URL...",
+                    "Biyan mirror download failed: {}. Falling back to original URL...",
                     e
                 );
             }
@@ -769,7 +769,7 @@ pub async fn _get_maybe_resume_with_fallback(
     Ok((resp, url.to_string()))
 }
 
-/// Download from URL with HMAC headers for Mita mirror authentication
+/// Download from URL with HMAC headers for Biyan mirror authentication
 async fn _get_maybe_resume_with_hmac(
     client: &reqwest::Client,
     url: &str,

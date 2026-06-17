@@ -53,7 +53,7 @@ describe('useAssistant', () => {
 
     const updatedAssistant = {
       ...defaultAssistant,
-      name: 'Updated Mita',
+      name: 'Updated Biyan',
       description: 'Updated description',
     }
 
@@ -61,7 +61,7 @@ describe('useAssistant', () => {
       result.current.updateAssistant(updatedAssistant)
     })
 
-    expect(result.current.assistants[0].name).toBe('Updated Mita')
+    expect(result.current.assistants[0].name).toBe('Updated Biyan')
     expect(result.current.assistants[0].description).toBe('Updated description')
   })
 
@@ -152,13 +152,13 @@ describe('useAssistant', () => {
     const { result } = renderHook(() => useAssistant())
 
     expect(result.current.currentAssistant.id).toBe('mita')
-    expect(result.current.currentAssistant.name).toBe('Mita')
+    expect(result.current.currentAssistant.name).toBe('Biyan')
     expect(result.current.currentAssistant.avatar).toBe('👋')
     expect(result.current.currentAssistant.instructions).toContain(
       'Never say that you are Jan'
     )
     expect(result.current.currentAssistant.instructions).toContain(
-      'your agent identity is Mita'
+      'your agent identity is Biyan'
     )
     expect(result.current.currentAssistant.instructions).toContain(
       'Use structured tools only when they are available'
@@ -182,14 +182,14 @@ describe('useAssistant', () => {
       ])
     })
 
-    expect(result.current.assistants[0].name).toBe('Mita')
-    expect(result.current.assistants[0].description).toContain('Mita')
-    expect(result.current.assistants[0].instructions).toContain('You are Mita')
+    expect(result.current.assistants[0].name).toBe('Biyan')
+    expect(result.current.assistants[0].description).toContain('Biyan')
+    expect(result.current.assistants[0].instructions).toContain('You are Biyan')
     expect(result.current.assistants[0].instructions).toContain(
       'Never say that you are Jan'
     )
     expect(result.current.assistants[0].instructions).toContain(
-      'your agent identity is Mita'
+      'your agent identity is Biyan'
     )
     expect(result.current.assistants[0].instructions).not.toContain(
       'Menlo Research（https://www.menlo.ai）'
@@ -211,13 +211,13 @@ describe('useAssistant', () => {
 
     const updatedDefaultAssistant = {
       ...defaultAssistant,
-      name: 'Updated Mita Name',
+      name: 'Updated Biyan Name',
     }
 
     act(() => {
       result.current.updateAssistant(updatedDefaultAssistant)
     })
 
-    expect(result.current.currentAssistant.name).toBe('Updated Mita Name')
+    expect(result.current.currentAssistant.name).toBe('Updated Biyan Name')
   })
 })

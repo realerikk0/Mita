@@ -4,7 +4,7 @@ import en from '../locales/en/mita-teams.json'
 import zhCN from '../locales/zh-CN/mita-teams.json'
 import zhTW from '../locales/zh-TW/mita-teams.json'
 
-describe('Mita Teams locale strings', () => {
+describe('Biyan Teams locale strings', () => {
   it('adds readable Chinese labels for the team workspace', () => {
     expect(zhCN.channels).toBe('频道')
     expect(zhCN.roles).toBe('角色')

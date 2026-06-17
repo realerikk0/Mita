@@ -94,7 +94,7 @@ pub async fn run_mcp_commands<R: Runtime>(
                     .map_err(|e| format!("Failed to serialize MCP config: {e}"))?,
             )
             .map_err(|e| format!("Failed to write MCP config: {e}"))?;
-            log::info!("Migrated Browser MCP config to Mita Web Research");
+            log::info!("Migrated Browser MCP config to Biyan Web Research");
         }
     }
 
@@ -488,7 +488,7 @@ async fn schedule_mcp_start_task<R: Runtime>(
             protocol_version: Default::default(),
             capabilities: ClientCapabilities::default(),
             client_info: Implementation {
-                name: "Mita Streamable Client".to_string(),
+                name: "Biyan Streamable Client".to_string(),
                 version: "0.0.1".to_string(),
                 title: None,
                 website_url: None,
@@ -556,7 +556,7 @@ async fn schedule_mcp_start_task<R: Runtime>(
             protocol_version: Default::default(),
             capabilities: ClientCapabilities::default(),
             client_info: Implementation {
-                name: "Mita SSE Client".to_string(),
+                name: "Biyan SSE Client".to_string(),
                 version: "0.0.1".to_string(),
                 title: None,
                 website_url: None,
@@ -596,7 +596,7 @@ async fn schedule_mcp_start_task<R: Runtime>(
                                 }
                                 Ok(false) => {
                                     return Err(format!(
-                                        "Port {} is already in use. Please close the application using this port or restart Mita.",
+                                        "Port {} is already in use. Please close the application using this port or restart Biyan.",
                                         port
                                     ));
                                 }
@@ -843,7 +843,7 @@ async fn schedule_mcp_start_task<R: Runtime>(
             ));
         }
 
-        // Create lock file for Mita Web Research and legacy browser MCP servers.
+        // Create lock file for Biyan Web Research and legacy browser MCP servers.
         if is_browser_mcp_name(&name) {
             if let Some(port_str) = config_params.envs.get("BRIDGE_PORT") {
                 if let Some(port_str) = port_str.as_str() {
@@ -903,7 +903,7 @@ fn resolve_web_research_script_path<R: Runtime>(app: &AppHandle<R>) -> Result<Pa
         return Ok(dev_path);
     }
 
-    Err("Mita Web Research sidecar script was not found.".to_string())
+    Err("Biyan Web Research sidecar script was not found.".to_string())
 }
 
 fn resolve_playwright_browsers_path<R: Runtime>(app: &AppHandle<R>) -> Option<PathBuf> {
@@ -1106,7 +1106,7 @@ pub async fn kill_orphaned_mcp_process_with_app<R: Runtime>(
 
     if !jan_utils::network::is_orphaned_mcp_process(&process_info) {
         log::warn!(
-            "Port {} occupied by non-Mita process '{}' (PID {})",
+            "Port {} occupied by non-Biyan process '{}' (PID {})",
             port,
             process_info.name,
             process_info.pid

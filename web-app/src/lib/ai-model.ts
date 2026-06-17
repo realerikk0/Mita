@@ -113,7 +113,7 @@ export function createLanguageModel(
       ...(provider.provider === 'openrouter'
         ? {
             'HTTP-Referer': 'https://github.com/realerikk0/Mita',
-            'X-Title': 'Mita',
+            'X-Title': 'Biyan',
           }
         : {}),
     },

@@ -36,7 +36,7 @@ export default memo(function DropdownToolsAvailable({
   onOpenChange,
 }: DropdownToolsAvailableProps) {
   const allTools = useAppState((state) => state.tools)
-  // Filter out internal Mita Web Research tools from the manual tool picker.
+  // Filter out internal Biyan Web Research tools from the manual tool picker.
   const tools = allTools.filter((tool) => !isBrowserMCPServerName(tool.server))
   const [isOpen, setIsOpen] = useState(false)
   const { t } = useTranslation()

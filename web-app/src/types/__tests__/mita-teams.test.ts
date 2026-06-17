@@ -217,7 +217,7 @@ describe('mita teams metadata', () => {
     })
     const instructions = renderMitaTeamsSystemInstructions(config)
 
-    expect(instructions).toContain('Mita Teams mode is active')
+    expect(instructions).toContain('Biyan Teams mode is active')
     expect(instructions).toContain('Task template: Code')
     expect(instructions).toContain('Act as the Coordinator')
     expect(instructions).toContain('suggest specific roles or channels')

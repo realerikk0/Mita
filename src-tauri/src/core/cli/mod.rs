@@ -334,11 +334,13 @@ pub fn discover_llamacpp_binary() -> Option<PathBuf> {
 /// Find the mlx-server binary.
 ///
 /// Checks standard locations in order:
-///   1. `/Applications/Mita.app/Contents/Resources/bin/mlx-server` (installed app)
+///   1. `/Applications/Biyan.app/Contents/Resources/bin/mlx-server` (installed app)
 ///   2. Next to the running binary (for dev/custom installs)
 pub fn discover_mlx_binary() -> Option<PathBuf> {
-    // 1. Standard macOS app bundle locations (try both path variants)
+    // 1. Standard macOS app bundle locations (try current and legacy path variants)
     for candidate in &[
+        "/Applications/Biyan.app/Contents/Resources/resources/bin/mlx-server",
+        "/Applications/Biyan.app/Contents/Resources/bin/mlx-server",
         "/Applications/Mita.app/Contents/Resources/resources/bin/mlx-server",
         "/Applications/Mita.app/Contents/Resources/bin/mlx-server",
     ] {

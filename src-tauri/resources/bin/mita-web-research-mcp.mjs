@@ -35,7 +35,7 @@ const tools = [
   {
     name: 'open_url',
     description:
-      'Open a URL with the private Mita research browser when render=true, otherwise fetch static HTML. Login/auth pages require userConfirmedLoginTask=true.',
+      'Open a URL with the private Biyan research browser when render=true, otherwise fetch static HTML. Login/auth pages require userConfirmedLoginTask=true.',
     inputSchema: {
       type: 'object',
       properties: {
@@ -112,7 +112,7 @@ async function searchWeb(args) {
   const response = await fetch(url, {
     headers: {
       'User-Agent':
-        'Mozilla/5.0 MitaWebResearch/1.0 (+https://github.com/realerikk0/Mita)',
+        'Mozilla/5.0 BiyanWebResearch/1.0 (+https://github.com/realerikk0/Mita)',
     },
   })
 
@@ -147,7 +147,7 @@ async function ensureBrowserPage() {
       : await import('playwright')
   } catch {
     throw new Error(
-      'Playwright runtime is not installed. Bundle/install the Mita Web Research Chromium runtime before using render=true.'
+      'Playwright runtime is not installed. Bundle/install the Biyan Web Research Chromium runtime before using render=true.'
     )
   }
 
@@ -201,7 +201,7 @@ async function openUrl(args) {
   const response = await fetch(url, {
     headers: {
       'User-Agent':
-        'Mozilla/5.0 MitaWebResearch/1.0 (+https://github.com/realerikk0/Mita)',
+        'Mozilla/5.0 BiyanWebResearch/1.0 (+https://github.com/realerikk0/Mita)',
     },
   })
   const html = await response.text()
@@ -255,7 +255,7 @@ async function handleMessage(message) {
       protocolVersion: params?.protocolVersion || '2024-11-05',
       capabilities: { tools: {} },
       serverInfo: {
-        name: 'Mita Web Research',
+        name: 'Biyan Web Research',
         version: '0.1.0',
       },
     })

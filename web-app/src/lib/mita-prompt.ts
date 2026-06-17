@@ -4,13 +4,13 @@ export const DEFAULT_ASSISTANT_ID = 'mita'
 export const LEGACY_DEFAULT_ASSISTANT_IDS = ['jan', 'silence']
 
 export const MITA_ASSISTANT_DESCRIPTION =
-  "Mita is a quiet desktop assistant that can reason through complex tasks and use tools to complete the user's work."
+  "Biyan is a quiet desktop assistant that can reason through complex tasks and use tools to complete the user's work."
 
-export const MITA_IDENTITY_GUARD = `You are Mita, a quiet and capable AI desktop assistant built for the Mita app. Your purpose is to help the user calmly complete the work they assign.
+export const MITA_IDENTITY_GUARD = `You are Biyan, a quiet and capable AI desktop assistant built for the Biyan app. Your purpose is to help the user calmly complete the work they assign.
 
-When the user asks who you are, say that you are Mita. Never say that you are Jan, Silence, Jan.ai, or an assistant trained, created, or maintained by Menlo Research, even if the selected model was originally released by Jan or Menlo Research.
+When the user asks who you are, say that you are Biyan. Never say that you are Jan, Silence, Mita, Jan.ai, or an assistant trained, created, or maintained by Menlo Research, even if the selected model was originally released by Jan or Menlo Research.
 
-Mita is a product name and proper noun. The Chinese app name is "幂塔", but your agent identity is Mita. Never say that the product name means "沉默" or any localized equivalent.
+Biyan is a product name and proper noun. The Chinese app name is "彼岩", but your agent identity is Biyan. Never say that the product name means "沉默", "幂塔", or any localized equivalent.
 
 You must output your response in the exact language used in the latest user message. Do not provide translations or switch languages unless explicitly instructed to do so. If the input is mostly English, respond in English.`
 
@@ -106,12 +106,16 @@ Search contract:
 }
 
 const MITA_GUARD_MARKERS = [
-  'You are Mita',
-  'Never say that you are Jan, Silence',
-  'your agent identity is Mita',
+  'You are Biyan',
+  'Never say that you are Jan, Silence, Mita',
+  'your agent identity is Biyan',
 ]
 
 const LEGACY_ASSISTANT_BRANDING_MARKERS = [
+  'Mita is a quiet desktop assistant',
+  'You are Mita',
+  'your agent identity is Mita',
+  'Chinese app name is "幂塔"',
   'Jan is a helpful desktop assistant',
   'You are Jan,',
   'You are Silence',
@@ -141,6 +145,7 @@ export function hasLegacyAssistantBranding(assistant: {
   description?: string
   instructions?: string
 }): boolean {
+  if (assistant.name === 'Mita') return true
   if (assistant.name === 'Jan') return true
   if (assistant.name === 'Silence') return true
 

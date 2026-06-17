@@ -11,6 +11,7 @@
       <string>uk.jingxing.mita</string>
       <key>CFBundleURLSchemes</key>
       <array>
+        <string>biyan</string>
         <string>mita</string>
         <string>silence</string>
       </array>

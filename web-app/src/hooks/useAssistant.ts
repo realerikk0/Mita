@@ -37,7 +37,7 @@ const setLastUsedAssistantId = (assistantId: string) => {
 
 export const defaultAssistant: Assistant = {
   id: DEFAULT_ASSISTANT_ID,
-  name: 'Mita',
+  name: 'Biyan',
   created_at: 1747029866.542,
   parameters: {
     temperature: 0.7,

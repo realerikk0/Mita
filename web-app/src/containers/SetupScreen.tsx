@@ -267,7 +267,7 @@ function SetupScreen() {
       <div className="flex flex-1 items-center justify-center px-4">
         <div className="w-full max-w-md space-y-5">
           <div className="space-y-2 text-center">
-            <h1 className="font-studio text-3xl font-medium">幂塔</h1>
+            <h1 className="font-studio text-3xl font-medium">彼岩</h1>
             <p className="text-sm text-muted-foreground">
               安安静静地完成主人交代的工作
             </p>
@@ -278,7 +278,7 @@ function SetupScreen() {
               <div className="space-y-1">
                 <div className="text-sm font-medium">Model Provider</div>
                 <div className="text-xs text-muted-foreground">
-                  选择一个服务商，幂塔会拉取可用模型并开始聊天。
+                  选择一个服务商，彼岩会拉取可用模型并开始聊天。
                 </div>
               </div>
               <Button

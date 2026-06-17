@@ -89,7 +89,7 @@ pub fn resolve_path_within_mita_data_folder(
 
     if !canonical_path.starts_with(&canonical_data) {
         return Err(format!(
-            "Path {} is outside of Mita data folder {}",
+            "Path {} is outside of Biyan data folder {}",
             canonical_path.display(),
             canonical_data.display()
         ));

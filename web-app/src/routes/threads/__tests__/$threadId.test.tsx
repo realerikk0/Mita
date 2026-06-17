@@ -680,17 +680,17 @@ describe('ThreadDetail route', () => {
     expect(screen.getByTestId('chat-status')).toHaveTextContent('ready')
   })
 
-  it('injects Mita identity prompt even when thread has no assistant', () => {
+  it('injects Biyan identity prompt even when thread has no assistant', () => {
     renderComponent()
 
     expect(h.useChatArgs.at(-1)?.systemMessage).toContain(
-      'rendered:You are Mita'
+      'rendered:You are Biyan'
     )
     expect(h.useChatArgs.at(-1)?.systemMessage).toContain(
       'Never say that you are Jan'
     )
     expect(h.useChatArgs.at(-1)?.systemMessage).toContain(
-      'your agent identity is Mita'
+      'your agent identity is Biyan'
     )
     expect(h.useChatArgs.at(-1)?.systemMessage).toContain(
       'assistant-body summary'
@@ -722,7 +722,7 @@ describe('ThreadDetail route', () => {
     expect(systemMessage).toContain('pass the relative folder path')
   })
 
-  it('prepends Mita identity guard to custom assistant instructions', () => {
+  it('prepends Biyan identity guard to custom assistant instructions', () => {
     h.threadsState.threads['thread-1'].assistants = [
       { id: 'custom', name: 'Custom', instructions: 'Use a concise tone.' },
     ]
@@ -730,13 +730,13 @@ describe('ThreadDetail route', () => {
     renderComponent()
 
     expect(h.useChatArgs.at(-1)?.systemMessage).toContain(
-      'rendered:You are Mita'
+      'rendered:You are Biyan'
     )
     expect(h.useChatArgs.at(-1)?.systemMessage).toContain(
       'Never say that you are Jan'
     )
     expect(h.useChatArgs.at(-1)?.systemMessage).toContain(
-      'your agent identity is Mita'
+      'your agent identity is Biyan'
     )
     expect(h.useChatArgs.at(-1)?.systemMessage).toContain('Use a concise tone.')
   })
@@ -906,7 +906,7 @@ describe('ThreadDetail route', () => {
     expect(screen.getByTestId('prompt-progress')).toBeInTheDocument()
   })
 
-  it('does not inject normal chat PromptProgress into Mita Teams while submitted', () => {
+  it('does not inject normal chat PromptProgress into Biyan Teams while submitted', () => {
     const baseConfig = createDefaultMitaTeamsConfig({
       provider: 'openai',
       id: 'gpt-x',
@@ -1053,7 +1053,7 @@ describe('ThreadDetail route', () => {
     )
   })
 
-  it('answers a pending Mita Teams choice only once on rapid duplicate clicks', async () => {
+  it('answers a pending Biyan Teams choice only once on rapid duplicate clicks', async () => {
     const baseConfig = createDefaultMitaTeamsConfig({
       provider: 'openai',
       id: 'gpt-x',
@@ -1098,7 +1098,7 @@ describe('ThreadDetail route', () => {
     expect(h.mockRunMitaTeamsRuntime).toHaveBeenCalledTimes(1)
   })
 
-  it('approves a Mita Teams plan once without adding a visible synthetic approval message', async () => {
+  it('approves a Biyan Teams plan once without adding a visible synthetic approval message', async () => {
     const baseConfig = createDefaultMitaTeamsConfig({
       provider: 'openai',
       id: 'gpt-x',
@@ -1160,7 +1160,7 @@ describe('ThreadDetail route', () => {
             }),
           }),
         }),
-        userText: expect.stringContaining('Approved Mita Teams plan'),
+        userText: expect.stringContaining('Approved Biyan Teams plan'),
       })
     )
     expect(h.messagesState.addMessage).not.toHaveBeenCalledWith(
@@ -1317,14 +1317,14 @@ describe('ThreadDetail route', () => {
     )
   })
 
-  it('updates the thread title after a completed Mita Teams round', async () => {
+  it('updates the thread title after a completed Biyan Teams round', async () => {
     const baseConfig = createDefaultMitaTeamsConfig({
       provider: 'openai',
       id: 'gpt-x',
     })
     h.threadsState.threads['thread-1'] = {
       ...h.threadsState.threads['thread-1'],
-      title: 'Mita Teams',
+      title: 'Biyan Teams',
       metadata: { mitaTeams: baseConfig },
     }
     h.mockRunMitaTeamsRuntime.mockImplementation(async ({ config }: any) => ({
@@ -1358,7 +1358,7 @@ describe('ThreadDetail route', () => {
     })
   })
 
-  it('routes role chat input to private Mita Teams role history', async () => {
+  it('routes role chat input to private Biyan Teams role history', async () => {
     const baseConfig = createDefaultMitaTeamsConfig({
       provider: 'openai',
       id: 'gpt-x',

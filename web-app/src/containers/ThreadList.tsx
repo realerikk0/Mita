@@ -29,7 +29,7 @@ import { toast } from 'sonner'
 import { cn } from '@/lib/utils'
 import { ThreadMessage } from '@janhq/core'
 
-const INTRO_THREAD_TITLE = 'What is Mita?'
+const INTRO_THREAD_TITLE = 'What is Biyan?'
 const LEGACY_INTRO_THREAD_TITLE = 'What is Jan?'
 const LEGACY_SILENCE_INTRO_THREAD_TITLE = 'What is Silence?'
 
