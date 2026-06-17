@@ -79,6 +79,8 @@ src-tauri/resources/bin/*
 !src-tauri/resources/embedding-models/
 src-tauri/resources/embedding-models/*
 !src-tauri/resources/embedding-models/.gitkeep
+!src-tauri/resources/embedding-models/sentence-transformer-mini/
+!src-tauri/resources/embedding-models/sentence-transformer-mini/model.gguf
 !src-tauri/resources/computer-agent-runner/
 src-tauri/resources/computer-agent-runner/*
 !src-tauri/resources/computer-agent-runner/.gitkeep
