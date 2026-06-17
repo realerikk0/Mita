@@ -98,6 +98,7 @@
       "waitForReferenceImport": "参考图正在导入，请稍后再生成",
       "importReferenceFailed": "导入参考图失败",
       "deleteAssetFailed": "删除图片资产失败",
+      "deleteVideoAssetFailed": "删除视频资产失败",
       "revealAssetFailed": "无法打开图片所在位置",
       "promptCopied": "提示词已复制",
       "referenceLimitReached": "最多可使用 {{count}} 张参考图。",
