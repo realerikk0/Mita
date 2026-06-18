@@ -569,9 +569,11 @@ function overlayRectFromPoints(
   canvas: HTMLCanvasElement
 ) {
   const rect = normalizeCanvasRect(start, end)
-  const bounds = canvas.getBoundingClientRect()
-  const scaleX = bounds.width / Math.max(1, canvas.width)
-  const scaleY = bounds.height / Math.max(1, canvas.height)
+  const displayWidth = canvas.clientWidth || canvas.offsetWidth || canvas.width
+  const displayHeight =
+    canvas.clientHeight || canvas.offsetHeight || canvas.height
+  const scaleX = displayWidth / Math.max(1, canvas.width)
+  const scaleY = displayHeight / Math.max(1, canvas.height)
   return {
     left: rect.x * scaleX,
     top: rect.y * scaleY,
