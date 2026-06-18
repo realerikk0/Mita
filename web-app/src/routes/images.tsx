@@ -4156,6 +4156,45 @@ function Images() {
       ? previewVideoAsset.path
       : serviceHub.core().convertFileSrc(previewVideoAsset.path)
     : ''
+  const downloadPreviewVideo = useCallback(async () => {
+    if (!previewVideoAsset || !previewVideoSrc) return
+
+    const fileName = previewVideoAsset.fileName || 'storyboard-video.mp4'
+    const sourcePath = localDownloadSourcePath(previewVideoAsset.path)
+
+    if (sourcePath) {
+      const extension = downloadExtension(fileName, previewVideoAsset.mimeType)
+      const destination = await serviceHub.dialog().save({
+        fileName,
+        filters: [
+          {
+            name: extension.toUpperCase(),
+            extensions: [extension],
+          },
+        ],
+      })
+      if (!destination) return
+
+      try {
+        await fs.copyFile(sourcePath, destination)
+        toast.success(t('common:toast.downloadComplete.title'), {
+          description: t('common:toast.downloadComplete.description', {
+            item: fileName,
+          }),
+        })
+      } catch (error) {
+        console.error('Failed to download preview video:', error)
+        toast.error(t('common:toast.downloadFailed.title'), {
+          description: t('common:toast.downloadFailed.description', {
+            item: fileName,
+          }),
+        })
+      }
+      return
+    }
+
+    triggerBrowserDownload(previewVideoSrc, fileName)
+  }, [previewVideoAsset, previewVideoSrc, serviceHub, t])
 
   const selectedModelCanEdit = selectedModel?.model
     ? isImageEditModel(selectedModel.model)
@@ -5226,11 +5265,24 @@ function Images() {
               imageT(t, 'storyboard.downloadVideo')}
           </DialogTitle>
           {previewVideoSrc ? (
-            <video
-              controls
-              src={previewVideoSrc}
-              className="max-h-[82vh] w-full bg-black"
-            />
+            <div className="space-y-3">
+              <video
+                controls
+                src={previewVideoSrc}
+                className="max-h-[82vh] w-full bg-black"
+              />
+              <div className="flex justify-end">
+                <Button
+                  type="button"
+                  variant="secondary"
+                  size="sm"
+                  onClick={() => void downloadPreviewVideo()}
+                >
+                  <Download className="size-4" />
+                  {imageT(t, 'storyboard.downloadVideo')}
+                </Button>
+              </div>
+            </div>
           ) : (
             <div className="flex h-[60vh] items-center justify-center text-muted-foreground">
               <Film className="size-8" />
