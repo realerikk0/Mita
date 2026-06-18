@@ -4763,8 +4763,8 @@ function Images() {
         <button
           type="button"
           className="mt-0.5 size-10 shrink-0 rotate-[-7deg] overflow-hidden rounded-sm bg-secondary shadow-sm"
-          onClick={() => editFromAsset(asset)}
-          aria-label={imageT(t, 'useSavedAsset')}
+          onClick={() => setPreviewAsset(asset)}
+          aria-label={t('common:preview')}
         >
           {asset.path ? (
             <img
@@ -4793,21 +4793,26 @@ function Images() {
       </div>
 
       <div className="max-w-[380px] overflow-hidden rounded-lg bg-border">
-        <div className="relative aspect-square bg-secondary">
+        <button
+          type="button"
+          className="relative block aspect-square w-full bg-secondary text-left"
+          aria-label={t('common:preview')}
+          onClick={() => setPreviewAsset(asset)}
+          onContextMenu={(event) => showAssetContextMenu(event, asset)}
+        >
           <ImageTokenUsageBadge usage={asset.usage} />
           {asset.path ? (
             <img
               src={assetSrc(asset)}
               alt={asset.prompt}
               className="size-full object-cover"
-              onContextMenu={(event) => showAssetContextMenu(event, asset)}
             />
           ) : (
             <div className="flex size-full items-center justify-center">
               <ImageIcon className="size-6 text-muted-foreground" />
             </div>
           )}
-        </div>
+        </button>
       </div>
 
       <div className="flex flex-wrap items-center gap-2">
@@ -4925,10 +4930,8 @@ function Images() {
                               <button
                                 type="button"
                                 className="mt-0.5 size-10 shrink-0 rotate-[-7deg] overflow-hidden rounded-sm bg-secondary shadow-sm"
-                                onClick={() =>
-                                  editFromAsset(source, group.prompt)
-                                }
-                                aria-label={imageT(t, 'useSourceImage')}
+                                onClick={() => setPreviewAsset(source)}
+                                aria-label={t('common:preview')}
                               >
                                 {source.path ? (
                                   <img
@@ -5002,14 +5005,21 @@ function Images() {
                                     usage={task.asset?.usage}
                                   />
                                   {task.asset?.path ? (
-                                    <img
-                                      src={assetSrc(task.asset)}
-                                      alt={task.prompt}
-                                      className="size-full object-cover"
+                                    <button
+                                      type="button"
+                                      className="block size-full text-left"
+                                      aria-label={t('common:preview')}
+                                      onClick={() => setPreviewAsset(task.asset!)}
                                       onContextMenu={(event) =>
                                         showAssetContextMenu(event, task.asset!)
                                       }
-                                    />
+                                    >
+                                      <img
+                                        src={assetSrc(task.asset)}
+                                        alt={task.prompt}
+                                        className="size-full object-cover"
+                                      />
+                                    </button>
                                   ) : (
                                     <div className="flex size-full items-center justify-center bg-neutral-100 dark:bg-secondary">
                                       {task.status === 'running' ? (
