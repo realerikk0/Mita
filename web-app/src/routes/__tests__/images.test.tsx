@@ -321,6 +321,8 @@ const translations: Record<string, string> = {
     'Reference image is still importing. Try again in a moment.',
   'common:imageGeneration.toast.importReferenceFailed':
     'Failed to import reference image',
+  'common:imageGeneration.toast.selectEditCapableModel':
+    'Select an image model that supports source images',
   'common:imageGeneration.defaultVariationPrompt':
     'Create a fresh variation of this image.',
   'common:imageGeneration.defaultMultiSourcePrompt':
@@ -2122,6 +2124,115 @@ describe('Images route', () => {
         sourceAssets: [expect.objectContaining({ id: 'asset-1' })],
       })
     )
+  })
+
+  it('switches to an edit-capable model when re-editing a saved image', async () => {
+    h.providers = [
+      {
+        provider: 'jingxing',
+        base_url: 'https://api.jingxing.uk/v1',
+        settings: [],
+        models: [
+          {
+            id: 'gpt-image-1.5',
+            capabilities: [ModelCapabilities.IMAGE_GENERATION],
+          },
+          {
+            id: 'gpt-image-2',
+            capabilities: [
+              ModelCapabilities.IMAGE_GENERATION,
+              ModelCapabilities.IMAGE_TO_IMAGE,
+            ],
+          },
+        ],
+      },
+    ]
+    h.listAssets.mockResolvedValue([
+      {
+        id: 'asset-1',
+        prompt: 'moon desk',
+        mode: 'generate',
+        provider: 'jingxing',
+        model: 'gpt-image-1.5',
+        ratio: '1:1',
+        size: '1024x1024',
+        quality: 'high',
+        sourceAssetIds: [],
+        createdAt: '2026-05-11T00:00:00Z',
+        status: 'succeeded',
+        path: '/tmp/asset.png',
+        fileName: 'image.png',
+        mimeType: 'image/png',
+      },
+    ])
+
+    renderComponent()
+
+    await screen.findByText('moon desk')
+    expect(
+      screen.getByRole('button', { name: 'Image model' })
+    ).toHaveTextContent('gpt-image-1.5')
+
+    fireEvent.click(screen.getByRole('button', { name: 'Re-edit' }))
+
+    await waitFor(() =>
+      expect(
+        screen.getByRole('button', { name: 'Image model' })
+      ).toHaveTextContent('gpt-image-2')
+    )
+    expect(
+      screen.getByRole('button', { name: 'Remove moon desk' })
+    ).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Clear source' })).toBeInTheDocument()
+  })
+
+  it('keeps the composer unchanged when re-edit has no edit-capable model', async () => {
+    h.providers = [
+      {
+        provider: 'jingxing',
+        base_url: 'https://api.jingxing.uk/v1',
+        settings: [],
+        models: [
+          {
+            id: 'gpt-image-1.5',
+            capabilities: [ModelCapabilities.IMAGE_GENERATION],
+          },
+        ],
+      },
+    ]
+    h.listAssets.mockResolvedValue([
+      {
+        id: 'asset-1',
+        prompt: 'moon desk',
+        mode: 'generate',
+        provider: 'jingxing',
+        model: 'gpt-image-1.5',
+        ratio: '1:1',
+        size: '1024x1024',
+        quality: 'high',
+        sourceAssetIds: [],
+        createdAt: '2026-05-11T00:00:00Z',
+        status: 'succeeded',
+        path: '/tmp/asset.png',
+        fileName: 'image.png',
+        mimeType: 'image/png',
+      },
+    ])
+
+    renderComponent()
+
+    await screen.findByText('moon desk')
+    fireEvent.click(screen.getByRole('button', { name: 'Re-edit' }))
+
+    expect(h.toast.error).toHaveBeenCalledWith(
+      'Select an image model that supports source images'
+    )
+    expect(
+      screen.queryByRole('button', { name: 'Remove moon desk' })
+    ).not.toBeInTheDocument()
+    expect(
+      screen.queryByRole('button', { name: 'Clear source' })
+    ).not.toBeInTheDocument()
   })
 
   it('clears the source asset and restores prompt-required generation', async () => {
