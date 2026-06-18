@@ -45,7 +45,7 @@ export async function startNewMitaTeams(navigate: NavigateThread) {
 
   const thread = await useThreads
     .getState()
-    .createThread(model, 'Mita Teams')
+    .createThread(model, 'Biyan Teams')
 
   useThreads.getState().updateThread(thread.id, {
     metadata: {

@@ -63,11 +63,11 @@ pub fn computer_agent_summary(
         name: COMPUTER_AGENT_SERVER_NAME.to_string(),
         capabilities,
         description: if shell_enabled {
-            "Create, read, list, move, trash, open files, and run sandboxed shell commands inside approved Mita Computer Agent roots.".to_string()
+            "Create, read, list, move, trash, open files, and run sandboxed shell commands inside approved Biyan Computer Agent roots.".to_string()
         } else if writes_enabled {
-            "Create, read, list, move, trash, and open files inside approved Mita Computer Agent roots.".to_string()
+            "Create, read, list, move, trash, and open files inside approved Biyan Computer Agent roots.".to_string()
         } else {
-            "Read and list files inside approved Mita Computer Agent roots.".to_string()
+            "Read and list files inside approved Biyan Computer Agent roots.".to_string()
         },
     })
 }
@@ -120,13 +120,13 @@ pub fn computer_agent_tools(settings: &McpSettings, shell_available: bool) -> Ve
     tools.extend(vec![
         tool(
             CREATE_TEXT_FILE,
-            "Create a UTF-8 .txt file. If directory is omitted, Mita creates it in this thread's private agent workspace. Use a short descriptive suggestedName without path separators.",
+            "Create a UTF-8 .txt file. If directory is omitted, Biyan creates it in this thread's private agent workspace. Use a short descriptive suggestedName without path separators.",
             json!({
                 "type": "object",
                 "properties": {
                     "suggestedName": {
                         "type": "string",
-                        "description": "Short human-readable file name suggestion. Mita sanitizes it and appends .txt."
+                        "description": "Short human-readable file name suggestion. Biyan sanitizes it and appends .txt."
                     },
                     "content": {
                         "type": "string",
@@ -143,7 +143,7 @@ pub fn computer_agent_tools(settings: &McpSettings, shell_available: bool) -> Ve
         ),
         tool(
             CREATE_DIRECTORY,
-            "Create a directory. If path is a relative folder name like data, Mita creates it inside this thread's private agent workspace. Absolute paths must be inside an allowed root.",
+            "Create a directory. If path is a relative folder name like data, Biyan creates it inside this thread's private agent workspace. Absolute paths must be inside an allowed root.",
             json!({
                 "type": "object",
                 "properties": {

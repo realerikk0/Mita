@@ -52,9 +52,12 @@ ${StrLoc}
 !define WEBVIEW2BOOTSTRAPPERPATH ""
 !define WEBVIEW2INSTALLERPATH ""
 !define MINIMUMWEBVIEW2VERSION ""
-!define UNINSTKEY "Software\Microsoft\Windows\CurrentVersion\Uninstall\${PRODUCTNAME}"
 !define MANUKEY "Software\${MANUFACTURER}"
+!define UNINSTKEY "Software\Microsoft\Windows\CurrentVersion\Uninstall\${PRODUCTNAME}"
 !define MANUPRODUCTKEY "${MANUKEY}\${PRODUCTNAME}"
+!define LEGACY_PRODUCTNAME "Mita"
+!define LEGACY_UNINSTKEY "Software\Microsoft\Windows\CurrentVersion\Uninstall\${LEGACY_PRODUCTNAME}"
+!define LEGACY_MANUPRODUCTKEY "${MANUKEY}\${LEGACY_PRODUCTNAME}"
 !define UNINSTALLERSIGNCOMMAND "$\"powershell$\" $\"-ExecutionPolicy$\" $\"Bypass$\" $\"-File$\" $\"./sign.ps1$\" $\"%1$\""
 !define ESTIMATEDSIZE "793795"
 !define STARTMENUFOLDER ""
@@ -66,6 +69,8 @@ Var UpdateMode
 Var NoShortcutMode
 Var WixMode
 Var OldMainBinaryName
+Var PreviousUninstKey
+Var PreviousManuProductKey
 
 Name "${PRODUCTNAME}"
 BrandingText "${COPYRIGHT}"
@@ -182,7 +187,9 @@ Function PageReinstall
     IntOp $0 $0 + 1
     ReadRegStr $R0 HKLM "SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall\$1" "DisplayName"
     ReadRegStr $R1 HKLM "SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall\$1" "Publisher"
-    StrCmp "$R0$R1" "${PRODUCTNAME}${MANUFACTURER}" 0 wix_loop
+    StrCmp "$R0$R1" "${PRODUCTNAME}${MANUFACTURER}" wix_match 0
+    StrCmp "$R0$R1" "${LEGACY_PRODUCTNAME}${MANUFACTURER}" 0 wix_loop
+    wix_match:
     ReadRegStr $R0 HKLM "SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall\$1" "UninstallString"
     ${StrCase} $R1 $R0 "L"
     ${StrLoc} $R0 $R1 "msiexec" ">"
@@ -192,9 +199,19 @@ Function PageReinstall
     Goto compare_version
   wix_loop_done:
 
-  ; Check if there is an existing installation, if not, abort the reinstall page
-  ReadRegStr $R0 SHCTX "${UNINSTKEY}" ""
-  ReadRegStr $R1 SHCTX "${UNINSTKEY}" "UninstallString"
+  ; Check if there is an existing installation, including the pre-Biyan Mita registry keys.
+  StrCpy $PreviousUninstKey "${UNINSTKEY}"
+  StrCpy $PreviousManuProductKey "${MANUPRODUCTKEY}"
+  ReadRegStr $R0 SHCTX "$PreviousUninstKey" ""
+  ReadRegStr $R1 SHCTX "$PreviousUninstKey" "UninstallString"
+  ${If} "$R0$R1" == ""
+    ReadRegStr $R0 SHCTX "${LEGACY_UNINSTKEY}" ""
+    ReadRegStr $R1 SHCTX "${LEGACY_UNINSTKEY}" "UninstallString"
+    ${If} "$R0$R1" != ""
+      StrCpy $PreviousUninstKey "${LEGACY_UNINSTKEY}"
+      StrCpy $PreviousManuProductKey "${LEGACY_MANUPRODUCTKEY}"
+    ${EndIf}
+  ${EndIf}
   ${IfThen} "$R0$R1" == "" ${|} Abort ${|}
 
   ; Compare this installar version with the existing installation
@@ -204,7 +221,7 @@ Function PageReinstall
   ${If} $WixMode = 1
     ReadRegStr $R0 HKLM "$R6" "DisplayVersion"
   ${Else}
-    ReadRegStr $R0 SHCTX "${UNINSTKEY}" "DisplayVersion"
+    ReadRegStr $R0 SHCTX "$PreviousUninstKey" "DisplayVersion"
   ${EndIf}
   ${IfThen} $R0 == "" ${|} StrCpy $R4 "$(unknown)" ${|}
 
@@ -336,8 +353,9 @@ Function PageLeaveReinstall
       ReadRegStr $R1 HKLM "$R6" "UninstallString"
       ExecWait '$R1' $0
     ${Else}
-      ReadRegStr $4 SHCTX "${MANUPRODUCTKEY}" ""
-      ReadRegStr $R1 SHCTX "${UNINSTKEY}" "UninstallString"
+      ReadRegStr $4 SHCTX "$PreviousManuProductKey" ""
+      ${IfThen} $4 == "" ${|} StrCpy $4 "$INSTDIR" ${|}
+      ReadRegStr $R1 SHCTX "$PreviousUninstKey" "UninstallString"
       ${IfThen} $UpdateMode = 1 ${|} StrCpy $R1 "$R1 /UPDATE" ${|} ; append /UPDATE
       ${IfThen} $PassiveMode = 1 ${|} StrCpy $R1 "$R1 /P" ${|} ; append /P
       StrCpy $R1 "$R1 _?=$4" ; append uninstall directory
@@ -727,6 +745,10 @@ Section Install
 
   ; Remove old main binary if it doesn't match new main binary name
   ReadRegStr $OldMainBinaryName SHCTX "${UNINSTKEY}" "MainBinaryName"
+  ${If} $OldMainBinaryName == ""
+  ${AndIf} $PreviousUninstKey != ""
+    ReadRegStr $OldMainBinaryName SHCTX "$PreviousUninstKey" "MainBinaryName"
+  ${EndIf}
   ${If} $OldMainBinaryName != ""
   ${AndIf} $OldMainBinaryName != "${MAINBINARYNAME}.exe"
     Delete "$INSTDIR\$OldMainBinaryName"
@@ -744,6 +766,11 @@ Section Install
   WriteRegStr SHCTX "${UNINSTKEY}" "UninstallString" "$\"$INSTDIR\uninstall.exe$\""
   WriteRegDWORD SHCTX "${UNINSTKEY}" "NoModify" "1"
   WriteRegDWORD SHCTX "${UNINSTKEY}" "NoRepair" "1"
+
+  ; Migrate first Biyan installs from the legacy Mita registry identity.
+  DeleteRegKey SHCTX "${LEGACY_UNINSTKEY}"
+  DeleteRegKey SHCTX "${LEGACY_MANUPRODUCTKEY}"
+  DeleteRegKey /ifempty SHCTX "${MANUKEY}"
 
   ${GetSize} "$INSTDIR" "/M=uninstall.exe /S=0K /G=0" $0 $1 $2
   IntOp $0 $0 + ${ESTIMATEDSIZE}
@@ -928,6 +955,8 @@ SectionEnd
 
 Function RestorePreviousInstallLocation
   ReadRegStr $4 SHCTX "${MANUPRODUCTKEY}" ""
+  StrCmp $4 "" 0 +2
+    ReadRegStr $4 SHCTX "${LEGACY_MANUPRODUCTKEY}" ""
   StrCmp $4 "" +2 0
     StrCpy $INSTDIR $4
 FunctionEnd
@@ -948,6 +977,22 @@ Function CreateOrUpdateStartMenuShortcut
   ; migrate old shortcuts to target the new MAINBINARYNAME
   StrCpy $R0 0
 
+  !insertmacro IsShortcutTarget "$SMPROGRAMS\$AppStartMenuFolder\${LEGACY_PRODUCTNAME}.lnk" "$INSTDIR\${MAINBINARYNAME}.exe"
+  Pop $0
+  ${If} $0 = 1
+    !insertmacro UnpinShortcut "$SMPROGRAMS\$AppStartMenuFolder\${LEGACY_PRODUCTNAME}.lnk"
+    Delete "$SMPROGRAMS\$AppStartMenuFolder\${LEGACY_PRODUCTNAME}.lnk"
+    StrCpy $R0 2
+  ${EndIf}
+
+  !insertmacro IsShortcutTarget "$SMPROGRAMS\${LEGACY_PRODUCTNAME}.lnk" "$INSTDIR\${MAINBINARYNAME}.exe"
+  Pop $0
+  ${If} $0 = 1
+    !insertmacro UnpinShortcut "$SMPROGRAMS\${LEGACY_PRODUCTNAME}.lnk"
+    Delete "$SMPROGRAMS\${LEGACY_PRODUCTNAME}.lnk"
+    StrCpy $R0 2
+  ${EndIf}
+
   !insertmacro IsShortcutTarget "$SMPROGRAMS\$AppStartMenuFolder\${PRODUCTNAME}.lnk" "$INSTDIR\$OldMainBinaryName"
   Pop $0
   ${If} $0 = 1
@@ -964,6 +1009,8 @@ Function CreateOrUpdateStartMenuShortcut
 
   ${If} $R0 = 1
     Return
+  ${ElseIf} $R0 = 2
+    Goto create_start_menu_shortcut
   ${EndIf}
 
   ; Skip creating shortcut if in update mode or no shortcut mode
@@ -975,6 +1022,7 @@ Function CreateOrUpdateStartMenuShortcut
     ${EndIf}
   ${EndIf}
 
+  create_start_menu_shortcut:
   !if "${STARTMENUFOLDER}" != ""
     CreateDirectory "$SMPROGRAMS\$AppStartMenuFolder"
     CreateShortcut "$SMPROGRAMS\$AppStartMenuFolder\${PRODUCTNAME}.lnk" "$INSTDIR\${MAINBINARYNAME}.exe"
@@ -988,6 +1036,14 @@ FunctionEnd
 Function CreateOrUpdateDesktopShortcut
   ; We used to use product name as MAINBINARYNAME
   ; migrate old shortcuts to target the new MAINBINARYNAME
+  !insertmacro IsShortcutTarget "$DESKTOP\${LEGACY_PRODUCTNAME}.lnk" "$INSTDIR\${MAINBINARYNAME}.exe"
+  Pop $0
+  ${If} $0 = 1
+    !insertmacro UnpinShortcut "$DESKTOP\${LEGACY_PRODUCTNAME}.lnk"
+    Delete "$DESKTOP\${LEGACY_PRODUCTNAME}.lnk"
+    Goto create_desktop_shortcut
+  ${EndIf}
+
   !insertmacro IsShortcutTarget "$DESKTOP\${PRODUCTNAME}.lnk" "$INSTDIR\$OldMainBinaryName"
   Pop $0
   ${If} $0 = 1
@@ -1004,6 +1060,7 @@ Function CreateOrUpdateDesktopShortcut
     ${EndIf}
   ${EndIf}
 
+  create_desktop_shortcut:
   CreateShortcut "$DESKTOP\${PRODUCTNAME}.lnk" "$INSTDIR\${MAINBINARYNAME}.exe"
   !insertmacro SetLnkAppUserModelId "$DESKTOP\${PRODUCTNAME}.lnk"
 FunctionEnd

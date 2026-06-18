@@ -70,7 +70,7 @@ describe('search decision', () => {
     })
   })
 
-  it('uses high depth for Mita Teams market research role calls', () => {
+  it('uses high depth for Biyan Teams market research role calls', () => {
     const decision = decideMitaTeamsRoleSearch({
       scenarioId: 'market_research',
       roleText: 'Market Analyst investment research',

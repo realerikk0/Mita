@@ -455,21 +455,21 @@ fn windows_runner_refusal_uses_structured_response() {
 #[cfg(windows)]
 #[test]
 fn windows_runner_candidates_include_packaged_resource_path() {
-    let current_exe = Path::new(r"C:\Program Files\Mita\Mita.exe");
-    let manifest_dir = Path::new(r"E:\codexprojects\Mita\src-tauri");
+    let current_exe = Path::new(r"C:\Program Files\Biyan\Biyan.exe");
+    let manifest_dir = Path::new(r"E:\codexprojects\Biyan\src-tauri");
     let candidates = runner_candidate_paths_from(current_exe, Some(manifest_dir));
 
     assert!(candidates.contains(&PathBuf::from(
-        r"C:\Program Files\Mita\resources\bin\mita-computer-agent-runner.exe"
+        r"C:\Program Files\Biyan\resources\bin\mita-computer-agent-runner.exe"
     )));
     assert!(candidates.contains(&PathBuf::from(
-        r"C:\Program Files\Mita\resources\computer-agent-runner\mita-computer-agent-runner.exe"
+        r"C:\Program Files\Biyan\resources\computer-agent-runner\mita-computer-agent-runner.exe"
     )));
     assert!(candidates.contains(&PathBuf::from(
-        r"E:\codexprojects\Mita\src-tauri\resources\computer-agent-runner\mita-computer-agent-runner.exe"
+        r"E:\codexprojects\Biyan\src-tauri\resources\computer-agent-runner\mita-computer-agent-runner.exe"
     )));
     assert!(candidates.contains(&PathBuf::from(
-        r"E:\codexprojects\Mita\src-tauri\target\debug\mita-computer-agent-runner.exe"
+        r"E:\codexprojects\Biyan\src-tauri\target\debug\mita-computer-agent-runner.exe"
     )));
 }
 
@@ -1153,7 +1153,7 @@ fn windows_runner_blocks_real_hkcu_registry_read_write() {
     fs::create_dir_all(&workspace).unwrap();
 
     let key = format!(
-        r"HKCU\Software\MitaComputerRunnerRegistryRegression\{}",
+        r"HKCU\Software\BiyanComputerRunnerRegistryRegression\{}",
         unique_test_id()
     );
     reg_delete_key(&key);

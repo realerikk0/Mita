@@ -46,7 +46,7 @@ export function KeyboardShortcutsProvider() {
     },
   })
 
-  // New Mita Teams
+  // New Biyan Teams
   useKeyboardShortcut({
     ...newMitaTeamsShortcut,
     callback: () => {

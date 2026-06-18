@@ -65,9 +65,9 @@ export function PromptMitaModel() {
   return (
     <div className="fixed bottom-4 right-4 z-50 p-4 shadow-lg bg-background w-4/5 md:w-100 border rounded-lg">
       <div className="flex items-center gap-2">
-        <img src="/images/mita-logo.png" alt="Mita" className="size-5" />
+        <img src="/images/mita-logo.png" alt="Biyan" className="size-5" />
         <h2 className="font-medium">
-          {recommendedModel?.display_name ?? recommendedModel?.model_name ?? 'Mita Model'}
+          {recommendedModel?.display_name ?? recommendedModel?.model_name ?? 'Biyan Model'}
           {defaultVariant && (
           <span className="text-muted-foreground">
             {' '}
@@ -77,7 +77,7 @@ export function PromptMitaModel() {
         </h2>
       </div>
       <p className="mt-2 text-sm text-muted-foreground">
-        Get started with {recommendedModel?.display_name ?? 'Mita'}, our recommended local AI model optimized for your device.
+        Get started with {recommendedModel?.display_name ?? 'Biyan'}, our recommended local AI model optimized for your device.
       </p>
       <div className="mt-4 flex justify-end space-x-2">
         <Button

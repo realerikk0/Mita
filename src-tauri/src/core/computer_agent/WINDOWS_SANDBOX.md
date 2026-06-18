@@ -6,7 +6,7 @@ enforce the same minimum safety boundary as the Linux and macOS runners.
 
 ## Target Boundary
 
-The Windows runner must enforce all of these properties before Mita exposes
+The Windows runner must enforce all of these properties before Biyan exposes
 `computer_agent_run_shell` to normal users:
 
 - The command runs in a separate `mita-computer-agent-runner.exe` process.
@@ -56,7 +56,7 @@ Current implementation:
 
 - `mita-computer-agent-runner.exe` validates the runner request and refuses direct
   execution unless the desktop app supplies its internal broker marker.
-- The Mita app exposes `computer_agent_run_shell` when the runner binary is
+- The Biyan app exposes `computer_agent_run_shell` when the runner binary is
   discoverable and the user has enabled Computer Agent shell in settings. The app
   injects `MITA_COMPUTER_AGENT_RUNNER_EXECUTE=1` only into the runner child
   process after approval.
@@ -73,7 +73,7 @@ Current implementation:
 - It removes the temporary workspace ACL grant and deletes the AppContainer
   profile when the run exits.
 
-The Mita app reports Windows shell as available when the packaged runner is
+The Biyan app reports Windows shell as available when the packaged runner is
 discoverable. The shell tool stays hidden unless the user enables Computer Agent
 and the explicit shell setting; structured Computer Agent file tools still work
 without enabling shell.
@@ -140,7 +140,7 @@ Validation run on 2026-05-16:
   passed.
 - `yarn prepare:computer-agent-runner:release` produced the packaged runner resource.
 - `yarn tauri build --bundles msi` produced
-  `src-tauri/target/release/bundle/msi/Mita_0.6.599_x64_en-US.msi`.
+  `src-tauri/target/release/bundle/msi/Biyan_0.6.599_x64_en-US.msi`.
 - `yarn smoke:computer-agent-shell:win32 --msi --dry-run` verified MSI install,
   runner discovery, and isolated data setup.
 - `yarn smoke:computer-agent-shell:win32 --msi` verified the MSI installed chat path

@@ -957,7 +957,7 @@ mod native {
             sandbox_diagnostic(
                 "stale-sandbox-cleanup",
                 e,
-                "Close running Mita instances, verify workspace permissions, and retry so the runner can remove stale ACL/profile state.",
+                "Close running Biyan instances, verify workspace permissions, and retry so the runner can remove stale ACL/profile state.",
             )
         })?;
 
@@ -1195,8 +1195,8 @@ mod native {
                     .as_millis()
             );
             let name_wide = wide_null(OsStr::new(&name));
-            let display = wide_null(OsStr::new("Mita Computer Runner"));
-            let description = wide_null(OsStr::new("Experimental Mita Computer Agent sandbox"));
+            let display = wide_null(OsStr::new("Biyan Computer Runner"));
+            let description = wide_null(OsStr::new("Experimental Biyan Computer Agent sandbox"));
             let mut sid: PSID = null_mut();
 
             let hr = unsafe {

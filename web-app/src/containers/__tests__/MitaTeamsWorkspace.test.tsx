@@ -630,7 +630,7 @@ describe('MitaTeamsWorkspace', () => {
         userChoiceRequest: {
           id: 'plan-choice-1',
           kind: 'plan_approval',
-          question: 'Review and approve the Mita Teams plan.',
+          question: 'Review and approve the Biyan Teams plan.',
           options: [
             { id: 'approve', label: 'Approve and continue' },
             { id: 'revise', label: 'Modify plan' },
@@ -657,7 +657,7 @@ describe('MitaTeamsWorkspace', () => {
       .toHaveLength(1)
     expect(screen.queryByText('Choose one option to continue')).not.toBeInTheDocument()
     expect(
-      screen.queryByText('Review and approve the Mita Teams plan.')
+      screen.queryByText('Review and approve the Biyan Teams plan.')
     ).not.toBeInTheDocument()
   })
 

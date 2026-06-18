@@ -115,7 +115,7 @@ export function buildDownloadManifest(release, options = {}) {
 
   return {
     schemaVersion: cdnBaseUrl ? 2 : 1,
-    product: 'Mita',
+    product: 'Biyan',
     channel: 'stable',
     tagName,
     version: String(tagName).replace(/^v/, ''),
@@ -147,7 +147,7 @@ export function buildDownloadPage(manifest) {
   const jsonMacosUrl = JSON.stringify(macosUrl)
   const jsonWindowsUrl = JSON.stringify(windowsUrl)
   const hasPlatformRouting = Boolean(manifest.platforms)
-  const downloadLabel = hasPlatformRouting ? 'Mita' : 'GitHub Release'
+  const downloadLabel = hasPlatformRouting ? 'Biyan' : 'GitHub Release'
   const metaRefresh = hasPlatformRouting
     ? ''
     : `  <meta http-equiv="refresh" content="0; url=${escapedUrl}">\n`
@@ -166,7 +166,7 @@ export function buildDownloadPage(manifest) {
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-${metaRefresh}  <title>Mita Download</title>
+${metaRefresh}  <title>Biyan Download</title>
   <style>
     body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; margin: 40px; line-height: 1.6; color: #111827; }
     a { color: #2563eb; }
@@ -223,8 +223,8 @@ async function main() {
   writeDownloadManifest(manifest, manifestOutput)
   writeDownloadPage(buildDownloadPage(manifest), pageOutput)
 
-  console.log(`Wrote Mita download manifest to ${manifestOutput}`)
-  console.log(`Wrote Mita download page to ${pageOutput}`)
+  console.log(`Wrote Biyan download manifest to ${manifestOutput}`)
+  console.log(`Wrote Biyan download page to ${pageOutput}`)
 }
 
 const isMain = process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)

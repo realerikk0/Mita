@@ -50,7 +50,7 @@ describe('useMitaWebResearch', () => {
     expect(result.current.isLoading).toBe(false)
   })
 
-  it('activates Mita Web Research', async () => {
+  it('activates Biyan Web Research', async () => {
     const config = { command: 'mita-web-research', args: [], env: {}, active: false }
     mockMcpServers = {
       [MITA_WEB_RESEARCH_MCP_NAME]: config,
@@ -73,7 +73,7 @@ describe('useMitaWebResearch', () => {
     )
   })
 
-  it('deactivates Mita Web Research', async () => {
+  it('deactivates Biyan Web Research', async () => {
     const config = { command: 'mita-web-research', args: [], env: {}, active: true }
     mockMcpServers = {
       [MITA_WEB_RESEARCH_MCP_NAME]: config,
@@ -105,7 +105,7 @@ describe('useMitaWebResearch', () => {
 
     expect(ok).toBe(false)
     expect(toast.error).toHaveBeenCalledWith(
-      'Mita Web Research not found',
+      'Biyan Web Research not found',
       expect.any(Object)
     )
   })

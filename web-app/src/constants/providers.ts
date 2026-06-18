@@ -49,7 +49,7 @@ export const predefinedProviders = [
         key: 'base-url',
         title: 'Base URL',
         description:
-          'The Biyuan AI OpenAI-compatible endpoint used by Mita.',
+          'The Biyuan AI OpenAI-compatible endpoint used by Biyan.',
         controller_type: 'input',
         controller_props: {
           placeholder: 'https://api.biyuan.ai/v1',

@@ -403,7 +403,7 @@ jobs:
           set -euo pipefail
           mkdir -p dist/updater
 
-          mac_tar="$(find dist -type f -name 'Mita.app.tar.gz' -print -quit)"
+          mac_tar="$(find dist -type f -name 'Biyan.app.tar.gz' -print -quit)"
           if [ -z "$mac_tar" ]; then
             echo "Missing macOS updater tarball (*.app.tar.gz)" >&2
             exit 1
@@ -414,7 +414,7 @@ jobs:
             exit 1
           fi
 
-          win_exe="$(find dist -type f -name 'Mita_*_x64-setup.exe' -print -quit)"
+          win_exe="$(find dist -type f -name 'Biyan_*_x64-setup.exe' -print -quit)"
           if [ -z "$win_exe" ]; then
             echo "Missing Windows updater installer (*_x64-setup.exe)" >&2
             exit 1
@@ -763,7 +763,7 @@ jobs:
       - name: Create draft release
         uses: softprops/action-gh-release@v2
         with:
-          name: Mita ${{ steps.version.outputs.tag }}
+          name: Biyan ${{ steps.version.outputs.tag }}
           tag_name: ${{ steps.version.outputs.tag }}
           draft: true
           prerelease: false

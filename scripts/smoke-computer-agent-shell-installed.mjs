@@ -30,7 +30,7 @@ function parseArgs(argv) {
     installDir: '',
     keepInstall: false,
     dryRun: false,
-    allowRunningMita: false,
+    allowRunningBiyan: false,
     msiScope: 'per-user',
     timeoutMs: 180_000,
   }
@@ -80,8 +80,9 @@ function parseArgs(argv) {
       case '--dry-run':
         options.dryRun = true
         break
+      case '--allow-running-biyan':
       case '--allow-running-mita':
-        options.allowRunningMita = true
+        options.allowRunningBiyan = true
         break
       case '--timeout-ms':
         options.timeoutMs = Number(readValue())
@@ -111,12 +112,12 @@ Options:
   --installer-kind <kind>  Installer kind: nsis or msi. Inferred from --installer extension when omitted.
   --nsis                  Use the newest NSIS setup installer.
   --msi                   Use the newest MSI installer.
-  --app <path>             Existing installed Mita.exe. Skips installer step.
+  --app <path>             Existing installed Biyan.exe. Skips installer step.
   --install-dir <path>     Temporary install directory for NSIS/MSI.
   --msi-scope <scope>      MSI install scope: per-user or all-users. Default: per-user.
   --keep-install           Leave the temporary install directory in place.
   --dry-run                Validate inputs and runner discovery without launching chat.
-  --allow-running-mita     Do not fail if another Mita.exe is already running.
+  --allow-running-biyan    Do not fail if another Biyan.exe is already running.
   --timeout-ms <number>    End-to-end timeout. Default: 180000.
 `)
 }
@@ -191,17 +192,17 @@ function ensureWindows() {
   }
 }
 
-function ensureNoRunningMita(options) {
-  if (options.allowRunningMita) return
+function ensureNoRunningBiyan(options) {
+  if (options.allowRunningBiyan) return
   const processes = powershellJson(`
-    @(Get-Process -Name Mita -ErrorAction SilentlyContinue |
+    @(Get-Process -Name Biyan,Mita -ErrorAction SilentlyContinue |
       Select-Object -ExpandProperty Id) |
       ConvertTo-Json
   `)
   const ids = Array.isArray(processes) ? processes : processes ? [processes] : []
   if (ids.length > 0) {
     fail(
-      `Mita.exe is already running (${ids.join(', ')}). Close it first or pass --allow-running-mita.`
+      `Biyan.exe or legacy Mita.exe is already running (${ids.join(', ')}). Close it first or pass --allow-running-biyan.`
     )
   }
 }
@@ -219,7 +220,7 @@ function createTempRoot() {
     .toISOString()
     .replace(/[-:TZ.]/g, '')
     .slice(0, 14)
-  const root = join(process.env.TEMP ?? process.cwd(), `MitaComputerSmoke-${stamp}-${process.pid}`)
+  const root = join(process.env.TEMP ?? process.cwd(), `BiyanComputerSmoke-${stamp}-${process.pid}`)
   mkdirSync(root, { recursive: true })
   return root
 }
@@ -228,8 +229,8 @@ function snapshotInstallArtifacts() {
   return powershellJson(`
     $ErrorActionPreference = 'Stop'
     $shell = New-Object -ComObject WScript.Shell
-    $key = 'HKCU:\\Software\\Microsoft\\Windows\\CurrentVersion\\Uninstall\\Mita'
-    $appKey = 'HKCU:\\Software\\Jingxing\\Mita'
+    $key = 'HKCU:\\Software\\Microsoft\\Windows\\CurrentVersion\\Uninstall\\Biyan'
+    $appKey = 'HKCU:\\Software\\Jingxing\\Biyan'
     $registry = $null
     if (Test-Path -LiteralPath $key) {
       $item = Get-ItemProperty -LiteralPath $key
@@ -257,10 +258,10 @@ function snapshotInstallArtifacts() {
     }
 
     $shortcutPaths = @(
-      (Join-Path ([Environment]::GetFolderPath('Desktop')) 'Mita.lnk'),
-      (Join-Path ([Environment]::GetFolderPath('CommonDesktopDirectory')) 'Mita.lnk'),
-      (Join-Path ([Environment]::GetFolderPath('Programs')) 'Mita.lnk'),
-      (Join-Path ([Environment]::GetFolderPath('CommonPrograms')) 'Mita.lnk')
+      (Join-Path ([Environment]::GetFolderPath('Desktop')) 'Biyan.lnk'),
+      (Join-Path ([Environment]::GetFolderPath('CommonDesktopDirectory')) 'Biyan.lnk'),
+      (Join-Path ([Environment]::GetFolderPath('Programs')) 'Biyan.lnk'),
+      (Join-Path ([Environment]::GetFolderPath('CommonPrograms')) 'Biyan.lnk')
     ) | Select-Object -Unique
 
     $shortcuts = @()
@@ -303,8 +304,8 @@ function snapshotInstallArtifacts() {
 function clearInstallArtifactsForTemporaryInstall() {
   powershell(`
     $paths = @(
-      'HKCU:\\Software\\Jingxing\\Mita',
-      'HKCU:\\Software\\Microsoft\\Windows\\CurrentVersion\\Uninstall\\Mita'
+      'HKCU:\\Software\\Jingxing\\Biyan',
+      'HKCU:\\Software\\Microsoft\\Windows\\CurrentVersion\\Uninstall\\Biyan'
     )
     foreach ($path in $paths) {
       if (Test-Path -LiteralPath $path) {
@@ -323,8 +324,8 @@ function restoreInstallArtifacts(snapshot, tempRoot) {
   powershell(`
     $ErrorActionPreference = 'Stop'
     $snapshot = Get-Content -LiteralPath ${JSON.stringify(snapshotPath)} -Raw | ConvertFrom-Json
-    $key = 'HKCU:\\Software\\Microsoft\\Windows\\CurrentVersion\\Uninstall\\Mita'
-    $appKey = 'HKCU:\\Software\\Jingxing\\Mita'
+    $key = 'HKCU:\\Software\\Microsoft\\Windows\\CurrentVersion\\Uninstall\\Biyan'
+    $appKey = 'HKCU:\\Software\\Jingxing\\Biyan'
 
     if ($snapshot.RegistryExists) {
       Remove-Item -LiteralPath $key -Recurse -Force -ErrorAction SilentlyContinue
@@ -383,9 +384,11 @@ function restoreInstallArtifacts(snapshot, tempRoot) {
   `)
 }
 
-function findInstalledMitaFromRegistry() {
+function findInstalledBiyanFromRegistry() {
   const installDirs = powershellJson(`
     $paths = @(
+      'HKCU:\\Software\\Jingxing\\Biyan',
+      'HKLM:\\Software\\Jingxing\\Biyan',
       'HKCU:\\Software\\Jingxing\\Mita',
       'HKLM:\\Software\\Jingxing\\Mita'
     )
@@ -403,7 +406,7 @@ function findInstalledMitaFromRegistry() {
 
   const dirs = Array.isArray(installDirs) ? installDirs : installDirs ? [installDirs] : []
   return dirs
-    .map((dir) => join(dir, 'Mita.exe'))
+    .flatMap((dir) => [join(dir, 'Biyan.exe'), join(dir, 'Mita.exe')])
     .find((candidate) => existsSync(candidate))
 }
 
@@ -416,11 +419,12 @@ function installNsis(installer, installDir) {
   log(`Installing ${installer} to ${installDir}`)
   run(installer, ['/S', `/D=${installDir}`], { cwd: dirname(installer) })
 
-  const appPath = join(installDir, 'Mita.exe')
-  if (!existsSync(appPath)) {
-    fail(`Installer completed but Mita.exe was not found at ${appPath}`)
+  const appPath = join(installDir, 'Biyan.exe')
+  const legacyAppPath = join(installDir, 'Mita.exe')
+  if (!existsSync(appPath) && !existsSync(legacyAppPath)) {
+    fail(`Installer completed but Biyan.exe was not found at ${appPath}`)
   }
-  return appPath
+  return existsSync(appPath) ? appPath : legacyAppPath
 }
 
 function installMsi(installer, installDir, scope, tempRoot) {
@@ -449,13 +453,13 @@ function installMsi(installer, installDir, scope, tempRoot) {
     ...properties,
   ])
 
-  const appPath = join(installDir, 'Mita.exe')
+  const appPath = join(installDir, 'Biyan.exe')
   if (existsSync(appPath)) return appPath
 
-  const registryAppPath = findInstalledMitaFromRegistry()
+  const registryAppPath = findInstalledBiyanFromRegistry()
   if (registryAppPath) return registryAppPath
 
-  fail(`MSI completed but Mita.exe was not found at ${appPath}. MSI log: ${logPath}`)
+  fail(`MSI completed but Biyan.exe was not found at ${appPath}. MSI log: ${logPath}`)
 }
 
 function uninstallMsi(installer, tempRoot) {
@@ -1014,7 +1018,7 @@ async function runChatSmoke(appPath, tempRoot, dataDir, allowedRoot, timeoutMs) 
 async function main() {
   ensureWindows()
   const options = parseArgs(process.argv.slice(2))
-  ensureNoRunningMita(options)
+  ensureNoRunningBiyan(options)
 
   const tempRoot = createTempRoot()
   const installSnapshot = snapshotInstallArtifacts()
@@ -1067,7 +1071,7 @@ async function main() {
   try {
     restoreAppConfig(appConfigSnapshot)
   } catch (error) {
-    log(`Could not restore Mita app config: ${error instanceof Error ? error.message : String(error)}`)
+    log(`Could not restore Biyan app config: ${error instanceof Error ? error.message : String(error)}`)
   }
 
   if (!options.keepInstall && msiInstallerForCleanup) {

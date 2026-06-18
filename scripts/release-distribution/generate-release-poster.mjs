@@ -61,11 +61,11 @@ export function buildPosterPrompt(release, highlights = extractPosterHighlights(
   const fixLines = highlights.fixes.map((item) => `- ${item}`).join('\n')
   const fixesBlock = fixLines || '- 稳定性与细节体验优化'
 
-  return `为 Mita 桌面版生成一张中文新版本发布宣传海报。
+  return `为彼岩桌面版生成一张中文新版本发布宣传海报。
 
 画面要求：
 - 竖版海报，适合飞书群通知展示，清爽高级，有桌面软件发布感。
-- 品牌名 Mita 要清晰，标题使用“Mita 桌面版新版本来啦”。
+- 品牌名彼岩/Biyan 要清晰，标题使用“彼岩桌面版新版本来啦”。
 - 视觉风格克制、现代、科技感，浅色背景，橙红色作为重点色。
 - 海报中需要有两个信息区：“本次更新”和“问题修复”。
 - 中文文字尽量清晰可读，不要出现无关品牌、水印或二维码。
@@ -308,7 +308,7 @@ export async function generateReleasePoster(release, options) {
     baseUrl: options.baseUrl,
     size: DEFAULT_SIZE,
     quality: DEFAULT_QUALITY,
-    title: 'Mita 桌面版新版本来啦',
+    title: '彼岩桌面版新版本来啦',
     highlights,
     prompt,
     ...image,

@@ -250,7 +250,7 @@ async function generateCompactSummary({
   for (let index = 0; index < chunks.length; index++) {
     const prompt = [
       runningSummary
-        ? `Existing cumulative Mita compact summary:\n\n${runningSummary}`
+        ? `Existing cumulative Biyan compact summary:\n\n${runningSummary}`
         : '',
       `Conversation chunk ${index + 1} of ${chunks.length} to compact:\n\n${chunks[index]}`,
       'Return the updated complete compact summary, not only a delta.',

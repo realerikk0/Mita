@@ -168,7 +168,7 @@ export function decideChatSearch(options: {
       intent: text.match(/来源|信源|引用|cite|citation|source/i)
         ? 'citation_required'
         : 'explicit_search',
-      reason: 'The user explicitly asked Mita to search or cite sources.',
+      reason: 'The user explicitly asked Biyan to search or cite sources.',
     })
   }
 

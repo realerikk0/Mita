@@ -85,11 +85,11 @@ impl CustomUpdater {
         })
     }
 
-    /// Build User-Agent header: Mita/{version} ({os}; {arch})
+    /// Build User-Agent header: Biyan/{version} ({os}; {arch})
     fn build_user_agent(app_version: &str) -> String {
         let os = std::env::consts::OS;
         let arch = std::env::consts::ARCH;
-        format!("Mita/{} ({}; {})", app_version, os, arch)
+        format!("Biyan/{} ({}; {})", app_version, os, arch)
     }
 
     /// Check for updates using endpoints list

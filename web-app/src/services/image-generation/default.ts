@@ -861,7 +861,7 @@ export class DefaultImageGenerationService implements ImageGenerationService {
         const status = response.status ? ` (${response.status})` : ''
         const progress = response.progress ? ` at ${response.progress}` : ''
         throw new Error(
-          `Provider returned async image task${taskId}${status}${progress}, but no image data was returned yet. Mita currently needs data[].b64_json or data[].url to save the asset.`
+          `Provider returned async image task${taskId}${status}${progress}, but no image data was returned yet. Biyan currently needs data[].b64_json or data[].url to save the asset.`
         )
       }
       throw new Error('Image response did not include any image data')

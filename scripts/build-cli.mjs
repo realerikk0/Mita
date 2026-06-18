@@ -75,4 +75,4 @@ const destination = join(destinationDir, cliBinaryName)
 mkdirSync(destinationDir, { recursive: true })
 copyFileSync(source, destination)
 
-console.log(`Prepared Mita CLI: ${destination}`)
+console.log(`Prepared Biyan CLI: ${destination}`)

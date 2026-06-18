@@ -61,7 +61,7 @@
   "enterNameForProvider": "输入提供商名称",
   "apiKeys": {
     "title": "API 密钥",
-    "description": "输入您的 API 密钥。可以在高级设置中添加备用密钥，某个密钥失败时幂塔 会自动尝试下一个。",
+    "description": "输入您的 API 密钥。可以在高级设置中添加备用密钥，某个密钥失败时彼岩 会自动尝试下一个。",
     "placeholder": "sk-…\nsk-…",
     "primaryPlaceholder": "输入主 API 密钥",
     "keyPlaceholder": "输入 API 密钥",
@@ -73,7 +73,7 @@
     "hideAdvanced": "隐藏高级",
     "oneKeyHint": "备用密钥可在高级设置中配置。",
     "retryHintPrefix": "主密钥是",
-    "retryHintSuffix": "幂塔 仅在以下状态码时重试下一个密钥：",
+    "retryHintSuffix": "彼岩 仅在以下状态码时重试下一个密钥：",
     "addKey": "添加密钥",
     "removeKey": "移除密钥"
   }

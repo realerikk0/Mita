@@ -38,6 +38,7 @@ import { isRouterModelSelectable } from '@/lib/mcp-router-model-filter'
 import { normalizeAppError } from '@/utils/appError'
 import {
   LEGACY_JAN_BROWSER_MCP_NAME,
+  LEGACY_MITA_WEB_RESEARCH_MCP_NAME,
   LEGACY_SILENCE_BROWSER_MCP_NAME,
   LEGACY_SILENCE_WEB_RESEARCH_MCP_NAME,
   MITA_WEB_RESEARCH_MCP_NAME,
@@ -643,7 +644,7 @@ function MCPServersDesktop() {
                             <div className="flex items-center gap-1.5 px-2 py-0.5 text-xs bg-secondary border rounded-sm">
                               <img
                                 src="/images/mita-logo.png"
-                                alt="Mita"
+                                alt="Biyan"
                                 className="w-3 h-3 object-contain"
                               />
                               <span>Official</span>
@@ -684,14 +685,15 @@ function MCPServersDesktop() {
                                     <p>
                                       Uses the bundled private browser runtime and does not read your system browser profile.
                                     </p>
-                                  ) : key === LEGACY_SILENCE_WEB_RESEARCH_MCP_NAME ||
+                                  ) : key === LEGACY_MITA_WEB_RESEARCH_MCP_NAME ||
+                                    key === LEGACY_SILENCE_WEB_RESEARCH_MCP_NAME ||
                                     key === LEGACY_SILENCE_BROWSER_MCP_NAME ||
                                     key === LEGACY_JAN_BROWSER_MCP_NAME ? (
                                     <p>
-                                      Legacy browser MCP configuration. It will be migrated to Mita Web Research on restart.
+                                      Legacy browser MCP configuration. It will be migrated to Biyan Web Research on restart.
                                     </p>
                                   ) : (
-                                    <p>Official Mita MCP server.</p>
+                                    <p>Official Biyan MCP server.</p>
                                   )}
                                 </div>
                               )}

@@ -274,12 +274,12 @@ function computerAgentApprovalDetails(
 
   const riskSummary =
     runsShell
-      ? 'Runs a local shell command in Mita sandbox limits.'
+      ? 'Runs a local shell command in Biyan sandbox limits.'
       : trashesPath
         ? 'Moves a local file or folder to the system trash.'
         : opensPath
           ? 'Opens a local path with the operating system.'
-          : 'Reads or modifies files inside Mita Computer Agent roots.'
+          : 'Reads or modifies files inside Biyan Computer Agent roots.'
 
   return {
     alwaysConfirm: true,
@@ -491,24 +491,24 @@ function ThreadDetail() {
     : threadModel
   const [isEditingMitaTeamsTitle, setIsEditingMitaTeamsTitle] = useState(false)
   const [mitaTeamsTitleDraft, setMitaTeamsTitleDraft] = useState(
-    thread?.title || 'Mita Teams'
+    thread?.title || 'Biyan Teams'
   )
 
   useEffect(() => {
     if (!isEditingMitaTeamsTitle) {
-      setMitaTeamsTitleDraft(thread?.title || 'Mita Teams')
+      setMitaTeamsTitleDraft(thread?.title || 'Biyan Teams')
     }
   }, [isEditingMitaTeamsTitle, thread?.title])
 
   const commitMitaTeamsTitle = useCallback(() => {
-    const nextTitle = mitaTeamsTitleDraft.trim() || 'Mita Teams'
+    const nextTitle = mitaTeamsTitleDraft.trim() || 'Biyan Teams'
     if (nextTitle !== thread?.title) {
       updateThread(threadId, { title: nextTitle })
     }
     setIsEditingMitaTeamsTitle(false)
   }, [mitaTeamsTitleDraft, thread?.title, threadId, updateThread])
 
-  // Always include the Mita identity guard so model-native Jan/Menlo
+  // Always include the Biyan identity guard so model-native Jan/Menlo
   // personas do not leak when a thread has no assigned assistant.
   const threadAssistant = thread?.assistants?.[0]
   const systemMessage = renderInstructions(
@@ -520,7 +520,7 @@ Tool result communication:
 - Summarize the result in readable prose or bullets. For failures, state the error briefly and say what you will try next.
 - Use the structured tool-calling channel only. Never write pseudo tool transcripts such as <tool_call>, <tool_response>, or web_search({...}) in normal assistant text.
 - If the structured tool channel is unavailable, say that you cannot use that tool right now instead of simulating a tool call or result.
-- If Mita converts a pseudo tool transcript into a real tool call, summarize only the real tool output that Mita provides.${
+- If Biyan converts a pseudo tool transcript into a real tool call, summarize only the real tool output that Biyan provides.${
       mitaTeamsConfig
         ? `\n\n${renderMitaTeamsSystemInstructions(mitaTeamsConfig)}`
         : ''
@@ -528,7 +528,7 @@ Tool result communication:
       computerAgentEnabled
         ? `\n\nComputer Agent guidance:
 - Prefer structured computer tools for file and folder work.
-- If the user asks to create a file without a path, omit the directory so Mita uses the private thread workspace.
+- If the user asks to create a file without a path, omit the directory so Biyan uses the private thread workspace.
 - When the user asks to create a folder in the current workspace and gives only a name, call computer_agent_create_directory and pass the relative folder path, for example "data".
 - Relative Computer Agent paths resolve inside the private thread workspace. Use absolute paths only when the user supplies or approves an allowed root.
 - Do not invent absolute paths. Ask for a folder or use the thread workspace when the user gives no path.
@@ -1118,7 +1118,7 @@ Tool result communication:
         }
       } catch (error) {
         const message =
-          error instanceof Error ? error.message : 'Mita Teams failed'
+          error instanceof Error ? error.message : 'Biyan Teams failed'
         toast.error(message)
       } finally {
         if (mitaTeamsAbortRef.current === controller) {
@@ -1168,7 +1168,7 @@ Tool result communication:
         }
       } catch (error) {
         const message =
-          error instanceof Error ? error.message : 'Mita Teams role chat failed'
+          error instanceof Error ? error.message : 'Biyan Teams role chat failed'
         toast.error(message)
       } finally {
         if (mitaTeamsAbortRef.current === controller) {
@@ -2052,7 +2052,7 @@ Tool result communication:
 
     mitaTeamsAnsweredChoiceIdsRef.current.add(approvalKey)
     const nextConfig = approveMitaTeamsPlan(mitaTeamsConfig)
-    const userText = `Approved Mita Teams plan "${plan.goal}". Continue with the approved role snapshot.`
+    const userText = `Approved Biyan Teams plan "${plan.goal}". Continue with the approved role snapshot.`
 
     persistMitaTeamsConfig(nextConfig)
     void startMitaTeamsRuntime(nextConfig, userText)
@@ -2662,7 +2662,7 @@ Tool result communication:
                     event.currentTarget.blur()
                   }
                   if (event.key === 'Escape') {
-                    setMitaTeamsTitleDraft(thread?.title || 'Mita Teams')
+                    setMitaTeamsTitleDraft(thread?.title || 'Biyan Teams')
                     setIsEditingMitaTeamsTitle(false)
                   }
                 }}
@@ -2676,7 +2676,7 @@ Tool result communication:
                 onClick={() => setIsEditingMitaTeamsTitle(true)}
                 title={t('mita-teams:editActivityTitle')}
               >
-                <span className="truncate">{thread?.title || 'Mita Teams'}</span>
+                <span className="truncate">{thread?.title || 'Biyan Teams'}</span>
               </Button>
             )}
           </div>

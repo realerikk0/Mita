@@ -1412,7 +1412,7 @@ const ChatInput = memo(function ChatInput({
 
           if (missingPathFiles.length > 0) {
             toast.error('Cannot attach dropped documents', {
-              description: `Mita needs local file paths for ${missingPathFiles.join(', ')}. Use the document picker instead.`,
+              description: `Biyan needs local file paths for ${missingPathFiles.join(', ')}. Use the document picker instead.`,
             })
           }
 

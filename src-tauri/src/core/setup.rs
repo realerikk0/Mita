@@ -199,14 +199,14 @@ pub fn migrate_mcp_servers(
         }
     }
     if mcp_version < 2 {
-        log::info!("Migrating MCP schema version 2: Adding Mita Web Research");
+        log::info!("Migrating MCP schema version 2: Adding Biyan Web Research");
         let result = add_server_config(
             app_handle.clone(),
             MITA_WEB_RESEARCH_MCP_NAME.to_string(),
             default_web_research_mcp_config(),
         );
         if let Err(e) = result {
-            log::error!("Failed to add Mita Web Research server config: {e}");
+            log::error!("Failed to add Biyan Web Research server config: {e}");
         }
     }
     if mcp_version < 3 {
@@ -223,10 +223,10 @@ pub fn migrate_mcp_servers(
     }
     if mcp_version < 5 {
         log::info!(
-            "Migrating MCP schema version 5: Replacing Browser MCP with Mita Web Research"
+            "Migrating MCP schema version 5: Replacing Browser MCP with Biyan Web Research"
         );
         if let Err(e) = migrate_browser_mcp_to_web_research(app_handle.clone()) {
-            log::error!("Failed to migrate Browser MCP to Mita Web Research: {e}");
+            log::error!("Failed to migrate Browser MCP to Biyan Web Research: {e}");
         }
     }
     store.set("mcp_version", 5);
@@ -427,7 +427,7 @@ pub fn setup_mcp<R: Runtime>(app: &App<R>) {
 
 #[cfg(feature = "desktop")]
 pub fn setup_tray(app: &App) -> tauri::Result<TrayIcon> {
-    let show_i = MenuItem::with_id(app.handle(), "open", "Open Mita", true, None::<&str>)?;
+    let show_i = MenuItem::with_id(app.handle(), "open", "Open Biyan", true, None::<&str>)?;
     let quit_i = MenuItem::with_id(app.handle(), "quit", "Quit", true, None::<&str>)?;
     let separator_i = PredefinedMenuItem::separator(app.handle())?;
     let menu = Menu::with_items(app.handle(), &[&show_i, &separator_i, &quit_i])?;

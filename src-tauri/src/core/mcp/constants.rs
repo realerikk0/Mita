@@ -1,6 +1,7 @@
 use serde_json::{json, Map, Value};
 
-pub const MITA_WEB_RESEARCH_MCP_NAME: &str = "Mita Web Research";
+pub const MITA_WEB_RESEARCH_MCP_NAME: &str = "Biyan Web Research";
+pub const LEGACY_MITA_WEB_RESEARCH_MCP_NAME: &str = "Mita Web Research";
 pub const LEGACY_SILENCE_WEB_RESEARCH_MCP_NAME: &str = "Silence Web Research";
 pub const LEGACY_SILENCE_BROWSER_MCP_NAME: &str = "Silence Browser MCP";
 pub const LEGACY_JAN_BROWSER_MCP_NAME: &str = "Jan Browser MCP";
@@ -9,6 +10,7 @@ pub fn is_browser_mcp_name(name: &str) -> bool {
     matches!(
         name,
         MITA_WEB_RESEARCH_MCP_NAME
+            | LEGACY_MITA_WEB_RESEARCH_MCP_NAME
             | LEGACY_SILENCE_WEB_RESEARCH_MCP_NAME
             | LEGACY_SILENCE_BROWSER_MCP_NAME
             | LEGACY_JAN_BROWSER_MCP_NAME
@@ -25,17 +27,19 @@ pub fn default_web_research_mcp_config() -> Value {
         "active": false,
         "official": true,
         "capabilities": ["web", "search", "browser"],
-        "description": "Mita built-in web research tools using a private browser profile."
+        "description": "Biyan built-in web research tools using a private browser profile."
     })
 }
 
 pub fn normalize_browser_mcp_server_key(mcp_servers: &mut Map<String, Value>) -> bool {
     let has_web_research = mcp_servers.contains_key(MITA_WEB_RESEARCH_MCP_NAME);
+    let legacy_mita_web_research_config = mcp_servers.remove(LEGACY_MITA_WEB_RESEARCH_MCP_NAME);
     let legacy_silence_web_research_config =
         mcp_servers.remove(LEGACY_SILENCE_WEB_RESEARCH_MCP_NAME);
     let legacy_silence_browser_config = mcp_servers.remove(LEGACY_SILENCE_BROWSER_MCP_NAME);
     let legacy_jan_config = mcp_servers.remove(LEGACY_JAN_BROWSER_MCP_NAME);
-    let legacy_config = legacy_silence_web_research_config
+    let legacy_config = legacy_mita_web_research_config
+        .or(legacy_silence_web_research_config)
         .or(legacy_silence_browser_config)
         .or(legacy_jan_config);
 
@@ -65,7 +69,7 @@ pub const DEFAULT_MCP_MAX_RECONNECT_ATTEMPTS: u32 = 3;
 
 pub const DEFAULT_MCP_CONFIG: &str = r#"{
   "mcpServers": {
-    "Mita Web Research": {
+    "Biyan Web Research": {
       "command": "mita-web-research",
       "args": [],
       "env": {
@@ -74,7 +78,7 @@ pub const DEFAULT_MCP_CONFIG: &str = r#"{
       "active": false,
       "official": true,
       "capabilities": ["web", "search", "browser"],
-      "description": "Mita built-in web research tools using a private browser profile."
+      "description": "Biyan built-in web research tools using a private browser profile."
     },
     "exa": {
       "type": "http",

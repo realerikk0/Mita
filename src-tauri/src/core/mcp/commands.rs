@@ -7,8 +7,9 @@ use tokio::time::timeout;
 use super::{
     constants::{
         is_browser_mcp_name, normalize_browser_mcp_server_key, DEFAULT_MCP_CONFIG,
-        LEGACY_JAN_BROWSER_MCP_NAME, LEGACY_SILENCE_BROWSER_MCP_NAME,
-        LEGACY_SILENCE_WEB_RESEARCH_MCP_NAME, MITA_WEB_RESEARCH_MCP_NAME,
+        LEGACY_JAN_BROWSER_MCP_NAME, LEGACY_MITA_WEB_RESEARCH_MCP_NAME,
+        LEGACY_SILENCE_BROWSER_MCP_NAME, LEGACY_SILENCE_WEB_RESEARCH_MCP_NAME,
+        MITA_WEB_RESEARCH_MCP_NAME,
     },
     helpers::{restart_active_mcp_servers, start_mcp_server},
 };
@@ -169,6 +170,7 @@ pub async fn deactivate_mcp_server<R: Runtime>(
         active_servers
             .get(&name)
             .or_else(|| active_servers.get(MITA_WEB_RESEARCH_MCP_NAME))
+            .or_else(|| active_servers.get(LEGACY_MITA_WEB_RESEARCH_MCP_NAME))
             .or_else(|| active_servers.get(LEGACY_SILENCE_WEB_RESEARCH_MCP_NAME))
             .or_else(|| active_servers.get(LEGACY_SILENCE_BROWSER_MCP_NAME))
             .or_else(|| active_servers.get(LEGACY_JAN_BROWSER_MCP_NAME))
@@ -183,6 +185,7 @@ pub async fn deactivate_mcp_server<R: Runtime>(
         let mut active_servers = state.mcp_active_servers.lock().await;
         if is_browser_mcp_name(&name) {
             active_servers.remove(MITA_WEB_RESEARCH_MCP_NAME);
+            active_servers.remove(LEGACY_MITA_WEB_RESEARCH_MCP_NAME);
             active_servers.remove(LEGACY_SILENCE_WEB_RESEARCH_MCP_NAME);
             active_servers.remove(LEGACY_SILENCE_BROWSER_MCP_NAME);
             active_servers.remove(LEGACY_JAN_BROWSER_MCP_NAME);
@@ -199,6 +202,10 @@ pub async fn deactivate_mcp_server<R: Runtime>(
         name.clone()
     } else if is_browser_mcp_name(&name) && servers_map.contains_key(MITA_WEB_RESEARCH_MCP_NAME) {
         MITA_WEB_RESEARCH_MCP_NAME.to_string()
+    } else if is_browser_mcp_name(&name)
+        && servers_map.contains_key(LEGACY_MITA_WEB_RESEARCH_MCP_NAME)
+    {
+        LEGACY_MITA_WEB_RESEARCH_MCP_NAME.to_string()
     } else if is_browser_mcp_name(&name)
         && servers_map.contains_key(LEGACY_SILENCE_WEB_RESEARCH_MCP_NAME)
     {
@@ -716,7 +723,7 @@ fn get_result_text(result: &rmcp::model::CallToolResult) -> Option<&str> {
         .map(|t| t.text.as_str())
 }
 
-/// Check if Mita Web Research is connected via MCP.
+/// Check if Biyan Web Research is connected via MCP.
 #[tauri::command]
 pub async fn check_mita_web_research_connected(state: State<'_, AppState>) -> Result<bool, String> {
     let servers = state.mcp_servers.lock().await;

@@ -141,7 +141,7 @@ function messageText(message: UIMessage) {
 function compactTaskText(messages: UIMessage[], fallback?: string) {
   const firstUserMessage = messages.find((message) => message.role === 'user')
   const text = firstUserMessage ? messageText(firstUserMessage) : ''
-  const source = text || fallback || 'Mita Teams workspace'
+  const source = text || fallback || 'Biyan Teams workspace'
   return source.length > 160 ? `${source.slice(0, 157)}...` : source
 }
 

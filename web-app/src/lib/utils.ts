@@ -160,7 +160,7 @@ export function getProviderLogo(provider: string) {
 export const getProviderTitle = (provider: string) => {
   switch (provider) {
     case 'jan':
-      return 'Mita'
+      return 'Biyan'
     case 'llamacpp':
       return 'Llama.cpp'
     case 'mlx':

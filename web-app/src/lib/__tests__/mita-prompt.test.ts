@@ -1,9 +1,32 @@
 import { describe, expect, it } from 'vitest'
 
 import {
+  ensureMitaIdentityGuard,
+  hasMitaIdentityGuard,
   getToolAwareSystemMessage,
   MITA_ASSISTANT_INSTRUCTIONS,
+  MITA_IDENTITY_GUARD,
 } from '../mita-prompt'
+
+describe('Biyan assistant identity', () => {
+  it('uses Biyan and 彼岩 as the current assistant brand', () => {
+    expect(MITA_IDENTITY_GUARD).toContain('You are Biyan')
+    expect(MITA_IDENTITY_GUARD).toContain('say that you are Biyan')
+    expect(MITA_IDENTITY_GUARD).toContain('Chinese app name is "彼岩"')
+    expect(MITA_IDENTITY_GUARD).not.toContain('You are Mita')
+    expect(MITA_IDENTITY_GUARD).not.toContain('Chinese app name is "幂塔"')
+  })
+
+  it('recognizes and inserts the Biyan identity guard', () => {
+    expect(hasMitaIdentityGuard(MITA_ASSISTANT_INSTRUCTIONS)).toBe(true)
+
+    const guarded = ensureMitaIdentityGuard('Answer briefly.')
+
+    expect(guarded).toContain('You are Biyan')
+    expect(guarded).toContain('Never say that you are Jan, Silence, Mita')
+    expect(guarded).toContain('Answer briefly.')
+  })
+})
 
 describe('getToolAwareSystemMessage', () => {
   it('removes legacy plain-text search hints when no real tool channel is enabled', () => {
