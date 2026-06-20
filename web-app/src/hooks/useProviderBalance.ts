@@ -237,6 +237,15 @@ function clearProviderBalanceStorage(providerName?: string) {
   }
 }
 
+function dispatchProviderBalanceRefresh(providerName?: string) {
+  if (typeof window === 'undefined') return
+  window.dispatchEvent(
+    new CustomEvent(PROVIDER_BALANCE_REFRESH_EVENT, {
+      detail: { provider: providerName },
+    })
+  )
+}
+
 export function notifyProviderBalanceMayHaveChanged(providerName?: string) {
   if (providerName) {
     for (const key of balanceCache.keys()) {
@@ -255,12 +264,7 @@ export function notifyProviderBalanceMayHaveChanged(providerName?: string) {
   }
   clearProviderBalanceStorage(providerName)
 
-  if (typeof window === 'undefined') return
-  window.dispatchEvent(
-    new CustomEvent(PROVIDER_BALANCE_REFRESH_EVENT, {
-      detail: { provider: providerName },
-    })
-  )
+  dispatchProviderBalanceRefresh(providerName)
 }
 
 export function useProviderBalance(
@@ -368,10 +372,19 @@ export function useProviderBalance(
     }
   }, [enabled, fetchBalance, provider])
 
+  const refetch = useCallback(() => {
+    if (provider?.provider && enabled && typeof window !== 'undefined') {
+      dispatchProviderBalanceRefresh(provider.provider)
+      return
+    }
+
+    void fetchBalance(true)
+  }, [enabled, fetchBalance, provider?.provider])
+
   return {
     balance,
     loading,
     error,
-    refetch: () => fetchBalance(true),
+    refetch,
   }
 }

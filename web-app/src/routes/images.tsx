@@ -18,6 +18,7 @@ import {
   FolderOpen,
   Image as ImageIcon,
   Loader2,
+  Move,
   Music,
   Minus,
   MoreHorizontal,
@@ -281,7 +282,7 @@ export type StoryboardSession = {
   videoAsset?: VideoAssetRecord
 }
 
-type StoryboardEditorTool = 'pen' | 'rect' | 'crop'
+type StoryboardEditorTool = 'pan' | 'pen' | 'rect' | 'crop'
 
 type CanvasPoint = {
   x: number
@@ -1475,9 +1476,16 @@ function StoryboardImageEditorDialog({
 }) {
   const { t } = useTranslation()
   const canvasRef = useRef<HTMLCanvasElement | null>(null)
+  const editorViewportRef = useRef<HTMLDivElement | null>(null)
   const drawingRef = useRef<{
     start: CanvasPoint
     last: CanvasPoint
+  } | null>(null)
+  const panRef = useRef<{
+    clientX: number
+    clientY: number
+    scrollLeft: number
+    scrollTop: number
   } | null>(null)
   const [tool, setTool] = useState<StoryboardEditorTool>('pen')
   const [color, setColor] = useState<(typeof STORYBOARD_EDITOR_COLORS)[number]>(
@@ -1489,6 +1497,7 @@ function StoryboardImageEditorDialog({
   )
   const [ready, setReady] = useState(false)
   const [saving, setSaving] = useState(false)
+  const [panning, setPanning] = useState(false)
   const [history, setHistory] = useState<string[]>([])
   const [historyIndex, setHistoryIndex] = useState(-1)
   const [draftRect, setDraftRect] = useState<{
@@ -1554,6 +1563,7 @@ function StoryboardImageEditorDialog({
     setSaving(false)
     setTool('pen')
     setZoom(1)
+    setPanning(false)
     setDraftRect(null)
 
     const image = new Image()
@@ -1612,6 +1622,25 @@ function StoryboardImageEditorDialog({
 
   const beginDraw = (event: ReactPointerEvent<HTMLCanvasElement>) => {
     if (!ready || !canvasRef.current) return
+
+    if (tool === 'pan') {
+      const viewport = editorViewportRef.current
+      if (!viewport) return
+      panRef.current = {
+        clientX: event.clientX,
+        clientY: event.clientY,
+        scrollLeft: viewport.scrollLeft,
+        scrollTop: viewport.scrollTop,
+      }
+      setPanning(true)
+      try {
+        event.currentTarget.setPointerCapture(event.pointerId)
+      } catch {
+        // Pointer capture is unavailable in some test environments.
+      }
+      return
+    }
+
     const canvas = canvasRef.current
     const point = canvasPointFromEvent(event, canvas)
     drawingRef.current = { start: point, last: point }
@@ -1642,6 +1671,15 @@ function StoryboardImageEditorDialog({
   }
 
   const continueDraw = (event: ReactPointerEvent<HTMLCanvasElement>) => {
+    const panState = panRef.current
+    if (tool === 'pan' && panState) {
+      const viewport = editorViewportRef.current
+      if (!viewport) return
+      viewport.scrollLeft = panState.scrollLeft - (event.clientX - panState.clientX)
+      viewport.scrollTop = panState.scrollTop - (event.clientY - panState.clientY)
+      return
+    }
+
     const state = drawingRef.current
     const canvas = canvasRef.current
     if (!state || !canvas) return
@@ -1662,6 +1700,17 @@ function StoryboardImageEditorDialog({
   }
 
   const finishDraw = (event: ReactPointerEvent<HTMLCanvasElement>) => {
+    if (tool === 'pan') {
+      panRef.current = null
+      setPanning(false)
+      try {
+        event.currentTarget.releasePointerCapture(event.pointerId)
+      } catch {
+        // Pointer capture is unavailable in some test environments.
+      }
+      return
+    }
+
     const state = drawingRef.current
     const canvas = canvasRef.current
     const context = currentContext()
@@ -1735,6 +1784,7 @@ function StoryboardImageEditorDialog({
     labelKey: string
     icon: typeof Pencil
   }> = [
+    { value: 'pan', labelKey: 'storyboard.editor.pan', icon: Move },
     { value: 'pen', labelKey: 'storyboard.editor.pen', icon: Pencil },
     { value: 'rect', labelKey: 'storyboard.editor.rect', icon: Square },
     { value: 'crop', labelKey: 'storyboard.editor.crop', icon: Crop },
@@ -1866,6 +1916,7 @@ function StoryboardImageEditorDialog({
           </aside>
 
           <div
+            ref={editorViewportRef}
             className="min-w-0 flex-1 overflow-auto bg-[#f4f5f7] p-6"
             onWheel={handleWheel}
           >
@@ -1878,12 +1929,19 @@ function StoryboardImageEditorDialog({
                   ref={setCanvasElement}
                   className={cn(
                     'block max-h-none max-w-none rounded-lg bg-white shadow-sm',
-                    tool === 'pen' ? 'cursor-crosshair' : 'cursor-cell',
+                    tool === 'pan'
+                      ? panning
+                        ? 'cursor-grabbing'
+                        : 'cursor-grab'
+                      : tool === 'pen'
+                        ? 'cursor-crosshair'
+                        : 'cursor-cell',
                     !ready && 'opacity-40'
                   )}
                   onPointerDown={beginDraw}
                   onPointerMove={continueDraw}
                   onPointerUp={finishDraw}
+                  onPointerCancel={finishDraw}
                 />
                 {draftRect && (
                   <div
@@ -4067,6 +4125,19 @@ function Images() {
               <Plus className="size-3.5" />
             </button>
           </div>
+
+          {sourceAssets.length > 0 && (
+            <Button
+              type="button"
+              variant="ghost"
+              size="sm"
+              className="h-[30px] px-2.5 text-xs text-muted-foreground"
+              onClick={() => setSourceAssetIds([])}
+            >
+              <X className="size-3.5" />
+              {imageT(t, 'clearSource')}
+            </Button>
+          )}
         </div>
 
         <div className="flex shrink-0 items-center">
@@ -4158,10 +4229,53 @@ function Images() {
       ? previewVideoAsset.path
       : serviceHub.core().convertFileSrc(previewVideoAsset.path)
     : ''
+  const downloadPreviewVideo = useCallback(async () => {
+    if (!previewVideoAsset || !previewVideoSrc) return
+
+    const fileName = previewVideoAsset.fileName || 'storyboard-video.mp4'
+    const sourcePath = localDownloadSourcePath(previewVideoAsset.path)
+
+    if (sourcePath) {
+      const extension = downloadExtension(fileName, previewVideoAsset.mimeType)
+      const destination = await serviceHub.dialog().save({
+        fileName,
+        filters: [
+          {
+            name: extension.toUpperCase(),
+            extensions: [extension],
+          },
+        ],
+      })
+      if (!destination) return
+
+      try {
+        await fs.copyFile(sourcePath, destination)
+        toast.success(t('common:toast.downloadComplete.title'), {
+          description: t('common:toast.downloadComplete.description', {
+            item: fileName,
+          }),
+        })
+      } catch (error) {
+        console.error('Failed to download preview video:', error)
+        toast.error(t('common:toast.downloadFailed.title'), {
+          description: t('common:toast.downloadFailed.description', {
+            item: fileName,
+          }),
+        })
+      }
+      return
+    }
+
+    triggerBrowserDownload(previewVideoSrc, fileName)
+  }, [previewVideoAsset, previewVideoSrc, serviceHub, t])
 
   const selectedModelCanEdit = selectedModel?.model
     ? isImageEditModel(selectedModel.model)
     : false
+  const editCapableImageModel = useMemo(
+    () => imageModels.find(({ model }) => isImageEditModel(model)),
+    [imageModels]
+  )
 
   const inferredMode = useMemo<ImageGenerationMode>(() => {
     if (sourceAssets.length === 0) return 'generate'
@@ -4577,6 +4691,14 @@ function Images() {
 
   const editFromAsset = useCallback(
     (asset: ImageAssetRecord, nextPrompt?: string) => {
+      if (!selectedModelCanEdit) {
+        if (!editCapableImageModel) {
+          toast.error(imageT(t, 'toast.selectEditCapableModel'))
+          return
+        }
+        setSelectedModelKey(imageModelKey(editCapableImageModel))
+      }
+
       if (
         !sourceAssetIds.includes(asset.id) &&
         sourceAssetIds.length >= MAX_REFERENCE_IMAGES
@@ -4588,7 +4710,14 @@ function Images() {
       addSourceAssets([asset])
       setPrompt(nextPrompt ?? asset.prompt)
     },
-    [addSourceAssets, showReferenceLimitToast, sourceAssetIds]
+    [
+      addSourceAssets,
+      editCapableImageModel,
+      selectedModelCanEdit,
+      showReferenceLimitToast,
+      sourceAssetIds,
+      t,
+    ]
   )
 
   const importReferenceAssets = useCallback(async () => {
@@ -4765,8 +4894,8 @@ function Images() {
         <button
           type="button"
           className="mt-0.5 size-10 shrink-0 rotate-[-7deg] overflow-hidden rounded-sm bg-secondary shadow-sm"
-          onClick={() => editFromAsset(asset)}
-          aria-label={imageT(t, 'useSavedAsset')}
+          onClick={() => setPreviewAsset(asset)}
+          aria-label={t('common:preview')}
         >
           {asset.path ? (
             <img
@@ -4795,21 +4924,26 @@ function Images() {
       </div>
 
       <div className="max-w-[380px] overflow-hidden rounded-lg bg-border">
-        <div className="relative aspect-square bg-secondary">
+        <button
+          type="button"
+          className="relative block aspect-square w-full bg-secondary text-left"
+          aria-label={t('common:preview')}
+          onClick={() => setPreviewAsset(asset)}
+          onContextMenu={(event) => showAssetContextMenu(event, asset)}
+        >
           <ImageTokenUsageBadge usage={asset.usage} />
           {asset.path ? (
             <img
               src={assetSrc(asset)}
               alt={asset.prompt}
               className="size-full object-cover"
-              onContextMenu={(event) => showAssetContextMenu(event, asset)}
             />
           ) : (
             <div className="flex size-full items-center justify-center">
               <ImageIcon className="size-6 text-muted-foreground" />
             </div>
           )}
-        </div>
+        </button>
       </div>
 
       <div className="flex flex-wrap items-center gap-2">
@@ -4927,10 +5061,8 @@ function Images() {
                               <button
                                 type="button"
                                 className="mt-0.5 size-10 shrink-0 rotate-[-7deg] overflow-hidden rounded-sm bg-secondary shadow-sm"
-                                onClick={() =>
-                                  editFromAsset(source, group.prompt)
-                                }
-                                aria-label={imageT(t, 'useSourceImage')}
+                                onClick={() => setPreviewAsset(source)}
+                                aria-label={t('common:preview')}
                               >
                                 {source.path ? (
                                   <img
@@ -5004,14 +5136,21 @@ function Images() {
                                     usage={task.asset?.usage}
                                   />
                                   {task.asset?.path ? (
-                                    <img
-                                      src={assetSrc(task.asset)}
-                                      alt={task.prompt}
-                                      className="size-full object-cover"
+                                    <button
+                                      type="button"
+                                      className="block size-full text-left"
+                                      aria-label={t('common:preview')}
+                                      onClick={() => setPreviewAsset(task.asset!)}
                                       onContextMenu={(event) =>
                                         showAssetContextMenu(event, task.asset!)
                                       }
-                                    />
+                                    >
+                                      <img
+                                        src={assetSrc(task.asset)}
+                                        alt={task.prompt}
+                                        className="size-full object-cover"
+                                      />
+                                    </button>
                                   ) : (
                                     <div className="flex size-full items-center justify-center bg-neutral-100 dark:bg-secondary">
                                       {task.status === 'running' ? (
@@ -5228,11 +5367,24 @@ function Images() {
               imageT(t, 'storyboard.downloadVideo')}
           </DialogTitle>
           {previewVideoSrc ? (
-            <video
-              controls
-              src={previewVideoSrc}
-              className="max-h-[82vh] w-full bg-black"
-            />
+            <div className="space-y-3">
+              <video
+                controls
+                src={previewVideoSrc}
+                className="max-h-[82vh] w-full bg-black"
+              />
+              <div className="flex justify-end">
+                <Button
+                  type="button"
+                  variant="secondary"
+                  size="sm"
+                  onClick={() => void downloadPreviewVideo()}
+                >
+                  <Download className="size-4" />
+                  {imageT(t, 'storyboard.downloadVideo')}
+                </Button>
+              </div>
+            </div>
           ) : (
             <div className="flex h-[60vh] items-center justify-center text-muted-foreground">
               <Film className="size-8" />

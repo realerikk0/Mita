@@ -16,6 +16,10 @@ const h = vi.hoisted(() => ({
   renameThread: vi.fn(),
   toastError: vi.fn(),
   toggleThreadPinned: vi.fn(),
+  location: {
+    pathname: '/threads/thread-1',
+    search: {},
+  } as { pathname: string; search: Record<string, string> },
 }))
 
 vi.mock('@tanstack/react-router', () => ({
@@ -29,6 +33,8 @@ vi.mock('@tanstack/react-router', () => ({
       : ''
     return <a href={`${resolvedPath}${query}`}>{children}</a>
   },
+  useRouterState: ({ select }: { select: (state: any) => any }) =>
+    select({ location: h.location }),
 }))
 
 vi.mock('@/i18n/react-i18next-compat', () => ({
@@ -94,7 +100,11 @@ vi.mock('@/components/ui/sidebar', () => ({
   SidebarGroupLabel: ({ children }: any) => <h2>{children}</h2>,
   SidebarMenu: ({ children }: any) => <ul>{children}</ul>,
   SidebarMenuAction: ({ children }: any) => <button>{children}</button>,
-  SidebarMenuButton: ({ children }: any) => <li>{children}</li>,
+  SidebarMenuButton: ({ children, className, isActive }: any) => (
+    <li className={className} data-active={isActive ? 'true' : 'false'}>
+      {children}
+    </li>
+  ),
   SidebarMenuItem: ({ children }: any) => <>{children}</>,
 }))
 
@@ -159,6 +169,10 @@ describe('NavChats history stream', () => {
     h.renameThread.mockClear()
     h.toastError.mockClear()
     h.toggleThreadPinned.mockClear()
+    h.location = {
+      pathname: '/threads/thread-1',
+      search: {},
+    }
     useImageGenerationStore.getState().reset()
   })
 
@@ -236,6 +250,36 @@ describe('NavChats history stream', () => {
 
     expect(await screen.findByText('generated image')).toBeInTheDocument()
     expect(screen.queryByText('reference image')).not.toBeInTheDocument()
+  })
+
+  it('marks the currently opened media history entry as selected', async () => {
+    h.location = {
+      pathname: '/images',
+      search: { media: 'image', assetId: 'image-active' },
+    }
+    h.imageAssets = [
+      {
+        id: 'image-active',
+        prompt: 'selected generated image',
+        createdAt: '2026-06-06T00:00:00Z',
+        assetKind: 'generated',
+      },
+      {
+        id: 'image-other',
+        prompt: 'other generated image',
+        createdAt: '2026-06-05T00:00:00Z',
+        assetKind: 'generated',
+      },
+    ]
+
+    render(<NavChats />)
+
+    const activeRow = (await screen.findByText('selected generated image'))
+      .closest('li')
+    const inactiveRow = screen.getByText('other generated image').closest('li')
+    expect(activeRow).toHaveAttribute('data-active', 'true')
+    expect(activeRow?.className).toContain('border-sidebar-primary/45')
+    expect(inactiveRow).toHaveAttribute('data-active', 'false')
   })
 
   it('keeps pinned chats above recent history and toggles pin state from the row menu', async () => {
