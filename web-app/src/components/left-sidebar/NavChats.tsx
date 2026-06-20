@@ -44,10 +44,11 @@ import { useServiceHub } from "@/hooks/useServiceHub"
 import { useImageGenerationStore } from "@/stores/image-generation-store"
 import type { ImageAssetRecord } from "@/services/image-generation/types"
 import type { VideoAssetRecord } from "@/services/video-generation/types"
-import { Link } from "@tanstack/react-router"
+import { Link, useRouterState } from "@tanstack/react-router"
 import { route } from "@/constants/routes"
 import { DeleteThreadDialog, RenameThreadDialog } from "@/containers/dialogs"
 import { toast } from "sonner"
+import { cn } from "@/lib/utils"
 
 type HistoryEntry =
   | {
@@ -128,6 +129,37 @@ function sortHistoryEntries(a: HistoryEntry, b: HistoryEntry) {
   return b.updatedAt - a.updatedAt
 }
 
+function searchParamValue(search: unknown, key: string) {
+  if (!search) return undefined
+  if (typeof search === 'string') {
+    return new URLSearchParams(search.startsWith('?') ? search.slice(1) : search)
+      .get(key) ?? undefined
+  }
+  if (search instanceof URLSearchParams) {
+    return search.get(key) ?? undefined
+  }
+  if (typeof search !== 'object') return undefined
+
+  const value = (search as Record<string, unknown>)[key]
+  return typeof value === 'string' ? value : undefined
+}
+
+function historyEntryIsActive(
+  entry: HistoryEntry,
+  pathname: string,
+  search: unknown
+) {
+  if (isThreadHistoryEntry(entry)) {
+    return pathname === `/threads/${entry.id}`
+  }
+
+  if (pathname !== route.images) return false
+  if (entry.mediaType === 'image') {
+    return searchParamValue(search, 'assetId') === entry.id
+  }
+  return searchParamValue(search, 'videoId') === entry.id
+}
+
 function SectionLabel({ children }: { children: ReactNode }) {
   return (
     <SidebarMenuItem>
@@ -140,12 +172,14 @@ function SectionLabel({ children }: { children: ReactNode }) {
 
 function HistoryItem({
   entry,
+  active,
   onTogglePin,
   onRename,
   onDelete,
   onDeleteMedia,
 }: {
   entry: HistoryEntry
+  active: boolean
   onTogglePin: (threadId: string) => void
   onRename: (threadId: string, title: string) => void
   onDelete: (threadId: string) => void
@@ -179,7 +213,15 @@ function HistoryItem({
 
   return (
     <SidebarMenuItem>
-      <SidebarMenuButton asChild className="pr-8">
+      <SidebarMenuButton
+        asChild
+        isActive={active}
+        className={cn(
+          'pr-8 border border-transparent',
+          active &&
+            'border-sidebar-primary/45 bg-sidebar-accent text-sidebar-accent-foreground shadow-sm ring-1 ring-sidebar-primary/25'
+        )}
+      >
         {entry.kind === 'media' ? (
           <Link to={entry.to} search={entry.search}>
             {content}
@@ -295,6 +337,9 @@ function HistoryItem({
 
 export function NavChats() {
   const { t } = useTranslation()
+  const location = useRouterState({
+    select: (state) => state.location,
+  })
   const serviceHub = useServiceHub()
   const getFilteredThreads = useThreads((state) => state.getFilteredThreads)
   const threads = useThreads((state) => state.threads)
@@ -462,6 +507,11 @@ export function NavChats() {
               <HistoryItem
                 key={`${entry.kind}-${entry.id}`}
                 entry={entry}
+                active={historyEntryIsActive(
+                  entry,
+                  location.pathname,
+                  location.search
+                )}
                 onTogglePin={toggleThreadPinned}
                 onRename={renameThread}
                 onDelete={deleteThread}
@@ -477,6 +527,11 @@ export function NavChats() {
           <HistoryItem
             key={`${entry.kind}-${entry.id}`}
             entry={entry}
+            active={historyEntryIsActive(
+              entry,
+              location.pathname,
+              location.search
+            )}
             onTogglePin={toggleThreadPinned}
             onRename={renameThread}
             onDelete={deleteThread}
