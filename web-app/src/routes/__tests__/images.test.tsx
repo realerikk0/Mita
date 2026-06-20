@@ -843,11 +843,29 @@ describe('Images route', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Redo' }))
 
     fireEvent.click(screen.getByRole('button', { name: 'Crop' }))
-    fireCanvasPointer('pointerdown', 5, 5, 2)
-    fireCanvasPointer('pointermove', 45, 30, 2)
-    fireCanvasPointer('pointerup', 45, 30, 2)
-    await waitFor(() => expect(canvas.width).toBe(40))
-    expect(canvas.height).toBe(25)
+    rectSpy.mockReturnValue({
+      bottom: 90,
+      height: 90,
+      left: 0,
+      right: 160,
+      top: 0,
+      width: 160,
+      x: 0,
+      y: 0,
+      toJSON: () => ({}),
+    })
+    fireCanvasPointer('pointerdown', 20, 20, 2)
+    fireCanvasPointer('pointermove', 70, 50, 2)
+    const cropOverlay = document.querySelector('.border-dashed') as HTMLElement
+    expect(cropOverlay).toHaveStyle({
+      left: '10px',
+      top: '10px',
+      width: '25px',
+      height: '15px',
+    })
+    fireCanvasPointer('pointerup', 70, 50, 2)
+    await waitFor(() => expect(canvas.width).toBe(25))
+    expect(canvas.height).toBe(15)
 
     fireEvent.click(screen.getByRole('button', { name: 'Save version' }))
     await waitFor(() => expect(h.saveAsset).toHaveBeenCalledTimes(2))
