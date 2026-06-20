@@ -259,6 +259,7 @@ const translations: Record<string, string> = {
     'edited storyboard version',
   'common:imageGeneration.storyboard.editor.title': 'Edit storyboard',
   'common:imageGeneration.storyboard.editor.tool': 'Tool',
+  'common:imageGeneration.storyboard.editor.pan': 'Pan',
   'common:imageGeneration.storyboard.editor.pen': 'Pen',
   'common:imageGeneration.storyboard.editor.rect': 'Box',
   'common:imageGeneration.storyboard.editor.crop': 'Crop',
@@ -813,6 +814,16 @@ describe('Images route', () => {
       })
       fireEvent(canvas, event)
     }
+    const editorViewport = canvas.closest('.overflow-auto') as HTMLDivElement
+    editorViewport.scrollLeft = 120
+    editorViewport.scrollTop = 80
+
+    fireEvent.click(screen.getByRole('button', { name: 'Pan' }))
+    fireCanvasPointer('pointerdown', 40, 35, 3)
+    fireCanvasPointer('pointermove', 10, 15, 3)
+    fireCanvasPointer('pointerup', 10, 15, 3)
+    expect(editorViewport.scrollLeft).toBe(150)
+    expect(editorViewport.scrollTop).toBe(100)
 
     fireEvent.click(
       screen.getByRole('button', { name: 'Choose color #2563eb' })
@@ -1974,6 +1985,62 @@ describe('Images route', () => {
     )
   })
 
+  it('downloads a storyboard video opened from history search params', async () => {
+    h.providers = [
+      {
+        provider: 'jingxing',
+        base_url: 'https://api.jingxing.uk/v1',
+        settings: [],
+        models: [
+          {
+            id: 'gpt-image-2',
+            capabilities: [ModelCapabilities.IMAGE_GENERATION],
+          },
+        ],
+      },
+    ]
+    h.search = { media: 'storyboard', videoId: 'video-asset-1' }
+    h.listVideoAssets.mockResolvedValue([
+      {
+        id: 'video-asset-1',
+        prompt: 'robot film',
+        provider: 'jingxing',
+        model: 'seedance-2.0',
+        ratio: '16:9',
+        resolution: '1080p',
+        duration: 8,
+        fps: 30,
+        sourceAssetIds: ['storyboard-1'],
+        createdAt: '2026-06-04T00:00:00Z',
+        status: 'succeeded',
+        path: '/tmp/video.mp4',
+        fileName: 'video.mp4',
+        mimeType: 'video/mp4',
+        assetKind: 'storyboard',
+      },
+    ])
+    h.dialogSave.mockResolvedValue('/Users/test/Downloads/video.mp4')
+
+    renderComponent()
+
+    expect(await screen.findByText('robot film')).toBeInTheDocument()
+    fireEvent.click(screen.getByRole('button', { name: 'Download video' }))
+
+    await waitFor(() =>
+      expect(h.dialogSave).toHaveBeenCalledWith({
+        fileName: 'video.mp4',
+        filters: [{ name: 'MP4', extensions: ['mp4'] }],
+      })
+    )
+    expect(h.copyFile).toHaveBeenCalledWith(
+      '/tmp/video.mp4',
+      '/Users/test/Downloads/video.mp4'
+    )
+    expect(h.toast.success).toHaveBeenCalledWith('Download complete', {
+      description: 'video.mp4 saved',
+    })
+  })
+
   it('shows recharge actions when image generation quota is exhausted', async () => {
     h.providers = [
       {
@@ -2094,7 +2161,7 @@ describe('Images route', () => {
     renderComponent()
 
     await screen.findByText('moon desk')
-    fireEvent.click(screen.getByRole('button', { name: 'Use saved asset' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Re-edit' }))
     expect(screen.queryByText('Mask')).not.toBeInTheDocument()
     expect(screen.getAllByText('moon desk').length).toBeGreaterThan(0)
 
@@ -2274,7 +2341,7 @@ describe('Images route', () => {
     renderComponent()
 
     await screen.findByText('moon desk')
-    fireEvent.click(screen.getByRole('button', { name: 'Use saved asset' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Re-edit' }))
     fireEvent.click(screen.getByRole('button', { name: 'Remove moon desk' }))
     fireEvent.change(screen.getByPlaceholderText(/Upload a reference image/), {
       target: { value: '' },
@@ -2282,6 +2349,53 @@ describe('Images route', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Generate' }))
 
     await waitFor(() => expect(h.generateImages).not.toHaveBeenCalled())
+  })
+
+  it('opens saved image preview instead of using the image area as an edit source', async () => {
+    h.providers = [
+      {
+        provider: 'jingxing',
+        base_url: 'https://api.jingxing.uk/v1',
+        settings: [],
+        models: [
+          {
+            id: 'gpt-image-2',
+            capabilities: [
+              ModelCapabilities.IMAGE_GENERATION,
+              ModelCapabilities.IMAGE_TO_IMAGE,
+            ],
+          },
+        ],
+      },
+    ]
+    h.listAssets.mockResolvedValue([
+      {
+        id: 'asset-1',
+        prompt: 'moon desk',
+        mode: 'generate',
+        provider: 'jingxing',
+        model: 'gpt-image-2',
+        ratio: '1:1',
+        size: '1024x1024',
+        quality: 'high',
+        sourceAssetIds: [],
+        createdAt: '2026-05-11T00:00:00Z',
+        status: 'succeeded',
+        path: '/tmp/asset.png',
+        fileName: 'image.png',
+        mimeType: 'image/png',
+      },
+    ])
+
+    renderComponent()
+
+    await screen.findByText('moon desk')
+    fireEvent.click(screen.getAllByRole('button', { name: 'Preview' }).at(-1)!)
+
+    expect(screen.getByText('Image preview')).toBeInTheDocument()
+    expect(
+      screen.queryByRole('button', { name: 'Remove moon desk' })
+    ).not.toBeInTheDocument()
   })
 
   it('imports computer images as references without adding them to history', async () => {
