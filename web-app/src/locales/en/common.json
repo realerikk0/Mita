@@ -243,6 +243,7 @@
       "editor": {
         "title": "Edit storyboard",
         "tool": "Tool",
+        "pan": "Pan",
         "pen": "Pen",
         "rect": "Box",
         "crop": "Crop",

@@ -1732,16 +1732,24 @@ function materializeApprovedPlanRoles(
   plan: MitaTeamsPlanDraft
 ) {
   const assignmentsByRoleId = new Map<MitaTeamsRoleId, MitaTeamsPlanRoleAssignment>()
+  const existingRoleIds = new Set(config.roles.map((role) => role.id))
+  const allowNewPlanRoles = config.workflowControl !== 'user_spec'
 
   for (const assignment of plan.roleAssignments) {
-    assignmentsByRoleId.set(assignment.roleId, assignment)
+    const roleId = normalizeMitaTeamsId(assignment.roleId, '')
+    if (!roleId || (!allowNewPlanRoles && !existingRoleIds.has(roleId))) {
+      continue
+    }
+    assignmentsByRoleId.set(roleId, { ...assignment, roleId })
   }
 
   for (const task of plan.tasks) {
-    if (!task.roleId || assignmentsByRoleId.has(task.roleId)) continue
-    assignmentsByRoleId.set(task.roleId, {
-      roleId: task.roleId,
-      name: titleFromId(task.roleId),
+    const roleId = normalizeMitaTeamsId(task.roleId ?? '', '')
+    if (!roleId || assignmentsByRoleId.has(roleId)) continue
+    if (!allowNewPlanRoles && !existingRoleIds.has(roleId)) continue
+    assignmentsByRoleId.set(roleId, {
+      roleId,
+      name: titleFromId(roleId),
       assignment: task.description || `Handle planned task: ${task.title}`,
     })
   }
