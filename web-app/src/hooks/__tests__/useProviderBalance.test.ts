@@ -166,6 +166,36 @@ describe('useProviderBalance', () => {
     })
   })
 
+  it('broadcasts manual refreshes to every matching provider balance hook', async () => {
+    fetchProviderBalance
+      .mockResolvedValueOnce(balanceFor('provider-a'))
+      .mockResolvedValueOnce({
+        ...balanceFor('provider-a'),
+        accountBalance: { available: 25 },
+      })
+    const provider = providerFor('provider-a')
+
+    const first = renderHook(() => useProviderBalance(provider))
+    const second = renderHook(() => useProviderBalance(provider))
+
+    await waitFor(() => {
+      expect(first.result.current.balance?.accountBalance?.available).toBe(10)
+      expect(second.result.current.balance?.accountBalance?.available).toBe(10)
+    })
+    expect(fetchProviderBalance).toHaveBeenCalledTimes(1)
+
+    await act(async () => {
+      first.result.current.refetch()
+      await Promise.resolve()
+    })
+
+    await waitFor(() => expect(fetchProviderBalance).toHaveBeenCalledTimes(2))
+    await waitFor(() => {
+      expect(first.result.current.balance?.accountBalance?.available).toBe(25)
+      expect(second.result.current.balance?.accountBalance?.available).toBe(25)
+    })
+  })
+
   it('persists successful balances locally and clears them on provider changes', async () => {
     fetchProviderBalance.mockResolvedValue(balanceFor('provider-a'))
     const provider = providerFor('provider-a')
