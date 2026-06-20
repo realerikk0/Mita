@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest'
 
 import {
+  approveMitaTeamsPlan,
   createDefaultMitaTeamsConfig,
   DEFAULT_MITA_TEAMS_ROLES,
   normalizeMitaTeamsConfig,
@@ -179,6 +180,95 @@ describe('mita teams metadata', () => {
     )
     expect(config?.runtime.tasks[0].status).toBe('researching')
     expect(config?.runtime.artifacts[0].type).toBe('risk')
+  })
+
+  it('does not add plan-suggested roles when the owner specified the team roles', () => {
+    const base = createDefaultMitaTeamsConfig({
+      provider: 'openai',
+      id: 'gpt-5',
+    })
+    const ownerRoles = ['market', 'finance', 'product'].map((id, index) => ({
+      ...base.roles[0],
+      id,
+      name: `${id} role`,
+      label: id,
+      description: `${id} work`,
+      prompt: `Handle ${id} work.`,
+      color: `bg-role-${index}`,
+    }))
+    const config = normalizeMitaTeamsConfig(
+      {
+        ...base,
+        workflowControl: 'user_spec',
+        roles: [...base.roles, ...ownerRoles],
+        channels: [
+          {
+            id: 'task',
+            label: 'Task',
+            description: 'Owner-scoped work.',
+            roleIds: ['orchestrator', 'market', 'finance', 'product'],
+          },
+        ],
+        runtime: {
+          ...base.runtime,
+          phase: 'awaiting_plan_approval',
+          planDraft: {
+            id: 'plan-1',
+            version: 1,
+            status: 'draft',
+            goal: 'Research a market.',
+            summary: 'Use the owner-selected four roles.',
+            scope: ['Market'],
+            acceptanceCriteria: ['No extra roles are created.'],
+            tasks: [
+              { id: 'task-1', title: 'Coordinate', roleId: 'orchestrator' },
+              { id: 'task-2', title: 'Unexpected scan', roleId: 'analyst' },
+            ],
+            roleAssignments: [
+              {
+                roleId: 'orchestrator',
+                name: 'Orchestrator',
+                assignment: 'Coordinate.',
+              },
+              {
+                roleId: 'market',
+                name: 'Market role',
+                assignment: 'Inspect market signals.',
+              },
+              {
+                roleId: 'analyst',
+                name: 'Analyst',
+                assignment: 'Extra role suggested by the plan.',
+              },
+              {
+                roleId: 'writer',
+                name: 'Writer',
+                assignment: 'Another extra role suggested by the plan.',
+              },
+            ],
+            executionOrder: ['Coordinate', 'Unexpected scan'],
+            createdAt: '2026-06-18T00:00:00.000Z',
+            updatedAt: '2026-06-18T00:00:00.000Z',
+          },
+        },
+      },
+      { provider: 'openai', id: 'gpt-5' }
+    )!
+
+    const approved = approveMitaTeamsPlan(config)
+
+    expect(approved.roles.map((role) => role.id)).toEqual([
+      'orchestrator',
+      'market',
+      'finance',
+      'product',
+    ])
+    expect(approved.runtime.approvedRoleSnapshot.map((role) => role.id)).toEqual(
+      ['orchestrator', 'market', 'finance', 'product']
+    )
+    expect(
+      approved.channels.flatMap((channel) => channel.roleIds)
+    ).not.toEqual(expect.arrayContaining(['analyst', 'writer']))
   })
 
   it('normalizes pending choice option ids and answered selections', () => {
