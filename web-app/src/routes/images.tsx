@@ -18,6 +18,7 @@ import {
   FolderOpen,
   Image as ImageIcon,
   Loader2,
+  Move,
   Music,
   Minus,
   MoreHorizontal,
@@ -281,7 +282,7 @@ export type StoryboardSession = {
   videoAsset?: VideoAssetRecord
 }
 
-type StoryboardEditorTool = 'pen' | 'rect' | 'crop'
+type StoryboardEditorTool = 'pan' | 'pen' | 'rect' | 'crop'
 
 type CanvasPoint = {
   x: number
@@ -1473,9 +1474,16 @@ function StoryboardImageEditorDialog({
 }) {
   const { t } = useTranslation()
   const canvasRef = useRef<HTMLCanvasElement | null>(null)
+  const editorViewportRef = useRef<HTMLDivElement | null>(null)
   const drawingRef = useRef<{
     start: CanvasPoint
     last: CanvasPoint
+  } | null>(null)
+  const panRef = useRef<{
+    clientX: number
+    clientY: number
+    scrollLeft: number
+    scrollTop: number
   } | null>(null)
   const [tool, setTool] = useState<StoryboardEditorTool>('pen')
   const [color, setColor] = useState<(typeof STORYBOARD_EDITOR_COLORS)[number]>(
@@ -1487,6 +1495,7 @@ function StoryboardImageEditorDialog({
   )
   const [ready, setReady] = useState(false)
   const [saving, setSaving] = useState(false)
+  const [panning, setPanning] = useState(false)
   const [history, setHistory] = useState<string[]>([])
   const [historyIndex, setHistoryIndex] = useState(-1)
   const [draftRect, setDraftRect] = useState<{
@@ -1552,6 +1561,7 @@ function StoryboardImageEditorDialog({
     setSaving(false)
     setTool('pen')
     setZoom(1)
+    setPanning(false)
     setDraftRect(null)
 
     const image = new Image()
@@ -1610,6 +1620,25 @@ function StoryboardImageEditorDialog({
 
   const beginDraw = (event: ReactPointerEvent<HTMLCanvasElement>) => {
     if (!ready || !canvasRef.current) return
+
+    if (tool === 'pan') {
+      const viewport = editorViewportRef.current
+      if (!viewport) return
+      panRef.current = {
+        clientX: event.clientX,
+        clientY: event.clientY,
+        scrollLeft: viewport.scrollLeft,
+        scrollTop: viewport.scrollTop,
+      }
+      setPanning(true)
+      try {
+        event.currentTarget.setPointerCapture(event.pointerId)
+      } catch {
+        // Pointer capture is unavailable in some test environments.
+      }
+      return
+    }
+
     const canvas = canvasRef.current
     const point = canvasPointFromEvent(event, canvas)
     drawingRef.current = { start: point, last: point }
@@ -1640,6 +1669,15 @@ function StoryboardImageEditorDialog({
   }
 
   const continueDraw = (event: ReactPointerEvent<HTMLCanvasElement>) => {
+    const panState = panRef.current
+    if (tool === 'pan' && panState) {
+      const viewport = editorViewportRef.current
+      if (!viewport) return
+      viewport.scrollLeft = panState.scrollLeft - (event.clientX - panState.clientX)
+      viewport.scrollTop = panState.scrollTop - (event.clientY - panState.clientY)
+      return
+    }
+
     const state = drawingRef.current
     const canvas = canvasRef.current
     if (!state || !canvas) return
@@ -1660,6 +1698,17 @@ function StoryboardImageEditorDialog({
   }
 
   const finishDraw = (event: ReactPointerEvent<HTMLCanvasElement>) => {
+    if (tool === 'pan') {
+      panRef.current = null
+      setPanning(false)
+      try {
+        event.currentTarget.releasePointerCapture(event.pointerId)
+      } catch {
+        // Pointer capture is unavailable in some test environments.
+      }
+      return
+    }
+
     const state = drawingRef.current
     const canvas = canvasRef.current
     const context = currentContext()
@@ -1733,6 +1782,7 @@ function StoryboardImageEditorDialog({
     labelKey: string
     icon: typeof Pencil
   }> = [
+    { value: 'pan', labelKey: 'storyboard.editor.pan', icon: Move },
     { value: 'pen', labelKey: 'storyboard.editor.pen', icon: Pencil },
     { value: 'rect', labelKey: 'storyboard.editor.rect', icon: Square },
     { value: 'crop', labelKey: 'storyboard.editor.crop', icon: Crop },
@@ -1864,6 +1914,7 @@ function StoryboardImageEditorDialog({
           </aside>
 
           <div
+            ref={editorViewportRef}
             className="min-w-0 flex-1 overflow-auto bg-[#f4f5f7] p-6"
             onWheel={handleWheel}
           >
@@ -1876,12 +1927,19 @@ function StoryboardImageEditorDialog({
                   ref={setCanvasElement}
                   className={cn(
                     'block max-h-none max-w-none rounded-lg bg-white shadow-sm',
-                    tool === 'pen' ? 'cursor-crosshair' : 'cursor-cell',
+                    tool === 'pan'
+                      ? panning
+                        ? 'cursor-grabbing'
+                        : 'cursor-grab'
+                      : tool === 'pen'
+                        ? 'cursor-crosshair'
+                        : 'cursor-cell',
                     !ready && 'opacity-40'
                   )}
                   onPointerDown={beginDraw}
                   onPointerMove={continueDraw}
                   onPointerUp={finishDraw}
+                  onPointerCancel={finishDraw}
                 />
                 {draftRect && (
                   <div

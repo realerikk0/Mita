@@ -259,6 +259,7 @@ const translations: Record<string, string> = {
     'edited storyboard version',
   'common:imageGeneration.storyboard.editor.title': 'Edit storyboard',
   'common:imageGeneration.storyboard.editor.tool': 'Tool',
+  'common:imageGeneration.storyboard.editor.pan': 'Pan',
   'common:imageGeneration.storyboard.editor.pen': 'Pen',
   'common:imageGeneration.storyboard.editor.rect': 'Box',
   'common:imageGeneration.storyboard.editor.crop': 'Crop',
@@ -811,6 +812,16 @@ describe('Images route', () => {
       })
       fireEvent(canvas, event)
     }
+    const editorViewport = canvas.closest('.overflow-auto') as HTMLDivElement
+    editorViewport.scrollLeft = 120
+    editorViewport.scrollTop = 80
+
+    fireEvent.click(screen.getByRole('button', { name: 'Pan' }))
+    fireCanvasPointer('pointerdown', 40, 35, 3)
+    fireCanvasPointer('pointermove', 10, 15, 3)
+    fireCanvasPointer('pointerup', 10, 15, 3)
+    expect(editorViewport.scrollLeft).toBe(150)
+    expect(editorViewport.scrollTop).toBe(100)
 
     fireEvent.click(
       screen.getByRole('button', { name: 'Choose color #2563eb' })
