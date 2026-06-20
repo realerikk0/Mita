@@ -4123,6 +4123,19 @@ function Images() {
               <Plus className="size-3.5" />
             </button>
           </div>
+
+          {sourceAssets.length > 0 && (
+            <Button
+              type="button"
+              variant="ghost"
+              size="sm"
+              className="h-[30px] px-2.5 text-xs text-muted-foreground"
+              onClick={() => setSourceAssetIds([])}
+            >
+              <X className="size-3.5" />
+              {imageT(t, 'clearSource')}
+            </Button>
+          )}
         </div>
 
         <div className="flex shrink-0 items-center">
@@ -4257,6 +4270,10 @@ function Images() {
   const selectedModelCanEdit = selectedModel?.model
     ? isImageEditModel(selectedModel.model)
     : false
+  const editCapableImageModel = useMemo(
+    () => imageModels.find(({ model }) => isImageEditModel(model)),
+    [imageModels]
+  )
 
   const inferredMode = useMemo<ImageGenerationMode>(() => {
     if (sourceAssets.length === 0) return 'generate'
@@ -4672,6 +4689,14 @@ function Images() {
 
   const editFromAsset = useCallback(
     (asset: ImageAssetRecord, nextPrompt?: string) => {
+      if (!selectedModelCanEdit) {
+        if (!editCapableImageModel) {
+          toast.error(imageT(t, 'toast.selectEditCapableModel'))
+          return
+        }
+        setSelectedModelKey(imageModelKey(editCapableImageModel))
+      }
+
       if (
         !sourceAssetIds.includes(asset.id) &&
         sourceAssetIds.length >= MAX_REFERENCE_IMAGES
@@ -4683,7 +4708,14 @@ function Images() {
       addSourceAssets([asset])
       setPrompt(nextPrompt ?? asset.prompt)
     },
-    [addSourceAssets, showReferenceLimitToast, sourceAssetIds]
+    [
+      addSourceAssets,
+      editCapableImageModel,
+      selectedModelCanEdit,
+      showReferenceLimitToast,
+      sourceAssetIds,
+      t,
+    ]
   )
 
   const importReferenceAssets = useCallback(async () => {
