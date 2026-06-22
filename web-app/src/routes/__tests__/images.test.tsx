@@ -1772,6 +1772,119 @@ describe('Images route', () => {
     ).toBeDisabled()
   })
 
+  it('disables the storyboard-page "Next" button into video when the plan is stale', async () => {
+    h.providers = [
+      {
+        provider: 'jingxing',
+        base_url: 'https://api.jingxing.uk/v1',
+        settings: [],
+        models: [
+          {
+            id: 'gpt-image-2',
+            capabilities: [ModelCapabilities.IMAGE_GENERATION],
+          },
+          {
+            id: 'video-model',
+            capabilities: [ModelCapabilities.VIDEO_GENERATION],
+          },
+        ],
+      },
+    ]
+    vi.stubGlobal(
+      'Image',
+      class {
+        naturalWidth = 0
+        naturalHeight = 0
+        onerror?: () => void
+        set src(_value: string) {
+          this.onerror?.()
+        }
+      }
+    )
+
+    const storyboardAsset = {
+      id: 'sb-1',
+      prompt: 'desert chase storyboard',
+      mode: 'generate',
+      provider: 'jingxing',
+      model: 'gpt-image-2',
+      ratio: '16:9',
+      size: '1280x720',
+      quality: 'standard',
+      sourceAssetIds: [],
+      createdAt: '2026-06-21T00:00:00Z',
+      status: 'succeeded',
+      path: '/mock/mita/image-assets/sb-1/image.png',
+      fileName: 'image.png',
+      mimeType: 'image/png',
+      assetKind: 'storyboard',
+    }
+    act(() => {
+      useStoryboardSessionStore.getState().save({
+        // On the storyboard page, but the story has moved on from the image.
+        stage: 'storyboard',
+        story: 'A rainy highway ambush at sunset.',
+        planStory: 'An old desert chase at noon.',
+        settings: {
+          style: '电影感',
+          aspect: '16:9',
+          qualityPreset: 'sd',
+          variantCount: 1,
+          template: 'board',
+          consistency: 'lockedCharacter',
+        },
+        videoSettings: {
+          ratio: '16:9',
+          resolution: '1080p',
+          duration: 8,
+          fps: 30,
+          camera: '自动',
+          motion: 55,
+          generateAudio: true,
+        },
+        shots: [
+          {
+            id: 'old-shot',
+            title: 'Old',
+            camera: 'wide',
+            prompt: 'old desert shot',
+            duration: 4,
+          },
+        ],
+        promptTabs: [],
+        activePromptTabId: '',
+        storyboardStatus: 'succeeded',
+        storyboardAsset,
+        storyboardVersions: [
+          {
+            id: 'sb-1',
+            label: 'Original',
+            asset: storyboardAsset,
+            kind: 'original',
+            createdAt: '2026-06-21T00:00:00Z',
+          },
+        ],
+        activeStoryboardVersionId: 'sb-1',
+        referenceAssets: [],
+        selectedVideoModelKey: '',
+        videoAsset: undefined,
+      } as any)
+      useStoryboardSessionStore.getState().setMediaMode('storyboard')
+    })
+
+    renderComponent()
+
+    await waitFor(() => expect(h.listAssets).toHaveBeenCalled())
+    // The sidebar "Next" into the video step is locked, consistent with the
+    // stepper, so a stale storyboard can't sneak into video generation.
+    expect(
+      screen.getByTestId('storyboard-stage-stale-notice')
+    ).toBeInTheDocument()
+    expect(
+      screen.getByRole('button', { name: /Next · generate video/ })
+    ).toBeDisabled()
+  })
+
   it('appends the shot-count contract to optimized non-plain storyboard prompts', async () => {
     h.providers = [
       {

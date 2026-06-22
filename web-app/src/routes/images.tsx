@@ -3459,6 +3459,14 @@ function StoryboardVideoMode({
                 {imageT(t, 'storyboard.downloadStoryboard')}
               </Button>
             )}
+            {planIsStale && (
+              <p
+                className="text-[11px] leading-4 text-amber-700 dark:text-amber-300"
+                data-testid="storyboard-stage-stale-notice"
+              >
+                {imageT(t, 'storyboard.storyChangedNotice')}
+              </p>
+            )}
             <div className="grid gap-2">
               <Button
                 type="button"
@@ -3471,7 +3479,7 @@ function StoryboardVideoMode({
               <Button
                 type="button"
                 className="bg-[#f36f4f] text-white hover:bg-[#e96346]"
-                disabled={!storyboardAsset}
+                disabled={!storyboardAsset || planIsStale}
                 onClick={() => setStage('video')}
               >
                 {imageT(t, 'storyboard.nextStep')}
