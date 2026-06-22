@@ -1198,6 +1198,304 @@ describe('Images route', () => {
     })
   })
 
+  const REFERENCE_ASSET = {
+    id: 'old-motorcycle-ref',
+    prompt: 'old motorcycle rider reference',
+    mode: 'edit',
+    provider: 'local',
+    model: 'reference-image',
+    ratio: '1:1',
+    size: 'original',
+    quality: 'source',
+    sourceAssetIds: [],
+    createdAt: '2026-06-21T00:00:00Z',
+    status: 'succeeded',
+    path: '/mock/mita/image-assets/old-motorcycle-ref/image.png',
+    fileName: 'image.png',
+    mimeType: 'image/png',
+    assetKind: 'reference',
+  }
+
+  // Restores a session whose reference image belongs to an OLD story, on an
+  // image-to-image-capable model, with the studio left in storyboard mode.
+  const primeImageToImageReferenceSession = () => {
+    h.providers = [
+      {
+        provider: 'jingxing',
+        base_url: 'https://api.jingxing.uk/v1',
+        settings: [],
+        models: [
+          {
+            id: 'gpt-image-2',
+            capabilities: [
+              ModelCapabilities.IMAGE_GENERATION,
+              ModelCapabilities.IMAGE_TO_IMAGE,
+            ],
+          },
+        ],
+      },
+    ]
+    h.generateImages.mockResolvedValue([
+      {
+        b64Json: 'aGVsbG8=',
+        mimeType: 'image/png',
+        revisedPrompt: 'fresh storyboard',
+      },
+    ])
+    h.saveAsset.mockImplementation((request: any) =>
+      Promise.resolve({
+        ...request,
+        createdAt: '2026-06-22T00:00:00Z',
+        path: `/mock/mita/image-assets/${request.id}/image.png`,
+        fileName: 'image.png',
+      })
+    )
+    vi.stubGlobal(
+      'Image',
+      class {
+        naturalWidth = 0
+        naturalHeight = 0
+        onerror?: () => void
+        set src(_value: string) {
+          this.onerror?.()
+        }
+      }
+    )
+    act(() => {
+      useStoryboardSessionStore.getState().save({
+        stage: 'compose',
+        story: 'A professional motorcycle rider crosses a muddy forest.',
+        settings: {
+          style: '电影感',
+          aspect: '16:9',
+          qualityPreset: 'sd',
+          variantCount: 1,
+          template: 'board',
+          consistency: 'lockedCharacter',
+        },
+        videoSettings: {
+          ratio: '16:9',
+          resolution: '1080p',
+          duration: 8,
+          fps: 30,
+          camera: '自动',
+          motion: 55,
+          generateAudio: true,
+        },
+        shots: [],
+        promptTabs: [],
+        activePromptTabId: '',
+        storyboardStatus: 'idle',
+        storyboardAsset: undefined,
+        storyboardVersions: [],
+        activeStoryboardVersionId: '',
+        referenceAssets: [{ ...REFERENCE_ASSET }],
+        selectedVideoModelKey: '',
+        videoAsset: undefined,
+      } as any)
+      useStoryboardSessionStore.getState().setMediaMode('storyboard')
+    })
+  }
+
+  const editStoryToRainyHighway = () =>
+    fireEvent.change(
+      screen.getByPlaceholderText(
+        'Describe the single video you want in one sentence.'
+      ),
+      {
+        target: {
+          value:
+            'A rainy highway ambush with two characters moving through sunset mist.',
+        },
+      }
+    )
+
+  const clickGenerateStoryboard = () =>
+    fireEvent.click(
+      screen.getByRole('button', { name: 'Generate storyboard image' })
+    )
+
+  it('keeps restored reference images on screen and holds them after the story text changes', async () => {
+    primeImageToImageReferenceSession()
+    renderComponent()
+
+    await waitFor(() => expect(h.listAssets).toHaveBeenCalled())
+    expect(
+      screen.getByAltText('old motorcycle rider reference')
+    ).toBeInTheDocument()
+    expect(
+      screen.queryByTestId('storyboard-references-held')
+    ).not.toBeInTheDocument()
+
+    editStoryToRainyHighway()
+
+    // The reference survives the edit (not wiped) but is flagged as held.
+    expect(
+      screen.getByAltText('old motorcycle rider reference')
+    ).toBeInTheDocument()
+    expect(
+      screen.getByTestId('storyboard-references-held')
+    ).toBeInTheDocument()
+  })
+
+  it('re-applies held reference images to the edited story for image-to-image generation', async () => {
+    primeImageToImageReferenceSession()
+    renderComponent()
+
+    await waitFor(() => expect(h.listAssets).toHaveBeenCalled())
+    editStoryToRainyHighway()
+    fireEvent.click(screen.getByTestId('storyboard-reapply-references'))
+    clickGenerateStoryboard()
+
+    await waitFor(() => expect(h.generateImages).toHaveBeenCalled())
+    const call = h.generateImages.mock.calls.at(-1)?.[0]
+    expect(call.mode).toBe('edit')
+    expect(call.sourceAssets.map((asset: any) => asset.id)).toEqual([
+      'old-motorcycle-ref',
+    ])
+    expect(h.saveAsset.mock.calls.at(-1)?.[0]).toMatchObject({
+      sourceAssetIds: ['old-motorcycle-ref'],
+    })
+  })
+
+  it('re-applies the original references after undoing a story edit', async () => {
+    primeImageToImageReferenceSession()
+    renderComponent()
+
+    await waitFor(() => expect(h.listAssets).toHaveBeenCalled())
+    editStoryToRainyHighway()
+    expect(screen.getByTestId('storyboard-references-held')).toBeInTheDocument()
+
+    fireEvent.click(screen.getByRole('button', { name: 'Undo' }))
+
+    // The story is back to its original; the references match again and the
+    // held notice is gone, so the next generation conditions on them.
+    expect(
+      screen.queryByTestId('storyboard-references-held')
+    ).not.toBeInTheDocument()
+    clickGenerateStoryboard()
+
+    await waitFor(() => expect(h.generateImages).toHaveBeenCalled())
+    const call = h.generateImages.mock.calls.at(-1)?.[0]
+    expect(call.mode).toBe('edit')
+    expect(call.sourceAssets.map((asset: any) => asset.id)).toEqual([
+      'old-motorcycle-ref',
+    ])
+  })
+
+  it('keeps the restored plan but flags it stale, then regenerates from the new story', async () => {
+    h.providers = [
+      {
+        provider: 'jingxing',
+        base_url: 'https://api.jingxing.uk/v1',
+        settings: [],
+        models: [
+          {
+            id: 'gpt-image-2',
+            capabilities: [ModelCapabilities.IMAGE_GENERATION],
+          },
+        ],
+      },
+    ]
+    h.generateImages.mockResolvedValue([
+      {
+        b64Json: 'aGVsbG8=',
+        mimeType: 'image/png',
+        revisedPrompt: 'fresh storyboard',
+      },
+    ])
+    h.saveAsset.mockImplementation((request: any) =>
+      Promise.resolve({
+        ...request,
+        createdAt: '2026-06-22T00:00:00Z',
+        path: `/mock/mita/image-assets/${request.id}/image.png`,
+        fileName: 'image.png',
+      })
+    )
+    vi.stubGlobal(
+      'Image',
+      class {
+        naturalWidth = 0
+        naturalHeight = 0
+        onerror?: () => void
+        set src(_value: string) {
+          this.onerror?.()
+        }
+      }
+    )
+
+    const oldShot = {
+      id: 'old-shot',
+      title: 'Old rider',
+      camera: 'Low angle',
+      prompt: 'A professional motorcycle rider crosses a muddy forest.',
+      duration: 5,
+    }
+    act(() => {
+      useStoryboardSessionStore.getState().save({
+        stage: 'compose',
+        story: 'Old optimized motorcycle storyboard prompt.',
+        settings: {
+          style: '电影感',
+          aspect: '16:9',
+          qualityPreset: 'sd',
+          variantCount: 1,
+          template: 'board',
+          consistency: 'lockedCharacter',
+        },
+        videoSettings: {
+          ratio: '16:9',
+          resolution: '1080p',
+          duration: 8,
+          fps: 30,
+          camera: '自动',
+          motion: 55,
+          generateAudio: true,
+        },
+        shots: [oldShot],
+        promptTabs: [
+          {
+            id: 'old-tab',
+            label: 'Prompt 1',
+            prompt: 'Old optimized motorcycle storyboard prompt.',
+            shots: [oldShot],
+            createdAt: '2026-06-21T00:00:00Z',
+          },
+        ],
+        activePromptTabId: 'old-tab',
+        storyboardStatus: 'idle',
+        storyboardAsset: undefined,
+        storyboardVersions: [],
+        activeStoryboardVersionId: '',
+        referenceAssets: [],
+        selectedVideoModelKey: '',
+        videoAsset: undefined,
+      } as any)
+      useStoryboardSessionStore.getState().setMediaMode('storyboard')
+    })
+
+    renderComponent()
+
+    await waitFor(() => expect(h.listAssets).toHaveBeenCalled())
+    // Restored plan matches its story, so nothing is stale yet.
+    expect(
+      screen.queryByTestId('storyboard-stale-notice')
+    ).not.toBeInTheDocument()
+
+    editStoryToRainyHighway()
+
+    // The plan is preserved on screen (not wiped) but flagged for regeneration.
+    expect(screen.getByTestId('storyboard-stale-notice')).toBeInTheDocument()
+
+    clickGenerateStoryboard()
+
+    await waitFor(() => expect(h.generateImages).toHaveBeenCalled())
+    const prompt = h.generateImages.mock.calls.at(-1)?.[0].prompt
+    expect(prompt).toContain('A rainy highway ambush')
+    expect(prompt).not.toContain('motorcycle')
+    expect(prompt).not.toContain('muddy forest')
+  })
+
   it('appends the shot-count contract to optimized non-plain storyboard prompts', async () => {
     h.providers = [
       {
