@@ -72,7 +72,6 @@ Var OldMainBinaryName
 Var PreviousUninstKey
 Var PreviousManuProductKey
 Var LegacyInstallDir
-Var LegacyInstallDetected
 Var LegacyShortcutFound
 
 Name "${PRODUCTNAME}"
@@ -969,7 +968,6 @@ Function RestorePreviousInstallLocation
 FunctionEnd
 
 Function DetectLegacyInstallLocation
-  StrCpy $LegacyInstallDetected 0
   StrCpy $LegacyInstallDir ""
 
   ReadRegStr $LegacyInstallDir SHCTX "${LEGACY_MANUPRODUCTKEY}" ""
@@ -982,7 +980,6 @@ Function DetectLegacyInstallLocation
 
   ${If} ${FileExists} "$LegacyInstallDir\${MAINBINARYNAME}.exe"
   ${OrIf} ${FileExists} "$LegacyInstallDir\uninstall.exe"
-    StrCpy $LegacyInstallDetected 1
   ${Else}
     StrCpy $LegacyInstallDir ""
   ${EndIf}
@@ -1037,9 +1034,6 @@ FunctionEnd
 Function CleanupLegacyMitaInstall
   Call DetectLegacyInstallLocation
   Call RemoveLegacyMitaShortcuts
-  ${If} $LegacyShortcutFound = 1
-    StrCpy $LegacyInstallDetected 1
-  ${EndIf}
 
   DeleteRegKey HKCU "${LEGACY_UNINSTKEY}"
   DeleteRegKey HKCU "${LEGACY_MANUPRODUCTKEY}"

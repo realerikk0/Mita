@@ -4,6 +4,7 @@ import test from 'node:test'
 
 const template = fs.readFileSync('src-tauri/tauri.bundle.windows.nsis.template', 'utf8')
 const makefile = fs.readFileSync('Makefile', 'utf8')
+const libSource = fs.readFileSync('src-tauri/src/lib.rs', 'utf8')
 
 function functionBody(name) {
   const match = template.match(new RegExp(`Function ${name}([\\s\\S]*?)FunctionEnd`))
@@ -26,6 +27,7 @@ test('Windows NSIS installer keeps legacy Mita update migration hooks', () => {
   assert.doesNotMatch(template, /ReadRegStr [^\n]+ HKLM "\$\{LEGACY_MANUPRODUCTKEY\}" ""/)
   assert.doesNotMatch(template, /DeleteRegKey HKLM "\$\{LEGACY_UNINSTKEY\}"/)
   assert.doesNotMatch(template, /DeleteRegKey HKLM "\$\{LEGACY_MANUPRODUCTKEY\}"/)
+  assert.doesNotMatch(template, /LegacyInstallDetected/)
 })
 
 test('Windows NSIS installer migrates legacy Mita shortcuts to Biyan shortcuts', () => {
@@ -73,5 +75,21 @@ test('Windows NSIS installer leaves legacy install directory deletion to runtime
 })
 
 test('Windows NSIS installer template tests run from Makefile test target', () => {
-  assert.match(makefile, /node --test \.\/scripts\/__tests__\/\*\.test\.mjs/)
+  assert.match(
+    makefile,
+    /node --test \.\/scripts\/__tests__\/windows-installer-template\.test\.mjs/,
+  )
+  assert.doesNotMatch(makefile, /node --test \.\/scripts\/__tests__\/\*\.test\.mjs/)
+})
+
+test('Windows startup self-heal marks migration only after success', () => {
+  const spawnIndex = libSource.indexOf('tauri::async_runtime::spawn_blocking')
+  const runIndex = libSource.indexOf('core::windows_migration::run_biyan_windows_migration()')
+  const markerIndex = libSource.indexOf('store.set(WINDOWS_BIYAN_MIGRATED_KEY')
+
+  assert.notEqual(spawnIndex, -1)
+  assert.notEqual(runIndex, -1)
+  assert.notEqual(markerIndex, -1)
+  assert.ok(spawnIndex < runIndex, 'migration should run inside spawn_blocking')
+  assert.ok(runIndex < markerIndex, 'migration marker should be written after migration succeeds')
 })

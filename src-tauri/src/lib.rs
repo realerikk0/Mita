@@ -243,13 +243,22 @@ pub fn run() {
                     .and_then(|value| value.as_bool())
                     .unwrap_or(false);
                 if !windows_biyan_migrated {
-                    store.set(WINDOWS_BIYAN_MIGRATED_KEY, serde_json::json!(true));
-                    tauri::async_runtime::spawn_blocking(|| {
-                        if let Err(error) = core::windows_migration::run_biyan_windows_migration()
-                        {
-                            log::warn!(
-                                "Failed to complete Biyan Windows migration self-heal: {error}"
-                            );
+                    let store = store.clone();
+                    tauri::async_runtime::spawn_blocking(move || {
+                        match core::windows_migration::run_biyan_windows_migration() {
+                            Ok(()) => {
+                                store.set(WINDOWS_BIYAN_MIGRATED_KEY, serde_json::json!(true));
+                                if let Err(error) = store.save() {
+                                    log::warn!(
+                                        "Failed to persist Biyan Windows migration marker: {error}"
+                                    );
+                                }
+                            }
+                            Err(error) => {
+                                log::warn!(
+                                    "Failed to complete Biyan Windows migration self-heal: {error}"
+                                );
+                            }
                         }
                     });
                 }

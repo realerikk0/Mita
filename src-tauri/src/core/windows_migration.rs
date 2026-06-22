@@ -126,14 +126,24 @@ fn run_biyan_windows_migration_windows() -> io::Result<()> {
         .join("Start Menu")
         .join("Programs");
 
-    remove_legacy_shortcuts(appdata, desktop, programs);
-    cleanup_legacy_registry();
+    let mut first_error = None;
+
+    if let Err(error) = remove_legacy_shortcuts(appdata, desktop, programs) {
+        first_error = Some(error);
+    }
+    if let Err(error) = cleanup_legacy_registry() {
+        if first_error.is_none() {
+            first_error = Some(error);
+        }
+    }
 
     let current_exe = match env::current_exe() {
         Ok(current_exe) => current_exe,
         Err(error) => {
             log::warn!("Skipping legacy Mita install folder cleanup: current exe unknown: {error}");
-            return Ok(());
+            return first_error
+                .map(Err)
+                .unwrap_or_else(|| Err(io::Error::new(error.kind(), error.to_string())));
         }
     };
 
@@ -142,26 +152,49 @@ fn run_biyan_windows_migration_windows() -> io::Result<()> {
             if legacy_install_dir_contains_payload(&candidate)
                 && should_remove_legacy_install_dir(&candidate, &current_exe)
             {
-                remove_legacy_install_dir(&candidate);
+                if let Err(error) = remove_legacy_install_dir(&candidate) {
+                    if first_error.is_none() {
+                        first_error = Some(error);
+                    }
+                }
             }
         }
     }
 
-    Ok(())
+    first_error.map(Err).unwrap_or(Ok(()))
 }
 
 #[cfg(windows)]
-fn remove_legacy_shortcuts(appdata: PathBuf, desktop: PathBuf, programs: PathBuf) {
+fn remove_legacy_shortcuts(
+    appdata: PathBuf,
+    desktop: PathBuf,
+    programs: PathBuf,
+) -> io::Result<()> {
+    let mut first_error = None;
+
     for shortcut in legacy_shortcut_paths(appdata, desktop, programs) {
         match fs::remove_file(&shortcut) {
             Ok(()) => log::info!("Removed legacy Mita shortcut at {}", shortcut.display()),
             Err(error) if error.kind() == io::ErrorKind::NotFound => {}
-            Err(error) => log::warn!(
-                "Failed to remove legacy Mita shortcut at {}: {error}",
-                shortcut.display()
-            ),
+            Err(error) => {
+                log::warn!(
+                    "Failed to remove legacy Mita shortcut at {}: {error}",
+                    shortcut.display()
+                );
+                if first_error.is_none() {
+                    first_error = Some(io::Error::new(
+                        error.kind(),
+                        format!(
+                            "failed to remove legacy Mita shortcut at {}: {error}",
+                            shortcut.display()
+                        ),
+                    ));
+                }
+            }
         }
     }
+
+    first_error.map(Err).unwrap_or(Ok(()))
 }
 
 #[cfg(windows)]
@@ -173,28 +206,41 @@ fn legacy_install_dir_contains_payload(candidate: &Path) -> bool {
 }
 
 #[cfg(windows)]
-fn remove_legacy_install_dir(candidate: &Path) {
+fn remove_legacy_install_dir(candidate: &Path) -> io::Result<()> {
     match fs::remove_dir_all(candidate) {
-        Ok(()) => log::info!(
-            "Removed legacy Mita install directory at {}",
-            candidate.display()
-        ),
-        Err(error) if error.kind() == io::ErrorKind::NotFound => {}
-        Err(error) => log::warn!(
-            "Failed to remove legacy Mita install directory at {}: {error}",
-            candidate.display()
-        ),
+        Ok(()) => {
+            log::info!(
+                "Removed legacy Mita install directory at {}",
+                candidate.display()
+            );
+            Ok(())
+        }
+        Err(error) if error.kind() == io::ErrorKind::NotFound => Ok(()),
+        Err(error) => {
+            log::warn!(
+                "Failed to remove legacy Mita install directory at {}: {error}",
+                candidate.display()
+            );
+            Err(io::Error::new(
+                error.kind(),
+                format!(
+                    "failed to remove legacy Mita install directory at {}: {error}",
+                    candidate.display()
+                ),
+            ))
+        }
     }
 }
 
 #[cfg(windows)]
-fn cleanup_legacy_registry() {
+fn cleanup_legacy_registry() -> io::Result<()> {
     use winreg::{
         enums::{HKEY_CURRENT_USER, KEY_READ, KEY_WRITE},
         RegKey,
     };
 
     let hkcu = RegKey::predef(HKEY_CURRENT_USER);
+    let mut first_error = None;
 
     for key in [
         r"Software\Jingxing\Mita",
@@ -204,10 +250,26 @@ fn cleanup_legacy_registry() {
             Ok(_) => {
                 if let Err(error) = hkcu.delete_subkey_all(key) {
                     log::warn!("Failed to delete legacy Mita registry key HKCU\\{key}: {error}");
+                    if first_error.is_none() {
+                        first_error = Some(io::Error::new(
+                            error.kind(),
+                            format!(
+                                "failed to delete legacy Mita registry key HKCU\\{key}: {error}"
+                            ),
+                        ));
+                    }
                 }
             }
             Err(error) if error.kind() == io::ErrorKind::NotFound => {}
-            Err(error) => log::debug!("Legacy Mita registry key HKCU\\{key} not writable: {error}"),
+            Err(error) => {
+                log::debug!("Legacy Mita registry key HKCU\\{key} not writable: {error}");
+                if first_error.is_none() {
+                    first_error = Some(io::Error::new(
+                        error.kind(),
+                        format!("legacy Mita registry key HKCU\\{key} not writable: {error}"),
+                    ));
+                }
+            }
         }
     }
 
@@ -218,4 +280,6 @@ fn cleanup_legacy_registry() {
             );
         }
     }
+
+    first_error.map(Err).unwrap_or(Ok(()))
 }
