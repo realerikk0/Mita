@@ -825,13 +825,32 @@ describe('Images route', () => {
     expect(editorViewport.scrollLeft).toBe(150)
     expect(editorViewport.scrollTop).toBe(100)
 
+    rectSpy.mockReturnValue({
+      bottom: 90,
+      height: 90,
+      left: 0,
+      right: 160,
+      top: 0,
+      width: 160,
+      x: 0,
+      y: 0,
+      toJSON: () => ({}),
+    })
     fireEvent.click(
       screen.getByRole('button', { name: 'Choose color #2563eb' })
     )
     fireEvent.click(screen.getByRole('button', { name: 'Box' }))
-    fireCanvasPointer('pointerdown', 10, 10, 1)
-    fireCanvasPointer('pointermove', 35, 25, 1)
-    fireCanvasPointer('pointerup', 35, 25, 1)
+    fireCanvasPointer('pointerdown', 20, 20, 1)
+    fireCanvasPointer('pointermove', 70, 50, 1)
+    const boxOverlay = document.querySelector('.border-dashed') as HTMLElement
+    expect(boxOverlay).toHaveStyle({
+      left: '10px',
+      top: '10px',
+      width: '25px',
+      height: '15px',
+    })
+    fireCanvasPointer('pointerup', 70, 50, 1)
+    expect(canvasContext.strokeRect).toHaveBeenCalledWith(10, 10, 25, 15)
     await waitFor(() => expect(canvasContext.strokeRect).toHaveBeenCalled())
     await waitFor(() =>
       expect(screen.getByRole('button', { name: 'Undo' })).toBeEnabled()
