@@ -977,9 +977,6 @@ Function DetectLegacyInstallLocation
     ReadRegStr $LegacyInstallDir HKCU "${LEGACY_MANUPRODUCTKEY}" ""
   ${EndIf}
   ${If} $LegacyInstallDir == ""
-    ReadRegStr $LegacyInstallDir HKLM "${LEGACY_MANUPRODUCTKEY}" ""
-  ${EndIf}
-  ${If} $LegacyInstallDir == ""
     StrCpy $LegacyInstallDir "$LOCALAPPDATA\Programs\${LEGACY_PRODUCTNAME}"
   ${EndIf}
 
@@ -1046,18 +1043,7 @@ Function CleanupLegacyMitaInstall
 
   DeleteRegKey HKCU "${LEGACY_UNINSTKEY}"
   DeleteRegKey HKCU "${LEGACY_MANUPRODUCTKEY}"
-  DeleteRegKey HKLM "${LEGACY_UNINSTKEY}"
-  DeleteRegKey HKLM "${LEGACY_MANUPRODUCTKEY}"
   DeleteRegKey /ifempty HKCU "${MANUKEY}"
-  DeleteRegKey /ifempty HKLM "${MANUKEY}"
-
-  ${If} $LegacyInstallDir != ""
-  ${AndIf} $LegacyInstallDir != "$INSTDIR"
-    Delete "$LegacyInstallDir\${MAINBINARYNAME}.exe"
-    Delete "$LegacyInstallDir\uninstall.exe"
-    RMDir /r /REBOOTOK "$LegacyInstallDir\resources"
-    RMDir /REBOOTOK "$LegacyInstallDir"
-  ${EndIf}
 FunctionEnd
 
 Function Skip
@@ -1110,7 +1096,7 @@ Function CreateOrUpdateStartMenuShortcut
     Return
   ${ElseIf} $R0 = 2
     Goto create_start_menu_shortcut
-  ${ElseIf} $LegacyInstallDetected = 1
+  ${ElseIf} $LegacyShortcutFound = 1
     Goto create_start_menu_shortcut
   ${EndIf}
 
@@ -1152,7 +1138,7 @@ Function CreateOrUpdateDesktopShortcut
     Return
   ${EndIf}
 
-  ${If} $LegacyInstallDetected = 1
+  ${If} $LegacyShortcutFound = 1
     Goto create_desktop_shortcut
   ${EndIf}
 

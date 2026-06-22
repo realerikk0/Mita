@@ -127,6 +127,7 @@ test: lint install-rust-targets
 ifeq ($(DETECTED_OS),Windows)
 endif
 	yarn test
+	node --test ./scripts/__tests__/*.test.mjs
 	yarn copy:assets:tauri
 	yarn build:icon
 	yarn build:mlx-server

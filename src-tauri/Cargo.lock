@@ -4,7 +4,7 @@ version = 3
 
 [[package]]
 name = "Mita"
-version = "0.6.623"
+version = "0.6.630"
 dependencies = [
  "async-trait",
  "base64 0.22.1",
@@ -67,6 +67,7 @@ dependencies = [
  "url",
  "uuid",
  "windows-sys 0.60.2",
+ "winreg 0.55.0",
  "zbus",
  "zip 0.6.6",
 ]

@@ -3,6 +3,13 @@ import fs from 'node:fs'
 import test from 'node:test'
 
 const template = fs.readFileSync('src-tauri/tauri.bundle.windows.nsis.template', 'utf8')
+const makefile = fs.readFileSync('Makefile', 'utf8')
+
+function functionBody(name) {
+  const match = template.match(new RegExp(`Function ${name}([\\s\\S]*?)FunctionEnd`))
+  assert.ok(match, `expected ${name} function to exist`)
+  return match[1]
+}
 
 test('Windows NSIS installer keeps legacy Mita update migration hooks', () => {
   assert.match(template, /!define LEGACY_PRODUCTNAME "Mita"/)
@@ -16,36 +23,55 @@ test('Windows NSIS installer keeps legacy Mita update migration hooks', () => {
   assert.match(template, /ReadRegStr \$R0 SHCTX "\$PreviousUninstKey" "DisplayVersion"/)
   assert.match(template, /DeleteRegKey HKCU "\$\{LEGACY_UNINSTKEY\}"/)
   assert.match(template, /DeleteRegKey HKCU "\$\{LEGACY_MANUPRODUCTKEY\}"/)
-  assert.match(template, /DeleteRegKey HKLM "\$\{LEGACY_UNINSTKEY\}"/)
-  assert.match(template, /DeleteRegKey HKLM "\$\{LEGACY_MANUPRODUCTKEY\}"/)
+  assert.doesNotMatch(template, /ReadRegStr [^\n]+ HKLM "\$\{LEGACY_MANUPRODUCTKEY\}" ""/)
+  assert.doesNotMatch(template, /DeleteRegKey HKLM "\$\{LEGACY_UNINSTKEY\}"/)
+  assert.doesNotMatch(template, /DeleteRegKey HKLM "\$\{LEGACY_MANUPRODUCTKEY\}"/)
 })
 
 test('Windows NSIS installer migrates legacy Mita shortcuts to Biyan shortcuts', () => {
   assert.match(template, /\$\{LEGACY_PRODUCTNAME\}\.lnk/)
   assert.match(template, /CreateShortcut "\$SMPROGRAMS\\\$\{PRODUCTNAME\}\.lnk"/)
   assert.match(template, /CreateShortcut "\$DESKTOP\\\$\{PRODUCTNAME\}\.lnk"/)
+  assert.match(functionBody('CreateOrUpdateStartMenuShortcut'), /\$LegacyShortcutFound = 1/)
+  assert.match(functionBody('CreateOrUpdateDesktopShortcut'), /\$LegacyShortcutFound = 1/)
+  assert.doesNotMatch(functionBody('CreateOrUpdateStartMenuShortcut'), /\$LegacyInstallDetected = 1/)
+  assert.doesNotMatch(functionBody('CreateOrUpdateDesktopShortcut'), /\$LegacyInstallDetected = 1/)
 })
 
 test('Windows NSIS installer detects legacy Mita installs without registry state', () => {
-  assert.match(template, /Function DetectLegacyInstallLocation/)
-  assert.match(template, /ReadRegStr \$LegacyInstallDir HKLM "\$\{LEGACY_MANUPRODUCTKEY\}" ""/)
-  assert.match(template, /\$LOCALAPPDATA\\Programs\\\$\{LEGACY_PRODUCTNAME\}/)
-  assert.match(template, /FileExists.*\$LegacyInstallDir\\\$\{MAINBINARYNAME\}\.exe/s)
-  assert.match(template, /Call DetectLegacyInstallLocation[\s\S]*StrCpy \$INSTDIR \$LegacyInstallDir/)
+  const detectLegacyInstallLocation = functionBody('DetectLegacyInstallLocation')
+
+  assert.doesNotMatch(
+    detectLegacyInstallLocation,
+    /ReadRegStr \$LegacyInstallDir HKLM "\$\{LEGACY_MANUPRODUCTKEY\}" ""/,
+  )
+  assert.match(detectLegacyInstallLocation, /\$LOCALAPPDATA\\Programs\\\$\{LEGACY_PRODUCTNAME\}/)
+  assert.match(
+    detectLegacyInstallLocation,
+    /FileExists.*\$LegacyInstallDir\\\$\{MAINBINARYNAME\}\.exe/s,
+  )
+  assert.match(functionBody('RestorePreviousInstallLocation'), /StrCpy \$INSTDIR \$LegacyInstallDir/)
 })
 
 test('Windows NSIS installer removes stale legacy Mita entry points', () => {
-  assert.match(template, /Function RemoveLegacyMitaShortcuts/)
-  assert.match(template, /Delete "\$DESKTOP\\\$\{LEGACY_PRODUCTNAME\}\.lnk"/)
-  assert.match(template, /Delete "\$SMPROGRAMS\\\$\{LEGACY_PRODUCTNAME\}\.lnk"/)
-  assert.match(template, /User Pinned\\TaskBar\\\$\{LEGACY_PRODUCTNAME\}\.lnk/)
-  assert.match(template, /User Pinned\\StartMenu\\\$\{LEGACY_PRODUCTNAME\}\.lnk/)
+  const removeLegacyMitaShortcuts = functionBody('RemoveLegacyMitaShortcuts')
+
+  assert.match(removeLegacyMitaShortcuts, /Delete "\$DESKTOP\\\$\{LEGACY_PRODUCTNAME\}\.lnk"/)
+  assert.match(removeLegacyMitaShortcuts, /Delete "\$SMPROGRAMS\\\$\{LEGACY_PRODUCTNAME\}\.lnk"/)
+  assert.match(removeLegacyMitaShortcuts, /User Pinned\\TaskBar\\\$\{LEGACY_PRODUCTNAME\}\.lnk/)
+  assert.match(removeLegacyMitaShortcuts, /User Pinned\\StartMenu\\\$\{LEGACY_PRODUCTNAME\}\.lnk/)
 })
 
-test('Windows NSIS installer removes separate legacy Mita install folder after Biyan install', () => {
-  assert.match(template, /Function CleanupLegacyMitaInstall/)
-  assert.match(template, /Call RemoveLegacyMitaShortcuts/)
-  assert.match(template, /DeleteRegKey HKCU "\$\{LEGACY_UNINSTKEY\}"/)
-  assert.match(template, /RMDir \/r \/REBOOTOK "\$LegacyInstallDir\\resources"/)
-  assert.match(template, /RMDir \/REBOOTOK "\$LegacyInstallDir"/)
+test('Windows NSIS installer leaves legacy install directory deletion to runtime self-heal', () => {
+  const cleanupLegacyMitaInstall = functionBody('CleanupLegacyMitaInstall')
+
+  assert.match(cleanupLegacyMitaInstall, /Call RemoveLegacyMitaShortcuts/)
+  assert.match(cleanupLegacyMitaInstall, /DeleteRegKey HKCU "\$\{LEGACY_UNINSTKEY\}"/)
+  assert.doesNotMatch(cleanupLegacyMitaInstall, /\$LegacyInstallDir != "\$INSTDIR"/)
+  assert.doesNotMatch(cleanupLegacyMitaInstall, /RMDir .*"\$LegacyInstallDir/)
+  assert.doesNotMatch(cleanupLegacyMitaInstall, /Delete "\$LegacyInstallDir/)
+})
+
+test('Windows NSIS installer template tests run from Makefile test target', () => {
+  assert.match(makefile, /node --test \.\/scripts\/__tests__\/\*\.test\.mjs/)
 })
