@@ -946,6 +946,133 @@ describe('Images route', () => {
     expect(prompt.match(/exactly 6 storyboard panels/g)).toHaveLength(1)
   })
 
+  it('does not reuse restored storyboard shots after the story text changes', async () => {
+    h.providers = [
+      {
+        provider: 'jingxing',
+        base_url: 'https://api.jingxing.uk/v1',
+        settings: [],
+        models: [
+          {
+            id: 'gpt-image-2',
+            capabilities: [ModelCapabilities.IMAGE_GENERATION],
+          },
+        ],
+      },
+    ]
+    h.generateImages.mockResolvedValueOnce([
+      {
+        b64Json: 'aGVsbG8=',
+        mimeType: 'image/png',
+        revisedPrompt: 'fresh storyboard',
+      },
+    ])
+    h.saveAsset.mockImplementation((request: any) =>
+      Promise.resolve({
+        ...request,
+        createdAt: '2026-06-22T00:00:00Z',
+        path: `/mock/mita/image-assets/${request.id}/image.png`,
+        fileName: 'image.png',
+      })
+    )
+    vi.stubGlobal(
+      'Image',
+      class {
+        naturalWidth = 0
+        naturalHeight = 0
+        onerror?: () => void
+        set src(_value: string) {
+          this.onerror?.()
+        }
+      }
+    )
+
+    act(() => {
+      useStoryboardSessionStore.getState().save({
+        stage: 'compose',
+        story: 'Old optimized motorcycle storyboard prompt.',
+        settings: {
+          style: '电影感',
+          aspect: '16:9',
+          qualityPreset: 'sd',
+          variantCount: 1,
+          template: 'board',
+          consistency: 'lockedCharacter',
+        },
+        videoSettings: {
+          ratio: '16:9',
+          resolution: '1080p',
+          duration: 8,
+          fps: 30,
+          camera: '自动',
+          motion: 55,
+          generateAudio: true,
+        },
+        shots: [
+          {
+            id: 'old-shot',
+            title: 'Old rider',
+            camera: 'Low angle',
+            prompt: 'A professional motorcycle rider crosses a muddy forest.',
+            duration: 5,
+          },
+        ],
+        promptTabs: [
+          {
+            id: 'old-tab',
+            label: 'Prompt 1',
+            prompt: 'Old optimized motorcycle storyboard prompt.',
+            shots: [
+              {
+                id: 'old-shot',
+                title: 'Old rider',
+                camera: 'Low angle',
+                prompt:
+                  'A professional motorcycle rider crosses a muddy forest.',
+                duration: 5,
+              },
+            ],
+            createdAt: '2026-06-21T00:00:00Z',
+          },
+        ],
+        activePromptTabId: 'old-tab',
+        storyboardStatus: 'idle',
+        storyboardAsset: undefined,
+        storyboardVersions: [],
+        activeStoryboardVersionId: '',
+        referenceAssets: [],
+        selectedVideoModelKey: '',
+        videoAsset: undefined,
+      } as any)
+      useStoryboardSessionStore.getState().setMediaMode('storyboard')
+    })
+
+    renderComponent()
+
+    await waitFor(() => expect(h.listAssets).toHaveBeenCalled())
+    fireEvent.change(
+      screen.getByPlaceholderText(
+        'Describe the single video you want in one sentence.'
+      ),
+      {
+        target: {
+          value:
+            'A rainy highway ambush with two characters moving through sunset mist.',
+        },
+      }
+    )
+    fireEvent.click(
+      screen.getByRole('button', { name: 'Generate storyboard image' })
+    )
+
+    await waitFor(() => expect(h.generateImages).toHaveBeenCalled())
+    const prompt = h.generateImages.mock.calls.at(-1)?.[0].prompt
+    expect(prompt).toContain('A rainy highway ambush')
+    expect(prompt).not.toContain('motorcycle')
+    expect(prompt).not.toContain('muddy forest')
+    expect(prompt).not.toContain('Old optimized motorcycle')
+  })
+
   it('appends the shot-count contract to optimized non-plain storyboard prompts', async () => {
     h.providers = [
       {

@@ -2371,6 +2371,16 @@ function StoryboardVideoMode({
   const updateVideoSettings = (patch: Partial<VideoSettings>) => {
     setVideoSettings((current) => ({ ...current, ...patch }))
   }
+  const clearStoryboardPlan = useCallback(() => {
+    setShots([])
+    setPromptTabs([])
+    setActivePromptTabId('')
+    setStoryboardAsset(undefined)
+    setStoryboardVersions([])
+    setActiveStoryboardVersionId('')
+    setStoryboardStatus('idle')
+    setStage('compose')
+  }, [])
   const commitStoryChange = useCallback(
     (nextStory: string) => {
       if (story === nextStory) return
@@ -2382,24 +2392,34 @@ function StoryboardVideoMode({
     },
     [story]
   )
+  const commitFreshStoryChange = useCallback(
+    (nextStory: string) => {
+      if (story === nextStory) return
+      clearStoryboardPlan()
+      commitStoryChange(nextStory)
+    },
+    [clearStoryboardPlan, commitStoryChange, story]
+  )
   const undoStoryChange = useCallback(() => {
     if (storyUndoStack.length === 0) return
     const previousStory = storyUndoStack[storyUndoStack.length - 1]!
+    clearStoryboardPlan()
     setStoryRedoStack((current) =>
       [...current, story].slice(-STORY_HISTORY_LIMIT)
     )
     setStoryUndoStack((current) => current.slice(0, -1))
     setStory(previousStory)
-  }, [story, storyUndoStack])
+  }, [clearStoryboardPlan, story, storyUndoStack])
   const redoStoryChange = useCallback(() => {
     if (storyRedoStack.length === 0) return
     const nextStory = storyRedoStack[storyRedoStack.length - 1]!
+    clearStoryboardPlan()
     setStoryUndoStack((current) =>
       [...current, story].slice(-STORY_HISTORY_LIMIT)
     )
     setStoryRedoStack((current) => current.slice(0, -1))
     setStory(nextStory)
-  }, [story, storyRedoStack])
+  }, [clearStoryboardPlan, story, storyRedoStack])
   const showStoryboardReferenceLimitToast = useCallback(() => {
     toast.error(
       imageT(t, 'toast.referenceLimitReached', {
@@ -2625,26 +2645,32 @@ function StoryboardVideoMode({
       return
     }
 
-    const nextShots = activePromptTab?.shots.length
-      ? activePromptTab.shots
-      : shots.length
-        ? shots
-        : buildStoryboardShots(story, DEFAULT_STORYBOARD_SHOT_COUNT).map(
-            (shot) => ({
-              ...shot,
-              duration: Math.max(
-                1,
-                Math.round(
-                  videoSettings.duration / DEFAULT_STORYBOARD_SHOT_COUNT
-                )
-              ),
-            })
-          )
+    const currentPromptTab =
+      activePromptTab?.prompt.trim() === story.trim()
+        ? activePromptTab
+        : undefined
+    const reusableShots =
+      currentPromptTab?.shots.length
+        ? currentPromptTab.shots
+        : !activePromptTab && shots.length
+          ? shots
+          : undefined
+    const nextShots = reusableShots
+      ? reusableShots
+      : buildStoryboardShots(story, DEFAULT_STORYBOARD_SHOT_COUNT).map(
+          (shot) => ({
+            ...shot,
+            duration: Math.max(
+              1,
+              Math.round(videoSettings.duration / DEFAULT_STORYBOARD_SHOT_COUNT)
+            ),
+          })
+        )
     const prompt = buildStoryboardImagePrompt(
       story,
       settings,
       nextShots,
-      activePromptTab ? story : undefined
+      currentPromptTab ? story : undefined
     )
     const sourceAssets =
       referenceAssets.length > 0 && selectedImageModelCanUseReferences
@@ -3047,7 +3073,9 @@ function StoryboardVideoMode({
                   className="min-h-[156px] resize-none rounded-lg border-0 bg-[#f7f8fa] px-4 py-3 text-[15px] leading-6 shadow-none focus-visible:ring-0"
                   value={story}
                   placeholder={imageT(t, 'storyboard.storyPlaceholder')}
-                  onChange={(event) => commitStoryChange(event.target.value)}
+                  onChange={(event) =>
+                    commitFreshStoryChange(event.target.value)
+                  }
                 />
               </div>
             </div>
