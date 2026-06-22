@@ -2378,6 +2378,7 @@ function StoryboardVideoMode({
     setStoryboardAsset(undefined)
     setStoryboardVersions([])
     setActiveStoryboardVersionId('')
+    setReferenceAssets([])
     setStoryboardStatus('idle')
     setStage('compose')
   }, [])

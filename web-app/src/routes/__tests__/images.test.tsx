@@ -1073,6 +1073,131 @@ describe('Images route', () => {
     expect(prompt).not.toContain('Old optimized motorcycle')
   })
 
+  it('does not reuse restored storyboard reference assets after the story text changes', async () => {
+    h.providers = [
+      {
+        provider: 'jingxing',
+        base_url: 'https://api.jingxing.uk/v1',
+        settings: [],
+        models: [
+          {
+            id: 'gpt-image-2',
+            capabilities: [
+              ModelCapabilities.IMAGE_GENERATION,
+              ModelCapabilities.IMAGE_TO_IMAGE,
+            ],
+          },
+        ],
+      },
+    ]
+    h.generateImages.mockResolvedValueOnce([
+      {
+        b64Json: 'aGVsbG8=',
+        mimeType: 'image/png',
+        revisedPrompt: 'fresh storyboard',
+      },
+    ])
+    h.saveAsset.mockImplementation((request: any) =>
+      Promise.resolve({
+        ...request,
+        createdAt: '2026-06-22T00:00:00Z',
+        path: `/mock/mita/image-assets/${request.id}/image.png`,
+        fileName: 'image.png',
+      })
+    )
+    vi.stubGlobal(
+      'Image',
+      class {
+        naturalWidth = 0
+        naturalHeight = 0
+        onerror?: () => void
+        set src(_value: string) {
+          this.onerror?.()
+        }
+      }
+    )
+
+    act(() => {
+      useStoryboardSessionStore.getState().save({
+        stage: 'compose',
+        story: 'A professional motorcycle rider crosses a muddy forest.',
+        settings: {
+          style: '电影感',
+          aspect: '16:9',
+          qualityPreset: 'sd',
+          variantCount: 1,
+          template: 'board',
+          consistency: 'lockedCharacter',
+        },
+        videoSettings: {
+          ratio: '16:9',
+          resolution: '1080p',
+          duration: 8,
+          fps: 30,
+          camera: '自动',
+          motion: 55,
+          generateAudio: true,
+        },
+        shots: [],
+        promptTabs: [],
+        activePromptTabId: '',
+        storyboardStatus: 'idle',
+        storyboardAsset: undefined,
+        storyboardVersions: [],
+        activeStoryboardVersionId: '',
+        referenceAssets: [
+          {
+            id: 'old-motorcycle-ref',
+            prompt: 'old motorcycle rider reference',
+            mode: 'edit',
+            provider: 'local',
+            model: 'reference-image',
+            ratio: '1:1',
+            size: 'original',
+            quality: 'source',
+            sourceAssetIds: [],
+            createdAt: '2026-06-21T00:00:00Z',
+            status: 'succeeded',
+            path: '/mock/mita/image-assets/old-motorcycle-ref/image.png',
+            fileName: 'image.png',
+            mimeType: 'image/png',
+            assetKind: 'reference',
+          },
+        ],
+        selectedVideoModelKey: '',
+        videoAsset: undefined,
+      } as any)
+      useStoryboardSessionStore.getState().setMediaMode('storyboard')
+    })
+
+    renderComponent()
+
+    await waitFor(() => expect(h.listAssets).toHaveBeenCalled())
+    fireEvent.change(
+      screen.getByPlaceholderText(
+        'Describe the single video you want in one sentence.'
+      ),
+      {
+        target: {
+          value:
+            'A rainy highway ambush with two characters moving through sunset mist.',
+        },
+      }
+    )
+    fireEvent.click(
+      screen.getByRole('button', { name: 'Generate storyboard image' })
+    )
+
+    await waitFor(() => expect(h.generateImages).toHaveBeenCalled())
+    expect(h.generateImages.mock.calls.at(-1)?.[0]).toMatchObject({
+      mode: 'generate',
+      sourceAssets: [],
+    })
+    expect(h.saveAsset.mock.calls.at(-1)?.[0]).toMatchObject({
+      sourceAssetIds: [],
+    })
+  })
+
   it('appends the shot-count contract to optimized non-plain storyboard prompts', async () => {
     h.providers = [
       {
