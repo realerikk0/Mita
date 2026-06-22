@@ -71,6 +71,9 @@ Var WixMode
 Var OldMainBinaryName
 Var PreviousUninstKey
 Var PreviousManuProductKey
+Var LegacyInstallDir
+Var LegacyInstallDetected
+Var LegacyShortcutFound
 
 Name "${PRODUCTNAME}"
 BrandingText "${COPYRIGHT}"
@@ -768,9 +771,7 @@ Section Install
   WriteRegDWORD SHCTX "${UNINSTKEY}" "NoRepair" "1"
 
   ; Migrate first Biyan installs from the legacy Mita registry identity.
-  DeleteRegKey SHCTX "${LEGACY_UNINSTKEY}"
-  DeleteRegKey SHCTX "${LEGACY_MANUPRODUCTKEY}"
-  DeleteRegKey /ifempty SHCTX "${MANUKEY}"
+  Call CleanupLegacyMitaInstall
 
   ${GetSize} "$INSTDIR" "/M=uninstall.exe /S=0K /G=0" $0 $1 $2
   IntOp $0 $0 + ${ESTIMATEDSIZE}
@@ -955,10 +956,108 @@ SectionEnd
 
 Function RestorePreviousInstallLocation
   ReadRegStr $4 SHCTX "${MANUPRODUCTKEY}" ""
-  StrCmp $4 "" 0 +2
+  ${If} $4 == ""
+    Call DetectLegacyInstallLocation
+    ${If} $LegacyInstallDir != ""
+      StrCpy $INSTDIR $LegacyInstallDir
+      Return
+    ${EndIf}
     ReadRegStr $4 SHCTX "${LEGACY_MANUPRODUCTKEY}" ""
+  ${EndIf}
   StrCmp $4 "" +2 0
     StrCpy $INSTDIR $4
+FunctionEnd
+
+Function DetectLegacyInstallLocation
+  StrCpy $LegacyInstallDetected 0
+  StrCpy $LegacyInstallDir ""
+
+  ReadRegStr $LegacyInstallDir SHCTX "${LEGACY_MANUPRODUCTKEY}" ""
+  ${If} $LegacyInstallDir == ""
+    ReadRegStr $LegacyInstallDir HKCU "${LEGACY_MANUPRODUCTKEY}" ""
+  ${EndIf}
+  ${If} $LegacyInstallDir == ""
+    ReadRegStr $LegacyInstallDir HKLM "${LEGACY_MANUPRODUCTKEY}" ""
+  ${EndIf}
+  ${If} $LegacyInstallDir == ""
+    StrCpy $LegacyInstallDir "$LOCALAPPDATA\Programs\${LEGACY_PRODUCTNAME}"
+  ${EndIf}
+
+  ${If} ${FileExists} "$LegacyInstallDir\${MAINBINARYNAME}.exe"
+  ${OrIf} ${FileExists} "$LegacyInstallDir\uninstall.exe"
+    StrCpy $LegacyInstallDetected 1
+  ${Else}
+    StrCpy $LegacyInstallDir ""
+  ${EndIf}
+FunctionEnd
+
+Function RemoveLegacyMitaShortcuts
+  StrCpy $LegacyShortcutFound 0
+
+  ${If} ${FileExists} "$DESKTOP\${LEGACY_PRODUCTNAME}.lnk"
+    StrCpy $LegacyShortcutFound 1
+  ${EndIf}
+  !insertmacro UnpinShortcut "$DESKTOP\${LEGACY_PRODUCTNAME}.lnk"
+  Delete "$DESKTOP\${LEGACY_PRODUCTNAME}.lnk"
+
+  ${If} ${FileExists} "$COMMONDESKTOP\${LEGACY_PRODUCTNAME}.lnk"
+    StrCpy $LegacyShortcutFound 1
+  ${EndIf}
+  !insertmacro UnpinShortcut "$COMMONDESKTOP\${LEGACY_PRODUCTNAME}.lnk"
+  Delete "$COMMONDESKTOP\${LEGACY_PRODUCTNAME}.lnk"
+
+  ${If} ${FileExists} "$SMPROGRAMS\${LEGACY_PRODUCTNAME}.lnk"
+    StrCpy $LegacyShortcutFound 1
+  ${EndIf}
+  !insertmacro UnpinShortcut "$SMPROGRAMS\${LEGACY_PRODUCTNAME}.lnk"
+  Delete "$SMPROGRAMS\${LEGACY_PRODUCTNAME}.lnk"
+
+  ${If} ${FileExists} "$COMMONSMPROGRAMS\${LEGACY_PRODUCTNAME}.lnk"
+    StrCpy $LegacyShortcutFound 1
+  ${EndIf}
+  !insertmacro UnpinShortcut "$COMMONSMPROGRAMS\${LEGACY_PRODUCTNAME}.lnk"
+  Delete "$COMMONSMPROGRAMS\${LEGACY_PRODUCTNAME}.lnk"
+
+  ${If} ${FileExists} "$SMPROGRAMS\$AppStartMenuFolder\${LEGACY_PRODUCTNAME}.lnk"
+    StrCpy $LegacyShortcutFound 1
+  ${EndIf}
+  !insertmacro UnpinShortcut "$SMPROGRAMS\$AppStartMenuFolder\${LEGACY_PRODUCTNAME}.lnk"
+  Delete "$SMPROGRAMS\$AppStartMenuFolder\${LEGACY_PRODUCTNAME}.lnk"
+
+  ${If} ${FileExists} "$APPDATA\Microsoft\Internet Explorer\Quick Launch\User Pinned\TaskBar\${LEGACY_PRODUCTNAME}.lnk"
+    StrCpy $LegacyShortcutFound 1
+  ${EndIf}
+  !insertmacro UnpinShortcut "$APPDATA\Microsoft\Internet Explorer\Quick Launch\User Pinned\TaskBar\${LEGACY_PRODUCTNAME}.lnk"
+  Delete "$APPDATA\Microsoft\Internet Explorer\Quick Launch\User Pinned\TaskBar\${LEGACY_PRODUCTNAME}.lnk"
+
+  ${If} ${FileExists} "$APPDATA\Microsoft\Internet Explorer\Quick Launch\User Pinned\StartMenu\${LEGACY_PRODUCTNAME}.lnk"
+    StrCpy $LegacyShortcutFound 1
+  ${EndIf}
+  !insertmacro UnpinShortcut "$APPDATA\Microsoft\Internet Explorer\Quick Launch\User Pinned\StartMenu\${LEGACY_PRODUCTNAME}.lnk"
+  Delete "$APPDATA\Microsoft\Internet Explorer\Quick Launch\User Pinned\StartMenu\${LEGACY_PRODUCTNAME}.lnk"
+FunctionEnd
+
+Function CleanupLegacyMitaInstall
+  Call DetectLegacyInstallLocation
+  Call RemoveLegacyMitaShortcuts
+  ${If} $LegacyShortcutFound = 1
+    StrCpy $LegacyInstallDetected 1
+  ${EndIf}
+
+  DeleteRegKey HKCU "${LEGACY_UNINSTKEY}"
+  DeleteRegKey HKCU "${LEGACY_MANUPRODUCTKEY}"
+  DeleteRegKey HKLM "${LEGACY_UNINSTKEY}"
+  DeleteRegKey HKLM "${LEGACY_MANUPRODUCTKEY}"
+  DeleteRegKey /ifempty HKCU "${MANUKEY}"
+  DeleteRegKey /ifempty HKLM "${MANUKEY}"
+
+  ${If} $LegacyInstallDir != ""
+  ${AndIf} $LegacyInstallDir != "$INSTDIR"
+    Delete "$LegacyInstallDir\${MAINBINARYNAME}.exe"
+    Delete "$LegacyInstallDir\uninstall.exe"
+    RMDir /r /REBOOTOK "$LegacyInstallDir\resources"
+    RMDir /REBOOTOK "$LegacyInstallDir"
+  ${EndIf}
 FunctionEnd
 
 Function Skip
@@ -1011,6 +1110,8 @@ Function CreateOrUpdateStartMenuShortcut
     Return
   ${ElseIf} $R0 = 2
     Goto create_start_menu_shortcut
+  ${ElseIf} $LegacyInstallDetected = 1
+    Goto create_start_menu_shortcut
   ${EndIf}
 
   ; Skip creating shortcut if in update mode or no shortcut mode
@@ -1049,6 +1150,10 @@ Function CreateOrUpdateDesktopShortcut
   ${If} $0 = 1
     !insertmacro SetShortcutTarget "$DESKTOP\${PRODUCTNAME}.lnk" "$INSTDIR\${MAINBINARYNAME}.exe"
     Return
+  ${EndIf}
+
+  ${If} $LegacyInstallDetected = 1
+    Goto create_desktop_shortcut
   ${EndIf}
 
   ; Skip creating shortcut if in update mode or no shortcut mode

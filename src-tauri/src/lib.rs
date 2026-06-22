@@ -220,6 +220,8 @@ pub fn run() {
             app.handle()
                 .plugin(tauri_plugin_updater::Builder::new().build())?;
 
+            core::windows_migration::run_biyan_windows_migration();
+
             // Start migration
             let mut store_path = get_mita_data_folder_path(app.handle().clone());
             store_path.push("store.json");
