@@ -19,6 +19,9 @@ use tauri_plugin_store::StoreExt;
 #[cfg(not(feature = "cli"))]
 use tokio::sync::Mutex;
 
+#[cfg(all(not(feature = "cli"), windows))]
+const WINDOWS_BIYAN_MIGRATED_KEY: &str = "windows_biyan_migrated";
+
 #[cfg(not(feature = "cli"))]
 macro_rules! invoke_commands_with_extras {
     ($($extra:path),* $(,)?) => {
@@ -232,6 +235,35 @@ pub fn run() {
                 .and_then(|v| v.as_str().map(String::from))
                 .unwrap_or_default();
             let app_version = app.config().version.clone().unwrap_or_default();
+
+            #[cfg(windows)]
+            {
+                let windows_biyan_migrated = store
+                    .get(WINDOWS_BIYAN_MIGRATED_KEY)
+                    .and_then(|value| value.as_bool())
+                    .unwrap_or(false);
+                if !windows_biyan_migrated {
+                    let store = store.clone();
+                    tauri::async_runtime::spawn_blocking(move || {
+                        match core::windows_migration::run_biyan_windows_migration() {
+                            Ok(()) => {
+                                store.set(WINDOWS_BIYAN_MIGRATED_KEY, serde_json::json!(true));
+                                if let Err(error) = store.save() {
+                                    log::warn!(
+                                        "Failed to persist Biyan Windows migration marker: {error}"
+                                    );
+                                }
+                            }
+                            Err(error) => {
+                                log::warn!(
+                                    "Failed to complete Biyan Windows migration self-heal: {error}"
+                                );
+                            }
+                        }
+                    });
+                }
+            }
+
             // Migrate extensions
             if let Err(e) =
                 setup::install_extensions(app.handle().clone(), stored_version != app_version)
