@@ -284,8 +284,8 @@ export type StoryboardSession = {
   videoAsset?: VideoAssetRecord
   /** Story text the shots/prompt tabs/storyboard image were last built for. */
   planStory?: string
-  /** Story text the reference images were last applied to. */
-  referenceStory?: string
+  /** Per-reference story provenance: asset id -> story it was applied to. */
+  referenceStories?: Record<string, string>
 }
 
 type StoryboardEditorTool = 'pan' | 'pen' | 'rect' | 'crop'
@@ -1313,10 +1313,12 @@ function StoryboardStepper({
   stage,
   setStage,
   hasStoryboard,
+  storyboardStale,
 }: {
   stage: StoryboardStage
   setStage: (stage: StoryboardStage) => void
   hasStoryboard: boolean
+  storyboardStale: boolean
 }) {
   const { t } = useTranslation()
   const steps: Array<{ value: StoryboardStage; label: string }> = [
@@ -1329,7 +1331,11 @@ function StoryboardStepper({
   return (
     <div className="flex min-w-0 items-center overflow-x-auto py-1">
       {steps.map((step, index) => {
-        const disabled = index > 0 && !hasStoryboard
+        // The video step also needs a storyboard that still matches the current
+        // story, otherwise a video would mix the new story with the old image.
+        const disabled =
+          (index > 0 && !hasStoryboard) ||
+          (step.value === 'video' && storyboardStale)
         const done = index < activeIndex
         return (
           <div key={step.value} className="flex shrink-0 items-center">
@@ -2291,12 +2297,22 @@ function StoryboardVideoMode({
       initialSession?.story ??
       DEFAULT_STORYBOARD_STORY
   )
-  const [referenceStory, setReferenceStory] = useState(
-    () =>
-      initialSession?.referenceStory ??
-      initialSession?.story ??
-      DEFAULT_STORYBOARD_STORY
-  )
+  // Per-reference provenance (asset id -> story it was applied to). A single
+  // scalar can't represent a mixed set (old held references + a freshly imported
+  // one), so each reference tracks its own story; only those matching the
+  // current story are fed into image-to-image generation.
+  const [referenceStories, setReferenceStories] = useState<
+    Record<string, string>
+  >(() => {
+    if (initialSession?.referenceStories) return initialSession.referenceStories
+    const baseStory = initialSession?.story ?? DEFAULT_STORYBOARD_STORY
+    return Object.fromEntries(
+      (initialSession?.referenceAssets ?? []).map((asset) => [
+        asset.id,
+        baseStory,
+      ])
+    )
+  })
   const [selectedVideoModelKey, setSelectedVideoModelKey] = useState(
     () => initialSession?.selectedVideoModelKey ?? ''
   )
@@ -2322,7 +2338,7 @@ function StoryboardVideoMode({
       selectedVideoModelKey,
       videoAsset: lastVideoAsset,
       planStory,
-      referenceStory,
+      referenceStories,
     }),
     [
       stage,
@@ -2340,7 +2356,7 @@ function StoryboardVideoMode({
       selectedVideoModelKey,
       lastVideoAsset,
       planStory,
-      referenceStory,
+      referenceStories,
     ]
   )
   const sessionSnapshotRef = useRef(sessionSnapshot)
@@ -2380,8 +2396,15 @@ function StoryboardVideoMode({
     planStory.trim() !== story.trim()
   // Restored/old reference images are kept but "held" after a story edit: they
   // are not fed into image-to-image generation until the user re-applies them.
-  const referencesAreStale =
-    referenceAssets.length > 0 && referenceStory.trim() !== story.trim()
+  // A reference is "applied" only when its provenance matches the current story.
+  const referenceMatchesStory = useCallback(
+    (assetId: string) =>
+      (referenceStories[assetId] ?? '').trim() === story.trim(),
+    [referenceStories, story]
+  )
+  const referencesAreStale = referenceAssets.some(
+    (asset) => !referenceMatchesStory(asset.id)
+  )
   const selectedImageModelCanUseReferences = Boolean(
     selectedImageModel?.model && isImageEditModel(selectedImageModel.model)
   )
@@ -2416,11 +2439,33 @@ function StoryboardVideoMode({
     },
     [story]
   )
-  // Re-apply the currently held reference images to the edited story so they are
+  // Re-apply all currently held reference images to the edited story so they are
   // used by the next image-to-image generation again.
   const reapplyReferencesToStory = useCallback(() => {
-    setReferenceStory(story)
-  }, [story])
+    setReferenceStories((prev) => {
+      const next = { ...prev }
+      referenceAssets.forEach((asset) => {
+        next[asset.id] = story
+      })
+      return next
+    })
+  }, [referenceAssets, story])
+  // Move references currently applied to `fromStory` over to `toStory`, leaving
+  // any held references untouched. Used when optimizing refines the story.
+  const retagAppliedReferences = useCallback(
+    (fromStory: string, toStory: string) => {
+      setReferenceStories((prev) => {
+        const next = { ...prev }
+        referenceAssets.forEach((asset) => {
+          if ((next[asset.id] ?? '').trim() === fromStory.trim()) {
+            next[asset.id] = toStory
+          }
+        })
+        return next
+      })
+    },
+    [referenceAssets]
+  )
   // Undo/redo restore only the story text; the plan is preserved across the edit
   // (it un-stales automatically when the restored story matches planStory).
   const undoStoryChange = useCallback(() => {
@@ -2497,8 +2542,15 @@ function StoryboardVideoMode({
         ),
       ])
       imported.forEach(onAssetSaved)
-      // Freshly imported references belong to the current story.
-      setReferenceStory(story)
+      // Only the freshly imported references belong to the current story; any
+      // previously held (stale) references stay held so they don't leak back in.
+      setReferenceStories((prev) => {
+        const next = { ...prev }
+        imported.forEach((asset) => {
+          next[asset.id] = story
+        })
+        return next
+      })
       toast.success(imageT(t, 'toast.referenceImported'))
     } catch (error) {
       console.error('Failed to import storyboard reference image:', error)
@@ -2622,6 +2674,10 @@ function StoryboardVideoMode({
         setShots(lastTab.shots)
         commitStoryChange(lastTab.prompt)
         setPlanStory(lastTab.prompt)
+        // Optimize is a refinement of the same story: carry references that were
+        // applied to the pre-optimize story over to the optimized prompt (held
+        // references stay held).
+        retagAppliedReferences(story, lastTab.prompt)
       }
       setStoryboardAsset(undefined)
       setStoryboardVersions([])
@@ -2645,6 +2701,7 @@ function StoryboardVideoMode({
       setActivePromptTabId(fallbackTab.id)
       commitStoryChange(fallbackTab.prompt)
       setPlanStory(fallbackTab.prompt)
+      retagAppliedReferences(story, fallbackTab.prompt)
       setStoryboardAsset(undefined)
       setStoryboardVersions([])
       setActiveStoryboardVersionId('')
@@ -2656,6 +2713,7 @@ function StoryboardVideoMode({
   }, [
     fallbackBreakdown,
     commitStoryChange,
+    retagAppliedReferences,
     serviceHub,
     settings,
     story,
@@ -2700,12 +2758,9 @@ function StoryboardVideoMode({
       nextShots,
       currentPromptTab ? story : undefined
     )
-    const sourceAssets =
-      referenceAssets.length > 0 &&
-      selectedImageModelCanUseReferences &&
-      referenceStory.trim() === story.trim()
-        ? referenceAssets
-        : []
+    const sourceAssets = selectedImageModelCanUseReferences
+      ? referenceAssets.filter((asset) => referenceMatchesStory(asset.id))
+      : []
     setShots(nextShots)
     setStoryboardStatus('running')
 
@@ -2780,7 +2835,7 @@ function StoryboardVideoMode({
     shots,
     story,
     planStory,
-    referenceStory,
+    referenceMatchesStory,
     activePromptTab,
     referenceAssets,
     selectedImageModelCanUseReferences,
@@ -2965,6 +3020,7 @@ function StoryboardVideoMode({
         stage={stage}
         setStage={setStage}
         hasStoryboard={Boolean(storyboardAsset)}
+        storyboardStale={planIsStale}
       />
 
       <div className="space-y-3">
@@ -3753,11 +3809,22 @@ function StoryboardVideoMode({
                   }
                 />
               </label>
+              {planIsStale && (
+                <p
+                  className="text-[11px] leading-4 text-amber-700 dark:text-amber-300"
+                  data-testid="storyboard-video-stale-notice"
+                >
+                  {imageT(t, 'storyboard.storyChangedNotice')}
+                </p>
+              )}
               <Button
                 type="button"
                 className="w-full bg-[#f36f4f] text-white hover:bg-[#e96346]"
                 disabled={
-                  !videoModel || !storyboardAsset || videoStatus === 'running'
+                  !videoModel ||
+                  !storyboardAsset ||
+                  videoStatus === 'running' ||
+                  planIsStale
                 }
                 onClick={generateVideo}
               >
