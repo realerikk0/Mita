@@ -1,7 +1,26 @@
 {
   "build": {
     "beforeDevCommand": "",
-    "devUrl": "http://localhost:1420/thinking-content-demo"
+    "devUrl": "http://127.0.0.1:1420"
+  },
+  "app": {
+    "windows": [
+      {
+        "label": "main",
+        "title": "Thinking Content Demo",
+        "url": "/thinking-content-demo",
+        "width": 1200,
+        "minWidth": 960,
+        "height": 860,
+        "minHeight": 700,
+        "resizable": true,
+        "fullscreen": false,
+        "center": true,
+        "decorations": true,
+        "transparent": false,
+        "dragDropEnabled": false
+      }
+    ]
   },
   "bundle": {
     "externalBin": [],

@@ -3,6 +3,9 @@ import fs from 'node:fs'
 import test from 'node:test'
 
 const script = fs.readFileSync('scripts/verify-thinking-content-windows.ps1', 'utf8')
+const tauriDemoConfig = JSON.parse(
+  fs.readFileSync('scripts/thinking-content-tauri-demo.config.json', 'utf8'),
+)
 
 test('thinking content Windows verifier writes a complete evidence package', () => {
   assert.match(
@@ -65,4 +68,10 @@ test('thinking content Windows verifier foregrounds the Tauri window before capt
   assert.match(script, /SetForegroundWindow/)
   assert.match(script, /Waiting \$TauriSettleSeconds seconds for Windows WebView content to settle/)
   assert.match(script, /Save-DesktopScreenshot -Path \$TauriScreenshot/)
+})
+
+test('thinking content Tauri demo config loads the preview route from the window', () => {
+  assert.equal(tauriDemoConfig.build.devUrl, 'http://127.0.0.1:1420')
+  assert.equal(tauriDemoConfig.app.windows[0].url, '/thinking-content-demo')
+  assert.equal(tauriDemoConfig.app.windows[0].transparent, false)
 })
