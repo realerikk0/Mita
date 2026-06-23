@@ -135,6 +135,12 @@ try {
 try {
   Set-Location $RepoRoot
 
+  Write-Host "Preparing core workspace build for Vite aliases..."
+  yarn workspace @janhq/core build
+  if ($LASTEXITCODE -ne 0) {
+    throw "yarn workspace @janhq/core build failed with exit code $LASTEXITCODE"
+  }
+
   Write-Host "Starting Vite demo server for thinking content verification..."
   $webProcess = Start-Process -FilePath "cmd.exe" `
     -ArgumentList @("/c", "yarn dev:web") `
