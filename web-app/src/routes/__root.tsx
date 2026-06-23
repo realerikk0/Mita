@@ -35,6 +35,8 @@ export const Route = createRootRoute({
   errorComponent: ({ error }) => <GlobalError error={error} />,
 })
 
+const THINKING_CONTENT_DEMO_PATH = '/thinking-content-demo'
+
 const AppLayout = () => {
   const { productAnalyticPrompt } = useAnalytic()
   const {
@@ -103,6 +105,8 @@ const LogsLayout = () => {
   )
 }
 
+const PreviewLayout = () => <Outlet />
+
 function RootLayout() {
   const getInitialLayoutType = () => {
     const pathname = window.location.pathname
@@ -137,6 +141,12 @@ function RootLayout() {
   }, [])
 
   const IS_LOGS_ROUTE = getInitialLayoutType()
+  const IS_THINKING_CONTENT_DEMO =
+    window.location.pathname === THINKING_CONTENT_DEMO_PATH
+
+  if (IS_THINKING_CONTENT_DEMO) {
+    return <PreviewLayout />
+  }
 
   return (
     <Fragment>

@@ -221,6 +221,16 @@ describe('__root route', () => {
     expect(screen.queryByTestId('left-sidebar')).not.toBeInTheDocument()
   })
 
+  it('uses a lightweight preview layout on /thinking-content-demo', () => {
+    window.history.pushState({}, '', '/thinking-content-demo')
+    renderComponent()
+    expect(screen.getByTestId('outlet')).toBeInTheDocument()
+    expect(screen.queryByTestId('service-hub')).not.toBeInTheDocument()
+    expect(screen.queryByTestId('translation')).not.toBeInTheDocument()
+    expect(screen.queryByTestId('left-sidebar')).not.toBeInTheDocument()
+    expect(screen.queryByTestId('tool-approval')).not.toBeInTheDocument()
+  })
+
   it('adds "loaded" class to body after mount timer fires', () => {
     vi.useFakeTimers()
     renderComponent()
