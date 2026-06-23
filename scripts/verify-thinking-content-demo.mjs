@@ -1,10 +1,14 @@
-import { mkdir } from 'node:fs/promises'
+import { mkdir, writeFile } from 'node:fs/promises'
 import path from 'node:path'
 import process from 'node:process'
 import { chromium } from 'playwright'
 
 const DEFAULT_URL = 'http://localhost:1420/thinking-content-demo'
 const DEFAULT_OUTPUT_DIR = 'output/playwright'
+const READY_TIMEOUT_MS = Number(
+  process.env.THINKING_CONTENT_READY_TIMEOUT_MS ??
+    (process.platform === 'win32' ? 90000 : 30000)
+)
 const EXPECTED_KINDS = ['reasoning', 'tool', 'search', 'plan', 'code']
 const EXPECTED_TEXT = [
   'Thinking content system',
@@ -73,6 +77,112 @@ function assert(condition, message) {
   }
 }
 
+function attachPageDiagnostics(page) {
+  const events = []
+
+  page.on('console', (message) => {
+    events.push({
+      location: message.location(),
+      text: message.text(),
+      type: message.type(),
+    })
+  })
+
+  page.on('pageerror', (error) => {
+    events.push({
+      message: error.message,
+      name: error.name,
+      stack: error.stack,
+      type: 'pageerror',
+    })
+  })
+
+  return events
+}
+
+async function collectFailureState(page) {
+  return page.evaluate(() => {
+    const root = document.querySelector('[data-thinking-content-demo]')
+    const blocks = root
+      ? Array.from(root.querySelectorAll('[data-thinking-kind]'))
+      : []
+
+    return {
+      blockCount: blocks.length,
+      bodyText: document.body?.innerText?.slice(0, 3000) ?? '',
+      documentReadyState: document.readyState,
+      rootHtml: root?.outerHTML?.slice(0, 3000) ?? null,
+      title: document.title,
+      url: window.location.href,
+    }
+  })
+}
+
+async function writeFailureDiagnostics(page, label, error, events) {
+  const safeLabel = label.replace(/[^a-z0-9-]+/gi, '-').toLowerCase()
+  const diagnosticPath = path.join(
+    outputDir,
+    `thinking-content-${safeLabel}-failure.json`
+  )
+  const screenshotPath = path.join(
+    outputDir,
+    `thinking-content-${safeLabel}-failure.png`
+  )
+
+  let screenshot = null
+  try {
+    await page.screenshot({ fullPage: true, path: screenshotPath })
+    screenshot = screenshotPath
+  } catch (screenshotError) {
+    screenshot = {
+      error: screenshotError.message,
+    }
+  }
+
+  let state = null
+  try {
+    state = await collectFailureState(page)
+  } catch (stateError) {
+    state = {
+      error: stateError.message,
+    }
+  }
+
+  await writeFile(
+    diagnosticPath,
+    JSON.stringify(
+      {
+        error: {
+          message: error.message,
+          stack: error.stack,
+        },
+        events,
+        readyTimeoutMs: READY_TIMEOUT_MS,
+        screenshot,
+        state,
+        url,
+      },
+      null,
+      2
+    )
+  )
+
+  console.error(
+    `Wrote thinking content ${label} failure diagnostics: ${diagnosticPath}`
+  )
+}
+
+async function withPageDiagnostics(page, label, callback) {
+  const events = attachPageDiagnostics(page)
+
+  try {
+    return await callback()
+  } catch (error) {
+    await writeFailureDiagnostics(page, label, error, events)
+    throw error
+  }
+}
+
 async function dismissAnalyticsPrompt(page) {
   await page.addInitScript(() => {
     localStorage.setItem(
@@ -123,9 +233,14 @@ async function collectPageState(page) {
 }
 
 async function waitForDemoReady(page) {
-  await page.waitForSelector('[data-thinking-content-demo] [data-thinking-kind]')
+  await page.waitForSelector('[data-thinking-content-demo]', {
+    timeout: READY_TIMEOUT_MS,
+  })
+  await page.waitForSelector('[data-thinking-content-demo] [data-thinking-kind]', {
+    timeout: READY_TIMEOUT_MS,
+  })
   await page.waitForFunction(() => !document.getElementById('initial-loader'), {
-    timeout: 6000,
+    timeout: Math.max(6000, Math.min(READY_TIMEOUT_MS, 15000)),
   })
 }
 
@@ -171,48 +286,63 @@ async function main() {
       deviceScaleFactor: 1,
       viewport: { width: 1440, height: 1100 },
     })
-    await dismissAnalyticsPrompt(desktop)
-    await desktop.goto(url, { waitUntil: 'networkidle' })
-    await waitForDemoReady(desktop)
-
-    const longRunMetrics = await collectLongRunMetrics(desktop)
-    const desktopState = await collectPageState(desktop)
+    let longRunMetrics
+    let desktopState
     const desktopScreenshot = path.join(
       outputDir,
       'thinking-content-demo-desktop.png'
     )
-    await desktop.screenshot({ fullPage: true, path: desktopScreenshot })
+    await withPageDiagnostics(desktop, 'desktop', async () => {
+      await dismissAnalyticsPrompt(desktop)
+      await desktop.goto(url, { waitUntil: 'networkidle' })
+      await waitForDemoReady(desktop)
+
+      longRunMetrics = await collectLongRunMetrics(desktop)
+      desktopState = await collectPageState(desktop)
+      await desktop.screenshot({ fullPage: true, path: desktopScreenshot })
+    })
 
     const mobile = await browser.newPage({
       deviceScaleFactor: 2,
       isMobile: true,
       viewport: { width: 390, height: 1000 },
     })
-    await dismissAnalyticsPrompt(mobile)
-    await mobile.goto(url, { waitUntil: 'networkidle' })
-    await waitForDemoReady(mobile)
-    const mobileState = await collectPageState(mobile)
+    let mobileState
     const mobileScreenshot = path.join(
       outputDir,
       'thinking-content-demo-mobile.png'
     )
-    await mobile.screenshot({ fullPage: true, path: mobileScreenshot })
+    await withPageDiagnostics(mobile, 'mobile', async () => {
+      await dismissAnalyticsPrompt(mobile)
+      await mobile.goto(url, { waitUntil: 'networkidle' })
+      await waitForDemoReady(mobile)
+      mobileState = await collectPageState(mobile)
+      await mobile.screenshot({ fullPage: true, path: mobileScreenshot })
+    })
 
     const reduced = await browser.newPage({
       viewport: { width: 900, height: 700 },
     })
-    await dismissAnalyticsPrompt(reduced)
-    await reduced.emulateMedia({ reducedMotion: 'reduce' })
-    await reduced.goto(url, { waitUntil: 'networkidle' })
-    await waitForDemoReady(reduced)
-    await reduced.waitForSelector('[data-thinking-content-demo] [data-loading-ribbon]')
-    const reducedMotion = await reduced
-      .locator('.loading-ribbon__text')
-      .first()
-      .evaluate((node) => ({
-        afterAnimation: getComputedStyle(node, '::after').animationName,
-        textAnimation: getComputedStyle(node).animationName,
-      }))
+    let reducedMotion
+    await withPageDiagnostics(reduced, 'reduced-motion', async () => {
+      await dismissAnalyticsPrompt(reduced)
+      await reduced.emulateMedia({ reducedMotion: 'reduce' })
+      await reduced.goto(url, { waitUntil: 'networkidle' })
+      await waitForDemoReady(reduced)
+      await reduced.waitForSelector(
+        '[data-thinking-content-demo] [data-loading-ribbon]',
+        {
+          timeout: READY_TIMEOUT_MS,
+        }
+      )
+      reducedMotion = await reduced
+        .locator('.loading-ribbon__text')
+        .first()
+        .evaluate((node) => ({
+          afterAnimation: getComputedStyle(node, '::after').animationName,
+          textAnimation: getComputedStyle(node).animationName,
+        }))
+    })
 
     assert(
       desktopState.background === 'rgb(2, 2, 4)',
@@ -267,6 +397,7 @@ async function main() {
           desktop: desktopState,
           longRun: longRunMetrics,
           mobile: mobileState,
+          readyTimeoutMs: READY_TIMEOUT_MS,
           reducedMotion,
           screenshots: [desktopScreenshot, mobileScreenshot],
           url,

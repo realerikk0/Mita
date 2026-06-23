@@ -19,6 +19,8 @@ $BrowserDesktopScreenshot = Join-Path $OutputDir "thinking-content-demo-desktop.
 $BrowserMobileScreenshot = Join-Path $OutputDir "thinking-content-demo-mobile.png"
 $TauriScreenshot = Join-Path $OutputDir "thinking-content-tauri-windows.png"
 $VerificationLog = Join-Path $OutputDir "thinking-content-windows-verification.log"
+$WebStdoutLog = Join-Path $OutputDir "thinking-content-vite-stdout.log"
+$WebStderrLog = Join-Path $OutputDir "thinking-content-vite-stderr.log"
 
 if (-not ("ThinkingContentWindowTools" -as [type])) {
   Add-Type @"
@@ -104,7 +106,22 @@ function Save-DesktopScreenshot {
   }
 }
 
+function Write-FileTail {
+  param([string]$Path, [int]$Lines = 80)
+
+  if (-not (Test-Path $Path)) {
+    Write-Host "  Missing log: $Path"
+    return
+  }
+
+  Write-Host "  Tail of $Path"
+  Get-Content -Path $Path -Tail $Lines | ForEach-Object {
+    Write-Host "    $_"
+  }
+}
+
 New-Item -ItemType Directory -Force -Path $OutputDir | Out-Null
+Remove-Item -Force -ErrorAction SilentlyContinue $WebStdoutLog, $WebStderrLog
 $transcriptStarted = $false
 $webProcess = $null
 
@@ -122,14 +139,24 @@ try {
   $webProcess = Start-Process -FilePath "cmd.exe" `
     -ArgumentList @("/c", "yarn dev:web") `
     -WorkingDirectory $RepoRoot `
+    -RedirectStandardOutput $WebStdoutLog `
+    -RedirectStandardError $WebStderrLog `
     -PassThru `
     -WindowStyle Minimized
+
+  Start-Sleep -Milliseconds 500
+  if ($webProcess.HasExited) {
+    Write-FileTail -Path $WebStdoutLog
+    Write-FileTail -Path $WebStderrLog
+    throw "Vite demo server exited before readiness check. Exit code: $($webProcess.ExitCode)"
+  }
 
   Wait-ForDemo -Url $DemoUrl -TimeoutSeconds $ServerTimeoutSeconds
 
   Write-Host "Running Edge/WebView2-compatible browser verification..."
   $env:THINKING_CONTENT_DEMO_URL = $DemoUrl
   $env:THINKING_CONTENT_OUTPUT_DIR = $OutputDir
+  $env:THINKING_CONTENT_READY_TIMEOUT_MS = "90000"
   $env:PLAYWRIGHT_CHANNEL = "msedge"
   yarn verify:thinking-content
   if ($LASTEXITCODE -ne 0) {
@@ -163,6 +190,8 @@ try {
 
   Write-Host "Evidence package:"
   Write-Host "  Log: $VerificationLog"
+  Write-Host "  Vite stdout log: $WebStdoutLog"
+  Write-Host "  Vite stderr log: $WebStderrLog"
   Write-Host "  Browser desktop screenshot: $BrowserDesktopScreenshot"
   Write-Host "  Browser mobile screenshot: $BrowserMobileScreenshot"
   if ($IncludeTauri) {
@@ -170,6 +199,9 @@ try {
   }
 } finally {
   Stop-ProcessTree -Process $webProcess
+  Write-Host "Vite server logs:"
+  Write-FileTail -Path $WebStdoutLog
+  Write-FileTail -Path $WebStderrLog
   if ($transcriptStarted) {
     Stop-Transcript | Out-Null
   }
