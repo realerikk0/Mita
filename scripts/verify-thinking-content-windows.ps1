@@ -101,6 +101,48 @@ function Stop-RepoPortOwner {
   }
 }
 
+function Test-HasMsvcLinker {
+  $linkCommand = Get-Command "link.exe" -ErrorAction SilentlyContinue | Select-Object -First 1
+  return $null -ne $linkCommand -and $linkCommand.Source -match "\\MSVC\\.*\\link\.exe$"
+}
+
+function Import-VisualStudioDevEnvironment {
+  if (Test-HasMsvcLinker) {
+    return
+  }
+
+  $vswhere = Join-Path ${env:ProgramFiles(x86)} "Microsoft Visual Studio/Installer/vswhere.exe"
+  if (-not (Test-Path $vswhere)) {
+    Write-Host "VS Build Tools lookup skipped: vswhere.exe was not found."
+    return
+  }
+
+  $installPath = & $vswhere -latest -products * -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 -property installationPath
+  if ([string]::IsNullOrWhiteSpace($installPath)) {
+    Write-Host "VS Build Tools lookup skipped: no VC tools installation found."
+    return
+  }
+
+  $vcvars = Join-Path $installPath "VC/Auxiliary/Build/vcvars64.bat"
+  if (-not (Test-Path $vcvars)) {
+    Write-Host "VS Build Tools lookup skipped: missing vcvars64.bat at $vcvars"
+    return
+  }
+
+  Write-Host "Importing Visual Studio Build Tools environment from $vcvars"
+  & cmd.exe /s /c "`"$vcvars`" >nul && set" | ForEach-Object {
+    if ($_ -match "^(.*?)=(.*)$") {
+      [Environment]::SetEnvironmentVariable($matches[1], $matches[2], "Process")
+    }
+  }
+
+  if (Test-HasMsvcLinker) {
+    Write-Host "Using MSVC linker: $((Get-Command 'link.exe').Source)"
+  } else {
+    Write-Host "MSVC linker still unavailable after importing Visual Studio environment."
+  }
+}
+
 function Wait-ForDemo {
   param([string]$Url, [int]$TimeoutSeconds)
 
@@ -188,6 +230,8 @@ try {
 
 try {
   Set-Location $RepoRoot
+
+  Import-VisualStudioDevEnvironment
 
   Write-Host "Preparing core workspace build for Vite aliases..."
   yarn workspace @janhq/core build
