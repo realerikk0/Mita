@@ -18,6 +18,15 @@ test('thinking content Windows verifier writes a complete evidence package', () 
   assert.match(script, /Evidence package/)
 })
 
+test('thinking content Windows verifier avoids ambiguous PowerShell variable references', () => {
+  const ambiguousReferences = script
+    .split(/\r?\n/)
+    .filter((line) => !line.includes('$env:'))
+    .filter((line) => /\$[A-Za-z_][A-Za-z0-9_]*:/.test(line))
+
+  assert.deepEqual(ambiguousReferences, [])
+})
+
 test('thinking content Windows verifier foregrounds the Tauri window before capture', () => {
   assert.match(script, /Add-Type[\s\S]*SetForegroundWindow/)
   assert.match(script, /function Wait-ForTauriWindow/)

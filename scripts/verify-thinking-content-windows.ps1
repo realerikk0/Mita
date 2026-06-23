@@ -112,7 +112,7 @@ try {
   Start-Transcript -Path $VerificationLog -Force | Out-Null
   $transcriptStarted = $true
 } catch {
-  Write-Warning "Unable to start transcript at $VerificationLog: $_"
+  Write-Warning "Unable to start transcript at ${VerificationLog}: $_"
 }
 
 try {
