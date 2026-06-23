@@ -1,7 +1,7 @@
 param(
   [switch]$IncludeTauri,
   [int]$ServerTimeoutSeconds = 180,
-  [int]$TauriWarmupSeconds = 120,
+  [int]$TauriWarmupSeconds = 600,
   [string[]]$TauriProcessNames = @("Biyan", "Mita")
 )
 
