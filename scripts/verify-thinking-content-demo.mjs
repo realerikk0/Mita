@@ -118,6 +118,21 @@ async function collectFailureState(page) {
   })
 }
 
+async function gotoDemo(page) {
+  await page.goto(url, {
+    timeout: READY_TIMEOUT_MS,
+    waitUntil: 'domcontentloaded',
+  })
+}
+
+async function captureScreenshot(page, screenshotPath) {
+  await page.screenshot({
+    fullPage: true,
+    path: screenshotPath,
+    timeout: READY_TIMEOUT_MS,
+  })
+}
+
 async function writeFailureDiagnostics(page, label, error, events) {
   const safeLabel = label.replace(/[^a-z0-9-]+/gi, '-').toLowerCase()
   const diagnosticPath = path.join(
@@ -131,7 +146,7 @@ async function writeFailureDiagnostics(page, label, error, events) {
 
   let screenshot = null
   try {
-    await page.screenshot({ fullPage: true, path: screenshotPath })
+    await captureScreenshot(page, screenshotPath)
     screenshot = screenshotPath
   } catch (screenshotError) {
     screenshot = {
@@ -294,12 +309,12 @@ async function main() {
     )
     await withPageDiagnostics(desktop, 'desktop', async () => {
       await dismissAnalyticsPrompt(desktop)
-      await desktop.goto(url, { waitUntil: 'networkidle' })
+      await gotoDemo(desktop)
       await waitForDemoReady(desktop)
 
       longRunMetrics = await collectLongRunMetrics(desktop)
       desktopState = await collectPageState(desktop)
-      await desktop.screenshot({ fullPage: true, path: desktopScreenshot })
+      await captureScreenshot(desktop, desktopScreenshot)
     })
 
     const mobile = await browser.newPage({
@@ -314,10 +329,10 @@ async function main() {
     )
     await withPageDiagnostics(mobile, 'mobile', async () => {
       await dismissAnalyticsPrompt(mobile)
-      await mobile.goto(url, { waitUntil: 'networkidle' })
+      await gotoDemo(mobile)
       await waitForDemoReady(mobile)
       mobileState = await collectPageState(mobile)
-      await mobile.screenshot({ fullPage: true, path: mobileScreenshot })
+      await captureScreenshot(mobile, mobileScreenshot)
     })
 
     const reduced = await browser.newPage({
@@ -327,7 +342,7 @@ async function main() {
     await withPageDiagnostics(reduced, 'reduced-motion', async () => {
       await dismissAnalyticsPrompt(reduced)
       await reduced.emulateMedia({ reducedMotion: 'reduce' })
-      await reduced.goto(url, { waitUntil: 'networkidle' })
+      await gotoDemo(reduced)
       await waitForDemoReady(reduced)
       await reduced.waitForSelector(
         '[data-thinking-content-demo] [data-loading-ribbon]',
