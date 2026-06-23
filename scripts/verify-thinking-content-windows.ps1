@@ -1,7 +1,7 @@
 param(
   [switch]$IncludeTauri,
   [int]$ServerTimeoutSeconds = 180,
-  [int]$TauriWarmupSeconds = 20,
+  [int]$TauriWarmupSeconds = 120,
   [string[]]$TauriProcessNames = @("Biyan", "Mita")
 )
 
@@ -21,6 +21,8 @@ $TauriScreenshot = Join-Path $OutputDir "thinking-content-tauri-windows.png"
 $VerificationLog = Join-Path $OutputDir "thinking-content-windows-verification.log"
 $WebStdoutLog = Join-Path $OutputDir "thinking-content-vite-stdout.log"
 $WebStderrLog = Join-Path $OutputDir "thinking-content-vite-stderr.log"
+$TauriStdoutLog = Join-Path $OutputDir "thinking-content-tauri-stdout.log"
+$TauriStderrLog = Join-Path $OutputDir "thinking-content-tauri-stderr.log"
 
 if (-not ("ThinkingContentWindowTools" -as [type])) {
   Add-Type @"
@@ -173,7 +175,7 @@ function Write-FileTail {
 }
 
 New-Item -ItemType Directory -Force -Path $OutputDir | Out-Null
-Remove-Item -Force -ErrorAction SilentlyContinue $WebStdoutLog, $WebStderrLog
+Remove-Item -Force -ErrorAction SilentlyContinue $WebStdoutLog, $WebStderrLog, $TauriStdoutLog, $TauriStderrLog
 $transcriptStarted = $false
 $webProcess = $null
 
@@ -232,10 +234,15 @@ try {
     $tauriProcess = Start-Process -FilePath "cmd.exe" `
       -ArgumentList @("/c", "yarn dev:thinking-content:tauri") `
       -WorkingDirectory $RepoRoot `
-      -PassThru
+      -RedirectStandardOutput $TauriStdoutLog `
+      -RedirectStandardError $TauriStderrLog `
+      -PassThru `
+      -WindowStyle Minimized
 
     try {
       if ($tauriProcess.HasExited) {
+        Write-FileTail -Path $TauriStdoutLog
+        Write-FileTail -Path $TauriStderrLog
         throw "Tauri dev exited before screenshot capture. Exit code: $($tauriProcess.ExitCode)"
       }
 
@@ -252,6 +259,8 @@ try {
   Write-Host "  Log: $VerificationLog"
   Write-Host "  Vite stdout log: $WebStdoutLog"
   Write-Host "  Vite stderr log: $WebStderrLog"
+  Write-Host "  Tauri stdout log: $TauriStdoutLog"
+  Write-Host "  Tauri stderr log: $TauriStderrLog"
   Write-Host "  Browser desktop screenshot: $BrowserDesktopScreenshot"
   Write-Host "  Browser mobile screenshot: $BrowserMobileScreenshot"
   if ($IncludeTauri) {
@@ -262,6 +271,11 @@ try {
   Write-Host "Vite server logs:"
   Write-FileTail -Path $WebStdoutLog
   Write-FileTail -Path $WebStderrLog
+  if ($IncludeTauri) {
+    Write-Host "Tauri dev logs:"
+    Write-FileTail -Path $TauriStdoutLog
+    Write-FileTail -Path $TauriStderrLog
+  }
   if ($transcriptStarted) {
     Stop-Transcript | Out-Null
   }
