@@ -28,22 +28,41 @@ vi.mock('@/i18n/react-i18next-compat', () => ({
   }),
 }))
 
+vi.mock('../loading-ribbon', () => ({
+  LoadingRibbonText: ({ label }: { label: string }) => (
+    <span data-testid="loading-ribbon">{label}</span>
+  ),
+}))
+
 import { Tool, ToolHeader, ToolInput } from '../tool'
 
 describe('Tool components', () => {
   it('renders a shell command separately from the raw parameters', () => {
-    render(
-      <ToolInput
-        input={{
-          command: 'df -h',
-          cwd: '/tmp/workspace',
-          timeoutSeconds: 10,
-        }}
-      />
+    const { container } = render(
+      <Tool state={'input-available' as any}>
+        <ToolHeader
+          state={'input-available' as any}
+          type={'tool-computer_agent_run_shell' as any}
+        />
+        <ToolInput
+          input={{
+            command: 'df -h',
+            cwd: '/tmp/workspace',
+            timeoutSeconds: 10,
+          }}
+        />
+      </Tool>
     )
 
+    expect(container.querySelector('[data-thinking-kind="tool"]')).toHaveAttribute(
+      'data-thinking-status',
+      'running'
+    )
     expect(screen.getByText('Command')).toBeInTheDocument()
     expect(screen.getByText('df -h')).toBeInTheDocument()
+    expect(container.querySelector('.thinking-tool-card__payload')).toHaveTextContent(
+      'df -h'
+    )
     expect(
       screen.getByText('Working directory: /tmp/workspace')
     ).toBeInTheDocument()
@@ -86,5 +105,20 @@ describe('Tool components', () => {
       screen.getByText('Used computer agent run shell')
     ).toBeInTheDocument()
     expect(screen.queryByText(/Result:/)).not.toBeInTheDocument()
+  })
+
+  it('uses the loading ribbon for running tool calls', () => {
+    render(
+      <Tool state={'input-available' as any}>
+        <ToolHeader
+          state={'input-available' as any}
+          type={'tool-web_search' as any}
+        />
+      </Tool>
+    )
+
+    expect(screen.getByTestId('loading-ribbon')).toHaveTextContent(
+      'Running web search...'
+    )
   })
 })

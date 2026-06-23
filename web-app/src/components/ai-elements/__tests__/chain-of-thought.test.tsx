@@ -2,7 +2,6 @@ import { describe, it, expect, vi } from 'vitest'
 import { render, screen } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { renderHook } from '@testing-library/react'
-import type { ReactNode } from 'react'
 
 import {
   ChainOfThought,
@@ -20,16 +19,16 @@ vi.mock('streamdown', () => ({
   Streamdown: ({ children }: { children: string }) => <span>{children}</span>,
 }))
 
-vi.mock('../shimmer', () => ({
-  Shimmer: ({ children }: { children: ReactNode }) => (
-    <span data-testid="shimmer">{children}</span>
+vi.mock('../loading-ribbon', () => ({
+  LoadingRibbonText: ({ label }: { label: string }) => (
+    <span data-testid="loading-ribbon">{label}</span>
   ),
 }))
 
 describe('ChainOfThought', () => {
   it('renders children inside a Collapsible, defaults open', () => {
-    render(
-      <ChainOfThought>
+    const { container } = render(
+      <ChainOfThought isStreaming>
         <ChainOfThoughtHeader />
         <ChainOfThoughtContent>
           <p>Inner content</p>
@@ -37,6 +36,10 @@ describe('ChainOfThought', () => {
       </ChainOfThought>
     )
     expect(screen.getByText('Inner content')).toBeInTheDocument()
+    expect(container.querySelector('[data-thinking-kind="plan"]')).toHaveAttribute(
+      'data-thinking-status',
+      'running'
+    )
   })
 
   it('defaults to open state', () => {
@@ -102,13 +105,13 @@ describe('ChainOfThought', () => {
 })
 
 describe('ChainOfThoughtHeader', () => {
-  it('shows "Reasoning..." shimmer when isStreaming=true', () => {
+  it('shows "Reasoning..." loading ribbon when isStreaming=true', () => {
     render(
       <ChainOfThought isStreaming={true}>
         <ChainOfThoughtHeader />
       </ChainOfThought>
     )
-    expect(screen.getByTestId('shimmer')).toBeInTheDocument()
+    expect(screen.getByTestId('loading-ribbon')).toBeInTheDocument()
     expect(screen.getByText('Reasoning...')).toBeInTheDocument()
   })
 
@@ -119,7 +122,7 @@ describe('ChainOfThoughtHeader', () => {
       </ChainOfThought>
     )
     expect(screen.getByText('Analyzing code')).toBeInTheDocument()
-    expect(screen.queryByTestId('shimmer')).not.toBeInTheDocument()
+    expect(screen.queryByTestId('loading-ribbon')).not.toBeInTheDocument()
   })
 
   it('shows default text when no title and not streaming', () => {
@@ -188,7 +191,10 @@ describe('ChainOfThoughtStep', () => {
         </ChainOfThoughtContent>
       </ChainOfThought>
     )
-    expect(screen.getByText(`Step ${status}`)).toBeInTheDocument()
+    expect(screen.getByText(`Step ${status}`)).toHaveAttribute(
+      'data-thinking-step-status',
+      status
+    )
   })
 
   it('renders children below the label', () => {

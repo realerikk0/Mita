@@ -1,0 +1,29 @@
+import assert from 'node:assert/strict'
+import fs from 'node:fs'
+import test from 'node:test'
+
+const script = fs.readFileSync('scripts/verify-thinking-content-windows.ps1', 'utf8')
+
+test('thinking content Windows verifier writes a complete evidence package', () => {
+  assert.match(
+    script,
+    /\$VerificationLog\s*=\s*Join-Path \$OutputDir "thinking-content-windows-verification\.log"/,
+  )
+  assert.match(script, /Start-Transcript -Path \$VerificationLog -Force/)
+  assert.match(script, /Stop-Transcript/)
+  assert.match(script, /\$env:THINKING_CONTENT_OUTPUT_DIR\s*=\s*\$OutputDir/)
+  assert.match(script, /thinking-content-demo-desktop\.png/)
+  assert.match(script, /thinking-content-demo-mobile\.png/)
+  assert.match(script, /thinking-content-tauri-windows\.png/)
+  assert.match(script, /Evidence package/)
+})
+
+test('thinking content Windows verifier foregrounds the Tauri window before capture', () => {
+  assert.match(script, /Add-Type[\s\S]*SetForegroundWindow/)
+  assert.match(script, /function Wait-ForTauriWindow/)
+  assert.match(script, /Biyan/)
+  assert.match(script, /Mita/)
+  assert.match(script, /Wait-ForTauriWindow -TimeoutSeconds \$TauriWarmupSeconds/)
+  assert.match(script, /SetForegroundWindow/)
+  assert.match(script, /Save-DesktopScreenshot -Path \$TauriScreenshot/)
+})

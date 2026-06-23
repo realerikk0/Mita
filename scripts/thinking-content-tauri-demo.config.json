@@ -1,0 +1,15 @@
+{
+  "build": {
+    "beforeDevCommand": "",
+    "devUrl": "http://localhost:1420/thinking-content-demo"
+  },
+  "bundle": {
+    "externalBin": [],
+    "resources": {
+      "resources/LICENSE": "resources/LICENSE",
+      "resources/bin/mita-web-research-mcp.mjs": "resources/bin/mita-web-research-mcp.mjs",
+      "resources/embedding-models": "resources/embedding-models",
+      "resources/ms-playwright": "resources/ms-playwright"
+    }
+  }
+}

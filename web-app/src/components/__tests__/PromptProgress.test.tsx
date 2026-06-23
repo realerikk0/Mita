@@ -27,7 +27,11 @@ describe('PromptProgress', () => {
 
     render(<PromptProgress />)
 
-    expect(screen.getByText('Reading: 50%')).toBeInTheDocument()
+    expect(screen.getByRole('status')).toHaveTextContent('分析代码中 50%')
+    expect(screen.getByRole('status')).toHaveAttribute(
+      'data-loading-ribbon-variant',
+      'wave'
+    )
   })
 
   it('should handle zero total gracefully', () => {
@@ -40,11 +44,12 @@ describe('PromptProgress', () => {
 
     mockUseAppState.mockReturnValue(mockProgress)
 
-    const { container } = render(<PromptProgress />)
+    render(<PromptProgress />)
 
-    // Component should render Loader when total is 0
-    const loader = container.querySelector('svg.animate-spin')
-    expect(loader).not.toBeNull()
-    expect(loader?.classList.contains('animate-spin')).toBe(true)
+    expect(screen.getByRole('status')).toHaveTextContent('思考中')
+    expect(screen.getByRole('status')).toHaveAttribute(
+      'data-loading-ribbon-variant',
+      'ribbon'
+    )
   })
 })

@@ -1,5 +1,5 @@
 import { useAppState } from '@/hooks/useAppState'
-import { Loader } from 'lucide-react'
+import { LoadingRibbonText } from '@/components/ai-elements/loading-ribbon'
 
 export function PromptProgress() {
   const promptProgress = useAppState((state) => state.promptProgress)
@@ -16,13 +16,22 @@ export function PromptProgress() {
     promptProgress.total <= 0 ||
     percentage >= 100
   ) {
-    return <Loader className="animate-spin w-4 h-4" />
+    return (
+      <LoadingRibbonText
+        icon="thinking"
+        label="思考中"
+        variant="ribbon"
+      />
+    )
   }
 
   return (
     <div className="flex items-center gap-2 text-sm text-muted-foreground mb-2">
-      <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-primary"></div>
-      <span>Reading: {percentage}%</span>
+      <LoadingRibbonText
+        icon="search"
+        label={`分析代码中 ${percentage}%`}
+        variant="wave"
+      />
     </div>
   )
 }

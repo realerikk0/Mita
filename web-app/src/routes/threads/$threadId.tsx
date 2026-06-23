@@ -84,7 +84,7 @@ import { useToolApproval } from '@/hooks/useToolApproval'
 import DropdownModelProvider from '@/containers/DropdownModelProvider'
 import { ExtensionTypeEnum, VectorDBExtension } from '@janhq/core'
 import { ExtensionManager } from '@/lib/extension'
-import { Shimmer } from '@/components/ai-elements/shimmer'
+import { LoadingRibbonText } from '@/components/ai-elements/loading-ribbon'
 import { useAgentMode } from '@/hooks/useAgentMode'
 import { useAutoRunStore } from '@/stores/auto-run-store'
 import { useMessageQueue } from '@/stores/message-queue-store'
@@ -2552,7 +2552,11 @@ Tool result communication:
       )}
       {processingEmbeddings && (
         <div className="flex flex-row items-center gap-2">
-          <Shimmer duration={1}>Processing embeddings...</Shimmer>
+          <LoadingRibbonText
+            icon="tool"
+            label="分析代码中"
+            variant="wave"
+          />
         </div>
       )}
       {(!mitaTeamsConfig &&
@@ -2560,7 +2564,12 @@ Tool result communication:
         isAutoIncreasingContext) && (
           <div className="flex flex-row items-center gap-2">
             {(pendingContinueMessage || isAutoIncreasingContext) && (
-              <Shimmer duration={1}>Growing the Mind...</Shimmer>
+              <LoadingRibbonText
+                icon="thinking"
+                label="正在生成回复"
+                live={false}
+                variant="glint"
+              />
             )}
             {effectiveStatus === CHAT_STATUS.SUBMITTED && <PromptProgress />}
           </div>

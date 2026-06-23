@@ -16,8 +16,8 @@ import {
   useMemo,
   useState,
 } from 'react'
-import { Streamdown } from 'streamdown'
-import { Shimmer } from './shimmer'
+import { LoadingRibbonText } from './loading-ribbon'
+import { ThinkingMarkdown } from './thinking-block'
 
 type ReasoningContextValue = {
   isStreaming: boolean
@@ -98,7 +98,9 @@ export const Reasoning = memo(
     return (
       <ReasoningContext.Provider value={contextValue}>
         <Collapsible
-          className={cn('not-prose mb-4', className)}
+          className={cn('thinking-block not-prose mb-4', className)}
+          data-thinking-kind="reasoning"
+          data-thinking-status={isStreaming ? 'running' : 'complete'}
           onOpenChange={handleOpenChange}
           open={isOpen}
           {...props}
@@ -118,7 +120,15 @@ export type ReasoningTriggerProps = ComponentProps<
 
 const defaultGetThinkingMessage = (isStreaming: boolean, duration?: number) => {
   if (isStreaming || duration === 0) {
-    return <Shimmer duration={1}>Thinking...</Shimmer>
+    return (
+      <LoadingRibbonText
+        icon="thinking"
+        label="Thinking..."
+        live={false}
+        showIcon={false}
+        variant="ribbon"
+      />
+    )
   }
   if (duration === undefined) {
     return <p>Thought for a few seconds</p>
@@ -138,20 +148,30 @@ export const ReasoningTrigger = memo(
     return (
       <CollapsibleTrigger
         className={cn(
-          'flex w-full items-center gap-2 text-muted-foreground text-sm transition-colors hover:text-foreground',
+          'thinking-block__trigger',
           className
         )}
         {...props}
       >
         {children ?? (
           <>
-            <BrainIcon className="size-4" />
-            {getThinkingMessage(isStreaming, duration)}
+            <span className="thinking-block__icon" aria-hidden="true">
+              <BrainIcon className="size-3.5" />
+            </span>
+            <span className="thinking-block__heading">
+              <span className="thinking-block__title">
+                {getThinkingMessage(isStreaming, duration)}
+              </span>
+            </span>
+            <span className="thinking-block__status">
+              {isStreaming ? 'Running' : 'Complete'}
+            </span>
             <ChevronDownIcon
               className={cn(
-                'size-4 transition-transform',
-                isOpen ? 'rotate-180' : 'rotate-0'
+                'thinking-block__chevron size-4',
+                isOpen && 'thinking-block__chevron--open'
               )}
+              aria-hidden="true"
             />
           </>
         )}
@@ -170,16 +190,14 @@ export const ReasoningContent = memo(
   ({ className, children, ...props }: ReasoningContentProps) => (
     <CollapsibleContent
       className={cn(
-        'mt-4 text-sm relative',
+        'thinking-block__content mt-0 text-sm relative',
         'data-[state=closed]:fade-out-0 data-[state=closed]:slide-out-to-top-2 data-[state=open]:slide-in-from-top-2 text-muted-foreground outline-none data-[state=closed]:animate-out data-[state=open]:animate-in',
         className
       )}
       {...props}
     >
-      <div className="ml-2 pl-4 border-l-2 border-dotted">
-        <Streamdown animate={true} animationDuration={500} {...props}>
-          {children}
-        </Streamdown>
+      <div className="thinking-block__inner">
+        <ThinkingMarkdown>{children}</ThinkingMarkdown>
       </div>
     </CollapsibleContent>
   )
