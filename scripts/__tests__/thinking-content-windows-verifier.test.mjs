@@ -42,6 +42,10 @@ test('thinking content Windows verifier writes a complete evidence package', () 
   assert.match(script, /thinking-content-demo-desktop\.png/)
   assert.match(script, /thinking-content-demo-mobile\.png/)
   assert.match(script, /thinking-content-tauri-windows\.png/)
+  assert.match(script, /function Test-TauriScreenshotContainsRenderedContent/)
+  assert.match(script, /GetWindowRect/)
+  assert.match(script, /dark pixel ratio/)
+  assert.match(script, /appears blank or did not render/)
   assert.match(script, /Evidence package/)
   assert.match(script, /Write-FileTail/)
 })
@@ -68,10 +72,14 @@ test('thinking content Windows verifier foregrounds the Tauri window before capt
   assert.match(script, /SetForegroundWindow/)
   assert.match(script, /Waiting \$TauriSettleSeconds seconds for Windows WebView content to settle/)
   assert.match(script, /Save-DesktopScreenshot -Path \$TauriScreenshot/)
+  assert.match(
+    script,
+    /Test-TauriScreenshotContainsRenderedContent -Path \$TauriScreenshot -WindowHandle \$tauriWindow\.MainWindowHandle/,
+  )
 })
 
 test('thinking content Tauri demo config loads the preview route from the window', () => {
   assert.equal(tauriDemoConfig.build.devUrl, 'http://localhost:1420')
-  assert.equal(tauriDemoConfig.app.windows[0].url, '/thinking-content-demo')
+  assert.equal(tauriDemoConfig.app.windows[0].url, 'http://localhost:1420/thinking-content-demo')
   assert.equal(tauriDemoConfig.app.windows[0].transparent, false)
 })

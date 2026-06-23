@@ -36,6 +36,17 @@ public static class ThinkingContentWindowTools {
 
   [DllImport("user32.dll")]
   public static extern bool ShowWindowAsync(IntPtr hWnd, int nCmdShow);
+
+  [DllImport("user32.dll")]
+  public static extern bool GetWindowRect(IntPtr hWnd, out ThinkingContentRect rect);
+}
+
+[StructLayout(LayoutKind.Sequential)]
+public struct ThinkingContentRect {
+  public int Left;
+  public int Top;
+  public int Right;
+  public int Bottom;
 }
 "@
 }
@@ -210,6 +221,58 @@ function Save-DesktopScreenshot {
   }
 }
 
+function Test-TauriScreenshotContainsRenderedContent {
+  param([string]$Path, [IntPtr]$WindowHandle)
+
+  Add-Type -AssemblyName System.Drawing
+
+  $rect = New-Object ThinkingContentRect
+  if (-not [ThinkingContentWindowTools]::GetWindowRect($WindowHandle, [ref]$rect)) {
+    throw "Unable to read Windows Tauri window bounds for screenshot validation."
+  }
+
+  $bitmap = [System.Drawing.Bitmap]::FromFile($Path)
+  try {
+    $left = [Math]::Max(0, $rect.Left + 24)
+    $top = [Math]::Max(0, $rect.Top + 80)
+    $right = [Math]::Min($bitmap.Width - 1, $rect.Right - 24)
+    $bottom = [Math]::Min($bitmap.Height - 1, $rect.Bottom - 24)
+
+    if ($right -le $left -or $bottom -le $top) {
+      throw "Unable to sample Windows Tauri screenshot content area."
+    }
+
+    [int]$stepX = [Math]::Max(1, [Math]::Floor(($right - $left) / 32))
+    [int]$stepY = [Math]::Max(1, [Math]::Floor(($bottom - $top) / 24))
+    $darkPixels = 0
+    $totalPixels = 0
+
+    for ($y = $top; $y -le $bottom; $y += $stepY) {
+      for ($x = $left; $x -le $right; $x += $stepX) {
+        $pixel = $bitmap.GetPixel($x, $y)
+        $luminance = (0.2126 * $pixel.R) + (0.7152 * $pixel.G) + (0.0722 * $pixel.B)
+        if ($luminance -lt 120) {
+          $darkPixels += 1
+        }
+        $totalPixels += 1
+      }
+    }
+
+    if ($totalPixels -eq 0) {
+      throw "Unable to sample Windows Tauri screenshot pixels."
+    }
+
+    $darkRatio = $darkPixels / $totalPixels
+    Write-Host ("Windows Tauri screenshot dark pixel ratio: {0:P1} ({1}/{2})" -f $darkRatio, $darkPixels, $totalPixels)
+
+    if ($darkRatio -lt 0.08) {
+      throw "Windows Tauri screenshot appears blank or did not render the dark thinking content demo."
+    }
+  } finally {
+    $bitmap.Dispose()
+  }
+}
+
 function Write-FileTail {
   param([string]$Path, [int]$Lines = 80)
 
@@ -315,6 +378,7 @@ try {
         Start-Sleep -Milliseconds 500
       }
       Save-DesktopScreenshot -Path $TauriScreenshot
+      Test-TauriScreenshotContainsRenderedContent -Path $TauriScreenshot -WindowHandle $tauriWindow.MainWindowHandle
       Write-Host "Saved Windows Tauri screenshot: $TauriScreenshot"
     } finally {
       Stop-ProcessTree -Process $tauriProcess
