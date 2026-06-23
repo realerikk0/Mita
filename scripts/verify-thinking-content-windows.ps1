@@ -2,6 +2,7 @@ param(
   [switch]$IncludeTauri,
   [int]$ServerTimeoutSeconds = 180,
   [int]$TauriWarmupSeconds = 600,
+  [int]$TauriSettleSeconds = 8,
   [string[]]$TauriProcessNames = @("Biyan", "Mita")
 )
 
@@ -305,6 +306,14 @@ try {
 
       $tauriWindow = Wait-ForTauriWindow -TimeoutSeconds $TauriWarmupSeconds -TauriProcess $tauriProcess
       Write-Host "Foregrounded Windows Tauri window: $($tauriWindow.ProcessName) (PID $($tauriWindow.Id))"
+      if ($TauriSettleSeconds -gt 0) {
+        Write-Host "Waiting $TauriSettleSeconds seconds for Windows WebView content to settle..."
+        Start-Sleep -Seconds $TauriSettleSeconds
+        $tauriWindow.Refresh()
+        [ThinkingContentWindowTools]::ShowWindowAsync($tauriWindow.MainWindowHandle, 5) | Out-Null
+        [ThinkingContentWindowTools]::SetForegroundWindow($tauriWindow.MainWindowHandle) | Out-Null
+        Start-Sleep -Milliseconds 500
+      }
       Save-DesktopScreenshot -Path $TauriScreenshot
       Write-Host "Saved Windows Tauri screenshot: $TauriScreenshot"
     } finally {
