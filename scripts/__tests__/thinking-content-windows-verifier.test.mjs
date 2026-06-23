@@ -32,6 +32,9 @@ test('thinking content Windows verifier writes a complete evidence package', () 
   assert.match(script, /vswhere\.exe/)
   assert.match(script, /vcvars64\.bat/)
   assert.match(script, /Using MSVC linker/)
+  assert.match(script, /Preparing Windows Tauri icon assets/)
+  assert.match(script, /yarn build:icon/)
+  assert.match(script, /yarn build:icon failed/)
   assert.match(script, /thinking-content-demo-desktop\.png/)
   assert.match(script, /thinking-content-demo-mobile\.png/)
   assert.match(script, /thinking-content-tauri-windows\.png/)
@@ -53,7 +56,11 @@ test('thinking content Windows verifier foregrounds the Tauri window before capt
   assert.match(script, /function Wait-ForTauriWindow/)
   assert.match(script, /Biyan/)
   assert.match(script, /Mita/)
-  assert.match(script, /Wait-ForTauriWindow -TimeoutSeconds \$TauriWarmupSeconds/)
+  assert.match(
+    script,
+    /Wait-ForTauriWindow -TimeoutSeconds \$TauriWarmupSeconds -TauriProcess \$tauriProcess/,
+  )
+  assert.match(script, /Tauri dev exited before screenshot capture/)
   assert.match(script, /SetForegroundWindow/)
   assert.match(script, /Save-DesktopScreenshot -Path \$TauriScreenshot/)
 })

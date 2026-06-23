@@ -162,10 +162,17 @@ function Wait-ForDemo {
 }
 
 function Wait-ForTauriWindow {
-  param([int]$TimeoutSeconds)
+  param([int]$TimeoutSeconds, [System.Diagnostics.Process]$TauriProcess)
 
   $deadline = (Get-Date).AddSeconds($TimeoutSeconds)
   while ((Get-Date) -lt $deadline) {
+    if ($null -ne $TauriProcess) {
+      $TauriProcess.Refresh()
+      if ($TauriProcess.HasExited) {
+        throw "Tauri dev exited before screenshot capture. Exit code: $($TauriProcess.ExitCode)"
+      }
+    }
+
     $process = Get-Process -Name $TauriProcessNames -ErrorAction SilentlyContinue |
       Where-Object { $_.MainWindowHandle -ne 0 } |
       Select-Object -First 1
@@ -275,6 +282,12 @@ try {
       throw "Missing Tauri demo config: $TauriConfigPath"
     }
 
+    Write-Host "Preparing Windows Tauri icon assets..."
+    yarn build:icon
+    if ($LASTEXITCODE -ne 0) {
+      throw "yarn build:icon failed with exit code $LASTEXITCODE"
+    }
+
     $tauriProcess = Start-Process -FilePath "cmd.exe" `
       -ArgumentList @("/c", "yarn dev:thinking-content:tauri") `
       -WorkingDirectory $RepoRoot `
@@ -290,7 +303,7 @@ try {
         throw "Tauri dev exited before screenshot capture. Exit code: $($tauriProcess.ExitCode)"
       }
 
-      $tauriWindow = Wait-ForTauriWindow -TimeoutSeconds $TauriWarmupSeconds
+      $tauriWindow = Wait-ForTauriWindow -TimeoutSeconds $TauriWarmupSeconds -TauriProcess $tauriProcess
       Write-Host "Foregrounded Windows Tauri window: $($tauriWindow.ProcessName) (PID $($tauriWindow.Id))"
       Save-DesktopScreenshot -Path $TauriScreenshot
       Write-Host "Saved Windows Tauri screenshot: $TauriScreenshot"
