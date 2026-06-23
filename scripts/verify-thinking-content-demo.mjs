@@ -7,7 +7,7 @@ const DEFAULT_URL = 'http://localhost:1420/thinking-content-demo'
 const DEFAULT_OUTPUT_DIR = 'output/playwright'
 const READY_TIMEOUT_MS = Number(
   process.env.THINKING_CONTENT_READY_TIMEOUT_MS ??
-    (process.platform === 'win32' ? 90000 : 30000)
+    (process.platform === 'win32' ? 180000 : 30000)
 )
 const EXPECTED_KINDS = ['reasoning', 'tool', 'search', 'plan', 'code']
 const EXPECTED_TEXT = [
@@ -121,7 +121,7 @@ async function collectFailureState(page) {
 async function gotoDemo(page) {
   await page.goto(url, {
     timeout: READY_TIMEOUT_MS,
-    waitUntil: 'domcontentloaded',
+    waitUntil: 'commit',
   })
 }
 

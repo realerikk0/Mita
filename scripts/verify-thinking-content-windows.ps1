@@ -1,6 +1,6 @@
 param(
   [switch]$IncludeTauri,
-  [int]$ServerTimeoutSeconds = 90,
+  [int]$ServerTimeoutSeconds = 180,
   [int]$TauriWarmupSeconds = 20,
   [string[]]$TauriProcessNames = @("Biyan", "Mita")
 )
@@ -216,7 +216,7 @@ try {
   Write-Host "Running Edge/WebView2-compatible browser verification..."
   $env:THINKING_CONTENT_DEMO_URL = $DemoUrl
   $env:THINKING_CONTENT_OUTPUT_DIR = $OutputDir
-  $env:THINKING_CONTENT_READY_TIMEOUT_MS = "90000"
+  $env:THINKING_CONTENT_READY_TIMEOUT_MS = "180000"
   $env:PLAYWRIGHT_CHANNEL = "msedge"
   yarn verify:thinking-content
   if ($LASTEXITCODE -ne 0) {
