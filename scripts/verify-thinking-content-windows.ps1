@@ -47,6 +47,58 @@ function Stop-ProcessTree {
   & taskkill.exe /PID $Process.Id /T /F | Out-Null
 }
 
+function Get-ProcessCommandLine {
+  param([int]$ProcessId)
+
+  try {
+    $processInfo = Get-CimInstance Win32_Process -Filter "ProcessId = $ProcessId"
+    return $processInfo.CommandLine
+  } catch {
+    return ""
+  }
+}
+
+function Test-IsRepoVerificationProcess {
+  param([string]$CommandLine)
+
+  if ([string]::IsNullOrWhiteSpace($CommandLine)) {
+    return $false
+  }
+
+  return (
+    $CommandLine.Contains($RepoRoot) -or
+    $CommandLine.Contains("Mita-thinking-content-test") -or
+    $CommandLine.Contains("verify-thinking-content") -or
+    $CommandLine.Contains("dev:web") -or
+    $CommandLine.Contains("thinking-content-demo") -or
+    $CommandLine.Contains("tauri dev")
+  )
+}
+
+function Stop-RepoPortOwner {
+  param([int]$Port)
+
+  $listeners = Get-NetTCPConnection -LocalPort $Port -State Listen -ErrorAction SilentlyContinue |
+    Select-Object -ExpandProperty OwningProcess -Unique
+
+  foreach ($ownerProcessId in $listeners) {
+    if ($ownerProcessId -eq $PID -or $ownerProcessId -eq 0) {
+      continue
+    }
+
+    $commandLine = Get-ProcessCommandLine -ProcessId $ownerProcessId
+    if (-not (Test-IsRepoVerificationProcess -CommandLine $commandLine)) {
+      throw "Port $Port is already in use by unrelated process PID $ownerProcessId. Command line: $commandLine"
+    }
+
+    $process = Get-Process -Id $ownerProcessId -ErrorAction SilentlyContinue
+    if ($null -ne $process) {
+      Write-Host "Stopping stale repo verification process on port ${Port}: $($process.ProcessName) PID $ownerProcessId"
+      Stop-ProcessTree -Process $process
+    }
+  }
+}
+
 function Wait-ForDemo {
   param([string]$Url, [int]$TimeoutSeconds)
 
@@ -140,6 +192,8 @@ try {
   if ($LASTEXITCODE -ne 0) {
     throw "yarn workspace @janhq/core build failed with exit code $LASTEXITCODE"
   }
+
+  Stop-RepoPortOwner -Port 1420
 
   Write-Host "Starting Vite demo server for thinking content verification..."
   $webProcess = Start-Process -FilePath "cmd.exe" `
