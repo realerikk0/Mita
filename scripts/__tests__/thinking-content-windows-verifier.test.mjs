@@ -71,7 +71,7 @@ test('thinking content Windows verifier foregrounds the Tauri window before capt
 })
 
 test('thinking content Tauri demo config loads the preview route from the window', () => {
-  assert.equal(tauriDemoConfig.build.devUrl, 'http://127.0.0.1:1420')
+  assert.equal(tauriDemoConfig.build.devUrl, 'http://localhost:1420')
   assert.equal(tauriDemoConfig.app.windows[0].url, '/thinking-content-demo')
   assert.equal(tauriDemoConfig.app.windows[0].transparent, false)
 })

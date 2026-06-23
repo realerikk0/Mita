@@ -1,7 +1,7 @@
 {
   "build": {
     "beforeDevCommand": "",
-    "devUrl": "http://127.0.0.1:1420"
+    "devUrl": "http://localhost:1420"
   },
   "app": {
     "windows": [
