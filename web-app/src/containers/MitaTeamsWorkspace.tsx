@@ -78,6 +78,7 @@ import {
   MoreVertical,
   Plus,
   Radio,
+  RotateCcw,
   Settings2,
   ShieldCheck,
   Target,
@@ -109,6 +110,7 @@ type MitaTeamsWorkspaceProps = {
   onTextResponse?: (text: string) => void
   onPlanApprove?: (keptRoleIds?: string[]) => void
   onPlanRevise?: (revision: string) => void
+  onRetry?: () => void
   onConfigChange: (config: MitaTeamsConfig) => void
 }
 
@@ -1004,6 +1006,52 @@ function PlanReviewCard({
             </Button>
           </div>
         )}
+      </div>
+    </div>
+  )
+}
+
+// Shown when a run ends in a terminal non-success state with no pending owner
+// choice — turns a dead-end (the run just stops) into a one-click retry that
+// re-runs the team from its persisted state, so the owner never has to retype.
+function RecoveryCard({
+  status,
+  error,
+  disabled,
+  onRetry,
+}: {
+  status: 'failed' | 'stopped'
+  error?: string
+  disabled?: boolean
+  onRetry?: () => void
+}) {
+  const { t } = useTranslation()
+  return (
+    <div className="mb-4 rounded-lg border border-destructive/30 bg-destructive/5 p-4">
+      <div className="flex items-start gap-2">
+        <AlertTriangle className="mt-0.5 size-4 shrink-0 text-destructive" />
+        <div className="min-w-0 flex-1">
+          <div className="text-sm font-medium">
+            {t(
+              status === 'failed'
+                ? 'mita-teams:recoveryFailedTitle'
+                : 'mita-teams:recoveryStoppedTitle'
+            )}
+          </div>
+          <div className="mt-1 text-sm leading-5 text-muted-foreground">
+            {error || t('mita-teams:recoveryDescription')}
+          </div>
+          <Button
+            type="button"
+            size="sm"
+            className="mt-3"
+            disabled={disabled}
+            onClick={() => onRetry?.()}
+          >
+            <RotateCcw className="size-4" />
+            {t('mita-teams:retryRun')}
+          </Button>
+        </div>
       </div>
     </div>
   )
@@ -2060,6 +2108,7 @@ export const MitaTeamsWorkspace = memo(function MitaTeamsWorkspace({
   onTextResponse,
   onPlanApprove,
   onPlanRevise,
+  onRetry,
   onConfigChange,
 }: MitaTeamsWorkspaceProps) {
   const { t } = useTranslation()
@@ -2094,6 +2143,13 @@ export const MitaTeamsWorkspace = memo(function MitaTeamsWorkspace({
     MITA_TEAMS_CHANNELS[0]
   const showThreadMessages = activeChannel.id === MITA_TEAMS_TASK_CHANNEL_ID
   const showChannelDiscussion = !showThreadMessages
+  // Terminal dead-end with no pending owner choice -> offer a one-click retry.
+  const showRecovery =
+    showThreadMessages &&
+    !isRoleChat &&
+    !isRuntimeBusy &&
+    !pendingChoice &&
+    (runStatus === 'failed' || runStatus === 'stopped')
   const channelRoles = useMemo(
     () => rolesForChannel(activeChannel, config.roles),
     [activeChannel, config.roles]
@@ -2837,6 +2893,14 @@ export const MitaTeamsWorkspace = memo(function MitaTeamsWorkspace({
                         roles={config.roles}
                         runtime={runtime}
                         isRuntimeBusy={isRuntimeBusy}
+                      />
+                    )}
+                    {showRecovery && (
+                      <RecoveryCard
+                        status={runStatus === 'failed' ? 'failed' : 'stopped'}
+                        error={runtime.run?.error}
+                        disabled={isRuntimeBusy}
+                        onRetry={onRetry}
                       />
                     )}
                     <RuntimeTokenUsageSummary usage={runtime.run?.usage} />

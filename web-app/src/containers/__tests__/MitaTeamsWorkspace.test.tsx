@@ -98,6 +98,9 @@ const h = vi.hoisted(() => {
     'mita-teams:rolePrompt': 'Role prompt',
     'mita-teams:roleModel': 'Role model',
     'mita-teams:archiveRole': 'Archive role',
+    'mita-teams:retryRun': 'Retry',
+    'mita-teams:recoveryFailedTitle': 'The run stopped on an error',
+    'mita-teams:recoveryStoppedTitle': 'The run was stopped',
     'mita-teams:permissions': 'Permissions',
     'mita-teams:permissionRead': 'Read',
     'mita-teams:permissionTools': 'Tools',
@@ -334,6 +337,7 @@ function renderWorkspace({
   onPlanApprove = vi.fn(),
   onPlanRevise = vi.fn(),
   onTextResponse = vi.fn(),
+  onRetry = vi.fn(),
   onConfigChange = vi.fn(),
 }: {
   config?: MitaTeamsConfig
@@ -345,6 +349,7 @@ function renderWorkspace({
   onPlanApprove?: () => void
   onPlanRevise?: (revision: string) => void
   onTextResponse?: (text: string) => void
+  onRetry?: () => void
   onConfigChange?: (config: MitaTeamsConfig) => void
 } = {}) {
   render(
@@ -359,6 +364,7 @@ function renderWorkspace({
       onPlanApprove={onPlanApprove}
       onPlanRevise={onPlanRevise}
       onTextResponse={onTextResponse}
+      onRetry={onRetry}
       onConfigChange={onConfigChange}
     />
   )
@@ -369,6 +375,7 @@ function renderWorkspace({
     onPlanApprove,
     onPlanRevise,
     onTextResponse,
+    onRetry,
     onConfigChange,
   }
 }
@@ -439,6 +446,30 @@ describe('MitaTeamsWorkspace', () => {
 
     expect(screen.getByText('1,234 tokens')).toBeInTheDocument()
     expect(screen.getByText('Prompt 800 · Completion 434')).toBeInTheDocument()
+  })
+
+  it('offers a one-click retry when a run ends on a failure', async () => {
+    const user = userEvent.setup()
+    const base = createConfig()
+    const config: MitaTeamsConfig = {
+      ...base,
+      runtime: {
+        ...base.runtime,
+        run: base.runtime.run
+          ? { ...base.runtime.run, status: 'failed', error: 'Provider timed out' }
+          : undefined,
+        // No pending owner choice -> a true dead-end the card recovers from.
+        userChoiceRequest: undefined,
+      },
+    }
+    const onRetry = vi.fn()
+    renderWorkspace({ config, onRetry })
+
+    expect(
+      screen.getByText('The run stopped on an error')
+    ).toBeInTheDocument()
+    await user.click(screen.getByRole('button', { name: 'Retry' }))
+    expect(onRetry).toHaveBeenCalledTimes(1)
   })
 
   it('allows choosing template and mode before the first team run starts', async () => {

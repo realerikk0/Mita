@@ -605,6 +605,7 @@ Tool result communication:
   const [settledChatStatus, setSettledChatStatus] =
     useState<ChatStatus | null>(null)
   const mitaTeamsAbortRef = useRef<AbortController | null>(null)
+  const mitaTeamsLastUserTextRef = useRef<string>('')
   const mitaTeamsAnsweredChoiceIdsRef = useRef<Set<string>>(new Set())
   const [isMitaTeamsRuntimeBusy, setIsMitaTeamsRuntimeBusy] = useState(false)
   const resetSettledChatStatus = useCallback(() => {
@@ -1106,6 +1107,7 @@ Tool result communication:
 
   const startMitaTeamsRuntime = useCallback(
     async (config: MitaTeamsConfig, userText: string) => {
+      mitaTeamsLastUserTextRef.current = userText
       mitaTeamsAbortRef.current?.abort()
       const controller = new AbortController()
       mitaTeamsAbortRef.current = controller
@@ -2087,6 +2089,14 @@ Tool result communication:
     threadId,
   ])
 
+  const handleMitaTeamsRetry = useCallback(() => {
+    if (!mitaTeamsConfig || isMitaTeamsRuntimeBusy) return
+    // Re-run the team from its persisted state using the last owner request,
+    // so a failed/stopped run is one click to recover instead of a dead-end.
+    const retryText = mitaTeamsLastUserTextRef.current || '继续。'
+    void startMitaTeamsRuntime(mitaTeamsConfig, retryText)
+  }, [isMitaTeamsRuntimeBusy, mitaTeamsConfig, startMitaTeamsRuntime])
+
   const handleMitaTeamsPlanRevise = useCallback(
     (revision: string) => {
       const plan = mitaTeamsConfig?.runtime.planDraft
@@ -2729,6 +2739,7 @@ Tool result communication:
           onTextResponse={handleMitaTeamsTextResponse}
           onPlanApprove={handleMitaTeamsPlanApprove}
           onPlanRevise={handleMitaTeamsPlanRevise}
+          onRetry={handleMitaTeamsRetry}
           onConfigChange={persistMitaTeamsConfig}
         />
       ) : (
