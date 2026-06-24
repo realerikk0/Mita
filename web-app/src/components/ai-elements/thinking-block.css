@@ -228,17 +228,21 @@
   overflow: auto;
 }
 
+/* Streamdown 2.1.1 emits these data attributes; keep this override scoped to thinking markdown. */
 .thinking-markdown [data-streamdown='heading-1'],
 .thinking-markdown [data-streamdown='heading-2'],
 .thinking-markdown [data-streamdown='heading-3'],
 .thinking-markdown [data-streamdown='heading-4'],
 .thinking-markdown [data-streamdown='heading-5'],
 .thinking-markdown [data-streamdown='heading-6'] {
-  color: rgb(226, 232, 240) !important;
+  background-image: var(--thinking-metal-text) !important;
+  background-clip: text !important;
+  color: transparent !important;
   font-size: 0.9375rem !important;
   line-height: 1.45 !important;
   margin: 0.35rem 0 0.4rem !important;
-  -webkit-text-fill-color: rgb(226, 232, 240);
+  -webkit-background-clip: text !important;
+  -webkit-text-fill-color: transparent !important;
 }
 
 .thinking-markdown [data-streamdown='code-block'] {
@@ -323,6 +327,10 @@
   color: rgb(226, 232, 240);
 }
 
+.thinking-step[data-thinking-step='active'] .thinking-step__icon {
+  animation: thinking-step-active-pulse 1.8s ease-in-out infinite;
+}
+
 .thinking-step__icon[data-thinking-step-icon='error'] {
   color: rgb(252, 165, 165);
 }
@@ -342,6 +350,10 @@
 
 .thinking-step__label[data-thinking-step-status='pending'] {
   color: rgb(137, 144, 156);
+}
+
+.thinking-step__label[data-thinking-step-status='active'] {
+  color: rgb(241, 245, 249);
 }
 
 .thinking-step__detail {
@@ -442,8 +454,40 @@
   padding: 0.5rem 0.625rem;
 }
 
+@keyframes thinking-step-active-pulse {
+  0%,
+  100% {
+    opacity: 0.62;
+    transform: scale(0.96);
+  }
+
+  48% {
+    opacity: 1;
+    transform: scale(1.08);
+  }
+}
+
 @media (prefers-reduced-motion: reduce) {
   .thinking-block__chevron {
     transition: none;
+  }
+
+  .thinking-step[data-thinking-step='active'] .thinking-step__icon {
+    animation: none;
+    transform: none;
+  }
+}
+
+@media (forced-colors: active) {
+  .thinking-markdown :is(h1, h2, h3, h4, h5, h6),
+  .thinking-markdown [data-streamdown='heading-1'],
+  .thinking-markdown [data-streamdown='heading-2'],
+  .thinking-markdown [data-streamdown='heading-3'],
+  .thinking-markdown [data-streamdown='heading-4'],
+  .thinking-markdown [data-streamdown='heading-5'],
+  .thinking-markdown [data-streamdown='heading-6'] {
+    background-image: none !important;
+    color: CanvasText !important;
+    -webkit-text-fill-color: CanvasText !important;
   }
 }

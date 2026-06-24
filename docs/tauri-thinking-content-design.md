@@ -206,6 +206,7 @@ Existing chat integrations:
 Preview and verification:
 
 - `web-app/src/routes/thinking-content-demo.tsx` covers reasoning, tool call, search sources, plan steps, code-analysis notes, long content, and collapsed content.
+- `/thinking-content-demo` and `/loading-ribbon-demo` share the root `PreviewLayout` path and bypass the normal app shell only in development; both routes throw `notFound()` from `beforeLoad` in production builds.
 - `scripts/verify-thinking-content-demo.mjs`
 - `scripts/run-thinking-content-tauri-demo.mjs`
 - `scripts/thinking-content-tauri-demo.config.json`

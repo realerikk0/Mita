@@ -20,6 +20,26 @@ vi.mock('../loading-ribbon', () => ({
   ),
 }))
 
+vi.mock('@/i18n/react-i18next-compat', () => ({
+  useTranslation: () => ({
+    t: (key: string, options?: Record<string, unknown>) => {
+      const values: Record<string, string> = {
+        'chat:generationStatus.thinkingEllipsis': 'Thinking...',
+        'chat:generationStatus.thoughtFewSeconds':
+          'Thought for a few seconds',
+        'chat:generationStatus.thoughtSeconds':
+          'Thought for {{count}} seconds',
+        'chat:thinkingBlock.status.running': 'Running',
+        'chat:thinkingBlock.status.complete': 'Complete',
+      }
+
+      return (values[key] ?? key).replace(/\{\{(\w+)\}\}/g, (_match, name) =>
+        options?.[name] === undefined ? _match : String(options[name])
+      )
+    },
+  }),
+}))
+
 describe('Reasoning', () => {
   beforeEach(() => {
     vi.useFakeTimers()

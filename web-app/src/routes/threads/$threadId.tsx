@@ -2554,7 +2554,7 @@ Tool result communication:
         <div className="flex flex-row items-center gap-2">
           <LoadingRibbonText
             icon="tool"
-            label="分析代码中"
+            label={t('chat:generationStatus.analyzingCode')}
             variant="wave"
           />
         </div>
@@ -2566,8 +2566,7 @@ Tool result communication:
             {(pendingContinueMessage || isAutoIncreasingContext) && (
               <LoadingRibbonText
                 icon="thinking"
-                label="正在生成回复"
-                live={false}
+                label={t('chat:generationStatus.generatingReply')}
                 variant="glint"
               />
             )}

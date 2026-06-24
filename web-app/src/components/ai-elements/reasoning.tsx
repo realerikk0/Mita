@@ -17,7 +17,11 @@ import {
   useState,
 } from 'react'
 import { LoadingRibbonText } from './loading-ribbon'
-import { ThinkingMarkdown } from './thinking-block'
+import {
+  getThinkingBlockStatusLabel,
+  ThinkingMarkdown,
+} from './thinking-block'
+import { useTranslation } from '@/i18n/react-i18next-compat'
 
 type ReasoningContextValue = {
   isStreaming: boolean
@@ -118,12 +122,16 @@ export type ReasoningTriggerProps = ComponentProps<
   getThinkingMessage?: (isStreaming: boolean, duration?: number) => ReactNode
 }
 
-const defaultGetThinkingMessage = (isStreaming: boolean, duration?: number) => {
+const defaultGetThinkingMessage = (
+  isStreaming: boolean,
+  duration: number | undefined,
+  t: (key: string, options?: Record<string, unknown>) => string
+) => {
   if (isStreaming || duration === 0) {
     return (
       <LoadingRibbonText
         icon="thinking"
-        label="Thinking..."
+        label={t('chat:generationStatus.thinkingEllipsis')}
         live={false}
         showIcon={false}
         variant="ribbon"
@@ -131,19 +139,27 @@ const defaultGetThinkingMessage = (isStreaming: boolean, duration?: number) => {
     )
   }
   if (duration === undefined) {
-    return <p>Thought for a few seconds</p>
+    return <p>{t('chat:generationStatus.thoughtFewSeconds')}</p>
   }
-  return <p>Thought for {duration} seconds</p>
+  return (
+    <p>
+      {t('chat:generationStatus.thoughtSeconds', {
+        count: duration,
+      })}
+    </p>
+  )
 }
 
 export const ReasoningTrigger = memo(
   ({
     className,
     children,
-    getThinkingMessage = defaultGetThinkingMessage,
+    getThinkingMessage,
     ...props
   }: ReasoningTriggerProps) => {
+    const { t } = useTranslation()
     const { isStreaming, isOpen, duration } = useReasoning()
+    const status = isStreaming ? 'running' : 'complete'
 
     return (
       <CollapsibleTrigger
@@ -160,11 +176,13 @@ export const ReasoningTrigger = memo(
             </span>
             <span className="thinking-block__heading">
               <span className="thinking-block__title">
-                {getThinkingMessage(isStreaming, duration)}
+                {getThinkingMessage
+                  ? getThinkingMessage(isStreaming, duration)
+                  : defaultGetThinkingMessage(isStreaming, duration, t)}
               </span>
             </span>
             <span className="thinking-block__status">
-              {isStreaming ? 'Running' : 'Complete'}
+              {getThinkingBlockStatusLabel(status, t)}
             </span>
             <ChevronDownIcon
               className={cn(

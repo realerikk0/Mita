@@ -39,11 +39,11 @@ describe('LoadingRibbonText', () => {
   it('exports reusable default status labels', () => {
     expect(loadingRibbonStatuses).toEqual(
       expect.arrayContaining([
-        '思考中',
-        '网络搜索中',
-        '正在生成回复',
-        '分析代码中',
-        '正在调用工具...',
+        'Thinking',
+        'Searching the web',
+        'Generating reply',
+        'Analyzing code',
+        'Calling tool...',
       ])
     )
   })

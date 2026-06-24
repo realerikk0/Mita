@@ -25,6 +25,22 @@ vi.mock('../loading-ribbon', () => ({
   ),
 }))
 
+vi.mock('@/i18n/react-i18next-compat', () => ({
+  useTranslation: () => ({
+    t: (key: string) => {
+      const values: Record<string, string> = {
+        'chat:generationStatus.reasoningEllipsis': 'Reasoning...',
+        'chat:generationStatus.reasonedThrough':
+          'Reasoned through the problem',
+        'chat:thinkingBlock.status.running': 'Running',
+        'chat:thinkingBlock.status.complete': 'Complete',
+      }
+
+      return values[key] ?? key
+    },
+  }),
+}))
+
 describe('ChainOfThought', () => {
   it('renders children inside a Collapsible, defaults open', () => {
     const { container } = render(

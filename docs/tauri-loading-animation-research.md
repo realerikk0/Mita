@@ -264,7 +264,8 @@ Liquid Glass / translucent macOS surfaces:
 Development route:
 
 - `/loading-ribbon-demo`
-- The route is a full-window black preview surface so screenshots are not affected by the normal app shell.
+- The route is a full-window black preview surface mounted through the root `PreviewLayout`, so screenshots are not affected by the normal app shell, providers, dialogs, or sidebar.
+- The preview route is development-only. `beforeLoad` throws `notFound()` in production builds, matching the `thinking-content-demo` guard.
 
 Run with the existing web/Tauri dev flow:
 
@@ -308,7 +309,7 @@ For an additional Tauri/WebView2 shell screenshot on Windows:
 yarn verify:loading-ribbon:windows -IncludeTauri
 ```
 
-The Windows script starts the demo server, runs the Edge-backed browser verifier, and, when `-IncludeTauri` is provided, launches a focused Tauri shell against `/loading-ribbon-demo` and saves a desktop screenshot.
+The Windows script starts the demo server, runs the Edge-backed browser verifier, clears stale repo-owned port listeners, and, when `-IncludeTauri` is provided, launches a focused Tauri shell against `/loading-ribbon-demo`, foregrounds the app window, checks that the capture is nonblank, and saves a desktop screenshot.
 
 Automated verification command:
 

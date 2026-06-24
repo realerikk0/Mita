@@ -8,8 +8,10 @@ import {
   ToolCallCard,
 } from '@/components/ai-elements/thinking-block'
 import { LoadingRibbonText } from '@/components/ai-elements/loading-ribbon'
+import { blockPreviewRouteInProduction } from './-preview-route-guard'
 
 export const Route = createFileRoute('/thinking-content-demo')({
+  beforeLoad: blockPreviewRouteInProduction,
   component: ThinkingContentDemo,
 })
 

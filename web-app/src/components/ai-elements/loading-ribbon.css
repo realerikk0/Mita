@@ -88,7 +88,6 @@
 
 .loading-ribbon[data-loading-ribbon-variant='ribbon'] .loading-ribbon__text {
   animation: loading-ribbon-flow var(--loading-ribbon-duration) linear infinite;
-  will-change: background-position;
 }
 
 .loading-ribbon[data-loading-ribbon-variant='ribbon'] .loading-ribbon__icon {
@@ -103,7 +102,6 @@
 .loading-ribbon[data-loading-ribbon-variant='glint'] .loading-ribbon__text::after {
   animation: loading-ribbon-glint var(--loading-ribbon-glint-duration)
     cubic-bezier(0.22, 0.61, 0.36, 1) infinite;
-  will-change: opacity, transform;
 }
 
 .loading-ribbon[data-loading-ribbon-variant='glint'] .loading-ribbon__icon {
@@ -113,7 +111,6 @@
 .loading-ribbon[data-loading-ribbon-variant='wave'] .loading-ribbon__text {
   animation: loading-ribbon-wave 4.4s ease-in-out infinite;
   background-size: 210% 140%;
-  will-change: background-position;
 }
 
 .loading-ribbon[data-loading-ribbon-variant='wave'] .loading-ribbon__icon {
@@ -186,7 +183,6 @@
   .loading-ribbon[data-loading-ribbon-variant] .loading-ribbon__text::after {
     animation: none;
     transform: none;
-    will-change: auto;
   }
 
   .loading-ribbon[data-loading-ribbon-variant] .loading-ribbon__icon {
@@ -199,5 +195,29 @@
 
   .loading-ribbon[data-loading-ribbon-variant] .loading-ribbon__text::after {
     opacity: 0;
+  }
+}
+
+@media (forced-colors: active) {
+  .loading-ribbon,
+  .loading-ribbon__icon,
+  .loading-ribbon__text {
+    color: CanvasText;
+  }
+
+  .loading-ribbon[data-loading-ribbon-variant] .loading-ribbon__icon,
+  .loading-ribbon[data-loading-ribbon-variant] .loading-ribbon__text,
+  .loading-ribbon[data-loading-ribbon-variant] .loading-ribbon__text::after {
+    animation: none;
+    transform: none;
+  }
+
+  .loading-ribbon__text {
+    background-image: none;
+    -webkit-text-fill-color: CanvasText;
+  }
+
+  .loading-ribbon__text::after {
+    content: none;
   }
 }

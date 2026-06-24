@@ -22,6 +22,7 @@ import {
 import type { ComponentProps, ReactNode } from 'react'
 import { memo } from 'react'
 import { Streamdown } from 'streamdown'
+import { useTranslation } from '@/i18n/react-i18next-compat'
 import { LoadingRibbonText } from './loading-ribbon'
 
 import './thinking-block.css'
@@ -42,12 +43,17 @@ const kindIcons = {
   code: Code2Icon,
 } satisfies Record<ThinkingBlockKind, typeof BrainCircuitIcon>
 
-const statusLabels: Record<ThinkingBlockStatus, string> = {
-  idle: 'Idle',
-  running: 'Running',
-  complete: 'Complete',
-  error: 'Error',
+const statusLabelKeys: Record<ThinkingBlockStatus, string> = {
+  idle: 'chat:thinkingBlock.status.idle',
+  running: 'chat:thinkingBlock.status.running',
+  complete: 'chat:thinkingBlock.status.complete',
+  error: 'chat:thinkingBlock.status.error',
 }
+
+export const getThinkingBlockStatusLabel = (
+  status: ThinkingBlockStatus,
+  t: (key: string, options?: Record<string, unknown>) => string
+) => t(statusLabelKeys[status])
 
 export type ThinkingBlockProps = ComponentProps<typeof Collapsible> & {
   kind?: ThinkingBlockKind
@@ -72,6 +78,7 @@ export const ThinkingBlock = memo(
     title,
     ...props
   }: ThinkingBlockProps) => {
+    const { t } = useTranslation()
     const [isOpen, setIsOpen] = useControllableState({
       prop: open,
       defaultProp: defaultOpen,
@@ -96,10 +103,14 @@ export const ThinkingBlock = memo(
           </span>
           <span className="thinking-block__heading">
             <span className="thinking-block__title">
-              {isRunning && typeof title === 'string' ? (
+              {isRunning ? (
                 <LoadingRibbonText
                   icon={kind === 'search' ? 'search' : kind === 'tool' ? 'tool' : 'thinking'}
-                  label={title}
+                  label={
+                    typeof title === 'string'
+                      ? title
+                      : t('chat:generationStatus.thinking')
+                  }
                   live={false}
                   showIcon={false}
                   size="sm"
@@ -117,7 +128,7 @@ export const ThinkingBlock = memo(
             className="thinking-block__status"
             data-thinking-block-status-label={status}
           >
-            {statusLabels[status]}
+            {getThinkingBlockStatusLabel(status, t)}
           </span>
           <ChevronDownIcon
             aria-hidden="true"
@@ -279,6 +290,7 @@ export const ToolCallCard = memo(
     status = 'complete',
     ...props
   }: ToolCallCardProps) => {
+    const { t } = useTranslation()
     const hasInput = input !== undefined
     const hasOutput = output !== undefined
 
@@ -291,11 +303,15 @@ export const ToolCallCard = memo(
         <div className="thinking-tool-card__header">
           <WrenchIcon className="size-3.5" aria-hidden="true" />
           <span className="thinking-tool-card__name">{formatToolName(name)}</span>
-          <span className="thinking-tool-card__badge">{statusLabels[status]}</span>
+          <span className="thinking-tool-card__badge">
+            {getThinkingBlockStatusLabel(status, t)}
+          </span>
         </div>
         {hasInput && (
           <div className="thinking-tool-card__section">
-            <div className="thinking-tool-card__label">Input</div>
+            <div className="thinking-tool-card__label">
+              {t('chat:thinkingBlock.inputLabel')}
+            </div>
             <pre
               className="thinking-tool-card__payload"
               data-testid="thinking-tool-input"
@@ -306,7 +322,9 @@ export const ToolCallCard = memo(
         )}
         {hasOutput && (
           <div className="thinking-tool-card__section">
-            <div className="thinking-tool-card__label">Output</div>
+            <div className="thinking-tool-card__label">
+              {t('chat:thinkingBlock.outputLabel')}
+            </div>
             <pre
               className="thinking-tool-card__payload"
               data-testid="thinking-tool-output"

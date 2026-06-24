@@ -18,5 +18,26 @@
     "parametersLabel": "參數",
     "resultLabel": "結果",
     "errorLabel": "錯誤"
+  },
+  "generationStatus": {
+    "thinking": "思考中",
+    "analyzingCode": "分析程式碼中",
+    "analyzingCodeProgress": "分析程式碼中 {{percent}}%",
+    "generatingReply": "正在生成回覆",
+    "thinkingEllipsis": "思考中...",
+    "reasoningEllipsis": "推理中...",
+    "thoughtFewSeconds": "思考了幾秒",
+    "thoughtSeconds": "思考了 {{count}} 秒",
+    "reasonedThrough": "已完成問題推理"
+  },
+  "thinkingBlock": {
+    "status": {
+      "idle": "閒置",
+      "running": "執行中",
+      "complete": "完成",
+      "error": "錯誤"
+    },
+    "inputLabel": "輸入",
+    "outputLabel": "輸出"
   }
 }

@@ -8,6 +8,22 @@ vi.mock('@/hooks/useAppState', () => ({
   useAppState: vi.fn(),
 }))
 
+vi.mock('@/i18n/react-i18next-compat', () => ({
+  useTranslation: () => ({
+    t: (key: string, options?: Record<string, unknown>) => {
+      const values: Record<string, string> = {
+        'chat:generationStatus.thinking': 'Thinking',
+        'chat:generationStatus.analyzingCodeProgress':
+          'Analyzing code {{percent}}%',
+      }
+
+      return (values[key] ?? key).replace(/\{\{(\w+)\}\}/g, (_match, name) =>
+        options?.[name] === undefined ? _match : String(options[name])
+      )
+    },
+  }),
+}))
+
 const mockUseAppState = useAppState as ReturnType<typeof vi.fn>
 
 describe('PromptProgress', () => {
@@ -27,7 +43,7 @@ describe('PromptProgress', () => {
 
     render(<PromptProgress />)
 
-    expect(screen.getByRole('status')).toHaveTextContent('分析代码中 50%')
+    expect(screen.getByRole('status')).toHaveTextContent('Analyzing code 50%')
     expect(screen.getByRole('status')).toHaveAttribute(
       'data-loading-ribbon-variant',
       'wave'
@@ -46,7 +62,7 @@ describe('PromptProgress', () => {
 
     render(<PromptProgress />)
 
-    expect(screen.getByRole('status')).toHaveTextContent('思考中')
+    expect(screen.getByRole('status')).toHaveTextContent('Thinking')
     expect(screen.getByRole('status')).toHaveAttribute(
       'data-loading-ribbon-variant',
       'ribbon'

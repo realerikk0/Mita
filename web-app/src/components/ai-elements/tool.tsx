@@ -24,6 +24,7 @@ import {
 import { CodeBlock } from './code-block'
 import { useTranslation } from '@/i18n/react-i18next-compat'
 import { LoadingRibbonText } from './loading-ribbon'
+import { getThinkingBlockStatusLabel } from './thinking-block'
 import './thinking-block.css'
 
 type ToolContextValue = {
@@ -172,11 +173,7 @@ export const ToolHeader = memo(
           </span>
         </span>
         <span className="thinking-block__status">
-          {isRunningToolState(state)
-            ? 'Running'
-            : isErrorToolState(state)
-              ? 'Error'
-              : 'Complete'}
+          {getThinkingBlockStatusLabel(getToolThinkingStatus(state), t)}
         </span>
         <ChevronDownIcon
           className={cn(

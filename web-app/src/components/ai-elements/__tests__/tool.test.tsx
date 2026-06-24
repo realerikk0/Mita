@@ -19,6 +19,9 @@ vi.mock('@/i18n/react-i18next-compat', () => ({
         'chat:toolCall.parametersLabel': 'Parameters',
         'chat:toolCall.resultLabel': 'Result',
         'chat:toolCall.errorLabel': 'Error',
+        'chat:thinkingBlock.status.running': 'Running',
+        'chat:thinkingBlock.status.complete': 'Complete',
+        'chat:thinkingBlock.status.error': 'Error',
       }
 
       return (values[key] ?? key).replace(/\{\{(\w+)\}\}/g, (_match, name) =>

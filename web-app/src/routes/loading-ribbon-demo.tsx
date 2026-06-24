@@ -5,8 +5,10 @@ import {
   type LoadingRibbonVariant,
 } from '@/components/ai-elements/loading-ribbon'
 import { SearchIcon, SparklesIcon, WrenchIcon } from 'lucide-react'
+import { blockPreviewRouteInProduction } from './-preview-route-guard'
 
 export const Route = createFileRoute('/loading-ribbon-demo')({
+  beforeLoad: blockPreviewRouteInProduction,
   component: LoadingRibbonDemo,
 })
 

@@ -23,6 +23,24 @@ vi.mock('../loading-ribbon', () => ({
   ),
 }))
 
+vi.mock('@/i18n/react-i18next-compat', () => ({
+  useTranslation: () => ({
+    t: (key: string) => {
+      const values: Record<string, string> = {
+        'chat:generationStatus.thinking': 'Thinking',
+        'chat:thinkingBlock.status.idle': 'Idle',
+        'chat:thinkingBlock.status.running': 'Running',
+        'chat:thinkingBlock.status.complete': 'Complete',
+        'chat:thinkingBlock.status.error': 'Error',
+        'chat:thinkingBlock.inputLabel': 'Input',
+        'chat:thinkingBlock.outputLabel': 'Output',
+      }
+
+      return values[key] ?? key
+    },
+  }),
+}))
+
 describe('ThinkingBlock', () => {
   it('renders a black-silver reasoning surface with a collapsible header', () => {
     render(

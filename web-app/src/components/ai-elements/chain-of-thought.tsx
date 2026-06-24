@@ -20,11 +20,13 @@ import {
 } from 'react'
 import { LoadingRibbonText } from './loading-ribbon'
 import {
+  getThinkingBlockStatusLabel,
   ReasoningStep as ThinkingReasoningStep,
   SearchSourceItem as ThinkingSearchSourceItem,
   SearchSourceList as ThinkingSearchSourceList,
   ThinkingMarkdown,
 } from './thinking-block'
+import { useTranslation } from '@/i18n/react-i18next-compat'
 
 // ── Types ──────────────────────────────────────────────────────────────────
 
@@ -123,7 +125,9 @@ export type ChainOfThoughtHeaderProps = ComponentProps<
 
 export const ChainOfThoughtHeader = memo(
   ({ className, title, children, ...props }: ChainOfThoughtHeaderProps) => {
+    const { t } = useTranslation()
     const { isStreaming, isOpen } = useChainOfThought()
+    const status = isStreaming ? 'running' : 'complete'
 
     return (
       <CollapsibleTrigger
@@ -143,18 +147,18 @@ export const ChainOfThoughtHeader = memo(
                 {isStreaming ? (
                   <LoadingRibbonText
                     icon="thinking"
-                    label="Reasoning..."
+                    label={t('chat:generationStatus.reasoningEllipsis')}
                     live={false}
                     showIcon={false}
                     variant="ribbon"
                   />
                 ) : (
-                  title ?? 'Reasoned through the problem'
+                  title ?? t('chat:generationStatus.reasonedThrough')
                 )}
               </span>
             </span>
             <span className="thinking-block__status">
-              {isStreaming ? 'Running' : 'Complete'}
+              {getThinkingBlockStatusLabel(status, t)}
             </span>
             <ChevronDownIcon
               className={cn(
