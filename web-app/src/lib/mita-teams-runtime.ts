@@ -552,6 +552,39 @@ function detectUserWorkflowSpec(userText: string): MitaTeamsUserWorkflowSpec {
   }
 }
 
+// Detects a plain-language instruction that the owner wants a fixed team and
+// the Host must NOT invent extra roles — e.g. "不要生成额外的角色", "只用这些角色",
+// "no extra roles", "don't add anyone". This binds owner intent without
+// requiring the rigid `## Name · `model`` workflow syntax (decision: control is
+// owner-authoritative). It only signals intent; enforcement happens by locking
+// workflowControl to 'user_spec'.
+function detectClosedRoleSetIntent(userText: string): boolean {
+  const text = userText
+  const cnForbidExtra =
+    /(不要|不得|不准|不许|禁止|别|勿|无需|不需要|不允许|無須|無需|不需|請勿|请勿)[^。!？\n]{0,14}(额外|額外|其他|其它|其餘|新增|多余|多餘|更多|别的|別的|另外)[^。!？\n]{0,8}(角色|人|专家|專家|成员|成員)/
+  const cnForbidAdd =
+    /(不要|不得|别|勿|禁止|不允许|不准|不许|請勿|请勿)[^。!？\n]{0,10}(生成|新增|增加|添加|创建|創建|创造|創造|加入|引入)[^。!？\n]{0,8}(角色|人|专家|專家)/
+  const cnOnlyThese =
+    /(只用|仅用|僅用|就用|只保留|仅保留|僅保留|固定|只要|仅限|僅限|限定)[^。!？\n]{0,16}角色/
+  const enForbidExtra =
+    /\b(no|don'?t|do not|never|without|avoid)\b[^.!?\n]{0,18}\b(extra|additional|new|more|other)\b[^.!?\n]{0,10}\brole/i
+  const enForbidAdd =
+    /\b(don'?t|do not|never|no|please don'?t)\b[^.!?\n]{0,14}\b(add|create|introduce|invent|spawn|generate)\b[^.!?\n]{0,10}\b(role|specialist|agent|persona)/i
+  const enOnlyThese =
+    /\bonly\b[^.!?\n]{0,18}\b(these|those|the following|the listed|the given)\b[^.!?\n]{0,10}\brole/i
+  const enFixedRoles = /\b(fixed|exact|specified|predefined)\s+roles?\b/i
+
+  return (
+    cnForbidExtra.test(text) ||
+    cnForbidAdd.test(text) ||
+    cnOnlyThese.test(text) ||
+    enForbidExtra.test(text) ||
+    enForbidAdd.test(text) ||
+    enOnlyThese.test(text) ||
+    enFixedRoles.test(text)
+  )
+}
+
 function hasTickerLikeInvestmentTarget(userText: string) {
   return (
     /\$[A-Z]{1,6}\b/.test(userText) ||
@@ -2483,8 +2516,18 @@ function constrainDecisionToWorkflowSpec(
   if (!workflowSpec?.explicit) return decision
 
   if (decision.action === 'configure_team') {
+    // A lock with no declared role list (prose "no extra roles", or a bare
+    // 'user_spec' from the owner control toggle) means only the owner's
+    // existing roles may run — block brand-new ones. A markdown spec that DID
+    // declare roles keeps its name-based filter so those roles can be created.
+    const lockToExistingRoles = workflowSpec.roles.length === 0
+    const existingRoleIds = new Set(config.roles.map((role) => role.id))
     const roles = decision.roles
-      .filter((role) => roleAllowedByWorkflowSpec(workflowSpec, role))
+      .filter((role) =>
+        lockToExistingRoles
+          ? existingRoleIds.has(role.id)
+          : roleAllowedByWorkflowSpec(workflowSpec, role)
+      )
       .map((role) => applyWorkflowRoleModel(role, workflowSpec, modelOptions))
     const allowedRoleIds = new Set([
       ...config.roles
@@ -3794,8 +3837,12 @@ export async function runMitaTeamsRuntime({
 }: RunMitaTeamsRuntimeOptions): Promise<MitaTeamsRuntimeResult> {
   const initialModelOptions = buildAvailableModelOptions()
   const detectedWorkflowSpec = detectUserWorkflowSpec(userText)
+  // Owner stated, in plain language, that the team is fixed — bind that intent.
+  const ownerLocksTeam = detectClosedRoleSetIntent(userText)
   const workflowSpec =
-    detectedWorkflowSpec.explicit || config.workflowControl === 'user_spec'
+    detectedWorkflowSpec.explicit ||
+    config.workflowControl === 'user_spec' ||
+    ownerLocksTeam
       ? {
           ...detectedWorkflowSpec,
           explicit: true,
@@ -3821,7 +3868,7 @@ export async function runMitaTeamsRuntime({
       initialModelOptions
     )
   )
-  if (workflowSpec?.explicit) {
+  if (workflowSpec?.explicit || ownerLocksTeam) {
     workingConfig = {
       ...workingConfig,
       workflowControl: 'user_spec',
