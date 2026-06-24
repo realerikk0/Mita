@@ -14,10 +14,30 @@ vi.mock('streamdown', () => ({
   Streamdown: ({ children }: { children: string }) => <span>{children}</span>,
 }))
 
-vi.mock('../shimmer', () => ({
-  Shimmer: ({ children }: { children: ReactNode }) => (
-    <span data-testid="shimmer">{children}</span>
+vi.mock('../loading-ribbon', () => ({
+  LoadingRibbonText: ({ label }: { label: string }) => (
+    <span data-testid="loading-ribbon">{label}</span>
   ),
+}))
+
+vi.mock('@/i18n/react-i18next-compat', () => ({
+  useTranslation: () => ({
+    t: (key: string, options?: Record<string, unknown>) => {
+      const values: Record<string, string> = {
+        'chat:generationStatus.thinkingEllipsis': 'Thinking...',
+        'chat:generationStatus.thoughtFewSeconds':
+          'Thought for a few seconds',
+        'chat:generationStatus.thoughtSeconds':
+          'Thought for {{count}} seconds',
+        'chat:thinkingBlock.status.running': 'Running',
+        'chat:thinkingBlock.status.complete': 'Complete',
+      }
+
+      return (values[key] ?? key).replace(/\{\{(\w+)\}\}/g, (_match, name) =>
+        options?.[name] === undefined ? _match : String(options[name])
+      )
+    },
+  }),
 }))
 
 describe('Reasoning', () => {
@@ -31,7 +51,7 @@ describe('Reasoning', () => {
   })
 
   it('renders children inside a Collapsible and defaults to open', () => {
-    render(
+    const { container } = render(
       <Reasoning>
         <ReasoningTrigger />
         <ReasoningContent>Some reasoning text</ReasoningContent>
@@ -39,16 +59,23 @@ describe('Reasoning', () => {
     )
 
     expect(screen.getByText('Some reasoning text')).toBeInTheDocument()
+    expect(container.querySelector('[data-thinking-kind="reasoning"]')).toHaveAttribute(
+      'data-thinking-status',
+      'complete'
+    )
+    expect(container.querySelector('.thinking-markdown')).toHaveTextContent(
+      'Some reasoning text'
+    )
   })
 
-  it('shows "Thinking..." shimmer when isStreaming=true', () => {
+  it('shows "Thinking..." loading ribbon when isStreaming=true', () => {
     render(
       <Reasoning isStreaming>
         <ReasoningTrigger />
       </Reasoning>
     )
 
-    expect(screen.getByTestId('shimmer')).toBeInTheDocument()
+    expect(screen.getByTestId('loading-ribbon')).toBeInTheDocument()
     expect(screen.getByText('Thinking...')).toBeInTheDocument()
   })
 

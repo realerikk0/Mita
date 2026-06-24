@@ -1,4 +1,4 @@
-import { createRootRoute, Outlet } from '@tanstack/react-router'
+import { createRootRoute, Outlet, useLocation } from '@tanstack/react-router'
 // import { TanStackRouterDevtools } from '@tanstack/react-router-devtools'
 
 import DialogAppUpdater from '@/containers/dialogs/AppUpdater'
@@ -29,6 +29,7 @@ import { WindowControls } from '@/components/WindowControls'
 import { getCurrentWebviewWindow } from '@tauri-apps/api/webviewWindow'
 import ErrorDialog from '@/containers/dialogs/ErrorDialog'
 import MissingDependenciesDialog from '@/containers/dialogs/MissingDependenciesDialog'
+import { previewRoutePaths } from './-preview-route-guard'
 
 export const Route = createRootRoute({
   component: RootLayout,
@@ -103,9 +104,11 @@ const LogsLayout = () => {
   )
 }
 
+const PreviewLayout = () => <Outlet />
+
 function RootLayout() {
-  const getInitialLayoutType = () => {
-    const pathname = window.location.pathname
+  const { pathname } = useLocation()
+  const getLayoutType = () => {
     return (
       pathname === route.localApiServerlogs ||
       pathname === route.systemMonitor ||
@@ -136,7 +139,12 @@ function RootLayout() {
     return () => clearTimeout(timer)
   }, [])
 
-  const IS_LOGS_ROUTE = getInitialLayoutType()
+  const IS_LOGS_ROUTE = getLayoutType()
+  const IS_PREVIEW_ROUTE = previewRoutePaths.has(pathname)
+
+  if (IS_PREVIEW_ROUTE) {
+    return <PreviewLayout />
+  }
 
   return (
     <Fragment>

@@ -324,10 +324,6 @@ vi.mock('@/components/ai-elements/conversation', () => ({
   ConversationScrollButton: () => <div data-testid="scroll-btn" />,
 }))
 
-vi.mock('@/components/ai-elements/shimmer', () => ({
-  Shimmer: ({ children }: any) => <div data-testid="shimmer">{children}</div>,
-}))
-
 vi.mock('@/components/PromptProgress', () => ({
   PromptProgress: () => <div data-testid="prompt-progress" />,
 }))

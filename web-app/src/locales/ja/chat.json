@@ -8,5 +8,26 @@
   },
   "sendMessage": "メッセージを送信",
   "newConversation": "新しい会話",
-  "clearHistory": "履歴を消去"
+  "clearHistory": "履歴を消去",
+  "generationStatus": {
+    "thinking": "思考中",
+    "analyzingCode": "コードを分析中",
+    "analyzingCodeProgress": "コードを分析中 {{percent}}%",
+    "generatingReply": "返信を生成中",
+    "thinkingEllipsis": "思考中...",
+    "reasoningEllipsis": "推論中...",
+    "thoughtFewSeconds": "数秒考えました",
+    "thoughtSeconds": "{{count}} 秒考えました",
+    "reasonedThrough": "問題の推論が完了しました"
+  },
+  "thinkingBlock": {
+    "status": {
+      "idle": "待機中",
+      "running": "実行中",
+      "complete": "完了",
+      "error": "エラー"
+    },
+    "inputLabel": "入力",
+    "outputLabel": "出力"
+  }
 }

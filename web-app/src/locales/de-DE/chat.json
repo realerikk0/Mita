@@ -8,5 +8,26 @@
   },
   "sendMessage": "Nachricht senden",
   "newConversation": "Neue Konversation",
-  "clearHistory": "Verlauf löschen"
+  "clearHistory": "Verlauf löschen",
+  "generationStatus": {
+    "thinking": "Denke nach",
+    "analyzingCode": "Analysiere Code",
+    "analyzingCodeProgress": "Analysiere Code {{percent}}%",
+    "generatingReply": "Antwort wird generiert",
+    "thinkingEllipsis": "Denke nach...",
+    "reasoningEllipsis": "Schlussfolgere...",
+    "thoughtFewSeconds": "Ein paar Sekunden nachgedacht",
+    "thoughtSeconds": "{{count}} Sekunden nachgedacht",
+    "reasonedThrough": "Problem durchdacht"
+  },
+  "thinkingBlock": {
+    "status": {
+      "idle": "Inaktiv",
+      "running": "Läuft",
+      "complete": "Abgeschlossen",
+      "error": "Fehler"
+    },
+    "inputLabel": "Eingabe",
+    "outputLabel": "Ausgabe"
+  }
 }

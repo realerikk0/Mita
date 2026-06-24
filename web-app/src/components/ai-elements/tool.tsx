@@ -23,6 +23,9 @@ import {
 } from 'react'
 import { CodeBlock } from './code-block'
 import { useTranslation } from '@/i18n/react-i18next-compat'
+import { LoadingRibbonText } from './loading-ribbon'
+import { getThinkingBlockStatusLabel } from './thinking-block'
+import './thinking-block.css'
 
 type ToolContextValue = {
   isOpen: boolean
@@ -48,6 +51,22 @@ export type ToolProps = ComponentProps<typeof Collapsible> & {
   onOpenChange?: (open: boolean) => void
 }
 
+const formatToolName = (toolName: string) =>
+  toolName.replaceAll('_', ' ').replaceAll('-', ' ').trim()
+
+const isRunningToolState = (status: ToolUIPart['state']) =>
+  status === 'input-streaming' || status === 'input-available'
+
+const isErrorToolState = (status: ToolUIPart['state']) =>
+  // @ts-expect-error state only available in AI SDK v6
+  status === 'output-error' || status === 'output-denied'
+
+const getToolThinkingStatus = (status: ToolUIPart['state']) => {
+  if (isRunningToolState(status)) return 'running'
+  if (isErrorToolState(status)) return 'error'
+  return 'complete'
+}
+
 export const Tool = memo(
   ({
     className,
@@ -71,7 +90,9 @@ export const Tool = memo(
     return (
       <ToolContext.Provider value={{ isOpen, setIsOpen, state }}>
         <Collapsible
-          className={cn('not-prose', className)}
+          className={cn('thinking-block not-prose', className)}
+          data-thinking-kind="tool"
+          data-thinking-status={getToolThinkingStatus(state)}
           onOpenChange={handleOpenChange}
           open={isOpen}
           {...props}
@@ -82,16 +103,6 @@ export const Tool = memo(
     )
   }
 )
-
-const formatToolName = (toolName: string) =>
-  toolName.replaceAll('_', ' ').replaceAll('-', ' ').trim()
-
-const isRunningToolState = (status: ToolUIPart['state']) =>
-  status === 'input-streaming' || status === 'input-available'
-
-const isErrorToolState = (status: ToolUIPart['state']) =>
-  // @ts-expect-error state only available in AI SDK v6
-  status === 'output-error' || status === 'output-denied'
 
 const tryParseJson = (value: string): unknown | undefined => {
   const trimmed = value.trim()
@@ -134,22 +145,42 @@ export const ToolHeader = memo(
     const { t } = useTranslation()
     const { isOpen } = useTool()
     const toolName = title ?? type.split('-').slice(1).join('-')
+    const isSearchTool = toolName.toLowerCase().includes('search')
 
     return (
       <CollapsibleTrigger
         className={cn(
-          'cursor-pointer flex w-full items-center gap-2 text-muted-foreground text-sm transition-colors capitalize',
-          !isOpen && 'hover:bg-secondary',
+          'thinking-block__trigger capitalize',
           className
         )}
       >
-        <WrenchIcon className="size-4" />
-        <span>{getStatusText(state, toolName, t)}</span>
+        <span className="thinking-block__icon" aria-hidden="true">
+          <WrenchIcon className="size-3.5" />
+        </span>
+        <span className="thinking-block__heading">
+          <span className="thinking-block__title">
+            {isRunningToolState(state) ? (
+              <LoadingRibbonText
+                icon={isSearchTool ? 'search' : 'tool'}
+                label={getStatusText(state, toolName, t)}
+                live={false}
+                showIcon={false}
+                variant={isSearchTool ? 'glint' : 'wave'}
+              />
+            ) : (
+              getStatusText(state, toolName, t)
+            )}
+          </span>
+        </span>
+        <span className="thinking-block__status">
+          {getThinkingBlockStatusLabel(getToolThinkingStatus(state), t)}
+        </span>
         <ChevronDownIcon
           className={cn(
-            'size-4 transition-transform',
-            isOpen ? 'rotate-180' : 'rotate-0'
+            'thinking-block__chevron size-4',
+            isOpen && 'thinking-block__chevron--open'
           )}
+          aria-hidden="true"
         />
       </CollapsibleTrigger>
     )
@@ -162,13 +193,13 @@ export const ToolContent = memo(
   ({ className, children, ...props }: ToolContentProps) => (
     <CollapsibleContent
       className={cn(
-        'mt-4 text-sm relative',
+        'thinking-block__content mt-0 text-sm relative',
         'data-[state=closed]:fade-out-0 data-[state=closed]:slide-out-to-top-2 data-[state=open]:slide-in-from-top-2 text-muted-foreground outline-none data-[state=closed]:animate-out data-[state=open]:animate-in',
         className
       )}
       {...props}
     >
-      <div className="ml-2 pl-4 border-l-2 border-dotted">
+      <div className="thinking-block__inner">
         {children}
       </div>
     </CollapsibleContent>
@@ -204,13 +235,13 @@ export const ToolInput = memo(
         : JSON.stringify(normalizedInput, null, 2) ?? ''
 
     return (
-      <div className={cn('space-y-2', className)} {...props}>
+      <div className={cn('thinking-tool-card', className)} {...props}>
         {command && (
-          <div className="space-y-1">
-            <h4 className="font-medium text-muted-foreground text-xs uppercase tracking-wide">
+          <div className="thinking-tool-card__section">
+            <h4 className="thinking-tool-card__label">
               {t('chat:toolCall.commandLabel')}
             </h4>
-            <pre className="rounded-md border bg-background p-2 text-xs font-mono whitespace-pre-wrap break-all text-foreground">
+            <pre className="thinking-tool-card__payload">
               {command}
             </pre>
             {cwd && (
@@ -220,11 +251,13 @@ export const ToolInput = memo(
             )}
           </div>
         )}
-        <h4 className="font-medium text-muted-foreground text-xs uppercase tracking-wide">
-          {t('chat:toolCall.parametersLabel')}
-        </h4>
-        <div className="rounded-md max-h-40 overflow-auto border ">
-          <CodeBlock code={code} language="json" />
+        <div className="thinking-tool-card__section">
+          <h4 className="thinking-tool-card__label">
+            {t('chat:toolCall.parametersLabel')}
+          </h4>
+          <div className="rounded-md max-h-40 overflow-auto border border-white/10">
+            <CodeBlock code={code} language="json" />
+          </div>
         </div>
       </div>
     )

@@ -68,5 +68,26 @@
     "parametersLabel": "参数",
     "resultLabel": "结果",
     "errorLabel": "错误"
+  },
+  "generationStatus": {
+    "thinking": "思考中",
+    "analyzingCode": "分析代码中",
+    "analyzingCodeProgress": "分析代码中 {{percent}}%",
+    "generatingReply": "正在生成回复",
+    "thinkingEllipsis": "思考中...",
+    "reasoningEllipsis": "推理中...",
+    "thoughtFewSeconds": "思考了几秒",
+    "thoughtSeconds": "思考了 {{count}} 秒",
+    "reasonedThrough": "已完成问题推理"
+  },
+  "thinkingBlock": {
+    "status": {
+      "idle": "空闲",
+      "running": "运行中",
+      "complete": "完成",
+      "error": "错误"
+    },
+    "inputLabel": "输入",
+    "outputLabel": "输出"
   }
 }

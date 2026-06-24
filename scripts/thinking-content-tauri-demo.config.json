@@ -1,0 +1,34 @@
+{
+  "build": {
+    "beforeDevCommand": "",
+    "devUrl": "http://localhost:1420"
+  },
+  "app": {
+    "windows": [
+      {
+        "label": "main",
+        "title": "Thinking Content Demo",
+        "url": "http://localhost:1420/thinking-content-demo",
+        "width": 1200,
+        "minWidth": 960,
+        "height": 860,
+        "minHeight": 700,
+        "resizable": true,
+        "fullscreen": false,
+        "center": true,
+        "decorations": true,
+        "transparent": false,
+        "dragDropEnabled": false
+      }
+    ]
+  },
+  "bundle": {
+    "externalBin": [],
+    "resources": {
+      "resources/LICENSE": "resources/LICENSE",
+      "resources/bin/mita-web-research-mcp.mjs": "resources/bin/mita-web-research-mcp.mjs",
+      "resources/embedding-models": "resources/embedding-models",
+      "resources/ms-playwright": "resources/ms-playwright"
+    }
+  }
+}
