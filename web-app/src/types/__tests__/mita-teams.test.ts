@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest'
 
 import {
   approveMitaTeamsPlan,
+  archiveMitaTeamsRole,
   createDefaultMitaTeamsConfig,
   DEFAULT_MITA_TEAMS_ROLES,
   normalizeMitaTeamsConfig,
@@ -180,6 +181,150 @@ describe('mita teams metadata', () => {
     )
     expect(config?.runtime.tasks[0].status).toBe('researching')
     expect(config?.runtime.artifacts[0].type).toBe('risk')
+  })
+
+  it('archives a role durably and records it in archivedRoleIds', () => {
+    const config = normalizeMitaTeamsConfig(
+      {
+        enabled: true,
+        activeChannel: 'task',
+        activeRoleId: 'data_scout',
+        roles: [
+          {
+            id: 'data_scout',
+            name: 'Data Scout',
+            label: 'Scout',
+            description: 'Gathers data.',
+            prompt: 'Find data.',
+            color: 'bg-cyan-600',
+            permission: 'tools',
+            enabled: true,
+          },
+        ],
+        channels: [
+          {
+            id: 'task',
+            label: 'Task',
+            description: 'Shared task.',
+            roleIds: ['orchestrator', 'data_scout'],
+          },
+        ],
+      },
+      { provider: 'openai', id: 'gpt-5' }
+    )!
+
+    const archived = archiveMitaTeamsRole(config, 'data_scout')
+
+    expect(
+      archived.roles.find((role) => role.id === 'data_scout')?.enabled
+    ).toBe(false)
+    expect(archived.runtime.archivedRoleIds).toContain('data_scout')
+    expect(
+      archived.channels.find((channel) => channel.id === 'task')?.roleIds
+    ).not.toContain('data_scout')
+    expect(archived.activeRoleId).toBe('orchestrator')
+
+    // archivedRoleIds survives a persistence round-trip (normalize).
+    const reloaded = normalizeMitaTeamsConfig(archived, {
+      provider: 'openai',
+      id: 'gpt-5',
+    })!
+    expect(reloaded.runtime.archivedRoleIds).toContain('data_scout')
+
+    // The orchestrator can never be archived.
+    expect(archiveMitaTeamsRole(config, 'orchestrator')).toBe(config)
+  })
+
+  it('does not re-enable an archived role when the coordinator reconfigures the team', async () => {
+    const { runMitaTeamsRuntime } = await import('@/lib/mita-teams-runtime')
+    const config = normalizeMitaTeamsConfig(
+      {
+        enabled: true,
+        activeChannel: 'task',
+        activeRoleId: 'orchestrator',
+        roles: [
+          {
+            id: 'data_scout',
+            name: 'Data Scout',
+            label: 'Scout',
+            description: 'Gathers data.',
+            prompt: 'Find data.',
+            color: 'bg-cyan-600',
+            permission: 'tools',
+            enabled: true,
+          },
+        ],
+        channels: [
+          {
+            id: 'task',
+            label: 'Task',
+            description: 'Shared task.',
+            roleIds: ['orchestrator', 'data_scout'],
+          },
+        ],
+      },
+      { provider: 'openai', id: 'gpt-5' }
+    )!
+    const archived = approveMitaTeamsPlan(
+      normalizeMitaTeamsConfig(
+        {
+          ...archiveMitaTeamsRole(config, 'data_scout'),
+          runtime: {
+            ...archiveMitaTeamsRole(config, 'data_scout').runtime,
+            phase: 'awaiting_plan_approval',
+            planDraft: {
+              id: 'plan-1',
+              version: 1,
+              status: 'draft',
+              goal: 'Continue work.',
+              summary: 'Continue.',
+              scope: ['x'],
+              acceptanceCriteria: ['y'],
+              tasks: [
+                { id: 't1', title: 'Coordinate', roleId: 'orchestrator' },
+              ],
+              roleAssignments: [
+                {
+                  roleId: 'orchestrator',
+                  name: 'Orchestrator',
+                  assignment: 'Coordinate.',
+                },
+              ],
+              executionOrder: ['Coordinate'],
+              createdAt: '2026-06-08T00:00:00.000Z',
+              updatedAt: '2026-06-08T00:00:00.000Z',
+            },
+          },
+        },
+        { provider: 'openai', id: 'gpt-5' }
+      )!
+    )
+
+    const result = await runMitaTeamsRuntime({
+      config: archived,
+      userText: 'Continue with the team.',
+      // Coordinator tries to bring the archived Data Scout back, enabled.
+      generateDecisionText: async () =>
+        JSON.stringify({
+          action: 'configure_team',
+          reason: 'Re-add Data Scout.',
+          roles: [
+            {
+              id: 'data_scout',
+              name: 'Data Scout',
+              prompt: 'Find data.',
+              enabled: true,
+            },
+          ],
+          channels: [],
+          calls: [],
+        }),
+      generateRoleText: async () => 'unused',
+    })
+
+    expect(
+      result.config.roles.find((role) => role.id === 'data_scout')?.enabled
+    ).toBe(false)
   })
 
   it('does not add plan-suggested roles when the owner specified the team roles', () => {

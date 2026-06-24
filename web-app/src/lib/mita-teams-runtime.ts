@@ -1832,16 +1832,28 @@ function normalizeDecisionRoles(
 
 function mergeRoles(
   currentRoles: MitaTeamsRoleConfig[],
-  incomingRoles: MitaTeamsRoleConfig[]
+  incomingRoles: MitaTeamsRoleConfig[],
+  archivedRoleIds?: ReadonlySet<MitaTeamsRoleId>
 ) {
   const byId = new Map(currentRoles.map((role) => [role.id, role]))
 
   for (const role of incomingRoles) {
+    // An owner-archived role must not be re-added or re-enabled by an
+    // auto-injection path. Keep any existing (disabled) copy untouched and
+    // never introduce a fresh archived role.
+    if (archivedRoleIds?.has(role.id)) continue
     const existing = byId.get(role.id)
     byId.set(role.id, existing ? { ...existing, ...role } : role)
   }
 
   return Array.from(byId.values())
+}
+
+function archivedRoleIdSet(
+  config: MitaTeamsConfig
+): ReadonlySet<MitaTeamsRoleId> | undefined {
+  const ids = config.runtime.archivedRoleIds
+  return ids && ids.length ? new Set(ids) : undefined
 }
 
 function normalizeDecisionChannels(
@@ -2002,7 +2014,11 @@ function applyScenarioPlaybook(
     config,
     modelOptions
   )
-  const roles = mergeRoles(config.roles, playbookRoles)
+  const roles = mergeRoles(
+    config.roles,
+    playbookRoles,
+    archivedRoleIdSet(config)
+  )
   const channelConfig = { ...config, roles }
   const playbookChannels = normalizeDecisionChannels(
     playbook.channels,
@@ -2319,7 +2335,11 @@ function applyTeamConfiguration({
   runtime: MitaTeamsRuntime
   decision: Extract<MitaTeamsOrchestratorDecision, { action: 'configure_team' }>
 }) {
-  const roles = mergeRoles(config.roles, decision.roles)
+  const roles = mergeRoles(
+    config.roles,
+    decision.roles,
+    archivedRoleIdSet(config)
+  )
   const channels = normalizeChannelMembership(
     mergeChannels(config.channels, decision.channels),
     roles
