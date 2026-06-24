@@ -821,6 +821,64 @@ describe('mita teams runtime', () => {
     }
   })
 
+  it('does not inject scenario specialists when the owner already configured a team', async () => {
+    const config = normalizeMitaTeamsConfig(
+      {
+        enabled: true,
+        activeChannel: 'task',
+        activeRoleId: 'orchestrator',
+        roles: [
+          {
+            id: 'equity_analyst',
+            name: 'Equity Analyst',
+            label: 'Analyst',
+            description: 'Owner-defined analyst.',
+            prompt: 'Analyze equities.',
+            color: 'bg-cyan-600',
+            permission: 'tools',
+            enabled: true,
+          },
+        ],
+        channels: [
+          {
+            id: 'task',
+            label: 'Task',
+            description: 'Shared.',
+            roleIds: ['orchestrator', 'equity_analyst'],
+          },
+        ],
+      },
+      { provider: 'openai', id: 'gpt-5' }
+    )!
+
+    let capturedDecisionPrompt = ''
+    const result = await runMitaTeamsRuntime({
+      // A market-research query that WOULD trigger the scenario playbook on a
+      // bare group, but here the owner has already defined a specialist team.
+      config: approveRuntimeForExecution(config),
+      userText: '帮我研究美股明日什么板块会涨',
+      generateDecisionText: async ({ prompt }) => {
+        capturedDecisionPrompt = prompt
+        return JSON.stringify({
+          action: 'stop',
+          reason: 'done',
+          finalResponse: 'done',
+        })
+      },
+      generateRoleText: async () => 'unused',
+    })
+
+    expect(capturedDecisionPrompt).not.toContain(
+      'Scenario playbook: Market research'
+    )
+    const roleIds = result.config.roles.map((role) => role.id)
+    expect(roleIds).not.toContain('data_scout')
+    expect(roleIds).not.toContain('market_analyst')
+    expect(roleIds).not.toContain('skeptic')
+    // The owner-configured team is left intact.
+    expect(roleIds).toContain('equity_analyst')
+  })
+
   it('requests native web search for ticker investment research role calls', async () => {
     const previousModelState = useModelProvider.getState()
     useModelProvider.setState({
@@ -1735,12 +1793,18 @@ describe('mita teams runtime', () => {
       },
     })
 
-    expect(result.status).toBe('failed')
+    // An unparseable post-approval decision pauses for owner input (retry/stop)
+    // rather than failing fatally, but it must never silently invent worker calls.
+    expect(result.status).toBe('waiting-for-user')
     expect(roleCallCount).toBe(0)
     expect(Object.keys(result.config.runtime.roleStates)).toEqual([
       'orchestrator',
     ])
-    expect(result.config.runtime.userChoiceRequest).toBeUndefined()
+    expect(
+      result.config.runtime.userChoiceRequest?.options.map(
+        (option) => option.id
+      )
+    ).toContain('retry')
   })
 
   it('filters role calls that ask for permissions the role does not have', async () => {
@@ -2275,7 +2339,10 @@ describe('mita teams runtime', () => {
           action: 'ask_user',
           reason: 'This should have been asked before approval.',
           question: 'Enable auto memory?',
-          options: [{ id: 'yes', label: 'Yes' }],
+          options: [
+            { id: 'yes', label: 'Yes' },
+            { id: 'no', label: 'No' },
+          ],
         }),
       generateRoleText: async () => 'unused',
     })
@@ -2285,6 +2352,69 @@ describe('mita teams runtime', () => {
     expect(result.config.runtime.run?.error).toContain(
       'cannot ask the owner after plan approval'
     )
+  })
+
+  it('recovers (does not fail fatally) when the post-approval decision cannot be parsed', async () => {
+    const base = createDefaultMitaTeamsConfig({
+      provider: 'openai',
+      id: 'gpt-5',
+    })
+    const approved = approveMitaTeamsPlan(
+      normalizeMitaTeamsConfig(
+        {
+          ...base,
+          runtime: {
+            ...base.runtime,
+            phase: 'awaiting_plan_approval',
+            planDraft: {
+              id: 'plan-1',
+              version: 1,
+              status: 'draft',
+              goal: 'Research memory policy.',
+              summary: 'Plan approved; execution should be resilient.',
+              scope: ['Memory policy'],
+              acceptanceCriteria: ['Parse failure must not kill the run.'],
+              tasks: [
+                {
+                  id: 'task-1',
+                  title: 'Execute approved memory policy research',
+                  roleId: 'orchestrator',
+                },
+              ],
+              roleAssignments: [
+                {
+                  roleId: 'orchestrator',
+                  name: 'Orchestrator',
+                  assignment: 'Coordinate.',
+                },
+              ],
+              executionOrder: ['Execute approved memory policy research'],
+              createdAt: '2026-06-08T00:00:00.000Z',
+              updatedAt: '2026-06-08T00:00:00.000Z',
+            },
+          },
+        },
+        { provider: 'openai', id: 'gpt-5' }
+      )!
+    )
+
+    // Both the initial call and the one JSON-repair retry return non-JSON, so
+    // generateParsedDecision falls back to jsonFailureDecision (an ask_user
+    // marked parseFallback). Post-approval this must NOT be treated as a
+    // protocol violation.
+    const result = await runMitaTeamsRuntime({
+      config: approved,
+      userText: 'Approved Biyan Teams plan. Continue.',
+      generateDecisionText: async () =>
+        'Sorry, I cannot return structured output right now.',
+      generateRoleText: async () => 'unused',
+    })
+
+    expect(result.status).toBe('waiting-for-user')
+    expect(result.config.runtime.run?.error).toBeUndefined()
+    const choice = result.config.runtime.userChoiceRequest
+    expect(choice?.status).toBe('pending')
+    expect(choice?.options.map((option) => option.id)).toContain('retry')
   })
 
   it('asks whether to keep role edits before applying a plan revision', () => {

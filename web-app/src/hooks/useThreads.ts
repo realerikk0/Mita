@@ -132,7 +132,10 @@ export const useThreads = create<ThreadState>()((set, get) => ({
     const fzfResults = currentIndex.find(searchTerm)
     return fzfResults.map(
       (result: { item: Thread; positions: Set<number> }) => {
-        const thread = result.item // Fzf stores the original item here
+        // The index may hold a stale object reference when only metadata changed
+        // (we skip reindexing on title-unchanged updates), so re-resolve the
+        // live thread from the store and fall back to the indexed item.
+        const thread = threads[result.item.id] ?? result.item
 
         return {
           ...thread,
@@ -513,14 +516,24 @@ export const useThreads = create<ThreadState>()((set, get) => ({
       getServiceHub().threads().updateThread(updatedThread)
 
       const newThreads = { ...state.threads, [threadId]: updatedThread }
+      // The search index keys on title only, so a metadata-only update (e.g. a
+      // Biyan Teams runtime persist, which fires on every streaming tick) does
+      // not need a full reindex over every thread. Rebuilding it synchronously
+      // on the UI thread for each persist is what froze the window on archive.
+      const titleChanged =
+        updates.title !== undefined && updates.title !== thread.title
       return {
         threads: newThreads,
-        searchIndex: new Fzf<Thread[]>(
-          Object.values(newThreads).filter((t) => t.id !== TEMPORARY_CHAT_ID && t.title),
-          {
-            selector: (item: Thread) => item.title ?? '',
-          }
-        ),
+        searchIndex: titleChanged
+          ? new Fzf<Thread[]>(
+              Object.values(newThreads).filter(
+                (t) => t.id !== TEMPORARY_CHAT_ID && t.title
+              ),
+              {
+                selector: (item: Thread) => item.title ?? '',
+              }
+            )
+          : state.searchIndex,
       }
     })
   },

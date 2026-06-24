@@ -36,6 +36,7 @@ import {
   MITA_TEAMS_MODES,
   MITA_TEAMS_ROLE_COLORS,
   MITA_TEAMS_TASK_TEMPLATES,
+  archiveMitaTeamsRole,
   markMitaTeamsRoleUserEdit,
   patchMitaTeamsConfig,
   type MitaTeamsArtifact,
@@ -2085,23 +2086,9 @@ export const MitaTeamsWorkspace = memo(function MitaTeamsWorkspace({
   const archiveRole = useCallback(
     (roleId: MitaTeamsRoleId) => {
       if (roleId === MITA_TEAMS_ORCHESTRATOR_ROLE_ID) return
-      const fallbackRoleId =
-        config.roles.find((role) => role.enabled && role.id !== roleId)?.id ??
-        MITA_TEAMS_ORCHESTRATOR_ROLE_ID
-
-      patchConfig({
-        roles: config.roles.map((role) =>
-          role.id === roleId ? { ...role, enabled: false } : role
-        ),
-        channels: config.channels.map((channel) => ({
-          ...channel,
-          roleIds: channel.roleIds.filter((id) => id !== roleId),
-        })),
-        activeRoleId: fallbackRoleId,
-        workspaceView: 'team-chat',
-      })
+      onConfigChange(archiveMitaTeamsRole(config, roleId))
     },
-    [config.channels, config.roles, patchConfig]
+    [config, onConfigChange]
   )
 
   const addRoleFromTemplate = useCallback(

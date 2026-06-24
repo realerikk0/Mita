@@ -279,6 +279,11 @@ export type MitaTeamsOrchestratorDecision =
       reason: string
       question: string
       options: MitaTeamsChoiceOption[]
+      // Set only by the JSON-parse fallback (jsonFailureDecision). Marks this
+      // ask_user as a mechanical parse failure rather than a genuine
+      // owner-facing question, so post-approval handling can recover instead of
+      // treating it as a protocol violation.
+      parseFallback?: boolean
     } & MitaTeamsDecisionUpdates)
   | ({
       action: 'clarify_user'
@@ -372,6 +377,9 @@ export type MitaTeamsRuntime = {
   roleUserEdits?: Partial<Record<MitaTeamsRoleId, MitaTeamsRoleUserEdit>>
   pendingPlanRevision?: string
   userChoiceRequest?: MitaTeamsChoiceRequest
+  // Role ids the owner explicitly archived. Auto-injection paths (scenario
+  // playbooks, coordinator configure_team) must not re-add or re-enable these.
+  archivedRoleIds?: MitaTeamsRoleId[]
 }
 
 export type MitaTeamsChannelConfig = {
@@ -1393,6 +1401,16 @@ export function normalizeMitaTeamsRuntime(
         ? raw.pendingPlanRevision.trim()
         : undefined,
     userChoiceRequest: normalizeChoiceRequest(raw.userChoiceRequest),
+    archivedRoleIds: Array.isArray(raw.archivedRoleIds)
+      ? Array.from(
+          new Set(
+            raw.archivedRoleIds.filter(
+              (id): id is MitaTeamsRoleId =>
+                typeof id === 'string' && id.length > 0
+            )
+          )
+        )
+      : undefined,
   }
 }
 
@@ -1608,6 +1626,42 @@ export function patchMitaTeamsConfig(
     ...config,
     ...patch,
     updatedAt: new Date().toISOString(),
+  }
+}
+
+// Archive (soft-disable) a role and record it in runtime.archivedRoleIds so the
+// auto-injection paths (scenario playbooks, coordinator configure_team) cannot
+// silently re-add or re-enable it. The orchestrator can never be archived.
+export function archiveMitaTeamsRole(
+  config: MitaTeamsConfig,
+  roleId: MitaTeamsRoleId
+): MitaTeamsConfig {
+  if (roleId === MITA_TEAMS_ORCHESTRATOR_ROLE_ID) return config
+  if (!config.roles.some((role) => role.id === roleId)) return config
+
+  const fallbackRoleId =
+    config.roles.find((role) => role.enabled && role.id !== roleId)?.id ??
+    MITA_TEAMS_ORCHESTRATOR_ROLE_ID
+  const archivedRoleIds = Array.from(
+    new Set([...(config.runtime.archivedRoleIds ?? []), roleId])
+  )
+
+  return {
+    ...config,
+    roles: config.roles.map((role) =>
+      role.id === roleId ? { ...role, enabled: false } : role
+    ),
+    channels: config.channels.map((channel) => ({
+      ...channel,
+      roleIds: channel.roleIds.filter((id) => id !== roleId),
+    })),
+    activeRoleId: fallbackRoleId,
+    workspaceView: 'team-chat',
+    runtime: {
+      ...config.runtime,
+      archivedRoleIds,
+    },
+    updatedAt: nowIso(),
   }
 }
 

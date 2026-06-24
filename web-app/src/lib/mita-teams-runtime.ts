@@ -1192,11 +1192,17 @@ function renderUserControl(control: MitaTeamsUserControl) {
   return parts.length ? parts.join('\n') : 'No explicit owner controls.'
 }
 
-function hasReusableTeam(config: MitaTeamsConfig) {
-  const hasSpecialistRole = config.roles.some(
+// True when the owner has configured at least one enabled non-orchestrator
+// role, i.e. they have already declared the team. Used to keep scenario
+// playbooks from injecting their own specialists over an owner-defined team.
+function hasOwnerSpecialistTeam(config: MitaTeamsConfig) {
+  return config.roles.some(
     (role) => role.enabled && role.id !== MITA_TEAMS_ORCHESTRATOR_ROLE_ID
   )
-  if (!hasSpecialistRole) return false
+}
+
+function hasReusableTeam(config: MitaTeamsConfig) {
+  if (!hasOwnerSpecialistTeam(config)) return false
 
   const runStatus = config.runtime.run?.status
   const hasRunHistory =
@@ -1832,16 +1838,28 @@ function normalizeDecisionRoles(
 
 function mergeRoles(
   currentRoles: MitaTeamsRoleConfig[],
-  incomingRoles: MitaTeamsRoleConfig[]
+  incomingRoles: MitaTeamsRoleConfig[],
+  archivedRoleIds?: ReadonlySet<MitaTeamsRoleId>
 ) {
   const byId = new Map(currentRoles.map((role) => [role.id, role]))
 
   for (const role of incomingRoles) {
+    // An owner-archived role must not be re-added or re-enabled by an
+    // auto-injection path. Keep any existing (disabled) copy untouched and
+    // never introduce a fresh archived role.
+    if (archivedRoleIds?.has(role.id)) continue
     const existing = byId.get(role.id)
     byId.set(role.id, existing ? { ...existing, ...role } : role)
   }
 
   return Array.from(byId.values())
+}
+
+function archivedRoleIdSet(
+  config: MitaTeamsConfig
+): ReadonlySet<MitaTeamsRoleId> | undefined {
+  const ids = config.runtime.archivedRoleIds
+  return ids && ids.length ? new Set(ids) : undefined
 }
 
 function normalizeDecisionChannels(
@@ -2002,7 +2020,11 @@ function applyScenarioPlaybook(
     config,
     modelOptions
   )
-  const roles = mergeRoles(config.roles, playbookRoles)
+  const roles = mergeRoles(
+    config.roles,
+    playbookRoles,
+    archivedRoleIdSet(config)
+  )
   const channelConfig = { ...config, roles }
   const playbookChannels = normalizeDecisionChannels(
     playbook.channels,
@@ -2319,7 +2341,11 @@ function applyTeamConfiguration({
   runtime: MitaTeamsRuntime
   decision: Extract<MitaTeamsOrchestratorDecision, { action: 'configure_team' }>
 }) {
-  const roles = mergeRoles(config.roles, decision.roles)
+  const roles = mergeRoles(
+    config.roles,
+    decision.roles,
+    archivedRoleIdSet(config)
+  )
   const channels = normalizeChannelMembership(
     mergeChannels(config.channels, decision.channels),
     roles
@@ -2706,6 +2732,7 @@ Return one corrected JSON object only. Do not include Markdown or explanation.`
 function jsonFailureDecision(): MitaTeamsOrchestratorDecision {
   return {
     action: 'ask_user',
+    parseFallback: true,
     reason:
       'The Orchestrator response could not be parsed after one JSON repair attempt.',
     question:
@@ -3400,6 +3427,12 @@ function approvedExecutionOwnerQuestionError(
   if (decision.action !== 'ask_user' && decision.action !== 'clarify_user') {
     return undefined
   }
+  // A JSON-parse fallback is not a genuine owner-facing question; let it fall
+  // through to the normal ask_user branch so the run pauses with a
+  // retry/stop choice instead of failing fatally.
+  if (decision.action === 'ask_user' && decision.parseFallback) {
+    return undefined
+  }
 
   return `Biyan Teams cannot ask the owner after plan approval. Blocking questions must be collected before proposing the plan. (${decision.action}: ${decision.question})`
 }
@@ -3741,8 +3774,13 @@ export async function runMitaTeamsRuntime({
         }
       : undefined
   const preferTeamReuse = hasReusableTeam(config)
+  // Do not auto-apply a scenario playbook (which would inject its own
+  // specialist roles) when the owner has already configured their own team —
+  // even on the very first run, before any run history exists. A bare
+  // orchestrator-only group still gets the auto-assembled scenario team.
+  const ownerDefinedTeam = hasOwnerSpecialistTeam(config)
   const scenarioPlaybook =
-    workflowSpec?.explicit || preferTeamReuse
+    workflowSpec?.explicit || preferTeamReuse || ownerDefinedTeam
       ? undefined
       : config.scenarioId === 'market_research'
         ? MARKET_RESEARCH_PLAYBOOK
