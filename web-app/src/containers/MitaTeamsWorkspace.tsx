@@ -180,9 +180,7 @@ function MessageModelBadge({
   if (!modelId && !provider) return null
 
   const logoProvider = getModelLogoProvider(modelId ?? '', provider ?? 'provider')
-  const label = modelId
-    ? getModelDisplayName(modelId)
-    : getProviderTitle(provider ?? '')
+  const label = modelId || getProviderTitle(provider ?? '')
 
   return (
     <span
