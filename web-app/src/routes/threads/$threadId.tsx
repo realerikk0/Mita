@@ -9,6 +9,7 @@ import { cn } from '@/lib/utils'
 
 import HeaderPage from '@/containers/HeaderPage'
 import { ProviderQuotaActions } from '@/components/ProviderQuotaActions'
+import { usePrompt } from '@/hooks/usePrompt'
 import { useThreads } from '@/hooks/useThreads'
 import ChatInput from '@/containers/ChatInput'
 import { AutoRunPanel } from '@/containers/AutoRunPanel'
@@ -2097,6 +2098,11 @@ Tool result communication:
     void startMitaTeamsRuntime(mitaTeamsConfig, retryText)
   }, [isMitaTeamsRuntimeBusy, mitaTeamsConfig, startMitaTeamsRuntime])
 
+  const handleMitaTeamsUseExample = useCallback((goal: string) => {
+    // Prefill the composer so the owner can tweak the example before sending.
+    usePrompt.getState().setPrompt(goal)
+  }, [])
+
   const handleMitaTeamsPlanRevise = useCallback(
     (revision: string) => {
       const plan = mitaTeamsConfig?.runtime.planDraft
@@ -2740,6 +2746,7 @@ Tool result communication:
           onPlanApprove={handleMitaTeamsPlanApprove}
           onPlanRevise={handleMitaTeamsPlanRevise}
           onRetry={handleMitaTeamsRetry}
+          onUseExample={handleMitaTeamsUseExample}
           onConfigChange={persistMitaTeamsConfig}
         />
       ) : (

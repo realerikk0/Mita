@@ -101,6 +101,8 @@ const h = vi.hoisted(() => {
     'mita-teams:retryRun': 'Retry',
     'mita-teams:recoveryFailedTitle': 'The run stopped on an error',
     'mita-teams:recoveryStoppedTitle': 'The run was stopped',
+    'mita-teams:onboardingStep1': 'Describe your goal',
+    'mita-teams:onboardingExample1': 'Compare two options',
     'mita-teams:permissions': 'Permissions',
     'mita-teams:permissionRead': 'Read',
     'mita-teams:permissionTools': 'Tools',
@@ -338,6 +340,7 @@ function renderWorkspace({
   onPlanRevise = vi.fn(),
   onTextResponse = vi.fn(),
   onRetry = vi.fn(),
+  onUseExample = vi.fn(),
   onConfigChange = vi.fn(),
 }: {
   config?: MitaTeamsConfig
@@ -350,6 +353,7 @@ function renderWorkspace({
   onPlanRevise?: (revision: string) => void
   onTextResponse?: (text: string) => void
   onRetry?: () => void
+  onUseExample?: (goal: string) => void
   onConfigChange?: (config: MitaTeamsConfig) => void
 } = {}) {
   render(
@@ -365,6 +369,7 @@ function renderWorkspace({
       onPlanRevise={onPlanRevise}
       onTextResponse={onTextResponse}
       onRetry={onRetry}
+      onUseExample={onUseExample}
       onConfigChange={onConfigChange}
     />
   )
@@ -376,6 +381,7 @@ function renderWorkspace({
     onPlanRevise,
     onTextResponse,
     onRetry,
+    onUseExample,
     onConfigChange,
   }
 }
@@ -470,6 +476,18 @@ describe('MitaTeamsWorkspace', () => {
     ).toBeInTheDocument()
     await user.click(screen.getByRole('button', { name: 'Retry' }))
     expect(onRetry).toHaveBeenCalledTimes(1)
+  })
+
+  it('onboards the empty state with steps and example goals', async () => {
+    const user = userEvent.setup()
+    const onUseExample = vi.fn()
+    renderWorkspace({ config: createUnlockedConfig(), onUseExample })
+
+    expect(screen.getByText('Describe your goal')).toBeInTheDocument()
+    await user.click(
+      screen.getByRole('button', { name: 'Compare two options' })
+    )
+    expect(onUseExample).toHaveBeenCalledWith('Compare two options')
   })
 
   it('allows choosing template and mode before the first team run starts', async () => {
