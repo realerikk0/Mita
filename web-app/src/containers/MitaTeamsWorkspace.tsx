@@ -163,6 +163,36 @@ function roleModelLabel(role: MitaTeamsRoleConfig, fallback: string) {
     : fallback
 }
 
+// Shows which provider/model actually produced a role's message. Reads the
+// model captured on the message at generation time (so it survives later
+// role-config edits), falling back to the role's current model.
+function MessageModelBadge({
+  model,
+  role,
+}: {
+  model?: ThreadModel
+  role: MitaTeamsRoleConfig
+}) {
+  const modelId = model?.id ?? role.modelId
+  const provider = model?.provider ?? role.provider
+  if (!modelId && !provider) return null
+
+  const logoProvider = getModelLogoProvider(modelId ?? '', provider ?? 'provider')
+  const label = modelId
+    ? getModelDisplayName(modelId)
+    : getProviderTitle(provider ?? '')
+
+  return (
+    <span
+      className="inline-flex min-w-0 max-w-[10rem] items-center gap-1"
+      title={roleModelLabel(role, label)}
+    >
+      <ProvidersAvatar provider={{ provider: logoProvider }} />
+      <span className="truncate">{label}</span>
+    </span>
+  )
+}
+
 type Translate = (key: string, options?: Record<string, unknown>) => string
 
 function localizedChannelLabel(channel: MitaTeamsChannelConfig, t: Translate) {
@@ -1067,7 +1097,12 @@ function RoleStreamPanel({
                     {isUserMessage ? t('mita-teams:you') : roleName}
                   </span>
                 </span>
-                <span className="shrink-0">{displayTime(message.createdAt)}</span>
+                <span className="inline-flex shrink-0 items-center gap-2">
+                  {!isUserMessage && (
+                    <MessageModelBadge model={message.model} role={role} />
+                  )}
+                  <span>{displayTime(message.createdAt)}</span>
+                </span>
               </div>
               <CollapsibleMessageText
                 content={message.content}
@@ -1200,7 +1235,12 @@ function ChannelRoleStreams({
                   />
                   <span className="truncate">{speakerName}</span>
                 </span>
-                <span className="shrink-0">{displayTime(message.createdAt)}</span>
+                <span className="inline-flex shrink-0 items-center gap-2">
+                  {!isHostMessage && (
+                    <MessageModelBadge model={message.model} role={role} />
+                  )}
+                  <span>{displayTime(message.createdAt)}</span>
+                </span>
               </div>
               <CollapsibleMessageText
                 content={message.content}
