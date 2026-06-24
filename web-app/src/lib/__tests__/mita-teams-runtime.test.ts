@@ -879,6 +879,42 @@ describe('mita teams runtime', () => {
     expect(roleIds).toContain('equity_analyst')
   })
 
+  it('binds a plain-language "no extra roles" instruction and blocks coordinator role-adds', async () => {
+    const config = createDefaultMitaTeamsConfig({
+      provider: 'openai',
+      id: 'gpt-5',
+    })
+
+    const result = await runMitaTeamsRuntime({
+      config: approveRuntimeForExecution(config),
+      userText: '就用现有的主持人，不要生成额外的角色。',
+      // The coordinator tries to introduce a brand-new specialist anyway.
+      generateDecisionText: async () =>
+        JSON.stringify({
+          action: 'configure_team',
+          reason: 'Bring in a data scout.',
+          roles: [
+            {
+              id: 'data_scout',
+              name: 'Data Scout',
+              prompt: 'Fetch data.',
+              enabled: true,
+            },
+          ],
+          channels: [],
+          calls: [],
+        }),
+      generateRoleText: async () => 'unused',
+    })
+
+    // Prose intent locks the team...
+    expect(result.config.workflowControl).toBe('user_spec')
+    // ...and the unrequested role never makes it in.
+    expect(result.config.roles.map((role) => role.id)).not.toContain(
+      'data_scout'
+    )
+  })
+
   it('requests native web search for ticker investment research role calls', async () => {
     const previousModelState = useModelProvider.getState()
     useModelProvider.setState({
