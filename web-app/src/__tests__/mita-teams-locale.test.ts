@@ -29,4 +29,23 @@ describe('Biyan Teams locale strings', () => {
       }
     }
   })
+
+  it('keeps every locale at full key parity with English', () => {
+    const collectKeys = (value: unknown, prefix = ''): string[] => {
+      if (!value || typeof value !== 'object' || Array.isArray(value)) return []
+      return Object.entries(value as Record<string, unknown>).flatMap(
+        ([key, child]) => {
+          const path = prefix ? `${prefix}.${key}` : key
+          return [path, ...collectKeys(child, path)]
+        }
+      )
+    }
+
+    const enKeys = collectKeys(en).sort()
+    // A missing key here means a locale silently falls back to English in the
+    // UI — most damaging on the trust-critical plan-approval gate (zh-TW
+    // regressed exactly this way before). Keep all locales in lockstep.
+    expect(collectKeys(zhCN).sort()).toEqual(enKeys)
+    expect(collectKeys(zhTW).sort()).toEqual(enKeys)
+  })
 })

@@ -1317,7 +1317,7 @@ describe('mita teams runtime', () => {
     ).toHaveLength(configuredEventCount)
     expect(
       followUp.config.runtime.teamEvents.some(
-        (event) => event.title === 'Orchestrator chose call_roles'
+        (event) => event.title === 'Host assigned roles to work'
       )
     ).toBe(true)
 

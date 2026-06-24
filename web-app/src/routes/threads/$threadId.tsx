@@ -1087,6 +1087,23 @@ Tool result communication:
     [addMessage, appendThreadMessageToChat, threadId]
   )
 
+  // Slice A of cost visibility: a team run spends real credits across every
+  // role's provider, so refresh those provider balances when it settles. The
+  // sidebar then reflects actual spend (the true balance delta) with no price
+  // table to maintain.
+  const refreshMitaTeamsProviderBalances = useCallback(
+    (config: MitaTeamsConfig) => {
+      const providers = new Set<string>()
+      for (const role of config.roles) {
+        if (role.provider) providers.add(role.provider)
+      }
+      for (const provider of providers) {
+        notifyProviderBalanceMayHaveChanged(provider)
+      }
+    },
+    []
+  )
+
   const startMitaTeamsRuntime = useCallback(
     async (config: MitaTeamsConfig, userText: string) => {
       mitaTeamsAbortRef.current?.abort()
@@ -1129,12 +1146,14 @@ Tool result communication:
             updateSessionStatus(threadId, 'ready')
           }
           setSettledChatStatus('ready')
+          refreshMitaTeamsProviderBalances(config)
         }
       }
     },
     [
       appendMitaTeamsAssistantMessage,
       persistMitaTeamsConfig,
+      refreshMitaTeamsProviderBalances,
       summarizeThreadTitleFromText,
       threadId,
     ]
@@ -1179,10 +1198,11 @@ Tool result communication:
             updateSessionStatus(threadId, 'ready')
           }
           setSettledChatStatus('ready')
+          refreshMitaTeamsProviderBalances(config)
         }
       }
     },
-    [persistMitaTeamsConfig, threadId]
+    [persistMitaTeamsConfig, refreshMitaTeamsProviderBalances, threadId]
   )
 
   const createCompactionModel = useCallback(async () => {

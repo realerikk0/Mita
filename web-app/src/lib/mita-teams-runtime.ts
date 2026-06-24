@@ -2729,6 +2729,34 @@ ${trimText(invalidText, 2400)}
 Return one corrected JSON object only. Do not include Markdown or explanation.`
 }
 
+// Human-readable title for a coordinator decision event, so the team timeline
+// reads as plain language instead of a raw action enum ("Host assigned roles
+// to work" rather than "Orchestrator chose call_roles").
+function describeDecisionEventTitle(
+  action: MitaTeamsOrchestratorDecision['action']
+) {
+  switch (action) {
+    case 'configure_team':
+      return 'Host set up the team'
+    case 'call_roles':
+      return 'Host assigned roles to work'
+    case 'ask_user':
+      return 'Host asked you a question'
+    case 'clarify_user':
+      return 'Host asked you to clarify'
+    case 'propose_plan':
+      return 'Host proposed a plan'
+    case 'revise_plan':
+      return 'Host revised the plan'
+    case 'milestone':
+      return 'Host logged a milestone'
+    case 'stop':
+      return 'Host wrapped up the run'
+    default:
+      return `Host decided: ${action}`
+  }
+}
+
 function jsonFailureDecision(): MitaTeamsOrchestratorDecision {
   return {
     action: 'ask_user',
@@ -3892,7 +3920,7 @@ export async function runMitaTeamsRuntime({
         }),
         {
           type: 'decision',
-          title: `Orchestrator chose ${decision.action}`,
+          title: describeDecisionEventTitle(decision.action),
           detail: decision.reason,
           roleId: MITA_TEAMS_ORCHESTRATOR_ROLE_ID,
         }

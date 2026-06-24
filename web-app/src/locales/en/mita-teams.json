@@ -61,7 +61,7 @@
   "review": "Review",
   "finalDelivery": "Final delivery",
   "emptyTitle": "Start with one concrete goal",
-  "emptyDescription": "The coordinator will understand the goal first, then suggest roles and channels only when they are useful.",
+  "emptyDescription": "The host will understand the goal first, then suggest roles and channels only when they are useful.",
   "owner": "Owner",
   "host": "Host",
   "you": "You",
@@ -95,6 +95,10 @@
   "editActivityTitle": "Edit activity title",
   "roundLimit": "{{count}} rounds",
   "threadMode": "Teams thread",
+  "teamControlLocked": "Team: your roles only",
+  "teamControlAuto": "Host may add specialists",
+  "teamControlLockedHint": "The Host runs exactly your roles and will not add specialists or auto-apply scenarios. Click to let the Host add specialists.",
+  "teamControlAutoHint": "The Host may add specialist roles and scenario teams. Click to lock the team to your roles only.",
   "rightPanelHidden": "Status panel hidden on this width",
   "artifactsEmpty": "No artifacts yet",
   "decisionsEmpty": "No decisions yet",
@@ -173,7 +177,7 @@
     },
     "roundtable": {
       "label": "Roundtable",
-      "description": "Collect role perspectives before the coordinator decides."
+      "description": "Collect role perspectives before the host decides."
     },
     "debate": {
       "label": "Debate",
@@ -190,7 +194,7 @@
   },
   "rolesById": {
     "orchestrator": {
-      "name": "Orchestrator",
+      "name": "Host",
       "label": "Host",
       "description": "Break down the request, choose speakers, and converge."
     },

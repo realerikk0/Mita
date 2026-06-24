@@ -71,6 +71,8 @@ import {
   Hash,
   ListChecks,
   Loader2,
+  Lock,
+  LockOpen,
   MessageSquare,
   Minus,
   MoreVertical,
@@ -161,6 +163,34 @@ function roleModelLabel(role: MitaTeamsRoleConfig, fallback: string) {
   return role.modelId
     ? `${role.provider ?? 'provider'} / ${role.modelId}`
     : fallback
+}
+
+// Shows which provider/model actually produced a role's message. Reads the
+// model captured on the message at generation time (so it survives later
+// role-config edits), falling back to the role's current model.
+function MessageModelBadge({
+  model,
+  role,
+}: {
+  model?: ThreadModel
+  role: MitaTeamsRoleConfig
+}) {
+  const modelId = model?.id ?? role.modelId
+  const provider = model?.provider ?? role.provider
+  if (!modelId && !provider) return null
+
+  const logoProvider = getModelLogoProvider(modelId ?? '', provider ?? 'provider')
+  const label = modelId || getProviderTitle(provider ?? '')
+
+  return (
+    <span
+      className="inline-flex min-w-0 max-w-[10rem] items-center gap-1"
+      title={roleModelLabel(role, label)}
+    >
+      <ProvidersAvatar provider={{ provider: logoProvider }} />
+      <span className="truncate">{label}</span>
+    </span>
+  )
 }
 
 type Translate = (key: string, options?: Record<string, unknown>) => string
@@ -511,6 +541,15 @@ function MemoryList({
       ))}
     </div>
   )
+}
+
+// Condensed one-line event for the sidebar lists: humanized title plus a short
+// snippet of the "why" (event.detail), which these lists otherwise drop.
+function eventSummaryLine(event: MitaTeamsTeamEvent) {
+  if (!event.detail) return event.title
+  const detail =
+    event.detail.length > 80 ? `${event.detail.slice(0, 79)}…` : event.detail
+  return `${event.title} · ${detail}`
 }
 
 const TASK_STATUS_ORDER: MitaTeamsTaskStatus[] = [
@@ -1067,7 +1106,12 @@ function RoleStreamPanel({
                     {isUserMessage ? t('mita-teams:you') : roleName}
                   </span>
                 </span>
-                <span className="shrink-0">{displayTime(message.createdAt)}</span>
+                <span className="inline-flex shrink-0 items-center gap-2">
+                  {!isUserMessage && (
+                    <MessageModelBadge model={message.model} role={role} />
+                  )}
+                  <span>{displayTime(message.createdAt)}</span>
+                </span>
               </div>
               <CollapsibleMessageText
                 content={message.content}
@@ -1200,7 +1244,12 @@ function ChannelRoleStreams({
                   />
                   <span className="truncate">{speakerName}</span>
                 </span>
-                <span className="shrink-0">{displayTime(message.createdAt)}</span>
+                <span className="inline-flex shrink-0 items-center gap-2">
+                  {!isHostMessage && (
+                    <MessageModelBadge model={message.model} role={role} />
+                  )}
+                  <span>{displayTime(message.createdAt)}</span>
+                </span>
               </div>
               <CollapsibleMessageText
                 content={message.content}
@@ -1568,7 +1617,7 @@ function WorkspaceInspectorContent({
           {t('mita-teams:events')}
         </div>
         <MemoryList
-          items={runtime.teamEvents.slice(-5).map((event) => event.title)}
+          items={runtime.teamEvents.slice(-5).map(eventSummaryLine)}
           emptyText={t('mita-teams:teamEventsEmpty')}
         />
       </section>
@@ -2201,6 +2250,18 @@ export const MitaTeamsWorkspace = memo(function MitaTeamsWorkspace({
     [patchConfig, setupLocked]
   )
 
+  // Owner-authoritative control: when locked ('user_spec') the Host runs exactly
+  // the owner's roles and may not add specialists or auto-apply scenarios. This
+  // toggle stays available even mid-run so the owner can clamp the team at any
+  // time. Not gated by setupLocked on purpose.
+  const teamLocked = config.workflowControl === 'user_spec'
+  const setTeamLocked = useCallback(
+    (locked: boolean) => {
+      patchConfig({ workflowControl: locked ? 'user_spec' : undefined })
+    },
+    [patchConfig]
+  )
+
   const setRoundLimit = useCallback(
     (roundLimit: number) => patchConfig({ roundLimit }),
     [patchConfig]
@@ -2473,6 +2534,35 @@ export const MitaTeamsWorkspace = memo(function MitaTeamsWorkspace({
               )}
               {!isRoleConfig && (
                 <RuntimeStatusBadge status={runStatus} isBusy={isRuntimeBusy} />
+              )}
+              {!isRoleConfig && !isRoleChat && (
+                <button
+                  type="button"
+                  onClick={() => setTeamLocked(!teamLocked)}
+                  aria-pressed={teamLocked}
+                  title={t(
+                    teamLocked
+                      ? 'mita-teams:teamControlLockedHint'
+                      : 'mita-teams:teamControlAutoHint'
+                  )}
+                  className={cn(
+                    'hidden items-center gap-1 rounded-full border px-2 py-0.5 text-[11px] transition-colors sm:inline-flex',
+                    teamLocked
+                      ? 'border-primary/30 bg-primary/10 text-primary hover:bg-primary/15'
+                      : 'text-muted-foreground hover:bg-muted/50'
+                  )}
+                >
+                  {teamLocked ? (
+                    <Lock className="size-3" />
+                  ) : (
+                    <LockOpen className="size-3" />
+                  )}
+                  {t(
+                    teamLocked
+                      ? 'mita-teams:teamControlLocked'
+                      : 'mita-teams:teamControlAuto'
+                  )}
+                </button>
               )}
             </div>
             <div className="mt-0.5 truncate text-xs text-muted-foreground">
@@ -2935,7 +3025,7 @@ export const MitaTeamsWorkspace = memo(function MitaTeamsWorkspace({
             {t('mita-teams:events')}
           </div>
           <MemoryList
-            items={runtime.teamEvents.slice(-5).map((event) => event.title)}
+            items={runtime.teamEvents.slice(-5).map(eventSummaryLine)}
             emptyText={t('mita-teams:teamEventsEmpty')}
           />
         </section>
