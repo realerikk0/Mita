@@ -107,7 +107,7 @@ type MitaTeamsWorkspaceProps = {
   isRuntimeBusy?: boolean
   onChoiceSelect?: (optionId: string) => void
   onTextResponse?: (text: string) => void
-  onPlanApprove?: () => void
+  onPlanApprove?: (keptRoleIds?: string[]) => void
   onPlanRevise?: (revision: string) => void
   onConfigChange: (config: MitaTeamsConfig) => void
 }
@@ -800,13 +800,20 @@ function PlanReviewCard({
 }: {
   plan: MitaTeamsPlanDraft
   disabled?: boolean
-  onApprove?: () => void
+  onApprove?: (keptRoleIds?: string[]) => void
   onRevise?: (revision: string) => void
 }) {
   const { t } = useTranslation()
   const [revision, setRevision] = useState('')
+  const [removedRoleIds, setRemovedRoleIds] = useState<string[]>([])
   const isApproved = plan.status === 'approved'
   const canSubmitRevision = revision.trim().length > 0 && !disabled
+  const toggleRemovedRole = (roleId: string) =>
+    setRemovedRoleIds((prev) =>
+      prev.includes(roleId)
+        ? prev.filter((id) => id !== roleId)
+        : [...prev, roleId]
+    )
 
   return (
     <div className="mb-4 rounded-lg border bg-card p-4">
@@ -889,25 +896,66 @@ function PlanReviewCard({
               {t('mita-teams:planRoles')}
             </div>
             <div className="grid gap-1.5">
-              {plan.roleAssignments.map((role) => (
-                <div
-                  key={role.roleId}
-                  className="rounded-md border bg-muted/20 px-3 py-2 text-sm"
-                >
-                  <div className="flex items-center justify-between gap-2">
-                    <span className="font-medium">{role.name}</span>
-                    {role.model && (
-                      <span className="truncate text-xs text-muted-foreground">
-                        {role.model}
+              {plan.roleAssignments.map((role) => {
+                const removed = removedRoleIds.includes(role.roleId)
+                const canRemove =
+                  role.roleId !== MITA_TEAMS_ORCHESTRATOR_ROLE_ID &&
+                  !isApproved &&
+                  !disabled
+                return (
+                  <div
+                    key={role.roleId}
+                    className={cn(
+                      'rounded-md border bg-muted/20 px-3 py-2 text-sm',
+                      removed && 'opacity-50'
+                    )}
+                  >
+                    <div className="flex items-center justify-between gap-2">
+                      <span
+                        className={cn('font-medium', removed && 'line-through')}
+                      >
+                        {role.name}
                       </span>
+                      <div className="flex shrink-0 items-center gap-2">
+                        {role.model && (
+                          <span className="truncate text-xs text-muted-foreground">
+                            {role.model}
+                          </span>
+                        )}
+                        {canRemove && (
+                          <button
+                            type="button"
+                            onClick={() => toggleRemovedRole(role.roleId)}
+                            title={t(
+                              removed
+                                ? 'mita-teams:planRoleRestore'
+                                : 'mita-teams:planRoleRemove'
+                            )}
+                            className="text-muted-foreground transition-colors hover:text-foreground"
+                          >
+                            {removed ? (
+                              <Plus className="size-3.5" />
+                            ) : (
+                              <Minus className="size-3.5" />
+                            )}
+                          </button>
+                        )}
+                      </div>
+                    </div>
+                    {!removed && (
+                      <div className="mt-0.5 text-xs text-muted-foreground">
+                        {role.assignment}
+                      </div>
                     )}
                   </div>
-                  <div className="mt-0.5 text-xs text-muted-foreground">
-                    {role.assignment}
-                  </div>
-                </div>
-              ))}
+                )
+              })}
             </div>
+            {removedRoleIds.length > 0 && !isApproved && (
+              <p className="text-xs text-muted-foreground">
+                {t('mita-teams:planRolesEditedHint')}
+              </p>
+            )}
           </section>
         )}
 
@@ -940,7 +988,16 @@ function PlanReviewCard({
               type="button"
               size="sm"
               disabled={disabled}
-              onClick={() => onApprove?.()}
+              onClick={() => {
+                if (removedRoleIds.length === 0) {
+                  onApprove?.()
+                  return
+                }
+                const keptRoleIds = plan.roleAssignments
+                  .map((role) => role.roleId)
+                  .filter((id) => !removedRoleIds.includes(id))
+                onApprove?.(keptRoleIds)
+              }}
             >
               <CheckCircle2 className="size-4" />
               {t('mita-teams:approvePlan')}

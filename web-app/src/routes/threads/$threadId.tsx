@@ -2057,7 +2057,7 @@ Tool result communication:
     ]
   )
 
-  const handleMitaTeamsPlanApprove = useCallback(() => {
+  const handleMitaTeamsPlanApprove = useCallback((keptRoleIds?: string[]) => {
     const plan = mitaTeamsConfig?.runtime.planDraft
     const approvalKey = plan ? `${threadId}:plan:${plan.id}:approve` : undefined
     if (
@@ -2071,7 +2071,10 @@ Tool result communication:
     }
 
     mitaTeamsAnsweredChoiceIdsRef.current.add(approvalKey)
-    const nextConfig = approveMitaTeamsPlan(mitaTeamsConfig)
+    const nextConfig = approveMitaTeamsPlan(
+      mitaTeamsConfig,
+      keptRoleIds ? { keepRoleIds: keptRoleIds } : undefined
+    )
     const userText = `Approved Biyan Teams plan "${plan.goal}". Continue with the approved role snapshot.`
 
     persistMitaTeamsConfig(nextConfig)
