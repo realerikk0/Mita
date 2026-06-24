@@ -1915,22 +1915,59 @@ function materializeApprovedPlanRoles(
   }
 }
 
-export function approveMitaTeamsPlan(config: MitaTeamsConfig): MitaTeamsConfig {
+export function approveMitaTeamsPlan(
+  config: MitaTeamsConfig,
+  options?: { keepRoleIds?: string[] }
+): MitaTeamsConfig {
   const plan = config.runtime.planDraft
   if (!plan) return config
   const now = nowIso()
+
+  // When the owner edited the team on the approval card (removed roles), keep
+  // only the roles they kept (plus the Host) so "approve" runs exactly the
+  // displayed team.
+  const edited = options?.keepRoleIds !== undefined
+  const keepSet = edited
+    ? new Set<string>([
+        MITA_TEAMS_ORCHESTRATOR_ROLE_ID,
+        ...(options?.keepRoleIds ?? []).map((id) =>
+          normalizeMitaTeamsId(id, '')
+        ),
+      ])
+    : undefined
+  const effectivePlan: MitaTeamsPlanDraft = keepSet
+    ? {
+        ...plan,
+        roleAssignments: plan.roleAssignments.filter((role) =>
+          keepSet.has(role.roleId)
+        ),
+        tasks: plan.tasks.filter(
+          (task) => !task.roleId || keepSet.has(task.roleId)
+        ),
+      }
+    : plan
+
   const approvedPlan: MitaTeamsPlanDraft = {
-    ...plan,
+    ...effectivePlan,
     status: 'approved',
     updatedAt: now,
     approvedAt: now,
   }
+  // Materialize the kept roles first (so a kept-but-new role is still created),
+  // then — for an edited approval — disable the dropped roles and lock the team
+  // so the Host cannot reintroduce them during execution.
   const materialized = materializeApprovedPlanRoles(config, approvedPlan)
+  const nextRoles = keepSet
+    ? materialized.roles.map((role) =>
+        keepSet.has(role.id) ? role : { ...role, enabled: false }
+      )
+    : materialized.roles
   return patchMitaTeamsConfig(config, {
-    roles: materialized.roles,
+    ...(edited ? { workflowControl: 'user_spec' as const } : {}),
+    roles: nextRoles,
     channels: materialized.channels,
-    activeRoleId: materialized.roles.some(
-      (role) => role.id === config.activeRoleId
+    activeRoleId: nextRoles.some(
+      (role) => role.enabled && role.id === config.activeRoleId
     )
       ? config.activeRoleId
       : MITA_TEAMS_ORCHESTRATOR_ROLE_ID,
@@ -1943,12 +1980,9 @@ export function approveMitaTeamsPlan(config: MitaTeamsConfig): MitaTeamsConfig {
       ...config.runtime,
       phase: 'running',
       approvedPlan,
-      approvedRoleSnapshot: materialized.roles.map((role) => ({ ...role })),
+      approvedRoleSnapshot: nextRoles.map((role) => ({ ...role })),
       roleEditBaseline: Object.fromEntries(
-        materialized.roles.map((role) => [
-          role.id,
-          roleEditBaselineFromRole(role),
-        ])
+        nextRoles.map((role) => [role.id, roleEditBaselineFromRole(role)])
       ),
       roleUserEdits: {},
       userChoiceRequest: undefined,

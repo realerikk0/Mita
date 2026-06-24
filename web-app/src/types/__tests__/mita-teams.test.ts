@@ -327,6 +327,93 @@ describe('mita teams metadata', () => {
     ).toBe(false)
   })
 
+  it('approving an edited plan keeps only the selected roles and locks the team', () => {
+    const config = normalizeMitaTeamsConfig(
+      {
+        enabled: true,
+        activeChannel: 'task',
+        activeRoleId: 'orchestrator',
+        roles: [
+          {
+            id: 'analyst',
+            name: 'Analyst',
+            label: 'A',
+            description: 'd',
+            prompt: 'p',
+            color: 'bg-violet-600',
+            permission: 'tools',
+            enabled: true,
+          },
+          {
+            id: 'scout',
+            name: 'Scout',
+            label: 'S',
+            description: 'd',
+            prompt: 'p',
+            color: 'bg-cyan-600',
+            permission: 'tools',
+            enabled: true,
+          },
+        ],
+        channels: [
+          {
+            id: 'task',
+            label: 'Task',
+            description: '',
+            roleIds: ['orchestrator', 'analyst', 'scout'],
+          },
+        ],
+        runtime: {
+          version: 1,
+          phase: 'awaiting_plan_approval',
+          planDraft: {
+            id: 'plan-1',
+            version: 1,
+            status: 'draft',
+            goal: 'Do the thing.',
+            summary: 'Plan.',
+            scope: ['x'],
+            acceptanceCriteria: ['y'],
+            tasks: [
+              { id: 't1', title: 'Analyze', roleId: 'analyst' },
+              { id: 't2', title: 'Scout', roleId: 'scout' },
+            ],
+            roleAssignments: [
+              { roleId: 'orchestrator', name: 'Host', assignment: 'Coordinate.' },
+              { roleId: 'analyst', name: 'Analyst', assignment: 'Analyze.' },
+              { roleId: 'scout', name: 'Scout', assignment: 'Scout.' },
+            ],
+            executionOrder: ['Analyze', 'Scout'],
+            createdAt: '2026-06-08T00:00:00.000Z',
+            updatedAt: '2026-06-08T00:00:00.000Z',
+          },
+        },
+      },
+      { provider: 'openai', id: 'gpt-5' }
+    )!
+
+    // Owner removes "scout" on the approval card, keeping only "analyst".
+    const approved = approveMitaTeamsPlan(config, { keepRoleIds: ['analyst'] })
+
+    expect(approved.workflowControl).toBe('user_spec')
+    expect(approved.roles.find((role) => role.id === 'analyst')?.enabled).toBe(
+      true
+    )
+    expect(approved.roles.find((role) => role.id === 'scout')?.enabled).toBe(
+      false
+    )
+    expect(
+      approved.runtime.approvedPlan?.roleAssignments.map((r) => r.roleId)
+    ).not.toContain('scout')
+
+    // Approving without edits leaves the team unlocked and intact.
+    const approvedAsIs = approveMitaTeamsPlan(config)
+    expect(approvedAsIs.workflowControl).not.toBe('user_spec')
+    expect(
+      approvedAsIs.roles.find((role) => role.id === 'scout')?.enabled
+    ).toBe(true)
+  })
+
   it('does not add plan-suggested roles when the owner specified the team roles', () => {
     const base = createDefaultMitaTeamsConfig({
       provider: 'openai',
