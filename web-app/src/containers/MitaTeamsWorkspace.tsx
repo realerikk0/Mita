@@ -71,6 +71,8 @@ import {
   Hash,
   ListChecks,
   Loader2,
+  Lock,
+  LockOpen,
   MessageSquare,
   Minus,
   MoreVertical,
@@ -2250,6 +2252,18 @@ export const MitaTeamsWorkspace = memo(function MitaTeamsWorkspace({
     [patchConfig, setupLocked]
   )
 
+  // Owner-authoritative control: when locked ('user_spec') the Host runs exactly
+  // the owner's roles and may not add specialists or auto-apply scenarios. This
+  // toggle stays available even mid-run so the owner can clamp the team at any
+  // time. Not gated by setupLocked on purpose.
+  const teamLocked = config.workflowControl === 'user_spec'
+  const setTeamLocked = useCallback(
+    (locked: boolean) => {
+      patchConfig({ workflowControl: locked ? 'user_spec' : undefined })
+    },
+    [patchConfig]
+  )
+
   const setRoundLimit = useCallback(
     (roundLimit: number) => patchConfig({ roundLimit }),
     [patchConfig]
@@ -2522,6 +2536,35 @@ export const MitaTeamsWorkspace = memo(function MitaTeamsWorkspace({
               )}
               {!isRoleConfig && (
                 <RuntimeStatusBadge status={runStatus} isBusy={isRuntimeBusy} />
+              )}
+              {!isRoleConfig && !isRoleChat && (
+                <button
+                  type="button"
+                  onClick={() => setTeamLocked(!teamLocked)}
+                  aria-pressed={teamLocked}
+                  title={t(
+                    teamLocked
+                      ? 'mita-teams:teamControlLockedHint'
+                      : 'mita-teams:teamControlAutoHint'
+                  )}
+                  className={cn(
+                    'hidden items-center gap-1 rounded-full border px-2 py-0.5 text-[11px] transition-colors sm:inline-flex',
+                    teamLocked
+                      ? 'border-primary/30 bg-primary/10 text-primary hover:bg-primary/15'
+                      : 'text-muted-foreground hover:bg-muted/50'
+                  )}
+                >
+                  {teamLocked ? (
+                    <Lock className="size-3" />
+                  ) : (
+                    <LockOpen className="size-3" />
+                  )}
+                  {t(
+                    teamLocked
+                      ? 'mita-teams:teamControlLocked'
+                      : 'mita-teams:teamControlAuto'
+                  )}
+                </button>
               )}
             </div>
             <div className="mt-0.5 truncate text-xs text-muted-foreground">
