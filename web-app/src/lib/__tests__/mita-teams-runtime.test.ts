@@ -821,6 +821,64 @@ describe('mita teams runtime', () => {
     }
   })
 
+  it('does not inject scenario specialists when the owner already configured a team', async () => {
+    const config = normalizeMitaTeamsConfig(
+      {
+        enabled: true,
+        activeChannel: 'task',
+        activeRoleId: 'orchestrator',
+        roles: [
+          {
+            id: 'equity_analyst',
+            name: 'Equity Analyst',
+            label: 'Analyst',
+            description: 'Owner-defined analyst.',
+            prompt: 'Analyze equities.',
+            color: 'bg-cyan-600',
+            permission: 'tools',
+            enabled: true,
+          },
+        ],
+        channels: [
+          {
+            id: 'task',
+            label: 'Task',
+            description: 'Shared.',
+            roleIds: ['orchestrator', 'equity_analyst'],
+          },
+        ],
+      },
+      { provider: 'openai', id: 'gpt-5' }
+    )!
+
+    let capturedDecisionPrompt = ''
+    const result = await runMitaTeamsRuntime({
+      // A market-research query that WOULD trigger the scenario playbook on a
+      // bare group, but here the owner has already defined a specialist team.
+      config: approveRuntimeForExecution(config),
+      userText: '帮我研究美股明日什么板块会涨',
+      generateDecisionText: async ({ prompt }) => {
+        capturedDecisionPrompt = prompt
+        return JSON.stringify({
+          action: 'stop',
+          reason: 'done',
+          finalResponse: 'done',
+        })
+      },
+      generateRoleText: async () => 'unused',
+    })
+
+    expect(capturedDecisionPrompt).not.toContain(
+      'Scenario playbook: Market research'
+    )
+    const roleIds = result.config.roles.map((role) => role.id)
+    expect(roleIds).not.toContain('data_scout')
+    expect(roleIds).not.toContain('market_analyst')
+    expect(roleIds).not.toContain('skeptic')
+    // The owner-configured team is left intact.
+    expect(roleIds).toContain('equity_analyst')
+  })
+
   it('requests native web search for ticker investment research role calls', async () => {
     const previousModelState = useModelProvider.getState()
     useModelProvider.setState({

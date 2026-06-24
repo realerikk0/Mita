@@ -1192,11 +1192,17 @@ function renderUserControl(control: MitaTeamsUserControl) {
   return parts.length ? parts.join('\n') : 'No explicit owner controls.'
 }
 
-function hasReusableTeam(config: MitaTeamsConfig) {
-  const hasSpecialistRole = config.roles.some(
+// True when the owner has configured at least one enabled non-orchestrator
+// role, i.e. they have already declared the team. Used to keep scenario
+// playbooks from injecting their own specialists over an owner-defined team.
+function hasOwnerSpecialistTeam(config: MitaTeamsConfig) {
+  return config.roles.some(
     (role) => role.enabled && role.id !== MITA_TEAMS_ORCHESTRATOR_ROLE_ID
   )
-  if (!hasSpecialistRole) return false
+}
+
+function hasReusableTeam(config: MitaTeamsConfig) {
+  if (!hasOwnerSpecialistTeam(config)) return false
 
   const runStatus = config.runtime.run?.status
   const hasRunHistory =
@@ -3768,8 +3774,13 @@ export async function runMitaTeamsRuntime({
         }
       : undefined
   const preferTeamReuse = hasReusableTeam(config)
+  // Do not auto-apply a scenario playbook (which would inject its own
+  // specialist roles) when the owner has already configured their own team —
+  // even on the very first run, before any run history exists. A bare
+  // orchestrator-only group still gets the auto-assembled scenario team.
+  const ownerDefinedTeam = hasOwnerSpecialistTeam(config)
   const scenarioPlaybook =
-    workflowSpec?.explicit || preferTeamReuse
+    workflowSpec?.explicit || preferTeamReuse || ownerDefinedTeam
       ? undefined
       : config.scenarioId === 'market_research'
         ? MARKET_RESEARCH_PLAYBOOK
