@@ -543,6 +543,15 @@ function MemoryList({
   )
 }
 
+// Condensed one-line event for the sidebar lists: humanized title plus a short
+// snippet of the "why" (event.detail), which these lists otherwise drop.
+function eventSummaryLine(event: MitaTeamsTeamEvent) {
+  if (!event.detail) return event.title
+  const detail =
+    event.detail.length > 80 ? `${event.detail.slice(0, 79)}…` : event.detail
+  return `${event.title} · ${detail}`
+}
+
 const TASK_STATUS_ORDER: MitaTeamsTaskStatus[] = [
   'todo',
   'researching',
@@ -1608,7 +1617,7 @@ function WorkspaceInspectorContent({
           {t('mita-teams:events')}
         </div>
         <MemoryList
-          items={runtime.teamEvents.slice(-5).map((event) => event.title)}
+          items={runtime.teamEvents.slice(-5).map(eventSummaryLine)}
           emptyText={t('mita-teams:teamEventsEmpty')}
         />
       </section>
@@ -2975,7 +2984,7 @@ export const MitaTeamsWorkspace = memo(function MitaTeamsWorkspace({
             {t('mita-teams:events')}
           </div>
           <MemoryList
-            items={runtime.teamEvents.slice(-5).map((event) => event.title)}
+            items={runtime.teamEvents.slice(-5).map(eventSummaryLine)}
             emptyText={t('mita-teams:teamEventsEmpty')}
           />
         </section>
