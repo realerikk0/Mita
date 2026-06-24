@@ -47,6 +47,27 @@
     "resultLabel": "Result",
     "errorLabel": "Error"
   },
+  "generationStatus": {
+    "thinking": "Thinking",
+    "analyzingCode": "Analyzing code",
+    "analyzingCodeProgress": "Analyzing code {{percent}}%",
+    "generatingReply": "Generating reply",
+    "thinkingEllipsis": "Thinking...",
+    "reasoningEllipsis": "Reasoning...",
+    "thoughtFewSeconds": "Thought for a few seconds",
+    "thoughtSeconds": "Thought for {{count}} seconds",
+    "reasonedThrough": "Reasoned through the problem"
+  },
+  "thinkingBlock": {
+    "status": {
+      "idle": "Idle",
+      "running": "Running",
+      "complete": "Complete",
+      "error": "Error"
+    },
+    "inputLabel": "Input",
+    "outputLabel": "Output"
+  },
   "paragraphEdit": {
     "editWithAi": "Edit with AI",
     "title": "Edit selection with AI",

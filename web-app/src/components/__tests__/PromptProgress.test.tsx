@@ -8,6 +8,22 @@ vi.mock('@/hooks/useAppState', () => ({
   useAppState: vi.fn(),
 }))
 
+vi.mock('@/i18n/react-i18next-compat', () => ({
+  useTranslation: () => ({
+    t: (key: string, options?: Record<string, unknown>) => {
+      const values: Record<string, string> = {
+        'chat:generationStatus.thinking': 'Thinking',
+        'chat:generationStatus.analyzingCodeProgress':
+          'Analyzing code {{percent}}%',
+      }
+
+      return (values[key] ?? key).replace(/\{\{(\w+)\}\}/g, (_match, name) =>
+        options?.[name] === undefined ? _match : String(options[name])
+      )
+    },
+  }),
+}))
+
 const mockUseAppState = useAppState as ReturnType<typeof vi.fn>
 
 describe('PromptProgress', () => {
@@ -27,7 +43,11 @@ describe('PromptProgress', () => {
 
     render(<PromptProgress />)
 
-    expect(screen.getByText('Reading: 50%')).toBeInTheDocument()
+    expect(screen.getByRole('status')).toHaveTextContent('Analyzing code 50%')
+    expect(screen.getByRole('status')).toHaveAttribute(
+      'data-loading-ribbon-variant',
+      'wave'
+    )
   })
 
   it('should handle zero total gracefully', () => {
@@ -40,11 +60,12 @@ describe('PromptProgress', () => {
 
     mockUseAppState.mockReturnValue(mockProgress)
 
-    const { container } = render(<PromptProgress />)
+    render(<PromptProgress />)
 
-    // Component should render Loader when total is 0
-    const loader = container.querySelector('svg.animate-spin')
-    expect(loader).not.toBeNull()
-    expect(loader?.classList.contains('animate-spin')).toBe(true)
+    expect(screen.getByRole('status')).toHaveTextContent('Thinking')
+    expect(screen.getByRole('status')).toHaveAttribute(
+      'data-loading-ribbon-variant',
+      'ribbon'
+    )
   })
 })

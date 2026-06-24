@@ -9,8 +9,10 @@
 // Additionally, you should also exclude this file from your linter and/or formatter to prevent it from being checked or modified.
 
 import { Route as rootRouteImport } from './routes/__root'
+import { Route as ThinkingContentDemoRouteImport } from './routes/thinking-content-demo'
 import { Route as SystemMonitorRouteImport } from './routes/system-monitor'
 import { Route as LogsRouteImport } from './routes/logs'
+import { Route as LoadingRibbonDemoRouteImport } from './routes/loading-ribbon-demo'
 import { Route as ImagesRouteImport } from './routes/images'
 import { Route as IndexRouteImport } from './routes/index'
 import { Route as HubIndexRouteImport } from './routes/hub/index'
@@ -34,6 +36,11 @@ import { Route as HubModelIdRouteImport } from './routes/hub/$modelId'
 import { Route as SettingsProvidersIndexRouteImport } from './routes/settings/providers/index'
 import { Route as SettingsProvidersProviderNameRouteImport } from './routes/settings/providers/$providerName'
 
+const ThinkingContentDemoRoute = ThinkingContentDemoRouteImport.update({
+  id: '/thinking-content-demo',
+  path: '/thinking-content-demo',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const SystemMonitorRoute = SystemMonitorRouteImport.update({
   id: '/system-monitor',
   path: '/system-monitor',
@@ -42,6 +49,11 @@ const SystemMonitorRoute = SystemMonitorRouteImport.update({
 const LogsRoute = LogsRouteImport.update({
   id: '/logs',
   path: '/logs',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const LoadingRibbonDemoRoute = LoadingRibbonDemoRouteImport.update({
+  id: '/loading-ribbon-demo',
+  path: '/loading-ribbon-demo',
   getParentRoute: () => rootRouteImport,
 } as any)
 const ImagesRoute = ImagesRouteImport.update({
@@ -159,8 +171,10 @@ const SettingsProvidersProviderNameRoute =
 export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
   '/images': typeof ImagesRoute
+  '/loading-ribbon-demo': typeof LoadingRibbonDemoRoute
   '/logs': typeof LogsRoute
   '/system-monitor': typeof SystemMonitorRoute
+  '/thinking-content-demo': typeof ThinkingContentDemoRoute
   '/hub/$modelId': typeof HubModelIdRoute
   '/local-api-server/logs': typeof LocalApiServerLogsRoute
   '/project/$projectId': typeof ProjectProjectIdRoute
@@ -185,8 +199,10 @@ export interface FileRoutesByFullPath {
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
   '/images': typeof ImagesRoute
+  '/loading-ribbon-demo': typeof LoadingRibbonDemoRoute
   '/logs': typeof LogsRoute
   '/system-monitor': typeof SystemMonitorRoute
+  '/thinking-content-demo': typeof ThinkingContentDemoRoute
   '/hub/$modelId': typeof HubModelIdRoute
   '/local-api-server/logs': typeof LocalApiServerLogsRoute
   '/project/$projectId': typeof ProjectProjectIdRoute
@@ -212,8 +228,10 @@ export interface FileRoutesById {
   __root__: typeof rootRouteImport
   '/': typeof IndexRoute
   '/images': typeof ImagesRoute
+  '/loading-ribbon-demo': typeof LoadingRibbonDemoRoute
   '/logs': typeof LogsRoute
   '/system-monitor': typeof SystemMonitorRoute
+  '/thinking-content-demo': typeof ThinkingContentDemoRoute
   '/hub/$modelId': typeof HubModelIdRoute
   '/local-api-server/logs': typeof LocalApiServerLogsRoute
   '/project/$projectId': typeof ProjectProjectIdRoute
@@ -240,8 +258,10 @@ export interface FileRouteTypes {
   fullPaths:
     | '/'
     | '/images'
+    | '/loading-ribbon-demo'
     | '/logs'
     | '/system-monitor'
+    | '/thinking-content-demo'
     | '/hub/$modelId'
     | '/local-api-server/logs'
     | '/project/$projectId'
@@ -266,8 +286,10 @@ export interface FileRouteTypes {
   to:
     | '/'
     | '/images'
+    | '/loading-ribbon-demo'
     | '/logs'
     | '/system-monitor'
+    | '/thinking-content-demo'
     | '/hub/$modelId'
     | '/local-api-server/logs'
     | '/project/$projectId'
@@ -292,8 +314,10 @@ export interface FileRouteTypes {
     | '__root__'
     | '/'
     | '/images'
+    | '/loading-ribbon-demo'
     | '/logs'
     | '/system-monitor'
+    | '/thinking-content-demo'
     | '/hub/$modelId'
     | '/local-api-server/logs'
     | '/project/$projectId'
@@ -319,8 +343,10 @@ export interface FileRouteTypes {
 export interface RootRouteChildren {
   IndexRoute: typeof IndexRoute
   ImagesRoute: typeof ImagesRoute
+  LoadingRibbonDemoRoute: typeof LoadingRibbonDemoRoute
   LogsRoute: typeof LogsRoute
   SystemMonitorRoute: typeof SystemMonitorRoute
+  ThinkingContentDemoRoute: typeof ThinkingContentDemoRoute
   HubModelIdRoute: typeof HubModelIdRoute
   LocalApiServerLogsRoute: typeof LocalApiServerLogsRoute
   ProjectProjectIdRoute: typeof ProjectProjectIdRoute
@@ -345,6 +371,13 @@ export interface RootRouteChildren {
 
 declare module '@tanstack/react-router' {
   interface FileRoutesByPath {
+    '/thinking-content-demo': {
+      id: '/thinking-content-demo'
+      path: '/thinking-content-demo'
+      fullPath: '/thinking-content-demo'
+      preLoaderRoute: typeof ThinkingContentDemoRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/system-monitor': {
       id: '/system-monitor'
       path: '/system-monitor'
@@ -357,6 +390,13 @@ declare module '@tanstack/react-router' {
       path: '/logs'
       fullPath: '/logs'
       preLoaderRoute: typeof LogsRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/loading-ribbon-demo': {
+      id: '/loading-ribbon-demo'
+      path: '/loading-ribbon-demo'
+      fullPath: '/loading-ribbon-demo'
+      preLoaderRoute: typeof LoadingRibbonDemoRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/images': {
@@ -519,8 +559,10 @@ declare module '@tanstack/react-router' {
 const rootRouteChildren: RootRouteChildren = {
   IndexRoute: IndexRoute,
   ImagesRoute: ImagesRoute,
+  LoadingRibbonDemoRoute: LoadingRibbonDemoRoute,
   LogsRoute: LogsRoute,
   SystemMonitorRoute: SystemMonitorRoute,
+  ThinkingContentDemoRoute: ThinkingContentDemoRoute,
   HubModelIdRoute: HubModelIdRoute,
   LocalApiServerLogsRoute: LocalApiServerLogsRoute,
   ProjectProjectIdRoute: ProjectProjectIdRoute,
