@@ -2706,6 +2706,7 @@ Return one corrected JSON object only. Do not include Markdown or explanation.`
 function jsonFailureDecision(): MitaTeamsOrchestratorDecision {
   return {
     action: 'ask_user',
+    parseFallback: true,
     reason:
       'The Orchestrator response could not be parsed after one JSON repair attempt.',
     question:
@@ -3398,6 +3399,12 @@ function approvedExecutionOwnerQuestionError(
 ) {
   if (!runtime.approvedPlan) return undefined
   if (decision.action !== 'ask_user' && decision.action !== 'clarify_user') {
+    return undefined
+  }
+  // A JSON-parse fallback is not a genuine owner-facing question; let it fall
+  // through to the normal ask_user branch so the run pauses with a
+  // retry/stop choice instead of failing fatally.
+  if (decision.action === 'ask_user' && decision.parseFallback) {
     return undefined
   }
 

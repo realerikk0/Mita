@@ -279,6 +279,11 @@ export type MitaTeamsOrchestratorDecision =
       reason: string
       question: string
       options: MitaTeamsChoiceOption[]
+      // Set only by the JSON-parse fallback (jsonFailureDecision). Marks this
+      // ask_user as a mechanical parse failure rather than a genuine
+      // owner-facing question, so post-approval handling can recover instead of
+      // treating it as a protocol violation.
+      parseFallback?: boolean
     } & MitaTeamsDecisionUpdates)
   | ({
       action: 'clarify_user'
