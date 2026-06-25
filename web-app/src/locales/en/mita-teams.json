@@ -58,6 +58,7 @@
   "planRolesEditedHint": "Approving will run only the roles above and lock the team to them.",
   "keepRoleEditsTitle": "Keep role edits?",
   "streamEmpty": "This role has no private stream yet.",
+  "silentCollabNote": "Collaboration is running quietly. Checkpoints and the final result appear here.",
   "rounds": "Rounds",
   "decreaseRounds": "Decrease rounds",
   "increaseRounds": "Increase rounds",

@@ -14,6 +14,7 @@ import type { ComponentProps, ReactNode } from 'react'
 import { MitaTeamsWorkspace } from '@/containers/MitaTeamsWorkspace'
 import {
   createDefaultMitaTeamsConfig,
+  normalizeMitaTeamsConfig,
   type MitaTeamsConfig,
 } from '@/types/mita-teams'
 
@@ -103,6 +104,7 @@ const h = vi.hoisted(() => {
     'mita-teams:recoveryStoppedTitle': 'The run was stopped',
     'mita-teams:onboardingStep1': 'Describe your goal',
     'mita-teams:onboardingExample1': 'Compare two options',
+    'mita-teams:silentCollabNote': 'Collaboration is running quietly.',
     'mita-teams:permissions': 'Permissions',
     'mita-teams:permissionRead': 'Read',
     'mita-teams:permissionTools': 'Tools',
@@ -488,6 +490,73 @@ describe('MitaTeamsWorkspace', () => {
       screen.getByRole('button', { name: 'Compare two options' })
     )
     expect(onUseExample).toHaveBeenCalledWith('Compare two options')
+  })
+
+  it('silent mode hides role chatter behind a quiet note', () => {
+    const config = normalizeMitaTeamsConfig(
+      {
+        enabled: true,
+        mode: 'silent',
+        activeChannel: 'discussion',
+        activeRoleId: 'orchestrator',
+        roles: [
+          {
+            id: 'analyst',
+            name: 'Analyst',
+            label: 'A',
+            description: 'd',
+            prompt: 'p',
+            color: 'bg-violet-600',
+            permission: 'tools',
+            enabled: true,
+          },
+        ],
+        channels: [
+          {
+            id: 'task',
+            label: 'Task',
+            description: '',
+            roleIds: ['orchestrator'],
+          },
+          {
+            id: 'discussion',
+            label: 'Discussion',
+            description: '',
+            roleIds: ['orchestrator', 'analyst'],
+          },
+        ],
+        runtime: {
+          version: 1,
+          roleStates: {
+            analyst: {
+              roleId: 'analyst',
+              status: 'done',
+              stream: [
+                {
+                  id: 'm1',
+                  turnId: 't1',
+                  roleId: 'analyst',
+                  channelId: 'discussion',
+                  role: 'assistant',
+                  content: 'SECRET_INTERNAL_CHATTER',
+                  createdAt: '2026-06-08T00:00:00.000Z',
+                },
+              ],
+            },
+          },
+        },
+      },
+      { provider: 'openai', id: 'gpt-5' }
+    )!
+
+    renderWorkspace({ config })
+
+    expect(
+      screen.queryByText('SECRET_INTERNAL_CHATTER')
+    ).not.toBeInTheDocument()
+    expect(
+      screen.getByText('Collaboration is running quietly.')
+    ).toBeInTheDocument()
   })
 
   it('allows choosing template and mode before the first team run starts', async () => {
