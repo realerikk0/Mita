@@ -111,6 +111,7 @@ type MitaTeamsWorkspaceProps = {
   onPlanApprove?: (keptRoleIds?: string[]) => void
   onPlanRevise?: (revision: string) => void
   onRetry?: () => void
+  onUseExample?: (goal: string) => void
   onConfigChange: (config: MitaTeamsConfig) => void
 }
 
@@ -2109,6 +2110,7 @@ export const MitaTeamsWorkspace = memo(function MitaTeamsWorkspace({
   onPlanApprove,
   onPlanRevise,
   onRetry,
+  onUseExample,
   onConfigChange,
 }: MitaTeamsWorkspaceProps) {
   const { t } = useTranslation()
@@ -2818,34 +2820,56 @@ export const MitaTeamsWorkspace = memo(function MitaTeamsWorkspace({
               <ConversationContent className="mx-auto w-full max-w-3xl px-3 py-4">
                 {!hasMessages && !isRoleChat && (
                   <div className="mx-auto mt-12 max-w-xl rounded-lg border bg-card p-5">
-                    <div className="mb-3 flex items-center gap-2">
+                    <div className="mb-4 flex items-center gap-2">
                       <div className="flex size-8 items-center justify-center rounded-full bg-primary/10 text-primary">
-                        {isRoleChat ? (
-                          <span
-                            className={cn(
-                              'size-3 rounded-full',
-                              activeRole.color
-                            )}
-                          />
-                        ) : (
-                          <UsersRound className="size-4" />
-                        )}
+                        <UsersRound className="size-4" />
                       </div>
                       <div>
                         <div className="text-sm font-medium">
-                          {isRoleChat
-                            ? t('mita-teams:roleChatTitle', {
-                                role: activeRoleName,
-                              })
-                            : t('mita-teams:emptyTitle')}
+                          {t('mita-teams:emptyTitle')}
                         </div>
                         <div className="text-xs text-muted-foreground">
-                          {isRoleChat
-                            ? activeRoleDescription
-                            : t('mita-teams:emptyDescription')}
+                          {t('mita-teams:emptyDescription')}
                         </div>
                       </div>
                     </div>
+
+                    <ol className="mb-4 grid gap-2">
+                      {[
+                        t('mita-teams:onboardingStep1'),
+                        t('mita-teams:onboardingStep2'),
+                        t('mita-teams:onboardingStep3'),
+                      ].map((step, index) => (
+                        <li key={step} className="flex items-start gap-2 text-sm">
+                          <span className="mt-0.5 flex size-5 shrink-0 items-center justify-center rounded-full bg-muted text-[11px] font-medium text-muted-foreground">
+                            {index + 1}
+                          </span>
+                          <span className="leading-5">{step}</span>
+                        </li>
+                      ))}
+                    </ol>
+
+                    {onUseExample && (
+                      <div className="grid gap-1.5">
+                        <div className="text-xs font-medium text-muted-foreground">
+                          {t('mita-teams:onboardingTryTitle')}
+                        </div>
+                        {[
+                          t('mita-teams:onboardingExample1'),
+                          t('mita-teams:onboardingExample2'),
+                          t('mita-teams:onboardingExample3'),
+                        ].map((example) => (
+                          <button
+                            key={example}
+                            type="button"
+                            onClick={() => onUseExample(example)}
+                            className="rounded-md border bg-muted/20 px-3 py-2 text-left text-sm transition-colors hover:bg-muted/50"
+                          >
+                            {example}
+                          </button>
+                        ))}
+                      </div>
+                    )}
                   </div>
                 )}
                 {isRoleChat ? (
