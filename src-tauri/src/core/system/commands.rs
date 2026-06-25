@@ -1,4 +1,6 @@
 use std::fs;
+#[cfg(any(windows, test))]
+use std::path::Path;
 use std::path::PathBuf;
 use tauri::{AppHandle, Manager, Runtime, State};
 use tauri_plugin_llamacpp::cleanup_llama_processes;
@@ -20,6 +22,8 @@ const LEGACY_SILENCE_LOCAL_API_MARKER: &str = "# Silence Local API Server - Clau
 const LEGACY_SILENCE_LOCAL_API_MARKER_PREFIX: &str = "# Silence Local API Server";
 const LEGACY_JAN_LOCAL_API_MARKER: &str = "# Jan Local API Server - Claude Code Config";
 const LEGACY_JAN_LOCAL_API_MARKER_PREFIX: &str = "# Jan Local API Server";
+#[cfg(any(windows, test))]
+const BIYAN_PROGRAM_DIR_NAME: &str = "Biyan";
 
 fn is_safe_to_delete(path: &std::path::Path) -> bool {
     let count = path.components().count();
@@ -723,11 +727,17 @@ fn mita_cli_install_dir() -> Result<PathBuf, String> {
 fn mita_cli_bin_dir_windows() -> Result<PathBuf, String> {
     let local_app_data =
         std::env::var("LOCALAPPDATA").map_err(|_| "Cannot determine LOCALAPPDATA".to_string())?;
-    Ok(PathBuf::from(local_app_data)
+    Ok(mita_cli_bin_dir_from_local_app_data(local_app_data))
+}
+
+#[cfg(any(windows, test))]
+fn mita_cli_bin_dir_from_local_app_data(local_app_data: impl AsRef<Path>) -> PathBuf {
+    local_app_data
+        .as_ref()
         .join("Programs")
-        .join("Mita")
+        .join(BIYAN_PROGRAM_DIR_NAME)
         .join("resources")
-        .join("bin"))
+        .join("bin")
 }
 
 /// Add a directory to the Windows user PATH.
@@ -1074,5 +1084,20 @@ mod tests {
         assert!(is_safe_to_delete(std::path::Path::new(
             "/home/user/.local/share/mita"
         )));
+    }
+
+    #[test]
+    fn test_windows_mita_cli_bin_dir_uses_biyan_install_dir() {
+        let local_app_data = PathBuf::from(r"C:\Users\Owner\AppData\Local");
+        let bin_dir = mita_cli_bin_dir_from_local_app_data(&local_app_data);
+
+        assert_eq!(
+            bin_dir,
+            local_app_data
+                .join("Programs")
+                .join("Biyan")
+                .join("resources")
+                .join("bin")
+        );
     }
 }
