@@ -4015,12 +4015,25 @@ export async function runMitaTeamsRuntime({
   // even on the very first run, before any run history exists. A bare
   // orchestrator-only group still gets the auto-assembled scenario team.
   const ownerDefinedTeam = hasOwnerSpecialistTeam(config)
-  const scenarioPlaybook =
+  const scenarioGate =
     workflowSpec?.explicit || preferTeamReuse || ownerDefinedTeam
-      ? undefined
-      : config.scenarioId === 'market_research'
-        ? MARKET_RESEARCH_PLAYBOOK
-        : detectScenarioPlaybook(userText)
+  // An accepted scenario (scenarioId already set by the owner saying "yes")
+  // applies immediately.
+  const acceptedPlaybook =
+    !scenarioGate && config.scenarioId === 'market_research'
+      ? MARKET_RESEARCH_PLAYBOOK
+      : undefined
+  // A scenario detected from the goal text — but not yet accepted — is only a
+  // candidate to *offer*, never to silently apply (consensual playbooks).
+  const detectedPlaybook =
+    !scenarioGate && !config.scenarioId
+      ? detectScenarioPlaybook(userText)
+      : undefined
+  const shouldOfferScenario =
+    !!detectedPlaybook && !config.runtime.scenarioOfferDismissed
+  // Only the accepted scenario applies here; a fresh detection is offered
+  // (handled below, after the run starts), a declined one is ignored.
+  const scenarioPlaybook = acceptedPlaybook
   const languageGuidance = buildLanguageGuidance(userText)
   let workingConfig = enforceTaskDeliveryChannel(
     applyScenarioPlaybook(
@@ -4055,6 +4068,53 @@ export async function runMitaTeamsRuntime({
       config: workingConfig,
       finalResponse: 'Biyan Teams 已暂停。你可以输入“继续”让主持人接着推进。',
       status: 'stopped',
+    }
+  }
+
+  // Consensual playbooks: a scenario team was auto-detected from the goal but
+  // not yet accepted — ask the owner before assembling it instead of silently
+  // injecting roles. Accepting sets scenarioId (the team applies on re-run);
+  // declining sets scenarioOfferDismissed (never re-prompts on this thread).
+  if (shouldOfferScenario) {
+    runtime = appendMitaTeamsEvent(
+      {
+        ...updateRun(runtime, { status: 'waiting-for-user' }),
+        phase: 'clarifying',
+        userChoiceRequest: {
+          id: stableId('choice'),
+          kind: 'scenario_offer',
+          question:
+            '这个问题看起来适合一支市场研究小队（数据侦察 · 市场分析 · 质疑审查）。要我组建这支团队来深入处理，还是保持简单、直接回答？',
+          options: [
+            {
+              id: 'use_scenario',
+              label: '组建市场研究团队',
+              description:
+                '由数据侦察、市场分析、质疑审查三个角色协作——更深入，但更慢、消耗更多。',
+            },
+            {
+              id: 'keep_simple',
+              label: '保持简单',
+              description: '直接回答，不组建额外团队。',
+            },
+          ],
+          status: 'pending',
+          createdAt: nowIso(),
+        },
+      },
+      {
+        type: 'choice_requested',
+        title: 'Biyan Teams offered a scenario team',
+        detail:
+          'Auto-detected a market-research scenario; awaiting owner consent.',
+        roleId: MITA_TEAMS_ORCHESTRATOR_ROLE_ID,
+      }
+    )
+    notify(runtime)
+    return {
+      config: workingConfig,
+      choiceRequestId: runtime.userChoiceRequest?.id,
+      status: 'waiting-for-user',
     }
   }
 
@@ -4476,13 +4536,17 @@ export async function runMitaTeamsRuntime({
 
     runtime = mergeProjectMemory(runtime, workingConfig.roles)
     const finalResponse = synthesizeFinalResponse(runtime, recentOutputs)
-    runtime = completeRun(runtime, 'completed', 'Round limit reached.')
+    // The loop exhausted its round/call budget without the Host converging on
+    // its own — this is a truncated run, not a finished one. Mark it 'stopped'
+    // so it doesn't read as "Done" and the owner gets the recovery card to
+    // continue for more rounds.
+    runtime = completeRun(runtime, 'stopped', 'Reached the round limit.')
     notify(runtime)
 
     return {
       config: workingConfig,
       finalResponse,
-      status: 'completed',
+      status: 'stopped',
     }
   } catch (error) {
     if (abortSignal?.aborted) {
