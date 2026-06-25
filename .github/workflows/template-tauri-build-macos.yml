@@ -256,11 +256,11 @@ jobs:
             MAC_UNIVERSAL_SIG=$(cat Mita-${{ inputs.channel }}.app.tar.gz.sig)
             TAR_NAME=Mita-${{ inputs.channel }}.app.tar.gz
           else
-            zip -r mita-mac-universal-${{ inputs.new_version }}.zip Mita.app
+            zip -r mita-mac-universal-${{ inputs.new_version }}.zip Biyan.app
             FILE_NAME=mita-mac-universal-${{ inputs.new_version }}.zip
-            MAC_UNIVERSAL_SIG=$(cat Mita.app.tar.gz.sig)
-            DMG_NAME=Mita_${{ inputs.new_version }}_universal.dmg
-            TAR_NAME=Mita.app.tar.gz
+            MAC_UNIVERSAL_SIG=$(cat Biyan.app.tar.gz.sig)
+            DMG_NAME=Biyan_${{ inputs.new_version }}_universal.dmg
+            TAR_NAME=Biyan.app.tar.gz
           fi
 
           echo "::set-output name=MAC_UNIVERSAL_SIG::$MAC_UNIVERSAL_SIG"

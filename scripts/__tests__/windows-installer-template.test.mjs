@@ -3,6 +3,10 @@ import fs from 'node:fs'
 import test from 'node:test'
 
 const template = fs.readFileSync('src-tauri/tauri.bundle.windows.nsis.template', 'utf8')
+const windowsBuildWorkflow = fs.readFileSync(
+  '.github/workflows/template-tauri-build-windows-x64.yml',
+  'utf8',
+)
 const makefile = fs.readFileSync('Makefile', 'utf8')
 const libSource = fs.readFileSync('src-tauri/src/lib.rs', 'utf8')
 
@@ -52,6 +56,14 @@ test('Windows NSIS installer detects legacy Mita installs without registry state
     detectLegacyInstallLocation,
     /FileExists.*\$LegacyInstallDir\\\$\{MAINBINARYNAME\}\.exe/s,
   )
+  assert.match(
+    detectLegacyInstallLocation,
+    /FileExists.*\$LegacyInstallDir\\\$\{LEGACY_PRODUCTNAME\}\.exe/s,
+  )
+  assert.match(
+    detectLegacyInstallLocation,
+    /FileExists.*\$LegacyInstallDir\\\$\{LEGACY_MAINBINARYNAME\}\.exe/s,
+  )
   assert.match(functionBody('RestorePreviousInstallLocation'), /StrCpy \$INSTDIR \$LegacyInstallDir/)
 })
 
@@ -72,6 +84,15 @@ test('Windows NSIS installer leaves legacy install directory deletion to runtime
   assert.doesNotMatch(cleanupLegacyMitaInstall, /\$LegacyInstallDir != "\$INSTDIR"/)
   assert.doesNotMatch(cleanupLegacyMitaInstall, /RMDir .*"\$LegacyInstallDir/)
   assert.doesNotMatch(cleanupLegacyMitaInstall, /Delete "\$LegacyInstallDir/)
+})
+
+test('Windows stable build template publishes Biyan installer artifacts', () => {
+  assert.match(windowsBuildWorkflow, /s\/mita_productname\/Biyan\/g/)
+  assert.match(windowsBuildWorkflow, /s\/mita_mainbinaryname\/Biyan\/g/)
+  assert.match(windowsBuildWorkflow, /FILE_NAME=Biyan_\$\{\{ inputs\.new_version \}\}_x64-setup\.exe/)
+  assert.match(windowsBuildWorkflow, /WIN_SIG=\$\(cat Biyan_\$\{\{ inputs\.new_version \}\}_x64-setup\.exe\.sig\)/)
+  assert.match(windowsBuildWorkflow, /MSI_FILE="Biyan_\$\{\{ inputs\.new_version \}\}_x64_en-US\.msi"/)
+  assert.doesNotMatch(windowsBuildWorkflow, /FILE_NAME=Mita_\$\{\{ inputs\.new_version \}\}_x64-setup\.exe/)
 })
 
 test('Windows NSIS installer template tests run from Makefile test target', () => {

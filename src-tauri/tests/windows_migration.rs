@@ -95,7 +95,7 @@ fn should_remove_legacy_install_dir_keeps_canonical_current_parent() {
 
 #[test]
 fn should_remove_legacy_install_dir_removes_separate_mita_install() {
-    let current_exe = PathBuf::from(r"C:\Users\Owner\AppData\Local\Programs\Biyan\mita.exe");
+    let current_exe = PathBuf::from(r"C:\Users\Owner\AppData\Local\Programs\Biyan\Biyan.exe");
     let legacy_dir = PathBuf::from(r"C:\Users\Owner\AppData\Local\Programs\Mita");
 
     assert!(should_remove_legacy_install_dir(&legacy_dir, &current_exe));
