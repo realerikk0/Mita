@@ -23,7 +23,7 @@ test('Windows NSIS installer keeps legacy Mita update migration hooks', () => {
     /!define LEGACY_UNINSTKEY "Software\\Microsoft\\Windows\\CurrentVersion\\Uninstall\\\$\{LEGACY_PRODUCTNAME\}"/,
   )
   assert.match(template, /!define LEGACY_MANUPRODUCTKEY "\$\{MANUKEY\}\\\$\{LEGACY_PRODUCTNAME\}"/)
-  assert.match(template, /ReadRegStr \$4 SHCTX "\$\{LEGACY_MANUPRODUCTKEY\}" ""/)
+  assert.match(template, /ReadRegStr \$LegacyInstallDir SHCTX "\$\{LEGACY_MANUPRODUCTKEY\}" ""/)
   assert.match(template, /ReadRegStr \$R1 SHCTX "\$PreviousUninstKey" "UninstallString"/)
   assert.match(template, /ReadRegStr \$R0 SHCTX "\$PreviousUninstKey" "DisplayVersion"/)
   assert.match(template, /DeleteRegKey HKCU "\$\{LEGACY_UNINSTKEY\}"/)
@@ -64,7 +64,26 @@ test('Windows NSIS installer detects legacy Mita installs without registry state
     detectLegacyInstallLocation,
     /FileExists.*\$LegacyInstallDir\\\$\{LEGACY_MAINBINARYNAME\}\.exe/s,
   )
-  assert.match(functionBody('RestorePreviousInstallLocation'), /StrCpy \$INSTDIR \$LegacyInstallDir/)
+  assert.doesNotMatch(functionBody('RestorePreviousInstallLocation'), /\$\{LEGACY_MANUPRODUCTKEY\}/)
+  assert.doesNotMatch(
+    functionBody('RestorePreviousInstallLocation'),
+    /StrCpy \$INSTDIR \$LegacyInstallDir/,
+  )
+})
+
+test('Windows NSIS installer migrates legacy Mita install directories to Biyan', () => {
+  const restorePreviousInstallLocation = functionBody('RestorePreviousInstallLocation')
+
+  assert.match(restorePreviousInstallLocation, /ReadRegStr \$4 SHCTX "\$\{MANUPRODUCTKEY\}" ""/)
+  assert.match(restorePreviousInstallLocation, /Call DetectLegacyInstallLocation/)
+  assert.match(restorePreviousInstallLocation, /\$\{StrCase\} \$R8 \$4 "L"/)
+  assert.match(restorePreviousInstallLocation, /\$\{StrCase\} \$R9 \$LegacyInstallDir "L"/)
+  assert.match(restorePreviousInstallLocation, /\$\{If\} \$R8 == \$R9[\s\S]*?Return/)
+  assert.match(restorePreviousInstallLocation, /StrCpy \$INSTDIR \$4/)
+
+  const compareIndex = restorePreviousInstallLocation.indexOf('${StrCase} $R8 $4 "L"')
+  const restoreIndex = restorePreviousInstallLocation.indexOf('StrCpy $INSTDIR $4')
+  assert.ok(compareIndex < restoreIndex, 'legacy path comparison should run before restoring $4')
 })
 
 test('Windows NSIS installer removes stale legacy Mita entry points', () => {
