@@ -1298,10 +1298,12 @@ function ChannelRoleStreams({
   roles,
   runtime,
   channelId,
+  silent,
 }: {
   roles: MitaTeamsRoleConfig[]
   runtime: MitaTeamsConfig['runtime']
   channelId: MitaTeamsChannelId
+  silent?: boolean
 }) {
   const { t } = useTranslation()
   const roleMentionTargets = useMemo(
@@ -1323,6 +1325,16 @@ function ChannelRoleStreams({
     .slice(-32)
 
   if (roleMessages.length === 0) return null
+
+  // Silent mode: keep internal collaboration quiet — surface only that the team
+  // is working (the timeline checkpoints and the final result render elsewhere).
+  if (silent) {
+    return (
+      <div className="mb-4 rounded-md border border-dashed bg-muted/20 px-3 py-2.5 text-xs text-muted-foreground">
+        {t('mita-teams:silentCollabNote')}
+      </div>
+    )
+  }
 
   return (
     <div className="mb-4 space-y-3">
@@ -2910,6 +2922,7 @@ export const MitaTeamsWorkspace = memo(function MitaTeamsWorkspace({
                         roles={channelEnabledRoles}
                         runtime={runtime}
                         channelId={activeChannel.id}
+                        silent={config.mode === 'silent'}
                       />
                     )}
                     {!showOrchestratorProgress && (
