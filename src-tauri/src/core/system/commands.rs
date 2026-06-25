@@ -1,7 +1,5 @@
 use std::fs;
-#[cfg(any(windows, test))]
-use std::path::Path;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use tauri::{AppHandle, Manager, Runtime, State};
 use tauri_plugin_llamacpp::cleanup_llama_processes;
 
@@ -226,52 +224,64 @@ pub fn relaunch<R: Runtime>(app: AppHandle<R>) {
 }
 
 #[tauri::command]
-pub fn open_app_directory<R: Runtime>(app: AppHandle<R>) {
-    let app_path = app.path().app_data_dir().unwrap();
-    if cfg!(target_os = "windows") {
-        std::process::Command::new("explorer")
-            .arg(app_path)
-            .status()
-            .expect("Failed to open app directory");
-    } else if cfg!(target_os = "macos") {
-        std::process::Command::new("open")
-            .arg(app_path)
-            .status()
-            .expect("Failed to open app directory");
-    } else {
-        std::process::Command::new("xdg-open")
-            .arg(app_path)
-            .status()
-            .expect("Failed to open app directory");
-    }
+pub fn open_app_directory<R: Runtime>(app: AppHandle<R>) -> Result<(), String> {
+    let app_path = app
+        .path()
+        .app_data_dir()
+        .map_err(|err| format!("Failed to resolve app directory: {err}"))?;
+    open_path_in_file_manager(&app_path)
 }
 
 #[tauri::command]
-pub fn open_file_explorer(path: String) {
+pub fn open_file_explorer(path: String) -> Result<(), String> {
     let path = PathBuf::from(path);
-    if cfg!(target_os = "windows") {
-        // Normalize extended-length paths (\\?\...) for explorer compatibility.
-        let mut path_str = path.to_string_lossy().into_owned();
-        if let Some(stripped) = path_str.strip_prefix(r"\\?\UNC\") {
-            path_str = format!(r"\\{}", stripped);
-        } else if let Some(stripped) = path_str.strip_prefix(r"\\?\") {
-            path_str = stripped.to_string();
-        }
-        std::process::Command::new("explorer")
-            .arg(path_str)
-            .status()
-            .expect("Failed to open file explorer");
-    } else if cfg!(target_os = "macos") {
-        std::process::Command::new("open")
-            .arg(path)
-            .status()
-            .expect("Failed to open file explorer");
-    } else {
-        std::process::Command::new("xdg-open")
-            .arg(path)
-            .status()
-            .expect("Failed to open file explorer");
+    open_path_in_file_manager(&path)
+}
+
+fn open_path_in_file_manager(path: &Path) -> Result<(), String> {
+    #[cfg(target_os = "windows")]
+    {
+        let path_str = normalize_windows_explorer_path(path);
+        let path_arg = std::ffi::OsString::from(path_str);
+        return spawn_file_manager("explorer", [path_arg], "open file explorer");
     }
+
+    #[cfg(target_os = "macos")]
+    {
+        return spawn_file_manager("open", [path.as_os_str()], "open file explorer");
+    }
+
+    #[cfg(all(not(target_os = "windows"), not(target_os = "macos")))]
+    {
+        spawn_file_manager("xdg-open", [path.as_os_str()], "open file explorer")
+    }
+}
+
+fn spawn_file_manager<I, A>(program: &str, args: I, action: &str) -> Result<(), String>
+where
+    I: IntoIterator<Item = A>,
+    A: AsRef<std::ffi::OsStr>,
+{
+    std::process::Command::new(program)
+        .args(args)
+        .spawn()
+        .map(|_| ())
+        .map_err(|err| {
+            log::warn!("Failed to {action}: {err}");
+            format!("Failed to {action}: {err}")
+        })
+}
+
+#[cfg(any(target_os = "windows", test))]
+fn normalize_windows_explorer_path(path: &Path) -> String {
+    // Normalize extended-length paths (\\?\...) for explorer compatibility.
+    let mut path_str = path.to_string_lossy().into_owned();
+    if let Some(stripped) = path_str.strip_prefix(r"\\?\UNC\") {
+        path_str = format!(r"\\{}", stripped);
+    } else if let Some(stripped) = path_str.strip_prefix(r"\\?\") {
+        path_str = stripped.to_string();
+    }
+    path_str
 }
 
 #[tauri::command]
@@ -1084,6 +1094,34 @@ mod tests {
         assert!(is_safe_to_delete(std::path::Path::new(
             "/home/user/.local/share/mita"
         )));
+    }
+
+    #[test]
+    fn test_normalize_windows_explorer_path_strips_extended_prefixes() {
+        assert_eq!(
+            normalize_windows_explorer_path(Path::new(r"\\?\C:\Users\Owner\Pictures\a.png")),
+            r"C:\Users\Owner\Pictures\a.png"
+        );
+        assert_eq!(
+            normalize_windows_explorer_path(Path::new(r"\\?\UNC\server\share\a.png")),
+            r"\\server\share\a.png"
+        );
+        assert_eq!(
+            normalize_windows_explorer_path(Path::new(r"C:\Users\Owner\Pictures\a.png")),
+            r"C:\Users\Owner\Pictures\a.png"
+        );
+    }
+
+    #[test]
+    fn test_spawn_file_manager_error_is_returned() {
+        let result = spawn_file_manager(
+            "__biyan_missing_file_manager_for_test__",
+            std::iter::empty::<&str>(),
+            "open file explorer",
+        );
+
+        assert!(result.is_err());
+        assert!(result.unwrap_err().contains("Failed to open file explorer"));
     }
 
     #[test]
