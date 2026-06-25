@@ -956,16 +956,20 @@ SectionEnd
 
 Function RestorePreviousInstallLocation
   ReadRegStr $4 SHCTX "${MANUPRODUCTKEY}" ""
-  ${If} $4 == ""
+  ${If} $4 != ""
     Call DetectLegacyInstallLocation
     ${If} $LegacyInstallDir != ""
-      StrCpy $INSTDIR $LegacyInstallDir
-      Return
+      ; Biyan 0.6.631 could write the Biyan registry key while still
+      ; installing into the legacy Mita directory. Do not preserve that
+      ; location; keep the default $INSTDIR, which points at Biyan.
+      ${StrCase} $R8 $4 "L"
+      ${StrCase} $R9 $LegacyInstallDir "L"
+      ${If} $R8 == $R9
+        Return
+      ${EndIf}
     ${EndIf}
-    ReadRegStr $4 SHCTX "${LEGACY_MANUPRODUCTKEY}" ""
-  ${EndIf}
-  StrCmp $4 "" +2 0
     StrCpy $INSTDIR $4
+  ${EndIf}
 FunctionEnd
 
 Function DetectLegacyInstallLocation
