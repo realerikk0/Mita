@@ -105,6 +105,10 @@ const h = vi.hoisted(() => {
     'mita-teams:onboardingStep1': 'Describe your goal',
     'mita-teams:onboardingExample1': 'Compare two options',
     'mita-teams:silentCollabNote': 'Collaboration is running quietly.',
+    'mita-teams:valueTitle': 'What the team did for you',
+    'mita-teams:valuePerspectives': 'Brought together {{count}} perspectives',
+    'mita-teams:valueChallenged': 'Stress-tested by a skeptic',
+    'mita-teams:valueCheckpoints': 'Logged {{count}} checkpoints',
     'mita-teams:permissions': 'Permissions',
     'mita-teams:permissionRead': 'Read',
     'mita-teams:permissionTools': 'Tools',
@@ -557,6 +561,112 @@ describe('MitaTeamsWorkspace', () => {
     expect(
       screen.getByText('Collaboration is running quietly.')
     ).toBeInTheDocument()
+  })
+
+  it('surfaces a value strip with what the team did after a completed run', () => {
+    const now = '2026-05-29T00:00:00.000Z'
+    const config = normalizeMitaTeamsConfig(
+      {
+        enabled: true,
+        activeChannel: 'task',
+        activeRoleId: 'orchestrator',
+        roles: [
+          {
+            id: 'analyst',
+            name: 'Analyst',
+            label: 'A',
+            description: 'd',
+            prompt: 'p',
+            color: 'bg-violet-600',
+            permission: 'tools',
+            enabled: true,
+          },
+          {
+            id: 'skeptic',
+            name: 'Skeptic Reviewer',
+            label: 'S',
+            description: 'd',
+            prompt: 'p',
+            color: 'bg-red-600',
+            permission: 'read',
+            enabled: true,
+          },
+        ],
+        runtime: {
+          version: 1,
+          run: {
+            id: 'run-x',
+            status: 'completed',
+            currentRound: 2,
+            maxRounds: 5,
+            callCount: 3,
+            activeRoleIds: [],
+            startedAt: now,
+            updatedAt: now,
+            completedAt: now,
+          },
+          milestones: [
+            {
+              id: 'm1',
+              title: 'Checkpoint',
+              createdAt: now,
+              sourceRoleId: 'orchestrator',
+            },
+          ],
+          roleStates: {
+            analyst: {
+              roleId: 'analyst',
+              status: 'done',
+              stream: [
+                {
+                  id: 'a1',
+                  turnId: 't1',
+                  roleId: 'analyst',
+                  channelId: 'task',
+                  role: 'assistant',
+                  content: 'Analysis result',
+                  createdAt: now,
+                },
+              ],
+            },
+            skeptic: {
+              roleId: 'skeptic',
+              status: 'done',
+              stream: [
+                {
+                  id: 's1',
+                  turnId: 't1',
+                  roleId: 'skeptic',
+                  channelId: 'task',
+                  role: 'assistant',
+                  content: 'Risk found',
+                  createdAt: now,
+                },
+              ],
+            },
+          },
+        },
+      },
+      { provider: 'openai', id: 'gpt-5' }
+    )!
+
+    renderWorkspace({
+      config,
+      messages: [
+        {
+          id: 'final-1',
+          role: 'assistant',
+          parts: [{ type: 'text', text: 'Final deliverable' }],
+        },
+      ] as ComponentProps<typeof MitaTeamsWorkspace>['messages'],
+    })
+
+    expect(screen.getByText('What the team did for you')).toBeInTheDocument()
+    expect(
+      screen.getByText('Brought together 2 perspectives')
+    ).toBeInTheDocument()
+    expect(screen.getByText('Stress-tested by a skeptic')).toBeInTheDocument()
+    expect(screen.getByText('Logged 1 checkpoints')).toBeInTheDocument()
   })
 
   it('allows choosing template and mode before the first team run starts', async () => {

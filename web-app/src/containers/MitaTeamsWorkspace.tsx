@@ -1069,6 +1069,73 @@ function isRoleFailureMessage(content: string) {
   )
 }
 
+// Roles whose contribution is "challenging" the result — surfaced as the
+// distinctive value of a team over a single model.
+const VALUE_CHALLENGER_PATTERN =
+  /skeptic|critic|red.?team|adversar|质疑|审查|反方|挑刺|风险/i
+
+function roleProducedRunOutput(
+  runtime: MitaTeamsConfig['runtime'],
+  roleId: MitaTeamsRoleId
+): boolean {
+  const stream = runtime.roleStates[roleId]?.stream ?? []
+  return stream.some(
+    (message) =>
+      message.role === 'assistant' &&
+      message.content.trim().length > 0 &&
+      !isRoleFailureMessage(message.content)
+  )
+}
+
+// A compact "what the team did for you" strip under a finished answer, so the
+// multi-agent value (perspectives, challenge, checkpoints) is visible rather
+// than hidden inside an anonymous final response.
+function TeamValueStrip({
+  config,
+  runtime,
+}: {
+  config: MitaTeamsConfig
+  runtime: MitaTeamsConfig['runtime']
+}) {
+  const { t } = useTranslation()
+  if (runtime.run?.status !== 'completed') return null
+  const specialists = config.roles.filter(
+    (role) =>
+      role.id !== MITA_TEAMS_ORCHESTRATOR_ROLE_ID &&
+      role.enabled &&
+      roleProducedRunOutput(runtime, role.id)
+  )
+  if (specialists.length === 0) return null
+  const challenged = specialists.some((role) =>
+    VALUE_CHALLENGER_PATTERN.test(`${role.id} ${role.name} ${role.label ?? ''}`)
+  )
+  const checkpoints = runtime.milestones?.length ?? 0
+  const items = [
+    t('mita-teams:valuePerspectives', { count: specialists.length }),
+    challenged ? t('mita-teams:valueChallenged') : null,
+    checkpoints > 0
+      ? t('mita-teams:valueCheckpoints', { count: checkpoints })
+      : null,
+  ].filter((item): item is string => Boolean(item))
+  return (
+    <div className="mb-4 rounded-md border border-emerald-500/20 bg-emerald-500/5 px-3 py-2.5">
+      <p className="mb-1.5 text-xs font-medium text-foreground/80">
+        {t('mita-teams:valueTitle')}
+      </p>
+      <div className="flex flex-wrap gap-1.5">
+        {items.map((item, index) => (
+          <span
+            key={index}
+            className="rounded-full bg-background/60 px-2 py-0.5 text-[11px] text-muted-foreground"
+          >
+            {item}
+          </span>
+        ))}
+      </div>
+    </div>
+  )
+}
+
 function CollapsibleMessageText({
   content,
   className,
@@ -2939,6 +3006,9 @@ export const MitaTeamsWorkspace = memo(function MitaTeamsWorkspace({
                         disabled={isRuntimeBusy}
                         onRetry={onRetry}
                       />
+                    )}
+                    {showThreadMessages && (
+                      <TeamValueStrip config={config} runtime={runtime} />
                     )}
                     <RuntimeTokenUsageSummary usage={runtime.run?.usage} />
                   </>
