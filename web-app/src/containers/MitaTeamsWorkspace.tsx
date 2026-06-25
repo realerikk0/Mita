@@ -32,6 +32,7 @@ import {
   DEFAULT_MITA_TEAMS_ROLES,
   MITA_TEAMS_CHANNELS,
   MITA_TEAMS_ORCHESTRATOR_ROLE_ID,
+  isMitaTeamsTeamLocked,
   MITA_TEAMS_TASK_CHANNEL_ID,
   MITA_TEAMS_MODES,
   MITA_TEAMS_ROLE_COLORS,
@@ -2480,10 +2481,13 @@ export const MitaTeamsWorkspace = memo(function MitaTeamsWorkspace({
   // the owner's roles and may not add specialists or auto-apply scenarios. This
   // toggle stays available even mid-run so the owner can clamp the team at any
   // time. Not gated by setupLocked on purpose.
-  const teamLocked = config.workflowControl === 'user_spec'
+  // Effective lock (includes the auto-lock of a configured roster). Turning the
+  // toggle off explicitly opens the team ('open') so the Host may add roles even
+  // with a roster present; turning it on is an explicit lock.
+  const teamLocked = isMitaTeamsTeamLocked(config)
   const setTeamLocked = useCallback(
     (locked: boolean) => {
-      patchConfig({ workflowControl: locked ? 'user_spec' : undefined })
+      patchConfig({ workflowControl: locked ? 'user_spec' : 'open' })
     },
     [patchConfig]
   )
