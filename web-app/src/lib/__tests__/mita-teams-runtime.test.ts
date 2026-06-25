@@ -1339,7 +1339,8 @@ describe('mita teams runtime', () => {
       generateRoleText: async () => 'unused',
     })
 
-    expect(result.status).toBe('completed')
+    // Hitting the round limit is a truncated run, not a clean completion.
+    expect(result.status).toBe('stopped')
     expect(decisionCalls).toBe(2)
     expect(result.config.runtime.run?.currentRound).toBe(2)
     expect(result.config.roles.some((role) => role.id === 'planner')).toBe(

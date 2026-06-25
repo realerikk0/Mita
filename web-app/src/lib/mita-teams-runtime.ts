@@ -4476,13 +4476,17 @@ export async function runMitaTeamsRuntime({
 
     runtime = mergeProjectMemory(runtime, workingConfig.roles)
     const finalResponse = synthesizeFinalResponse(runtime, recentOutputs)
-    runtime = completeRun(runtime, 'completed', 'Round limit reached.')
+    // The loop exhausted its round/call budget without the Host converging on
+    // its own — this is a truncated run, not a finished one. Mark it 'stopped'
+    // so it doesn't read as "Done" and the owner gets the recovery card to
+    // continue for more rounds.
+    runtime = completeRun(runtime, 'stopped', 'Reached the round limit.')
     notify(runtime)
 
     return {
       config: workingConfig,
       finalResponse,
-      status: 'completed',
+      status: 'stopped',
     }
   } catch (error) {
     if (abortSignal?.aborted) {
