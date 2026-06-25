@@ -52,6 +52,14 @@ test('Windows NSIS installer detects legacy Mita installs without registry state
     detectLegacyInstallLocation,
     /FileExists.*\$LegacyInstallDir\\\$\{MAINBINARYNAME\}\.exe/s,
   )
+  assert.match(
+    detectLegacyInstallLocation,
+    /FileExists.*\$LegacyInstallDir\\\$\{LEGACY_PRODUCTNAME\}\.exe/s,
+  )
+  assert.match(
+    detectLegacyInstallLocation,
+    /FileExists.*\$LegacyInstallDir\\\$\{LEGACY_MAINBINARYNAME\}\.exe/s,
+  )
   assert.match(functionBody('RestorePreviousInstallLocation'), /StrCpy \$INSTDIR \$LegacyInstallDir/)
 })
 

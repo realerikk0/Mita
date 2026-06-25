@@ -3,8 +3,8 @@
 version = 3
 
 [[package]]
-name = "Mita"
-version = "0.6.630"
+name = "Biyan"
+version = "0.6.631"
 dependencies = [
  "async-trait",
  "base64 0.22.1",

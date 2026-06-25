@@ -56,6 +56,7 @@ ${StrLoc}
 !define UNINSTKEY "Software\Microsoft\Windows\CurrentVersion\Uninstall\${PRODUCTNAME}"
 !define MANUPRODUCTKEY "${MANUKEY}\${PRODUCTNAME}"
 !define LEGACY_PRODUCTNAME "Mita"
+!define LEGACY_MAINBINARYNAME "mita"
 !define LEGACY_UNINSTKEY "Software\Microsoft\Windows\CurrentVersion\Uninstall\${LEGACY_PRODUCTNAME}"
 !define LEGACY_MANUPRODUCTKEY "${MANUKEY}\${LEGACY_PRODUCTNAME}"
 !define UNINSTALLERSIGNCOMMAND "$\"powershell$\" $\"-ExecutionPolicy$\" $\"Bypass$\" $\"-File$\" $\"./sign.ps1$\" $\"%1$\""
@@ -979,6 +980,8 @@ Function DetectLegacyInstallLocation
   ${EndIf}
 
   ${If} ${FileExists} "$LegacyInstallDir\${MAINBINARYNAME}.exe"
+  ${OrIf} ${FileExists} "$LegacyInstallDir\${LEGACY_PRODUCTNAME}.exe"
+  ${OrIf} ${FileExists} "$LegacyInstallDir\${LEGACY_MAINBINARYNAME}.exe"
   ${OrIf} ${FileExists} "$LegacyInstallDir\uninstall.exe"
   ${Else}
     StrCpy $LegacyInstallDir ""

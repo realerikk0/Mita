@@ -194,7 +194,7 @@ function stampWindowsBuildFiles(version) {
     const next = fs
       .readFileSync(templatePath, 'utf8')
       .replaceAll('mita_productname', 'Biyan')
-      .replaceAll('mita_mainbinaryname', 'mita')
+      .replaceAll('mita_mainbinaryname', 'Biyan')
       .replaceAll('mita_version', fileVersion)
       .replaceAll('mita_build', productVersion)
       .replace(/^!define UNINSTALLERSIGNCOMMAND .*$/m, '!define UNINSTALLERSIGNCOMMAND ""')
