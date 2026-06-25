@@ -400,6 +400,7 @@
   "apiKeyRequired": "API Key is required",
   "enterTrustedHosts": "Enter trusted hosts",
   "placeholder": {
+    "mitaTeamsChatInput": "Describe a goal for your team to take on…",
     "chatInput": "Ask me anything..."
   },
   "confirm": "Confirm",

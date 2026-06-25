@@ -7,7 +7,7 @@
   "goal": "目標",
   "plan": "計劃",
   "decisions": "決策",
-  "artifacts": "產物",
+  "artifacts": "成果",
   "budget": "預算",
   "permissions": "權限",
   "model": "模型",
@@ -52,7 +52,7 @@
   "currentTask": "目前任務",
   "research": "調研",
   "discussion": "討論",
-  "buildLog": "建置記錄",
+  "buildLog": "工作記錄",
   "review": "審查",
   "finalDelivery": "最終交付",
   "emptyTitle": "從一個具體目標開始",
@@ -98,7 +98,7 @@
   "teamControlLockedHint": "主持人只會執行你設定的角色，不會新增專家或自動套用場景。點擊可允許主持人加入專家。",
   "teamControlAutoHint": "主持人可以加入專家角色和場景團隊。點擊可鎖定為僅用你的角色。",
   "rightPanelHidden": "目前寬度下已隱藏狀態面板",
-  "artifactsEmpty": "暫無產物",
+  "artifactsEmpty": "暫無成果",
   "decisionsEmpty": "暫無決策",
   "budgetText": "MVP 保護：自動追問最多 {{count}} 輪。",
   "permissionRead": "讀取",
@@ -111,7 +111,7 @@
   "taskStatusDone": "已完成",
   "artifactTypeDecision": "決策",
   "artifactTypeRisk": "風險",
-  "artifactTypeArtifact": "產物",
+  "artifactTypeArtifact": "產出",
   "artifactTypeTestResult": "測試",
   "artifactTypeFinalDraft": "草稿",
   "roundsUsed": "輪次",
@@ -156,7 +156,7 @@
       "description": "比較方案、解決分歧，並讓團隊對齊。"
     },
     "build": {
-      "label": "建置記錄",
+      "label": "工作記錄",
       "description": "記錄具體改動、實作備註和驗證輸出。"
     },
     "review": {
@@ -165,7 +165,7 @@
     },
     "final": {
       "label": "最終交付",
-      "description": "整理面向使用者的回答、產物和後續行動。"
+      "description": "整理面向使用者的回答、成果和後續行動。"
     }
   },
   "modesById": {

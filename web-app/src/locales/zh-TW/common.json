@@ -230,6 +230,7 @@
   "apiKeyRequired": "需要 API 金鑰",
   "enterTrustedHosts": "輸入受信任的主機",
   "placeholder": {
+    "mitaTeamsChatInput": "描述一個目標，交給你的團隊來完成…",
     "chatInput": "問我任何事..."
   },
   "confirm": "確認",
