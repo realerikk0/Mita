@@ -2,7 +2,7 @@ id: uk.jingxing.Mita
 runtime: org.gnome.Platform
 runtime-version: '49'
 sdk: org.gnome.Sdk
-command: Mita
+command: Biyan
 finish-args:
   - --socket=wayland # Permission needed to show the window
   - --socket=fallback-x11 # Permission needed to show the window on X11
@@ -84,7 +84,7 @@ modules:
       - type: patch
         path: patches/fix-cstdint.patch
 
-  - name: mita-binary
+  - name: biyan-binary
     buildsystem: simple
     sources:
       - type: file
@@ -96,14 +96,14 @@ modules:
     build-commands:
       - ar -x *.deb
       - tar -xf data.tar.gz
-      - 'install -Dm755 usr/bin/Mita /app/bin/Mita'
+      - 'install -Dm755 usr/bin/Biyan /app/bin/Biyan'
       - 'install -Dm755 usr/bin/bun /app/bin/bun'
       - 'install -Dm755 usr/bin/uv /app/bin/uv'
       - cp -rv usr/lib/* /app/lib/.
-      - install -Dm644 usr/share/applications/Mita.desktop /app/share/applications/uk.jingxing.Mita.desktop
-      - desktop-file-edit --set-key=Exec --set-value=/app/bin/Mita --set-icon=uk.jingxing.Mita /app/share/applications/uk.jingxing.Mita.desktop
-      - install -Dm644 usr/share/icons/hicolor/128x128/apps/Mita.png /app/share/icons/hicolor/128x128/apps/uk.jingxing.Mita.png
-      - install -Dm644 usr/share/icons/hicolor/32x32/apps/Mita.png /app/share/icons/hicolor/32x32/apps/uk.jingxing.Mita.png
-      - install -Dm644 usr/share/icons/hicolor/256x256@2/apps/Mita.png /app/share/icons/hicolor/256x256@2/apps/uk.jingxing.Mita.png
+      - install -Dm644 usr/share/applications/Biyan.desktop /app/share/applications/uk.jingxing.Mita.desktop
+      - desktop-file-edit --set-key=Exec --set-value=/app/bin/Biyan --set-icon=uk.jingxing.Mita /app/share/applications/uk.jingxing.Mita.desktop
+      - install -Dm644 usr/share/icons/hicolor/128x128/apps/Biyan.png /app/share/icons/hicolor/128x128/apps/uk.jingxing.Mita.png
+      - install -Dm644 usr/share/icons/hicolor/32x32/apps/Biyan.png /app/share/icons/hicolor/32x32/apps/uk.jingxing.Mita.png
+      - install -Dm644 usr/share/icons/hicolor/256x256@2/apps/Biyan.png /app/share/icons/hicolor/256x256@2/apps/uk.jingxing.Mita.png
       - install -Dm644 uk.jingxing.Mita.metainfo.xml /app/share/metainfo/uk.jingxing.Mita.metainfo.xml
       - mkdir -p /app/lib/GL

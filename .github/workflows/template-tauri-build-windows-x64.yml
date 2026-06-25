@@ -195,8 +195,7 @@ jobs:
             cat ./src-tauri/tauri.conf.json
 
             # Update Cargo.toml
-            ctoml ./src-tauri/Cargo.toml package.name "Mita-${{ inputs.channel }}"
-            ctoml ./src-tauri/Cargo.toml package.default-run "Mita-${{ inputs.channel }}"
+            node .github/scripts/rename-cargo-channel-app.mjs ./src-tauri/Cargo.toml "${{ inputs.channel }}"
             ctoml ./src-tauri/Cargo.toml dependencies.tauri.features[] "devtools"
             echo "------------------"
             cat ./src-tauri/Cargo.toml

@@ -128,6 +128,7 @@ ifeq ($(DETECTED_OS),Windows)
 endif
 	yarn test
 	node --test ./scripts/__tests__/windows-installer-template.test.mjs
+	node --test ./scripts/__tests__/rename-cargo-channel-app.test.mjs
 	yarn copy:assets:tauri
 	yarn build:icon
 	yarn build:mlx-server
