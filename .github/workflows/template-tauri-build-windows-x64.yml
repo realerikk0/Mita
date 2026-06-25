@@ -277,11 +277,11 @@ jobs:
             MSI_FILE="Mita-${{ inputs.channel }}_${{ inputs.new_version }}_x64_en-US.msi"
             # PORTABLE_FILE_NAME="Mita-${{ inputs.channel }}_${{ inputs.new_version }}_x64-portable.exe"
           else
-            FILE_NAME=Mita_${{ inputs.new_version }}_x64-setup.exe
-            WIN_SIG=$(cat Mita_${{ inputs.new_version }}_x64-setup.exe.sig)
+            FILE_NAME=Biyan_${{ inputs.new_version }}_x64-setup.exe
+            WIN_SIG=$(cat Biyan_${{ inputs.new_version }}_x64-setup.exe.sig)
 
-            MSI_FILE="Mita_${{ inputs.new_version }}_x64_en-US.msi"
-            # PORTABLE_FILE_NAME="Mita_${{ inputs.new_version }}_x64-portable.exe"
+            MSI_FILE="Biyan_${{ inputs.new_version }}_x64_en-US.msi"
+            # PORTABLE_FILE_NAME="Biyan_${{ inputs.new_version }}_x64-portable.exe"
           fi
 
           echo "::set-output name=WIN_SIG::$WIN_SIG"
