@@ -109,6 +109,8 @@ const h = vi.hoisted(() => {
     'mita-teams:valuePerspectives': 'Brought together {{count}} perspectives',
     'mita-teams:valueChallenged': 'Stress-tested by a skeptic',
     'mita-teams:valueCheckpoints': 'Logged {{count}} checkpoints',
+    'mita-teams:eventTitle.role_completed': '{{role}} finished',
+    'mita-teams:eventTitle.run_completed': 'Run completed',
     'mita-teams:permissions': 'Permissions',
     'mita-teams:permissionRead': 'Read',
     'mita-teams:permissionTools': 'Tools',
@@ -667,6 +669,77 @@ describe('MitaTeamsWorkspace', () => {
     ).toBeInTheDocument()
     expect(screen.getByText('Stress-tested by a skeptic')).toBeInTheDocument()
     expect(screen.getByText('Logged 1 checkpoints')).toBeInTheDocument()
+  })
+
+  it('localizes team-timeline event titles by type', () => {
+    const now = '2026-06-08T00:00:00.000Z'
+    const config = normalizeMitaTeamsConfig(
+      {
+        enabled: true,
+        activeChannel: 'discussion',
+        activeRoleId: 'orchestrator',
+        roles: [
+          {
+            id: 'analyst',
+            name: 'Analyst',
+            label: 'A',
+            description: 'd',
+            prompt: 'p',
+            color: 'bg-violet-600',
+            permission: 'tools',
+            enabled: true,
+          },
+        ],
+        channels: [
+          {
+            id: 'task',
+            label: 'Task',
+            description: '',
+            roleIds: ['orchestrator'],
+          },
+          {
+            id: 'discussion',
+            label: 'Discussion',
+            description: '',
+            roleIds: ['orchestrator', 'analyst'],
+          },
+        ],
+        runtime: {
+          version: 1,
+          teamEvents: [
+            {
+              id: 'e1',
+              type: 'role_completed',
+              title: 'RAW_ENGLISH_TITLE_A',
+              roleId: 'analyst',
+              channelId: 'discussion',
+              createdAt: now,
+            },
+            {
+              id: 'e2',
+              type: 'run_completed',
+              title: 'RAW_ENGLISH_TITLE_B',
+              channelId: 'discussion',
+              createdAt: now,
+            },
+          ],
+        },
+      },
+      { provider: 'openai', id: 'gpt-5' }
+    )!
+
+    renderWorkspace({ config })
+
+    // Localized by type (role name interpolated), not the stored English title.
+    const timeline = screen.getByText('Team timeline').closest('.rounded-lg')
+    expect(timeline).toBeTruthy()
+    expect(
+      within(timeline as HTMLElement).getByText('Analyst finished')
+    ).toBeInTheDocument()
+    expect(
+      within(timeline as HTMLElement).getByText('Run completed')
+    ).toBeInTheDocument()
+    expect(screen.queryByText('RAW_ENGLISH_TITLE_A')).not.toBeInTheDocument()
   })
 
   it('allows choosing template and mode before the first team run starts', async () => {
@@ -1301,7 +1374,7 @@ describe('MitaTeamsWorkspace', () => {
         teamEvents: [
           {
             id: 'late',
-            type: 'role_completed',
+            type: 'milestone',
             title: 'Late event',
             channelId: 'research',
             createdAt: '2026-05-29T00:02:00.000Z',

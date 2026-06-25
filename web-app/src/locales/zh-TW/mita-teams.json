@@ -248,5 +248,25 @@
   "orchestratorProgressTitle": "主持人進度",
   "orchestratorProgressUnderstanding": "正在拆解需求",
   "orchestratorProgressPlanning": "正在準備下一步",
-  "orchestratorProgressFinalizing": "正在整理計劃"
+  "orchestratorProgressFinalizing": "正在整理計劃",
+  "eventTitle": {
+    "run_started": "執行開始",
+    "decision": "{{role}} 決定下一步",
+    "team_configured": "已組建團隊",
+    "role_called": "{{role}} 開始工作",
+    "role_completed": "{{role}} 完成",
+    "memory_merged": "更新了團隊記憶",
+    "milestone": "達成里程碑",
+    "choice_requested": "請求你的確認",
+    "choice_answered": "你已回應",
+    "plan_proposed": "提出了計劃",
+    "plan_approved": "計劃已批准",
+    "plan_revision_requested": "請求修訂計劃",
+    "role_edit_confirmation_requested": "確認角色改動",
+    "tasks_updated": "更新了任務",
+    "artifact_recorded": "記錄了成果",
+    "json_repair_requested": "重新整理決策格式",
+    "run_completed": "執行完成",
+    "run_failed": "執行出錯"
+  }
 }

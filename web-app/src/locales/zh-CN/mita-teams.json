@@ -248,5 +248,25 @@
     "architect": "建议角色",
     "builder": "创建频道",
     "reviewer": "收敛回答"
+  },
+  "eventTitle": {
+    "run_started": "运行开始",
+    "decision": "{{role}} 决定下一步",
+    "team_configured": "已组建团队",
+    "role_called": "{{role}} 开始工作",
+    "role_completed": "{{role}} 完成",
+    "memory_merged": "更新了团队记忆",
+    "milestone": "达成里程碑",
+    "choice_requested": "请求你的确认",
+    "choice_answered": "你已回应",
+    "plan_proposed": "提出了计划",
+    "plan_approved": "计划已批准",
+    "plan_revision_requested": "请求修订计划",
+    "role_edit_confirmation_requested": "确认角色改动",
+    "tasks_updated": "更新了任务",
+    "artifact_recorded": "记录了成果",
+    "json_repair_requested": "重新整理决策格式",
+    "run_completed": "运行完成",
+    "run_failed": "运行出错"
   }
 }

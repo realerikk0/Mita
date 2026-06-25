@@ -248,5 +248,25 @@
     "architect": "Suggest roles",
     "builder": "Create channels",
     "reviewer": "Converge answer"
+  },
+  "eventTitle": {
+    "run_started": "Run started",
+    "decision": "{{role}} decided the next step",
+    "team_configured": "Team set up",
+    "role_called": "{{role}} started working",
+    "role_completed": "{{role}} finished",
+    "memory_merged": "Team memory updated",
+    "milestone": "Milestone reached",
+    "choice_requested": "Asked for your input",
+    "choice_answered": "You responded",
+    "plan_proposed": "Plan proposed",
+    "plan_approved": "Plan approved",
+    "plan_revision_requested": "Plan revision requested",
+    "role_edit_confirmation_requested": "Confirm role changes",
+    "tasks_updated": "Tasks updated",
+    "artifact_recorded": "Deliverable recorded",
+    "json_repair_requested": "Reformatting the decision",
+    "run_completed": "Run completed",
+    "run_failed": "Run hit an error"
   }
 }

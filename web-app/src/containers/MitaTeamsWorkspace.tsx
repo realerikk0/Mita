@@ -546,13 +546,35 @@ function MemoryList({
   )
 }
 
+// The timeline event titles are stored in English at the data layer. Localize
+// them by their stable `type` (interpolating the role name where relevant), and
+// fall back to the stored title for any unmapped type.
+function describeEventTitle(
+  event: MitaTeamsTeamEvent,
+  roles: MitaTeamsRoleConfig[],
+  t: Translate
+): string {
+  const role = event.roleId
+    ? roles.find((item) => item.id === event.roleId)
+    : undefined
+  const roleName = role ? localizedRoleName(role, t) : ''
+  const key = `mita-teams:eventTitle.${event.type}`
+  const localized = t(key, { role: roleName })
+  return localized === key ? event.title : localized
+}
+
 // Condensed one-line event for the sidebar lists: humanized title plus a short
 // snippet of the "why" (event.detail), which these lists otherwise drop.
-function eventSummaryLine(event: MitaTeamsTeamEvent) {
-  if (!event.detail) return event.title
+function eventSummaryLine(
+  event: MitaTeamsTeamEvent,
+  roles: MitaTeamsRoleConfig[],
+  t: Translate
+) {
+  const title = describeEventTitle(event, roles, t)
+  if (!event.detail) return title
   const detail =
     event.detail.length > 80 ? `${event.detail.slice(0, 79)}…` : event.detail
-  return `${event.title} · ${detail}`
+  return `${title} · ${detail}`
 }
 
 const TASK_STATUS_ORDER: MitaTeamsTaskStatus[] = [
@@ -1298,7 +1320,13 @@ function RoleStreamPanel({
   )
 }
 
-function TeamTimeline({ events }: { events: MitaTeamsTeamEvent[] }) {
+function TeamTimeline({
+  events,
+  roles,
+}: {
+  events: MitaTeamsTeamEvent[]
+  roles: MitaTeamsRoleConfig[]
+}) {
   const { t } = useTranslation()
   const [expanded, setExpanded] = useState(false)
   const visibleEvents = [...events]
@@ -1343,7 +1371,9 @@ function TeamTimeline({ events }: { events: MitaTeamsTeamEvent[] }) {
             <span className="mt-2 size-1.5 shrink-0 rounded-full bg-primary" />
             <div className="min-w-0 flex-1">
               <div className="flex items-center justify-between gap-2">
-                <span className="truncate font-medium">{event.title}</span>
+                <span className="truncate font-medium">
+                  {describeEventTitle(event, roles, t)}
+                </span>
                 <span className="shrink-0 text-[11px] text-muted-foreground">
                   {displayTime(event.createdAt)}
                 </span>
@@ -1802,7 +1832,9 @@ function WorkspaceInspectorContent({
           {t('mita-teams:events')}
         </div>
         <MemoryList
-          items={runtime.teamEvents.slice(-5).map(eventSummaryLine)}
+          items={runtime.teamEvents
+            .slice(-5)
+            .map((event) => eventSummaryLine(event, config.roles, t))}
           emptyText={t('mita-teams:teamEventsEmpty')}
         />
       </section>
@@ -2962,7 +2994,7 @@ export const MitaTeamsWorkspace = memo(function MitaTeamsWorkspace({
                 ) : (
                   <>
                     {showChannelDiscussion && (
-                      <TeamTimeline events={channelEvents} />
+                      <TeamTimeline events={channelEvents} roles={config.roles} />
                     )}
                     {showThreadMessages && messageItems}
                     {showOrchestratorProgress && (
@@ -3253,7 +3285,9 @@ export const MitaTeamsWorkspace = memo(function MitaTeamsWorkspace({
             {t('mita-teams:events')}
           </div>
           <MemoryList
-            items={runtime.teamEvents.slice(-5).map(eventSummaryLine)}
+            items={runtime.teamEvents
+            .slice(-5)
+            .map((event) => eventSummaryLine(event, config.roles, t))}
             emptyText={t('mita-teams:teamEventsEmpty')}
           />
         </section>
