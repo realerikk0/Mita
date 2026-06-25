@@ -140,6 +140,27 @@
   }
   body {
     @apply bg-background text-foreground font-sans text-sm antialiased overflow-hidden;
+    cursor: default;
+    user-select: none;
+    -webkit-user-select: none;
+  }
+
+  input,
+  textarea,
+  [contenteditable="true"],
+  [contenteditable="plaintext-only"],
+  .select-text,
+  .select-text *,
+  .markdown,
+  .markdown *,
+  .thinking-markdown,
+  .thinking-markdown *,
+  [data-streamdown],
+  [data-streamdown] *,
+  code,
+  pre {
+    user-select: text;
+    -webkit-user-select: text;
   }
 
   ::-ms-reveal {
