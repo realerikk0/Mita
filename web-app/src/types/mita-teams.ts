@@ -406,7 +406,11 @@ export type MitaTeamsRoleConfig = {
   enabled: boolean
 }
 
-export type MitaTeamsWorkflowControl = 'user_spec'
+// 'user_spec' = owner explicitly locked the roster; 'open' = owner explicitly
+// let the Host add/change roles; undefined = auto (locked iff the owner has
+// configured a specialist roster — a bare orchestrator-only group stays open so
+// the Host can still build a team).
+export type MitaTeamsWorkflowControl = 'user_spec' | 'open'
 
 export type MitaTeamsConfig = {
   enabled: boolean
@@ -1444,6 +1448,23 @@ export function createDefaultMitaTeamsConfig(
   }
 }
 
+// The owner has configured a real roster once any non-orchestrator role is
+// enabled (a fresh group is orchestrator-only).
+export function mitaTeamsHasSpecialistRoster(config: MitaTeamsConfig): boolean {
+  return config.roles.some(
+    (role) => role.enabled && role.id !== MITA_TEAMS_ORCHESTRATOR_ROLE_ID
+  )
+}
+
+// Whether the Host is bound to the current roster (cannot add/swap roles).
+// Explicit owner choices win; otherwise a configured roster auto-locks while a
+// bare orchestrator-only group stays open so the Host can still build a team.
+export function isMitaTeamsTeamLocked(config: MitaTeamsConfig): boolean {
+  if (config.workflowControl === 'user_spec') return true
+  if (config.workflowControl === 'open') return false
+  return mitaTeamsHasSpecialistRoster(config)
+}
+
 export function normalizeMitaTeamsConfig(
   value: unknown,
   model?: ThreadModel
@@ -1603,7 +1624,12 @@ export function normalizeMitaTeamsConfig(
     ...raw,
     enabled: true,
     scenarioId: raw.scenarioId === 'market_research' ? raw.scenarioId : undefined,
-    workflowControl: raw.workflowControl === 'user_spec' ? 'user_spec' : undefined,
+    workflowControl:
+      raw.workflowControl === 'user_spec'
+        ? 'user_spec'
+        : raw.workflowControl === 'open'
+          ? 'open'
+          : undefined,
     mode: isMitaTeamsMode(raw.mode) ? raw.mode : fallback.mode,
     taskTemplateId,
     activeChannel,
@@ -1793,7 +1819,7 @@ function materializeApprovedPlanRoles(
 ) {
   const assignmentsByRoleId = new Map<MitaTeamsRoleId, MitaTeamsPlanRoleAssignment>()
   const existingRoleIds = new Set(config.roles.map((role) => role.id))
-  const allowNewPlanRoles = config.workflowControl !== 'user_spec'
+  const allowNewPlanRoles = !isMitaTeamsTeamLocked(config)
 
   for (const assignment of plan.roleAssignments) {
     const roleId = normalizeMitaTeamsId(assignment.roleId, '')

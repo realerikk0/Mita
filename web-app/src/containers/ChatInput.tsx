@@ -156,6 +156,9 @@ const ChatInput = memo(function ChatInput({
   const addToHistory = usePrompt((state) => state.addToHistory)
   const navigateHistory = usePrompt((state) => state.navigateHistory)
   const currentThread = useThreads((state) => state.getCurrentThread())
+  const isMitaTeamsThread =
+    (currentThread?.metadata?.mitaTeams as { enabled?: boolean } | undefined)
+      ?.enabled === true
   const updateCurrentThreadAssistant = useThreads(
     (state) => state.updateCurrentThreadAssistant
   )
@@ -1711,7 +1714,11 @@ const ChatInput = memo(function ChatInput({
                 }
               }}
               onPaste={handlePaste}
-              placeholder={t('common:placeholder.chatInput')}
+              placeholder={
+                isMitaTeamsThread
+                  ? t('common:placeholder.mitaTeamsChatInput')
+                  : t('common:placeholder.chatInput')
+              }
               autoFocus
               spellCheck={spellCheckChatInput}
               data-gramm={spellCheckChatInput}

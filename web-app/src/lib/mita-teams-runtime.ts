@@ -37,6 +37,7 @@ import {
 } from '@/lib/mita-teams-memory'
 import {
   MITA_TEAMS_ORCHESTRATOR_ROLE_ID,
+  isMitaTeamsTeamLocked,
   MITA_TEAMS_TASK_CHANNEL_ID,
   MITA_TEAMS_CHANNELS,
   MITA_TEAMS_MODES,
@@ -4000,10 +4001,12 @@ export async function runMitaTeamsRuntime({
   const detectedWorkflowSpec = detectUserWorkflowSpec(userText)
   // Owner stated, in plain language, that the team is fixed — bind that intent.
   const ownerLocksTeam = detectClosedRoleSetIntent(userText)
+  // The Host is bound to the roster for any lock — an explicit one (prose, a
+  // detected spec, the toggle) or the auto-lock of a configured roster. This
+  // reuses the existing "locked" path (empty spec + explicit: true).
+  const teamLocked = isMitaTeamsTeamLocked(config)
   const workflowSpec =
-    detectedWorkflowSpec.explicit ||
-    config.workflowControl === 'user_spec' ||
-    ownerLocksTeam
+    detectedWorkflowSpec.explicit || teamLocked || ownerLocksTeam
       ? {
           ...detectedWorkflowSpec,
           explicit: true,
@@ -4042,7 +4045,14 @@ export async function runMitaTeamsRuntime({
       initialModelOptions
     )
   )
-  if (workflowSpec?.explicit || ownerLocksTeam) {
+  // Persist an *explicit* lock only (prose intent, a detected spec, or an
+  // existing user_spec). An auto-locked roster stays in the 'auto' state
+  // (undefined) so that emptying the roster later re-opens it for the Host.
+  if (
+    detectedWorkflowSpec.explicit ||
+    ownerLocksTeam ||
+    config.workflowControl === 'user_spec'
+  ) {
     workingConfig = {
       ...workingConfig,
       workflowControl: 'user_spec',

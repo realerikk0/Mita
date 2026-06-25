@@ -7,7 +7,7 @@
   "goal": "Goal",
   "plan": "Plan",
   "decisions": "Decisions",
-  "artifacts": "Artifacts",
+  "artifacts": "Deliverables",
   "budget": "Budget",
   "permissions": "Permissions",
   "model": "Model",
@@ -69,7 +69,7 @@
   "currentTask": "Current task",
   "research": "Research",
   "discussion": "Discussion",
-  "buildLog": "Build log",
+  "buildLog": "Work log",
   "review": "Review",
   "finalDelivery": "Final delivery",
   "emptyTitle": "Start with one concrete goal",
@@ -119,7 +119,7 @@
   "teamControlLockedHint": "The Host runs exactly your roles and will not add specialists or auto-apply scenarios. Click to let the Host add specialists.",
   "teamControlAutoHint": "The Host may add specialist roles and scenario teams. Click to lock the team to your roles only.",
   "rightPanelHidden": "Status panel hidden on this width",
-  "artifactsEmpty": "No artifacts yet",
+  "artifactsEmpty": "No deliverables yet",
   "decisionsEmpty": "No decisions yet",
   "budgetText": "MVP guard: {{count}} automatic follow-up rounds max.",
   "permissionRead": "Read",
@@ -132,7 +132,7 @@
   "taskStatusDone": "Done",
   "artifactTypeDecision": "Decision",
   "artifactTypeRisk": "Risk",
-  "artifactTypeArtifact": "Artifact",
+  "artifactTypeArtifact": "Output",
   "artifactTypeTestResult": "Test",
   "artifactTypeFinalDraft": "Draft",
   "roundsUsed": "Rounds",
@@ -177,7 +177,7 @@
       "description": "Compare options, resolve disagreements, and align the team."
     },
     "build": {
-      "label": "Build log",
+      "label": "Work log",
       "description": "Track concrete edits, implementation notes, and verification output."
     },
     "review": {
@@ -186,7 +186,7 @@
     },
     "final": {
       "label": "Final delivery",
-      "description": "Assemble the user-facing answer, artifacts, and next actions."
+      "description": "Assemble the user-facing answer, deliverables, and next actions."
     }
   },
   "modesById": {
@@ -248,5 +248,25 @@
     "architect": "Suggest roles",
     "builder": "Create channels",
     "reviewer": "Converge answer"
+  },
+  "eventTitle": {
+    "run_started": "Run started",
+    "decision": "{{role}} decided the next step",
+    "team_configured": "Team set up",
+    "role_called": "{{role}} started working",
+    "role_completed": "{{role}} finished",
+    "memory_merged": "Team memory updated",
+    "milestone": "Milestone reached",
+    "choice_requested": "Asked for your input",
+    "choice_answered": "You responded",
+    "plan_proposed": "Plan proposed",
+    "plan_approved": "Plan approved",
+    "plan_revision_requested": "Plan revision requested",
+    "role_edit_confirmation_requested": "Confirm role changes",
+    "tasks_updated": "Tasks updated",
+    "artifact_recorded": "Deliverable recorded",
+    "json_repair_requested": "Reformatting the decision",
+    "run_completed": "Run completed",
+    "run_failed": "Run hit an error"
   }
 }

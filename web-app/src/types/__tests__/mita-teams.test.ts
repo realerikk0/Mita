@@ -5,6 +5,7 @@ import {
   archiveMitaTeamsRole,
   createDefaultMitaTeamsConfig,
   DEFAULT_MITA_TEAMS_ROLES,
+  isMitaTeamsTeamLocked,
   normalizeMitaTeamsConfig,
   renderMitaTeamsSystemInstructions,
 } from '../mita-teams'
@@ -561,5 +562,39 @@ describe('mita teams metadata', () => {
 
     expect(instructions).toContain('Direct role chat')
     expect(instructions).toContain('Answer as Reviewer')
+  })
+
+  it('auto-locks a configured roster but leaves a bare group open (tri-state)', () => {
+    const base = createDefaultMitaTeamsConfig({ provider: 'openai', id: 'gpt-5' })
+
+    // A fresh orchestrator-only group stays open so the Host can build a team.
+    expect(isMitaTeamsTeamLocked(base)).toBe(false)
+
+    // Once the owner adds a specialist, the roster auto-locks by default.
+    const withRoster = {
+      ...base,
+      roles: [
+        ...base.roles,
+        {
+          id: 'analyst',
+          name: 'Analyst',
+          label: 'A',
+          description: 'd',
+          prompt: 'p',
+          color: 'bg-violet-600',
+          permission: 'tools' as const,
+          enabled: true,
+        },
+      ],
+    }
+    expect(isMitaTeamsTeamLocked(withRoster)).toBe(true)
+
+    // Explicit owner choices override the auto behavior either way.
+    expect(
+      isMitaTeamsTeamLocked({ ...withRoster, workflowControl: 'open' })
+    ).toBe(false)
+    expect(
+      isMitaTeamsTeamLocked({ ...base, workflowControl: 'user_spec' })
+    ).toBe(true)
   })
 })
