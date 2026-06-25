@@ -761,10 +761,14 @@ describe('mita teams runtime', () => {
     })
 
     try {
-      const config = createDefaultMitaTeamsConfig({
-        provider: 'anthropic',
-        id: 'claude-opus-4-7',
-      })
+      const config = {
+        ...createDefaultMitaTeamsConfig({
+          provider: 'anthropic',
+          id: 'claude-opus-4-7',
+        }),
+        // Pre-accept the scenario; the consent offer is tested separately.
+        scenarioId: 'market_research' as const,
+      }
       let capturedDecisionPrompt = ''
       const rolePrompts: string[] = []
 
@@ -877,6 +881,73 @@ describe('mita teams runtime', () => {
     expect(roleIds).not.toContain('skeptic')
     // The owner-configured team is left intact.
     expect(roleIds).toContain('equity_analyst')
+  })
+
+  it('offers the scenario team for consent instead of silently assembling it', async () => {
+    const config = createDefaultMitaTeamsConfig({
+      provider: 'openai',
+      id: 'gpt-5',
+    })
+
+    let decisionCalls = 0
+    const result = await runMitaTeamsRuntime({
+      config: approveRuntimeForExecution(config),
+      userText: '帮我研究美股明日什么板块会涨',
+      generateDecisionText: async () => {
+        decisionCalls += 1
+        return JSON.stringify({
+          action: 'stop',
+          reason: 'done',
+          finalResponse: 'done',
+        })
+      },
+      generateRoleText: async () => 'unused',
+    })
+
+    // The run pauses to ask before assembling the team — no orchestration runs.
+    expect(result.status).toBe('waiting-for-user')
+    expect(decisionCalls).toBe(0)
+    expect(result.config.runtime.userChoiceRequest?.kind).toBe('scenario_offer')
+    // Nothing was injected or committed without the owner's consent.
+    expect(result.config.roles.map((role) => role.id)).not.toContain(
+      'data_scout'
+    )
+    expect(result.config.scenarioId).toBeUndefined()
+  })
+
+  it('skips the scenario offer once the owner has declined it', async () => {
+    const approved = approveRuntimeForExecution(
+      createDefaultMitaTeamsConfig({ provider: 'openai', id: 'gpt-5' })
+    )
+    const config = {
+      ...approved,
+      runtime: { ...approved.runtime, scenarioOfferDismissed: true },
+    }
+
+    let decisionCalls = 0
+    const result = await runMitaTeamsRuntime({
+      config,
+      userText: '帮我研究美股明日什么板块会涨',
+      generateDecisionText: async () => {
+        decisionCalls += 1
+        return JSON.stringify({
+          action: 'stop',
+          reason: 'done',
+          finalResponse: 'done',
+        })
+      },
+      generateRoleText: async () => 'unused',
+    })
+
+    // Declined once → runs straight through, no re-offer, no scenario roles.
+    expect(result.status).not.toBe('waiting-for-user')
+    expect(decisionCalls).toBeGreaterThan(0)
+    expect(result.config.runtime.userChoiceRequest?.kind).not.toBe(
+      'scenario_offer'
+    )
+    expect(result.config.roles.map((role) => role.id)).not.toContain(
+      'data_scout'
+    )
   })
 
   it('binds a plain-language "no extra roles" instruction and blocks coordinator role-adds', async () => {
@@ -1055,10 +1126,15 @@ describe('mita teams runtime', () => {
     })
 
     try {
-      const config = createDefaultMitaTeamsConfig({
-        provider: 'jingxing',
-        id: 'claude-opus-4-7',
-      })
+      const config = {
+        ...createDefaultMitaTeamsConfig({
+          provider: 'jingxing',
+          id: 'claude-opus-4-7',
+        }),
+        // Pre-accept the scenario so this test exercises the playbook itself,
+        // not the consent offer (covered by a dedicated test below).
+        scenarioId: 'market_research' as const,
+      }
       const roleCalls: Array<{
         roleId: string
         modelId?: string
@@ -1150,10 +1226,14 @@ describe('mita teams runtime', () => {
     })
 
     try {
-      const config = createDefaultMitaTeamsConfig({
-        provider: 'jingxing',
-        id: 'basic-chat-model',
-      })
+      const config = {
+        ...createDefaultMitaTeamsConfig({
+          provider: 'jingxing',
+          id: 'basic-chat-model',
+        }),
+        // Pre-accept the scenario; the consent offer is tested separately.
+        scenarioId: 'market_research' as const,
+      }
       const roleCalls: Array<{
         prompt: string
         webSearch?: { enabled: boolean; blockedReason?: string }
@@ -1349,10 +1429,14 @@ describe('mita teams runtime', () => {
   })
 
   it('reuses existing roles and channels when a follow-up repeats configure_team', async () => {
-    const config = createDefaultMitaTeamsConfig({
-      provider: 'openai',
-      id: 'gpt-5',
-    })
+    const config = {
+      ...createDefaultMitaTeamsConfig({
+        provider: 'openai',
+        id: 'gpt-5',
+      }),
+      // Pre-accept the scenario; the consent offer is tested separately.
+      scenarioId: 'market_research' as const,
+    }
     let firstDecisionCount = 0
 
     const firstRun = await runMitaTeamsRuntime({

@@ -121,6 +121,7 @@ export type MitaTeamsUserInputKind =
   | 'free_text'
   | 'plan_approval'
   | 'keep_role_edits'
+  | 'scenario_offer'
 
 export type MitaTeamsChoiceRequest = {
   id: string
@@ -380,6 +381,9 @@ export type MitaTeamsRuntime = {
   // Role ids the owner explicitly archived. Auto-injection paths (scenario
   // playbooks, coordinator configure_team) must not re-add or re-enable these.
   archivedRoleIds?: MitaTeamsRoleId[]
+  // Set once the owner has declined the auto-suggested scenario team, so the
+  // offer is never re-shown for this thread (consent is asked once, not nagged).
+  scenarioOfferDismissed?: boolean
 }
 
 export type MitaTeamsChannelConfig = {
@@ -828,7 +832,8 @@ const isUserInputKind = (value: unknown): value is MitaTeamsUserInputKind =>
   value === 'single_choice' ||
   value === 'free_text' ||
   value === 'plan_approval' ||
-  value === 'keep_role_edits'
+  value === 'keep_role_edits' ||
+  value === 'scenario_offer'
 
 const isTaskTemplateId = (value: unknown): value is MitaTeamsTaskTemplateId =>
   MITA_TEAMS_TASK_TEMPLATES.some((template) => template.id === value)
@@ -1411,6 +1416,7 @@ export function normalizeMitaTeamsRuntime(
           )
         )
       : undefined,
+    scenarioOfferDismissed: raw.scenarioOfferDismissed === true ? true : undefined,
   }
 }
 

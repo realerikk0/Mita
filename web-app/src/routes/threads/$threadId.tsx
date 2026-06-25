@@ -1929,6 +1929,47 @@ Tool result communication:
       if (!option) return
       mitaTeamsAnsweredChoiceIdsRef.current.add(answeredChoiceKey)
 
+      if (choice.kind === 'scenario_offer') {
+        const accept = optionId === 'use_scenario'
+        const answeredRuntime = answerMitaTeamsChoice(
+          mitaTeamsConfig.runtime,
+          optionId
+        )
+        // Accept → mark the scenario accepted (it applies on the re-run);
+        // decline → remember the dismissal so it never re-prompts here.
+        const nextConfig = {
+          ...withMitaTeamsRuntime(mitaTeamsConfig, {
+            ...answeredRuntime,
+            scenarioOfferDismissed: accept ? undefined : true,
+          }),
+          scenarioId: accept ? ('market_research' as const) : undefined,
+        }
+        // Re-run on the owner's original goal, not the choice label.
+        const goalText = mitaTeamsLastUserTextRef.current
+        const userText = [`选择：${option.label}`, option.description]
+          .filter(Boolean)
+          .join('\n')
+        const userMessage = newUserThreadContent(
+          threadId,
+          userText,
+          [],
+          generateId(),
+          {
+            mitaTeams: {
+              choiceRequestId: choice.id,
+              selectedOptionId: optionId,
+              action: 'scenario_offer',
+            },
+          }
+        )
+
+        persistMitaTeamsConfig(nextConfig)
+        addMessage(userMessage)
+        appendThreadMessageToChat(userMessage)
+        void startMitaTeamsRuntime(nextConfig, goalText || userText)
+        return
+      }
+
       if (choice.kind === 'keep_role_edits') {
         const keepRoleEdits = optionId === 'keep'
         const nextConfig = resolveMitaTeamsRoleEditConfirmation(
