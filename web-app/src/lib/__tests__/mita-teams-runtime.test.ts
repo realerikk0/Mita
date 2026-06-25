@@ -915,6 +915,119 @@ describe('mita teams runtime', () => {
     )
   })
 
+  it('red-team mode requires a skeptic stress-test before the run can stop', async () => {
+    const config = normalizeMitaTeamsConfig(
+      {
+        enabled: true,
+        mode: 'red-team',
+        activeChannel: 'task',
+        activeRoleId: 'orchestrator',
+        roles: [
+          {
+            id: 'builder',
+            name: 'Builder',
+            label: 'B',
+            description: 'd',
+            prompt: 'p',
+            color: 'bg-violet-600',
+            permission: 'tools',
+            enabled: true,
+          },
+          {
+            id: 'skeptic',
+            name: 'Skeptic Reviewer',
+            label: 'Risk',
+            description: 'd',
+            prompt: 'p',
+            color: 'bg-amber-600',
+            permission: 'tools',
+            enabled: true,
+          },
+        ],
+        channels: [
+          {
+            id: 'task',
+            label: 'Task',
+            description: '',
+            roleIds: ['orchestrator', 'builder', 'skeptic'],
+          },
+        ],
+      },
+      { provider: 'openai', id: 'gpt-5' }
+    )!
+
+    const calledRoles: string[] = []
+    // The Host tries to stop immediately; red-team mode must inject the skeptic.
+    await runMitaTeamsRuntime({
+      config: approveRuntimeForExecution(config),
+      userText: 'Finalize the plan.',
+      generateDecisionText: async () =>
+        JSON.stringify({ action: 'stop', reason: 'done', finalResponse: 'done' }),
+      generateRoleText: async ({ role }) => {
+        calledRoles.push(role.id)
+        return `${role.name} output.`
+      },
+    })
+
+    expect(calledRoles).toContain('skeptic')
+  })
+
+  it('roundtable mode gathers more than one perspective before deciding', async () => {
+    const config = normalizeMitaTeamsConfig(
+      {
+        enabled: true,
+        mode: 'roundtable',
+        activeChannel: 'task',
+        activeRoleId: 'orchestrator',
+        roles: [
+          {
+            id: 'analyst',
+            name: 'Analyst',
+            label: 'A',
+            description: 'd',
+            prompt: 'p',
+            color: 'bg-violet-600',
+            permission: 'tools',
+            enabled: true,
+          },
+          {
+            id: 'researcher',
+            name: 'Researcher',
+            label: 'R',
+            description: 'd',
+            prompt: 'p',
+            color: 'bg-cyan-600',
+            permission: 'tools',
+            enabled: true,
+          },
+        ],
+        channels: [
+          {
+            id: 'task',
+            label: 'Task',
+            description: '',
+            roleIds: ['orchestrator', 'analyst', 'researcher'],
+          },
+        ],
+      },
+      { provider: 'openai', id: 'gpt-5' }
+    )!
+
+    const calledRoles = new Set<string>()
+    await runMitaTeamsRuntime({
+      config: approveRuntimeForExecution(config),
+      userText: 'Decide between the options.',
+      generateDecisionText: async () =>
+        JSON.stringify({ action: 'stop', reason: 'done', finalResponse: 'done' }),
+      generateRoleText: async ({ role }) => {
+        calledRoles.add(role.id)
+        return `${role.name} perspective.`
+      },
+    })
+
+    expect(calledRoles.size).toBeGreaterThanOrEqual(2)
+  })
+
   it('requests native web search for ticker investment research role calls', async () => {
     const previousModelState = useModelProvider.getState()
     useModelProvider.setState({

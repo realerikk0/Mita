@@ -2159,6 +2159,167 @@ function nextScenarioRequiredCall(
   return undefined
 }
 
+const MODE_REVIEWER_PATTERN =
+  /(review|critic|qa|quality|editor|verif|proof|审校|審校|审阅|審閱|校对|校對|复核|複核|评审|評審|审查|審查|编辑|編輯)/i
+const MODE_SKEPTIC_PATTERN =
+  /(skeptic|sceptic|red[-\s]?team|devil|adversar|challenge|critic|质疑|質疑|怀疑|懷疑|红队|紅隊|挑战|挑戰|风险|風險|证伪|證偽)/i
+
+function findEnabledRoleByPattern(
+  config: MitaTeamsConfig,
+  pattern: RegExp
+): MitaTeamsRoleConfig | undefined {
+  return config.roles.find(
+    (role) =>
+      role.enabled &&
+      role.id !== MITA_TEAMS_ORCHESTRATOR_ROLE_ID &&
+      pattern.test(`${role.id} ${role.name} ${role.label}`)
+  )
+}
+
+function distinctSpecialistOutputs(
+  config: MitaTeamsConfig,
+  runtime: MitaTeamsRuntime
+): number {
+  return config.roles.filter(
+    (role) =>
+      role.enabled &&
+      role.id !== MITA_TEAMS_ORCHESTRATOR_ROLE_ID &&
+      hasSuccessfulRoleOutput(runtime, role.id)
+  ).length
+}
+
+function nextUnspokenSpecialist(
+  config: MitaTeamsConfig,
+  runtime: MitaTeamsRuntime
+): MitaTeamsRoleConfig | undefined {
+  return config.roles.find(
+    (role) =>
+      role.enabled &&
+      role.id !== MITA_TEAMS_ORCHESTRATOR_ROLE_ID &&
+      !hasSuccessfulRoleOutput(runtime, role.id)
+  )
+}
+
+function modeRequiredCallDecision(
+  config: MitaTeamsConfig,
+  role: MitaTeamsRoleConfig,
+  reason: string,
+  instruction: string
+): MitaTeamsOrchestratorDecision | undefined {
+  const channel = findChannelForRole(config, role.id)
+  if (!channel) return undefined
+  return {
+    action: 'call_roles',
+    mode: 'serial',
+    reason,
+    calls: [
+      {
+        roleId: role.id,
+        channelId: channel.id,
+        instruction,
+        requiredPermission: 'read',
+      },
+    ],
+  }
+}
+
+// Makes the selected collaboration mode structurally real: before the Host is
+// allowed to converge (stop), require the mode's defining step to have actually
+// happened, injecting it otherwise. Loop-safe (each gate clears once the
+// required role produces output); scenario-driven runs keep their own flow.
+function enforceModeBeforeStop(
+  decision: MitaTeamsOrchestratorDecision,
+  config: MitaTeamsConfig,
+  runtime: MitaTeamsRuntime
+): MitaTeamsOrchestratorDecision {
+  if (decision.action !== 'stop') return decision
+  if (config.scenarioId) return decision
+
+  switch (config.mode) {
+    case 'red-team': {
+      const skeptic = findEnabledRoleByPattern(config, MODE_SKEPTIC_PATTERN)
+      if (skeptic && !hasSuccessfulRoleOutput(runtime, skeptic.id)) {
+        return (
+          modeRequiredCallDecision(
+            config,
+            skeptic,
+            `Red-team mode requires ${skeptic.name} to stress-test the result before finishing.`,
+            'Stress-test the candidate answer or plan before it is finalized: list risks, failure modes, and any required fixes.'
+          ) ?? decision
+        )
+      }
+      return decision
+    }
+    case 'relay': {
+      const reviewer =
+        findEnabledRoleByPattern(config, MODE_REVIEWER_PATTERN) ??
+        findEnabledRoleByPattern(config, MODE_SKEPTIC_PATTERN)
+      if (
+        reviewer &&
+        distinctSpecialistOutputs(config, runtime) >= 1 &&
+        !hasSuccessfulRoleOutput(runtime, reviewer.id)
+      ) {
+        return (
+          modeRequiredCallDecision(
+            config,
+            reviewer,
+            `Relay mode requires ${reviewer.name} to review the draft before finishing.`,
+            'Review and refine the latest draft before it is finalized; flag anything incomplete or incorrect.'
+          ) ?? decision
+        )
+      }
+      return decision
+    }
+    case 'roundtable': {
+      if (distinctSpecialistOutputs(config, runtime) < 2) {
+        const next = nextUnspokenSpecialist(config, runtime)
+        if (next) {
+          return (
+            modeRequiredCallDecision(
+              config,
+              next,
+              `Roundtable mode requires more than one perspective before deciding (${next.name} has not weighed in).`,
+              'Give your distinct perspective on the task before the team converges.'
+            ) ?? decision
+          )
+        }
+      }
+      return decision
+    }
+    case 'debate': {
+      if (distinctSpecialistOutputs(config, runtime) < 2) {
+        const next = nextUnspokenSpecialist(config, runtime)
+        if (next) {
+          return (
+            modeRequiredCallDecision(
+              config,
+              next,
+              `Debate mode requires opposing perspectives before convergence (${next.name} has not weighed in).`,
+              'Argue your position on the task and challenge the other proposals before the team converges.'
+            ) ?? decision
+          )
+        }
+      }
+      const critic =
+        findEnabledRoleByPattern(config, MODE_SKEPTIC_PATTERN) ??
+        findEnabledRoleByPattern(config, MODE_REVIEWER_PATTERN)
+      if (critic && !hasSuccessfulRoleOutput(runtime, critic.id)) {
+        return (
+          modeRequiredCallDecision(
+            config,
+            critic,
+            `Debate mode requires a rebuttal before convergence (${critic.name} has not challenged the proposals).`,
+            'Challenge the proposals so far: name the weakest assumptions and argue the strongest counter-case before convergence.'
+          ) ?? decision
+        )
+      }
+      return decision
+    }
+    default:
+      return decision
+  }
+}
+
 function enforceScenarioBeforeStop(
   decision: MitaTeamsOrchestratorDecision,
   config: MitaTeamsConfig,
@@ -3936,16 +4097,20 @@ export async function runMitaTeamsRuntime({
       })
       const decision = preferExistingTeamDecision(
         workingConfig,
-        enforceScenarioBeforeStop(
-          constrainDecisionToWorkflowSpec(
+        enforceModeBeforeStop(
+          enforceScenarioBeforeStop(
+            constrainDecisionToWorkflowSpec(
+              workingConfig,
+              decisionResolution.decision,
+              workflowSpec,
+              initialModelOptions
+            ),
             workingConfig,
-            decisionResolution.decision,
-            workflowSpec,
-            initialModelOptions
+            runtime,
+            scenarioPlaybook
           ),
           workingConfig,
-          runtime,
-          scenarioPlaybook
+          runtime
         ),
         preferTeamReuse
       )
