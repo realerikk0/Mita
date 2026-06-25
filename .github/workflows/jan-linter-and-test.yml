@@ -27,20 +27,11 @@ on:
     branches:
       - mita-main
       - release/**
-    paths:
-      - '.github/workflows/jan-linter-and-test.yml'
-      - 'web/**'
-      - 'joi/**'
-      - 'package.json'
-      - 'node_modules/**'
-      - 'yarn.lock'
-      - 'Makefile'
-      - 'extensions/**'
-      - 'core/**'
-      - 'scripts/**'
-      - 'src-tauri/**'
-      - 'web-app/**'
-      - '!README.md'
+    # No paths filter on purpose: the workflow must run on EVERY PR so the
+    # required "PR CI Gate" check always reports. With a paths filter a
+    # docs-only PR never triggers this workflow, leaving the gate perpetually
+    # "expected" and the PR un-mergeable. Cost is controlled by the run_checks
+    # scope below — docs-only PRs no-op the Fast PR check and skip heavy jobs.
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
@@ -52,6 +43,7 @@ jobs:
     runs-on: ubuntu-latest
     outputs:
       full_ci: ${{ steps.scope.outputs.full_ci }}
+      run_checks: ${{ steps.scope.outputs.run_checks }}
       changed_files: ${{ steps.scope.outputs.changed_files }}
     steps:
       - name: Getting the repo
@@ -67,6 +59,7 @@ jobs:
 
           if [ "${{ github.event_name }}" != "pull_request" ]; then
             echo "full_ci=true" >> "$GITHUB_OUTPUT"
+            echo "run_checks=true" >> "$GITHUB_OUTPUT"
             echo "changed_files=non-pr event" >> "$GITHUB_OUTPUT"
             exit 0
           fi
@@ -89,23 +82,42 @@ jobs:
             echo "full_ci=false" >> "$GITHUB_OUTPUT"
           fi
 
+          # run_checks=false only when EVERY changed file is docs/markdown, so a
+          # docs-only PR skips lint/test/build yet the Fast PR check still
+          # reports success and satisfies the gate. Any non-doc file flips it on.
+          if printf '%s\n' "$changed_files" | grep -qvE '^(docs/|.*\.mdx?$|LICENSE$|\.gitignore$)'; then
+            echo "run_checks=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "run_checks=false" >> "$GITHUB_OUTPUT"
+          fi
+
   quick-pr-check:
     name: Fast PR check
+    needs: ci-scope
     if: github.event_name == 'pull_request'
     runs-on: ubuntu-latest
     timeout-minutes: 20
     steps:
+      # Docs-only PRs (run_checks=false) report success without doing any work,
+      # so the required Fast PR check + gate pass without wasting CI on a build.
+      - name: Skip checks (docs-only change)
+        if: needs.ci-scope.outputs.run_checks != 'true'
+        run: echo "Docs-only PR — no lint/test/build needed; reporting success."
+
       - name: Getting the repo
+        if: needs.ci-scope.outputs.run_checks == 'true'
         uses: actions/checkout@v4
         with:
           fetch-depth: 0
 
       - name: Installing node
+        if: needs.ci-scope.outputs.run_checks == 'true'
         uses: actions/setup-node@v4
         with:
           node-version: 20
 
       - name: Config Yarn
+        if: needs.ci-scope.outputs.run_checks == 'true'
         run: |
           corepack enable
           corepack prepare yarn@4.5.3 --activate
@@ -113,15 +125,19 @@ jobs:
           yarn config set -H enableImmutableInstalls false
 
       - name: Install dependencies
+        if: needs.ci-scope.outputs.run_checks == 'true'
         run: yarn install
 
       - name: Lint web app
+        if: needs.ci-scope.outputs.run_checks == 'true'
         run: yarn lint
 
       - name: Test web app
+        if: needs.ci-scope.outputs.run_checks == 'true'
         run: yarn test:web
 
       - name: Build web app
+        if: needs.ci-scope.outputs.run_checks == 'true'
         run: yarn build:web
 
   base_branch_cov:
