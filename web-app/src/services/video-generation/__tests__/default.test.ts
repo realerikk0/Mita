@@ -83,6 +83,87 @@ describe('DefaultVideoGenerationService', () => {
     })
   })
 
+  it('adds Biyuan-compatible image fields for storyboard sources', async () => {
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(
+        new Response(new Uint8Array([1, 2, 3]), {
+          status: 200,
+          headers: { 'content-type': 'image/png' },
+        })
+      )
+      .mockResolvedValueOnce(
+        new Response(
+          JSON.stringify({
+            id: 'video-task-1',
+            task_id: 'video-task-1',
+            object: 'video',
+            status: 'queued',
+            progress: 0,
+          }),
+          { status: 202, headers: { 'content-type': 'application/json' } }
+        )
+      )
+    vi.stubGlobal('fetch', fetchMock)
+
+    const service = new DefaultVideoGenerationService()
+    await service.generateVideo({
+      provider: {
+        ...provider,
+        provider: 'openai-compatible',
+        base_url: 'https://api.biyuan.ai/v1',
+      } as unknown as ModelProvider,
+      model,
+      prompt: 'A gold robot walks through a neon city.',
+      ratio: '16:9',
+      duration: 8,
+      resolution: '1080p',
+      fps: 24,
+      generateAudio: false,
+      sourceAsset: {
+        id: 'storyboard-1',
+        prompt: 'storyboard',
+        mode: 'generate',
+        provider: 'jingxing',
+        model: 'gpt-image-2',
+        ratio: '16:9',
+        size: '1920x1080',
+        quality: 'hd',
+        sourceAssetIds: [],
+        createdAt: '2026-06-04T00:00:00Z',
+        status: 'succeeded',
+        path: '/mock/mita/image-assets/storyboard-1/image.png',
+        fileName: 'image.png',
+        mimeType: 'image/png',
+      },
+    })
+
+    expect(fetchMock).toHaveBeenNthCalledWith(
+      1,
+      '/mock/mita/image-assets/storyboard-1/image.png'
+    )
+    const init = fetchMock.mock.calls[1][1] as RequestInit & { body: string }
+    const body = JSON.parse(init.body)
+    const imageUrl = 'data:image/png;base64,AQID'
+
+    expect(body).toMatchObject({
+      model: 'seedance-2.0',
+      prompt: 'A gold robot walks through a neon city.',
+      image: imageUrl,
+      size: '1920x1080',
+      metadata: {
+        ratio: '16:9',
+        resolution: '1080p',
+        generate_audio: false,
+        watermark: false,
+      },
+    })
+    expect(body.content).toEqual([
+      { type: 'text', text: 'A gold robot walks through a neon city.' },
+      { type: 'image_url', image_url: { url: imageUrl } },
+    ])
+  })
+
   it('polls wrapped Seedance-style responses and extracts the video URL', async () => {
     const fetchMock = vi.fn().mockResolvedValueOnce(
       new Response(
