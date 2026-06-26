@@ -514,6 +514,21 @@ function assetQualityLabel(t: TranslationFn, quality?: string) {
   }
 }
 
+function qualityPresetFromAssetQuality(quality?: string): ImageQualityPreset {
+  switch (quality?.toLowerCase()) {
+    case 'high':
+    case 'hd':
+      return 'hd'
+    default:
+      return 'sd'
+  }
+}
+
+function regenerationModeForAsset(asset: ImageAssetRecord): ImageGenerationMode {
+  if (asset.sourceAssetIds.length === 0) return 'generate'
+  return asset.mode === 'generate' ? 'edit' : asset.mode
+}
+
 function imageCountLabel(t: TranslationFn, count: number) {
   return imageT(t, count === 1 ? 'imageCount.one' : 'imageCount.other', {
     count,
@@ -4768,15 +4783,10 @@ function Images() {
     [addTasks, runQueue]
   )
 
-  const regeneratePrompt = useCallback(
-    (nextPrompt: string) => {
-      if (!selectedModel) {
-        toast.error(imageT(t, 'toast.selectImageModelFirst'))
-        return
-      }
-
-      const cleanPrompt = nextPrompt.trim()
-      if (!cleanPrompt) {
+  const regenerateAsset = useCallback(
+    (asset: ImageAssetRecord) => {
+      const cleanPrompt = asset.prompt.trim()
+      if (!cleanPrompt && asset.sourceAssetIds.length === 0) {
         toast.error(imageT(t, 'toast.describeImageFirst'))
         return
       }
@@ -4788,18 +4798,18 @@ function Images() {
         batchId,
         createdAt,
         prompt: cleanPrompt,
-        mode: 'generate',
-        providerName: selectedModel.provider.provider,
-        modelId: selectedModel.model.id,
-        ratio,
-        qualityPreset,
-        sourceAssetIds: [],
+        mode: regenerationModeForAsset(asset),
+        providerName: asset.provider,
+        modelId: asset.model,
+        ratio: asset.ratio,
+        qualityPreset: qualityPresetFromAssetQuality(asset.quality),
+        sourceAssetIds: asset.sourceAssetIds,
         status: 'pending',
       }))
       addTasks(nextTasks)
       void runQueue(nextTasks)
     },
-    [addTasks, count, qualityPreset, ratio, runQueue, selectedModel, t]
+    [addTasks, count, runQueue, t]
   )
 
   const cancelTask = (taskId: string) => {
@@ -5124,7 +5134,7 @@ function Images() {
         <Button
           variant="secondary"
           size="sm"
-          onClick={() => regeneratePrompt(asset.prompt)}
+          onClick={() => regenerateAsset(asset)}
         >
           <RefreshCcw className="size-4" />
           {imageT(t, 'regenerate')}
