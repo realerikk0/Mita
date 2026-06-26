@@ -13,6 +13,7 @@ import type {
   VideoGenerationService,
   VideoGenerationStatus,
   VideoGenerationTask,
+  VideoResolution,
 } from './types'
 
 type RawVideoResponse = {
@@ -168,22 +169,26 @@ export class DefaultVideoGenerationService implements VideoGenerationService {
   }
 
   private async generationBody(request: GenerateVideoRequest) {
-    return {
+    const imageUrl = request.sourceAsset
+      ? await this.sourceAssetDataUrl(request.sourceAsset)
+      : undefined
+    const content = [
+      { type: 'text', text: request.prompt },
+      ...(imageUrl
+        ? [
+            {
+              type: 'image_url',
+              image_url: {
+                url: imageUrl,
+              },
+            },
+          ]
+        : []),
+    ]
+    const baseBody: Record<string, unknown> = {
       model: request.model.id,
       prompt: request.prompt,
-      content: [
-        { type: 'text', text: request.prompt },
-        ...(request.sourceAsset
-          ? [
-              {
-                type: 'image_url',
-                image_url: {
-                  url: await this.sourceAssetDataUrl(request.sourceAsset),
-                },
-              },
-            ]
-          : []),
-      ],
+      content,
       ratio: request.ratio,
       duration: request.duration,
       resolution: request.resolution,
@@ -191,6 +196,65 @@ export class DefaultVideoGenerationService implements VideoGenerationService {
       generate_audio: request.generateAudio ?? false,
       watermark: false,
     }
+
+    if (!this.usesJingxingCompatibleVideoParams(request.provider)) {
+      return baseBody
+    }
+
+    return {
+      ...baseBody,
+      ...(imageUrl
+        ? {
+            image: imageUrl,
+          }
+        : {}),
+      size: this.videoSizeFor(request.resolution, request.ratio),
+      metadata: {
+        ratio: request.ratio,
+        resolution: request.resolution,
+        framespersecond: request.fps,
+        fps: request.fps,
+        generate_audio: request.generateAudio ?? false,
+        watermark: false,
+      },
+    }
+  }
+
+  private usesJingxingCompatibleVideoParams(provider: ModelProvider) {
+    const providerId = provider.provider?.toLowerCase() ?? ''
+    const baseUrl = provider.base_url?.toLowerCase() ?? ''
+    return (
+      providerId.includes('jingxing') ||
+      providerId.includes('biyuan') ||
+      baseUrl.includes('api.jingxing.') ||
+      baseUrl.includes('jingxing.io') ||
+      baseUrl.includes('api.biyuan.ai') ||
+      baseUrl.includes('biyuan.ai')
+    )
+  }
+
+  private videoSizeFor(resolution: VideoResolution, ratio: string) {
+    const baseHeight =
+      resolution === '4K' ? 2160 : resolution === '720p' ? 720 : 1080
+    const [ratioWidth, ratioHeight] = ratio
+      .split(':')
+      .map((part) => Number.parseInt(part, 10))
+
+    if (!ratioWidth || !ratioHeight) {
+      return resolution === '4K'
+        ? '3840x2160'
+        : `${(baseHeight * 16) / 9}x${baseHeight}`
+    }
+
+    if (ratioWidth >= ratioHeight) {
+      return `${Math.round(
+        (baseHeight * ratioWidth) / ratioHeight
+      )}x${baseHeight}`
+    }
+
+    return `${baseHeight}x${Math.round(
+      (baseHeight * ratioHeight) / ratioWidth
+    )}`
   }
 
   private videoGenerationEndpoint(provider: ModelProvider) {
