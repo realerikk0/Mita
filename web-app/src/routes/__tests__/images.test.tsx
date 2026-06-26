@@ -3483,6 +3483,99 @@ describe('Images route', () => {
     )
   })
 
+  it('regenerates saved image history with original reference assets', async () => {
+    h.providers = [
+      {
+        provider: 'jingxing',
+        base_url: 'https://api.jingxing.uk/v1',
+        settings: [],
+        models: [
+          {
+            id: 'gpt-image-2',
+            capabilities: [
+              ModelCapabilities.IMAGE_GENERATION,
+              ModelCapabilities.IMAGE_TO_IMAGE,
+            ],
+          },
+        ],
+      },
+    ]
+    const referenceAsset = {
+      id: 'local-ref-1',
+      prompt: 'blue dress reference',
+      mode: 'edit',
+      provider: 'local',
+      model: 'reference-image',
+      ratio: '1:1',
+      size: 'original',
+      quality: 'source',
+      sourceAssetIds: [],
+      createdAt: '2026-05-11T00:00:00Z',
+      status: 'succeeded',
+      path: '/mock/mita/image-assets/local-ref-1/image.png',
+      fileName: 'image.png',
+      mimeType: 'image/png',
+      assetKind: 'reference',
+    }
+    const generatedAsset = {
+      id: 'generated-1',
+      prompt: 'keep the reference style',
+      mode: 'edit',
+      provider: 'jingxing',
+      model: 'gpt-image-2',
+      ratio: '3:4',
+      size: '1024x1536',
+      quality: 'high',
+      sourceAssetIds: ['local-ref-1'],
+      createdAt: '2026-05-11T00:01:00Z',
+      status: 'succeeded',
+      path: '/mock/mita/image-assets/generated-1/image.png',
+      fileName: 'image.png',
+      mimeType: 'image/png',
+    }
+    h.listAssets.mockResolvedValue([generatedAsset, referenceAsset])
+    h.generateImages.mockResolvedValueOnce([
+      {
+        b64Json: 'aGVsbG8=',
+        mimeType: 'image/png',
+      },
+    ])
+    h.saveAsset.mockImplementation((request: any) =>
+      Promise.resolve({
+        ...request,
+        createdAt: '2026-05-11T00:02:00Z',
+        path: `/mock/mita/image-assets/${request.id}/image.png`,
+        fileName: 'image.png',
+      })
+    )
+    vi.stubGlobal(
+      'Image',
+      class {
+        naturalWidth = 1024
+        naturalHeight = 1536
+        onload?: () => void
+        set src(_value: string) {
+          this.onload?.()
+        }
+      }
+    )
+
+    renderComponent()
+
+    await screen.findByText('keep the reference style')
+    fireEvent.click(screen.getByRole('button', { name: 'Regenerate' }))
+
+    await waitFor(() => expect(h.generateImages).toHaveBeenCalled())
+    expect(h.generateImages.mock.calls.at(-1)?.[0]).toMatchObject({
+      mode: 'edit',
+      model: expect.objectContaining({ id: 'gpt-image-2' }),
+      prompt: 'keep the reference style',
+      ratio: '3:4',
+      qualityPreset: 'hd',
+      sourceAssets: [expect.objectContaining({ id: 'local-ref-1' })],
+    })
+  })
+
   it('does not submit while a reference image is still importing', async () => {
     h.providers = [
       {
