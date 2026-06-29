@@ -123,6 +123,9 @@ type DroppedFileWithPath = File & {
   path?: string
 }
 
+const droppedFileKey = (file: File) =>
+  `${file.name}:${file.size}:${file.type || ''}:${file.lastModified || 0}`
+
 const ChatInput = memo(function ChatInput({
   className,
   initialMessage,
@@ -979,6 +982,24 @@ const ChatInput = memo(function ChatInput({
       : undefined
   }
 
+  const getDroppedItemPathMap = (
+    items: DataTransferItemList | undefined
+  ): Map<string, string> => {
+    const paths = new Map<string, string>()
+    if (!items) return paths
+
+    for (const item of Array.from(items)) {
+      if (item.kind !== 'file') continue
+      const file = item.getAsFile()
+      const path = file ? getDroppedDocumentPath(file) : undefined
+      if (file && path) {
+        paths.set(droppedFileKey(file), path)
+      }
+    }
+
+    return paths
+  }
+
   const formatBytes = (bytes?: number): string => {
     if (!bytes || bytes <= 0) return ''
     const units = ['B', 'KB', 'MB', 'GB']
@@ -1380,6 +1401,7 @@ const ChatInput = memo(function ChatInput({
     const files = e.dataTransfer.files
     if (files && files.length > 0) {
       const droppedFiles = Array.from(files)
+      const droppedItemPaths = getDroppedItemPathMap(e.dataTransfer.items)
       const imageFiles = droppedFiles.filter(isImageDropFile)
       const documentFiles = droppedFiles.filter((file) => !isImageDropFile(file))
 
@@ -1401,7 +1423,9 @@ const ChatInput = memo(function ChatInput({
           const missingPathFiles: string[] = []
           const documentInputs: DocumentFileInput[] = []
           for (const file of documentFiles) {
-            const path = getDroppedDocumentPath(file)
+            const path =
+              getDroppedDocumentPath(file) ??
+              droppedItemPaths.get(droppedFileKey(file))
             if (!path) {
               missingPathFiles.push(file.name)
               continue
@@ -1414,8 +1438,8 @@ const ChatInput = memo(function ChatInput({
           }
 
           if (missingPathFiles.length > 0) {
-            toast.error('Cannot attach dropped documents', {
-              description: `Biyan needs local file paths for ${missingPathFiles.join(', ')}. Use the document picker instead.`,
+            toast.info('Use the document picker for these files', {
+              description: `Biyan needs local file paths for ${missingPathFiles.join(', ')}.`,
             })
           }
 

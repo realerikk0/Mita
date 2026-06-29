@@ -43,6 +43,7 @@ import {
 } from 'lucide-react'
 import {
   type ReactNode,
+  type DragEvent as ReactDragEvent,
   type MouseEvent,
   type PointerEvent as ReactPointerEvent,
   type WheelEvent as ReactWheelEvent,
@@ -859,6 +860,73 @@ function localPromptFromPath(path: string, fallback: string) {
   const fileName = path.split(/[\\/]/).pop()
   const stem = fileName?.replace(/\.[^.]+$/, '').trim()
   return stem || fallback
+}
+
+type DroppedFileWithPath = File & {
+  path?: string
+}
+
+function localPathFromDroppedFile(file: File | null | undefined) {
+  const dropped = file as DroppedFileWithPath | null | undefined
+  const path = dropped?.path?.trim()
+  return path || undefined
+}
+
+function droppedFileKey(file: File) {
+  return `${file.name}:${file.size}:${file.type || ''}:${file.lastModified || 0}`
+}
+
+function droppedFilesFromDataTransfer(dataTransfer: DataTransfer) {
+  const files = Array.from(dataTransfer.files ?? [])
+  const seen = new Set(files.map(droppedFileKey))
+
+  for (const item of Array.from(dataTransfer.items ?? [])) {
+    if (item.kind !== 'file') continue
+    const file = item.getAsFile()
+    if (!file) continue
+    const key = droppedFileKey(file)
+    if (seen.has(key)) continue
+    files.push(file)
+    seen.add(key)
+  }
+
+  return files
+}
+
+function imageMimeTypeFromFile(file: File) {
+  if (file.type.startsWith('image/')) return file.type
+
+  const extension = file.name.toLowerCase().split('.').pop()
+  switch (extension) {
+    case 'jpg':
+    case 'jpeg':
+      return 'image/jpeg'
+    case 'png':
+      return 'image/png'
+    case 'webp':
+      return 'image/webp'
+    default:
+      return ''
+  }
+}
+
+function isImageReferenceFile(file: File) {
+  return imageMimeTypeFromFile(file).startsWith('image/')
+}
+
+function hasImageReferenceTransfer(dataTransfer: DataTransfer) {
+  const items = Array.from(dataTransfer.items ?? [])
+  if (
+    items.some(
+      (item) =>
+        item.kind === 'file' &&
+        (item.type === '' || item.type.startsWith('image/'))
+    )
+  ) {
+    return true
+  }
+
+  return Array.from(dataTransfer.files ?? []).some(isImageReferenceFile)
 }
 
 function openInSystemFileManagerKey() {
@@ -3933,6 +4001,7 @@ function Images() {
     ImageAssetRecord[]
   >([])
   const [referenceAssetsLoading, setReferenceAssetsLoading] = useState(false)
+  const [composerDragActive, setComposerDragActive] = useState(false)
   const [nowMs, setNowMs] = useState(() => Date.now())
   const [previewAsset, setPreviewAsset] = useState<ImageAssetRecord | null>(
     null
@@ -4134,8 +4203,14 @@ function Images() {
     <form
       className={cn(
         'w-full overflow-hidden rounded-2xl border bg-background shadow-[0_2px_10px_rgba(0,0,0,0.04)]',
+        composerDragActive &&
+          'border-[#f7693f] shadow-[0_0_0_2px_rgba(247,105,63,0.16)]',
         !pinned && 'mt-[22px]'
       )}
+      onDragEnter={handleImageComposerDragEnter}
+      onDragLeave={handleImageComposerDragLeave}
+      onDragOver={handleImageComposerDragOver}
+      onDrop={handleImageComposerDrop}
       onSubmit={(event) => {
         event.preventDefault()
         startGeneration()
@@ -4356,6 +4431,25 @@ function Images() {
     [resolveAssetById, sourceAssetIds]
   )
 
+  const ensureSourceAssets = useCallback(
+    async (ids: string[]) => {
+      if (ids.length === 0) return []
+
+      const immediate = ids
+        .map((id) => resolveAssetById(id))
+        .filter((asset): asset is ImageAssetRecord => Boolean(asset))
+      if (immediate.length === ids.length) return immediate
+
+      const latestAssets = await serviceHub.imageGeneration().listAssets()
+      setAssets(latestAssets)
+      const fallbackAssets = [...latestAssets, ...sourceAssetRecords]
+      return ids
+        .map((id) => fallbackAssets.find((asset) => asset.id === id))
+        .filter((asset): asset is ImageAssetRecord => Boolean(asset))
+    },
+    [resolveAssetById, serviceHub, setAssets, sourceAssetRecords]
+  )
+
   const taskGroups = useMemo<ImageTaskGroup[]>(() => {
     const groups = new Map<string, ImageTaskGroup>()
     tasks.forEach((task) => {
@@ -4490,9 +4584,24 @@ function Images() {
         return
       }
 
-      const sourceAssets = task.sourceAssetIds
-        .map((id) => resolveAssetById(id))
-        .filter((asset): asset is ImageAssetRecord => Boolean(asset))
+      let sourceAssets: ImageAssetRecord[]
+      try {
+        sourceAssets = await ensureSourceAssets(task.sourceAssetIds)
+      } catch (error) {
+        console.error('Failed to load reference images for image task:', error)
+        updateTask(task.id, {
+          status: 'failed',
+          message: imageT(t, 'toast.importReferenceFailed'),
+        })
+        return
+      }
+      if (sourceAssets.length < task.sourceAssetIds.length) {
+        updateTask(task.id, {
+          status: 'failed',
+          message: imageT(t, 'toast.importReferenceFailed'),
+        })
+        return
+      }
       if (isTaskCancelled(task.id)) return
 
       const controller = new AbortController()
@@ -4637,10 +4746,10 @@ function Images() {
     [
       clearTaskCancellation,
       findTaskModel,
+      ensureSourceAssets,
       isTaskCancelled,
       registerTaskController,
       releaseTaskController,
-      resolveAssetById,
       serviceHub,
       t,
       updateTask,
@@ -4784,10 +4893,26 @@ function Images() {
   )
 
   const regenerateAsset = useCallback(
-    (asset: ImageAssetRecord) => {
+    async (asset: ImageAssetRecord) => {
       const cleanPrompt = asset.prompt.trim()
       if (!cleanPrompt && asset.sourceAssetIds.length === 0) {
         toast.error(imageT(t, 'toast.describeImageFirst'))
+        return
+      }
+
+      let sourceAssets: ImageAssetRecord[]
+      try {
+        sourceAssets = await ensureSourceAssets(asset.sourceAssetIds)
+      } catch (error) {
+        console.error(
+          'Failed to load reference images for image regeneration:',
+          error
+        )
+        toast.error(imageT(t, 'toast.importReferenceFailed'))
+        return
+      }
+      if (sourceAssets.length < asset.sourceAssetIds.length) {
+        toast.error(imageT(t, 'toast.importReferenceFailed'))
         return
       }
 
@@ -4803,13 +4928,13 @@ function Images() {
         modelId: asset.model,
         ratio: asset.ratio,
         qualityPreset: qualityPresetFromAssetQuality(asset.quality),
-        sourceAssetIds: asset.sourceAssetIds,
+        sourceAssetIds: sourceAssets.map((sourceAsset) => sourceAsset.id),
         status: 'pending',
       }))
       addTasks(nextTasks)
       void runQueue(nextTasks)
     },
-    [addTasks, count, runQueue, t]
+    [addTasks, count, ensureSourceAssets, runQueue, t]
   )
 
   const cancelTask = (taskId: string) => {
@@ -4956,9 +5081,142 @@ function Images() {
     upsertAssets,
   ])
 
+  const importReferenceFiles = useCallback(
+    async (files: File[]) => {
+      const imageFiles = files.filter(isImageReferenceFile)
+      if (imageFiles.length === 0) return
+
+      const remainingSlots = MAX_REFERENCE_IMAGES - sourceAssetIds.length
+      if (remainingSlots <= 0) {
+        showReferenceLimitToast()
+        return
+      }
+
+      const filesToImport = imageFiles.slice(0, remainingSlots)
+      if (imageFiles.length > remainingSlots) {
+        showReferenceLimitToast()
+      }
+
+      setReferenceAssetsLoading(true)
+      try {
+        const imported: ImageAssetRecord[] = []
+        for (const file of filesToImport) {
+          const sourcePath = localPathFromDroppedFile(file)
+          if (sourcePath) {
+            imported.push(
+              await serviceHub.imageGeneration().importAsset({
+                id: createId(),
+                sourcePath,
+                prompt: localPromptFromPath(
+                  sourcePath,
+                  imageT(t, 'localReferenceImage')
+                ),
+              })
+            )
+            continue
+          }
+
+          const mimeType = imageMimeTypeFromFile(file) || 'image/png'
+          const b64Json = await arrayBufferToBase64(
+            await fileToArrayBuffer(file)
+          )
+          const size = await readImageSize({ b64Json, mimeType })
+          imported.push(
+            await serviceHub.imageGeneration().saveAsset({
+              id: createId(),
+              prompt: localPromptFromPath(
+                file.name,
+                imageT(t, 'localReferenceImage')
+              ),
+              mode: 'edit',
+              provider: 'local',
+              model: 'reference-image',
+              ratio: '1:1',
+              size: size ?? 'original',
+              quality: 'source',
+              sourceAssetIds: [],
+              status: 'succeeded',
+              mimeType,
+              b64Json,
+              extension: imageFileExtension(mimeType),
+              assetKind: 'reference',
+            })
+          )
+        }
+
+        upsertAssets(imported)
+        addSourceAssets(imported)
+        toast.success(imageT(t, 'toast.referenceImported'))
+      } catch (error) {
+        console.error('Failed to import dropped reference image:', error)
+        toast.error(imageT(t, 'toast.importReferenceFailed'))
+      } finally {
+        setReferenceAssetsLoading(false)
+      }
+    },
+    [
+      addSourceAssets,
+      serviceHub,
+      showReferenceLimitToast,
+      sourceAssetIds.length,
+      t,
+      upsertAssets,
+    ]
+  )
+
+  const handleImageComposerDragEnter = useCallback(
+    (event: ReactDragEvent<HTMLFormElement>) => {
+      if (!hasImageReferenceTransfer(event.dataTransfer)) return
+      event.preventDefault()
+      event.stopPropagation()
+      setComposerDragActive(true)
+    },
+    []
+  )
+
+  const handleImageComposerDragOver = useCallback(
+    (event: ReactDragEvent<HTMLFormElement>) => {
+      if (!hasImageReferenceTransfer(event.dataTransfer)) return
+      event.preventDefault()
+      event.stopPropagation()
+      setComposerDragActive(true)
+    },
+    []
+  )
+
+  const handleImageComposerDragLeave = useCallback(
+    (event: ReactDragEvent<HTMLFormElement>) => {
+      event.preventDefault()
+      event.stopPropagation()
+      const relatedTarget = event.relatedTarget as Node | null
+      if (!relatedTarget || !event.currentTarget.contains(relatedTarget)) {
+        setComposerDragActive(false)
+      }
+    },
+    []
+  )
+
+  const handleImageComposerDrop = useCallback(
+    (event: ReactDragEvent<HTMLFormElement>) => {
+      const imageFiles = droppedFilesFromDataTransfer(
+        event.dataTransfer
+      ).filter(isImageReferenceFile)
+      if (imageFiles.length === 0) {
+        setComposerDragActive(false)
+        return
+      }
+
+      event.preventDefault()
+      event.stopPropagation()
+      setComposerDragActive(false)
+      void importReferenceFiles(imageFiles)
+    },
+    [importReferenceFiles]
+  )
+
   const savePastedReferenceFiles = useCallback(
     async (files: File[]) => {
-      const imageFiles = files.filter((file) => file.type.startsWith('image/'))
+      const imageFiles = files.filter(isImageReferenceFile)
       if (imageFiles.length === 0) return
 
       const remainingSlots = MAX_REFERENCE_IMAGES - sourceAssetIds.length
@@ -4976,7 +5234,7 @@ function Images() {
       try {
         const savedAssets: ImageAssetRecord[] = []
         for (const file of filesToSave) {
-          const mimeType = file.type || 'image/png'
+          const mimeType = imageMimeTypeFromFile(file) || 'image/png'
           const b64Json = await arrayBufferToBase64(
             await fileToArrayBuffer(file)
           )
@@ -5134,7 +5392,7 @@ function Images() {
         <Button
           variant="secondary"
           size="sm"
-          onClick={() => regenerateAsset(asset)}
+          onClick={() => void regenerateAsset(asset)}
         >
           <RefreshCcw className="size-4" />
           {imageT(t, 'regenerate')}
