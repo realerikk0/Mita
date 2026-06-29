@@ -742,8 +742,8 @@ describe('ChatInput', () => {
         parseMode: 'embeddings',
       }),
     ])
-    expect(toast.error).not.toHaveBeenCalledWith(
-      'Cannot attach dropped documents',
+    expect(toast.info).not.toHaveBeenCalledWith(
+      'Use the document picker for these files',
       expect.anything()
     )
   })

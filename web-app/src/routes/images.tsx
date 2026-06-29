@@ -131,6 +131,19 @@ type ImagesSearchParams = {
   videoId?: string
 }
 
+type SourceAssetCache = {
+  records: Map<string, ImageAssetRecord>
+  listAssetsPromise?: Promise<ImageAssetRecord[]>
+}
+
+function createSourceAssetCache(
+  assets: ImageAssetRecord[] = []
+): SourceAssetCache {
+  return {
+    records: new Map(assets.map((asset) => [asset.id, asset])),
+  }
+}
+
 export const Route = createFileRoute(route.images as '/images')({
   component: Images,
   validateSearch: (search: Record<string, unknown>): ImagesSearchParams => ({
@@ -4432,19 +4445,30 @@ function Images() {
   )
 
   const ensureSourceAssets = useCallback(
-    async (ids: string[]) => {
+    async (ids: string[], cache?: SourceAssetCache) => {
       if (ids.length === 0) return []
 
       const immediate = ids
-        .map((id) => resolveAssetById(id))
+        .map((id) => cache?.records.get(id) ?? resolveAssetById(id))
         .filter((asset): asset is ImageAssetRecord => Boolean(asset))
+      immediate.forEach((asset) => cache?.records.set(asset.id, asset))
       if (immediate.length === ids.length) return immediate
 
-      const latestAssets = await serviceHub.imageGeneration().listAssets()
+      if (cache && !cache.listAssetsPromise) {
+        cache.listAssetsPromise = serviceHub.imageGeneration().listAssets()
+      }
+      const latestAssets = cache?.listAssetsPromise
+        ? await cache.listAssetsPromise
+        : await serviceHub.imageGeneration().listAssets()
       setAssets(latestAssets)
       const fallbackAssets = [...latestAssets, ...sourceAssetRecords]
+      fallbackAssets.forEach((asset) => cache?.records.set(asset.id, asset))
       return ids
-        .map((id) => fallbackAssets.find((asset) => asset.id === id))
+        .map(
+          (id) =>
+            cache?.records.get(id) ??
+            fallbackAssets.find((asset) => asset.id === id)
+        )
         .filter((asset): asset is ImageAssetRecord => Boolean(asset))
     },
     [resolveAssetById, serviceHub, setAssets, sourceAssetRecords]
@@ -4574,7 +4598,13 @@ function Images() {
   )
 
   const runTask = useCallback(
-    async (task: ImageTask) => {
+    async (task: ImageTask, sourceAssetCache?: SourceAssetCache) => {
+      const finishIfCancelled = () => {
+        if (!isTaskCancelled(task.id)) return false
+        clearTaskCancellation(task.id)
+        return true
+      }
+
       const match = findTaskModel(task)
       if (!match) {
         updateTask(task.id, {
@@ -4586,9 +4616,13 @@ function Images() {
 
       let sourceAssets: ImageAssetRecord[]
       try {
-        sourceAssets = await ensureSourceAssets(task.sourceAssetIds)
+        sourceAssets = await ensureSourceAssets(
+          task.sourceAssetIds,
+          sourceAssetCache
+        )
       } catch (error) {
         console.error('Failed to load reference images for image task:', error)
+        if (finishIfCancelled()) return
         updateTask(task.id, {
           status: 'failed',
           message: imageT(t, 'toast.importReferenceFailed'),
@@ -4596,13 +4630,14 @@ function Images() {
         return
       }
       if (sourceAssets.length < task.sourceAssetIds.length) {
+        if (finishIfCancelled()) return
         updateTask(task.id, {
           status: 'failed',
           message: imageT(t, 'toast.importReferenceFailed'),
         })
         return
       }
-      if (isTaskCancelled(task.id)) return
+      if (finishIfCancelled()) return
 
       const controller = new AbortController()
       registerTaskController(task.id, controller)
@@ -4758,8 +4793,12 @@ function Images() {
   )
 
   const runQueue = useCallback(
-    async (nextTasks: ImageTask[]) => {
+    async (
+      nextTasks: ImageTask[],
+      preloadedSourceAssets: ImageAssetRecord[] = []
+    ) => {
       const pending = [...nextTasks]
+      const sourceAssetCache = createSourceAssetCache(preloadedSourceAssets)
       const workers = Array.from(
         { length: Math.min(2, pending.length) },
         async () => {
@@ -4770,7 +4809,7 @@ function Images() {
               clearTaskCancellation(task.id)
               continue
             }
-            await runTask(task)
+            await runTask(task, sourceAssetCache)
           }
         }
       )
@@ -4932,7 +4971,7 @@ function Images() {
         status: 'pending',
       }))
       addTasks(nextTasks)
-      void runQueue(nextTasks)
+      void runQueue(nextTasks, sourceAssets)
     },
     [addTasks, count, ensureSourceAssets, runQueue, t]
   )
