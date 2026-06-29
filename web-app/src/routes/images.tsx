@@ -4151,7 +4151,7 @@ function Images() {
         />
 
         <Textarea
-          className="min-h-[58px] flex-1 resize-none border-0 bg-transparent p-0 pt-1.5 text-sm shadow-none focus-visible:ring-0"
+          className="min-h-[58px] max-h-[40svh] flex-1 resize-none overflow-y-auto overscroll-contain border-0 bg-transparent p-0 pt-1.5 text-sm shadow-none [scrollbar-gutter:stable] focus-visible:ring-0"
           value={prompt}
           placeholder={imageT(t, 'promptPlaceholder')}
           onChange={(event) => setPrompt(event.target.value)}
