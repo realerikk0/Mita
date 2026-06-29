@@ -85,6 +85,7 @@
       "selectEditCapableModel": "Pilih model gambar yang mendukung gambar sumber",
       "referenceImported": "Gambar referensi diimpor",
       "importReferenceFailed": "Gagal mengimpor gambar referensi",
+      "unsupportedReferenceFormat": "Gunakan gambar referensi PNG, JPG, atau WEBP.",
       "deleteAssetFailed": "Gagal menghapus aset gambar",
       "revealAssetFailed": "Gagal membuka lokasi aset gambar",
       "promptCopied": "Prompt disalin",

@@ -84,6 +84,7 @@
       "selectEditCapableModel": "Selecione um modelo de imagem compatível com imagens fonte",
       "referenceImported": "Imagem de referência importada",
       "importReferenceFailed": "Falha ao importar imagem de referência",
+      "unsupportedReferenceFormat": "Use imagens de referência PNG, JPG ou WEBP.",
       "deleteAssetFailed": "Falha ao excluir recurso de imagem",
       "revealAssetFailed": "Falha ao revelar recurso de imagem",
       "promptCopied": "Prompt copiado",

@@ -879,10 +879,38 @@ type DroppedFileWithPath = File & {
   path?: string
 }
 
+const SUPPORTED_REFERENCE_IMAGE_MIME_TYPES = new Set([
+  'image/jpeg',
+  'image/png',
+  'image/webp',
+])
+const UNSUPPORTED_IMAGE_EXTENSIONS = new Set([
+  'avif',
+  'bmp',
+  'gif',
+  'heic',
+  'heif',
+  'svg',
+  'tif',
+  'tiff',
+])
+
 function localPathFromDroppedFile(file: File | null | undefined) {
   const dropped = file as DroppedFileWithPath | null | undefined
   const path = dropped?.path?.trim()
   return path || undefined
+}
+
+function fileExtension(file: File) {
+  return file.name.toLowerCase().split('.').pop() ?? ''
+}
+
+function supportedReferenceImageMimeType(mimeType?: string) {
+  const normalized = mimeType?.toLowerCase().split(';')[0].trim()
+  if (!normalized || !SUPPORTED_REFERENCE_IMAGE_MIME_TYPES.has(normalized)) {
+    return ''
+  }
+  return normalized
 }
 
 function droppedFileKey(file: File) {
@@ -907,10 +935,10 @@ function droppedFilesFromDataTransfer(dataTransfer: DataTransfer) {
 }
 
 function imageMimeTypeFromFile(file: File) {
-  if (file.type.startsWith('image/')) return file.type
+  const mimeType = supportedReferenceImageMimeType(file.type)
+  if (mimeType) return mimeType
 
-  const extension = file.name.toLowerCase().split('.').pop()
-  switch (extension) {
+  switch (fileExtension(file)) {
     case 'jpg':
     case 'jpeg':
       return 'image/jpeg'
@@ -924,7 +952,17 @@ function imageMimeTypeFromFile(file: File) {
 }
 
 function isImageReferenceFile(file: File) {
-  return imageMimeTypeFromFile(file).startsWith('image/')
+  return Boolean(imageMimeTypeFromFile(file))
+}
+
+function isUnsupportedImageReferenceFile(file: File) {
+  if (isImageReferenceFile(file)) return false
+  if (file.type.toLowerCase().startsWith('image/')) return true
+  return UNSUPPORTED_IMAGE_EXTENSIONS.has(fileExtension(file))
+}
+
+function isImageReferenceCandidateFile(file: File) {
+  return isImageReferenceFile(file) || isUnsupportedImageReferenceFile(file)
 }
 
 function hasImageReferenceTransfer(dataTransfer: DataTransfer) {
@@ -939,7 +977,9 @@ function hasImageReferenceTransfer(dataTransfer: DataTransfer) {
     return true
   }
 
-  return Array.from(dataTransfer.files ?? []).some(isImageReferenceFile)
+  return Array.from(dataTransfer.files ?? []).some(
+    isImageReferenceCandidateFile
+  )
 }
 
 function openInSystemFileManagerKey() {
@@ -4251,7 +4291,7 @@ function Images() {
             const clipboardFiles = Array.from(event.clipboardData.files ?? [])
             const imageFiles = [...itemFiles, ...clipboardFiles].filter(
               (file, index, allFiles) =>
-                file.type.startsWith('image/') &&
+                isImageReferenceCandidateFile(file) &&
                 allFiles.findIndex(
                   (candidate) =>
                     candidate.name === file.name &&
@@ -5123,6 +5163,10 @@ function Images() {
   const importReferenceFiles = useCallback(
     async (files: File[]) => {
       const imageFiles = files.filter(isImageReferenceFile)
+      const unsupportedImageFiles = files.filter(isUnsupportedImageReferenceFile)
+      if (unsupportedImageFiles.length > 0) {
+        toast.error(imageT(t, 'toast.unsupportedReferenceFormat'))
+      }
       if (imageFiles.length === 0) return
 
       const remainingSlots = MAX_REFERENCE_IMAGES - sourceAssetIds.length
@@ -5237,10 +5281,9 @@ function Images() {
 
   const handleImageComposerDrop = useCallback(
     (event: ReactDragEvent<HTMLFormElement>) => {
-      const imageFiles = droppedFilesFromDataTransfer(
-        event.dataTransfer
-      ).filter(isImageReferenceFile)
-      if (imageFiles.length === 0) {
+      const droppedFiles = droppedFilesFromDataTransfer(event.dataTransfer)
+      const referenceFiles = droppedFiles.filter(isImageReferenceCandidateFile)
+      if (referenceFiles.length === 0) {
         setComposerDragActive(false)
         return
       }
@@ -5248,7 +5291,7 @@ function Images() {
       event.preventDefault()
       event.stopPropagation()
       setComposerDragActive(false)
-      void importReferenceFiles(imageFiles)
+      void importReferenceFiles(referenceFiles)
     },
     [importReferenceFiles]
   )
@@ -5256,6 +5299,10 @@ function Images() {
   const savePastedReferenceFiles = useCallback(
     async (files: File[]) => {
       const imageFiles = files.filter(isImageReferenceFile)
+      const unsupportedImageFiles = files.filter(isUnsupportedImageReferenceFile)
+      if (unsupportedImageFiles.length > 0) {
+        toast.error(imageT(t, 'toast.unsupportedReferenceFormat'))
+      }
       if (imageFiles.length === 0) return
 
       const remainingSlots = MAX_REFERENCE_IMAGES - sourceAssetIds.length

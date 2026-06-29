@@ -102,6 +102,7 @@
       "referenceImported": "Reference image imported",
       "waitForReferenceImport": "Reference image is still importing. Try again in a moment.",
       "importReferenceFailed": "Failed to import reference image",
+      "unsupportedReferenceFormat": "Use PNG, JPG, or WEBP reference images.",
       "deleteAssetFailed": "Failed to delete image asset",
       "deleteVideoAssetFailed": "Failed to delete video asset",
       "revealAssetFailed": "Failed to reveal image asset",

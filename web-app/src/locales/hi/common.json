@@ -91,6 +91,7 @@
       "selectEditCapableModel": "स्रोत इमेज समर्थित इमेज मॉडल चुनें",
       "referenceImported": "संदर्भ इमेज इंपोर्ट हो गई",
       "importReferenceFailed": "संदर्भ इमेज इंपोर्ट नहीं हो सकी",
+      "unsupportedReferenceFormat": "PNG, JPG या WEBP संदर्भ इमेज का उपयोग करें.",
       "deleteAssetFailed": "इमेज एसेट हटाया नहीं जा सका",
       "revealAssetFailed": "इमेज एसेट दिखाया नहीं जा सका",
       "promptCopied": "Prompt कॉपी किया गया",

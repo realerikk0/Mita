@@ -85,6 +85,7 @@
       "selectEditCapableModel": "Выберите модель изображений с поддержкой исходных изображений",
       "referenceImported": "Референсное изображение импортировано",
       "importReferenceFailed": "Не удалось импортировать референсное изображение",
+      "unsupportedReferenceFormat": "Используйте референсные изображения PNG, JPG или WEBP.",
       "deleteAssetFailed": "Не удалось удалить ассет изображения",
       "revealAssetFailed": "Не удалось открыть расположение ассета",
       "promptCopied": "Prompt скопирован",
