@@ -532,6 +532,33 @@ describe('Images route', () => {
     ).toHaveTextContent('Ultra HD 4K')
   })
 
+  it('keeps long image prompts scrollable inside the pinned composer', async () => {
+    h.providers = [
+      {
+        provider: 'jingxing',
+        base_url: 'https://api.jingxing.uk/v1',
+        settings: [],
+        models: [
+          {
+            id: 'gpt-image-1.5',
+            capabilities: [ModelCapabilities.IMAGE_GENERATION],
+          },
+        ],
+      },
+    ]
+
+    renderComponent()
+
+    await waitFor(() => expect(h.listAssets).toHaveBeenCalled())
+    const promptInput = screen.getByPlaceholderText(/Upload a reference image/)
+    expect(promptInput).toHaveClass(
+      'max-h-[40svh]',
+      'overflow-y-auto',
+      'overscroll-contain',
+      '[scrollbar-gutter:stable]'
+    )
+  })
+
   it('keeps an in-flight image task visible after leaving and returning to the media route', async () => {
     h.providers = [
       {
