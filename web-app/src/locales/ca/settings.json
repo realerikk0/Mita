@@ -261,7 +261,12 @@
     "reportIssue": "Informa del problema",
     "credits": "Crèdits",
     "creditsDesc1": "👋 Biyan el construeix amb ❤️ l’equip de Jingxing.",
-    "creditsDesc2": "Agraïments especials a les nostres dependències de codi obert — especialment llama.cpp i Tauri — i a la nostra comunitat d’IA."
+    "creditsDesc2": "Agraïments especials a les nostres dependències de codi obert — especialment llama.cpp i Tauri — i a la nostra comunitat d’IA.",
+    "clearLogs": "Clear Logs",
+    "clearLogsTitle": "Clear local diagnostic logs?",
+    "clearLogsDesc": "This removes local diagnostic log files from this device. It will not affect chats, settings, models, or cloud services.",
+    "clearLogsSuccess": "Local diagnostic logs cleared",
+    "clearLogsError": "Failed to clear local diagnostic logs"
   },
   "extensions": {
     "title": "Extensions"

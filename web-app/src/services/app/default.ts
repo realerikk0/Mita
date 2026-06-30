@@ -17,6 +17,7 @@ export class DefaultAppService implements AppService {
   }
 
   async readLogs(_options?: ReadLogsOptions): Promise<LogEntry[]> {
+    void _options
     return []
   }
 

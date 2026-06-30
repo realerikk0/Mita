@@ -259,7 +259,12 @@
     "reportIssue": "Сообщить об ошибке",
     "credits": "Авторы",
     "creditsDesc1": "👋 Biyan создан с ❤️ командой Jingxing.",
-    "creditsDesc2": "Особая благодарность нашим зависимостям с открытым исходным кодом — особенно llama.cpp и Tauri — а также нашему удивительному сообществу ИИ."
+    "creditsDesc2": "Особая благодарность нашим зависимостям с открытым исходным кодом — особенно llama.cpp и Tauri — а также нашему удивительному сообществу ИИ.",
+    "clearLogs": "Clear Logs",
+    "clearLogsTitle": "Clear local diagnostic logs?",
+    "clearLogsDesc": "This removes local diagnostic log files from this device. It will not affect chats, settings, models, or cloud services.",
+    "clearLogsSuccess": "Local diagnostic logs cleared",
+    "clearLogsError": "Failed to clear local diagnostic logs"
   },
   "extensions": {
     "title": "Расширения"

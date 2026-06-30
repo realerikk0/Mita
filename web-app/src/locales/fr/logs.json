@@ -1,3 +1,4 @@
 {
-  "noLogs": "Aucun journal disponible"
+  "noLogs": "Aucun journal disponible",
+  "loadError": "Failed to load logs"
 }

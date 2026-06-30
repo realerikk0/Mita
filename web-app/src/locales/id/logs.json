@@ -1,3 +1,4 @@
 {
-  "noLogs": "Tidak ada log yang tersedia"
+  "noLogs": "Tidak ada log yang tersedia",
+  "loadError": "Failed to load logs"
 }

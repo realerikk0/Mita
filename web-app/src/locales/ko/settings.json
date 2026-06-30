@@ -266,7 +266,12 @@
     "reportIssue": "문제 신고",
     "credits": "크레딧",
     "creditsDesc1": "👋 Biyan은 Jingxing 팀이 ❤️를 담아 만들었습니다.",
-    "creditsDesc2": "오픈 소스 종속성(특히 llama.cpp 및 Tauri)과 멋진 AI 커뮤니티에 특별히 감사드립니다."
+    "creditsDesc2": "오픈 소스 종속성(특히 llama.cpp 및 Tauri)과 멋진 AI 커뮤니티에 특별히 감사드립니다.",
+    "clearLogs": "Clear Logs",
+    "clearLogsTitle": "Clear local diagnostic logs?",
+    "clearLogsDesc": "This removes local diagnostic log files from this device. It will not affect chats, settings, models, or cloud services.",
+    "clearLogsSuccess": "Local diagnostic logs cleared",
+    "clearLogsError": "Failed to clear local diagnostic logs"
   },
   "extensions": {
     "title": "확장 프로그램"

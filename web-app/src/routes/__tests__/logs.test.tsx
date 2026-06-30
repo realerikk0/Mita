@@ -37,6 +37,7 @@ describe('LogsViewer route', () => {
   beforeEach(() => {
     vi.clearAllMocks()
     h.readLogs.mockResolvedValue([])
+    vi.spyOn(console, 'error').mockImplementation(() => {})
   })
 
   it('renders empty state when no logs', async () => {
@@ -56,11 +57,37 @@ describe('LogsViewer route', () => {
 
   it('renders log entries with level labels and messages', async () => {
     h.readLogs.mockResolvedValue([
-      { timestamp: '2024-01-01T00:00:00Z', level: 'error', target: 'settings', event: 'boom.event', message: 'boom' },
-      { timestamp: '2024-01-01T00:00:01Z', level: 'info', target: 'app', message: 'hello' },
-      { timestamp: '2024-01-01T00:00:02Z', level: 'warn', target: 'app', message: 'careful' },
-      { timestamp: '2024-01-01T00:00:03Z', level: 'debug', target: 'app', message: 'trace' },
-      { timestamp: '2024-01-01T00:00:04Z', level: 'verbose', target: 'app', message: 'misc' },
+      {
+        timestamp: '2024-01-01T00:00:00Z',
+        level: 'error',
+        target: 'settings',
+        event: 'boom.event',
+        message: 'boom',
+      },
+      {
+        timestamp: '2024-01-01T00:00:01Z',
+        level: 'info',
+        target: 'app',
+        message: 'hello',
+      },
+      {
+        timestamp: '2024-01-01T00:00:02Z',
+        level: 'warn',
+        target: 'app',
+        message: 'careful',
+      },
+      {
+        timestamp: '2024-01-01T00:00:03Z',
+        level: 'debug',
+        target: 'app',
+        message: 'trace',
+      },
+      {
+        timestamp: '2024-01-01T00:00:04Z',
+        level: 'verbose',
+        target: 'app',
+        message: 'misc',
+      },
     ])
     renderComponent()
     await waitFor(() => {
@@ -74,6 +101,34 @@ describe('LogsViewer route', () => {
     expect(screen.getByText('boom.event · settings')).toBeInTheDocument()
     // default branch (unknown level) still renders uppercased
     expect(screen.getByText('VERBOSE')).toBeInTheDocument()
+  })
+
+  it('renders a safe timestamp fallback for invalid dates', async () => {
+    h.readLogs.mockResolvedValue([
+      {
+        timestamp: 'not-a-date',
+        level: 'info',
+        target: 'app',
+        message: 'bad date',
+      },
+    ])
+
+    renderComponent()
+
+    await waitFor(() => {
+      expect(screen.getByText('bad date')).toBeInTheDocument()
+    })
+    expect(screen.getByText('[--:--:--]')).toBeInTheDocument()
+  })
+
+  it('renders a load error when reading logs fails', async () => {
+    h.readLogs.mockRejectedValue(new Error('boom'))
+
+    renderComponent()
+
+    await waitFor(() => {
+      expect(screen.getByText('logs:loadError')).toBeInTheDocument()
+    })
   })
 
   it('filters out falsy log entries before rendering', async () => {

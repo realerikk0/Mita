@@ -93,6 +93,29 @@ describe('TauriAppService', () => {
       })
     })
 
+    it('should strip legacy fern prefix from JSONL runtime messages', () => {
+      const logLine = JSON.stringify({
+        ts: '2026-06-30T12:00:00Z',
+        level: 'error',
+        target: 'runtime',
+        event: 'runtime.log',
+        message:
+          '[2026-06-30][12:00:00][runtime::target][ERROR] network failed',
+      })
+
+      const result = appService.parseLogLine(logLine)
+
+      expect(result.message).toBe('network failed')
+    })
+
+    it('should not treat parsed JSON arrays as structured log entries', () => {
+      const result = appService.parseLogLine('[]')
+
+      expect(result.message).toBe('[]')
+      expect(result.level).toBe('info')
+      expect(result.target).toBe('info')
+    })
+
     it('should parse valid log line', () => {
       const logLine = '[2024-01-01][10:00:00Z][target][INFO] Test message'
       const result = appService.parseLogLine(logLine)

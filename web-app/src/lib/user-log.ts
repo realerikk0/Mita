@@ -19,6 +19,7 @@ const SENSITIVE_KEY_PARTS = [
 ]
 
 const PATH_KEY_PARTS = ['path', 'folder', 'directory', 'file']
+const MAX_TEXT_LEN = 500
 
 function shouldRedactSensitiveKey(key: string) {
   const normalized = key.toLowerCase()
@@ -30,14 +31,40 @@ function shouldRedactPathKey(key: string) {
   return PATH_KEY_PARTS.some((part) => normalized.includes(part))
 }
 
-function compactText(value: string, limit = 500) {
-  return value.length > limit ? `${value.slice(0, limit)}...` : value
+function redactUrlToken(rawToken: string) {
+  const match = rawToken.match(/^(.+?)([.,)\]}'"]*)$/)
+  const core = match?.[1] ?? rawToken
+  const suffix = match?.[2] ?? ''
+
+  try {
+    const url = new URL(core)
+    if (!['http:', 'https:'].includes(url.protocol)) return rawToken
+    return `${url.protocol}//${url.host}${url.pathname}${url.search ? '?[redacted]' : ''}${url.hash ? '#[redacted]' : ''}${suffix}`
+  } catch {
+    return rawToken
+  }
+}
+
+export function sanitizeUserLogText(value: string, limit = MAX_TEXT_LEN) {
+  const compact = value.replace(/[\r\n]+/g, ' ')
+  const redacted = compact
+    .replace(/https?:\/\/[^\s]+/gi, (token) => redactUrlToken(token))
+    .replace(/\b(Bearer|Basic)\s+[^\s,;'"&]+/gi, '$1 [redacted]')
+    .replace(
+      /\b(api_key|apikey|access_token|refresh_token|auth_token|token|password|secret)=([^\s,;'"&]+)/gi,
+      '$1=[redacted]'
+    )
+    .replace(/\b(authorization|cookie)\s*[:=]\s*[^\s,;'"&]+/gi, '$1: [redacted]')
+    .replace(/\/Users\/[^/\s]+/g, '/Users/[redacted]')
+    .replace(/([A-Za-z]:\\Users\\)[^\\\s]+/g, '$1[redacted]')
+
+  return redacted.length > limit ? `${redacted.slice(0, limit)}...` : redacted
 }
 
 function sanitizeValue(value: unknown, depth = 0): unknown {
   if (depth > 4) return '[truncated]'
   if (value === null || value === undefined) return value
-  if (typeof value === 'string') return compactText(value)
+  if (typeof value === 'string') return sanitizeUserLogText(value)
   if (typeof value === 'number' || typeof value === 'boolean') return value
 
   if (Array.isArray(value)) {
@@ -65,11 +92,11 @@ function normalizeError(error: unknown) {
   if (error instanceof Error) {
     return {
       name: error.name,
-      message: compactText(error.message || error.name),
+      message: sanitizeUserLogText(error.message || error.name),
     }
   }
   if (typeof error === 'string') {
-    return { message: compactText(error) }
+    return { message: sanitizeUserLogText(error) }
   }
   if (typeof error === 'object') {
     const record = error as Record<string, unknown>
@@ -81,7 +108,7 @@ function normalizeError(error: unknown) {
       statusText: record.statusText,
     })
   }
-  return { message: compactText(String(error)) }
+  return { message: sanitizeUserLogText(String(error)) }
 }
 
 function canWriteUserLog() {
@@ -99,7 +126,7 @@ export async function writeUserLog(payload: UserLogPayload): Promise<void> {
     level: payload.level ?? 'info',
     target: payload.target ?? 'web-app',
     event: payload.event,
-    message: payload.message ? compactText(payload.message) : undefined,
+    message: payload.message ? sanitizeUserLogText(payload.message) : undefined,
     context: sanitizeValue(payload.context),
     error: normalizeError(payload.error),
   }

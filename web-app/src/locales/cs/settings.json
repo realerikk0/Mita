@@ -259,7 +259,12 @@
     "reportIssue": "Nahlásit problém",
     "credits": "Poděkování",
     "creditsDesc1": "👋 Biyan je vytvořen s ❤️ týmem Jingxing.",
-    "creditsDesc2": "Speciální poděkování našim open-source závislostem—zejména llama.cpp a Tauri—a naší úžasné AI komunitě."
+    "creditsDesc2": "Speciální poděkování našim open-source závislostem—zejména llama.cpp a Tauri—a naší úžasné AI komunitě.",
+    "clearLogs": "Clear Logs",
+    "clearLogsTitle": "Clear local diagnostic logs?",
+    "clearLogsDesc": "This removes local diagnostic log files from this device. It will not affect chats, settings, models, or cloud services.",
+    "clearLogsSuccess": "Local diagnostic logs cleared",
+    "clearLogsError": "Failed to clear local diagnostic logs"
   },
   "extensions": {
     "title": "Rozšíření"

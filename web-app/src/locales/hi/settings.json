@@ -266,7 +266,12 @@
     "reportIssue": "समस्या रिपोर्ट करें",
     "credits": "श्रेय",
     "creditsDesc1": "👋 Biyan Jingxing टीम द्वारा ❤️ के साथ बनाया गया है।",
-    "creditsDesc2": "हमारे ओपन सोर्स डिपेंडेंसीज़ जैसे llama.cpp और Tauri, तथा हमारी शानदार AI समुदाय को विशेष धन्यवाद।"
+    "creditsDesc2": "हमारे ओपन सोर्स डिपेंडेंसीज़ जैसे llama.cpp और Tauri, तथा हमारी शानदार AI समुदाय को विशेष धन्यवाद।",
+    "clearLogs": "Clear Logs",
+    "clearLogsTitle": "Clear local diagnostic logs?",
+    "clearLogsDesc": "This removes local diagnostic log files from this device. It will not affect chats, settings, models, or cloud services.",
+    "clearLogsSuccess": "Local diagnostic logs cleared",
+    "clearLogsError": "Failed to clear local diagnostic logs"
   },
   "extensions": {
     "title": "एक्सटेंशन"

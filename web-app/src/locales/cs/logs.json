@@ -1,3 +1,4 @@
 {
-  "noLogs": "Nejsou k dispozici žádné záznamy"
+  "noLogs": "Nejsou k dispozici žádné záznamy",
+  "loadError": "Failed to load logs"
 }

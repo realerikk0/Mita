@@ -263,7 +263,12 @@
     "creditsDesc1": "彼岩 由 Jingxing 團隊用 ❤️ 構建。",
     "creditsDesc2": "特別感謝我們的開源依賴項——尤其是 llama.cpp 和 Tauri——以及我們出色的 AI 社群。",
     "huggingfaceToken": "HuggingFace 代幣",
-    "huggingfaceTokenDesc": "您的 HuggingFace API 代幣，用於存取模型。"
+    "huggingfaceTokenDesc": "您的 HuggingFace API 代幣，用於存取模型。",
+    "clearLogs": "Clear Logs",
+    "clearLogsTitle": "Clear local diagnostic logs?",
+    "clearLogsDesc": "This removes local diagnostic log files from this device. It will not affect chats, settings, models, or cloud services.",
+    "clearLogsSuccess": "Local diagnostic logs cleared",
+    "clearLogsError": "Failed to clear local diagnostic logs"
   },
   "extensions": {
     "title": "擴充功能"

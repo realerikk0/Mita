@@ -104,13 +104,13 @@ export class TauriAppService extends DefaultAppService {
         appVersion?: string
         platform?: string
       }
-      if (parsed && typeof parsed === 'object') {
+      if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
         return {
           timestamp: parsed.ts ?? Date.now(),
           level: this.normalizeLogLevel(parsed.level),
           target: parsed.target ?? 'app',
           event: parsed.event,
-          message: parsed.message ?? '',
+          message: this.stripLegacyLogPrefix(parsed.message ?? ''),
           context: parsed.context,
           error: parsed.error,
           appVersion: parsed.appVersion,
@@ -155,6 +155,11 @@ export class TauriAppService extends DefaultAppService {
       default:
         return 'info'
     }
+  }
+
+  private stripLegacyLogPrefix(message: string): string {
+    const match = message.match(/^\[[^\]]+\]\[[^\]]+\]\[[^\]]+\]\[[^\]]+\]\s(.*)$/)
+    return match ? match[1] : message
   }
 
   async getServerStatus(): Promise<boolean> {

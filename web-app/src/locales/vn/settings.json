@@ -253,7 +253,12 @@
     "creditsDesc1": "Biyan được xây dựng với ❤️ bởi Đội Jingxing.",
     "creditsDesc2": "Cảm ơn đặc biệt đến các phụ thuộc mã nguồn mở của chúng tôi—đặc biệt là llama.cpp và Tauri—và đến cộng đồng AI tuyệt vời của chúng tôi.",
     "huggingfaceToken": "Token HuggingFace",
-    "huggingfaceTokenDesc": "Token API HuggingFace của bạn để truy cập các mô hình."
+    "huggingfaceTokenDesc": "Token API HuggingFace của bạn để truy cập các mô hình.",
+    "clearLogs": "Clear Logs",
+    "clearLogsTitle": "Clear local diagnostic logs?",
+    "clearLogsDesc": "This removes local diagnostic log files from this device. It will not affect chats, settings, models, or cloud services.",
+    "clearLogsSuccess": "Local diagnostic logs cleared",
+    "clearLogsError": "Failed to clear local diagnostic logs"
   },
   "extensions": {
     "title": "Tiện ích mở rộng"

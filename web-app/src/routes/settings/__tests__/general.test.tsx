@@ -1,3 +1,5 @@
+import fs from 'node:fs'
+import path from 'node:path'
 import { describe, it, expect, beforeEach, vi } from 'vitest'
 import { render, screen, fireEvent, waitFor, act } from '@testing-library/react'
 import { Route as GeneralRoute } from '../general'
@@ -389,6 +391,28 @@ describe('General Settings Route', () => {
     })
 
     expect(screen.getByText('v1.0.0')).toBeInTheDocument()
+  })
+
+  it('defines clear log strings under the general settings namespace', () => {
+    const localesDir = path.resolve(process.cwd(), 'src/locales')
+    const requiredKeys = [
+      'clearLogs',
+      'clearLogsTitle',
+      'clearLogsDesc',
+      'clearLogsSuccess',
+      'clearLogsError',
+    ]
+
+    for (const locale of fs.readdirSync(localesDir)) {
+      const settingsUrl = path.join(localesDir, locale, 'settings.json')
+      if (!fs.existsSync(settingsUrl)) continue
+
+      const settings = JSON.parse(fs.readFileSync(settingsUrl, 'utf8'))
+      for (const key of requiredKeys) {
+        expect(settings.general?.[key], `${locale} missing general.${key}`)
+          .toBeTruthy()
+      }
+    }
   })
 
   // TODO: This test is currently commented out due to missing implementation

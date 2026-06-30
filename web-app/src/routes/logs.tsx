@@ -14,6 +14,7 @@ export const Route = createFileRoute(route.appLogs as any)({
 function LogsViewer() {
   const { t } = useTranslation()
   const [logs, setLogs] = useState<LogEntry[]>([])
+  const [loadError, setLoadError] = useState(false)
   const logsContainerRef = useRef<HTMLDivElement>(null)
   const serviceHub = useServiceHub()
 
@@ -30,9 +31,14 @@ function LogsViewer() {
 
           lastLogsLength = filteredLogs.length
           setLogs(filteredLogs)
+          setLoadError(false)
 
           // Scroll to bottom after initial logs are loaded
           if (needScroll) setTimeout(() => scrollToBottom(), 100)
+        })
+        .catch((error) => {
+          console.error('Failed to read local logs:', error)
+          setLoadError(true)
         })
     }
     updateLogs()
@@ -77,6 +83,7 @@ function LogsViewer() {
   // Format timestamp to be more readable
   const formatTimestamp = (timestamp: string | number) => {
     const date = new Date(timestamp)
+    if (Number.isNaN(date.getTime())) return '--:--:--'
     return date.toLocaleTimeString('en-US', {
       hour12: false,
       timeZone: 'UTC',
@@ -90,7 +97,11 @@ function LogsViewer() {
     <div className="flex flex-col h-full bg-background">
       <div className="flex-1 overflow-auto" ref={logsContainerRef}>
         <div className="font-mono p-2">
-          {logs.length === 0 ? (
+          {loadError ? (
+            <div className="text-center text-muted-foreground py-8">
+              {t('logs:loadError')}
+            </div>
+          ) : logs.length === 0 ? (
             <div className="text-center text-muted-foreground py-8">
               {t('logs:noLogs')}
             </div>

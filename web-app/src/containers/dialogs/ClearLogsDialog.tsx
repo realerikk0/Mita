@@ -21,10 +21,6 @@ export function ClearLogsDialog({ onClear, children }: ClearLogsDialogProps) {
   const { t } = useTranslation()
   const clearButtonRef = useRef<HTMLButtonElement>(null)
 
-  const handleKeyDown = (e: React.KeyboardEvent) => {
-    if (e.key === 'Enter') onClear()
-  }
-
   return (
     <Dialog>
       <DialogTrigger asChild>{children}</DialogTrigger>
@@ -55,7 +51,6 @@ export function ClearLogsDialog({ onClear, children }: ClearLogsDialogProps) {
                 ref={clearButtonRef}
                 variant="destructive"
                 onClick={onClear}
-                onKeyDown={handleKeyDown}
                 size="sm"
                 className="w-full sm:w-auto"
                 aria-label={t('settings:general.clearLogs')}

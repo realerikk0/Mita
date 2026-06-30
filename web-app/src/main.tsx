@@ -95,7 +95,7 @@ const registerGlobalErrorLogging = () => {
     void logUserError(
       'window.error',
       event.error ?? event.message,
-      { source: event.filename, lineno: event.lineno, colno: event.colno },
+      { filename: event.filename, lineno: event.lineno, colno: event.colno },
       'web-runtime'
     )
   })

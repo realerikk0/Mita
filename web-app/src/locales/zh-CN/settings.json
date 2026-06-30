@@ -271,7 +271,12 @@
     "creditsDesc1": "彼岩 由 Jingxing 团队用 ❤️ 构建。",
     "creditsDesc2": "特别感谢我们的开源依赖项——尤其是 llama.cpp 和 Tauri——以及我们出色的 AI 社区。",
     "huggingfaceToken": "HuggingFace 令牌",
-    "huggingfaceTokenDesc": "您用于访问模型的 HuggingFace API 令牌。"
+    "huggingfaceTokenDesc": "您用于访问模型的 HuggingFace API 令牌。",
+    "clearLogs": "清理日志",
+    "clearLogsTitle": "清理本地诊断日志？",
+    "clearLogsDesc": "这会删除此设备上的本地诊断日志文件，不会影响聊天、设置、模型或云服务。",
+    "clearLogsSuccess": "本地诊断日志已清理",
+    "clearLogsError": "清理本地诊断日志失败"
   },
   "extensions": {
     "title": "扩展"

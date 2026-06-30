@@ -1,3 +1,4 @@
 {
-  "noLogs": "No hi ha registres disponibles"
+  "noLogs": "No hi ha registres disponibles",
+  "loadError": "Failed to load logs"
 }
