@@ -88,6 +88,7 @@
       "selectEditCapableModel": "請選擇支援源圖輸入的圖片模型",
       "referenceImported": "參考圖已匯入",
       "importReferenceFailed": "匯入參考圖失敗",
+      "unsupportedReferenceFormat": "請使用 PNG、JPG 或 WEBP 參考圖。",
       "deleteAssetFailed": "刪除圖片資產失敗",
       "revealAssetFailed": "無法開啟圖片所在位置",
       "promptCopied": "提示詞已複製",

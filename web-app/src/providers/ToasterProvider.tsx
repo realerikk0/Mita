@@ -9,6 +9,7 @@ export function ToasterProvider() {
 
   return (
     <Toaster
+      closeButton
       richColors
       position={notificationPosition}
       offset={getToastOffset(notificationPosition)}

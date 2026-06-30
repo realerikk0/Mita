@@ -85,6 +85,7 @@
       "selectEditCapableModel": "Vyberte obrázkový model podporující zdrojové obrázky",
       "referenceImported": "Referenční obrázek importován",
       "importReferenceFailed": "Nepodařilo se importovat referenční obrázek",
+      "unsupportedReferenceFormat": "Použijte referenční obrázky PNG, JPG nebo WEBP.",
       "deleteAssetFailed": "Nepodařilo se odstranit obrázkovou položku",
       "revealAssetFailed": "Nepodařilo se zobrazit obrázkovou položku",
       "promptCopied": "Prompt zkopírován",

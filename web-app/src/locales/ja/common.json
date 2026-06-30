@@ -85,6 +85,7 @@
       "selectEditCapableModel": "ソース画像に対応した画像モデルを選択してください",
       "referenceImported": "参照画像をインポートしました",
       "importReferenceFailed": "参照画像のインポートに失敗しました",
+      "unsupportedReferenceFormat": "PNG、JPG、WEBP の参照画像を使用してください。",
       "deleteAssetFailed": "画像アセットの削除に失敗しました",
       "revealAssetFailed": "画像アセットの場所を開けませんでした",
       "promptCopied": "プロンプトをコピーしました",

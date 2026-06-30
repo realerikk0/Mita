@@ -85,6 +85,7 @@
       "selectEditCapableModel": "Chọn mô hình ảnh hỗ trợ ảnh nguồn",
       "referenceImported": "Đã nhập ảnh tham chiếu",
       "importReferenceFailed": "Không thể nhập ảnh tham chiếu",
+      "unsupportedReferenceFormat": "Hãy dùng ảnh tham chiếu PNG, JPG hoặc WEBP.",
       "deleteAssetFailed": "Không thể xóa tài nguyên ảnh",
       "revealAssetFailed": "Không thể mở vị trí tài nguyên ảnh",
       "promptCopied": "Đã sao chép prompt",

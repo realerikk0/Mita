@@ -322,6 +322,8 @@ const translations: Record<string, string> = {
     'Reference image is still importing. Try again in a moment.',
   'common:imageGeneration.toast.importReferenceFailed':
     'Failed to import reference image',
+  'common:imageGeneration.toast.unsupportedReferenceFormat':
+    'Use PNG, JPG, or WEBP reference images.',
   'common:imageGeneration.toast.selectEditCapableModel':
     'Select an image model that supports source images',
   'common:imageGeneration.defaultVariationPrompt':
@@ -3510,6 +3512,225 @@ describe('Images route', () => {
     )
   })
 
+  it('imports dropped image files as media references', async () => {
+    h.providers = [
+      {
+        provider: 'jingxing',
+        base_url: 'https://api.jingxing.uk/v1',
+        settings: [],
+        models: [
+          {
+            id: 'gpt-image-2',
+            capabilities: [
+              ModelCapabilities.IMAGE_GENERATION,
+              ModelCapabilities.IMAGE_TO_IMAGE,
+            ],
+          },
+        ],
+      },
+    ]
+    const droppedReferenceAsset = {
+      id: 'local-ref-1',
+      prompt: 'folder-girl',
+      mode: 'edit',
+      provider: 'local',
+      model: 'reference-image',
+      ratio: '1:1',
+      size: '4x3',
+      quality: 'source',
+      sourceAssetIds: [],
+      createdAt: '2026-05-11T00:00:00Z',
+      status: 'succeeded',
+      path: '/mock/mita/image-assets/local-ref-1/image.png',
+      fileName: 'image.png',
+      mimeType: 'image/png',
+      assetKind: 'reference',
+    }
+    h.listAssets.mockResolvedValue([])
+    h.saveAsset.mockResolvedValue(droppedReferenceAsset)
+    vi.stubGlobal(
+      'Image',
+      class {
+        naturalWidth = 4
+        naturalHeight = 3
+        onload?: () => void
+        set src(_value: string) {
+          this.onload?.()
+        }
+      }
+    )
+
+    renderComponent()
+
+    await waitFor(() => expect(h.listAssets).toHaveBeenCalled())
+    const composer = screen
+      .getByRole('button', { name: 'Add reference image' })
+      .closest('form')
+    expect(composer).toBeTruthy()
+
+    const droppedFile = new File(['image-bytes'], 'folder-girl.png', {
+      type: 'image/png',
+    })
+    await act(async () => {
+      fireEvent.drop(composer!, {
+        dataTransfer: {
+          files: [droppedFile],
+          items: [],
+        },
+      })
+      await Promise.resolve()
+    })
+
+    await waitFor(() =>
+      expect(h.saveAsset).toHaveBeenCalledWith(
+        expect.objectContaining({
+          prompt: 'folder-girl',
+          mimeType: 'image/png',
+          assetKind: 'reference',
+        })
+      )
+    )
+    expect((await screen.findAllByAltText('folder-girl')).length).toBeGreaterThan(0)
+
+    fireEvent.click(screen.getByRole('button', { name: 'Generate' }))
+
+    await waitFor(() =>
+      expect(h.generateImages.mock.calls.at(-1)?.[0]).toMatchObject({
+        mode: 'variation',
+        sourceAssets: [expect.objectContaining({ id: 'local-ref-1' })],
+      })
+    )
+  })
+
+  it('rejects unsupported dropped reference image formats before saving', async () => {
+    h.providers = [
+      {
+        provider: 'jingxing',
+        base_url: 'https://api.jingxing.uk/v1',
+        settings: [],
+        models: [
+          {
+            id: 'gpt-image-2',
+            capabilities: [
+              ModelCapabilities.IMAGE_GENERATION,
+              ModelCapabilities.IMAGE_TO_IMAGE,
+            ],
+          },
+        ],
+      },
+    ]
+    h.listAssets.mockResolvedValue([])
+
+    renderComponent()
+
+    await waitFor(() => expect(h.listAssets).toHaveBeenCalled())
+    const composer = screen
+      .getByRole('button', { name: 'Add reference image' })
+      .closest('form')
+    expect(composer).toBeTruthy()
+
+    const droppedFile = new File(['<svg />'], 'vector.svg', {
+      type: 'image/svg+xml',
+    })
+    await act(async () => {
+      fireEvent.drop(composer!, {
+        dataTransfer: {
+          files: [droppedFile],
+          items: [],
+        },
+      })
+      await Promise.resolve()
+    })
+
+    expect(h.saveAsset).not.toHaveBeenCalled()
+    expect(h.importAsset).not.toHaveBeenCalled()
+    expect(h.toast.error).toHaveBeenCalledWith(
+      'Use PNG, JPG, or WEBP reference images.'
+    )
+  })
+
+  it('imports dropped webp reference files when the mime type is missing', async () => {
+    h.providers = [
+      {
+        provider: 'jingxing',
+        base_url: 'https://api.jingxing.uk/v1',
+        settings: [],
+        models: [
+          {
+            id: 'gpt-image-2',
+            capabilities: [
+              ModelCapabilities.IMAGE_GENERATION,
+              ModelCapabilities.IMAGE_TO_IMAGE,
+            ],
+          },
+        ],
+      },
+    ]
+    const droppedReferenceAsset = {
+      id: 'local-ref-1',
+      prompt: 'folder-girl',
+      mode: 'edit',
+      provider: 'local',
+      model: 'reference-image',
+      ratio: '1:1',
+      size: '4x3',
+      quality: 'source',
+      sourceAssetIds: [],
+      createdAt: '2026-05-11T00:00:00Z',
+      status: 'succeeded',
+      path: '/mock/mita/image-assets/local-ref-1/image.webp',
+      fileName: 'image.webp',
+      mimeType: 'image/webp',
+      assetKind: 'reference',
+    }
+    h.listAssets.mockResolvedValue([])
+    h.saveAsset.mockResolvedValue(droppedReferenceAsset)
+    vi.stubGlobal(
+      'Image',
+      class {
+        naturalWidth = 4
+        naturalHeight = 3
+        onload?: () => void
+        set src(_value: string) {
+          this.onload?.()
+        }
+      }
+    )
+
+    renderComponent()
+
+    await waitFor(() => expect(h.listAssets).toHaveBeenCalled())
+    const composer = screen
+      .getByRole('button', { name: 'Add reference image' })
+      .closest('form')
+    expect(composer).toBeTruthy()
+
+    const droppedFile = new File(['image-bytes'], 'folder-girl.webp')
+    await act(async () => {
+      fireEvent.drop(composer!, {
+        dataTransfer: {
+          files: [droppedFile],
+          items: [],
+        },
+      })
+      await Promise.resolve()
+    })
+
+    await waitFor(() =>
+      expect(h.saveAsset).toHaveBeenCalledWith(
+        expect.objectContaining({
+          prompt: 'folder-girl',
+          mimeType: 'image/webp',
+          extension: 'webp',
+          assetKind: 'reference',
+        })
+      )
+    )
+    expect(h.toast.error).not.toHaveBeenCalledWith(
+      'Use PNG, JPG, or WEBP reference images.'
+    )
+  })
+
   it('regenerates saved image history with original reference assets', async () => {
     h.providers = [
       {
@@ -3590,9 +3811,15 @@ describe('Images route', () => {
     renderComponent()
 
     await screen.findByText('keep the reference style')
+    act(() => {
+      useImageGenerationStore.getState().setAssets([generatedAsset] as any)
+    })
+    h.listAssets.mockClear()
+    h.listAssets.mockResolvedValue([generatedAsset, referenceAsset])
     fireEvent.click(screen.getByRole('button', { name: 'Regenerate' }))
 
     await waitFor(() => expect(h.generateImages).toHaveBeenCalled())
+    expect(h.listAssets).toHaveBeenCalled()
     expect(h.generateImages.mock.calls.at(-1)?.[0]).toMatchObject({
       mode: 'edit',
       model: expect.objectContaining({ id: 'gpt-image-2' }),

@@ -80,6 +80,7 @@
       "selectEditCapableModel": "Selecciona un model d’imatge que admeti imatges font",
       "referenceImported": "Imatge de referència importada",
       "importReferenceFailed": "No s’ha pogut importar la imatge de referència",
+      "unsupportedReferenceFormat": "Fes servir imatges de referència PNG, JPG o WEBP.",
       "deleteAssetFailed": "No s’ha pogut suprimir el recurs d’imatge",
       "revealAssetFailed": "No s’ha pogut mostrar la ubicació del recurs",
       "promptCopied": "Prompt copiat",

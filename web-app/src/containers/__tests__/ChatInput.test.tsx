@@ -320,6 +320,7 @@ vi.mock('@/lib/platform/utils', () => ({
 
 // Import component AFTER all mocks
 import ChatInput from '../ChatInput'
+import { toast } from 'sonner'
 
 // Helpers -------------------------------------------------------------------
 
@@ -689,6 +690,59 @@ describe('ChatInput', () => {
       }),
     ])
     expect(screen.queryByText(/Invalid file type/)).not.toBeInTheDocument()
+  })
+
+  it('uses data transfer item paths when dropped document files omit them', async () => {
+    attachmentsSettings = {
+      enabled: true,
+      parseMode: 'embeddings',
+      maxFileSizeMB: 10,
+    }
+    setAttachmentsMock.mockImplementation((_key, updater) => {
+      attachmentsList =
+        typeof updater === 'function' ? updater(attachmentsList) : updater
+    })
+    const lastModified = 123
+    const pdf = new File(['pdf'], 'report.pdf', {
+      type: 'application/pdf',
+      lastModified,
+    })
+    const itemPdf = new File(['pdf'], 'report.pdf')
+    Object.defineProperty(itemPdf, 'path', {
+      value: '/tmp/report.pdf',
+      configurable: true,
+    })
+    const { container } = renderInput()
+    const dropZone = container.querySelector('[data-drop-zone="true"]')
+
+    await act(async () => {
+      fireEvent.drop(dropZone!, {
+        dataTransfer: {
+          files: [pdf],
+          items: [
+            {
+              kind: 'file',
+              getAsFile: () => itemPdf,
+            },
+          ],
+        },
+      })
+    })
+
+    expect(attachmentsList).toEqual([
+      expect.objectContaining({
+        type: 'document',
+        name: 'report.pdf',
+        path: '/tmp/report.pdf',
+        fileType: 'pdf',
+        size: pdf.size,
+        parseMode: 'embeddings',
+      }),
+    ])
+    expect(toast.info).not.toHaveBeenCalledWith(
+      'Use the document picker for these files',
+      expect.anything()
+    )
   })
 
   it('shows the queued-message chips from the message queue', () => {

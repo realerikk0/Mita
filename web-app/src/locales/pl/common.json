@@ -85,6 +85,7 @@
       "selectEditCapableModel": "Wybierz model obrazu obsługujący obrazy źródłowe",
       "referenceImported": "Obraz referencyjny zaimportowany",
       "importReferenceFailed": "Nie udało się zaimportować obrazu referencyjnego",
+      "unsupportedReferenceFormat": "Użyj obrazów referencyjnych PNG, JPG lub WEBP.",
       "deleteAssetFailed": "Nie udało się usunąć zasobu obrazu",
       "revealAssetFailed": "Nie udało się pokazać zasobu obrazu",
       "promptCopied": "Prompt skopiowany",

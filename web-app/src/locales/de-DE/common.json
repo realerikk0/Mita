@@ -85,6 +85,7 @@
       "selectEditCapableModel": "Wähle ein Bildmodell, das Quellbilder unterstützt",
       "referenceImported": "Referenzbild importiert",
       "importReferenceFailed": "Referenzbild konnte nicht importiert werden",
+      "unsupportedReferenceFormat": "Verwende Referenzbilder im Format PNG, JPG oder WEBP.",
       "deleteAssetFailed": "Bild-Asset konnte nicht gelöscht werden",
       "revealAssetFailed": "Bild-Asset konnte nicht angezeigt werden",
       "promptCopied": "Prompt kopiert",

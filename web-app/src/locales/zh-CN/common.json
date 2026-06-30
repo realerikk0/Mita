@@ -97,6 +97,7 @@
       "referenceImported": "参考图已导入",
       "waitForReferenceImport": "参考图正在导入，请稍后再生成",
       "importReferenceFailed": "导入参考图失败",
+      "unsupportedReferenceFormat": "请使用 PNG、JPG 或 WEBP 参考图。",
       "deleteAssetFailed": "删除图片资产失败",
       "deleteVideoAssetFailed": "删除视频资产失败",
       "revealAssetFailed": "无法打开图片所在位置",

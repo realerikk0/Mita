@@ -91,6 +91,7 @@
       "selectEditCapableModel": "Selecciona un modelo de imagen que admita imágenes de origen",
       "referenceImported": "Imagen de referencia importada",
       "importReferenceFailed": "No se pudo importar la imagen de referencia",
+      "unsupportedReferenceFormat": "Usa imágenes de referencia PNG, JPG o WEBP.",
       "deleteAssetFailed": "No se pudo eliminar el recurso de imagen",
       "revealAssetFailed": "No se pudo mostrar el recurso de imagen",
       "promptCopied": "Prompt copiado",
