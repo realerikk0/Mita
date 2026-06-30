@@ -707,10 +707,7 @@ describe('ChatInput', () => {
       type: 'application/pdf',
       lastModified,
     })
-    const itemPdf = new File(['pdf'], 'report.pdf', {
-      type: 'application/pdf',
-      lastModified,
-    })
+    const itemPdf = new File(['pdf'], 'report.pdf')
     Object.defineProperty(itemPdf, 'path', {
       value: '/tmp/report.pdf',
       configurable: true,

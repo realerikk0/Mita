@@ -124,7 +124,7 @@ type DroppedFileWithPath = File & {
 }
 
 const droppedFileKey = (file: File) =>
-  `${file.name}:${file.size}:${file.type || ''}:${file.lastModified || 0}`
+  `${file.name}:${file.size}`
 
 const ChatInput = memo(function ChatInput({
   className,

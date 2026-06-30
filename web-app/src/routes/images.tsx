@@ -966,6 +966,9 @@ function isImageReferenceCandidateFile(file: File) {
 }
 
 function hasImageReferenceTransfer(dataTransfer: DataTransfer) {
+  const files = Array.from(dataTransfer.files ?? [])
+  if (files.length > 0) return files.some(isImageReferenceCandidateFile)
+
   const items = Array.from(dataTransfer.items ?? [])
   if (
     items.some(
@@ -977,9 +980,7 @@ function hasImageReferenceTransfer(dataTransfer: DataTransfer) {
     return true
   }
 
-  return Array.from(dataTransfer.files ?? []).some(
-    isImageReferenceCandidateFile
-  )
+  return false
 }
 
 function openInSystemFileManagerKey() {
@@ -4257,7 +4258,7 @@ function Images() {
       className={cn(
         'w-full overflow-hidden rounded-2xl border bg-background shadow-[0_2px_10px_rgba(0,0,0,0.04)]',
         composerDragActive &&
-          'border-[#f7693f] shadow-[0_0_0_2px_rgba(247,105,63,0.16)]',
+          'border-[#f36f4f] shadow-[0_0_0_2px_rgba(243,111,79,0.16)]',
         !pinned && 'mt-[22px]'
       )}
       onDragEnter={handleImageComposerDragEnter}
@@ -5160,13 +5161,21 @@ function Images() {
     upsertAssets,
   ])
 
-  const importReferenceFiles = useCallback(
-    async (files: File[]) => {
+  const supportedReferenceFiles = useCallback(
+    (files: File[]) => {
       const imageFiles = files.filter(isImageReferenceFile)
       const unsupportedImageFiles = files.filter(isUnsupportedImageReferenceFile)
       if (unsupportedImageFiles.length > 0) {
         toast.error(imageT(t, 'toast.unsupportedReferenceFormat'))
       }
+      return imageFiles
+    },
+    [t]
+  )
+
+  const importReferenceFiles = useCallback(
+    async (files: File[]) => {
+      const imageFiles = supportedReferenceFiles(files)
       if (imageFiles.length === 0) return
 
       const remainingSlots = MAX_REFERENCE_IMAGES - sourceAssetIds.length
@@ -5242,6 +5251,7 @@ function Images() {
       serviceHub,
       showReferenceLimitToast,
       sourceAssetIds.length,
+      supportedReferenceFiles,
       t,
       upsertAssets,
     ]
@@ -5298,11 +5308,7 @@ function Images() {
 
   const savePastedReferenceFiles = useCallback(
     async (files: File[]) => {
-      const imageFiles = files.filter(isImageReferenceFile)
-      const unsupportedImageFiles = files.filter(isUnsupportedImageReferenceFile)
-      if (unsupportedImageFiles.length > 0) {
-        toast.error(imageT(t, 'toast.unsupportedReferenceFormat'))
-      }
+      const imageFiles = supportedReferenceFiles(files)
       if (imageFiles.length === 0) return
 
       const remainingSlots = MAX_REFERENCE_IMAGES - sourceAssetIds.length
@@ -5362,6 +5368,7 @@ function Images() {
       serviceHub,
       showReferenceLimitToast,
       sourceAssetIds.length,
+      supportedReferenceFiles,
       t,
       upsertAssets,
     ]
