@@ -269,7 +269,7 @@
     "creditsDesc2": "오픈 소스 종속성(특히 llama.cpp 및 Tauri)과 멋진 AI 커뮤니티에 특별히 감사드립니다.",
     "clearLogs": "Clear Logs",
     "clearLogsTitle": "Clear local diagnostic logs?",
-    "clearLogsDesc": "This removes local diagnostic log files from this device. It will not affect chats, settings, models, or cloud services.",
+    "clearLogsDesc": "Local diagnostic logs stay on this device, are kept for up to 30 days, and can be cleared manually at any time.",
     "clearLogsSuccess": "Local diagnostic logs cleared",
     "clearLogsError": "Failed to clear local diagnostic logs"
   },

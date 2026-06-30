@@ -412,6 +412,10 @@ describe('General Settings Route', () => {
         expect(settings.general?.[key], `${locale} missing general.${key}`)
           .toBeTruthy()
       }
+      expect(
+        settings.general.clearLogsDesc,
+        `${locale} missing 30-day retention copy`
+      ).toContain('30')
     }
   })
 

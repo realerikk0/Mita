@@ -108,6 +108,21 @@ describe('TauriAppService', () => {
       expect(result.message).toBe('network failed')
     })
 
+    it('should preserve bracketed non-runtime JSONL messages', () => {
+      const message = '[a][b][c][d] user supplied text'
+      const logLine = JSON.stringify({
+        ts: '2026-06-30T12:00:00Z',
+        level: 'info',
+        target: 'web-app',
+        event: 'user.action',
+        message,
+      })
+
+      const result = appService.parseLogLine(logLine)
+
+      expect(result.message).toBe(message)
+    })
+
     it('should not treat parsed JSON arrays as structured log entries', () => {
       const result = appService.parseLogLine('[]')
 

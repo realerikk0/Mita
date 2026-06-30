@@ -1,4 +1,4 @@
-use chrono::{Local, SecondsFormat, Utc};
+use chrono::{Duration, NaiveDate, SecondsFormat, Utc};
 use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value};
 use std::{
@@ -21,8 +21,10 @@ const MAX_CONTEXT_DEPTH: usize = 6;
 const MAX_ARRAY_ITEMS: usize = 20;
 const MAX_OBJECT_FIELDS: usize = 50;
 const TAIL_READ_CHUNK_SIZE: u64 = 16 * 1024;
+const LOG_RETENTION_DAYS: i64 = 30;
 
 static LOG_WRITER: OnceLock<Mutex<LogFileWriter>> = OnceLock::new();
+static LOG_LAST_PRUNED_DATE: OnceLock<Mutex<Option<NaiveDate>>> = OnceLock::new();
 
 #[derive(Default)]
 struct LogFileWriter {
@@ -33,6 +35,9 @@ struct LogFileWriter {
 impl LogFileWriter {
     fn write_line(&mut self, file_path: &Path, line: &str) -> Result<(), String> {
         if self.active_path.as_deref() != Some(file_path) {
+            if let Some(parent) = file_path.parent() {
+                fs::create_dir_all(parent).map_err(|err| err.to_string())?;
+            }
             self.file = None;
             self.active_path = Some(file_path.to_path_buf());
             self.file = Some(
@@ -171,9 +176,13 @@ pub fn resolve_user_logs_directory<R: Runtime>(_app: &AppHandle<R>) -> Result<Pa
 }
 
 pub fn append_log_entry(log_dir: &Path, entry: &UserLogEntry) -> Result<(), String> {
+    let today = Utc::now().date_naive();
+    if let Err(err) = prune_user_log_files_once_per_day(log_dir, today) {
+        eprintln!("Failed to prune Biyan local logs: {err}");
+    }
+
     let mut writer = acquire_log_writer()?;
-    fs::create_dir_all(log_dir).map_err(|err| err.to_string())?;
-    let file_path = log_dir.join(daily_log_file_name_for_date(Local::now().date_naive()));
+    let file_path = log_dir.join(daily_log_file_name_for_date(today));
     let mut line = serde_json::to_string(entry).map_err(|err| err.to_string())?;
     line.push('\n');
     writer.write_line(&file_path, &line)
@@ -343,6 +352,73 @@ pub fn clear_legacy_log_file(legacy_log: &Path) -> Result<(), String> {
     Ok(())
 }
 
+pub fn prune_user_log_files(log_dir: &Path) -> Result<usize, String> {
+    prune_user_log_files_for_date(log_dir, Utc::now().date_naive())
+}
+
+fn prune_user_log_files_once_per_day(log_dir: &Path, today: NaiveDate) -> Result<(), String> {
+    let mut last_pruned = LOG_LAST_PRUNED_DATE
+        .get_or_init(|| Mutex::new(None))
+        .lock()
+        .map_err(|_| "Failed to acquire user log prune lock".to_string())?;
+
+    if *last_pruned == Some(today) {
+        return Ok(());
+    }
+
+    *last_pruned = Some(today);
+    drop(last_pruned);
+
+    prune_user_log_files_for_date(log_dir, today).map(|_| ())
+}
+
+fn prune_user_log_files_for_date(log_dir: &Path, today: NaiveDate) -> Result<usize, String> {
+    if let Ok(mut writer) = acquire_log_writer() {
+        writer.close_if_under(log_dir);
+    }
+
+    if !log_dir.exists() {
+        return Ok(0);
+    }
+
+    let cutoff = today - Duration::days(LOG_RETENTION_DAYS - 1);
+    let mut removed = 0;
+
+    for entry in fs::read_dir(log_dir).map_err(|err| err.to_string())? {
+        let path = entry.map_err(|err| err.to_string())?.path();
+        if !path.is_file() {
+            continue;
+        }
+
+        let Some(file_date) = user_log_file_date(&path) else {
+            continue;
+        };
+
+        if file_date < cutoff {
+            fs::remove_file(&path).map_err(|err| err.to_string())?;
+            removed += 1;
+        }
+    }
+
+    Ok(removed)
+}
+
+fn user_log_file_date(path: &Path) -> Option<NaiveDate> {
+    let name = path.file_name()?.to_str()?;
+    if !name.starts_with(LOG_FILE_PREFIX) || !name.ends_with(LOG_FILE_SUFFIX) {
+        return None;
+    }
+
+    let date_start = LOG_FILE_PREFIX.len();
+    let date_end = name.len().checked_sub(LOG_FILE_SUFFIX.len())?;
+    let date = &name[date_start..date_end];
+    if date.len() != "YYYY-MM-DD".len() {
+        return None;
+    }
+
+    NaiveDate::parse_from_str(date, "%Y-%m-%d").ok()
+}
+
 fn read_tail_lines(path: &Path, limit: usize) -> Result<Vec<String>, String> {
     if limit == 0 {
         return Ok(Vec::new());
@@ -369,11 +445,14 @@ fn read_tail_lines(path: &Path, limit: usize) -> Result<Vec<String>, String> {
     }
 
     let content = String::from_utf8_lossy(&buffer);
-    let lines = content
+    let mut lines = content
         .lines()
         .filter(|line| !line.trim().is_empty())
         .map(str::to_string)
         .collect::<Vec<_>>();
+    if cursor > 0 && !lines.is_empty() {
+        lines.remove(0);
+    }
     let start = lines.len().saturating_sub(limit);
     Ok(lines[start..].to_vec())
 }
@@ -636,8 +715,7 @@ fn is_sensitive_key(key: &str) -> bool {
         || key.contains("cookie")
         || key.contains("password")
         || key.contains("secret")
-        || key == "token"
-        || key.ends_with("_token")
+        || key.contains("token")
 }
 
 fn is_path_key(key: &str) -> bool {
@@ -713,6 +791,8 @@ mod tests {
         let value = sanitize_value(
             serde_json::json!({
                 "apiKey": "sk-secret",
+                "accessToken": "access-secret",
+                "sessionToken": "session-secret",
                 "Authorization": "Bearer secret",
                 "selectedPath": "/Users/owner/private.txt",
                 "filename": "/Users/owner/private.txt",
@@ -722,6 +802,8 @@ mod tests {
         );
 
         assert_eq!(value["apiKey"], "<redacted>");
+        assert_eq!(value["accessToken"], "<redacted>");
+        assert_eq!(value["sessionToken"], "<redacted>");
         assert_eq!(value["Authorization"], "<redacted>");
         assert_eq!(value["selectedPath"], "<redacted-path>");
         assert_eq!(value["filename"], "<redacted-path>");
@@ -804,6 +886,31 @@ mod tests {
     }
 
     #[test]
+    fn prunes_only_biyan_logs_older_than_retention_window() {
+        let tmp = tempdir().unwrap();
+        let today = NaiveDate::from_ymd_opt(2026, 6, 30).unwrap();
+        let expired = tmp.path().join("biyan-2026-05-31.log");
+        let boundary = tmp.path().join("biyan-2026-06-01.log");
+        let current = tmp.path().join("biyan-2026-06-30.log");
+        let invalid_date = tmp.path().join("biyan-not-a-date.log");
+        let other = tmp.path().join("other.log");
+        fs::write(&expired, "expired").unwrap();
+        fs::write(&boundary, "boundary").unwrap();
+        fs::write(&current, "current").unwrap();
+        fs::write(&invalid_date, "invalid").unwrap();
+        fs::write(&other, "other").unwrap();
+
+        let removed = prune_user_log_files_for_date(tmp.path(), today).unwrap();
+
+        assert_eq!(removed, 1);
+        assert!(!expired.exists());
+        assert!(boundary.exists());
+        assert!(current.exists());
+        assert!(invalid_date.exists());
+        assert!(other.exists());
+    }
+
+    #[test]
     fn clear_legacy_log_removes_app_log() {
         let tmp = tempdir().unwrap();
         let legacy_log = tmp.path().join("app.log");
@@ -845,7 +952,7 @@ mod tests {
 
         let file_path = tmp
             .path()
-            .join(daily_log_file_name_for_date(Local::now().date_naive()));
+            .join(daily_log_file_name_for_date(Utc::now().date_naive()));
         let content = fs::read_to_string(file_path).unwrap();
         let lines = content.lines().collect::<Vec<_>>();
 

@@ -110,7 +110,10 @@ export class TauriAppService extends DefaultAppService {
           level: this.normalizeLogLevel(parsed.level),
           target: parsed.target ?? 'app',
           event: parsed.event,
-          message: this.stripLegacyLogPrefix(parsed.message ?? ''),
+          message:
+            parsed.event === 'runtime.log'
+              ? this.stripLegacyLogPrefix(parsed.message ?? '')
+              : (parsed.message ?? ''),
           context: parsed.context,
           error: parsed.error,
           appVersion: parsed.appVersion,

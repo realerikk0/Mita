@@ -217,6 +217,9 @@ pub fn run() {
                     );
                     get_mita_data_folder_path(app.handle().clone()).join("logs")
                 });
+            if let Err(err) = core::user_logs::prune_user_log_files(&user_log_dir) {
+                eprintln!("Failed to prune Biyan local logs during startup: {err}");
+            }
             let app_version = app.config().version.clone().unwrap_or_default();
             let platform = std::env::consts::OS.to_string();
             app.handle().plugin(
