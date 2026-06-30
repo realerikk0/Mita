@@ -50,17 +50,17 @@ describe('LogsViewer route', () => {
   it('calls readLogs on mount', async () => {
     renderComponent()
     await waitFor(() => {
-      expect(h.readLogs).toHaveBeenCalled()
+      expect(h.readLogs).toHaveBeenCalledWith({ limit: 2000 })
     })
   })
 
   it('renders log entries with level labels and messages', async () => {
     h.readLogs.mockResolvedValue([
-      { timestamp: '2024-01-01T00:00:00Z', level: 'error', message: 'boom' },
-      { timestamp: '2024-01-01T00:00:01Z', level: 'info', message: 'hello' },
-      { timestamp: '2024-01-01T00:00:02Z', level: 'warn', message: 'careful' },
-      { timestamp: '2024-01-01T00:00:03Z', level: 'debug', message: 'trace' },
-      { timestamp: '2024-01-01T00:00:04Z', level: 'verbose', message: 'misc' },
+      { timestamp: '2024-01-01T00:00:00Z', level: 'error', target: 'settings', event: 'boom.event', message: 'boom' },
+      { timestamp: '2024-01-01T00:00:01Z', level: 'info', target: 'app', message: 'hello' },
+      { timestamp: '2024-01-01T00:00:02Z', level: 'warn', target: 'app', message: 'careful' },
+      { timestamp: '2024-01-01T00:00:03Z', level: 'debug', target: 'app', message: 'trace' },
+      { timestamp: '2024-01-01T00:00:04Z', level: 'verbose', target: 'app', message: 'misc' },
     ])
     renderComponent()
     await waitFor(() => {
@@ -71,6 +71,7 @@ describe('LogsViewer route', () => {
     expect(screen.getByText('INFO')).toBeInTheDocument()
     expect(screen.getByText('WARN')).toBeInTheDocument()
     expect(screen.getByText('DEBUG')).toBeInTheDocument()
+    expect(screen.getByText('boom.event · settings')).toBeInTheDocument()
     // default branch (unknown level) still renders uppercased
     expect(screen.getByText('VERBOSE')).toBeInTheDocument()
   })
@@ -79,7 +80,7 @@ describe('LogsViewer route', () => {
     h.readLogs.mockResolvedValue([
       null,
       undefined,
-      { timestamp: '2024-01-01T00:00:00Z', level: 'info', message: 'kept' },
+      { timestamp: '2024-01-01T00:00:00Z', level: 'info', target: 'app', message: 'kept' },
       false,
     ])
     renderComponent()

@@ -12,6 +12,7 @@ pub mod setup;
 pub mod state;
 pub mod system;
 pub mod threads;
+pub mod user_logs;
 pub mod video_assets;
 pub mod windows_migration;
 

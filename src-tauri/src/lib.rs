@@ -76,6 +76,10 @@ macro_rules! invoke_commands_with_extras {
         core::system::commands::open_file_explorer,
         core::system::commands::factory_reset,
         core::system::commands::read_logs,
+        core::user_logs::write_user_log,
+        core::user_logs::read_user_logs,
+        core::user_logs::clear_user_logs,
+        core::user_logs::get_user_logs_directory,
         core::system::commands::is_library_available,
         core::system::commands::launch_claude_code_with_config,
         core::system::commands::check_mita_cli_installed,
@@ -206,16 +210,28 @@ pub fn run() {
             mcp_reconnect_notify: Arc::new(tokio::sync::Notify::new()),
         })
         .setup(|app| {
+            let user_log_dir = core::user_logs::resolve_user_logs_directory(app.handle())
+                .unwrap_or_else(|err| {
+                    eprintln!(
+                        "Failed to resolve platform logs directory, falling back to data folder logs: {err}"
+                    );
+                    get_mita_data_folder_path(app.handle().clone()).join("logs")
+                });
+            let app_version = app.config().version.clone().unwrap_or_default();
+            let platform = std::env::consts::OS.to_string();
             app.handle().plugin(
                 tauri_plugin_log::Builder::default()
                     .level(log::LevelFilter::Debug)
                     .targets([
                         tauri_plugin_log::Target::new(tauri_plugin_log::TargetKind::Stdout),
                         tauri_plugin_log::Target::new(tauri_plugin_log::TargetKind::Webview),
-                        tauri_plugin_log::Target::new(tauri_plugin_log::TargetKind::Folder {
-                            path: get_mita_data_folder_path(app.handle().clone()).join("logs"),
-                            file_name: Some("app".to_string()),
-                        }),
+                        tauri_plugin_log::Target::new(tauri_plugin_log::TargetKind::Dispatch(
+                            core::user_logs::fern_dispatch_for_user_logs(
+                                user_log_dir,
+                                app_version,
+                                platform,
+                            ),
+                        )),
                     ])
                     .build(),
             )?;

@@ -66,6 +66,33 @@ describe('TauriAppService', () => {
   })
 
   describe('parseLogLine', () => {
+    it('should parse JSONL user log line', () => {
+      const logLine = JSON.stringify({
+        ts: '2026-06-30T12:00:00Z',
+        level: 'warning',
+        target: 'settings',
+        event: 'app_update.available',
+        message: 'Update available',
+        context: { version: '1.2.3' },
+        appVersion: '1.0.0',
+        platform: 'macos',
+      })
+
+      const result = appService.parseLogLine(logLine)
+
+      expect(result).toEqual({
+        timestamp: '2026-06-30T12:00:00Z',
+        level: 'warn',
+        target: 'settings',
+        event: 'app_update.available',
+        message: 'Update available',
+        context: { version: '1.2.3' },
+        error: undefined,
+        appVersion: '1.0.0',
+        platform: 'macos',
+      })
+    })
+
     it('should parse valid log line', () => {
       const logLine = '[2024-01-01][10:00:00Z][target][INFO] Test message'
       const result = appService.parseLogLine(logLine)
@@ -98,7 +125,9 @@ describe('TauriAppService', () => {
 
       const result = await appService.readLogs()
 
-      expect(invoke).toHaveBeenCalledWith('read_logs')
+      expect(invoke).toHaveBeenCalledWith('read_user_logs', {
+        options: undefined,
+      })
       expect(result).toHaveLength(2)
       expect(result[0].message).toBe('Test message')
       expect(result[1].message).toBe('Error message')
@@ -110,7 +139,70 @@ describe('TauriAppService', () => {
 
       const result = await appService.readLogs()
 
-      expect(result).toEqual([expect.objectContaining({ message: '' })])
+      expect(result).toEqual([])
+    })
+
+    it('should pass read options to read_user_logs', async () => {
+      const { invoke } = await import('@tauri-apps/api/core')
+      vi.mocked(invoke).mockResolvedValue('')
+
+      await appService.readLogs({ limit: 5 })
+
+      expect(invoke).toHaveBeenCalledWith('read_user_logs', {
+        options: { limit: 5 },
+      })
+    })
+
+    it('should fall back to legacy read_logs command', async () => {
+      const { invoke } = await import('@tauri-apps/api/core')
+      vi.mocked(invoke)
+        .mockRejectedValueOnce(new Error('missing command'))
+        .mockResolvedValueOnce('[2024-01-01][10:00:00Z][target][INFO] Legacy')
+
+      const result = await appService.readLogs()
+
+      expect(invoke).toHaveBeenNthCalledWith(1, 'read_user_logs', {
+        options: undefined,
+      })
+      expect(invoke).toHaveBeenNthCalledWith(2, 'read_logs')
+      expect(result).toHaveLength(1)
+      expect(result[0].message).toBe('Legacy')
+    })
+  })
+
+  describe('user logs commands', () => {
+    it('should write user logs', async () => {
+      const { invoke } = await import('@tauri-apps/api/core')
+      const payload = {
+        level: 'error' as const,
+        target: 'settings',
+        event: 'test.event',
+        message: 'boom',
+      }
+
+      await appService.writeLog(payload)
+
+      expect(invoke).toHaveBeenCalledWith('write_user_log', {
+        entry: payload,
+      })
+    })
+
+    it('should clear user logs', async () => {
+      const { invoke } = await import('@tauri-apps/api/core')
+
+      await appService.clearLogs()
+
+      expect(invoke).toHaveBeenCalledWith('clear_user_logs')
+    })
+
+    it('should get user logs directory', async () => {
+      const { invoke } = await import('@tauri-apps/api/core')
+      vi.mocked(invoke).mockResolvedValue('/Users/test/Library/Logs/biyan')
+
+      const result = await appService.getLogsDirectory()
+
+      expect(invoke).toHaveBeenCalledWith('get_user_logs_directory')
+      expect(result).toBe('/Users/test/Library/Logs/biyan')
     })
   })
 

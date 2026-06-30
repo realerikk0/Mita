@@ -1,6 +1,7 @@
 import { useState, useEffect, useCallback, useRef } from 'react'
 import { useServiceHub } from './useServiceHub'
 import { modelIdFromDescriptor } from '@/lib/provider-models'
+import { logUserError } from '@/lib/user-log'
 
 type UseProviderModelsState = {
   models: string[]
@@ -71,6 +72,15 @@ export const useProviderModels = (provider?: ModelProvider): UseProviderModelsSt
       const errorMessage = err instanceof Error ? err.message : 'Failed to fetch models'
       setError(errorMessage)
       console.error(`Error fetching models from ${provider.provider}:`, err)
+      void logUserError(
+        'provider.models.fetch_failed',
+        err,
+        {
+          provider: provider.provider,
+          baseUrl: provider.base_url,
+        },
+        'provider-network'
+      )
     } finally {
       if (currentRequestId === requestIdRef.current) setLoading(false)
     }

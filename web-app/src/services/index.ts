@@ -6,6 +6,7 @@
  */
 
 import { isPlatformTauri, isPlatformIOS, isPlatformAndroid } from '@/lib/platform/utils'
+import { logUserError, writeUserLog } from '@/lib/user-log'
 
 // Import default services
 import { DefaultThemeService } from './theme/default'
@@ -123,11 +124,16 @@ class PlatformServiceHub implements ServiceHub {
   async initialize(): Promise<void> {
     if (this.initialized) return
 
+    const platform =
+      isPlatformTauri() && !isPlatformIOS() && !isPlatformAndroid() ? 'tauri' :
+      isPlatformIOS() ? 'ios' :
+      isPlatformAndroid() ? 'android' : 'web'
+
     console.log(
       'Initializing service hub for platform:',
-      isPlatformTauri() && !isPlatformIOS() && !isPlatformAndroid() ? 'Tauri' :
-      isPlatformIOS() ? 'iOS' :
-      isPlatformAndroid() ? 'Android' : 'Web'
+      platform === 'tauri' ? 'Tauri' :
+      platform === 'ios' ? 'iOS' :
+      platform === 'android' ? 'Android' : 'Web'
     )
 
     try {
@@ -230,8 +236,21 @@ class PlatformServiceHub implements ServiceHub {
 
       this.initialized = true
       console.log('Service hub initialized successfully')
+      void writeUserLog({
+        level: 'info',
+        target: 'service-hub',
+        event: 'service_hub.initialized',
+        message: 'Service hub initialized',
+        context: { platform },
+      })
     } catch (error) {
       console.error('Failed to initialize service hub:', error)
+      void logUserError(
+        'service_hub.initialize_failed',
+        error,
+        { platform },
+        'service-hub'
+      )
       this.initialized = true
       throw error
     }

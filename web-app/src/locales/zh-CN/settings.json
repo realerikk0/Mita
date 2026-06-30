@@ -16,6 +16,11 @@
   "copyPath": "复制路径",
   "openLogs": "打开日志",
   "revealLogs": "显示日志",
+  "clearLogs": "清理日志",
+  "clearLogsTitle": "清理本地诊断日志？",
+  "clearLogsDesc": "这会删除此设备上的本地诊断日志文件，不会影响聊天、设置、模型或云服务。",
+  "clearLogsSuccess": "本地诊断日志已清理",
+  "clearLogsError": "清理本地诊断日志失败",
   "showInFinder": "在 Finder 中显示",
   "showInFileExplorer": "在文件资源管理器中显示",
   "openContainingFolder": "打开包含文件夹",
@@ -49,7 +54,7 @@
     "appData": "应用数据",
     "appDataDesc": "消息和其他用户数据的默认位置。",
     "appLogs": "应用日志",
-    "appLogsDesc": "查看应用的详细日志。"
+    "appLogsDesc": "仅保存在此设备上的本地诊断日志。"
   },
   "others": {
     "spellCheck": "拼写检查",

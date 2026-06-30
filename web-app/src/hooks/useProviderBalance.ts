@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useServiceHub } from './useServiceHub'
 import type { ProviderBalanceStatus } from '@/services/providers/types'
+import { logUserError, logUserWarning } from '@/lib/user-log'
 
 type ProviderBalanceCacheEntry = {
   balance: ProviderBalanceStatus
@@ -322,6 +323,14 @@ export function useProviderBalance(
         if (result.state === 'error' && result.retryable && cached) {
           setBalance(cached.balance)
           setError(result.message)
+          void logUserWarning(
+            'provider.balance.retryable_error',
+            result.message,
+            {
+              provider: provider.provider,
+              status: result.status,
+            }
+          )
           return
         }
 
@@ -339,6 +348,12 @@ export function useProviderBalance(
           setBalance(cached.balance)
         }
         setError(message)
+        void logUserError(
+          'provider.balance.fetch_failed',
+          err,
+          { provider: provider.provider },
+          'provider-network'
+        )
       } finally {
         if (requestId === requestIdRef.current) setLoading(false)
       }

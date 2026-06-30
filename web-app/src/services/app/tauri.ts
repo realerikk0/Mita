@@ -4,7 +4,12 @@
 
 import { invoke } from '@tauri-apps/api/core'
 import { AppConfiguration } from '@janhq/core'
-import type { FactoryResetOptions, LogEntry } from './types'
+import type {
+  FactoryResetOptions,
+  LogEntry,
+  ReadLogsOptions,
+  UserLogPayload,
+} from './types'
 import { DefaultAppService } from './default'
 import { localStorageKey } from '@/constants/localStorage'
 
@@ -45,9 +50,29 @@ export class TauriAppService extends DefaultAppService {
     }
   }
 
-  async readLogs(): Promise<LogEntry[]> {
-    const logData: string = (await invoke('read_logs')) ?? ''
-    return logData.split('\n').map(this.parseLogLine)
+  async readLogs(options?: ReadLogsOptions): Promise<LogEntry[]> {
+    let logData = ''
+    try {
+      logData = (await invoke<string>('read_user_logs', { options })) ?? ''
+    } catch {
+      logData = (await invoke<string>('read_logs')) ?? ''
+    }
+    return logData
+      .split('\n')
+      .filter((line) => line.trim().length > 0)
+      .map((line) => this.parseLogLine(line))
+  }
+
+  async writeLog(payload: UserLogPayload): Promise<void> {
+    await invoke('write_user_log', { entry: payload })
+  }
+
+  async clearLogs(): Promise<void> {
+    await invoke('clear_user_logs')
+  }
+
+  async getLogsDirectory(): Promise<string | undefined> {
+    return await invoke<string>('get_user_logs_directory')
   }
 
   async getMitaDataFolder(): Promise<string | undefined> {
@@ -67,26 +92,68 @@ export class TauriAppService extends DefaultAppService {
   }
 
   parseLogLine(line: string): LogEntry {
+    try {
+      const parsed = JSON.parse(line) as {
+        ts?: string
+        level?: string
+        target?: string
+        event?: string
+        message?: string
+        context?: unknown
+        error?: unknown
+        appVersion?: string
+        platform?: string
+      }
+      if (parsed && typeof parsed === 'object') {
+        return {
+          timestamp: parsed.ts ?? Date.now(),
+          level: this.normalizeLogLevel(parsed.level),
+          target: parsed.target ?? 'app',
+          event: parsed.event,
+          message: parsed.message ?? '',
+          context: parsed.context,
+          error: parsed.error,
+          appVersion: parsed.appVersion,
+          platform: parsed.platform,
+        }
+      }
+    } catch {
+      // Fall through to legacy plain-text parsing.
+    }
+
     const regex = /^\[(.*?)\]\[(.*?)\]\[(.*?)\]\[(.*?)\]\s(.*)$/
     const match = line.match(regex)
 
     if (!match)
       return {
         timestamp: Date.now(),
-        level: 'info' as 'info' | 'warn' | 'error' | 'debug',
+        level: 'info',
         target: 'info',
         message: line ?? '',
-      } as LogEntry
+      }
 
     const [, date, time, target, levelRaw, message] = match
 
-    const level = levelRaw.toLowerCase() as 'info' | 'warn' | 'error' | 'debug'
-
     return {
       timestamp: `${date} ${time}`,
-      level,
+      level: this.normalizeLogLevel(levelRaw),
       target,
       message,
+    }
+  }
+
+  private normalizeLogLevel(level?: string): LogEntry['level'] {
+    switch (level?.toLowerCase()) {
+      case 'debug':
+      case 'trace':
+        return 'debug'
+      case 'warn':
+      case 'warning':
+        return 'warn'
+      case 'error':
+        return 'error'
+      default:
+        return 'info'
     }
   }
 
