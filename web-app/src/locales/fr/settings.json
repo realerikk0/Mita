@@ -260,11 +260,11 @@
     "credits": "Crédits",
     "creditsDesc1": "👋 Biyan est construit avec ❤️ par l'équipe de Jingxing.",
     "creditsDesc2": "Remerciements spéciaux à nos dépendances open-source, en particulier llama.cpp et Tauri, ainsi qu'à notre incroyable communauté IA.",
-    "clearLogs": "Clear Logs",
-    "clearLogsTitle": "Clear local diagnostic logs?",
-    "clearLogsDesc": "Local diagnostic logs stay on this device, are kept for up to 30 days, and can be cleared manually at any time.",
-    "clearLogsSuccess": "Local diagnostic logs cleared",
-    "clearLogsError": "Failed to clear local diagnostic logs"
+    "clearLogs": "Effacer les journaux",
+    "clearLogsTitle": "Effacer les journaux de diagnostic locaux ?",
+    "clearLogsDesc": "Les journaux de diagnostic locaux restent sur cet appareil, sont conservés jusqu’à 30 jours et peuvent être effacés manuellement à tout moment.",
+    "clearLogsSuccess": "Journaux de diagnostic locaux effacés",
+    "clearLogsError": "Impossible d’effacer les journaux de diagnostic locaux"
   },
   "extensions": {
     "title": "Extensions"

@@ -97,13 +97,14 @@ function LogsViewer() {
     <div className="flex flex-col h-full bg-background">
       <div className="flex-1 overflow-auto" ref={logsContainerRef}>
         <div className="font-mono p-2">
-          {loadError ? (
-            <div className="text-center text-muted-foreground py-8">
+          {loadError && logs.length > 0 && (
+            <div className="mb-2 border border-yellow-500/30 bg-yellow-500/10 px-2 py-1 text-yellow-700 dark:text-yellow-300">
               {t('logs:loadError')}
             </div>
-          ) : logs.length === 0 ? (
+          )}
+          {logs.length === 0 ? (
             <div className="text-center text-muted-foreground py-8">
-              {t('logs:noLogs')}
+              {loadError ? t('logs:loadError') : t('logs:noLogs')}
             </div>
           ) : (
             logs.map((log, index) => (

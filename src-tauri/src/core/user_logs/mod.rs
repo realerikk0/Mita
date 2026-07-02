@@ -38,15 +38,13 @@ impl LogFileWriter {
             if let Some(parent) = file_path.parent() {
                 fs::create_dir_all(parent).map_err(|err| err.to_string())?;
             }
-            self.file = None;
+            let file = OpenOptions::new()
+                .create(true)
+                .append(true)
+                .open(file_path)
+                .map_err(|err| err.to_string())?;
+            self.file = Some(file);
             self.active_path = Some(file_path.to_path_buf());
-            self.file = Some(
-                OpenOptions::new()
-                    .create(true)
-                    .append(true)
-                    .open(file_path)
-                    .map_err(|err| err.to_string())?,
-            );
         }
 
         let file = self
@@ -489,17 +487,53 @@ fn sanitize_text(text: &str) -> String {
 }
 
 pub fn strip_legacy_log_prefix(line: &str) -> &str {
-    let mut rest = line;
-    for _ in 0..4 {
-        if !rest.starts_with('[') {
-            return line;
-        }
-        let Some(end) = rest.find(']') else {
-            return line;
-        };
-        rest = &rest[end + 1..];
+    let Some((date, rest)) = take_bracketed_segment(line) else {
+        return line;
+    };
+    if !is_legacy_log_date(date) {
+        return line;
     }
+
+    let Some((_time, rest)) = take_bracketed_segment(rest) else {
+        return line;
+    };
+    let Some((_target, rest)) = take_bracketed_segment(rest) else {
+        return line;
+    };
+    let Some((level, rest)) = take_bracketed_segment(rest) else {
+        return line;
+    };
+    if !is_legacy_log_level(level) {
+        return line;
+    }
+
     rest.trim_start()
+}
+
+fn take_bracketed_segment(input: &str) -> Option<(&str, &str)> {
+    if !input.starts_with('[') {
+        return None;
+    }
+    let end = input.find(']')?;
+    Some((&input[1..end], &input[end + 1..]))
+}
+
+fn is_legacy_log_date(value: &str) -> bool {
+    let bytes = value.as_bytes();
+    bytes.len() == 10
+        && bytes[4] == b'-'
+        && bytes[7] == b'-'
+        && bytes
+            .iter()
+            .enumerate()
+            .all(|(index, byte)| matches!(index, 4 | 7) || byte.is_ascii_digit())
+}
+
+fn is_legacy_log_level(value: &str) -> bool {
+    matches!(
+        value.to_ascii_lowercase().as_str(),
+        "trace" | "debug" | "info" | "warn" | "warning" | "error"
+    )
 }
 
 fn sanitize_free_text(text: &str) -> String {
@@ -544,7 +578,8 @@ fn redact_urls_in_text(text: &str) -> String {
 }
 
 fn find_next_url_start(text: &str) -> Option<usize> {
-    match (text.find("http://"), text.find("https://")) {
+    let lower = text.to_ascii_lowercase();
+    match (lower.find("http://"), lower.find("https://")) {
         (Some(http), Some(https)) => Some(http.min(https)),
         (Some(http), None) => Some(http),
         (None, Some(https)) => Some(https),
@@ -597,13 +632,31 @@ fn redact_inline_secrets(text: &str) -> String {
         &redacted,
         &[
             "api_key=",
+            "api_key:",
             "apikey=",
+            "apikey:",
             "access_token=",
+            "access_token:",
+            "accesstoken=",
+            "accesstoken:",
             "refresh_token=",
+            "refresh_token:",
+            "refreshtoken=",
+            "refreshtoken:",
             "auth_token=",
+            "auth_token:",
+            "authtoken=",
+            "authtoken:",
+            "session_token=",
+            "session_token:",
+            "sessiontoken=",
+            "sessiontoken:",
             "token=",
+            "token:",
             "password=",
+            "password:",
             "secret=",
+            "secret:",
         ],
         true,
     );
@@ -816,13 +869,15 @@ mod tests {
             .map(|path| path.join("secret.txt").to_string_lossy().into_owned())
             .unwrap_or_else(|| "/Users/owner/secret.txt".to_string());
         let text = format!(
-            "failed Authorization: Bearer sk-secret api_key=abc123 url https://user:pass@example.com/api?token=abc#frag path {home_path}"
+            "failed Authorization: Bearer sk-secret api_key=abc123 token: colon-secret password: pass-secret url HTTPS://user:pass@example.com/api?token=abc#frag path {home_path}"
         );
 
         let sanitized = sanitize_text(&text);
 
         assert!(!sanitized.contains("sk-secret"));
         assert!(!sanitized.contains("abc123"));
+        assert!(!sanitized.contains("colon-secret"));
+        assert!(!sanitized.contains("pass-secret"));
         assert!(!sanitized.contains("user:pass"));
         assert!(!sanitized.contains("token=abc"));
         assert!(sanitized.contains("https://example.com/api?<redacted>#<redacted>"));
@@ -841,6 +896,25 @@ mod tests {
             "network failed"
         );
         assert_eq!(strip_legacy_log_prefix("network failed"), "network failed");
+        assert_eq!(
+            strip_legacy_log_prefix("[a][b][c][d] user supplied text"),
+            "[a][b][c][d] user supplied text"
+        );
+    }
+
+    #[test]
+    fn writer_retries_same_path_after_open_failure() {
+        let tmp = tempdir().unwrap();
+        let file_path = tmp.path().join("biyan-2026-06-30.log");
+        fs::create_dir(&file_path).unwrap();
+        let mut writer = LogFileWriter::default();
+
+        assert!(writer.write_line(&file_path, "first\n").is_err());
+
+        fs::remove_dir(&file_path).unwrap();
+        writer.write_line(&file_path, "second\n").unwrap();
+
+        assert_eq!(fs::read_to_string(&file_path).unwrap(), "second\n");
     }
 
     #[test]

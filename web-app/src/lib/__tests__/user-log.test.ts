@@ -18,11 +18,13 @@ describe('user-log helper', () => {
 
   it('redacts secrets, credentialed URLs, and home paths from free text', () => {
     const result = sanitizeUserLogText(
-      'Authorization: Bearer sk-secret api_key=abc123 url https://user:pass@example.com/api?token=abc#frag path /Users/owner/private.txt C:\\Users\\owner\\secret.txt'
+      'Authorization: Bearer sk-secret api_key=abc123 token: colon-secret password: pass-secret url HTTPS://user:pass@example.com/api?token=abc#frag path /Users/owner/private.txt C:\\Users\\owner\\secret.txt'
     )
 
     expect(result).not.toContain('sk-secret')
     expect(result).not.toContain('abc123')
+    expect(result).not.toContain('colon-secret')
+    expect(result).not.toContain('pass-secret')
     expect(result).not.toContain('user:pass')
     expect(result).not.toContain('token=abc')
     expect(result).not.toContain('/Users/owner')
@@ -35,7 +37,7 @@ describe('user-log helper', () => {
       level: 'error',
       target: 'test',
       event: 'request.failed',
-      message: 'Bearer sk-secret request failed',
+      message: 'Bearer sk-secret token: colon-secret request failed',
       context: {
         url: 'https://user:pass@example.com/api?token=abc',
         filename: '/Users/owner/private.txt',
@@ -53,6 +55,7 @@ describe('user-log helper', () => {
     })
     expect(serialized).not.toContain('sk-secret')
     expect(serialized).not.toContain('abc123')
+    expect(serialized).not.toContain('colon-secret')
     expect(serialized).not.toContain('user:pass')
     expect(serialized).not.toContain('token=abc')
     expect(serialized).not.toContain('/Users/owner')

@@ -131,6 +131,40 @@ describe('LogsViewer route', () => {
     })
   })
 
+  it('keeps existing logs visible when a poll fails', async () => {
+    vi.useFakeTimers()
+    let shouldFail = false
+    h.readLogs.mockImplementation(() => {
+      if (shouldFail) return Promise.reject(new Error('boom'))
+      return Promise.resolve([
+        {
+          timestamp: '2024-01-01T00:00:00Z',
+          level: 'info',
+          target: 'app',
+          message: 'kept after poll error',
+        },
+      ])
+    })
+
+    const { unmount } = renderComponent()
+    try {
+      await vi.waitFor(() => {
+        expect(screen.getByText('kept after poll error')).toBeInTheDocument()
+      })
+
+      shouldFail = true
+      await vi.advanceTimersByTimeAsync(3000)
+
+      await vi.waitFor(() => {
+        expect(screen.getByText('logs:loadError')).toBeInTheDocument()
+      })
+      expect(screen.getByText('kept after poll error')).toBeInTheDocument()
+    } finally {
+      unmount()
+      vi.useRealTimers()
+    }
+  })
+
   it('filters out falsy log entries before rendering', async () => {
     h.readLogs.mockResolvedValue([
       null,

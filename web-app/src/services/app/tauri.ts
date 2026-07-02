@@ -161,8 +161,10 @@ export class TauriAppService extends DefaultAppService {
   }
 
   private stripLegacyLogPrefix(message: string): string {
-    const match = message.match(/^\[[^\]]+\]\[[^\]]+\]\[[^\]]+\]\[[^\]]+\]\s(.*)$/)
-    return match ? match[1] : message
+    const match = message.match(
+      /^\[\d{4}-\d{2}-\d{2}\]\[[^\]]+\]\[[^\]]+\]\[(trace|debug|info|warn|warning|error)\]\s(.*)$/i
+    )
+    return match ? match[2] : message
   }
 
   async getServerStatus(): Promise<boolean> {

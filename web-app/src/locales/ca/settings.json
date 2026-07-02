@@ -262,11 +262,11 @@
     "credits": "Crèdits",
     "creditsDesc1": "👋 Biyan el construeix amb ❤️ l’equip de Jingxing.",
     "creditsDesc2": "Agraïments especials a les nostres dependències de codi obert — especialment llama.cpp i Tauri — i a la nostra comunitat d’IA.",
-    "clearLogs": "Clear Logs",
-    "clearLogsTitle": "Clear local diagnostic logs?",
-    "clearLogsDesc": "Local diagnostic logs stay on this device, are kept for up to 30 days, and can be cleared manually at any time.",
-    "clearLogsSuccess": "Local diagnostic logs cleared",
-    "clearLogsError": "Failed to clear local diagnostic logs"
+    "clearLogs": "Esborra els registres",
+    "clearLogsTitle": "Esborrar els registres de diagnòstic locals?",
+    "clearLogsDesc": "Els registres de diagnòstic locals només es desen en aquest dispositiu, es conserven com a màxim 30 dies i es poden esborrar manualment en qualsevol moment.",
+    "clearLogsSuccess": "Registres de diagnòstic locals esborrats",
+    "clearLogsError": "No s'han pogut esborrar els registres de diagnòstic locals"
   },
   "extensions": {
     "title": "Extensions"

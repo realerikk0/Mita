@@ -123,6 +123,21 @@ describe('TauriAppService', () => {
       expect(result.message).toBe(message)
     })
 
+    it('should preserve bracketed runtime messages that are not legacy fern lines', () => {
+      const message = '[a][b][c][d] user supplied text'
+      const logLine = JSON.stringify({
+        ts: '2026-06-30T12:00:00Z',
+        level: 'info',
+        target: 'runtime',
+        event: 'runtime.log',
+        message,
+      })
+
+      const result = appService.parseLogLine(logLine)
+
+      expect(result.message).toBe(message)
+    })
+
     it('should not treat parsed JSON arrays as structured log entries', () => {
       const result = appService.parseLogLine('[]')
 

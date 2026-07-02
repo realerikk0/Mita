@@ -1,4 +1,4 @@
 {
   "noLogs": "No hi ha registres disponibles",
-  "loadError": "Failed to load logs"
+  "loadError": "No s'han pogut carregar els registres"
 }

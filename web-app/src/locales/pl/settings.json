@@ -254,11 +254,11 @@
     "credits": "Podziękowania",
     "creditsDesc1": "Aplikacja 👋 Biyan jest rozwijana z ❤️ przez zespół Jingxing.",
     "creditsDesc2": "Szczególne podziękowania dla naszych otwartoźródłowych zależności - zwłaszcza llama.cpp i Tauri - oraz dla naszej wspaniałej społeczności SI.",
-    "clearLogs": "Clear Logs",
-    "clearLogsTitle": "Clear local diagnostic logs?",
-    "clearLogsDesc": "Local diagnostic logs stay on this device, are kept for up to 30 days, and can be cleared manually at any time.",
-    "clearLogsSuccess": "Local diagnostic logs cleared",
-    "clearLogsError": "Failed to clear local diagnostic logs"
+    "clearLogs": "Wyczyść logi",
+    "clearLogsTitle": "Wyczyścić lokalne logi diagnostyczne?",
+    "clearLogsDesc": "Lokalne logi diagnostyczne pozostają na tym urządzeniu, są przechowywane maksymalnie 30 dni i można je ręcznie wyczyścić w dowolnym momencie.",
+    "clearLogsSuccess": "Lokalne logi diagnostyczne wyczyszczone",
+    "clearLogsError": "Nie udało się wyczyścić lokalnych logów diagnostycznych"
   },
   "extensions": {
     "title": "Rozszerzenia"

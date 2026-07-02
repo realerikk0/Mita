@@ -267,11 +267,11 @@
     "credits": "Créditos",
     "creditsDesc1": "👋 Biyan está hecho con ❤️ por el equipo de Jingxing.",
     "creditsDesc2": "Un agradecimiento especial a nuestras dependencias de código abierto, especialmente llama.cpp y Tauri, y a nuestra increíble comunidad de IA.",
-    "clearLogs": "Clear Logs",
-    "clearLogsTitle": "Clear local diagnostic logs?",
-    "clearLogsDesc": "Local diagnostic logs stay on this device, are kept for up to 30 days, and can be cleared manually at any time.",
-    "clearLogsSuccess": "Local diagnostic logs cleared",
-    "clearLogsError": "Failed to clear local diagnostic logs"
+    "clearLogs": "Borrar registros",
+    "clearLogsTitle": "¿Borrar los registros de diagnóstico locales?",
+    "clearLogsDesc": "Los registros de diagnóstico locales solo se guardan en este dispositivo, se conservan hasta 30 días y se pueden borrar manualmente en cualquier momento.",
+    "clearLogsSuccess": "Registros de diagnóstico locales borrados",
+    "clearLogsError": "No se pudieron borrar los registros de diagnóstico locales"
   },
   "extensions": {
     "title": "Extensiones"

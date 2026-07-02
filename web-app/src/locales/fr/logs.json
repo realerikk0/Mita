@@ -1,4 +1,4 @@
 {
   "noLogs": "Aucun journal disponible",
-  "loadError": "Failed to load logs"
+  "loadError": "Impossible de charger les journaux"
 }

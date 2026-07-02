@@ -1,4 +1,4 @@
 {
   "noLogs": "Нет доступных журналов",
-  "loadError": "Failed to load logs"
+  "loadError": "Не удалось загрузить журналы"
 }

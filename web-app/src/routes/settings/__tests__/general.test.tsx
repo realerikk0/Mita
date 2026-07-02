@@ -419,6 +419,21 @@ describe('General Settings Route', () => {
     }
   })
 
+  it('defines log viewer strings for every locale', () => {
+    const localesDir = path.resolve(process.cwd(), 'src/locales')
+    const requiredKeys = ['noLogs', 'loadError']
+
+    for (const locale of fs.readdirSync(localesDir)) {
+      const logsUrl = path.join(localesDir, locale, 'logs.json')
+      expect(fs.existsSync(logsUrl), `${locale} missing logs.json`).toBe(true)
+
+      const logs = JSON.parse(fs.readFileSync(logsUrl, 'utf8'))
+      for (const key of requiredKeys) {
+        expect(logs[key], `${locale} missing logs.${key}`).toBeTruthy()
+      }
+    }
+  })
+
   // TODO: This test is currently commented out due to missing implementation
   // it('should render language switcher', () => {
   //   const Component = GeneralRoute.component as React.ComponentType

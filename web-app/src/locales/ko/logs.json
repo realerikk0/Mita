@@ -1,4 +1,4 @@
 {
   "noLogs": "사용 가능한 로그 없음",
-  "loadError": "Failed to load logs"
+  "loadError": "로그를 불러오지 못했습니다"
 }

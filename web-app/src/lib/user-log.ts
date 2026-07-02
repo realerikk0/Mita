@@ -51,8 +51,8 @@ export function sanitizeUserLogText(value: string, limit = MAX_TEXT_LEN) {
     .replace(/https?:\/\/[^\s]+/gi, (token) => redactUrlToken(token))
     .replace(/\b(Bearer|Basic)\s+[^\s,;'"&]+/gi, '$1 [redacted]')
     .replace(
-      /\b(api_key|apikey|access_token|refresh_token|auth_token|token|password|secret)=([^\s,;'"&]+)/gi,
-      '$1=[redacted]'
+      /\b(api_key|apikey|apiKey|access_token|accessToken|refresh_token|refreshToken|auth_token|authToken|session_token|sessionToken|token|password|secret)\s*([:=])\s*[^\s,;'"&]+/gi,
+      '$1$2[redacted]'
     )
     .replace(/\b(authorization|cookie)\s*[:=]\s*[^\s,;'"&]+/gi, '$1: [redacted]')
     .replace(/\/Users\/[^/\s]+/g, '/Users/[redacted]')
