@@ -54,7 +54,8 @@ export function sanitizeUserLogText(value: string, limit = MAX_TEXT_LEN) {
       /\b(api_key|apikey|apiKey|access_token|accessToken|refresh_token|refreshToken|auth_token|authToken|session_token|sessionToken|token|password|secret)\s*([:=])\s*[^\s,;'"&]+/gi,
       '$1$2[redacted]'
     )
-    .replace(/\b(authorization|cookie)\s*[:=]\s*[^\s,;'"&]+/gi, '$1: [redacted]')
+    .replace(/\bauthorization\s*[:=]\s*[^\s,;'"&]+/gi, 'authorization: [redacted]')
+    .replace(/\bcookie\s*[:=]\s*[^'"&]+/gi, 'cookie: [redacted]')
     .replace(/\/Users\/[^/\s]+/g, '/Users/[redacted]')
     .replace(/([A-Za-z]:\\Users\\)[^\\\s]+/g, '$1[redacted]')
 

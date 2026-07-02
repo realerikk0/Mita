@@ -1,8 +1,14 @@
 import fs from 'node:fs'
 import path from 'node:path'
+import { fileURLToPath } from 'node:url'
 import { describe, it, expect, beforeEach, vi } from 'vitest'
 import { render, screen, fireEvent, waitFor, act } from '@testing-library/react'
 import { Route as GeneralRoute } from '../general'
+
+const localesDir = path.resolve(
+  path.dirname(fileURLToPath(import.meta.url)),
+  '../../../locales'
+)
 
 const webSearchMocks = vi.hoisted(() => ({
   setEnabled: vi.fn(),
@@ -394,7 +400,6 @@ describe('General Settings Route', () => {
   })
 
   it('defines clear log strings under the general settings namespace', () => {
-    const localesDir = path.resolve(process.cwd(), 'src/locales')
     const requiredKeys = [
       'clearLogs',
       'clearLogsTitle',
@@ -420,7 +425,6 @@ describe('General Settings Route', () => {
   })
 
   it('defines log viewer strings for every locale', () => {
-    const localesDir = path.resolve(process.cwd(), 'src/locales')
     const requiredKeys = ['noLogs', 'loadError']
 
     for (const locale of fs.readdirSync(localesDir)) {

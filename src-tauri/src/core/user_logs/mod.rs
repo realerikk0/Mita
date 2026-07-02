@@ -660,11 +660,8 @@ fn redact_inline_secrets(text: &str) -> String {
         ],
         true,
     );
-    redact_after_prefixes(
-        &redacted,
-        &["authorization:", "authorization=", "cookie:"],
-        true,
-    )
+    let redacted = redact_after_prefixes(&redacted, &["authorization:", "authorization="], true);
+    redact_cookie_header_values(&redacted)
 }
 
 fn redact_after_prefixes(text: &str, prefixes: &[&str], stop_on_whitespace: bool) -> String {
@@ -683,6 +680,30 @@ fn redact_after_prefixes(text: &str, prefixes: &[&str], stop_on_whitespace: bool
 
         let secret_start = start + prefix.len();
         let secret_end = find_secret_end(text, secret_start, stop_on_whitespace);
+        result.push_str("<redacted>");
+        cursor = secret_end;
+    }
+
+    result
+}
+
+fn redact_cookie_header_values(text: &str) -> String {
+    let lower = text.to_ascii_lowercase();
+    let mut result = String::with_capacity(text.len());
+    let mut cursor = 0;
+
+    while cursor < text.len() {
+        let Some((start, prefix)) = find_next_prefix(&lower, &["cookie:", "cookie="], cursor)
+        else {
+            result.push_str(&text[cursor..]);
+            break;
+        };
+
+        result.push_str(&text[cursor..start]);
+        result.push_str(&text[start..start + prefix.len()]);
+
+        let secret_start = start + prefix.len();
+        let secret_end = find_cookie_secret_end(text, secret_start);
         result.push_str("<redacted>");
         cursor = secret_end;
     }
@@ -719,6 +740,21 @@ fn find_secret_end(text: &str, start: usize, stop_on_whitespace: bool) -> usize 
             matches!(ch, ',' | ';' | '"' | '\'')
         };
         if is_delimiter {
+            return value_start + offset;
+        }
+    }
+    text.len()
+}
+
+fn find_cookie_secret_end(text: &str, start: usize) -> usize {
+    let value_start = text[start..]
+        .char_indices()
+        .find(|(_, ch)| !ch.is_whitespace())
+        .map(|(offset, _)| start + offset)
+        .unwrap_or(start);
+
+    for (offset, ch) in text[value_start..].char_indices() {
+        if matches!(ch, '&' | '"' | '\'') {
             return value_start + offset;
         }
     }
@@ -869,7 +905,7 @@ mod tests {
             .map(|path| path.join("secret.txt").to_string_lossy().into_owned())
             .unwrap_or_else(|| "/Users/owner/secret.txt".to_string());
         let text = format!(
-            "failed Authorization: Bearer sk-secret api_key=abc123 token: colon-secret password: pass-secret url HTTPS://user:pass@example.com/api?token=abc#frag path {home_path}"
+            "failed Authorization: Bearer sk-secret api_key=abc123 token: colon-secret password: pass-secret url HTTPS://user:pass@example.com/api?token=abc#frag path {home_path} Cookie: a=b; c=d"
         );
 
         let sanitized = sanitize_text(&text);
@@ -880,6 +916,8 @@ mod tests {
         assert!(!sanitized.contains("pass-secret"));
         assert!(!sanitized.contains("user:pass"));
         assert!(!sanitized.contains("token=abc"));
+        assert!(!sanitized.contains("a=b"));
+        assert!(!sanitized.contains("c=d"));
         assert!(sanitized.contains("https://example.com/api?<redacted>#<redacted>"));
         if dirs::home_dir().is_some() {
             assert!(!sanitized.contains(&home_path));

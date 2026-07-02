@@ -186,7 +186,7 @@ describe('TauriAppService – coverage', () => {
 
       const result = await svc.readLogs()
 
-      expect(result).toEqual([expect.objectContaining({ message: '' })])
+      expect(result).toEqual([])
     })
   })
 

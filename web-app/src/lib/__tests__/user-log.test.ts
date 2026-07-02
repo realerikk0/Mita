@@ -18,7 +18,7 @@ describe('user-log helper', () => {
 
   it('redacts secrets, credentialed URLs, and home paths from free text', () => {
     const result = sanitizeUserLogText(
-      'Authorization: Bearer sk-secret api_key=abc123 token: colon-secret password: pass-secret url HTTPS://user:pass@example.com/api?token=abc#frag path /Users/owner/private.txt C:\\Users\\owner\\secret.txt'
+      'Authorization: Bearer sk-secret api_key=abc123 token: colon-secret password: pass-secret url HTTPS://user:pass@example.com/api?token=abc#frag path /Users/owner/private.txt C:\\Users\\owner\\secret.txt Cookie: a=b; c=d'
     )
 
     expect(result).not.toContain('sk-secret')
@@ -27,6 +27,8 @@ describe('user-log helper', () => {
     expect(result).not.toContain('pass-secret')
     expect(result).not.toContain('user:pass')
     expect(result).not.toContain('token=abc')
+    expect(result).not.toContain('a=b')
+    expect(result).not.toContain('c=d')
     expect(result).not.toContain('/Users/owner')
     expect(result).not.toContain('C:\\Users\\owner')
     expect(result).toContain('https://example.com/api?[redacted]#[redacted]')
