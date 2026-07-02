@@ -253,7 +253,12 @@
     "reportIssue": "Problem melden",
     "credits": "Credits",
     "creditsDesc1": "Biyan wurde mit ❤️ gebaut vom Jingxing Team.",
-    "creditsDesc2": "Besonderer Dank gilt unseren Open-Source-Abhängigkeiten - insbesondere llama.cpp und Tauri - und unserer großartigen KI-Community."
+    "creditsDesc2": "Besonderer Dank gilt unseren Open-Source-Abhängigkeiten - insbesondere llama.cpp und Tauri - und unserer großartigen KI-Community.",
+    "clearLogs": "Protokolle löschen",
+    "clearLogsTitle": "Lokale Diagnoseprotokolle löschen?",
+    "clearLogsDesc": "Lokale Diagnoseprotokolle bleiben auf diesem Gerät, werden bis zu 30 Tage aufbewahrt und können jederzeit manuell gelöscht werden.",
+    "clearLogsSuccess": "Lokale Diagnoseprotokolle gelöscht",
+    "clearLogsError": "Lokale Diagnoseprotokolle konnten nicht gelöscht werden"
   },
   "extensions": {
     "title": "Erweiterungen"

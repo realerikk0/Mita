@@ -253,7 +253,12 @@
     "creditsDesc1": "Biyan được xây dựng với ❤️ bởi Đội Jingxing.",
     "creditsDesc2": "Cảm ơn đặc biệt đến các phụ thuộc mã nguồn mở của chúng tôi—đặc biệt là llama.cpp và Tauri—và đến cộng đồng AI tuyệt vời của chúng tôi.",
     "huggingfaceToken": "Token HuggingFace",
-    "huggingfaceTokenDesc": "Token API HuggingFace của bạn để truy cập các mô hình."
+    "huggingfaceTokenDesc": "Token API HuggingFace của bạn để truy cập các mô hình.",
+    "clearLogs": "Xóa nhật ký",
+    "clearLogsTitle": "Xóa nhật ký chẩn đoán cục bộ?",
+    "clearLogsDesc": "Nhật ký chẩn đoán cục bộ chỉ được lưu trên thiết bị này, được giữ tối đa 30 ngày và có thể xóa thủ công bất cứ lúc nào.",
+    "clearLogsSuccess": "Đã xóa nhật ký chẩn đoán cục bộ",
+    "clearLogsError": "Không thể xóa nhật ký chẩn đoán cục bộ"
   },
   "extensions": {
     "title": "Tiện ích mở rộng"

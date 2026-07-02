@@ -253,7 +253,12 @@
     "reportIssue": "Reportar Problema",
     "credits": "Créditos",
     "creditsDesc1": "👋 Biyan é construído com ❤️ pela equipe Jingxing.",
-    "creditsDesc2": "Agradecimentos especiais às nossas dependências de código aberto—especialmente llama.cpp e Tauri—e à nossa incrível comunidade de IA."
+    "creditsDesc2": "Agradecimentos especiais às nossas dependências de código aberto—especialmente llama.cpp e Tauri—e à nossa incrível comunidade de IA.",
+    "clearLogs": "Limpar logs",
+    "clearLogsTitle": "Limpar logs de diagnóstico locais?",
+    "clearLogsDesc": "Os logs de diagnóstico locais ficam neste dispositivo, são mantidos por até 30 dias e podem ser limpos manualmente a qualquer momento.",
+    "clearLogsSuccess": "Logs de diagnóstico locais limpos",
+    "clearLogsError": "Falha ao limpar logs de diagnóstico locais"
   },
   "extensions": {
     "title": "Extensões"

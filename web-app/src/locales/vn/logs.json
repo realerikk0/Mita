@@ -1,3 +1,4 @@
 {
-  "noLogs": "Không có nhật ký nào"
+  "noLogs": "Không có nhật ký nào",
+  "loadError": "Không thể tải nhật ký"
 }

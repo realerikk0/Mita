@@ -1,3 +1,4 @@
 {
-  "noLogs": "No logs available"
+  "noLogs": "No logs available",
+  "loadError": "Failed to load logs"
 }

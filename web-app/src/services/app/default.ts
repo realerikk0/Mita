@@ -2,7 +2,13 @@
  * Default App Service - Generic implementation with minimal returns
  */
 
-import type { AppService, FactoryResetOptions, LogEntry } from './types'
+import type {
+  AppService,
+  FactoryResetOptions,
+  LogEntry,
+  ReadLogsOptions,
+  UserLogPayload,
+} from './types'
 
 export class DefaultAppService implements AppService {
   async factoryReset(options?: FactoryResetOptions): Promise<void> {
@@ -10,7 +16,8 @@ export class DefaultAppService implements AppService {
     // No-op
   }
 
-  async readLogs(): Promise<LogEntry[]> {
+  async readLogs(_options?: ReadLogsOptions): Promise<LogEntry[]> {
+    void _options
     return []
   }
 
@@ -21,6 +28,19 @@ export class DefaultAppService implements AppService {
       target: 'default',
       message: line ?? '',
     }
+  }
+
+  async writeLog(payload: UserLogPayload): Promise<void> {
+    void payload
+    // No-op
+  }
+
+  async clearLogs(): Promise<void> {
+    // No-op
+  }
+
+  async getLogsDirectory(): Promise<string | undefined> {
+    return undefined
   }
 
   async getMitaDataFolder(): Promise<string | undefined> {

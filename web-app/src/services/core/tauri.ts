@@ -6,6 +6,7 @@ import { invoke, convertFileSrc } from '@tauri-apps/api/core'
 import type { ExtensionManifest } from '@/lib/extension'
 import type { InvokeArgs } from './types'
 import { DefaultCoreService } from './default'
+import { logUserError } from '@/lib/user-log'
 
 export class TauriCoreService extends DefaultCoreService {
   async invoke<T = unknown>(command: string, args?: InvokeArgs): Promise<T> {
@@ -13,6 +14,14 @@ export class TauriCoreService extends DefaultCoreService {
       return await invoke<T>(command, args)
     } catch (error) {
       console.error(`Error invoking Tauri command '${command}' in Tauri:`, error)
+      if (command !== 'write_user_log') {
+        void logUserError(
+          'tauri.command.failed',
+          error,
+          { command },
+          'tauri-command'
+        )
+      }
       throw error
     }
   }
@@ -22,6 +31,12 @@ export class TauriCoreService extends DefaultCoreService {
       return convertFileSrc(filePath, protocol)
     } catch (error) {
       console.error('Error converting file src in Tauri:', error)
+      void logUserError(
+        'tauri.file_src.failed',
+        error,
+        { protocol },
+        'tauri-command'
+      )
       return filePath
     }
   }

@@ -250,7 +250,12 @@
     "reportIssue": "問題を報告",
     "credits": "クレジット",
     "creditsDesc1": "👋 BiyanはJingxingチームによって❤️を込めて作られています。",
-    "creditsDesc2": "オープンソースの依存関係、特にllama.cppとTauri、そして素晴らしいAIコミュニティに感謝します。"
+    "creditsDesc2": "オープンソースの依存関係、特にllama.cppとTauri、そして素晴らしいAIコミュニティに感謝します。",
+    "clearLogs": "ログを消去",
+    "clearLogsTitle": "ローカル診断ログを消去しますか？",
+    "clearLogsDesc": "ローカル診断ログはこのデバイスにのみ保存され、最大 30 日間保持されます。いつでも手動で消去できます。",
+    "clearLogsSuccess": "ローカル診断ログを消去しました",
+    "clearLogsError": "ローカル診断ログを消去できませんでした"
   },
   "extensions": {
     "title": "拡張機能"

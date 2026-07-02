@@ -259,7 +259,12 @@
     "reportIssue": "Nahlásit problém",
     "credits": "Poděkování",
     "creditsDesc1": "👋 Biyan je vytvořen s ❤️ týmem Jingxing.",
-    "creditsDesc2": "Speciální poděkování našim open-source závislostem—zejména llama.cpp a Tauri—a naší úžasné AI komunitě."
+    "creditsDesc2": "Speciální poděkování našim open-source závislostem—zejména llama.cpp a Tauri—a naší úžasné AI komunitě.",
+    "clearLogs": "Vymazat protokoly",
+    "clearLogsTitle": "Vymazat místní diagnostické protokoly?",
+    "clearLogsDesc": "Místní diagnostické protokoly se ukládají pouze v tomto zařízení, uchovávají se nejvýše 30 dní a můžete je kdykoli ručně vymazat.",
+    "clearLogsSuccess": "Místní diagnostické protokoly byly vymazány",
+    "clearLogsError": "Místní diagnostické protokoly se nepodařilo vymazat"
   },
   "extensions": {
     "title": "Rozšíření"

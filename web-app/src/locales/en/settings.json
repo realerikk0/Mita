@@ -16,6 +16,11 @@
   "copyPath": "Copy Path",
   "openLogs": "Open Logs",
   "revealLogs": "Reveal Logs",
+  "clearLogs": "Clear Logs",
+  "clearLogsTitle": "Clear local diagnostic logs?",
+  "clearLogsDesc": "Local diagnostic logs stay on this device, are kept for up to 30 days, and can be cleared manually at any time.",
+  "clearLogsSuccess": "Local diagnostic logs cleared",
+  "clearLogsError": "Failed to clear local diagnostic logs",
   "showInFinder": "Show in Finder",
   "showInFileExplorer": "Show in File Explorer",
   "openContainingFolder": "Open Containing Folder",
@@ -49,7 +54,7 @@
     "appData": "App Data",
     "appDataDesc": "Location for messages, downloaded models and other data.",
     "appLogs": "App Logs",
-    "appLogsDesc": "View detailed logs of the App."
+    "appLogsDesc": "Local diagnostic logs stored only on this device."
   },
   "others": {
     "spellCheck": "Spell Check",
@@ -279,7 +284,12 @@
     "reportIssue": "Report Issue",
     "credits": "Credits",
     "creditsDesc1": "👋 Biyan is built with ❤️ by the Jingxing team.",
-    "creditsDesc2": "Special thanks to our open-source dependencies—especially llama.cpp and Tauri—and to our amazing AI community."
+    "creditsDesc2": "Special thanks to our open-source dependencies—especially llama.cpp and Tauri—and to our amazing AI community.",
+    "clearLogs": "Clear Logs",
+    "clearLogsTitle": "Clear local diagnostic logs?",
+    "clearLogsDesc": "Local diagnostic logs stay on this device, are kept for up to 30 days, and can be cleared manually at any time.",
+    "clearLogsSuccess": "Local diagnostic logs cleared",
+    "clearLogsError": "Failed to clear local diagnostic logs"
   },
   "extensions": {
     "title": "Extensions"

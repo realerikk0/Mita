@@ -16,6 +16,11 @@
   "copyPath": "复制路径",
   "openLogs": "打开日志",
   "revealLogs": "显示日志",
+  "clearLogs": "清理日志",
+  "clearLogsTitle": "清理本地诊断日志？",
+  "clearLogsDesc": "本地诊断日志仅保存在此设备上，最多保留 30 天，可随时手动清理。",
+  "clearLogsSuccess": "本地诊断日志已清理",
+  "clearLogsError": "清理本地诊断日志失败",
   "showInFinder": "在 Finder 中显示",
   "showInFileExplorer": "在文件资源管理器中显示",
   "openContainingFolder": "打开包含文件夹",
@@ -49,7 +54,7 @@
     "appData": "应用数据",
     "appDataDesc": "消息和其他用户数据的默认位置。",
     "appLogs": "应用日志",
-    "appLogsDesc": "查看应用的详细日志。"
+    "appLogsDesc": "仅保存在此设备上的本地诊断日志。"
   },
   "others": {
     "spellCheck": "拼写检查",
@@ -266,7 +271,12 @@
     "creditsDesc1": "彼岩 由 Jingxing 团队用 ❤️ 构建。",
     "creditsDesc2": "特别感谢我们的开源依赖项——尤其是 llama.cpp 和 Tauri——以及我们出色的 AI 社区。",
     "huggingfaceToken": "HuggingFace 令牌",
-    "huggingfaceTokenDesc": "您用于访问模型的 HuggingFace API 令牌。"
+    "huggingfaceTokenDesc": "您用于访问模型的 HuggingFace API 令牌。",
+    "clearLogs": "清理日志",
+    "clearLogsTitle": "清理本地诊断日志？",
+    "clearLogsDesc": "本地诊断日志仅保存在此设备上，最多保留 30 天，可随时手动清理。",
+    "clearLogsSuccess": "本地诊断日志已清理",
+    "clearLogsError": "清理本地诊断日志失败"
   },
   "extensions": {
     "title": "扩展"

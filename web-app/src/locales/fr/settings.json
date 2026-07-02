@@ -259,7 +259,12 @@
     "reportIssue": "Signaler un problème",
     "credits": "Crédits",
     "creditsDesc1": "👋 Biyan est construit avec ❤️ par l'équipe de Jingxing.",
-    "creditsDesc2": "Remerciements spéciaux à nos dépendances open-source, en particulier llama.cpp et Tauri, ainsi qu'à notre incroyable communauté IA."
+    "creditsDesc2": "Remerciements spéciaux à nos dépendances open-source, en particulier llama.cpp et Tauri, ainsi qu'à notre incroyable communauté IA.",
+    "clearLogs": "Effacer les journaux",
+    "clearLogsTitle": "Effacer les journaux de diagnostic locaux ?",
+    "clearLogsDesc": "Les journaux de diagnostic locaux restent sur cet appareil, sont conservés jusqu’à 30 jours et peuvent être effacés manuellement à tout moment.",
+    "clearLogsSuccess": "Journaux de diagnostic locaux effacés",
+    "clearLogsError": "Impossible d’effacer les journaux de diagnostic locaux"
   },
   "extensions": {
     "title": "Extensions"

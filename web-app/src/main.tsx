@@ -4,6 +4,7 @@ import { RouterProvider, createRouter } from '@tanstack/react-router'
 
 // Import the generated route tree
 import { routeTree } from './routeTree.gen'
+import { logUserError } from './lib/user-log'
 
 import './index.css'
 import './i18n'
@@ -89,6 +90,26 @@ const preventWebviewZoom = () => {
   document.addEventListener('gestureend', preventGestureZoom)
 }
 
+const registerGlobalErrorLogging = () => {
+  window.addEventListener('error', (event) => {
+    void logUserError(
+      'window.error',
+      event.error ?? event.message,
+      { filename: event.filename, lineno: event.lineno, colno: event.colno },
+      'web-runtime'
+    )
+  })
+
+  window.addEventListener('unhandledrejection', (event) => {
+    void logUserError(
+      'window.unhandled_rejection',
+      event.reason,
+      { source: 'unhandledrejection' },
+      'web-runtime'
+    )
+  })
+}
+
 // Initialize mobile setup
 setupMobileViewport()
 
@@ -97,6 +118,9 @@ preventDefaultFileDrop()
 
 // Prevent WebView/browser page zoom shortcuts and gestures
 preventWebviewZoom()
+
+// Capture unhandled frontend failures in local diagnostic logs.
+registerGlobalErrorLogging()
 
 // Create a new router instance
 const router = createRouter({ routeTree })

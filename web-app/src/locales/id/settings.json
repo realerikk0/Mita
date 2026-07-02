@@ -253,7 +253,12 @@
     "reportIssue": "Laporkan Masalah",
     "credits": "Kredit",
     "creditsDesc1": "Biyan dibuat dengan ❤️ oleh Tim Jingxing.",
-    "creditsDesc2": "Terima kasih khusus kepada dependensi sumber terbuka kami—terutama llama.cpp dan Tauri—dan kepada komunitas AI kami yang luar biasa."
+    "creditsDesc2": "Terima kasih khusus kepada dependensi sumber terbuka kami—terutama llama.cpp dan Tauri—dan kepada komunitas AI kami yang luar biasa.",
+    "clearLogs": "Bersihkan Log",
+    "clearLogsTitle": "Bersihkan log diagnostik lokal?",
+    "clearLogsDesc": "Log diagnostik lokal hanya disimpan di perangkat ini, disimpan hingga 30 hari, dan dapat dibersihkan secara manual kapan saja.",
+    "clearLogsSuccess": "Log diagnostik lokal dibersihkan",
+    "clearLogsError": "Gagal membersihkan log diagnostik lokal"
   },
   "extensions": {
     "title": "Ekstensi"

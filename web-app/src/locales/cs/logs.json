@@ -1,3 +1,4 @@
 {
-  "noLogs": "Nejsou k dispozici žádné záznamy"
+  "noLogs": "Nejsou k dispozici žádné záznamy",
+  "loadError": "Protokoly se nepodařilo načíst"
 }

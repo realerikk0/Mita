@@ -157,6 +157,7 @@ pub fn factory_reset<R: Runtime>(
         }
     }
     let data_folder = get_mita_data_folder_path(app_handle.clone());
+    let user_logs_dir = crate::core::user_logs::resolve_user_logs_directory(&app_handle).ok();
     log::info!(
         "Factory reset (keep_app_data={}, keep_models_and_configs={}), data folder: {:?}",
         keep_app_data,
@@ -204,6 +205,16 @@ pub fn factory_reset<R: Runtime>(
             // store.json spans all categories; only wipe it when nothing is kept
             if !keep_app_data && !keep_models_and_configs {
                 delete_settings(&data_folder);
+            }
+        }
+
+        if let Some(user_logs_dir) = user_logs_dir {
+            if let Err(e) = crate::core::user_logs::clear_user_log_files(&user_logs_dir) {
+                eprintln!(
+                    "Failed to clear Biyan local logs during factory reset ({}): {}",
+                    user_logs_dir.display(),
+                    e
+                );
             }
         }
 
@@ -286,15 +297,7 @@ fn normalize_windows_explorer_path(path: &Path) -> String {
 
 #[tauri::command]
 pub async fn read_logs<R: Runtime>(app: AppHandle<R>) -> Result<String, String> {
-    let log_path = get_mita_data_folder_path(app)
-        .join("logs")
-        .join("app.log");
-    if log_path.exists() {
-        let content = fs::read_to_string(log_path).map_err(|e| e.to_string())?;
-        Ok(content)
-    } else {
-        Err("Log file not found".to_string())
-    }
+    crate::core::user_logs::read_user_logs(app, None)
 }
 
 // check if a system library is available

@@ -1,3 +1,4 @@
 {
-  "noLogs": "Brak dzienników"
+  "noLogs": "Brak dzienników",
+  "loadError": "Nie udało się wczytać logów"
 }

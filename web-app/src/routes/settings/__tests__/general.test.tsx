@@ -1,6 +1,14 @@
+import fs from 'node:fs'
+import path from 'node:path'
+import { fileURLToPath } from 'node:url'
 import { describe, it, expect, beforeEach, vi } from 'vitest'
 import { render, screen, fireEvent, waitFor, act } from '@testing-library/react'
 import { Route as GeneralRoute } from '../general'
+
+const localesDir = path.resolve(
+  path.dirname(fileURLToPath(import.meta.url)),
+  '../../../locales'
+)
 
 const webSearchMocks = vi.hoisted(() => ({
   setEnabled: vi.fn(),
@@ -11,6 +19,19 @@ const webSearchMocks = vi.hoisted(() => ({
     isActive: false,
     isLoading: false,
   },
+}))
+
+const serviceHubMocks = vi.hoisted(() => ({
+  factoryReset: vi.fn(),
+  getMitaDataFolder: vi.fn().mockResolvedValue('/test/data/folder'),
+  getLogsDirectory: vi.fn().mockResolvedValue('/test/logs/folder'),
+  clearLogs: vi.fn().mockResolvedValue(undefined),
+  relocateMitaDataFolder: vi.fn(),
+  stopAllModels: vi.fn(),
+  dialogOpen: vi.fn().mockResolvedValue('/test/path'),
+  emit: vi.fn(),
+  openLogsWindow: vi.fn(),
+  revealItemInDir: vi.fn().mockResolvedValue(undefined),
 }))
 
 // Mock all the dependencies
@@ -216,24 +237,26 @@ vi.mock('@/services/models/default', () => ({
 vi.mock('@/hooks/useServiceHub', () => ({
   useServiceHub: () => ({
     app: () => ({
-      factoryReset: vi.fn(),
-      getMitaDataFolder: vi.fn().mockResolvedValue('/test/data/folder'),
-      relocateMitaDataFolder: vi.fn(),
+      factoryReset: serviceHubMocks.factoryReset,
+      getMitaDataFolder: serviceHubMocks.getMitaDataFolder,
+      getLogsDirectory: serviceHubMocks.getLogsDirectory,
+      clearLogs: serviceHubMocks.clearLogs,
+      relocateMitaDataFolder: serviceHubMocks.relocateMitaDataFolder,
     }),
     models: () => ({
-      stopAllModels: vi.fn(),
+      stopAllModels: serviceHubMocks.stopAllModels,
     }),
     dialog: () => ({
-      open: vi.fn().mockResolvedValue('/test/path'),
+      open: serviceHubMocks.dialogOpen,
     }),
     events: () => ({
-      emit: vi.fn(),
+      emit: serviceHubMocks.emit,
     }),
     window: () => ({
-      openLogsWindow: vi.fn(),
+      openLogsWindow: serviceHubMocks.openLogsWindow,
     }),
     opener: () => ({
-      revealItemInDir: vi.fn(),
+      revealItemInDir: serviceHubMocks.revealItemInDir,
     }),
     path: () => ({
       join: vi.fn().mockResolvedValue('/test/data/folder/logs'),
@@ -243,6 +266,12 @@ vi.mock('@/hooks/useServiceHub', () => ({
       extname: vi.fn().mockResolvedValue(''),
     }),
   }),
+}))
+
+vi.mock('@/lib/user-log', () => ({
+  logUserAction: vi.fn(),
+  logUserError: vi.fn(),
+  logUserWarning: vi.fn(),
 }))
 
 // Add tests for rfd dialog
@@ -345,6 +374,9 @@ describe('General Settings Route', () => {
     webSearchMocks.state.isActive = false
     webSearchMocks.state.isLoading = false
     webSearchMocks.setActive.mockResolvedValue(true)
+    serviceHubMocks.getMitaDataFolder.mockResolvedValue('/test/data/folder')
+    serviceHubMocks.getLogsDirectory.mockResolvedValue('/test/logs/folder')
+    serviceHubMocks.clearLogs.mockResolvedValue(undefined)
   })
 
   it('should render the general settings page', async () => {
@@ -365,6 +397,45 @@ describe('General Settings Route', () => {
     })
 
     expect(screen.getByText('v1.0.0')).toBeInTheDocument()
+  })
+
+  it('defines clear log strings under the general settings namespace', () => {
+    const requiredKeys = [
+      'clearLogs',
+      'clearLogsTitle',
+      'clearLogsDesc',
+      'clearLogsSuccess',
+      'clearLogsError',
+    ]
+
+    for (const locale of fs.readdirSync(localesDir)) {
+      const settingsUrl = path.join(localesDir, locale, 'settings.json')
+      if (!fs.existsSync(settingsUrl)) continue
+
+      const settings = JSON.parse(fs.readFileSync(settingsUrl, 'utf8'))
+      for (const key of requiredKeys) {
+        expect(settings.general?.[key], `${locale} missing general.${key}`)
+          .toBeTruthy()
+      }
+      expect(
+        settings.general.clearLogsDesc,
+        `${locale} missing 30-day retention copy`
+      ).toContain('30')
+    }
+  })
+
+  it('defines log viewer strings for every locale', () => {
+    const requiredKeys = ['noLogs', 'loadError']
+
+    for (const locale of fs.readdirSync(localesDir)) {
+      const logsUrl = path.join(localesDir, locale, 'logs.json')
+      expect(fs.existsSync(logsUrl), `${locale} missing logs.json`).toBe(true)
+
+      const logs = JSON.parse(fs.readFileSync(logsUrl, 'utf8'))
+      for (const key of requiredKeys) {
+        expect(logs[key], `${locale} missing logs.${key}`).toBeTruthy()
+      }
+    }
   })
 
   // TODO: This test is currently commented out due to missing implementation
@@ -470,6 +541,11 @@ describe('General Settings Route', () => {
     // Test that component renders without errors
     expect(screen.getByTestId('header-page')).toBeInTheDocument()
     expect(screen.getByTestId('settings-menu')).toBeInTheDocument()
+    await act(async () => {
+      await Promise.resolve()
+      await Promise.resolve()
+    })
+    expect(screen.getByText('/test/logs/folder')).toBeInTheDocument()
   })
 
   it('should handle copy to clipboard', async () => {
@@ -489,9 +565,9 @@ describe('General Settings Route', () => {
       render(<Component />)
     })
 
-    expect(screen.getByTestId('dialog')).toBeInTheDocument()
-    expect(screen.getByTestId('dialog-trigger')).toBeInTheDocument()
-    expect(screen.getByTestId('dialog-content')).toBeInTheDocument()
+    expect(screen.getAllByTestId('dialog').length).toBeGreaterThan(0)
+    expect(screen.getAllByTestId('dialog-trigger').length).toBeGreaterThan(0)
+    expect(screen.getAllByTestId('dialog-content').length).toBeGreaterThan(0)
   })
 
   it('should render external links', async () => {
@@ -544,7 +620,30 @@ describe('General Settings Route', () => {
         fireEvent.click(revealLogsButton)
       })
       expect(revealLogsButton).toBeInTheDocument()
+      expect(serviceHubMocks.revealItemInDir).toHaveBeenCalledWith(
+        '/test/logs/folder'
+      )
     }
+  })
+
+  it('should clear logs from the confirmation dialog', async () => {
+    const Component = GeneralRoute.component as React.ComponentType
+    await act(async () => {
+      render(<Component />)
+    })
+
+    const buttons = screen.getAllByTestId('button')
+    const clearLogsButtons = buttons.filter((button) =>
+      button.textContent?.includes('clearLogs')
+    )
+    const clearLogsButton = clearLogsButtons.at(-1)
+
+    expect(clearLogsButton).toBeInTheDocument()
+    await act(async () => {
+      fireEvent.click(clearLogsButton!)
+    })
+
+    expect(serviceHubMocks.clearLogs).toHaveBeenCalled()
   })
 
   it('should show correct file explorer text for Windows', async () => {

@@ -266,7 +266,12 @@
     "reportIssue": "Reportar problema",
     "credits": "Créditos",
     "creditsDesc1": "👋 Biyan está hecho con ❤️ por el equipo de Jingxing.",
-    "creditsDesc2": "Un agradecimiento especial a nuestras dependencias de código abierto, especialmente llama.cpp y Tauri, y a nuestra increíble comunidad de IA."
+    "creditsDesc2": "Un agradecimiento especial a nuestras dependencias de código abierto, especialmente llama.cpp y Tauri, y a nuestra increíble comunidad de IA.",
+    "clearLogs": "Borrar registros",
+    "clearLogsTitle": "¿Borrar los registros de diagnóstico locales?",
+    "clearLogsDesc": "Los registros de diagnóstico locales solo se guardan en este dispositivo, se conservan hasta 30 días y se pueden borrar manualmente en cualquier momento.",
+    "clearLogsSuccess": "Registros de diagnóstico locales borrados",
+    "clearLogsError": "No se pudieron borrar los registros de diagnóstico locales"
   },
   "extensions": {
     "title": "Extensiones"

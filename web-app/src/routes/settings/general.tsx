@@ -13,7 +13,7 @@ import { useWebSearch } from '@/hooks/useWebSearch'
 import { useMitaWebResearch } from '@/hooks/useMitaWebResearch'
 import { useEffect, useState } from 'react'
 import ChangeDataFolderLocation from '@/containers/dialogs/ChangeDataFolderLocation'
-import { FactoryResetDialog } from '@/containers/dialogs'
+import { ClearLogsDialog, FactoryResetDialog } from '@/containers/dialogs'
 import type { FactoryResetOptions } from '@/services/app/types'
 import { useServiceHub } from '@/hooks/useServiceHub'
 import {
@@ -23,6 +23,7 @@ import {
   IconLogs,
   IconCopy,
   IconCopyCheck,
+  IconTrash,
 } from '@tabler/icons-react'
 import { toast } from 'sonner'
 import { SystemEvent } from '@/types/events'
@@ -30,6 +31,11 @@ import { Input } from '@/components/ui/input'
 import { useHardware } from '@/hooks/useHardware'
 import LanguageSwitcher from '@/containers/LanguageSwitcher'
 import { isRootDir } from '@/utils/path'
+import {
+  logUserAction,
+  logUserError,
+  logUserWarning,
+} from '@/lib/user-log'
 const TOKEN_VALIDATION_TIMEOUT_MS = 10_000
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -69,6 +75,7 @@ function General() {
   const [mitaDataFolder, setMitaDataFolder] = useState<
     string | undefined
   >()
+  const [logsDirectory, setLogsDirectory] = useState<string | undefined>()
   const [isCopied, setIsCopied] = useState(false)
   const [selectedNewPath, setSelectedNewPath] = useState<string | null>(null)
   const [isDialogOpen, setIsDialogOpen] = useState(false)
@@ -79,12 +86,22 @@ function General() {
   const [isCheckingForUpdates, setIsCheckingForUpdates] = useState(false)
 
   useEffect(() => {
-    const fetchDataFolder = async () => {
-      const path = await serviceHub.app().getMitaDataFolder()
-      setMitaDataFolder(path)
+    const fetchStoragePaths = async () => {
+      try {
+        const [dataFolder, logsPath] = await Promise.all([
+          serviceHub.app().getMitaDataFolder(),
+          serviceHub.app().getLogsDirectory(),
+        ])
+        setMitaDataFolder(dataFolder)
+        setLogsDirectory(logsPath)
+        void logUserAction('settings.general.opened', 'General settings opened')
+      } catch (error) {
+        console.error('Failed to load storage paths:', error)
+        void logUserError('settings.storage_paths.load_failed', error)
+      }
     }
 
-    fetchDataFolder()
+    fetchStoragePaths()
   }, [serviceHub])
 
   useEffect(() => {
@@ -101,8 +118,10 @@ function General() {
       setCliInstalled(s.installed)
       setCliPath(s.path)
       toast.success(`Biyan CLI installed to ${s.path}`)
+      void logUserAction('cli.install.succeeded', 'Biyan CLI installed')
     } catch (e) {
       toast.error('Install failed', { description: String(e) })
+      void logUserError('cli.install.failed', e, undefined, 'settings')
     } finally {
       setIsCliLoading(false)
     }
@@ -115,8 +134,10 @@ function General() {
       setCliInstalled(false)
       setCliPath(null)
       toast.success('Biyan CLI uninstalled')
+      void logUserAction('cli.uninstall.succeeded', 'Biyan CLI uninstalled')
     } catch (e) {
       toast.error('Uninstall failed', { description: String(e) })
+      void logUserError('cli.uninstall.failed', e, undefined, 'settings')
     } finally {
       setIsCliLoading(false)
     }
@@ -125,17 +146,50 @@ function General() {
   const resetApp = async (options: FactoryResetOptions) => {
     if (isRootDir(mitaDataFolder ?? '/')) {
       toast.error(t('settings:general.couldNotResetRootDirectory'))
+      void logUserWarning(
+        'factory_reset.blocked_root_directory',
+        'Factory reset blocked because data folder is root'
+      )
       return
     }
     pausePolling()
+    void logUserAction('factory_reset.requested', 'Factory reset requested', {
+      keepAppData: options.keepAppData,
+      keepModelsAndConfigs: options.keepModelsAndConfigs,
+    })
     await serviceHub.app().factoryReset(options)
   }
 
   const handleOpenLogs = async () => {
     try {
       await serviceHub.window().openLogsWindow()
+      void logUserAction('settings.logs_window.opened', 'Logs window opened')
     } catch (error) {
       console.error('Failed to open logs window:', error)
+      void logUserError('settings.logs_window.open_failed', error)
+    }
+  }
+
+  const handleRevealLogsFolder = async () => {
+    if (!logsDirectory) return
+    try {
+      await serviceHub.opener().revealItemInDir(logsDirectory)
+      void logUserAction('settings.logs_directory.revealed')
+    } catch (error) {
+      console.error('Failed to reveal logs folder:', error)
+      void logUserError('settings.logs_directory.reveal_failed', error)
+    }
+  }
+
+  const handleClearLogs = async () => {
+    try {
+      await serviceHub.app().clearLogs()
+      toast.success(t('settings:general.clearLogsSuccess'))
+      void logUserAction('settings.logs_cleared', 'Local diagnostic logs cleared')
+    } catch (error) {
+      console.error('Failed to clear logs:', error)
+      toast.error(t('settings:general.clearLogsError'))
+      void logUserError('settings.logs_clear.failed', error)
     }
   }
 
@@ -151,12 +205,17 @@ function General() {
             version: update.version,
           }),
         })
+        void logUserWarning('app_update.available', 'App update available', {
+          version: update.version,
+        })
       } else {
         toast.success(t('settings:general.noUpdateAvailable'))
+        void logUserAction('app_update.no_update', 'No app update available')
       }
     } catch (error) {
       console.error('Failed to check for app updates:', error)
       toast.error(t('settings:general.updateError'))
+      void logUserError('app_update.check_failed', error, undefined, 'settings')
     } finally {
       setIsCheckingForUpdates(false)
     }
@@ -196,6 +255,7 @@ function General() {
 
     if (selectedPath === mitaDataFolder) return
     if (selectedPath !== null) {
+      void logUserAction('data_folder.change_selected')
       setSelectedNewPath(selectedPath as string)
       setIsDialogOpen(true)
     }
@@ -213,12 +273,14 @@ function General() {
               throw new Error(t('settings:general.couldNotRelocateToRoot'))
             await serviceHub.app().relocateMitaDataFolder(selectedNewPath)
             setMitaDataFolder(selectedNewPath)
+            void logUserAction('data_folder.relocate_succeeded')
             // Only relaunch if relocation was successful
             window.core?.api?.relaunch()
             setSelectedNewPath(null)
             setIsDialogOpen(false)
           } catch (error) {
             console.error(error)
+            void logUserError('data_folder.relocate_failed', error)
             toast.error(
               error instanceof Error
                 ? error.message
@@ -228,6 +290,7 @@ function General() {
         }, 1000)
       } catch (error) {
         console.error('Failed to relocate data folder:', error)
+        void logUserError('data_folder.prepare_relocate_failed', error)
         // Revert the data folder path on error
         const originalPath = await serviceHub.app().getMitaDataFolder()
         setMitaDataFolder(originalPath)
@@ -371,7 +434,23 @@ function General() {
                 title={t('settings:dataFolder.appLogs', {
                   ns: 'settings',
                 })}
-                description={t('settings:dataFolder.appLogsDesc')}
+                description={
+                  <>
+                    <span>{t('settings:dataFolder.appLogsDesc')}</span>
+                    {logsDirectory && (
+                      <div className="flex items-center gap-2 mt-1">
+                        <div className="max-w-100 bg-secondary rounded-sm px-1 py-0.5">
+                          <span
+                            title={logsDirectory}
+                            className="text-xs line-clamp-1 break-all"
+                          >
+                            {logsDirectory}
+                          </span>
+                        </div>
+                      </div>
+                    )}
+                  </>
+                }
                 className="items-start flex-row gap-y-2"
                 actions={
                   <div className="flex items-center gap-2">
@@ -379,22 +458,8 @@ function General() {
                       variant="outline"
                       size="sm"
                       className="p-0"
-                      onClick={async () => {
-                        if (mitaDataFolder) {
-                          try {
-                            const logsPath = await serviceHub.path().join(
-                              mitaDataFolder,
-                              'logs'
-                            )
-                            await serviceHub.opener().revealItemInDir(logsPath)
-                          } catch (error) {
-                            console.error(
-                              'Failed to reveal logs folder:',
-                              error
-                            )
-                          }
-                        }
-                      }}
+                      onClick={handleRevealLogsFolder}
+                      disabled={!logsDirectory}
                       title={t('settings:general.revealLogs')}
                     >
                       <IconFolder
@@ -412,6 +477,19 @@ function General() {
                       <IconLogs size={12} className="text-muted-foreground" />
                       <span>{t('settings:general.openLogs')}</span>
                     </Button>
+                    <ClearLogsDialog onClear={handleClearLogs}>
+                      <Button
+                        variant="destructive"
+                        size="sm"
+                        title={t('settings:general.clearLogs')}
+                      >
+                        <IconTrash
+                          size={12}
+                          className="text-destructive-foreground"
+                        />
+                        <span>{t('settings:general.clearLogs')}</span>
+                      </Button>
+                    </ClearLogsDialog>
                   </div>
                 }
               />
@@ -555,11 +633,20 @@ function General() {
                                 ? `Signed in as ${data.name}`
                                 : 'Your Hugging Face token is valid.',
                             })
+                            void logUserAction(
+                              'huggingface_token.validate_succeeded',
+                              'Hugging Face token validated'
+                            )
                           } else {
                             toast.error('Token invalid', {
                               description:
                                 'The provided Hugging Face token is invalid. Please check your token and try again.',
                             })
+                            void logUserWarning(
+                              'huggingface_token.validate_rejected',
+                              'Hugging Face token validation was rejected',
+                              { status: resp.status, statusText: resp.statusText }
+                            )
                           }
                         } catch (e) {
                           const name = (e as { name?: string })?.name
@@ -568,11 +655,23 @@ function General() {
                               description:
                                 'The validation request timed out. Please check your network connection and try again.',
                             })
+                            void logUserError(
+                              'huggingface_token.validate_timeout',
+                              e,
+                              undefined,
+                              'settings-network'
+                            )
                           } else {
                             toast.error('Validation failed', {
                               description:
                                 'A network error occurred while validating the token. Please check your internet connection.',
                             })
+                            void logUserError(
+                              'huggingface_token.validate_network_failed',
+                              e,
+                              undefined,
+                              'settings-network'
+                            )
                           }
                         } finally {
                           clearTimeout(timeoutId)
