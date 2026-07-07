@@ -309,7 +309,12 @@ pub fn run() {
             #[cfg(all(feature = "deep-link", any(windows, target_os = "linux")))]
             {
                 use tauri_plugin_deep_link::DeepLinkExt;
-                app.deep_link().register_all()?;
+                if let Err(error) = app.deep_link().register_all() {
+                    #[cfg(debug_assertions)]
+                    log::warn!("Failed to register deep links during dev startup: {error}");
+                    #[cfg(not(debug_assertions))]
+                    return Err(error.into());
+                }
             }
 
             // Initialize SQLite database for mobile platforms

@@ -60,6 +60,41 @@ fn saves_lists_and_deletes_image_asset_under_data_folder() {
 }
 
 #[test]
+fn preserves_source_asset_ids_when_listing_saved_assets() {
+    let app = mock_app();
+    let id = "test-image-asset-source-roundtrip";
+    let reference_id = "test-image-asset-reference-source";
+    let _ = delete_image_asset(app.handle().clone(), id.to_string());
+    let _ = delete_image_asset(app.handle().clone(), reference_id.to_string());
+
+    let source_path = std::env::temp_dir().join("mita-test-source-reference.png");
+    fs::write(&source_path, b"fake image bytes").unwrap();
+    let reference = import_image_asset(
+        app.handle().clone(),
+        test_import_asset(reference_id, source_path.to_string_lossy().to_string()),
+    )
+    .unwrap();
+
+    let mut request = test_asset(id);
+    request.mode = "edit".to_string();
+    request.source_asset_ids = vec![reference.id.clone()];
+    let record = save_image_asset(app.handle().clone(), request).unwrap();
+    assert_eq!(record.source_asset_ids, vec![reference.id.clone()]);
+
+    let assets = list_image_assets(app.handle().clone()).unwrap();
+    let listed = assets
+        .iter()
+        .find(|asset| asset.id == id)
+        .expect("saved asset is listed");
+    assert_eq!(listed.source_asset_ids, vec![reference.id.clone()]);
+    assert!(assets.iter().any(|asset| asset.id == reference_id));
+
+    delete_image_asset(app.handle().clone(), id.to_string()).unwrap();
+    delete_image_asset(app.handle().clone(), reference_id.to_string()).unwrap();
+    let _ = fs::remove_file(source_path);
+}
+
+#[test]
 fn rejects_unsafe_asset_ids() {
     let app = mock_app();
     let result = save_image_asset(app.handle().clone(), test_asset("../outside"));

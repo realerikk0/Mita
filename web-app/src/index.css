@@ -256,3 +256,29 @@
     padding: 6px 16px !important;
   }
 }
+
+@layer components {
+  [data-sonner-toast][data-styled='true'] [data-close-button] {
+    top: 0.75rem !important;
+    right: 0.75rem !important;
+    left: auto !important;
+    transform: none !important;
+    width: 1.25rem;
+    height: 1.25rem;
+    color: currentColor;
+    background: transparent;
+    border-color: transparent;
+    opacity: 0.75;
+  }
+
+  [data-sonner-toast][data-styled='true'] [data-close-button]:hover {
+    background: var(--accent);
+    border-color: var(--border);
+    opacity: 1;
+  }
+
+  [data-sonner-toast][data-styled='true'] [data-close-button]:focus-visible {
+    outline: 2px solid var(--ring);
+    outline-offset: 2px;
+  }
+}
