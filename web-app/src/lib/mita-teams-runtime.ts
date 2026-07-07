@@ -54,6 +54,7 @@ import {
   type MitaTeamsExecutionMode,
   type MitaTeamsMilestone,
   type MitaTeamsOrchestratorDecision,
+  type MitaTeamsPlanDraft,
   type MitaTeamsRoleCallPlan,
   type MitaTeamsRoleConfig,
   type MitaTeamsRoleId,
@@ -519,6 +520,34 @@ function cleanWorkflowRoleName(value: string) {
     .trim()
 }
 
+function pushWorkflowRoleSpec(
+  roles: MitaTeamsUserWorkflowRoleSpec[],
+  seen: Set<string>,
+  name: string,
+  modelId?: string
+) {
+  const key = workflowTextKey(name)
+  if (!name || !key || seen.has(key)) return
+  seen.add(key)
+  roles.push({
+    name,
+    key,
+    ...(modelId ? { modelId } : {}),
+  })
+}
+
+function naturalWorkflowRoleName(value: string) {
+  const cleaned = cleanWorkflowRoleName(value)
+    .replace(/^[A-Za-z\s]*roles?\s*\d*\s*[:：-]\s*/i, '')
+    .replace(/^(?:AI\s*)?(?:角色|智能体|代理|专家|成员)\s*\d*\s*[:：-]\s*/i, '')
+    .replace(/[`*_~]/g, '')
+    .trim()
+  const name = cleaned.split(/[:：\-—–|，,。；;]/)[0]?.trim() ?? ''
+  if (name.length < 2 || name.length > 40) return ''
+  if (/[。！？.!?]/.test(name)) return ''
+  return name
+}
+
 function detectUserWorkflowSpec(userText: string): MitaTeamsUserWorkflowSpec {
   const roles: MitaTeamsUserWorkflowRoleSpec[] = []
   const seen = new Set<string>()
@@ -529,14 +558,7 @@ function detectUserWorkflowSpec(userText: string): MitaTeamsUserWorkflowSpec {
   while ((match = headingPattern.exec(userText))) {
     const name = cleanWorkflowRoleName(match[1] ?? '')
     const modelId = match[2]?.trim()
-    const key = workflowTextKey(name)
-    if (!name || !key || seen.has(key)) continue
-    seen.add(key)
-    roles.push({
-      name,
-      key,
-      ...(modelId ? { modelId } : {}),
-    })
+    pushWorkflowRoleSpec(roles, seen, name, modelId)
   }
 
   const channelMatch = userText.match(/频道名\s*[:：]\s*#?([^\n`*_]+)/)
@@ -545,9 +567,55 @@ function detectUserWorkflowSpec(userText: string): MitaTeamsUserWorkflowSpec {
     /(角色卡|按发言顺序|频道名|轮次|模式|工作流|流程|prompt|提示词)/i.test(
       userText
     ) && /```|`[^`\n]+`/.test(userText)
+  const hasNaturalRoleSetSignal =
+    /(?:指定|选定|选择|使用|只用|仅用|固定|以下|下面|这[几个四4三3二2五5六6七7八8]?个|角色|智能体|代理|专家|成员|specified|selected|listed|following|given|exactly|only|roles?|agents?|personas?|specialists?)/i.test(
+      userText
+    ) &&
+    /(?:AI\s*)?(?:角色|智能体|代理|专家|成员)|roles?|agents?|personas?|specialists?/i.test(
+      userText
+    )
+
+  if (roles.length === 0 && hasNaturalRoleSetSignal) {
+    const lines = userText.split(/\r?\n/)
+    let inRoleBlock = false
+
+    for (const rawLine of lines) {
+      const line = rawLine.trim()
+      if (!line) {
+        if (inRoleBlock) break
+        continue
+      }
+
+      if (
+        /(?:AI\s*)?(?:角色|智能体|代理|专家|成员)|roles?|agents?|personas?|specialists?/i.test(
+          line
+        ) &&
+        /[:：]|\d|[一二三四五六七八九]/.test(line)
+      ) {
+        inRoleBlock = true
+        const inlineList = line.split(/[:：]/).slice(1).join(':')
+        if (inlineList) {
+          inlineList
+            .split(/[、，,；;/]|(?:\s+and\s+)/i)
+            .map(naturalWorkflowRoleName)
+            .filter(Boolean)
+            .forEach((name) => pushWorkflowRoleSpec(roles, seen, name))
+        }
+        continue
+      }
+
+      if (!inRoleBlock) continue
+      const listItem = line.match(
+        /^(?:[-*•]\s*)?(?:\d+|[一二三四五六七八九])[\s.)、:：-]+(.+)$/
+      )
+      const roleName = naturalWorkflowRoleName(listItem?.[1] ?? line)
+      if (roleName) pushWorkflowRoleSpec(roles, seen, roleName)
+    }
+  }
 
   return {
-    explicit: roles.length > 0 && hasWorkflowSignals,
+    explicit:
+      roles.length > 0 && (hasWorkflowSignals || hasNaturalRoleSetSignal),
     roles,
     ...(channelLabel ? { channelLabel } : {}),
   }
@@ -573,7 +641,9 @@ function detectClosedRoleSetIntent(userText: string): boolean {
     /\b(don'?t|do not|never|no|please don'?t)\b[^.!?\n]{0,14}\b(add|create|introduce|invent|spawn|generate)\b[^.!?\n]{0,10}\b(role|specialist|agent|persona)/i
   const enOnlyThese =
     /\bonly\b[^.!?\n]{0,18}\b(these|those|the following|the listed|the given)\b[^.!?\n]{0,10}\brole/i
-  const enFixedRoles = /\b(fixed|exact|specified|predefined)\s+roles?\b/i
+  const enFixedRoles = /\b(fixed|exact|predefined)\s+roles?\b/i
+  const enSpecifiedRolesOnly =
+    /\b(specified|selected|listed|following|given)\b[^.!?\n]{0,28}\b(ai\s*)?(roles?|agents?|personas?|specialists?)\b[^.!?\n]{0,16}\bonly\b/i
 
   return (
     cnForbidExtra.test(text) ||
@@ -582,7 +652,8 @@ function detectClosedRoleSetIntent(userText: string): boolean {
     enForbidExtra.test(text) ||
     enForbidAdd.test(text) ||
     enOnlyThese.test(text) ||
-    enFixedRoles.test(text)
+    enFixedRoles.test(text) ||
+    enSpecifiedRolesOnly.test(text)
   )
 }
 
@@ -2536,13 +2607,35 @@ function applyTeamConfiguration({
   runtime: MitaTeamsRuntime
   decision: Extract<MitaTeamsOrchestratorDecision, { action: 'configure_team' }>
 }) {
+  const lockedToExistingRoster =
+    isMitaTeamsTeamLocked(config) &&
+    hasOwnerSpecialistTeam(config) &&
+    !config.scenarioId
+  const existingRoleIds = new Set(config.roles.map((role) => role.id))
+  const decisionRoles = lockedToExistingRoster
+    ? decision.roles.filter((role) => existingRoleIds.has(role.id))
+    : decision.roles
+  const decisionChannels = lockedToExistingRoster
+    ? decision.channels
+        .map((channel) => ({
+          ...channel,
+          roleIds: channel.roleIds.filter((roleId) =>
+            existingRoleIds.has(roleId)
+          ),
+        }))
+        .filter(
+          (channel) =>
+            channel.id === MITA_TEAMS_TASK_CHANNEL_ID ||
+            channel.roleIds.length > 0
+        )
+    : decision.channels
   const roles = mergeRoles(
     config.roles,
-    decision.roles,
+    decisionRoles,
     archivedRoleIdSet(config)
   )
   const channels = normalizeChannelMembership(
-    mergeChannels(config.channels, decision.channels),
+    mergeChannels(config.channels, decisionChannels),
     roles
   )
   const activeRoleId = roles.some((role) => role.id === config.activeRoleId)
@@ -2649,6 +2742,52 @@ function roleAllowedByWorkflowSpec(
   return Boolean(workflowSpecForRole(workflowSpec, role))
 }
 
+function roleAssignmentAllowedByWorkflowSpec(
+  workflowSpec: MitaTeamsUserWorkflowSpec | undefined,
+  assignment: { roleId: MitaTeamsRoleId; name: string }
+) {
+  return roleAllowedByWorkflowSpec(workflowSpec, {
+    id: assignment.roleId,
+    name: assignment.name,
+    label: assignment.name,
+  })
+}
+
+function constrainPlanToWorkflowSpec(
+  config: MitaTeamsConfig,
+  plan: MitaTeamsPlanDraft,
+  workflowSpec: MitaTeamsUserWorkflowSpec | undefined
+): MitaTeamsPlanDraft {
+  if (!workflowSpec?.explicit) return plan
+
+  const existingRoleIds = new Set(config.roles.map((role) => role.id))
+  const lockToExistingRoles = workflowSpec.roles.length === 0
+  const roleAssignments = plan.roleAssignments.filter((assignment) =>
+    lockToExistingRoles
+      ? existingRoleIds.has(assignment.roleId)
+      : roleAssignmentAllowedByWorkflowSpec(workflowSpec, assignment)
+  )
+  const allowedRoleIds = new Set<MitaTeamsRoleId>([
+    MITA_TEAMS_ORCHESTRATOR_ROLE_ID,
+    ...config.roles
+      .filter((role) =>
+        lockToExistingRoles
+          ? existingRoleIds.has(role.id)
+          : roleAllowedByWorkflowSpec(workflowSpec, role)
+      )
+      .map((role) => role.id),
+    ...roleAssignments.map((assignment) => assignment.roleId),
+  ])
+
+  return {
+    ...plan,
+    tasks: plan.tasks.filter(
+      (task) => !task.roleId || allowedRoleIds.has(task.roleId)
+    ),
+    roleAssignments,
+  }
+}
+
 function applyWorkflowRoleModel(
   role: MitaTeamsRoleConfig,
   workflowSpec: MitaTeamsUserWorkflowSpec,
@@ -2734,6 +2873,20 @@ function constrainDecisionToWorkflowSpec(
     return {
       ...decision,
       calls,
+    }
+  }
+
+  if (
+    decision.action === 'propose_plan' ||
+    decision.action === 'revise_plan'
+  ) {
+    return {
+      ...decision,
+      plan: constrainPlanToWorkflowSpec(
+        config,
+        decision.plan as MitaTeamsPlanDraft,
+        workflowSpec
+      ),
     }
   }
 
@@ -4048,10 +4201,15 @@ export async function runMitaTeamsRuntime({
   // Persist an *explicit* lock only (prose intent, a detected spec, or an
   // existing user_spec). An auto-locked roster stays in the 'auto' state
   // (undefined) so that emptying the roster later re-opens it for the Host.
+  const allowInitialWorkflowRoleCreation =
+    detectedWorkflowSpec.explicit &&
+    detectedWorkflowSpec.roles.length > 0 &&
+    !hasOwnerSpecialistTeam(config)
   if (
-    detectedWorkflowSpec.explicit ||
-    ownerLocksTeam ||
-    config.workflowControl === 'user_spec'
+    (detectedWorkflowSpec.explicit ||
+      ownerLocksTeam ||
+      config.workflowControl === 'user_spec') &&
+    !allowInitialWorkflowRoleCreation
   ) {
     workingConfig = {
       ...workingConfig,
@@ -4420,6 +4578,14 @@ export async function runMitaTeamsRuntime({
           decision,
         })
         workingConfig = applied.config
+        if (allowInitialWorkflowRoleCreation && workflowSpec?.explicit) {
+          workingConfig = {
+            ...workingConfig,
+            workflowControl: 'user_spec',
+            scenarioId: undefined,
+            updatedAt: nowIso(),
+          }
+        }
         runtime = applied.runtime
         notify(runtime)
 

@@ -986,6 +986,339 @@ describe('mita teams runtime', () => {
     )
   })
 
+  it('does not treat a request to choose several roles as a locked team', async () => {
+    const config = createDefaultMitaTeamsConfig({
+      provider: 'openai',
+      id: 'gpt-5',
+    })
+
+    const result = await runMitaTeamsRuntime({
+      config: approveRuntimeForExecution(config),
+      userText: '请帮我选择三个AI角色来分析这个问题。',
+      generateDecisionText: async () =>
+        JSON.stringify({
+          action: 'configure_team',
+          reason: 'Choose three useful roles for the owner.',
+          roles: [
+            {
+              id: 'planner',
+              name: 'Planner',
+              prompt: 'Plan the analysis.',
+              enabled: true,
+            },
+            {
+              id: 'researcher',
+              name: 'Researcher',
+              prompt: 'Research the problem.',
+              enabled: true,
+            },
+            {
+              id: 'reviewer',
+              name: 'Reviewer',
+              prompt: 'Review the answer.',
+              enabled: true,
+            },
+          ],
+          channels: [
+            {
+              id: 'discussion',
+              label: 'Discussion',
+              description: 'Team discussion.',
+              roleIds: ['planner', 'researcher', 'reviewer'],
+            },
+          ],
+          calls: [],
+        }),
+      generateRoleText: async () => 'unused',
+    })
+
+    expect(result.config.workflowControl).not.toBe('user_spec')
+    expect(result.config.roles.map((role) => role.id)).toEqual(
+      expect.arrayContaining(['planner', 'researcher', 'reviewer'])
+    )
+  })
+
+  it('does not add unrequested roles when the owner limits an existing team to four roles', async () => {
+    const model = { provider: 'openai', id: 'gpt-5' }
+    const config = normalizeMitaTeamsConfig(
+      {
+        enabled: true,
+        workflowControl: 'open',
+        activeChannel: 'discussion',
+        activeRoleId: 'planner',
+        roles: [
+          {
+            id: 'planner',
+            name: 'Planner',
+            label: 'Plan',
+            description: 'Plans the discussion.',
+            prompt: 'Plan the discussion.',
+            color: 'bg-blue-600',
+            permission: 'read',
+            enabled: true,
+          },
+          {
+            id: 'researcher',
+            name: 'Researcher',
+            label: 'Research',
+            description: 'Researches facts.',
+            prompt: 'Research facts.',
+            color: 'bg-cyan-600',
+            permission: 'read',
+            enabled: true,
+          },
+          {
+            id: 'writer',
+            name: 'Writer',
+            label: 'Write',
+            description: 'Writes the draft.',
+            prompt: 'Write the draft.',
+            color: 'bg-emerald-600',
+            permission: 'read',
+            enabled: true,
+          },
+          {
+            id: 'reviewer',
+            name: 'Reviewer',
+            label: 'Review',
+            description: 'Reviews the answer.',
+            prompt: 'Review the answer.',
+            color: 'bg-amber-600',
+            permission: 'read',
+            enabled: true,
+          },
+        ],
+        channels: [
+          {
+            id: 'discussion',
+            label: 'Discussion',
+            description: 'Owner-defined room.',
+            roleIds: ['planner', 'researcher', 'writer', 'reviewer'],
+          },
+        ],
+      },
+      model
+    )!
+    const calledRoles: string[] = []
+    let decisionCount = 0
+
+    const result = await runMitaTeamsRuntime({
+      config: approveRuntimeForExecution(config),
+      userText: '只使用当前目标话题指定的四个AI角色来讨论，不要增加其他角色。',
+      generateDecisionText: async () => {
+        decisionCount += 1
+        if (decisionCount > 1) {
+          return JSON.stringify({
+            action: 'stop',
+            reason: 'Owner-defined team finished.',
+            finalResponse: 'Done.',
+          })
+        }
+
+        return JSON.stringify({
+          action: 'configure_team',
+          reason: 'Try to expand beyond the owner-selected four roles.',
+          roles: [
+            {
+              id: 'data_scout',
+              name: 'Data Scout',
+              prompt: 'Collect market data.',
+              enabled: true,
+            },
+            {
+              id: 'market_analyst',
+              name: 'Market Analyst',
+              prompt: 'Analyze markets.',
+              enabled: true,
+            },
+            {
+              id: 'skeptic',
+              name: 'Skeptic Reviewer',
+              prompt: 'Challenge the answer.',
+              enabled: true,
+            },
+          ],
+          channels: [
+            {
+              id: 'discussion',
+              label: 'Discussion',
+              description: 'Mixed room.',
+              roleIds: [
+                'planner',
+                'researcher',
+                'writer',
+                'reviewer',
+                'data_scout',
+                'market_analyst',
+                'skeptic',
+              ],
+            },
+          ],
+          calls: [
+            {
+              roleId: 'planner',
+              channelId: 'discussion',
+              instruction: 'Start with the owner-defined plan.',
+            },
+            {
+              roleId: 'data_scout',
+              channelId: 'discussion',
+              instruction: 'Run extra market research.',
+            },
+          ],
+        })
+      },
+      generateRoleText: async ({ role }) => {
+        calledRoles.push(role.id)
+        return `${role.name} responded.`
+      },
+    })
+
+    const roleIds = result.config.roles.map((role) => role.id)
+    expect(roleIds).toEqual(
+      expect.arrayContaining(['planner', 'researcher', 'writer', 'reviewer'])
+    )
+    expect(roleIds).not.toContain('data_scout')
+    expect(roleIds).not.toContain('market_analyst')
+    expect(roleIds).not.toContain('skeptic')
+    expect(result.config.workflowControl).toBe('user_spec')
+    expect(calledRoles).toContain('planner')
+    expect(calledRoles).not.toContain('data_scout')
+    expect(calledRoles).not.toContain('market_analyst')
+    expect(calledRoles).not.toContain('skeptic')
+  })
+
+  it('filters unapproved extra role assignments out of locked-team plan drafts', async () => {
+    const model = { provider: 'openai', id: 'gpt-5' }
+    const config = normalizeMitaTeamsConfig(
+      {
+        enabled: true,
+        activeChannel: 'discussion',
+        activeRoleId: 'planner',
+        roles: [
+          {
+            id: 'planner',
+            name: 'Planner',
+            label: 'Plan',
+            description: 'Plans the discussion.',
+            prompt: 'Plan the discussion.',
+            color: 'bg-blue-600',
+            permission: 'read',
+            enabled: true,
+          },
+          {
+            id: 'researcher',
+            name: 'Researcher',
+            label: 'Research',
+            description: 'Researches facts.',
+            prompt: 'Research facts.',
+            color: 'bg-cyan-600',
+            permission: 'read',
+            enabled: true,
+          },
+          {
+            id: 'writer',
+            name: 'Writer',
+            label: 'Write',
+            description: 'Writes the draft.',
+            prompt: 'Write the draft.',
+            color: 'bg-emerald-600',
+            permission: 'read',
+            enabled: true,
+          },
+          {
+            id: 'reviewer',
+            name: 'Reviewer',
+            label: 'Review',
+            description: 'Reviews the answer.',
+            prompt: 'Review the answer.',
+            color: 'bg-amber-600',
+            permission: 'read',
+            enabled: true,
+          },
+        ],
+        channels: [
+          {
+            id: 'discussion',
+            label: 'Discussion',
+            description: 'Owner-defined room.',
+            roleIds: ['planner', 'researcher', 'writer', 'reviewer'],
+          },
+        ],
+      },
+      model
+    )!
+
+    const result = await runMitaTeamsRuntime({
+      config,
+      userText: 'Use the specified four roles only.',
+      generateDecisionText: async () =>
+        JSON.stringify({
+          action: 'propose_plan',
+          reason: 'Plan with accidental extra role assignments.',
+          plan: {
+            goal: 'Discuss with the selected team.',
+            summary: 'Use the owner-defined roles.',
+            scope: ['No extra agents.'],
+            acceptanceCriteria: ['Only selected roles are assigned.'],
+            tasks: [
+              { title: 'Plan', roleId: 'planner' },
+              { title: 'Research', roleId: 'researcher' },
+              { title: 'Scout extra data', roleId: 'data_scout' },
+            ],
+            roleAssignments: [
+              {
+                roleId: 'planner',
+                name: 'Planner',
+                assignment: 'Plan the discussion.',
+              },
+              {
+                roleId: 'researcher',
+                name: 'Researcher',
+                assignment: 'Research facts.',
+              },
+              {
+                roleId: 'writer',
+                name: 'Writer',
+                assignment: 'Write the answer.',
+              },
+              {
+                roleId: 'reviewer',
+                name: 'Reviewer',
+                assignment: 'Review the answer.',
+              },
+              {
+                roleId: 'data_scout',
+                name: 'Data Scout',
+                assignment: 'Unrequested extra market research.',
+              },
+              {
+                roleId: 'market_analyst',
+                name: 'Market Analyst',
+                assignment: 'Unrequested extra analysis.',
+              },
+              {
+                roleId: 'skeptic',
+                name: 'Skeptic Reviewer',
+                assignment: 'Unrequested extra review.',
+              },
+            ],
+            executionOrder: ['Plan', 'Research', 'Write', 'Review'],
+          },
+        }),
+      generateRoleText: async () => 'unused',
+    })
+
+    expect(result.status).toBe('waiting-for-user')
+    expect(
+      result.config.runtime.planDraft?.roleAssignments.map((role) => role.roleId)
+    ).toEqual(['planner', 'researcher', 'writer', 'reviewer'])
+    expect(result.config.runtime.planDraft?.tasks.map((task) => task.roleId)).toEqual([
+      'planner',
+      'researcher',
+    ])
+  })
+
   it('red-team mode requires a skeptic stress-test before the run can stop', async () => {
     const config = normalizeMitaTeamsConfig(
       {

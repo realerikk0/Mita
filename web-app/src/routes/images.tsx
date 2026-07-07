@@ -41,6 +41,7 @@ import {
   ZoomIn,
   ZoomOut,
 } from 'lucide-react'
+import TextareaAutosize from 'react-textarea-autosize'
 import {
   type ReactNode,
   type DragEvent as ReactDragEvent,
@@ -538,8 +539,12 @@ function qualityPresetFromAssetQuality(quality?: string): ImageQualityPreset {
   }
 }
 
+function sourceAssetIdsForAsset(asset: ImageAssetRecord) {
+  return Array.isArray(asset.sourceAssetIds) ? asset.sourceAssetIds : []
+}
+
 function regenerationModeForAsset(asset: ImageAssetRecord): ImageGenerationMode {
-  if (asset.sourceAssetIds.length === 0) return 'generate'
+  if (sourceAssetIdsForAsset(asset).length === 0) return 'generate'
   return asset.mode === 'generate' ? 'edit' : asset.mode
 }
 
@@ -1940,6 +1945,10 @@ function StoryboardImageEditorDialog({
     { value: 'rect', labelKey: 'storyboard.editor.rect', icon: Square },
     { value: 'crop', labelKey: 'storyboard.editor.crop', icon: Crop },
   ]
+  const editorCanvasWidth = editorCanvas?.width ?? 1
+  const editorCanvasHeight = editorCanvas?.height ?? 1
+  const scaledCanvasWidth = Math.max(1, editorCanvasWidth * zoom)
+  const scaledCanvasHeight = Math.max(1, editorCanvasHeight * zoom)
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
@@ -2071,40 +2080,49 @@ function StoryboardImageEditorDialog({
             className="min-w-0 flex-1 overflow-auto bg-[#f4f5f7] p-6"
             onWheel={handleWheel}
           >
-            <div className="flex min-h-full items-center justify-center">
+            <div className="flex min-h-full min-w-full">
               <div
-                className="relative origin-center"
-                style={{ transform: `scale(${zoom})` }}
+                data-testid="storyboard-editor-canvas-frame"
+                className="relative m-auto shrink-0"
+                style={{
+                  width: `${scaledCanvasWidth}px`,
+                  height: `${scaledCanvasHeight}px`,
+                }}
               >
-                <canvas
-                  ref={setCanvasElement}
-                  className={cn(
-                    'block max-h-none max-w-none rounded-lg bg-white shadow-sm',
-                    tool === 'pan'
-                      ? panning
-                        ? 'cursor-grabbing'
-                        : 'cursor-grab'
-                      : tool === 'pen'
-                        ? 'cursor-crosshair'
-                        : 'cursor-cell',
-                    !ready && 'opacity-40'
-                  )}
-                  onPointerDown={beginDraw}
-                  onPointerMove={continueDraw}
-                  onPointerUp={finishDraw}
-                  onPointerCancel={finishDraw}
-                />
-                {draftRect && (
-                  <div
+                <div
+                  className="absolute left-0 top-0 origin-top-left"
+                  style={{ transform: `scale(${zoom})` }}
+                >
+                  <canvas
+                    ref={setCanvasElement}
                     className={cn(
-                      'pointer-events-none absolute border-2 border-dashed',
-                      tool === 'crop'
-                        ? 'border-emerald-500 bg-emerald-500/10'
-                        : 'border-[#f36f4f] bg-[#f36f4f]/10'
+                      'block max-h-none max-w-none rounded-lg bg-white shadow-sm',
+                      tool === 'pan'
+                        ? panning
+                          ? 'cursor-grabbing'
+                          : 'cursor-grab'
+                        : tool === 'pen'
+                          ? 'cursor-crosshair'
+                          : 'cursor-cell',
+                      !ready && 'opacity-40'
                     )}
-                    style={draftRect}
+                    onPointerDown={beginDraw}
+                    onPointerMove={continueDraw}
+                    onPointerUp={finishDraw}
+                    onPointerCancel={finishDraw}
                   />
-                )}
+                  {draftRect && (
+                    <div
+                      className={cn(
+                        'pointer-events-none absolute border-2 border-dashed',
+                        tool === 'crop'
+                          ? 'border-emerald-500 bg-emerald-500/10'
+                          : 'border-[#f36f4f] bg-[#f36f4f]/10'
+                      )}
+                      style={draftRect}
+                    />
+                  )}
+                </div>
               </div>
             </div>
           </div>
@@ -4060,6 +4078,9 @@ function Images() {
   const [previewAsset, setPreviewAsset] = useState<ImageAssetRecord | null>(
     null
   )
+  const [referencePickerAssetId, setReferencePickerAssetId] = useState<
+    string | null
+  >(null)
   const [previewVideoAsset, setPreviewVideoAsset] =
     useState<VideoAssetRecord | null>(null)
   const [contextMenu, setContextMenu] = useState<AssetContextMenuState>(null)
@@ -4279,8 +4300,11 @@ function Images() {
           onRemove={removeSourceAsset}
         />
 
-        <Textarea
-          className="min-h-[58px] max-h-[40svh] flex-1 resize-none overflow-y-auto overscroll-contain border-0 bg-transparent p-0 pt-1.5 text-sm shadow-none [scrollbar-gutter:stable] focus-visible:ring-0"
+        <TextareaAutosize
+          dir="auto"
+          minRows={2}
+          maxRows={10}
+          className="min-h-[58px] max-h-[40svh] flex-1 resize-none overflow-y-auto overscroll-contain border-0 bg-transparent p-0 pt-1.5 text-sm shadow-none outline-0 [scrollbar-gutter:stable] focus-visible:ring-0"
           value={prompt}
           placeholder={imageT(t, 'promptPlaceholder')}
           onChange={(event) => setPrompt(event.target.value)}
@@ -4951,7 +4975,23 @@ function Images() {
   )
 
   const rerunGroup = useCallback(
-    (group: ImageTaskGroup) => {
+    async (group: ImageTaskGroup) => {
+      let sourceAssets: ImageAssetRecord[]
+      try {
+        sourceAssets = await ensureSourceAssets(group.sourceAssetIds)
+      } catch (error) {
+        console.error(
+          'Failed to load reference images for image group regeneration:',
+          error
+        )
+        toast.error(imageT(t, 'toast.importReferenceFailed'))
+        return
+      }
+      if (sourceAssets.length < group.sourceAssetIds.length) {
+        toast.error(imageT(t, 'toast.importReferenceFailed'))
+        return
+      }
+
       const batchId = createId()
       const createdAt = new Date().toISOString()
       const nextTasks: ImageTask[] = group.tasks.map((task) => ({
@@ -4967,22 +5007,31 @@ function Images() {
         asset: undefined,
       }))
       addTasks(nextTasks)
-      void runQueue(nextTasks)
+      void runQueue(nextTasks, sourceAssets)
     },
-    [addTasks, runQueue]
+    [addTasks, ensureSourceAssets, runQueue, t]
   )
 
   const regenerateAsset = useCallback(
     async (asset: ImageAssetRecord) => {
       const cleanPrompt = asset.prompt.trim()
-      if (!cleanPrompt && asset.sourceAssetIds.length === 0) {
+      const assetSourceAssetIds = sourceAssetIdsForAsset(asset)
+      if (!cleanPrompt && assetSourceAssetIds.length === 0) {
         toast.error(imageT(t, 'toast.describeImageFirst'))
+        return
+      }
+
+      if (
+        assetSourceAssetIds.length === 0 &&
+        (asset.mode === 'edit' || asset.mode === 'variation')
+      ) {
+        toast.error(imageT(t, 'toast.importReferenceFailed'))
         return
       }
 
       let sourceAssets: ImageAssetRecord[]
       try {
-        sourceAssets = await ensureSourceAssets(asset.sourceAssetIds)
+        sourceAssets = await ensureSourceAssets(assetSourceAssetIds)
       } catch (error) {
         console.error(
           'Failed to load reference images for image regeneration:',
@@ -4991,7 +5040,7 @@ function Images() {
         toast.error(imageT(t, 'toast.importReferenceFailed'))
         return
       }
-      if (sourceAssets.length < asset.sourceAssetIds.length) {
+      if (sourceAssets.length < assetSourceAssetIds.length) {
         toast.error(imageT(t, 'toast.importReferenceFailed'))
         return
       }
@@ -5412,101 +5461,175 @@ function Images() {
     })
   }
 
-  const renderSavedHistoryAsset = (asset: ImageAssetRecord) => (
-    <section
-      key={asset.id}
-      className="w-full space-y-3 rounded-xl border bg-background p-[18px] shadow-sm"
-    >
-      <div className="flex items-start gap-2.5">
-        <button
-          type="button"
-          className="mt-0.5 size-10 shrink-0 rotate-[-7deg] overflow-hidden rounded-sm bg-secondary shadow-sm"
-          onClick={() => setPreviewAsset(asset)}
-          aria-label={t('common:preview')}
-        >
-          {asset.path ? (
-            <img
-              src={assetSrc(asset)}
-              alt={asset.prompt}
-              className="size-full object-cover"
-            />
-          ) : (
-            <div className="flex size-full items-center justify-center">
-              <ImageIcon className="size-4 text-muted-foreground" />
-            </div>
+  const renderSavedHistoryAsset = (asset: ImageAssetRecord) => {
+    const assetSourceAssetIds = sourceAssetIdsForAsset(asset)
+    const assetSourceAssets = assetSourceAssetIds
+      .map((id) => resolveAssetById(id))
+      .filter((item): item is ImageAssetRecord => Boolean(item))
+    const headerReferenceAsset = assetSourceAssets[0]
+
+    return (
+      <section
+        key={asset.id}
+        className="w-full space-y-3 rounded-xl border bg-background p-[18px] shadow-sm"
+      >
+        <div className="flex items-start gap-2.5">
+          {headerReferenceAsset && (
+            <>
+              {assetSourceAssets.length > 1 ? (
+                <Popover
+                  open={referencePickerAssetId === asset.id}
+                  onOpenChange={(open) =>
+                    setReferencePickerAssetId(open ? asset.id : null)
+                  }
+                >
+                  <PopoverTrigger asChild>
+                    <button
+                      type="button"
+                      className="relative mt-0.5 size-10 shrink-0 rotate-[-7deg] overflow-hidden rounded-sm bg-secondary shadow-sm"
+                      aria-label={t('common:preview')}
+                    >
+                      {headerReferenceAsset.path ? (
+                        <img
+                          src={assetSrc(headerReferenceAsset)}
+                          alt={headerReferenceAsset.prompt}
+                          className="size-full object-cover"
+                        />
+                      ) : (
+                        <div className="flex size-full items-center justify-center">
+                          <ImageIcon className="size-4 text-muted-foreground" />
+                        </div>
+                      )}
+                      <span className="absolute bottom-0 right-0 rounded-tl-sm bg-background/90 px-1 text-[10px] leading-4 text-muted-foreground">
+                        +{assetSourceAssets.length - 1}
+                      </span>
+                    </button>
+                  </PopoverTrigger>
+                  <PopoverContent align="start" className="w-auto p-2">
+                    <div className="grid max-w-[220px] grid-cols-4 gap-2">
+                      {assetSourceAssets.map((sourceAsset) => (
+                        <button
+                          key={sourceAsset.id}
+                          type="button"
+                          className="size-11 overflow-hidden rounded-sm bg-secondary shadow-sm ring-offset-background transition hover:ring-2 hover:ring-ring focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                          onClick={() => {
+                            setPreviewAsset(sourceAsset)
+                            setReferencePickerAssetId(null)
+                          }}
+                          aria-label={t('common:preview')}
+                        >
+                          {sourceAsset.path ? (
+                            <img
+                              src={assetSrc(sourceAsset)}
+                              alt={sourceAsset.prompt}
+                              className="size-full object-cover"
+                            />
+                          ) : (
+                            <div className="flex size-full items-center justify-center">
+                              <ImageIcon className="size-4 text-muted-foreground" />
+                            </div>
+                          )}
+                        </button>
+                      ))}
+                    </div>
+                  </PopoverContent>
+                </Popover>
+              ) : (
+                <button
+                  type="button"
+                  className="relative mt-0.5 size-10 shrink-0 rotate-[-7deg] overflow-hidden rounded-sm bg-secondary shadow-sm"
+                  onClick={() => setPreviewAsset(headerReferenceAsset)}
+                  aria-label={t('common:preview')}
+                >
+                  {headerReferenceAsset.path ? (
+                    <img
+                      src={assetSrc(headerReferenceAsset)}
+                      alt={headerReferenceAsset.prompt}
+                      className="size-full object-cover"
+                    />
+                  ) : (
+                    <div className="flex size-full items-center justify-center">
+                      <ImageIcon className="size-4 text-muted-foreground" />
+                    </div>
+                  )}
+                </button>
+              )}
+            </>
           )}
-        </button>
-        <div className="min-w-0 space-y-1">
-          <div className="flex flex-wrap items-center gap-x-2 gap-y-1 text-sm text-foreground">
-            <span className="font-medium">{asset.prompt}</span>
-            <span className="text-muted-foreground">
-              {asset.model} · {asset.ratio} ·{' '}
-              {assetQualityLabel(t, asset.quality)}
+          <div className="min-w-0 space-y-2">
+            <div className="flex flex-wrap items-center gap-x-2 gap-y-1 text-sm text-foreground">
+              <span className="select-text cursor-text font-medium">
+                {asset.prompt}
+              </span>
+              <span className="text-muted-foreground">
+                {asset.model} · {asset.ratio} ·{' '}
+                {assetQualityLabel(t, asset.quality)}
+              </span>
+            </div>
+            <span className="inline-flex rounded-full bg-emerald-500/10 px-2 py-0.5 text-xs text-emerald-600">
+              {imageT(t, 'status.saved')}
             </span>
           </div>
-          <span className="inline-flex rounded-full bg-emerald-500/10 px-2 py-0.5 text-xs text-emerald-600">
-            {imageT(t, 'status.saved')}
-          </span>
         </div>
-      </div>
 
-      <div className="max-w-[380px] overflow-hidden rounded-lg bg-border">
-        <button
-          type="button"
-          className="relative block aspect-square w-full bg-secondary text-left"
-          aria-label={t('common:preview')}
-          onClick={() => setPreviewAsset(asset)}
-          onContextMenu={(event) => showAssetContextMenu(event, asset)}
-        >
-          <ImageTokenUsageBadge usage={asset.usage} />
-          {asset.path ? (
-            <img
-              src={assetSrc(asset)}
-              alt={asset.prompt}
-              className="size-full object-cover"
-            />
-          ) : (
-            <div className="flex size-full items-center justify-center">
-              <ImageIcon className="size-6 text-muted-foreground" />
-            </div>
-          )}
-        </button>
-      </div>
+        <div className="max-w-[380px] overflow-hidden rounded-lg bg-border">
+          <button
+            type="button"
+            className="relative block aspect-square w-full bg-secondary text-left"
+            aria-label={t('common:preview')}
+            onClick={() => setPreviewAsset(asset)}
+            onContextMenu={(event) => showAssetContextMenu(event, asset)}
+          >
+            <ImageTokenUsageBadge usage={asset.usage} />
+            {asset.path ? (
+              <img
+                src={assetSrc(asset)}
+                alt={asset.prompt}
+                className="size-full object-cover"
+              />
+            ) : (
+              <div className="flex size-full items-center justify-center">
+                <ImageIcon className="size-6 text-muted-foreground" />
+              </div>
+            )}
+          </button>
+        </div>
 
-      <div className="flex flex-wrap items-center gap-2">
-        <Button
-          variant="secondary"
-          size="sm"
-          onClick={() => editFromAsset(asset)}
-        >
-          <ImageIcon className="size-4" />
-          {imageT(t, 'reEdit')}
-        </Button>
-        <Button
-          variant="secondary"
-          size="sm"
-          onClick={() => void regenerateAsset(asset)}
-        >
-          <RefreshCcw className="size-4" />
-          {imageT(t, 'regenerate')}
-        </Button>
-        <Button
-          variant="secondary"
-          size="icon-sm"
-          onClick={() => void copyPrompt(asset.prompt)}
-        >
-          <Copy className="size-4" />
-        </Button>
-        <Button
-          variant="secondary"
-          size="icon-sm"
-          onClick={() => void deleteAsset(asset)}
-        >
-          <Trash2 className="size-4" />
-        </Button>
-      </div>
-    </section>
-  )
+        <div className="flex flex-wrap items-center gap-2">
+          <Button
+            variant="secondary"
+            size="sm"
+            onClick={() => editFromAsset(asset)}
+          >
+            <ImageIcon className="size-4" />
+            {imageT(t, 'reEdit')}
+          </Button>
+          <Button
+            variant="secondary"
+            size="sm"
+            onClick={() => void regenerateAsset(asset)}
+          >
+            <RefreshCcw className="size-4" />
+            {imageT(t, 'regenerate')}
+          </Button>
+          <Button
+            variant="secondary"
+            size="icon-sm"
+            onClick={() => void copyPrompt(asset.prompt)}
+          >
+            <Copy className="size-4" />
+          </Button>
+          <Button
+            variant="secondary"
+            size="icon-sm"
+            onClick={() => void deleteAsset(asset)}
+          >
+            <Trash2 className="size-4" />
+          </Button>
+        </div>
+      </section>
+    )
+  }
 
   if (imageModels.length === 0) {
     return (
@@ -5611,7 +5734,7 @@ function Images() {
                                     {imageT(t, 'reference')}
                                   </span>
                                 )}
-                                <span className="font-medium">
+                                <span className="select-text cursor-text font-medium">
                                   {group.prompt}
                                 </span>
                                 <span className="text-muted-foreground">
@@ -5740,7 +5863,7 @@ function Images() {
                             <Button
                               variant="secondary"
                               size="sm"
-                              onClick={() => rerunGroup(group)}
+                              onClick={() => void rerunGroup(group)}
                             >
                               <RefreshCcw className="size-4" />
                               {imageT(t, 'regenerate')}

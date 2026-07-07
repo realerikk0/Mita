@@ -844,6 +844,12 @@ describe('Images route', () => {
       fireEvent(canvas, event)
     }
     const editorViewport = canvas.closest('.overflow-auto') as HTMLDivElement
+    const canvasFrame = screen.getByTestId('storyboard-editor-canvas-frame')
+    expect(canvasFrame).toHaveStyle({ width: '80px', height: '45px' })
+    fireEvent.click(screen.getByRole('button', { name: 'Zoom in' }))
+    expect(canvasFrame).toHaveStyle({ width: '96px', height: '54px' })
+    fireEvent.click(screen.getByRole('button', { name: 'Zoom out' }))
+    expect(canvasFrame).toHaveStyle({ width: '80px', height: '45px' })
     editorViewport.scrollLeft = 120
     editorViewport.scrollTop = 80
 
@@ -3127,6 +3133,45 @@ describe('Images route', () => {
     expect(screen.getByRole('button', { name: 'Retry in 5s' })).toBeDisabled()
   })
 
+  it('allows saved image history prompts to be selected for copying', async () => {
+    h.providers = [
+      {
+        provider: 'jingxing',
+        base_url: 'https://api.jingxing.uk/v1',
+        settings: [],
+        models: [
+          {
+            id: 'gpt-image-2',
+            capabilities: [ModelCapabilities.IMAGE_GENERATION],
+          },
+        ],
+      },
+    ]
+    h.listAssets.mockResolvedValue([
+      {
+        id: 'asset-selectable-prompt',
+        prompt: 'selectable saved prompt text',
+        mode: 'generate',
+        provider: 'jingxing',
+        model: 'gpt-image-2',
+        ratio: '1:1',
+        size: '1024x1024',
+        quality: 'high',
+        sourceAssetIds: [],
+        createdAt: '2026-05-11T00:00:00Z',
+        status: 'succeeded',
+        path: '/tmp/asset-selectable-prompt.png',
+        fileName: 'image.png',
+        mimeType: 'image/png',
+      },
+    ])
+
+    renderComponent()
+
+    const promptText = await screen.findByText('selectable saved prompt text')
+    expect(promptText).toHaveClass('select-text', 'cursor-text')
+  })
+
   it('uses selected source assets for edit and variation inference', async () => {
     h.providers = [
       {
@@ -3765,6 +3810,18 @@ describe('Images route', () => {
       mimeType: 'image/png',
       assetKind: 'reference',
     }
+    const currentComposerReferenceAsset = {
+      ...referenceAsset,
+      id: 'local-ref-current',
+      prompt: 'red dress current composer reference',
+      path: '/mock/mita/image-assets/local-ref-current/image.png',
+    }
+    const secondReferenceAsset = {
+      ...referenceAsset,
+      id: 'local-ref-2',
+      prompt: 'green shoes reference',
+      path: '/mock/mita/image-assets/local-ref-2/image.png',
+    }
     const generatedAsset = {
       id: 'generated-1',
       prompt: 'keep the reference style',
@@ -3774,14 +3831,20 @@ describe('Images route', () => {
       ratio: '3:4',
       size: '1024x1536',
       quality: 'high',
-      sourceAssetIds: ['local-ref-1'],
+      sourceAssetIds: ['local-ref-1', 'local-ref-2'],
       createdAt: '2026-05-11T00:01:00Z',
       status: 'succeeded',
       path: '/mock/mita/image-assets/generated-1/image.png',
       fileName: 'image.png',
       mimeType: 'image/png',
     }
-    h.listAssets.mockResolvedValue([generatedAsset, referenceAsset])
+    h.listAssets.mockResolvedValue([
+      generatedAsset,
+      referenceAsset,
+      secondReferenceAsset,
+    ])
+    h.dialogOpen.mockResolvedValue('/tmp/current-reference.png')
+    h.importAsset.mockResolvedValue(currentComposerReferenceAsset)
     h.generateImages.mockResolvedValueOnce([
       {
         b64Json: 'aGVsbG8=',
@@ -3811,11 +3874,29 @@ describe('Images route', () => {
     renderComponent()
 
     await screen.findByText('keep the reference style')
+    expect(screen.getByAltText('blue dress reference')).toBeInTheDocument()
+    expect(screen.getByText('+1')).toBeInTheDocument()
+    expect(screen.queryByAltText('green shoes reference')).not.toBeInTheDocument()
+    fireEvent.click(screen.getByAltText('blue dress reference'))
+    expect(await screen.findByAltText('green shoes reference')).toBeInTheDocument()
+    fireEvent.click(screen.getByAltText('green shoes reference'))
+    expect(screen.getByText('Image preview')).toBeInTheDocument()
+    fireEvent.click(screen.getByRole('button', { name: 'Close' }))
+    expect(screen.getAllByAltText('keep the reference style')).toHaveLength(1)
+    fireEvent.click(screen.getByRole('button', { name: 'Add reference image' }))
+    await waitFor(() => expect(h.importAsset).toHaveBeenCalled())
     act(() => {
-      useImageGenerationStore.getState().setAssets([generatedAsset] as any)
+      useImageGenerationStore
+        .getState()
+        .setAssets([generatedAsset, currentComposerReferenceAsset] as any)
     })
     h.listAssets.mockClear()
-    h.listAssets.mockResolvedValue([generatedAsset, referenceAsset])
+    h.listAssets.mockResolvedValue([
+      generatedAsset,
+      referenceAsset,
+      secondReferenceAsset,
+      currentComposerReferenceAsset,
+    ])
     fireEvent.click(screen.getByRole('button', { name: 'Regenerate' }))
 
     await waitFor(() => expect(h.generateImages).toHaveBeenCalled())
@@ -3826,8 +3907,64 @@ describe('Images route', () => {
       prompt: 'keep the reference style',
       ratio: '3:4',
       qualityPreset: 'hd',
-      sourceAssets: [expect.objectContaining({ id: 'local-ref-1' })],
+      sourceAssets: [
+        expect.objectContaining({ id: 'local-ref-1' }),
+        expect.objectContaining({ id: 'local-ref-2' }),
+      ],
     })
+    expect(h.generateImages.mock.calls.at(-1)?.[0].sourceAssets).not.toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ id: 'local-ref-current' }),
+      ])
+    )
+  })
+
+  it('blocks saved image regeneration when persisted reference assets are missing', async () => {
+    h.providers = [
+      {
+        provider: 'jingxing',
+        base_url: 'https://api.jingxing.uk/v1',
+        settings: [],
+        models: [
+          {
+            id: 'gpt-image-2',
+            capabilities: [
+              ModelCapabilities.IMAGE_GENERATION,
+              ModelCapabilities.IMAGE_TO_IMAGE,
+            ],
+          },
+        ],
+      },
+    ]
+    const generatedAsset = {
+      id: 'generated-missing-reference',
+      prompt: 'restore the missing reference',
+      mode: 'edit',
+      provider: 'jingxing',
+      model: 'gpt-image-2',
+      ratio: '1:1',
+      size: '1024x1024',
+      quality: 'high',
+      sourceAssetIds: ['missing-ref-1'],
+      createdAt: '2026-05-11T00:01:00Z',
+      status: 'succeeded',
+      path: '/mock/mita/image-assets/generated-missing-reference/image.png',
+      fileName: 'image.png',
+      mimeType: 'image/png',
+    }
+    h.listAssets.mockResolvedValue([generatedAsset])
+
+    renderComponent()
+
+    await screen.findByText('restore the missing reference')
+    fireEvent.click(screen.getByRole('button', { name: 'Regenerate' }))
+
+    await waitFor(() =>
+      expect(h.toast.error).toHaveBeenCalledWith(
+        'Failed to import reference image'
+      )
+    )
+    expect(h.generateImages).not.toHaveBeenCalled()
   })
 
   it('does not submit while a reference image is still importing', async () => {
@@ -4042,7 +4179,7 @@ describe('Images route', () => {
 
       renderComponent()
 
-      const image = (await screen.findAllByAltText('moon desk'))[1]
+      const image = await screen.findByAltText('moon desk')
       fireEvent.contextMenu(image)
 
       expect(
