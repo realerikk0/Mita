@@ -596,7 +596,7 @@ function detectUserWorkflowSpec(userText: string): MitaTeamsUserWorkflowSpec {
         const inlineList = line.split(/[:：]/).slice(1).join(':')
         if (inlineList) {
           inlineList
-            .split(/[、，,；;\/]|(?:\s+and\s+)/i)
+            .split(/[、，,；;/]|(?:\s+and\s+)/i)
             .map(naturalWorkflowRoleName)
             .filter(Boolean)
             .forEach((name) => pushWorkflowRoleSpec(roles, seen, name))
