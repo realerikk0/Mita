@@ -18,7 +18,8 @@ fn test_asset(id: &str) -> SaveVideoAssetRequest {
         usage: None,
         status: "succeeded".to_string(),
         mime_type: "video/mp4".to_string(),
-        b64_json: "AAAA".to_string(),
+        b64_json: Some("AAAA".to_string()),
+        video_url: None,
         extension: Some("mp4".to_string()),
         created_at: Some("2026-06-04T00:00:00Z".to_string()),
         asset_kind: None,
@@ -60,7 +61,7 @@ fn rejects_unsafe_video_asset_ids() {
 fn rejects_invalid_video_base64() {
     let app = mock_app();
     let mut asset = test_asset("test-video-asset-invalid-base64");
-    asset.b64_json = "not base64".to_string();
+    asset.b64_json = Some("not base64".to_string());
 
     let result = save_video_asset(app.handle().clone(), asset);
     assert!(result.is_err());

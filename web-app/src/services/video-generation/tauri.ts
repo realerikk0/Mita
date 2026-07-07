@@ -1,7 +1,6 @@
 import { convertFileSrc, invoke } from '@tauri-apps/api/core'
 import { fetch as fetchTauri } from '@tauri-apps/plugin-http'
-import { arrayBufferToBase64 } from '@/lib/image-generation'
-import { videoFileExtension } from '@/lib/video-generation'
+import { videoDebugError, videoDebugLog } from '@/lib/video-generation-debug'
 import { DefaultVideoGenerationService } from './default'
 import type {
   SaveVideoAssetRequest,
@@ -20,15 +19,59 @@ export class TauriVideoGenerationService extends DefaultVideoGenerationService {
   async saveVideoAsset(
     request: SaveVideoAssetRequest
   ): Promise<VideoAssetRecord> {
-    const asset =
-      request.b64Json || !request.videoUrl
-        ? request
-        : {
-            ...request,
-            ...(await this.videoPayloadFromUrl(request.videoUrl)),
-          }
+    videoDebugLog('save:start', {
+      id: request.id,
+      provider: request.provider,
+      model: request.model,
+      videoUrl: request.videoUrl,
+      hasB64Json: Boolean(request.b64Json),
+      sourceAssetIds: request.sourceAssetIds,
+      mimeType: request.mimeType,
+    })
 
-    return invoke<VideoAssetRecord>('save_video_asset', { asset })
+    let asset: SaveVideoAssetRequest
+    try {
+      if (!request.b64Json && request.videoUrl) {
+        const saved = await invoke<VideoAssetRecord>('save_video_asset_from_url', {
+          asset: request,
+        })
+        videoDebugLog('save:remote-success', {
+          id: saved.id,
+          path: saved.path,
+          fileName: saved.fileName,
+          mimeType: saved.mimeType,
+          sourceAssetIds: saved.sourceAssetIds,
+        })
+        return saved
+      }
+
+      asset = request
+    } catch (error) {
+      videoDebugError('save:remote-failed', error, {
+        id: request.id,
+        videoUrl: request.videoUrl,
+      })
+      throw error
+    }
+
+    try {
+      const saved = await invoke<VideoAssetRecord>('save_video_asset', { asset })
+      videoDebugLog('save:success', {
+        id: saved.id,
+        path: saved.path,
+        fileName: saved.fileName,
+        mimeType: saved.mimeType,
+        sourceAssetIds: saved.sourceAssetIds,
+      })
+      return saved
+    } catch (error) {
+      videoDebugError('save:invoke-failed', error, {
+        id: request.id,
+        videoUrl: request.videoUrl,
+        mimeType: asset.mimeType,
+      })
+      throw error
+    }
   }
 
   async listVideoAssets(): Promise<VideoAssetRecord[]> {
@@ -37,16 +80,5 @@ export class TauriVideoGenerationService extends DefaultVideoGenerationService {
 
   async deleteVideoAsset(assetId: string): Promise<void> {
     return invoke('delete_video_asset', { assetId })
-  }
-
-  private async videoPayloadFromUrl(videoUrl: string) {
-    const response = await this.fetch()(videoUrl)
-    if (!response.ok) throw new Error('Unable to download generated video')
-    const mimeType = response.headers.get('content-type')?.split(';')[0] || 'video/mp4'
-    return {
-      mimeType,
-      extension: videoFileExtension(mimeType),
-      b64Json: await arrayBufferToBase64(await response.arrayBuffer()),
-    }
   }
 }

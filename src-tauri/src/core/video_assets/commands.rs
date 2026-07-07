@@ -69,6 +69,38 @@ pub fn save_video_asset<R: Runtime>(
     app: tauri::AppHandle<R>,
     asset: SaveVideoAssetRequest,
 ) -> Result<VideoAssetRecord, String> {
+    let b64_json = asset
+        .b64_json
+        .as_deref()
+        .ok_or_else(|| "Missing video base64".to_string())?;
+    let video_bytes = general_purpose::STANDARD
+        .decode(strip_data_url(b64_json))
+        .map_err(|e| format!("Invalid video base64: {e}"))?;
+
+    save_video_asset_bytes(app, asset, video_bytes)
+}
+
+#[tauri::command]
+pub async fn save_video_asset_from_url<R: Runtime>(
+    app: tauri::AppHandle<R>,
+    mut asset: SaveVideoAssetRequest,
+) -> Result<VideoAssetRecord, String> {
+    let video_url = asset
+        .video_url
+        .as_deref()
+        .ok_or_else(|| "Missing generated video URL".to_string())?
+        .to_string();
+    let (video_bytes, mime_type) = download_video_asset(&video_url).await?;
+    asset.mime_type = mime_type;
+
+    save_video_asset_bytes(app, asset, video_bytes)
+}
+
+fn save_video_asset_bytes<R: Runtime>(
+    app: tauri::AppHandle<R>,
+    asset: SaveVideoAssetRequest,
+    video_bytes: Vec<u8>,
+) -> Result<VideoAssetRecord, String> {
     validate_asset_id(&asset.id)?;
 
     let root = assets_root(&app);
@@ -78,9 +110,6 @@ pub fn save_video_asset<R: Runtime>(
     let extension = normalize_extension(asset.extension.as_deref(), &asset.mime_type);
     let file_name = format!("video.{extension}");
     let video_path = asset_dir.join(&file_name);
-    let video_bytes = general_purpose::STANDARD
-        .decode(strip_data_url(&asset.b64_json))
-        .map_err(|e| format!("Invalid video base64: {e}"))?;
 
     fs::write(&video_path, video_bytes).map_err(|e| e.to_string())?;
 
@@ -105,6 +134,44 @@ pub fn save_video_asset<R: Runtime>(
 
     write_metadata(&metadata_path(&asset_dir), &record)?;
     Ok(record)
+}
+
+async fn download_video_asset(video_url: &str) -> Result<(Vec<u8>, String), String> {
+    let response = reqwest::Client::builder()
+        .redirect(reqwest::redirect::Policy::limited(10))
+        .build()
+        .map_err(|e| e.to_string())?
+        .get(video_url)
+        .send()
+        .await
+        .map_err(|e| format!("Unable to download generated video: {e}"))?;
+
+    let status = response.status();
+    if !status.is_success() {
+        let detail = response.text().await.unwrap_or_default();
+        let detail = detail.chars().take(300).collect::<String>();
+        return Err(if detail.is_empty() {
+            format!("Unable to download generated video ({status})")
+        } else {
+            format!("Unable to download generated video ({status}): {detail}")
+        });
+    }
+
+    let mime_type = response
+        .headers()
+        .get(reqwest::header::CONTENT_TYPE)
+        .and_then(|value| value.to_str().ok())
+        .and_then(|value| value.split(';').next())
+        .filter(|value| !value.trim().is_empty())
+        .map(|value| value.trim().to_string())
+        .unwrap_or_else(|| "video/mp4".to_string());
+    let video_bytes = response
+        .bytes()
+        .await
+        .map_err(|e| format!("Unable to read generated video body: {e}"))?
+        .to_vec();
+
+    Ok((video_bytes, mime_type))
 }
 
 #[tauri::command]
