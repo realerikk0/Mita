@@ -13,9 +13,14 @@ const h = vi.hoisted(() => ({
   deleteThread: vi.fn(),
   deleteAsset: vi.fn(),
   deleteVideoAsset: vi.fn(),
+  updateAssetProject: vi.fn(),
+  updateVideoAssetProject: vi.fn(),
   renameThread: vi.fn(),
   toastError: vi.fn(),
+  toastSuccess: vi.fn(),
   toggleThreadPinned: vi.fn(),
+  updateThread: vi.fn(),
+  folders: [] as any[],
   location: {
     pathname: '/threads/thread-1',
     search: {},
@@ -59,6 +64,14 @@ vi.mock('@/i18n/react-i18next-compat', () => ({
         'common:recents': 'Recents',
         'common:rename': 'Rename',
         'common:delete': 'Delete',
+        'common:projects.addToProject': 'Add to project',
+        'common:projects.noProjectsAvailable': 'No projects available',
+        'common:projects.removeFromProject': 'Remove from project',
+        'common:projects.title': 'Projects',
+        'common:toast.threadAssignedToProject.description':
+          'Thread assigned to project',
+        'common:toast.threadRemovedFromProject.description':
+          'Thread removed from project',
       })[key] ?? key,
   }),
 }))
@@ -66,6 +79,7 @@ vi.mock('@/i18n/react-i18next-compat', () => ({
 vi.mock('sonner', () => ({
   toast: {
     error: h.toastError,
+    success: h.toastSuccess,
   },
 }))
 
@@ -78,7 +92,16 @@ vi.mock('@/hooks/useThreads', () => ({
       deleteThread: h.deleteThread,
       renameThread: h.renameThread,
       toggleThreadPinned: h.toggleThreadPinned,
+      updateThread: h.updateThread,
     }),
+}))
+
+vi.mock('@/hooks/useThreadManagement', () => ({
+  useThreadManagement: () => ({
+    folders: h.folders,
+    getFolderById: (id: string) =>
+      h.folders.find((folder) => folder.id === id),
+  }),
 }))
 
 vi.mock('@/hooks/useServiceHub', () => ({
@@ -86,10 +109,12 @@ vi.mock('@/hooks/useServiceHub', () => ({
     imageGeneration: () => ({
       listAssets: vi.fn().mockResolvedValue(h.imageAssets),
       deleteAsset: h.deleteAsset,
+      updateAssetProject: h.updateAssetProject,
     }),
     videoGeneration: () => ({
       listVideoAssets: vi.fn().mockResolvedValue(h.videoAssets),
       deleteVideoAsset: h.deleteVideoAsset,
+      updateVideoAssetProject: h.updateVideoAssetProject,
     }),
   }),
 }))
@@ -119,6 +144,9 @@ vi.mock('@/components/ui/dropdown-menu', () => {
       </button>
     ),
     DropdownMenuSeparator: () => null,
+    DropdownMenuSub: Passthrough,
+    DropdownMenuSubContent: Passthrough,
+    DropdownMenuSubTrigger: ({ children }: any) => <button>{children}</button>,
     DropdownMenuTrigger: Passthrough,
   }
 })
@@ -166,9 +194,14 @@ describe('NavChats history stream', () => {
     h.deleteAsset.mockResolvedValue(undefined)
     h.deleteVideoAsset.mockReset()
     h.deleteVideoAsset.mockResolvedValue(undefined)
+    h.updateAssetProject.mockReset()
+    h.updateVideoAssetProject.mockReset()
     h.renameThread.mockClear()
     h.toastError.mockClear()
+    h.toastSuccess.mockClear()
     h.toggleThreadPinned.mockClear()
+    h.updateThread.mockClear()
+    h.folders = []
     h.location = {
       pathname: '/threads/thread-1',
       search: {},
@@ -336,6 +369,77 @@ describe('NavChats history stream', () => {
     expect(await screen.findByText('image only')).toBeInTheDocument()
     expect(screen.queryByRole('button', { name: /Pin to top/i })).not.toBeInTheDocument()
     expect(screen.queryByRole('button', { name: /Unpin/i })).not.toBeInTheDocument()
+  })
+
+  it('moves a chat history entry into a project from the row menu', async () => {
+    h.threads = [
+      makeThread({
+        id: 'chat-move',
+        title: 'Move me',
+      }),
+    ]
+    h.folders = [
+      {
+        id: 'project-1',
+        name: 'Client Work',
+        updated_at: Date.parse('2026-06-06T00:00:00Z'),
+      },
+    ]
+
+    render(<NavChats />)
+
+    expect(await screen.findByText('Move me')).toBeInTheDocument()
+    fireEvent.click(screen.getByRole('button', { name: /Client Work/i }))
+
+    expect(h.updateThread).toHaveBeenCalledWith('chat-move', {
+      metadata: {
+        project: {
+          id: 'project-1',
+          name: 'Client Work',
+          updated_at: Date.parse('2026-06-06T00:00:00Z'),
+        },
+      },
+    })
+    expect(h.toastSuccess).toHaveBeenCalledWith('Thread assigned to project')
+  })
+
+  it('moves a generated image history entry into a project and hides it from general history', async () => {
+    const project = {
+      id: 'project-1',
+      name: 'Client Work',
+      updated_at: Date.parse('2026-06-06T00:00:00Z'),
+    }
+    h.folders = [project]
+    h.imageAssets = [
+      {
+        id: 'image-move',
+        prompt: 'move this image',
+        createdAt: '2026-06-06T00:00:00Z',
+        assetKind: 'generated',
+      },
+    ]
+    h.updateAssetProject.mockImplementation(async (_assetId, nextProject) => {
+      h.imageAssets = [
+        {
+          ...h.imageAssets[0],
+          project: nextProject,
+        },
+      ]
+      return h.imageAssets[0]
+    })
+
+    render(<NavChats />)
+
+    expect(await screen.findByText('move this image')).toBeInTheDocument()
+    fireEvent.click(screen.getByRole('button', { name: /Client Work/i }))
+
+    await waitFor(() => {
+      expect(h.updateAssetProject).toHaveBeenCalledWith('image-move', project)
+    })
+    await waitFor(() => {
+      expect(screen.queryByText('move this image')).not.toBeInTheDocument()
+    })
+    expect(h.toastSuccess).toHaveBeenCalledWith('Thread assigned to project')
   })
 
   it('deletes generated image history entries from the sidebar row menu', async () => {

@@ -1,4 +1,4 @@
-import { Folder, MoreHorizontal, Pencil, Trash2, X } from 'lucide-react'
+import { MoreHorizontal, Pencil, Trash2 } from 'lucide-react'
 import { useThreads } from '@/hooks/useThreads'
 import { useMessages } from '@/hooks/useMessages'
 import { useThreadManagement } from '@/hooks/useThreadManagement'
@@ -11,9 +11,6 @@ import {
   DropdownMenuItem,
   DropdownMenuSeparator,
   DropdownMenuTrigger,
-  DropdownMenuSub,
-  DropdownMenuSubContent,
-  DropdownMenuSubTrigger,
 } from '@/components/ui/dropdown-menu'
 import {
   SidebarMenuAction,
@@ -25,9 +22,10 @@ import { useTranslation } from '@/i18n/react-i18next-compat'
 import { memo, useMemo, useState } from 'react'
 import { Link } from '@tanstack/react-router'
 import { RenameThreadDialog, DeleteThreadDialog } from '@/containers/dialogs'
-import { toast } from 'sonner'
 import { cn } from '@/lib/utils'
 import { ThreadMessage } from '@janhq/core'
+import { ThreadProjectMenuItems } from '@/containers/ThreadProjectMenuItems'
+import type { ThreadFolder } from '@/services/projects/types'
 
 const INTRO_THREAD_TITLE = 'What is Biyan?'
 const LEGACY_INTRO_THREAD_TITLE = 'What is Jan?'
@@ -38,16 +36,17 @@ const ThreadItem = memo(
     thread,
     isMobile,
     currentProjectId,
+    folders,
+    getFolderById,
   }: {
     thread: Thread
     isMobile: boolean
     currentProjectId?: string
+    folders: ThreadFolder[]
+    getFolderById: (id: string) => ThreadFolder | undefined
   }) => {
     const deleteThread = useThreads((state) => state.deleteThread)
     const renameThread = useThreads((state) => state.renameThread)
-    const updateThread = useThreads((state) => state.updateThread)
-    const getFolderById = useThreadManagement().getFolderById
-    const { folders } = useThreadManagement()
     const { t } = useTranslation()
     const [renameOpen, setRenameOpen] = useState(false)
     const [deleteConfirmOpen, setDeleteConfirmOpen] = useState(false)
@@ -119,36 +118,6 @@ const ThreadItem = memo(
       return (displayTitle || '').replace(/<span[^>]*>|<\/span>/g, '')
     }, [displayTitle])
 
-    const availableProjects = useMemo(() => {
-      return folders
-        .filter((f) => {
-          if (f.id === currentProjectId) return false
-          if (f.id === thread.metadata?.project?.id) return false
-          return true
-        })
-        .sort((a, b) => b.updated_at - a.updated_at)
-    }, [folders, currentProjectId, thread.metadata?.project?.id])
-
-    const assignThreadToProject = (threadId: string, projectId: string) => {
-      const project = getFolderById(projectId)
-      if (project && updateThread) {
-        const projectMetadata = {
-          id: project.id,
-          name: project.name,
-          updated_at: project.updated_at,
-        }
-
-        updateThread(threadId, {
-          metadata: {
-            ...thread.metadata,
-            project: projectMetadata,
-          },
-        })
-
-        toast.success(`Thread assigned to "${project.name}" successfully`)
-      }
-    }
-
     return (
       <SidebarMenuItem>
         {currentProjectId ?
@@ -186,59 +155,12 @@ const ThreadItem = memo(
               <Pencil className="size-4" />
               <span>{t('common:rename')}</span>
             </DropdownMenuItem>
-            <DropdownMenuSub>
-              <DropdownMenuSubTrigger className="gap-2">
-                <Folder className="size-4" />
-                <span>{t('common:projects.addToProject')}</span>
-              </DropdownMenuSubTrigger>
-              <DropdownMenuSubContent className="max-h-60 min-w-44 overflow-y-auto">
-                {availableProjects.length === 0 ? (
-                  <DropdownMenuItem disabled>
-                    <span className="text-muted-foreground">
-                      {t('common:projects.noProjectsAvailable')}
-                    </span>
-                  </DropdownMenuItem>
-                ) : (
-                  availableProjects.map((folder) => (
-                    <DropdownMenuItem
-                      key={folder.id}
-                      onClick={(e) => {
-                        e.stopPropagation()
-                        assignThreadToProject(thread.id, folder.id)
-                      }}
-                    >
-                      <Folder className="size-4" />
-                      <span className="truncate max-w-[200px]">
-                        {folder.name}
-                      </span>
-                    </DropdownMenuItem>
-                  ))
-                )}
-              </DropdownMenuSubContent>
-            </DropdownMenuSub>
-            {thread.metadata?.project && (
-              <>
-                <DropdownMenuSeparator />
-                <DropdownMenuItem
-                  onClick={(e) => {
-                    e.stopPropagation()
-                    const projectName = thread.metadata?.project?.name
-                    updateThread(thread.id, {
-                      metadata: {
-                        ...thread.metadata,
-                        project: undefined,
-                      },
-                    })
-                    toast.success(
-                      `Thread removed from "${projectName}" successfully`
-                    )
-                  }}
-                >
-                  <X className="size-4" />
-                  <span>Remove from project</span>
-                </DropdownMenuItem>
-              </>
-            )}
+            <ThreadProjectMenuItems
+              thread={thread}
+              folders={folders}
+              getFolderById={getFolderById}
+              currentProjectId={currentProjectId}
+            />
             <DropdownMenuSeparator />
             <DropdownMenuItem
               variant="destructive"
@@ -283,6 +205,7 @@ type ThreadListProps = {
 
 function ThreadList({ threads, currentProjectId }: ThreadListProps) {
   const { isMobile } = useSidebar()
+  const { folders, getFolderById } = useThreadManagement()
 
   const sortedThreads = useMemo(() => {
     return [...threads].sort((a, b) => {
@@ -298,6 +221,8 @@ function ThreadList({ threads, currentProjectId }: ThreadListProps) {
           thread={thread}
           isMobile={isMobile}
           currentProjectId={currentProjectId}
+          folders={folders}
+          getFolderById={getFolderById}
         />
       ))}
     </>

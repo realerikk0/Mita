@@ -1,4 +1,4 @@
-use super::models::{SaveVideoAssetRequest, VideoAssetRecord};
+use super::models::{SaveVideoAssetRequest, VideoAssetProject, VideoAssetRecord};
 use crate::core::app::commands::get_mita_data_folder_path;
 use base64::{engine::general_purpose, Engine as _};
 use chrono::Utc;
@@ -69,6 +69,11 @@ fn write_metadata(path: &Path, record: &VideoAssetRecord) -> Result<(), String> 
     fs::rename(&tmp_path, path).map_err(|e| e.to_string())
 }
 
+fn read_metadata(path: &Path) -> Result<VideoAssetRecord, String> {
+    let data = fs::read_to_string(path).map_err(|e| e.to_string())?;
+    serde_json::from_str::<VideoAssetRecord>(&data).map_err(|e| e.to_string())
+}
+
 #[tauri::command]
 pub fn save_video_asset<R: Runtime>(
     app: tauri::AppHandle<R>,
@@ -136,6 +141,7 @@ fn save_video_asset_bytes<R: Runtime>(
         file_name,
         mime_type: asset.mime_type,
         asset_kind: asset.asset_kind.or_else(|| Some("generated".to_string())),
+        project: asset.project,
     };
 
     write_metadata(&metadata_path(&asset_dir), &record)?;
@@ -287,4 +293,24 @@ pub fn delete_video_asset<R: Runtime>(
         return Ok(());
     }
     fs::remove_dir_all(path).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+pub fn update_video_asset_project<R: Runtime>(
+    app: tauri::AppHandle<R>,
+    asset_id: String,
+    project: Option<VideoAssetProject>,
+) -> Result<VideoAssetRecord, String> {
+    validate_asset_id(&asset_id)?;
+
+    let asset_dir = assets_root(&app).join(&asset_id);
+    let path = metadata_path(&asset_dir);
+    if !path.exists() {
+        return Err("Video asset not found".to_string());
+    }
+
+    let mut record = read_metadata(&path)?;
+    record.project = project;
+    write_metadata(&path, &record)?;
+    Ok(record)
 }
