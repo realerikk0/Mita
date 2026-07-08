@@ -4,6 +4,7 @@ import {
   parseProviderErrorResponse,
   providerQuotaErrorFromUnknown,
 } from '@/lib/provider-quota-error'
+import { videoDebugLog } from '@/lib/video-generation-debug'
 import { videoFileExtension } from '@/lib/video-generation'
 import type {
   GenerateVideoRequest,
@@ -109,13 +110,37 @@ export class DefaultVideoGenerationService implements VideoGenerationService {
   async generateVideo(
     request: GenerateVideoRequest
   ): Promise<VideoGenerationTask> {
+    const endpoint = this.videoGenerationEndpoint(request.provider)
+    const body = await this.generationBody(request)
+    videoDebugLog('generate:request', {
+      endpoint,
+      provider: request.provider.provider,
+      baseUrl: request.provider.base_url,
+      model: request.model.id,
+      hasSourceAsset: Boolean(request.sourceAsset),
+      sourceAsset: request.sourceAsset
+        ? {
+            id: request.sourceAsset.id,
+            path: request.sourceAsset.path,
+            mimeType: request.sourceAsset.mimeType,
+            fileName: request.sourceAsset.fileName,
+          }
+        : undefined,
+      body,
+    })
+
     const { json } = await this.postJson(
-      this.videoGenerationEndpoint(request.provider),
+      endpoint,
       request.provider,
-      await this.generationBody(request),
+      body,
       request.signal
     )
-    return this.parseVideoTask(json)
+    const task = this.parseVideoTask(json)
+    videoDebugLog('generate:response', {
+      task,
+      raw: json,
+    })
+    return task
   }
 
   async pollVideoTask(
@@ -123,17 +148,34 @@ export class DefaultVideoGenerationService implements VideoGenerationService {
   ): Promise<VideoGenerationTask> {
     const startedAt = Date.now()
     let currentApiKey: string | undefined
+    let pollCount = 0
 
     while (Date.now() - startedAt <= this.timeoutMs) {
       this.throwIfAborted(request.signal)
+      pollCount += 1
+      const endpoint = this.videoTaskEndpoint(request.provider, request.taskId)
       const result = await this.getJson(
-        this.videoTaskEndpoint(request.provider, request.taskId),
+        endpoint,
         request.provider,
         request.signal,
         currentApiKey
       )
       currentApiKey = result.apiKey
       const task = this.parseVideoTask(result.json)
+      videoDebugLog(
+        task.status === 'succeeded' || task.status === 'failed'
+          ? 'poll:terminal'
+          : 'poll:progress',
+        {
+          endpoint,
+          pollCount,
+          task,
+          raw:
+            task.status === 'succeeded' || task.status === 'failed'
+              ? result.json
+              : undefined,
+        }
+      )
 
       if (task.status === 'succeeded' || task.status === 'failed') {
         return task
@@ -275,15 +317,30 @@ export class DefaultVideoGenerationService implements VideoGenerationService {
     path: string
     mimeType: string
   }) {
-    const response = await globalThis.fetch(this.fileSrc(asset.path))
+    const fileUrl = this.fileSrc(asset.path)
+    videoDebugLog('source:read:start', {
+      path: asset.path,
+      fileUrl,
+      mimeType: asset.mimeType,
+    })
+    const response = await globalThis.fetch(fileUrl)
     if (!response.ok) throw new Error('Unable to read storyboard image')
     const mimeType =
       response.headers.get('content-type')?.split(';')[0] ||
       asset.mimeType ||
       'image/png'
-    return `data:${mimeType};base64,${await arrayBufferToBase64(
-      await response.arrayBuffer()
+    const buffer = await response.arrayBuffer()
+    const dataUrl = `data:${mimeType};base64,${await arrayBufferToBase64(
+      buffer
     )}`
+    videoDebugLog('source:read:success', {
+      status: response.status,
+      contentType: response.headers.get('content-type'),
+      mimeType,
+      bytes: buffer.byteLength,
+      dataUrl,
+    })
+    return dataUrl
   }
 
   private async postJson(
@@ -304,6 +361,12 @@ export class DefaultVideoGenerationService implements VideoGenerationService {
         },
         body: JSON.stringify(body),
         signal,
+      })
+      videoDebugLog('http:post-response', {
+        endpoint,
+        ok: response.ok,
+        status: response.status,
+        contentType: response.headers.get('content-type'),
       })
 
       const retry = await this.shouldRetryOrThrow(response, provider, index, attempts.length)
@@ -340,6 +403,12 @@ export class DefaultVideoGenerationService implements VideoGenerationService {
         if (index < attempts.length - 1) continue
         throw error
       }
+      videoDebugLog('http:get-response', {
+        endpoint,
+        ok: response.ok,
+        status: response.status,
+        contentType: response.headers.get('content-type'),
+      })
 
       const retry = await this.shouldRetryOrThrow(response, provider, index, attempts.length)
       if (retry) continue

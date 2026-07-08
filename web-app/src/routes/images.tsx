@@ -89,6 +89,7 @@ import {
   type ImageRatio,
 } from '@/lib/image-generation'
 import { getVideoModels } from '@/lib/video-generation'
+import { videoDebugLog } from '@/lib/video-generation-debug'
 import {
   cn,
   getModelDisplayName,
@@ -3694,7 +3695,22 @@ function StoryboardVideoMode({
                       controls
                       src={videoSrc}
                       className="size-full"
-                      onError={() => markAssetFailed(videoAsset.id)}
+                      onError={(event) => {
+                        const mediaError = event.currentTarget.error
+                        videoDebugLog('ui:video-load-error', {
+                          assetId: videoAsset.id,
+                          path: videoAsset.path,
+                          src: videoSrc,
+                          mimeType: videoAsset.mimeType,
+                          mediaError: mediaError
+                            ? {
+                                code: mediaError.code,
+                                message: mediaError.message,
+                              }
+                            : undefined,
+                        })
+                        markAssetFailed(videoAsset.id)
+                      }}
                     />
                   ) : videoStatus === 'running' ? (
                     <div className="flex w-2/3 flex-col items-center gap-3">
@@ -3714,15 +3730,6 @@ function StoryboardVideoMode({
                       <Play className="ml-0.5 size-6" />
                     </div>
                   )}
-                </div>
-                <div className="flex items-center gap-3 bg-neutral-950 px-4 py-3">
-                  <Play className="size-4 text-white" />
-                  <div className="h-1 flex-1 rounded-full bg-white/15">
-                    <div className="h-full w-0 rounded-full bg-white" />
-                  </div>
-                  <span className="font-mono text-xs text-neutral-500">
-                    00:00 / 00:{String(videoSettings.duration).padStart(2, '0')}
-                  </span>
                 </div>
               </div>
               {videoAsset && videoSrc && (

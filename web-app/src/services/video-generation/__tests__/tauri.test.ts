@@ -154,4 +154,61 @@ describe('TauriVideoGenerationService', () => {
     })
     expect(result).toBe(record)
   })
+
+  it('saves remote video URLs through Tauri without JS header parsing', async () => {
+    const record = {
+      id: 'video-asset-2',
+      prompt: 'gold robot',
+      provider: 'jingxing',
+      model: 'seedance-2.0',
+      ratio: '16:9',
+      resolution: '1080p',
+      duration: 8,
+      fps: 30,
+      sourceAssetIds: ['storyboard-1'],
+      createdAt: '2026-06-04T00:00:00Z',
+      status: 'succeeded',
+      path: '/mock/mita/video-assets/video-asset-2/video.mp4',
+      fileName: 'video.mp4',
+      mimeType: 'video/mp4',
+    }
+    vi.mocked(invoke).mockResolvedValue(record)
+
+    const service = new TauriVideoGenerationService()
+    const result = await service.saveVideoAsset({
+      id: 'video-asset-2',
+      prompt: 'gold robot',
+      provider: 'jingxing',
+      model: 'seedance-2.0',
+      ratio: '16:9',
+      resolution: '1080p',
+      duration: 8,
+      fps: 30,
+      sourceAssetIds: ['storyboard-1'],
+      status: 'succeeded',
+      mimeType: 'video/mp4',
+      videoUrl:
+        'https://ark-acg-cn-beijing.tos-cn-beijing.volces.com/video.mp4?X-Tos-Signature=test',
+    })
+
+    expect(fetchTauri).not.toHaveBeenCalled()
+    expect(invoke).toHaveBeenCalledWith('save_video_asset_from_url', {
+      asset: {
+        id: 'video-asset-2',
+        prompt: 'gold robot',
+        provider: 'jingxing',
+        model: 'seedance-2.0',
+        ratio: '16:9',
+        resolution: '1080p',
+        duration: 8,
+        fps: 30,
+        sourceAssetIds: ['storyboard-1'],
+        status: 'succeeded',
+        mimeType: 'video/mp4',
+        videoUrl:
+          'https://ark-acg-cn-beijing.tos-cn-beijing.volces.com/video.mp4?X-Tos-Signature=test',
+      },
+    })
+    expect(result).toBe(record)
+  })
 })

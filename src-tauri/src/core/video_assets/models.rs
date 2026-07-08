@@ -16,7 +16,10 @@ pub struct SaveVideoAssetRequest {
     pub usage: Option<serde_json::Value>,
     pub status: String,
     pub mime_type: String,
-    pub b64_json: String,
+    #[serde(default)]
+    pub b64_json: Option<String>,
+    #[serde(default)]
+    pub video_url: Option<String>,
     pub extension: Option<String>,
     pub created_at: Option<String>,
     pub asset_kind: Option<String>,

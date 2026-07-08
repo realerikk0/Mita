@@ -4,6 +4,7 @@ import { toast } from 'sonner'
 
 import { getServiceHub } from '@/hooks/useServiceHub'
 import { useModelProvider } from '@/hooks/useModelProvider'
+import { videoDebugError, videoDebugLog } from '@/lib/video-generation-debug'
 import { videoFileExtension } from '@/lib/video-generation'
 import type { ImageRatio } from '@/lib/image-generation'
 import type { ImageAssetRecord } from '@/services/image-generation/types'
@@ -149,6 +150,16 @@ async function finishTask(
   try {
     const persisted = useVideoGenerationStore.getState().tasks[key]
     if (!persisted) return
+    videoDebugLog('store:finish:start', {
+      key,
+      taskId: persisted.taskId,
+      assetId: persisted.assetId,
+      provider: persisted.providerName,
+      model: persisted.modelId,
+      sourceAssetIds: persisted.sourceAssetIds,
+      hasInitialTask: Boolean(initialTask),
+      initialTask,
+    })
 
     const finalTask =
       initialTask && initialTask.status === 'succeeded'
@@ -159,11 +170,21 @@ async function finishTask(
             taskId: persisted.taskId,
             signal: controller.signal,
           })
+    videoDebugLog('store:finish:final-task', {
+      key,
+      taskId: persisted.taskId,
+      finalTask,
+    })
 
     if (finalTask.status !== 'succeeded') {
       throw new Error(VIDEO_GENERATION_FAILED)
     }
     if (!finalTask.videoUrl) {
+      videoDebugLog('store:finish:no-video-url', {
+        key,
+        taskId: persisted.taskId,
+        finalTask,
+      })
       throw new Error(VIDEO_GENERATION_NO_URL)
     }
 
@@ -188,6 +209,11 @@ async function finishTask(
     // saveVideoAsset is an un-abortable download; a regenerate/reset may have
     // superseded this run while it was in flight — don't clobber the newer run.
     if (isSuperseded(key, controller)) return
+    videoDebugLog('store:finish:saved', {
+      key,
+      taskId: persisted.taskId,
+      saved,
+    })
     setRuntime(key, { status: 'succeeded', asset: saved, error: undefined })
     removePersisted(key)
     window.dispatchEvent(new Event('mita-media-history-updated'))
@@ -195,6 +221,7 @@ async function finishTask(
     // Aborted/superseded runs (cancel()/reset()/regenerate) already cleaned up
     // and may have started a newer run for this key — don't touch state.
     if (isSuperseded(key, controller)) return
+    videoDebugError('store:finish:failed', error, { key })
     console.error('Video generation failed:', error)
     const message = error instanceof Error ? error.message : VIDEO_GENERATION_FAILED
     setRuntime(key, { status: 'failed', error: message })
@@ -215,6 +242,25 @@ export const useVideoGenerationStore = create<VideoGenerationStoreState>()(
       start: (input, hub) => {
         // Abort any earlier attempt for this storyboard before restarting.
         get().cancel(input.key)
+        videoDebugLog('store:start', {
+          key: input.key,
+          assetId: input.assetId,
+          provider: input.provider.provider,
+          baseUrl: input.provider.base_url,
+          model: input.model.id,
+          ratio: input.ratio,
+          resolution: input.resolution,
+          duration: input.duration,
+          fps: input.fps,
+          generateAudio: input.generateAudio,
+          sourceAsset: {
+            id: input.sourceAsset.id,
+            path: input.sourceAsset.path,
+            mimeType: input.sourceAsset.mimeType,
+            fileName: input.sourceAsset.fileName,
+          },
+          sourceAssetIds: input.sourceAssetIds,
+        })
 
         const startedAt = Date.now()
         const estimateMs = estimateMsFor(input.duration)
@@ -246,6 +292,11 @@ export const useVideoGenerationStore = create<VideoGenerationStoreState>()(
             })
           } catch (error) {
             if (!controller.signal.aborted) {
+              videoDebugError('store:generate:failed', error, {
+                key: input.key,
+                provider: input.provider.provider,
+                model: input.model.id,
+              })
               console.error('Video generation failed:', error)
               const message =
                 error instanceof Error ? error.message : VIDEO_GENERATION_FAILED
@@ -262,6 +313,10 @@ export const useVideoGenerationStore = create<VideoGenerationStoreState>()(
           // was in flight — its fetch can resolve even after abort. Bail before
           // persisting so we don't orphan the newer run's descriptor.
           if (isSuperseded(input.key, controller)) return
+          videoDebugLog('store:generate:task-created', {
+            key: input.key,
+            initialTask,
+          })
 
           // Persist now that we have a provider task id to resume from.
           setPersisted(input.key, {
