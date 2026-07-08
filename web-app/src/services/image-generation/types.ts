@@ -3,6 +3,7 @@ import type {
   ImageQualityPreset,
   ImageRatio,
 } from '@/lib/image-generation'
+import type { ProjectAssignment } from '@/services/projects/types'
 
 export type ImageGenerationStatus =
   | 'pending'
@@ -28,6 +29,7 @@ export type ImageAssetRecord = {
   fileName: string
   mimeType: string
   assetKind?: 'generated' | 'reference' | 'storyboard'
+  project?: ProjectAssignment
 }
 
 export type SaveImageAssetRequest = Omit<
@@ -71,4 +73,8 @@ export interface ImageGenerationService {
   importAsset(request: ImportImageAssetRequest): Promise<ImageAssetRecord>
   listAssets(): Promise<ImageAssetRecord[]>
   deleteAsset(assetId: string): Promise<void>
+  updateAssetProject(
+    assetId: string,
+    project?: ProjectAssignment
+  ): Promise<ImageAssetRecord>
 }

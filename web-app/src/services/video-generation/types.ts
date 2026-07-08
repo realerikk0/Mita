@@ -1,5 +1,6 @@
 import type { ImageAssetRecord } from '@/services/image-generation/types'
 import type { ImageRatio } from '@/lib/image-generation'
+import type { ProjectAssignment } from '@/services/projects/types'
 
 export type VideoGenerationStatus =
   | 'queued'
@@ -56,6 +57,7 @@ export type VideoAssetRecord = {
   fileName: string
   mimeType: string
   assetKind?: 'generated' | 'storyboard'
+  project?: ProjectAssignment
 }
 
 export type SaveVideoAssetRequest = Omit<
@@ -74,4 +76,8 @@ export interface VideoGenerationService {
   saveVideoAsset(request: SaveVideoAssetRequest): Promise<VideoAssetRecord>
   listVideoAssets(): Promise<VideoAssetRecord[]>
   deleteVideoAsset(assetId: string): Promise<void>
+  updateVideoAssetProject(
+    assetId: string,
+    project?: ProjectAssignment
+  ): Promise<VideoAssetRecord>
 }

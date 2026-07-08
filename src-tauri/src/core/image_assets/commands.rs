@@ -1,4 +1,6 @@
-use super::models::{ImageAssetRecord, ImportImageAssetRequest, SaveImageAssetRequest};
+use super::models::{
+    ImageAssetProject, ImageAssetRecord, ImportImageAssetRequest, SaveImageAssetRequest,
+};
 use crate::core::app::commands::get_mita_data_folder_path;
 use base64::{engine::general_purpose, Engine as _};
 use chrono::Utc;
@@ -80,6 +82,11 @@ fn write_metadata(path: &Path, record: &ImageAssetRecord) -> Result<(), String> 
     fs::rename(&tmp_path, path).map_err(|e| e.to_string())
 }
 
+fn read_metadata(path: &Path) -> Result<ImageAssetRecord, String> {
+    let data = fs::read_to_string(path).map_err(|e| e.to_string())?;
+    serde_json::from_str::<ImageAssetRecord>(&data).map_err(|e| e.to_string())
+}
+
 #[tauri::command]
 pub fn save_image_asset<R: Runtime>(
     app: tauri::AppHandle<R>,
@@ -118,6 +125,7 @@ pub fn save_image_asset<R: Runtime>(
         file_name,
         mime_type: asset.mime_type,
         asset_kind: asset.asset_kind.or_else(|| Some("generated".to_string())),
+        project: asset.project,
     };
 
     write_metadata(&metadata_path(&asset_dir), &record)?;
@@ -178,6 +186,7 @@ pub fn import_image_asset<R: Runtime>(
         file_name,
         mime_type: mime_type.to_string(),
         asset_kind: Some("reference".to_string()),
+        project: None,
     };
 
     write_metadata(&metadata_path(&asset_dir), &record)?;
@@ -227,4 +236,24 @@ pub fn delete_image_asset<R: Runtime>(
         return Ok(());
     }
     fs::remove_dir_all(path).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+pub fn update_image_asset_project<R: Runtime>(
+    app: tauri::AppHandle<R>,
+    asset_id: String,
+    project: Option<ImageAssetProject>,
+) -> Result<ImageAssetRecord, String> {
+    validate_asset_id(&asset_id)?;
+
+    let asset_dir = assets_root(&app).join(&asset_id);
+    let path = metadata_path(&asset_dir);
+    if !path.exists() {
+        return Err("Image asset not found".to_string());
+    }
+
+    let mut record = read_metadata(&path)?;
+    record.project = project;
+    write_metadata(&path, &record)?;
+    Ok(record)
 }

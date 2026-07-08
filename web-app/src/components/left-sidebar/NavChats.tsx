@@ -49,6 +49,10 @@ import { route } from "@/constants/routes"
 import { DeleteThreadDialog, RenameThreadDialog } from "@/containers/dialogs"
 import { toast } from "sonner"
 import { cn } from "@/lib/utils"
+import { ThreadProjectMenuItems } from "@/containers/ThreadProjectMenuItems"
+import { useThreadManagement } from "@/hooks/useThreadManagement"
+import type { ThreadFolder } from "@/services/projects/types"
+import { MediaProjectMenuItems } from "@/containers/MediaProjectMenuItems"
 
 type HistoryEntry =
   | {
@@ -66,6 +70,7 @@ type HistoryEntry =
       id: string
       kind: 'media'
       mediaType: 'image' | 'video'
+      asset: ImageAssetRecord | VideoAssetRecord
       title: string
       updatedAt: number
       icon: LucideIcon
@@ -177,6 +182,9 @@ function HistoryItem({
   onRename,
   onDelete,
   onDeleteMedia,
+  onUpdateMediaAsset,
+  folders,
+  getFolderById,
 }: {
   entry: HistoryEntry
   active: boolean
@@ -184,6 +192,9 @@ function HistoryItem({
   onRename: (threadId: string, title: string) => void
   onDelete: (threadId: string) => void
   onDeleteMedia: (entry: MediaHistoryEntry) => void
+  onUpdateMediaAsset: (entry: MediaHistoryEntry, asset: ImageAssetRecord | VideoAssetRecord) => void
+  folders: ThreadFolder[]
+  getFolderById: (id: string) => ThreadFolder | undefined
 }) {
   const { t } = useTranslation()
   const [renameOpen, setRenameOpen] = useState(false)
@@ -254,6 +265,11 @@ function HistoryItem({
                 <Pencil className="size-4" />
                 <span>{t('common:rename')}</span>
               </DropdownMenuItem>
+              <ThreadProjectMenuItems
+                thread={entry.thread}
+                folders={folders}
+                getFolderById={getFolderById}
+              />
               <DropdownMenuSeparator />
               <DropdownMenuItem
                 variant="destructive"
@@ -264,13 +280,23 @@ function HistoryItem({
               </DropdownMenuItem>
             </>
           ) : (
-            <DropdownMenuItem
-              variant="destructive"
-              onSelect={() => setMediaDeleteOpen(true)}
-            >
-              <Trash2 className="size-4" />
-              <span>{t('common:delete')}</span>
-            </DropdownMenuItem>
+            <>
+              <MediaProjectMenuItems
+                asset={entry.asset}
+                mediaType={entry.mediaType}
+                folders={folders}
+                getFolderById={getFolderById}
+                onAssetUpdated={(asset) => onUpdateMediaAsset(entry, asset)}
+              />
+              <DropdownMenuSeparator />
+              <DropdownMenuItem
+                variant="destructive"
+                onSelect={() => setMediaDeleteOpen(true)}
+              >
+                <Trash2 className="size-4" />
+                <span>{t('common:delete')}</span>
+              </DropdownMenuItem>
+            </>
           )}
         </DropdownMenuContent>
       </DropdownMenu>
@@ -347,8 +373,10 @@ export function NavChats() {
   const deleteThread = useThreads((state) => state.deleteThread)
   const renameThread = useThreads((state) => state.renameThread)
   const toggleThreadPinned = useThreads((state) => state.toggleThreadPinned)
+  const { folders, getFolderById } = useThreadManagement()
   const imageAssets = useImageGenerationStore((state) => state.assets)
   const setImageAssets = useImageGenerationStore((state) => state.setAssets)
+  const upsertImageAsset = useImageGenerationStore((state) => state.upsertAsset)
   const removeImageAsset = useImageGenerationStore((state) => state.removeAsset)
   const [dropdownOpen, setDropdownOpen] = useState(false)
   const [videoAssets, setVideoAssets] = useState<VideoAssetRecord[]>([])
@@ -416,7 +444,24 @@ export function NavChats() {
     }
   }
 
+  const updateMediaEntryAsset = (
+    entry: MediaHistoryEntry,
+    asset: ImageAssetRecord | VideoAssetRecord
+  ) => {
+    if (entry.mediaType === 'image') {
+      upsertImageAsset(asset as ImageAssetRecord)
+      return
+    }
+
+    setVideoAssets((current) =>
+      current.map((item) =>
+        item.id === asset.id ? (asset as VideoAssetRecord) : item
+      )
+    )
+  }
+
   const historyEntries = useMemo<HistoryEntry[]>(() => {
+    const activeProjectIds = new Set(folders.map((folder) => folder.id))
     const threadEntries: HistoryEntry[] = threadsWithoutProject.map((thread) => {
       const team = isMitaTeamsThread(thread)
       return {
@@ -433,11 +478,16 @@ export function NavChats() {
     })
 
     const imageEntries: HistoryEntry[] = imageAssets
-      .filter((asset) => asset.assetKind !== 'reference')
+      .filter(
+        (asset) =>
+          asset.assetKind !== 'reference' &&
+          (!asset.project || !activeProjectIds.has(asset.project.id))
+      )
       .map((asset) => ({
         id: asset.id,
         kind: 'media',
         mediaType: 'image',
+        asset,
         title: mediaTitle(asset, t('common:newMedia')),
         updatedAt: timestampFromIso(asset.createdAt),
         icon: ImagePlus,
@@ -448,24 +498,27 @@ export function NavChats() {
         },
       }))
 
-    const videoEntries: HistoryEntry[] = videoAssets.map((asset) => ({
-      id: asset.id,
-      kind: 'media',
-      mediaType: 'video',
-      title: mediaTitle(asset, t('common:imageGeneration.mode.storyboardVideo')),
-      updatedAt: timestampFromIso(asset.createdAt),
-      icon: Video,
-      to: route.images as '/images',
-      search: {
-        media: 'storyboard',
-        videoId: asset.id,
-      },
-    }))
+    const videoEntries: HistoryEntry[] = videoAssets
+      .filter((asset) => !asset.project || !activeProjectIds.has(asset.project.id))
+      .map((asset) => ({
+        id: asset.id,
+        kind: 'media',
+        mediaType: 'video',
+        asset,
+        title: mediaTitle(asset, t('common:imageGeneration.mode.storyboardVideo')),
+        updatedAt: timestampFromIso(asset.createdAt),
+        icon: Video,
+        to: route.images as '/images',
+        search: {
+          media: 'storyboard',
+          videoId: asset.id,
+        },
+      }))
 
     return [...threadEntries, ...imageEntries, ...videoEntries].sort(
       sortHistoryEntries
     )
-  }, [imageAssets, threadsWithoutProject, t, videoAssets])
+  }, [folders, imageAssets, threadsWithoutProject, t, videoAssets])
 
   const pinnedEntries = useMemo(
     () => historyEntries.filter(isPinnedHistoryEntry),
@@ -516,6 +569,9 @@ export function NavChats() {
                 onRename={renameThread}
                 onDelete={deleteThread}
                 onDeleteMedia={deleteMediaEntry}
+                onUpdateMediaAsset={updateMediaEntryAsset}
+                folders={folders}
+                getFolderById={getFolderById}
               />
             ))}
             {recentEntries.length > 0 && (
@@ -536,6 +592,9 @@ export function NavChats() {
             onRename={renameThread}
             onDelete={deleteThread}
             onDeleteMedia={deleteMediaEntry}
+            onUpdateMediaAsset={updateMediaEntryAsset}
+            folders={folders}
+            getFolderById={getFolderById}
           />
         ))}
       </SidebarMenu>

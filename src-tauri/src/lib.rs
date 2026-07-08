@@ -47,10 +47,12 @@ macro_rules! invoke_commands_with_extras {
         core::image_assets::commands::import_image_asset,
         core::image_assets::commands::list_image_assets,
         core::image_assets::commands::delete_image_asset,
+        core::image_assets::commands::update_image_asset_project,
         core::video_assets::commands::save_video_asset,
         core::video_assets::commands::save_video_asset_from_url,
         core::video_assets::commands::list_video_assets,
         core::video_assets::commands::delete_video_asset,
+        core::video_assets::commands::update_video_asset_project,
         // Computer Agent commands
         core::computer_agent::commands::get_computer_agent_shell_status,
         core::computer_agent::commands::get_computer_agent_workspace_path,

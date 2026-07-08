@@ -6,6 +6,7 @@ import type {
   ImportImageAssetRequest,
   SaveImageAssetRequest,
 } from './types'
+import type { ProjectAssignment } from '@/services/projects/types'
 
 export class TauriImageGenerationService extends DefaultImageGenerationService {
   protected fetch(): typeof globalThis.fetch {
@@ -32,5 +33,15 @@ export class TauriImageGenerationService extends DefaultImageGenerationService {
 
   async deleteAsset(assetId: string): Promise<void> {
     return invoke('delete_image_asset', { assetId })
+  }
+
+  async updateAssetProject(
+    assetId: string,
+    project?: ProjectAssignment
+  ): Promise<ImageAssetRecord> {
+    return invoke<ImageAssetRecord>('update_image_asset_project', {
+      assetId,
+      project: project ?? null,
+    })
   }
 }

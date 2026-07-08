@@ -1,5 +1,7 @@
-use super::commands::{delete_video_asset, list_video_assets, save_video_asset};
-use super::models::SaveVideoAssetRequest;
+use super::commands::{
+    delete_video_asset, list_video_assets, save_video_asset, update_video_asset_project,
+};
+use super::models::{SaveVideoAssetRequest, VideoAssetProject};
 use crate::core::app::commands::get_mita_data_folder_path;
 use std::fs;
 use tauri::test::mock_app;
@@ -23,6 +25,7 @@ fn test_asset(id: &str) -> SaveVideoAssetRequest {
         extension: Some("mp4".to_string()),
         created_at: Some("2026-06-04T00:00:00Z".to_string()),
         asset_kind: None,
+        project: None,
     }
 }
 
@@ -65,6 +68,37 @@ fn rejects_invalid_video_base64() {
 
     let result = save_video_asset(app.handle().clone(), asset);
     assert!(result.is_err());
+}
+
+#[test]
+fn updates_video_asset_project_metadata() {
+    let app = mock_app();
+    let id = "test-video-asset-project-metadata";
+    let _ = delete_video_asset(app.handle().clone(), id.to_string());
+
+    let record = save_video_asset(app.handle().clone(), test_asset(id)).unwrap();
+    assert!(record.project.is_none());
+
+    let project = VideoAssetProject {
+        id: "project-1".to_string(),
+        name: "Client Work".to_string(),
+        updated_at: 1_780_000_000_000,
+    };
+    let updated =
+        update_video_asset_project(app.handle().clone(), id.to_string(), Some(project)).unwrap();
+    assert_eq!(updated.project.as_ref().map(|project| project.id.as_str()), Some("project-1"));
+
+    let assets = list_video_assets(app.handle().clone()).unwrap();
+    let listed = assets
+        .iter()
+        .find(|asset| asset.id == id)
+        .expect("saved asset is listed");
+    assert_eq!(listed.project.as_ref().map(|project| project.name.as_str()), Some("Client Work"));
+
+    let cleared = update_video_asset_project(app.handle().clone(), id.to_string(), None).unwrap();
+    assert!(cleared.project.is_none());
+
+    delete_video_asset(app.handle().clone(), id.to_string()).unwrap();
 }
 
 #[test]

@@ -1,5 +1,13 @@
 use serde::{Deserialize, Serialize};
 
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub struct VideoAssetProject {
+    pub id: String,
+    pub name: String,
+    pub updated_at: i64,
+}
+
 #[derive(Debug, Clone, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct SaveVideoAssetRequest {
@@ -23,6 +31,7 @@ pub struct SaveVideoAssetRequest {
     pub extension: Option<String>,
     pub created_at: Option<String>,
     pub asset_kind: Option<String>,
+    pub project: Option<VideoAssetProject>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -44,4 +53,5 @@ pub struct VideoAssetRecord {
     pub file_name: String,
     pub mime_type: String,
     pub asset_kind: Option<String>,
+    pub project: Option<VideoAssetProject>,
 }

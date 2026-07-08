@@ -26,6 +26,7 @@ import type {
   ImportImageAssetRequest,
   SaveImageAssetRequest,
 } from './types'
+import type { ProjectAssignment } from '@/services/projects/types'
 
 type RawImageItem = {
   b64_json?: string
@@ -142,6 +143,15 @@ export class DefaultImageGenerationService implements ImageGenerationService {
   async deleteAsset(assetId: string): Promise<void> {
     void assetId
     return
+  }
+
+  async updateAssetProject(
+    assetId: string,
+    project?: ProjectAssignment
+  ): Promise<ImageAssetRecord> {
+    void assetId
+    void project
+    throw new Error('Image asset project updates are only available in the desktop app')
   }
 
   private endpointForMode(request: ImageGenerationRequest) {

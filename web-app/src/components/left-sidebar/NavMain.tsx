@@ -240,7 +240,6 @@ export function NavMain() {
       (item) =>
         ![
           'common:newAgentChat',
-          'common:projects.new',
           'common:hub',
         ].includes(item.title)
     )

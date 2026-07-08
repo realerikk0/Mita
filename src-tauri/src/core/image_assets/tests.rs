@@ -1,7 +1,8 @@
 use super::commands::{
     delete_image_asset, import_image_asset, list_image_assets, save_image_asset,
+    update_image_asset_project,
 };
-use super::models::{ImportImageAssetRequest, SaveImageAssetRequest};
+use super::models::{ImageAssetProject, ImportImageAssetRequest, SaveImageAssetRequest};
 use crate::core::app::commands::get_mita_data_folder_path;
 use std::fs;
 use tauri::test::mock_app;
@@ -25,6 +26,7 @@ fn test_asset(id: &str) -> SaveImageAssetRequest {
         extension: Some("png".to_string()),
         created_at: Some("2026-05-11T00:00:00Z".to_string()),
         asset_kind: None,
+        project: None,
     }
 }
 
@@ -92,6 +94,37 @@ fn preserves_source_asset_ids_when_listing_saved_assets() {
     delete_image_asset(app.handle().clone(), id.to_string()).unwrap();
     delete_image_asset(app.handle().clone(), reference_id.to_string()).unwrap();
     let _ = fs::remove_file(source_path);
+}
+
+#[test]
+fn updates_image_asset_project_metadata() {
+    let app = mock_app();
+    let id = "test-image-asset-project-metadata";
+    let _ = delete_image_asset(app.handle().clone(), id.to_string());
+
+    let record = save_image_asset(app.handle().clone(), test_asset(id)).unwrap();
+    assert!(record.project.is_none());
+
+    let project = ImageAssetProject {
+        id: "project-1".to_string(),
+        name: "Client Work".to_string(),
+        updated_at: 1_780_000_000_000,
+    };
+    let updated =
+        update_image_asset_project(app.handle().clone(), id.to_string(), Some(project)).unwrap();
+    assert_eq!(updated.project.as_ref().map(|project| project.id.as_str()), Some("project-1"));
+
+    let assets = list_image_assets(app.handle().clone()).unwrap();
+    let listed = assets
+        .iter()
+        .find(|asset| asset.id == id)
+        .expect("saved asset is listed");
+    assert_eq!(listed.project.as_ref().map(|project| project.name.as_str()), Some("Client Work"));
+
+    let cleared = update_image_asset_project(app.handle().clone(), id.to_string(), None).unwrap();
+    assert!(cleared.project.is_none());
+
+    delete_image_asset(app.handle().clone(), id.to_string()).unwrap();
 }
 
 #[test]

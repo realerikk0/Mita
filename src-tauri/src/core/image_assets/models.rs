@@ -1,5 +1,13 @@
 use serde::{Deserialize, Serialize};
 
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub struct ImageAssetProject {
+    pub id: String,
+    pub name: String,
+    pub updated_at: i64,
+}
+
 #[derive(Debug, Clone, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct SaveImageAssetRequest {
@@ -21,6 +29,7 @@ pub struct SaveImageAssetRequest {
     pub extension: Option<String>,
     pub created_at: Option<String>,
     pub asset_kind: Option<String>,
+    pub project: Option<ImageAssetProject>,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -52,4 +61,5 @@ pub struct ImageAssetRecord {
     pub file_name: String,
     pub mime_type: String,
     pub asset_kind: Option<String>,
+    pub project: Option<ImageAssetProject>,
 }

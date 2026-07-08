@@ -6,6 +6,7 @@ import type {
   SaveVideoAssetRequest,
   VideoAssetRecord,
 } from './types'
+import type { ProjectAssignment } from '@/services/projects/types'
 
 export class TauriVideoGenerationService extends DefaultVideoGenerationService {
   protected fetch(): typeof globalThis.fetch {
@@ -80,5 +81,15 @@ export class TauriVideoGenerationService extends DefaultVideoGenerationService {
 
   async deleteVideoAsset(assetId: string): Promise<void> {
     return invoke('delete_video_asset', { assetId })
+  }
+
+  async updateVideoAssetProject(
+    assetId: string,
+    project?: ProjectAssignment
+  ): Promise<VideoAssetRecord> {
+    return invoke<VideoAssetRecord>('update_video_asset_project', {
+      assetId,
+      project: project ?? null,
+    })
   }
 }

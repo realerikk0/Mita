@@ -16,6 +16,7 @@ import type {
   VideoGenerationTask,
   VideoResolution,
 } from './types'
+import type { ProjectAssignment } from '@/services/projects/types'
 
 type RawVideoResponse = {
   id?: string
@@ -208,6 +209,15 @@ export class DefaultVideoGenerationService implements VideoGenerationService {
   async deleteVideoAsset(assetId: string): Promise<void> {
     void assetId
     return
+  }
+
+  async updateVideoAssetProject(
+    assetId: string,
+    project?: ProjectAssignment
+  ): Promise<VideoAssetRecord> {
+    void assetId
+    void project
+    throw new Error('Video asset project updates are only available in the desktop app')
   }
 
   private async generationBody(request: GenerateVideoRequest) {

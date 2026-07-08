@@ -10,6 +10,8 @@ export interface ThreadFolder {
   assistantId?: string
 }
 
+export type ProjectAssignment = Pick<ThreadFolder, 'id' | 'name' | 'updated_at'>
+
 export interface ProjectsService {
   /**
    * Get all projects/folders
