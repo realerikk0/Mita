@@ -2,13 +2,18 @@ use super::models::{SaveVideoAssetRequest, VideoAssetRecord};
 use crate::core::app::commands::get_mita_data_folder_path;
 use base64::{engine::general_purpose, Engine as _};
 use chrono::Utc;
+use futures_util::StreamExt;
 use std::{
     fs,
     path::{Path, PathBuf},
+    time::Duration,
 };
 use tauri::Runtime;
 
 const VIDEO_ASSETS_DIR: &str = "video-assets";
+const REMOTE_VIDEO_DOWNLOAD_TIMEOUT_SECS: u64 = 120;
+const MAX_REMOTE_VIDEO_BYTES: u64 = 512 * 1024 * 1024;
+const MAX_REMOTE_ERROR_BODY_BYTES: u64 = 16 * 1024;
 
 fn validate_asset_id(id: &str) -> Result<(), String> {
     if id.is_empty()
@@ -92,6 +97,7 @@ pub async fn save_video_asset_from_url<R: Runtime>(
         .to_string();
     let (video_bytes, mime_type) = download_video_asset(&video_url).await?;
     asset.mime_type = mime_type;
+    asset.extension = None;
 
     save_video_asset_bytes(app, asset, video_bytes)
 }
@@ -139,6 +145,7 @@ fn save_video_asset_bytes<R: Runtime>(
 async fn download_video_asset(video_url: &str) -> Result<(Vec<u8>, String), String> {
     let response = reqwest::Client::builder()
         .redirect(reqwest::redirect::Policy::limited(10))
+        .timeout(Duration::from_secs(REMOTE_VIDEO_DOWNLOAD_TIMEOUT_SECS))
         .build()
         .map_err(|e| e.to_string())?
         .get(video_url)
@@ -148,7 +155,10 @@ async fn download_video_asset(video_url: &str) -> Result<(Vec<u8>, String), Stri
 
     let status = response.status();
     if !status.is_success() {
-        let detail = response.text().await.unwrap_or_default();
+        let detail = read_response_body_limited(response, MAX_REMOTE_ERROR_BODY_BYTES)
+            .await
+            .map(|bytes| String::from_utf8_lossy(&bytes).to_string())
+            .unwrap_or_default();
         let detail = detail.chars().take(300).collect::<String>();
         return Err(if detail.is_empty() {
             format!("Unable to download generated video ({status})")
@@ -157,21 +167,81 @@ async fn download_video_asset(video_url: &str) -> Result<(Vec<u8>, String), Stri
         });
     }
 
-    let mime_type = response
+    if let Some(content_length) = response.content_length() {
+        if content_length > MAX_REMOTE_VIDEO_BYTES {
+            return Err(format!(
+                "Generated video is too large ({content_length} bytes)"
+            ));
+        }
+    }
+
+    let mime_type = response_video_mime_type(&response, video_url)?;
+    let video_bytes = read_response_body_limited(response, MAX_REMOTE_VIDEO_BYTES).await?;
+
+    Ok((video_bytes, mime_type))
+}
+
+fn response_video_mime_type(
+    response: &reqwest::Response,
+    video_url: &str,
+) -> Result<String, String> {
+    let content_type = response
         .headers()
         .get(reqwest::header::CONTENT_TYPE)
         .and_then(|value| value.to_str().ok())
         .and_then(|value| value.split(';').next())
-        .filter(|value| !value.trim().is_empty())
-        .map(|value| value.trim().to_string())
-        .unwrap_or_else(|| "video/mp4".to_string());
-    let video_bytes = response
-        .bytes()
-        .await
-        .map_err(|e| format!("Unable to read generated video body: {e}"))?
-        .to_vec();
+        .map(|value| value.trim().to_ascii_lowercase())
+        .filter(|value| !value.is_empty());
 
-    Ok((video_bytes, mime_type))
+    match content_type.as_deref() {
+        Some(value) if value.starts_with("video/") => Ok(value.to_string()),
+        Some("application/octet-stream") | None => {
+            video_mime_from_url(video_url).ok_or_else(|| {
+                "Generated video response is missing a supported video content type".to_string()
+            })
+        }
+        Some(value) => Err(format!(
+            "Generated video response has unsupported content type: {value}"
+        )),
+    }
+}
+
+fn video_mime_from_url(video_url: &str) -> Option<String> {
+    let path = url::Url::parse(video_url)
+        .ok()
+        .map(|url| url.path().to_ascii_lowercase())?;
+
+    if path.ends_with(".webm") {
+        Some("video/webm".to_string())
+    } else if path.ends_with(".mov") {
+        Some("video/quicktime".to_string())
+    } else if path.ends_with(".mp4") || path.ends_with(".m4v") {
+        Some("video/mp4".to_string())
+    } else {
+        None
+    }
+}
+
+async fn read_response_body_limited(
+    response: reqwest::Response,
+    max_bytes: u64,
+) -> Result<Vec<u8>, String> {
+    let mut stream = response.bytes_stream();
+    let mut body = Vec::new();
+    let mut total = 0_u64;
+
+    while let Some(chunk) = stream.next().await {
+        let chunk = chunk.map_err(|e| format!("Unable to read generated video body: {e}"))?;
+        total = total
+            .checked_add(chunk.len() as u64)
+            .ok_or_else(|| "Generated video body is too large".to_string())?;
+        if total > max_bytes {
+            return Err(format!("Generated video exceeds {max_bytes} bytes"));
+        }
+        body.extend_from_slice(&chunk);
+    }
+
+    Ok(body)
 }
 
 #[tauri::command]

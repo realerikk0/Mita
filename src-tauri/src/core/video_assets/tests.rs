@@ -66,3 +66,21 @@ fn rejects_invalid_video_base64() {
     let result = save_video_asset(app.handle().clone(), asset);
     assert!(result.is_err());
 }
+
+#[test]
+fn infers_video_extension_from_mime_when_extension_is_missing() {
+    let app = mock_app();
+    let id = "test-video-asset-webm-extension";
+    let _ = delete_video_asset(app.handle().clone(), id.to_string());
+
+    let mut asset = test_asset(id);
+    asset.mime_type = "video/webm".to_string();
+    asset.extension = None;
+
+    let record = save_video_asset(app.handle().clone(), asset).unwrap();
+
+    assert_eq!(record.file_name, "video.webm");
+    assert!(record.path.ends_with("video.webm"));
+
+    delete_video_asset(app.handle().clone(), id.to_string()).unwrap();
+}

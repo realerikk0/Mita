@@ -6,12 +6,10 @@ type PlainObject = Record<string, unknown>
 export function isVideoGenerationDebugEnabled() {
   try {
     const value = globalThis.localStorage?.getItem(VIDEO_DEBUG_STORAGE_KEY)
-    if (value != null) return value !== '0' && value !== 'false' && value !== 'off'
+    return isEnabledFlag(value)
   } catch {
-    return import.meta.env.DEV
+    return false
   }
-
-  return import.meta.env.DEV
 }
 
 export function videoDebugLog(event: string, payload?: unknown) {
@@ -92,7 +90,20 @@ function sanitizeField(key: string, value: unknown, depth: number) {
 
 function sanitizeString(value: string) {
   if (value.startsWith('data:')) return dataUrlSummary(value)
-  return truncate(value, 600)
+  return truncate(sanitizeUrl(value), 600)
+}
+
+function sanitizeUrl(value: string) {
+  try {
+    const url = new URL(value)
+    if (url.protocol !== 'http:' && url.protocol !== 'https:') return value
+
+    const query = url.search ? '?[redacted]' : ''
+    const hash = url.hash ? '#[redacted]' : ''
+    return `${url.origin}${url.pathname}${query}${hash}`
+  } catch {
+    return value
+  }
 }
 
 function dataUrlSummary(value: string) {
@@ -137,4 +148,9 @@ function isPlainObject(value: unknown): value is PlainObject {
     (Object.getPrototypeOf(value) === Object.prototype ||
       Object.getPrototypeOf(value) === null)
   )
+}
+
+function isEnabledFlag(value: string | null | undefined) {
+  if (value == null) return false
+  return ['1', 'true', 'on', 'yes'].includes(value.trim().toLowerCase())
 }
