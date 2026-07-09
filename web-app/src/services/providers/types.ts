@@ -14,7 +14,10 @@ export type ProviderMoneyBalanceTotals = ProviderBalanceTotals & {
   currency?: string
 }
 
-export type ProviderTokenLimit = ProviderBalanceTotals & {
+export type ProviderTokenLimit = {
+  available?: number
+  used?: number
+  total?: number
   unlimited?: boolean
   status?: number
   expiresAt?: number
@@ -37,6 +40,38 @@ export type ProviderBalanceNotice = {
   hideBadge?: boolean
 }
 
+export type ProviderBalanceBillingPreference =
+  | 'subscription_first'
+  | 'wallet_first'
+  | 'subscription_only'
+  | 'wallet_only'
+
+export type ProviderBalanceQuotaWindow = {
+  limit?: number
+  used?: number
+  available?: number
+  resetAt?: number
+  availablePercent?: number
+}
+
+export type ProviderBalanceSubscriptionPlan = {
+  title: string
+  planCode?: string
+  startTime?: number
+  endTime?: number
+  status?: string
+  weeklyWindow: ProviderBalanceQuotaWindow
+  fiveHourWindow: ProviderBalanceQuotaWindow
+  features: string[]
+}
+
+export type ProviderBalanceSubscription = {
+  active: boolean
+  billingPreference?: ProviderBalanceBillingPreference
+  subscriptions: ProviderBalanceSubscriptionPlan[]
+  unavailable?: boolean
+}
+
 export type SupportedProviderBalance = {
   state: 'supported'
   provider: string
@@ -46,6 +81,7 @@ export type SupportedProviderBalance = {
   accountBalance?: ProviderBalanceTotals
   moneyBalance?: ProviderMoneyBalanceTotals
   tokenLimit?: ProviderTokenLimit
+  subscription?: ProviderBalanceSubscription
   notice?: ProviderBalanceNotice
   links?: ProviderBalanceLinks
   raw?: unknown

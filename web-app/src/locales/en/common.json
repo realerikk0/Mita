@@ -775,6 +775,7 @@
     "unlimitedKey": "Unlimited key",
     "keyLimitRemaining": "Key limit remaining {{value}}",
     "keyStatus": "Key {{status}}",
+    "walletBalance": "Wallet balance",
     "accountUsed": "Account used",
     "keyUsed": "Key used",
     "updatedAt": "Updated",
@@ -782,6 +783,30 @@
     "quotaPoints": "quota points",
     "badgeLabel": "Balance",
     "current": "Current",
+    "billingPreference": {
+      "subscriptionFirst": "Subscription first",
+      "walletFirst": "Wallet first",
+      "subscriptionOnly": "Subscription only",
+      "walletOnly": "Wallet only"
+    },
+    "subscription": {
+      "currentPlan": "Current plan",
+      "availableSuffix": "left",
+      "weeklyCompact": "7d",
+      "weeklyRemaining": "7-day window remaining",
+      "weeklyReset": "7-day reset",
+      "fiveHourRemaining": "5-hour window remaining",
+      "fiveHourReset": "5-hour reset",
+      "period": "Plan period",
+      "status": "Plan {{status}}",
+      "statusActive": "active",
+      "statusCanceled": "canceled",
+      "statusDisabled": "disabled",
+      "statusExpired": "expired",
+      "startsAt": "Starts {{value}}",
+      "endsAt": "Ends {{value}}",
+      "unavailable": "Subscription details unavailable"
+    },
     "tokenStatus": {
       "normal": "normal",
       "disabled": "disabled",

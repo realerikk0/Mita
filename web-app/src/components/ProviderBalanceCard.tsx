@@ -5,10 +5,11 @@ import { cn, getProviderTitle } from '@/lib/utils'
 import { useProviderBalance } from '@/hooks/useProviderBalance'
 import type { ProviderBalanceStatus } from '@/services/providers/types'
 import {
-  formatBiyuanQuotaAsUsd,
+  formatProviderPercent,
   formatProviderMoney,
-  isBiyuanQuotaBalance,
+  primaryProviderSubscriptionPlan,
   providerBalancePrimaryLabel,
+  shouldPrioritizeProviderWallet,
 } from '@/lib/provider-balance-display'
 import { useTranslation } from '@/i18n/react-i18next-compat'
 
@@ -29,6 +30,21 @@ const tokenStatusLabelKeys: Record<number, string> = {
   4: 'common:providerBalance.tokenStatus.exhausted',
 }
 
+const billingPreferenceLabelKeys = {
+  subscription_first: 'common:providerBalance.billingPreference.subscriptionFirst',
+  wallet_first: 'common:providerBalance.billingPreference.walletFirst',
+  subscription_only: 'common:providerBalance.billingPreference.subscriptionOnly',
+  wallet_only: 'common:providerBalance.billingPreference.walletOnly',
+} as const
+
+const subscriptionStatusLabelKeys: Record<string, string> = {
+  active: 'common:providerBalance.subscription.statusActive',
+  canceled: 'common:providerBalance.subscription.statusCanceled',
+  cancelled: 'common:providerBalance.subscription.statusCanceled',
+  disabled: 'common:providerBalance.subscription.statusDisabled',
+  expired: 'common:providerBalance.subscription.statusExpired',
+}
+
 function formatInteger(value?: number) {
   if (value === undefined || !Number.isFinite(value)) return '-'
   return new Intl.NumberFormat('en-US', { maximumFractionDigits: 0 }).format(value)
@@ -37,6 +53,16 @@ function formatInteger(value?: number) {
 function formatTimeFromUnixSeconds(value?: number) {
   if (!value) return '-'
   return new Intl.DateTimeFormat(undefined, {
+    hour: '2-digit',
+    minute: '2-digit',
+  }).format(new Date(value * 1000))
+}
+
+function formatDateTimeFromUnixSeconds(value?: number) {
+  if (!value) return '-'
+  return new Intl.DateTimeFormat(undefined, {
+    month: 'short',
+    day: 'numeric',
     hour: '2-digit',
     minute: '2-digit',
   }).format(new Date(value * 1000))
@@ -57,15 +83,39 @@ function providerDisplayUnit(balance: ProviderBalanceStatus, t: TranslationFn) {
   return balance.unit
 }
 
+function billingPreferenceLabel(
+  preference: keyof typeof billingPreferenceLabelKeys | undefined,
+  t: TranslationFn
+) {
+  return preference ? t(billingPreferenceLabelKeys[preference]) : undefined
+}
+
+function subscriptionStatusLabel(status: string | undefined, t: TranslationFn) {
+  const normalized = status?.trim().toLowerCase()
+  if (!normalized) return undefined
+  const labelKey = subscriptionStatusLabelKeys[normalized]
+  return labelKey ? t(labelKey) : status
+}
+
 function formatProviderBalanceValue(
   value: number,
+  displayUnit: string
+) {
+  return `${formatInteger(value)} ${displayUnit}`
+}
+
+function formatAccountBalanceAvailable(
   balance: ProviderBalanceStatus,
   displayUnit: string
 ) {
-  if (isBiyuanQuotaBalance(balance)) {
-    return formatBiyuanQuotaAsUsd(value)
+  if (balance.state !== 'supported' || !balance.accountBalance) return undefined
+  if (balance.moneyBalance) {
+    return formatProviderMoney(
+      balance.moneyBalance.available,
+      balance.moneyBalance.currency ?? balance.currency ?? 'USD'
+    )
   }
-  return `${formatInteger(value)} ${displayUnit}`
+  return formatProviderBalanceValue(balance.accountBalance.available, displayUnit)
 }
 
 function providerNoticeLabel(balance: ProviderBalanceStatus, t: TranslationFn) {
@@ -221,19 +271,34 @@ export function ProviderBalanceContent({
 
   const quotaUnitLabel = t('common:providerBalance.quotaPoints')
   const displayUnit = providerDisplayUnit(balance, t)
-  const primary = providerBalancePrimaryLabel(balance, { quotaUnitLabel })
+  const primary = providerBalancePrimaryLabel(balance, {
+    quotaUnitLabel,
+    weeklyWindowLabel: t('common:providerBalance.subscription.weeklyCompact'),
+    subscriptionAvailableSuffix: t('common:providerBalance.subscription.availableSuffix'),
+  })
   const hasAvailableBalance = Boolean(primary)
   const topupLink = balance.links?.topup
   const tokenLimit = balance.tokenLimit
   const tokenStatus = tokenStatusLabel(tokenLimit?.status, t)
   const notice = providerNoticeLabel(balance, t)
+  const primaryPlan = primaryProviderSubscriptionPlan(balance)
+  const walletPrimary = shouldPrioritizeProviderWallet(balance)
+  const billing = billingPreferenceLabel(
+    balance.subscription?.billingPreference,
+    t
+  )
+  const subscriptionUnavailable = balance.subscription?.unavailable === true
+  const primaryPlanStatus = subscriptionStatusLabel(primaryPlan?.status, t)
+  const accountAvailable = formatAccountBalanceAvailable(balance, displayUnit)
 
   return (
     <div className="space-y-4">
       {hasAvailableBalance ? (
         <div className="space-y-1">
           <div className="text-sm text-muted-foreground">
-            {t('common:providerBalance.availableBalance')}
+            {primaryPlan && !walletPrimary
+              ? t('common:providerBalance.subscription.currentPlan')
+              : t('common:providerBalance.availableBalance')}
           </div>
           <div className="text-2xl font-semibold tracking-normal">{primary}</div>
         </div>
@@ -262,11 +327,7 @@ export function ProviderBalanceContent({
         {!tokenLimit?.unlimited && tokenLimit?.available !== undefined && (
           <StatusPill>
             {t('common:providerBalance.keyLimitRemaining', {
-              value: formatProviderBalanceValue(
-                tokenLimit.available,
-                balance,
-                displayUnit
-              ),
+              value: formatProviderBalanceValue(tokenLimit.available, displayUnit),
             })}
           </StatusPill>
         )}
@@ -275,35 +336,110 @@ export function ProviderBalanceContent({
             {t('common:providerBalance.keyStatus', { status: tokenStatus })}
           </StatusPill>
         )}
+        {primaryPlanStatus && (
+          <StatusPill
+            tone={
+              primaryPlan?.status?.toLowerCase() === 'active'
+                ? 'success'
+                : 'neutral'
+            }
+          >
+            {t('common:providerBalance.subscription.status', {
+              status: primaryPlanStatus,
+            })}
+          </StatusPill>
+        )}
+        {billing && <StatusPill>{billing}</StatusPill>}
+        {subscriptionUnavailable && (
+          <StatusPill tone="neutral">
+            {t('common:providerBalance.subscription.unavailable')}
+          </StatusPill>
+        )}
       </div>
 
       <div className="space-y-1.5">
-        {balance.accountBalance?.used !== undefined && (
-          <DetailRow
-            label={t('common:providerBalance.accountUsed')}
-            value={
-              balance.moneyBalance?.used !== undefined
-                ? formatProviderMoney(
-                    balance.moneyBalance.used,
-                    balance.moneyBalance.currency ?? balance.currency ?? 'USD'
-                  )
-                : formatProviderBalanceValue(
-                    balance.accountBalance.used,
-                    balance,
-                    displayUnit
-                  )
-            }
-          />
-        )}
-        {!tokenLimit?.unlimited && tokenLimit?.used !== undefined && (
-          <DetailRow
-            label={t('common:providerBalance.keyUsed')}
-            value={formatProviderBalanceValue(
-              tokenLimit.used,
-              balance,
-              displayUnit
+        {primaryPlan ? (
+          <>
+            {accountAvailable && !walletPrimary && (
+              <DetailRow
+                label={t('common:providerBalance.walletBalance')}
+                value={accountAvailable}
+              />
             )}
-          />
+            <DetailRow
+              label={t('common:providerBalance.subscription.weeklyRemaining')}
+              value={
+                formatProviderPercent(
+                  primaryPlan.weeklyWindow.availablePercent
+                ) ?? '-'
+              }
+            />
+            <DetailRow
+              label={t('common:providerBalance.subscription.weeklyReset')}
+              value={formatDateTimeFromUnixSeconds(
+                primaryPlan.weeklyWindow.resetAt
+              )}
+            />
+            <DetailRow
+              label={t('common:providerBalance.subscription.fiveHourRemaining')}
+              value={
+                formatProviderPercent(
+                  primaryPlan.fiveHourWindow.availablePercent
+                ) ?? '-'
+              }
+            />
+            <DetailRow
+              label={t('common:providerBalance.subscription.fiveHourReset')}
+              value={formatDateTimeFromUnixSeconds(
+                primaryPlan.fiveHourWindow.resetAt
+              )}
+            />
+            {(primaryPlan.startTime || primaryPlan.endTime) && (
+              <DetailRow
+                label={t('common:providerBalance.subscription.period')}
+                value={
+                  primaryPlan.startTime && primaryPlan.endTime
+                    ? `${formatDateTimeFromUnixSeconds(primaryPlan.startTime)} - ${formatDateTimeFromUnixSeconds(primaryPlan.endTime)}`
+                    : primaryPlan.startTime
+                      ? t('common:providerBalance.subscription.startsAt', {
+                          value: formatDateTimeFromUnixSeconds(
+                            primaryPlan.startTime
+                          ),
+                        })
+                      : t('common:providerBalance.subscription.endsAt', {
+                          value: formatDateTimeFromUnixSeconds(
+                            primaryPlan.endTime
+                          ),
+                        })
+                }
+              />
+            )}
+          </>
+        ) : (
+          <>
+            {balance.accountBalance?.used !== undefined && (
+              <DetailRow
+                label={t('common:providerBalance.accountUsed')}
+                value={
+                  balance.moneyBalance?.used !== undefined
+                    ? formatProviderMoney(
+                        balance.moneyBalance.used,
+                        balance.moneyBalance.currency ?? balance.currency ?? 'USD'
+                      )
+                    : formatProviderBalanceValue(
+                        balance.accountBalance.used,
+                        displayUnit
+                      )
+                }
+              />
+            )}
+            {!tokenLimit?.unlimited && tokenLimit?.used !== undefined && (
+              <DetailRow
+                label={t('common:providerBalance.keyUsed')}
+                value={formatProviderBalanceValue(tokenLimit.used, displayUnit)}
+              />
+            )}
+          </>
         )}
         <DetailRow
           label={t('common:providerBalance.updatedAt')}

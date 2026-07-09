@@ -219,6 +219,7 @@ export function NavMain() {
   const settingsBalanceLabel = getProviderBalanceBadgeLabel(currentProviderBalance, {
     balancePrefix: t('common:providerBalance.badgeLabel'),
     quotaUnitLabel: t('common:providerBalance.quotaPoints'),
+    weeklyWindowLabel: t('common:providerBalance.subscription.weeklyCompact'),
   })
   const { open: searchOpen, setOpen: setSearchOpen } = useSearchDialog()
   const { open: projectDialogOpen, setOpen: setProjectDialogOpen } =

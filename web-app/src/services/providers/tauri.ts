@@ -13,8 +13,12 @@ import { DefaultProvidersService } from './default'
 import { getModelCapabilities } from '@/lib/models'
 import type { ProviderModelDescriptor } from '@/lib/provider-models'
 import type {
+  ProviderBalanceBillingPreference,
   ProviderBalanceLinks,
+  ProviderBalanceQuotaWindow,
   ProviderMoneyBalanceTotals,
+  ProviderBalanceSubscription,
+  ProviderBalanceSubscriptionPlan,
   ProviderBalanceStatus,
   ProviderBalanceTotals,
 } from './types'
@@ -24,9 +28,8 @@ import {
   providerQuotaErrorFromUnknown,
 } from '@/lib/provider-quota-error'
 import {
-  BIYUAN_BALANCE_URL,
+  BIYUAN_DEFAULT_BASE_URL,
   BIYUAN_PROVIDER_NAMES,
-  BIYUAN_QUOTA_POINTS_PER_USD,
 } from '@/constants/biyuan'
 
 const tlsCertificateErrorFragments = [
@@ -57,6 +60,7 @@ const connectionErrorFragments = [
 const BALANCE_REQUEST_TIMEOUT_MS = 15_000
 const BALANCE_SERVER_ERROR_MAX_ATTEMPTS = 3
 const BALANCE_SERVER_ERROR_RETRY_BASE_MS = 300
+const BIYUAN_STATUS_REQUEST_TIMEOUT_MS = 2_500
 
 function errorMessageFromUnknown(error: unknown) {
   return error instanceof Error ? error.message : 'Unknown error'
@@ -134,15 +138,96 @@ function balanceBaseUrl(provider: ModelProvider) {
   return ensureUrlProtocol(provider.base_url ?? '')
 }
 
-function biyuanBalanceUrl(provider: ModelProvider) {
+function urlOrigin(value: string) {
+  try {
+    const url = new URL(ensureUrlProtocol(value))
+    url.pathname = ''
+    url.search = ''
+    url.hash = ''
+    return url.toString().replace(/\/$/, '')
+  } catch {
+    return ''
+  }
+}
+
+function biyuanOriginUrl(provider: ModelProvider) {
+  return urlOrigin(balanceBaseUrl(provider) || BIYUAN_DEFAULT_BASE_URL)
+}
+
+function biyuanPortalOriginFromApiOrigin(origin: string) {
+  try {
+    const url = new URL(origin)
+    const hostname = url.hostname.toLowerCase()
+    if (
+      hostname === 'api.biyuan.ai' ||
+      hostname === 'api.jingxing.io' ||
+      hostname === 'api.jingxing.uk'
+    ) {
+      url.hostname = hostname.replace(/^api\./, '')
+      url.pathname = ''
+      url.search = ''
+      url.hash = ''
+      return url.toString().replace(/\/$/, '')
+    }
+  } catch {
+    return ''
+  }
+  return ''
+}
+
+function biyuanV1BaseUrl(provider: ModelProvider) {
   const baseUrl = balanceBaseUrl(provider)
   if (!baseUrl) {
-    return BIYUAN_BALANCE_URL
+    return BIYUAN_DEFAULT_BASE_URL
   }
-  if (/\/v1$/i.test(baseUrl)) {
-    return joinUrl(baseUrl, '/balance')
+
+  try {
+    const url = new URL(baseUrl)
+    const parts = url.pathname.split('/').filter(Boolean)
+    if (parts.at(-1)?.toLowerCase() !== 'v1') {
+      url.pathname = `/${[...parts, 'v1'].join('/')}`
+    }
+    url.search = ''
+    url.hash = ''
+    return url.toString().replace(/\/$/, '')
+  } catch {
+    if (/\/v1$/i.test(baseUrl)) return baseUrl
+    return joinUrl(baseUrl, '/v1')
   }
-  return joinUrl(baseUrl, '/v1/balance')
+}
+
+function biyuanBalanceUrl(provider: ModelProvider) {
+  return joinUrl(biyuanV1BaseUrl(provider), '/balance')
+}
+
+function biyuanBaseUrlWithoutTrailingV1(provider: ModelProvider) {
+  const baseUrl = balanceBaseUrl(provider) || BIYUAN_DEFAULT_BASE_URL
+  try {
+    const url = new URL(baseUrl)
+    const parts = url.pathname.split('/').filter(Boolean)
+    if (parts.at(-1)?.toLowerCase() === 'v1') {
+      parts.pop()
+    }
+    url.pathname = parts.length ? `/${parts.join('/')}` : ''
+    url.search = ''
+    url.hash = ''
+    return url.toString().replace(/\/$/, '')
+  } catch {
+    return baseUrl.replace(/\/v1$/i, '')
+  }
+}
+
+function biyuanStatusUrl(provider: ModelProvider) {
+  const origin = biyuanOriginUrl(provider)
+  return joinUrl(
+    biyuanPortalOriginFromApiOrigin(origin) ||
+      biyuanBaseUrlWithoutTrailingV1(provider),
+    '/api/status'
+  )
+}
+
+function biyuanLegacyTokenUsageUrl(provider: ModelProvider) {
+  return joinUrl(biyuanBaseUrlWithoutTrailingV1(provider), '/api/usage/token/')
 }
 
 function deepSeekBalanceUrl(provider: ModelProvider) {
@@ -163,6 +248,10 @@ function numericValue(value: unknown): number | undefined {
   return undefined
 }
 
+function stringValue(value: unknown): string | undefined {
+  return typeof value === 'string' && value.trim() ? value.trim() : undefined
+}
+
 function totalsFromRecord(
   record: Record<string, unknown>,
   keys: { available: string; used?: string; total?: string }
@@ -178,20 +267,59 @@ function totalsFromRecord(
   }
 }
 
-function moneyTotalsFromBiyuanQuota(
-  quotaTotals?: ProviderBalanceTotals
-): ProviderMoneyBalanceTotals | undefined {
-  if (!quotaTotals) return undefined
+type BiyuanQuotaDisplaySettings = {
+  quotaPerUnit: number
+  currency: 'USD' | 'CNY'
+  usdExchangeRate?: number
+}
+
+function biyuanQuotaDisplaySettingsFrom(
+  response: Record<string, unknown>
+): BiyuanQuotaDisplaySettings | undefined {
+  const nestedData = asRecord(response.data)
+  const data = Object.keys(nestedData).length ? nestedData : response
+  const quotaPerUnit = numericValue(data.quota_per_unit)
+  if (!quotaPerUnit || quotaPerUnit <= 0) return undefined
+
+  const displayType = stringValue(data.quota_display_type)?.toLowerCase()
+  if (displayType === 'cny' || displayType === 'rmb') {
+    const usdExchangeRate = numericValue(data.usd_exchange_rate)
+    if (!usdExchangeRate || usdExchangeRate <= 0) return undefined
+    return {
+      quotaPerUnit,
+      currency: 'CNY',
+      usdExchangeRate,
+    }
+  }
 
   return {
-    available: quotaTotals.available / BIYUAN_QUOTA_POINTS_PER_USD,
+    quotaPerUnit,
+    currency: 'USD',
+  }
+}
+
+function moneyTotalsFromBiyuanQuota(
+  quotaTotals?: ProviderBalanceTotals,
+  settings?: BiyuanQuotaDisplaySettings
+): ProviderMoneyBalanceTotals | undefined {
+  if (!quotaTotals || !settings) return undefined
+
+  const convert = (value: number) => {
+    const usd = value / settings.quotaPerUnit
+    return settings.currency === 'CNY'
+      ? usd * (settings.usdExchangeRate ?? 1)
+      : usd
+  }
+
+  return {
+    available: convert(quotaTotals.available),
     ...(quotaTotals.used !== undefined
-      ? { used: quotaTotals.used / BIYUAN_QUOTA_POINTS_PER_USD }
+      ? { used: convert(quotaTotals.used) }
       : {}),
     ...(quotaTotals.total !== undefined
-      ? { total: quotaTotals.total / BIYUAN_QUOTA_POINTS_PER_USD }
+      ? { total: convert(quotaTotals.total) }
       : {}),
-    currency: 'USD',
+    currency: settings.currency,
   }
 }
 
@@ -210,18 +338,172 @@ function tokenLimitFromBiyuan(data: Record<string, unknown>) {
   const available = numericValue(data.total_available)
   const used = numericValue(data.total_used)
   const total = numericValue(data.total_granted)
-  if (available === undefined && used === undefined && total === undefined) {
+  const status = numericValue(data.token_status)
+  const expiresAt = numericValue(data.expires_at)
+  const modelLimitsRecord = asRecord(data.model_limits)
+  const modelLimits = Object.keys(modelLimitsRecord).length
+    ? (modelLimitsRecord as Record<string, boolean>)
+    : undefined
+  const hasQuota =
+    available !== undefined || used !== undefined || total !== undefined
+  const hasMeta =
+    status !== undefined ||
+    expiresAt !== undefined ||
+    data.unlimited_quota === true ||
+    data.unlimited_quota === false ||
+    data.model_limits_enabled === true ||
+    modelLimits !== undefined
+
+  if (!hasQuota && !hasMeta) {
     return undefined
   }
+
+  if (data.unlimited_quota === true) {
+    return {
+      unlimited: true,
+      ...(status !== undefined ? { status } : {}),
+      ...(expiresAt !== undefined ? { expiresAt } : {}),
+      ...(data.model_limits_enabled === true ? { modelLimitsEnabled: true } : {}),
+      ...(modelLimits ? { modelLimits } : {}),
+    }
+  }
+
   return {
-    available: available ?? 0,
+    ...(available !== undefined ? { available } : {}),
     ...(used !== undefined ? { used } : {}),
     ...(total !== undefined ? { total } : {}),
-    unlimited: data.unlimited_quota === true,
-    status: numericValue(data.token_status),
-    expiresAt: numericValue(data.expires_at),
-    modelLimitsEnabled: data.model_limits_enabled === true,
-    modelLimits: asRecord(data.model_limits) as Record<string, boolean>,
+    ...(data.unlimited_quota === false ? { unlimited: false } : {}),
+    ...(status !== undefined ? { status } : {}),
+    ...(expiresAt !== undefined ? { expiresAt } : {}),
+    ...(data.model_limits_enabled === true ? { modelLimitsEnabled: true } : {}),
+    ...(modelLimits ? { modelLimits } : {}),
+  }
+}
+
+const biyuanBillingPreferences = new Set<ProviderBalanceBillingPreference>([
+  'subscription_first',
+  'wallet_first',
+  'subscription_only',
+  'wallet_only',
+])
+
+function biyuanBillingPreferenceFrom(
+  value: unknown
+): ProviderBalanceBillingPreference | undefined {
+  const preference = stringValue(value)
+  return preference &&
+    biyuanBillingPreferences.has(preference as ProviderBalanceBillingPreference)
+    ? (preference as ProviderBalanceBillingPreference)
+    : undefined
+}
+
+function quotaWindowFromBiyuan(value: unknown): ProviderBalanceQuotaWindow {
+  const record = asRecord(value)
+  const limit = numericValue(record.limit)
+  const used = numericValue(record.used)
+  const available = numericValue(record.available)
+  const resetAt = numericValue(record.reset_at)
+  const availablePercent =
+    available !== undefined && limit !== undefined && limit > 0
+      ? available / limit
+      : undefined
+
+  return {
+    ...(limit !== undefined ? { limit } : {}),
+    ...(used !== undefined ? { used } : {}),
+    ...(available !== undefined ? { available } : {}),
+    ...(resetAt !== undefined ? { resetAt } : {}),
+    ...(availablePercent !== undefined ? { availablePercent } : {}),
+  }
+}
+
+function stringArrayFromUnknown(value: unknown) {
+  return Array.isArray(value)
+    ? value.map(stringValue).filter((item): item is string => Boolean(item))
+    : []
+}
+
+function subscriptionPlanFromBiyuan(
+  value: unknown
+): ProviderBalanceSubscriptionPlan | undefined {
+  const record = asRecord(value)
+  if (!Object.keys(record).length) return undefined
+  const plan = asRecord(record.plan)
+  const subscription = asRecord(record.subscription)
+  const usage = asRecord(record.usage)
+  const entitlements = asRecord(usage.entitlements)
+  const title =
+    stringValue(plan.title) ??
+    stringValue(plan.plan_code)
+  if (!title) return undefined
+  const planCode = stringValue(plan.plan_code)
+  const startTime = numericValue(subscription.start_time)
+  const endTime = numericValue(subscription.end_time)
+  const status = stringValue(subscription.status)
+
+  return {
+    title,
+    ...(planCode ? { planCode } : {}),
+    ...(startTime !== undefined ? { startTime } : {}),
+    ...(endTime !== undefined ? { endTime } : {}),
+    ...(status ? { status } : {}),
+    weeklyWindow: quotaWindowFromBiyuan(usage.weekly_window),
+    fiveHourWindow: quotaWindowFromBiyuan(usage.five_hour_window),
+    features: stringArrayFromUnknown(entitlements.features),
+  }
+}
+
+function subscriptionFromBiyuan(
+  value: unknown
+): ProviderBalanceSubscription | undefined {
+  const record = asRecord(value)
+  if (!Object.keys(record).length) return undefined
+  const billingPreference = biyuanBillingPreferenceFrom(
+    record.billing_preference
+  )
+  const subscriptions = Array.isArray(record.subscriptions)
+    ? record.subscriptions
+        .map(subscriptionPlanFromBiyuan)
+        .filter(
+          (item): item is ProviderBalanceSubscriptionPlan => Boolean(item)
+        )
+    : []
+
+  return {
+    active: record.active === true,
+    ...(billingPreference ? { billingPreference } : {}),
+    subscriptions,
+  }
+}
+
+function messageFromProviderErrorBody(value: unknown) {
+  const record = asRecord(value)
+  const error = asRecord(record.error)
+  return stringValue(error.message) ?? stringValue(record.message)
+}
+
+async function providerErrorMessageFromResponse(response: Response) {
+  const jsonReadable =
+    typeof response.clone === 'function' ? response.clone() : response
+  if (typeof jsonReadable.json === 'function') {
+    try {
+      const message = messageFromProviderErrorBody(await jsonReadable.json())
+      if (message) return message
+    } catch {
+      // Fall through to text parsing.
+    }
+  }
+
+  const textReadable =
+    typeof response.clone === 'function' ? response.clone() : response
+  if (typeof textReadable.text !== 'function') return undefined
+
+  try {
+    const text = await textReadable.text()
+    if (!text.trim()) return undefined
+    return messageFromProviderErrorBody(JSON.parse(text))
+  } catch {
+    return undefined
   }
 }
 
@@ -272,6 +554,11 @@ function providerConsoleLink(providerName: string) {
 }
 
 export class TauriProvidersService extends DefaultProvidersService {
+  private readonly biyuanStatusSettingsCache = new Map<
+    string,
+    BiyuanQuotaDisplaySettings | undefined
+  >()
+
   fetch(): typeof fetch {
     // Tauri implementation uses Tauri's fetch to avoid CORS issues
     return fetchTauri as typeof fetch
@@ -551,7 +838,9 @@ export class TauriProvidersService extends DefaultProvidersService {
       Authorization: `Bearer ${apiKey}`,
       ...extraHeaders,
     }
-    let lastServerError: { status: number; statusText: string } | undefined
+    let lastServerError:
+      | { status: number; statusText: string; message?: string }
+      | undefined
 
     if (apiKey) {
       headers['x-api-key'] = apiKey
@@ -578,11 +867,16 @@ export class TauriProvidersService extends DefaultProvidersService {
 
         if (!response.ok) {
           if (response.status >= 500) {
+            const isLastAttempt =
+              attempt >= BALANCE_SERVER_ERROR_MAX_ATTEMPTS - 1
             lastServerError = {
               status: response.status,
               statusText: response.statusText,
+              ...(isLastAttempt
+                ? { message: await providerErrorMessageFromResponse(response) }
+                : {}),
             }
-            if (attempt < BALANCE_SERVER_ERROR_MAX_ATTEMPTS - 1) {
+            if (!isLastAttempt) {
               await delay(
                 BALANCE_SERVER_ERROR_RETRY_BASE_MS * 2 ** attempt
               )
@@ -590,6 +884,7 @@ export class TauriProvidersService extends DefaultProvidersService {
             }
             break
           }
+          const bodyMessage = await providerErrorMessageFromResponse(response)
           if (response.status === 401) {
             return {
               state: 'error',
@@ -612,7 +907,7 @@ export class TauriProvidersService extends DefaultProvidersService {
               provider: provider.provider,
               status: 429,
               retryable: true,
-              message: 'Balance lookup is rate limited.',
+              message: bodyMessage ?? 'Balance lookup is rate limited.',
             }
           }
           return {
@@ -620,7 +915,9 @@ export class TauriProvidersService extends DefaultProvidersService {
             provider: provider.provider,
             status: response.status,
             retryable: response.status >= 500,
-            message: `Balance lookup failed: ${response.status} ${response.statusText}`,
+            message:
+              bodyMessage ??
+              `Balance lookup failed: ${response.status} ${response.statusText}`,
           }
         }
 
@@ -645,8 +942,93 @@ export class TauriProvidersService extends DefaultProvidersService {
       ...(lastServerError ? { status: lastServerError.status } : {}),
       retryable: true,
       message: lastServerError
-        ? `Balance lookup failed after retrying server errors: ${lastServerError.status} ${lastServerError.statusText}`
+        ? lastServerError.message ??
+          `Balance lookup failed after retrying server errors: ${lastServerError.status} ${lastServerError.statusText}`
         : 'Balance lookup failed after retrying server errors.',
+    }
+  }
+
+  private async fetchBiyuanQuotaDisplaySettings(
+    provider: ModelProvider
+  ): Promise<BiyuanQuotaDisplaySettings | undefined> {
+    const url = biyuanStatusUrl(provider)
+    if (this.biyuanStatusSettingsCache.has(url)) {
+      return this.biyuanStatusSettingsCache.get(url)
+    }
+
+    const controller = new AbortController()
+    const timeoutId = setTimeout(
+      () => controller.abort(),
+      BIYUAN_STATUS_REQUEST_TIMEOUT_MS
+    )
+
+    try {
+      const response = await fetchTauri(url, {
+        method: 'GET',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        signal: controller.signal,
+      })
+      if (!response.ok) return undefined
+      const settings = biyuanQuotaDisplaySettingsFrom(
+        asRecord(await response.json())
+      )
+      this.biyuanStatusSettingsCache.set(url, settings)
+      return settings
+    } catch {
+      return undefined
+    } finally {
+      clearTimeout(timeoutId)
+    }
+  }
+
+  private async fetchLegacyBiyuanTokenUsage(
+    provider: ModelProvider,
+    apiKey: string
+  ): Promise<ProviderBalanceStatus> {
+    const result = await this.fetchBalanceJson(
+      provider,
+      biyuanLegacyTokenUsageUrl(provider),
+      apiKey
+    )
+    if ('state' in result) return result
+
+    const response = asRecord(result.json)
+    if (response.success === false) {
+      return {
+        state: 'error',
+        provider: provider.provider,
+        message:
+          stringValue(response.message) ??
+          'Legacy Biyuan balance lookup failed.',
+      }
+    }
+
+    const nestedData = asRecord(response.data)
+    const data = Object.keys(nestedData).length ? nestedData : response
+    const tokenLimit = tokenLimitFromBiyuan(data)
+    if (!tokenLimit) {
+      return {
+        state: 'error',
+        provider: provider.provider,
+        message:
+          'Legacy Biyuan token usage response did not include quota fields.',
+      }
+    }
+
+    return {
+      state: 'supported',
+      provider: provider.provider,
+      unit: 'quota',
+      fetchedAt: Math.floor(Date.now() / 1000),
+      tokenLimit,
+      subscription: {
+        active: false,
+        subscriptions: [],
+        unavailable: true,
+      },
+      raw: result.json,
     }
   }
 
@@ -671,7 +1053,15 @@ export class TauriProvidersService extends DefaultProvidersService {
         biyuanBalanceUrl(provider),
         primaryKey
       )
-      if ('state' in result) return result
+      if ('state' in result) {
+        if (
+          result.state === 'error' &&
+          (result.status === 404 || result.status === 405)
+        ) {
+          return this.fetchLegacyBiyuanTokenUsage(provider, primaryKey)
+        }
+        return result
+      }
 
       const data = asRecord(result.json)
       const account = totalsFromRecord(asRecord(data.account), {
@@ -679,7 +1069,11 @@ export class TauriProvidersService extends DefaultProvidersService {
         used: 'total_used',
         total: 'total_granted',
       })
-      const moneyBalance = moneyTotalsFromBiyuanQuota(account)
+      const displaySettings = account
+        ? await this.fetchBiyuanQuotaDisplaySettings(provider)
+        : undefined
+      const moneyBalance = moneyTotalsFromBiyuanQuota(account, displaySettings)
+      const subscription = subscriptionFromBiyuan(data.subscription)
 
       return {
         state: 'supported',
@@ -689,6 +1083,7 @@ export class TauriProvidersService extends DefaultProvidersService {
         ...(account ? { accountBalance: account } : {}),
         ...(moneyBalance ? { moneyBalance } : {}),
         tokenLimit: tokenLimitFromBiyuan(data),
+        ...(subscription ? { subscription } : {}),
         links: linksFromUnknown(data.links),
         raw: result.json,
       }

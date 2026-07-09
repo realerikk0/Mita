@@ -693,6 +693,7 @@
     "unlimitedKey": "不限额 Key",
     "keyLimitRemaining": "此 Key 限额剩余 {{value}}",
     "keyStatus": "Key {{status}}",
+    "walletBalance": "钱包余额",
     "accountUsed": "账户已用",
     "keyUsed": "Key 已用",
     "updatedAt": "更新时间",
@@ -700,6 +701,30 @@
     "quotaPoints": "额度点",
     "badgeLabel": "余额",
     "current": "当前",
+    "billingPreference": {
+      "subscriptionFirst": "优先套餐",
+      "walletFirst": "优先钱包",
+      "subscriptionOnly": "仅套餐",
+      "walletOnly": "仅钱包"
+    },
+    "subscription": {
+      "currentPlan": "当前套餐",
+      "availableSuffix": "可用",
+      "weeklyCompact": "7天",
+      "weeklyRemaining": "7 天窗口剩余",
+      "weeklyReset": "7 天窗口重置",
+      "fiveHourRemaining": "5 小时窗口剩余",
+      "fiveHourReset": "5 小时窗口重置",
+      "period": "套餐有效期",
+      "status": "套餐 {{status}}",
+      "statusActive": "生效中",
+      "statusCanceled": "已取消",
+      "statusDisabled": "已禁用",
+      "statusExpired": "已过期",
+      "startsAt": "{{value}} 开始",
+      "endsAt": "{{value}} 结束",
+      "unavailable": "旧版服务未提供套餐信息"
+    },
     "tokenStatus": {
       "normal": "正常",
       "disabled": "已禁用",
