@@ -5,9 +5,8 @@ import { cn, getProviderTitle } from '@/lib/utils'
 import { useProviderBalance } from '@/hooks/useProviderBalance'
 import type { ProviderBalanceStatus } from '@/services/providers/types'
 import {
-  formatBiyuanQuotaAsUsd,
+  formatProviderPercent,
   formatProviderMoney,
-  isBiyuanQuotaBalance,
   providerBalancePrimaryLabel,
 } from '@/lib/provider-balance-display'
 import { useTranslation } from '@/i18n/react-i18next-compat'
@@ -29,6 +28,13 @@ const tokenStatusLabelKeys: Record<number, string> = {
   4: 'common:providerBalance.tokenStatus.exhausted',
 }
 
+const billingPreferenceLabelKeys = {
+  subscription_first: 'common:providerBalance.billingPreference.subscriptionFirst',
+  wallet_first: 'common:providerBalance.billingPreference.walletFirst',
+  subscription_only: 'common:providerBalance.billingPreference.subscriptionOnly',
+  wallet_only: 'common:providerBalance.billingPreference.walletOnly',
+} as const
+
 function formatInteger(value?: number) {
   if (value === undefined || !Number.isFinite(value)) return '-'
   return new Intl.NumberFormat('en-US', { maximumFractionDigits: 0 }).format(value)
@@ -37,6 +43,16 @@ function formatInteger(value?: number) {
 function formatTimeFromUnixSeconds(value?: number) {
   if (!value) return '-'
   return new Intl.DateTimeFormat(undefined, {
+    hour: '2-digit',
+    minute: '2-digit',
+  }).format(new Date(value * 1000))
+}
+
+function formatDateTimeFromUnixSeconds(value?: number) {
+  if (!value) return '-'
+  return new Intl.DateTimeFormat(undefined, {
+    month: 'short',
+    day: 'numeric',
     hour: '2-digit',
     minute: '2-digit',
   }).format(new Date(value * 1000))
@@ -57,14 +73,27 @@ function providerDisplayUnit(balance: ProviderBalanceStatus, t: TranslationFn) {
   return balance.unit
 }
 
+function billingPreferenceLabel(
+  preference: keyof typeof billingPreferenceLabelKeys | undefined,
+  t: TranslationFn
+) {
+  return preference ? t(billingPreferenceLabelKeys[preference]) : undefined
+}
+
+function primarySubscriptionPlan(balance: ProviderBalanceStatus) {
+  if (balance.state !== 'supported') return undefined
+  if (!balance.subscription?.active || balance.subscription.unavailable) {
+    return undefined
+  }
+  return balance.subscription.subscriptions[0]
+}
+
 function formatProviderBalanceValue(
   value: number,
   balance: ProviderBalanceStatus,
   displayUnit: string
 ) {
-  if (isBiyuanQuotaBalance(balance)) {
-    return formatBiyuanQuotaAsUsd(value)
-  }
+  void balance
   return `${formatInteger(value)} ${displayUnit}`
 }
 
@@ -221,19 +250,31 @@ export function ProviderBalanceContent({
 
   const quotaUnitLabel = t('common:providerBalance.quotaPoints')
   const displayUnit = providerDisplayUnit(balance, t)
-  const primary = providerBalancePrimaryLabel(balance, { quotaUnitLabel })
+  const primary = providerBalancePrimaryLabel(balance, {
+    quotaUnitLabel,
+    weeklyWindowLabel: t('common:providerBalance.subscription.weeklyCompact'),
+    subscriptionAvailableSuffix: t('common:providerBalance.subscription.availableSuffix'),
+  })
   const hasAvailableBalance = Boolean(primary)
   const topupLink = balance.links?.topup
   const tokenLimit = balance.tokenLimit
   const tokenStatus = tokenStatusLabel(tokenLimit?.status, t)
   const notice = providerNoticeLabel(balance, t)
+  const primaryPlan = primarySubscriptionPlan(balance)
+  const billing = billingPreferenceLabel(
+    balance.subscription?.billingPreference,
+    t
+  )
+  const subscriptionUnavailable = balance.subscription?.unavailable === true
 
   return (
     <div className="space-y-4">
       {hasAvailableBalance ? (
         <div className="space-y-1">
           <div className="text-sm text-muted-foreground">
-            {t('common:providerBalance.availableBalance')}
+            {primaryPlan
+              ? t('common:providerBalance.subscription.currentPlan')
+              : t('common:providerBalance.availableBalance')}
           </div>
           <div className="text-2xl font-semibold tracking-normal">{primary}</div>
         </div>
@@ -275,35 +316,89 @@ export function ProviderBalanceContent({
             {t('common:providerBalance.keyStatus', { status: tokenStatus })}
           </StatusPill>
         )}
+        {primaryPlan?.status && (
+          <StatusPill tone={primaryPlan.status === 'active' ? 'success' : 'neutral'}>
+            {t('common:providerBalance.subscription.status', {
+              status: primaryPlan.status,
+            })}
+          </StatusPill>
+        )}
+        {billing && <StatusPill>{billing}</StatusPill>}
+        {subscriptionUnavailable && (
+          <StatusPill tone="neutral">
+            {t('common:providerBalance.subscription.unavailable')}
+          </StatusPill>
+        )}
       </div>
 
       <div className="space-y-1.5">
-        {balance.accountBalance?.used !== undefined && (
-          <DetailRow
-            label={t('common:providerBalance.accountUsed')}
-            value={
-              balance.moneyBalance?.used !== undefined
-                ? formatProviderMoney(
-                    balance.moneyBalance.used,
-                    balance.moneyBalance.currency ?? balance.currency ?? 'USD'
-                  )
-                : formatProviderBalanceValue(
-                    balance.accountBalance.used,
-                    balance,
-                    displayUnit
-                  )
-            }
-          />
-        )}
-        {!tokenLimit?.unlimited && tokenLimit?.used !== undefined && (
-          <DetailRow
-            label={t('common:providerBalance.keyUsed')}
-            value={formatProviderBalanceValue(
-              tokenLimit.used,
-              balance,
-              displayUnit
+        {primaryPlan ? (
+          <>
+            <DetailRow
+              label={t('common:providerBalance.subscription.weeklyRemaining')}
+              value={
+                formatProviderPercent(
+                  primaryPlan.weeklyWindow.availablePercent
+                ) ?? '-'
+              }
+            />
+            <DetailRow
+              label={t('common:providerBalance.subscription.weeklyReset')}
+              value={formatDateTimeFromUnixSeconds(
+                primaryPlan.weeklyWindow.resetAt
+              )}
+            />
+            <DetailRow
+              label={t('common:providerBalance.subscription.fiveHourRemaining')}
+              value={
+                formatProviderPercent(
+                  primaryPlan.fiveHourWindow.availablePercent
+                ) ?? '-'
+              }
+            />
+            <DetailRow
+              label={t('common:providerBalance.subscription.fiveHourReset')}
+              value={formatDateTimeFromUnixSeconds(
+                primaryPlan.fiveHourWindow.resetAt
+              )}
+            />
+            {(primaryPlan.startTime || primaryPlan.endTime) && (
+              <DetailRow
+                label={t('common:providerBalance.subscription.period')}
+                value={`${formatDateTimeFromUnixSeconds(primaryPlan.startTime)} - ${formatDateTimeFromUnixSeconds(primaryPlan.endTime)}`}
+              />
             )}
-          />
+          </>
+        ) : (
+          <>
+            {balance.accountBalance?.used !== undefined && (
+              <DetailRow
+                label={t('common:providerBalance.accountUsed')}
+                value={
+                  balance.moneyBalance?.used !== undefined
+                    ? formatProviderMoney(
+                        balance.moneyBalance.used,
+                        balance.moneyBalance.currency ?? balance.currency ?? 'USD'
+                      )
+                    : formatProviderBalanceValue(
+                        balance.accountBalance.used,
+                        balance,
+                        displayUnit
+                      )
+                }
+              />
+            )}
+            {!tokenLimit?.unlimited && tokenLimit?.used !== undefined && (
+              <DetailRow
+                label={t('common:providerBalance.keyUsed')}
+                value={formatProviderBalanceValue(
+                  tokenLimit.used,
+                  balance,
+                  displayUnit
+                )}
+              />
+            )}
+          </>
         )}
         <DetailRow
           label={t('common:providerBalance.updatedAt')}

@@ -29,6 +29,20 @@ vi.mock('@/i18n/react-i18next-compat', () => ({
         'common:providerBalance.tokenStatus.expired': '已过期',
         'common:providerBalance.tokenStatus.exhausted': '已耗尽',
         'common:providerBalance.keyStatus': 'Key {{status}}',
+        'common:providerBalance.billingPreference.subscriptionFirst': '优先套餐',
+        'common:providerBalance.billingPreference.walletFirst': '优先钱包',
+        'common:providerBalance.billingPreference.subscriptionOnly': '仅套餐',
+        'common:providerBalance.billingPreference.walletOnly': '仅钱包',
+        'common:providerBalance.subscription.currentPlan': '当前套餐',
+        'common:providerBalance.subscription.availableSuffix': '可用',
+        'common:providerBalance.subscription.weeklyCompact': '7天',
+        'common:providerBalance.subscription.weeklyRemaining': '7 天窗口剩余',
+        'common:providerBalance.subscription.weeklyReset': '7 天窗口重置',
+        'common:providerBalance.subscription.fiveHourRemaining': '5 小时窗口剩余',
+        'common:providerBalance.subscription.fiveHourReset': '5 小时窗口重置',
+        'common:providerBalance.subscription.period': '套餐有效期',
+        'common:providerBalance.subscription.status': '套餐 {{status}}',
+        'common:providerBalance.subscription.unavailable': '套餐信息不可用',
       }
       return (translations[key] ?? key).replace(/\{\{(\w+)\}\}/g, (_, name) =>
         String(options?.[name] ?? `{{${name}}}`)
@@ -65,6 +79,52 @@ const biyuanWithAccount: ProviderBalanceStatus = {
   },
 }
 
+const biyuanWithSubscription: ProviderBalanceStatus = {
+  ...biyuanWithAccount,
+  tokenLimit: {
+    available: 75000,
+    used: 25000,
+    total: 100000,
+    unlimited: false,
+    status: 1,
+  },
+  subscription: {
+    active: true,
+    billingPreference: 'subscription_first',
+    subscriptions: [
+      {
+        title: 'Biyuan Pro',
+        planCode: 'biyuan_pro',
+        startTime: 1783209600,
+        endTime: 1785801600,
+        status: 'active',
+        weeklyWindow: {
+          limit: 700000,
+          used: 140000,
+          available: 560000,
+          resetAt: 1783814400,
+          availablePercent: 0.8,
+        },
+        fiveHourWindow: {
+          limit: 100000,
+          used: 75000,
+          available: 25000,
+          resetAt: 1783227600,
+          availablePercent: 0.25,
+        },
+        features: ['text', 'image', 'audio_transcription'],
+      },
+      {
+        title: 'Biyuan Team',
+        planCode: 'biyuan_team',
+        weeklyWindow: { limit: 100, available: 50, availablePercent: 0.5 },
+        fiveHourWindow: { limit: 100, available: 10, availablePercent: 0.1 },
+        features: ['all'],
+      },
+    ],
+  },
+}
+
 describe('ProviderBalanceCard', () => {
   it('renders Biyuan available money as the main value and marks unlimited keys', () => {
     render(
@@ -88,7 +148,42 @@ describe('ProviderBalanceCard', () => {
     )
   })
 
-  it('derives Biyuan available money from quota points when money balance is missing', () => {
+  it('renders the first active Biyuan subscription as the main balance view', () => {
+    const formatReset = (value: number) =>
+      new Intl.DateTimeFormat(undefined, {
+        month: 'short',
+        day: 'numeric',
+        hour: '2-digit',
+        minute: '2-digit',
+      }).format(new Date(value * 1000))
+
+    render(
+      <ProviderBalanceContent
+        provider={{ provider: 'jingxing' } as ModelProvider}
+        balance={biyuanWithSubscription}
+        loading={false}
+        onRefresh={() => undefined}
+      />
+    )
+
+    expect(screen.getByText('当前套餐')).toBeInTheDocument()
+    expect(screen.getByText('Biyuan Pro · 7天 80% 可用')).toBeInTheDocument()
+    expect(screen.getByText('7 天窗口剩余')).toBeInTheDocument()
+    expect(screen.getByText('80%')).toBeInTheDocument()
+    expect(screen.getByText('5 小时窗口剩余')).toBeInTheDocument()
+    expect(screen.getByText('25%')).toBeInTheDocument()
+    expect(screen.getByText('7 天窗口重置')).toBeInTheDocument()
+    expect(screen.getByText(formatReset(1783814400))).toBeInTheDocument()
+    expect(screen.getByText('5 小时窗口重置')).toBeInTheDocument()
+    expect(screen.getByText(formatReset(1783227600))).toBeInTheDocument()
+    expect(screen.getByText('套餐 active')).toBeInTheDocument()
+    expect(screen.getByText('优先套餐')).toBeInTheDocument()
+    expect(screen.getByText('Key 正常')).toBeInTheDocument()
+    expect(screen.queryByText('1,000,000 额度点')).not.toBeInTheDocument()
+    expect(screen.queryByText('100,000 额度点')).not.toBeInTheDocument()
+  })
+
+  it('falls back to quota points when Biyuan money balance is missing', () => {
     render(
       <ProviderBalanceContent
         provider={{ provider: 'jingxing' } as ModelProvider}
@@ -101,8 +196,8 @@ describe('ProviderBalanceCard', () => {
       />
     )
 
-    expect(screen.getByText('$77.13')).toBeInTheDocument()
-    expect(screen.queryByText('38,563,951 额度点')).not.toBeInTheDocument()
+    expect(screen.getByText('38,563,951 额度点')).toBeInTheDocument()
+    expect(screen.queryByText('$77.13')).not.toBeInTheDocument()
   })
 
   it('falls back to quota points for unknown quota providers', () => {
@@ -142,9 +237,9 @@ describe('ProviderBalanceCard', () => {
     )
 
     expect(screen.getByText('$77.13')).toBeInTheDocument()
-    expect(screen.getByText('此 Key 限额剩余 $1.00')).toBeInTheDocument()
+    expect(screen.getByText('此 Key 限额剩余 500,000 额度点')).toBeInTheDocument()
     expect(screen.getByText('Key 已耗尽')).toBeInTheDocument()
-    expect(screen.getByText('$0.50')).toBeInTheDocument()
+    expect(screen.getByText('250,000 额度点')).toBeInTheDocument()
   })
 
   it('explains missing Biyuan account balance only in settings content', () => {
@@ -173,6 +268,36 @@ describe('ProviderBalanceCard', () => {
     expect(screen.getByText('仅获取到 Key 限额信息')).toBeInTheDocument()
     expect(screen.getByText('不限额 Key')).toBeInTheDocument()
     expect(screen.queryByText('-15,388,303 额度点')).not.toBeInTheDocument()
+  })
+
+  it('marks legacy Biyuan fallback responses as subscription unavailable', () => {
+    render(
+      <ProviderBalanceContent
+        provider={{ provider: 'jingxing' } as ModelProvider}
+        balance={{
+          state: 'supported',
+          provider: 'jingxing',
+          unit: 'quota',
+          fetchedAt: 1781258144,
+          tokenLimit: {
+            available: 678.5,
+            used: 321.5,
+            total: 1000,
+            unlimited: false,
+          },
+          subscription: {
+            active: false,
+            subscriptions: [],
+            unavailable: true,
+          },
+        }}
+        loading={false}
+        onRefresh={() => undefined}
+      />
+    )
+
+    expect(screen.getByText('套餐信息不可用')).toBeInTheDocument()
+    expect(screen.getByText('此 Key 限额剩余 679 额度点')).toBeInTheDocument()
   })
 
   it('shows needs-extra-auth providers as management permission requirements', () => {
@@ -221,6 +346,16 @@ describe('ProviderBalanceCard', () => {
     ).toBe('余额 $77.13')
   })
 
+  it('creates compact chat badge labels from Biyuan subscription weekly window', () => {
+    expect(
+      getProviderBalanceBadgeLabel(biyuanWithSubscription, {
+        balancePrefix: '余额',
+        quotaUnitLabel: '额度点',
+        weeklyWindowLabel: '7天',
+      })
+    ).toBe('余额 7天 80%')
+  })
+
   it('formats available money with two decimals when currency is omitted', () => {
     expect(
       getProviderBalanceBadgeLabel(
@@ -238,7 +373,7 @@ describe('ProviderBalanceCard', () => {
     ).toBe('余额 77.13')
   })
 
-  it('derives compact Biyuan chat badge labels from quota points', () => {
+  it('creates compact Biyuan chat badge labels from quota points when money is missing', () => {
     expect(
       getProviderBalanceBadgeLabel(
         {
@@ -250,7 +385,7 @@ describe('ProviderBalanceCard', () => {
           quotaUnitLabel: '额度点',
         }
       )
-    ).toBe('余额 $77.13')
+    ).toBe('余额 38,563,951 额度点')
   })
 
   it('falls back to quota points for compact unknown quota badge labels', () => {

@@ -782,6 +782,24 @@
     "quotaPoints": "quota points",
     "badgeLabel": "Balance",
     "current": "Current",
+    "billingPreference": {
+      "subscriptionFirst": "Subscription first",
+      "walletFirst": "Wallet first",
+      "subscriptionOnly": "Subscription only",
+      "walletOnly": "Wallet only"
+    },
+    "subscription": {
+      "currentPlan": "Current plan",
+      "availableSuffix": "left",
+      "weeklyCompact": "7d",
+      "weeklyRemaining": "7-day window remaining",
+      "weeklyReset": "7-day reset",
+      "fiveHourRemaining": "5-hour window remaining",
+      "fiveHourReset": "5-hour reset",
+      "period": "Plan period",
+      "status": "Plan {{status}}",
+      "unavailable": "Subscription unavailable"
+    },
     "tokenStatus": {
       "normal": "normal",
       "disabled": "disabled",

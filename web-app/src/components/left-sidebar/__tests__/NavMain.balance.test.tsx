@@ -47,6 +47,7 @@ vi.mock('@/i18n/react-i18next-compat', () => ({
       const translations: Record<string, string> = {
         'common:providerBalance.badgeLabel': '余额',
         'common:providerBalance.quotaPoints': '额度点',
+        'common:providerBalance.subscription.weeklyCompact': '7天',
       }
       return translations[key] ?? key
     },
@@ -139,7 +140,7 @@ describe('NavMain provider balance', () => {
     expect(settingsLink).toHaveTextContent('余额 $77.13')
   })
 
-  it('derives current provider money from quota points when available money is missing', () => {
+  it('falls back to quota points when current provider money is missing', () => {
     vi.mocked(useProviderBalance).mockReturnValue({
       balance: {
         state: 'supported',
@@ -158,6 +159,51 @@ describe('NavMain provider balance', () => {
     const settingsLink = screen.getByRole('link', {
       name: /common:settings/,
     })
-    expect(settingsLink).toHaveTextContent('余额 $77.13')
+    expect(settingsLink).toHaveTextContent('余额 38,563,951 额度点')
+  })
+
+  it('shows the current provider subscription window on the settings nav item', () => {
+    vi.mocked(useProviderBalance).mockReturnValue({
+      balance: {
+        state: 'supported',
+        provider: 'jingxing',
+        unit: 'quota',
+        fetchedAt: 1781260326,
+        accountBalance: { available: 38563951 },
+        moneyBalance: { available: 77.127902, currency: 'USD' },
+        subscription: {
+          active: true,
+          billingPreference: 'subscription_first',
+          subscriptions: [
+            {
+              title: 'Biyuan Pro',
+              planCode: 'biyuan_pro',
+              weeklyWindow: {
+                limit: 700000,
+                available: 560000,
+                availablePercent: 0.8,
+              },
+              fiveHourWindow: {
+                limit: 100000,
+                available: 25000,
+                availablePercent: 0.25,
+              },
+              features: ['text'],
+            },
+          ],
+        },
+      },
+      loading: false,
+      error: null,
+      refetch: vi.fn(),
+    })
+
+    render(<NavMain />)
+
+    const settingsLink = screen.getByRole('link', {
+      name: /common:settings/,
+    })
+    expect(settingsLink).toHaveTextContent('余额 7天 80%')
+    expect(settingsLink).not.toHaveTextContent('$77.13')
   })
 })
