@@ -54,7 +54,6 @@ import { route } from '@/constants/routes'
 import {
   TEMPORARY_CHAT_ID,
   TEMPORARY_CHAT_QUERY_ID,
-  SESSION_STORAGE_KEY,
   SESSION_STORAGE_PREFIX,
 } from '@/constants/chat'
 import { localStorageKey } from '@/constants/localStorage'
@@ -301,6 +300,10 @@ const ChatInput = memo(function ChatInput({
   )
   const ingestingAny = attachments.some((a) => a.processing)
   const canDropFiles = hasMmproj || attachmentsEnabled
+  const modelSupportsTools =
+    selectedModel?.capabilities?.includes('tools') === true
+  const documentParseMode =
+    !projectId && !modelSupportsTools ? 'inline' : parsePreference
 
   const [, setFileIngestProgress] = useState<{
     completed: number
@@ -451,7 +454,7 @@ const ChatInput = memo(function ChatInput({
       if (isTemporaryChat) {
         // For temporary chat, store message and navigate to temporary thread
         sessionStorage.setItem(
-          SESSION_STORAGE_KEY.INITIAL_MESSAGE_TEMPORARY,
+          `${SESSION_STORAGE_PREFIX.INITIAL_MESSAGE}${TEMPORARY_CHAT_ID}`,
           JSON.stringify(messagePayload)
         )
         sessionStorage.setItem('temp-chat-nav', 'true')
@@ -691,7 +694,7 @@ const ChatInput = memo(function ChatInput({
             path: file.path,
             fileType,
             size,
-            parseMode: parsePreference,
+            parseMode: documentParseMode,
           })
         )
       }
@@ -751,8 +754,8 @@ const ChatInput = memo(function ChatInput({
     },
     [
       attachmentsKey,
+      documentParseMode,
       maxFileSizeMB,
-      parsePreference,
       processNewDocumentAttachments,
       setAttachmentsForThread,
     ]
@@ -1790,7 +1793,6 @@ const ChatInput = memo(function ChatInput({
                     {/* RAG document attachments - desktop-only via dialog; shown when feature enabled */}
                     <DropdownMenuItem
                       onClick={handleAttachDocsIngest}
-                      disabled={!selectedModel?.capabilities?.includes('tools')}
                     >
                       {ingestingDocs ? (
                         <IconLoader2

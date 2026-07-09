@@ -357,6 +357,8 @@ const resetAll = () => {
   setActivePromptKeyMock.mockClear()
   navigateMock.mockClear()
   createThreadMock.mockReset()
+  sessionStorage.clear()
+  window.history.pushState({}, '', '/')
 }
 
 const getTextarea = () =>
@@ -393,6 +395,19 @@ describe('ChatInput', () => {
     renderInput()
 
     expect(screen.getByText('正在索引文档…')).toBeInTheDocument()
+  })
+
+  it('keeps document attachment picker enabled on a new chat before tool-capable model selection', () => {
+    currentThreadIdState = undefined as unknown as string
+    selectedModelOverride = {
+      id: 'model-a',
+      capabilities: ['completion'],
+      provider: 'llamacpp',
+    }
+
+    renderInput({ initialMessage: true })
+
+    expect(screen.getByText('添加文档或文件').closest('button')).not.toBeDisabled()
   })
 
   it('does not render web search controls in the composer', () => {
@@ -496,6 +511,29 @@ describe('ChatInput', () => {
     expect(promptEvents.indexOf('temporary-chat:')).toBeLessThan(
       promptEvents.indexOf('navigate')
     )
+  })
+
+  it('stores temporary chat initial messages under the thread detail key', async () => {
+    currentThreadIdState = undefined as unknown as string
+    activePromptKey = 'temporary-chat'
+    promptState = 'temporary starter'
+    promptStateByKey = { 'temporary-chat': 'temporary starter' }
+    window.history.pushState({}, '', '/?temporary-chat=true')
+
+    renderInput()
+
+    await act(async () => {
+      fireEvent.keyDown(getTextarea(), { key: 'Enter' })
+    })
+
+    expect(sessionStorage.getItem('initial-message-temporary-chat')).toBe(
+      JSON.stringify({ text: 'temporary starter', files: [] })
+    )
+    expect(sessionStorage.getItem('initial-message-temporary')).toBeNull()
+    expect(navigateMock).toHaveBeenCalledWith({
+      to: '/threads/$threadId',
+      params: { threadId: 'temporary-chat' },
+    })
   })
 
   it('routes /compact to onCompact without normal submit', async () => {
@@ -690,6 +728,48 @@ describe('ChatInput', () => {
       }),
     ])
     expect(screen.queryByText(/Invalid file type/)).not.toBeInTheDocument()
+  })
+
+  it('defaults new document attachments to inline when the selected model lacks tool support', async () => {
+    selectedModelOverride = {
+      id: 'model-a',
+      capabilities: ['completion'],
+      provider: 'llamacpp',
+    }
+    attachmentsSettings = {
+      enabled: true,
+      parseMode: 'embeddings',
+      maxFileSizeMB: 10,
+    }
+    setAttachmentsMock.mockImplementation((_key, updater) => {
+      attachmentsList =
+        typeof updater === 'function' ? updater(attachmentsList) : updater
+    })
+    const txt = new File(['notes'], 'notes.txt', { type: 'text/plain' })
+    Object.defineProperty(txt, 'path', {
+      value: '/tmp/notes.txt',
+      configurable: true,
+    })
+    const { container } = renderInput({ initialMessage: true })
+    const dropZone = container.querySelector('[data-drop-zone="true"]')
+
+    await act(async () => {
+      fireEvent.drop(dropZone!, {
+        dataTransfer: {
+          files: [txt],
+        },
+      })
+    })
+
+    expect(attachmentsList).toEqual([
+      expect.objectContaining({
+        type: 'document',
+        name: 'notes.txt',
+        path: '/tmp/notes.txt',
+        parseMode: 'inline',
+      }),
+    ])
+    expect(showAttachmentPromptMock).not.toHaveBeenCalled()
   })
 
   it('uses data transfer item paths when dropped document files omit them', async () => {
