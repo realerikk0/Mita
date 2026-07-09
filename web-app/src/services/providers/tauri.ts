@@ -60,6 +60,7 @@ const connectionErrorFragments = [
 const BALANCE_REQUEST_TIMEOUT_MS = 15_000
 const BALANCE_SERVER_ERROR_MAX_ATTEMPTS = 3
 const BALANCE_SERVER_ERROR_RETRY_BASE_MS = 300
+const BIYUAN_STATUS_REQUEST_TIMEOUT_MS = 2_500
 
 function errorMessageFromUnknown(error: unknown) {
   return error instanceof Error ? error.message : 'Unknown error'
@@ -153,6 +154,27 @@ function biyuanOriginUrl(provider: ModelProvider) {
   return urlOrigin(balanceBaseUrl(provider) || BIYUAN_DEFAULT_BASE_URL)
 }
 
+function biyuanPortalOriginFromApiOrigin(origin: string) {
+  try {
+    const url = new URL(origin)
+    const hostname = url.hostname.toLowerCase()
+    if (
+      hostname === 'api.biyuan.ai' ||
+      hostname === 'api.jingxing.io' ||
+      hostname === 'api.jingxing.uk'
+    ) {
+      url.hostname = hostname.replace(/^api\./, '')
+      url.pathname = ''
+      url.search = ''
+      url.hash = ''
+      return url.toString().replace(/\/$/, '')
+    }
+  } catch {
+    return ''
+  }
+  return ''
+}
+
 function biyuanV1BaseUrl(provider: ModelProvider) {
   const baseUrl = balanceBaseUrl(provider)
   if (!baseUrl) {
@@ -162,10 +184,7 @@ function biyuanV1BaseUrl(provider: ModelProvider) {
   try {
     const url = new URL(baseUrl)
     const parts = url.pathname.split('/').filter(Boolean)
-    const v1Index = parts.findIndex((part) => part.toLowerCase() === 'v1')
-    if (v1Index >= 0) {
-      url.pathname = `/${parts.slice(0, v1Index + 1).join('/')}`
-    } else {
+    if (parts.at(-1)?.toLowerCase() !== 'v1') {
       url.pathname = `/${[...parts, 'v1'].join('/')}`
     }
     url.search = ''
@@ -181,12 +200,34 @@ function biyuanBalanceUrl(provider: ModelProvider) {
   return joinUrl(biyuanV1BaseUrl(provider), '/balance')
 }
 
+function biyuanBaseUrlWithoutTrailingV1(provider: ModelProvider) {
+  const baseUrl = balanceBaseUrl(provider) || BIYUAN_DEFAULT_BASE_URL
+  try {
+    const url = new URL(baseUrl)
+    const parts = url.pathname.split('/').filter(Boolean)
+    if (parts.at(-1)?.toLowerCase() === 'v1') {
+      parts.pop()
+    }
+    url.pathname = parts.length ? `/${parts.join('/')}` : ''
+    url.search = ''
+    url.hash = ''
+    return url.toString().replace(/\/$/, '')
+  } catch {
+    return baseUrl.replace(/\/v1$/i, '')
+  }
+}
+
 function biyuanStatusUrl(provider: ModelProvider) {
-  return joinUrl(biyuanOriginUrl(provider), '/api/status')
+  const origin = biyuanOriginUrl(provider)
+  return joinUrl(
+    biyuanPortalOriginFromApiOrigin(origin) ||
+      biyuanBaseUrlWithoutTrailingV1(provider),
+    '/api/status'
+  )
 }
 
 function biyuanLegacyTokenUsageUrl(provider: ModelProvider) {
-  return joinUrl(biyuanOriginUrl(provider), '/api/usage/token/')
+  return joinUrl(biyuanBaseUrlWithoutTrailingV1(provider), '/api/usage/token/')
 }
 
 function deepSeekBalanceUrl(provider: ModelProvider) {
@@ -233,8 +274,10 @@ type BiyuanQuotaDisplaySettings = {
 }
 
 function biyuanQuotaDisplaySettingsFrom(
-  data: Record<string, unknown>
+  response: Record<string, unknown>
 ): BiyuanQuotaDisplaySettings | undefined {
+  const nestedData = asRecord(response.data)
+  const data = Object.keys(nestedData).length ? nestedData : response
   const quotaPerUnit = numericValue(data.quota_per_unit)
   if (!quotaPerUnit || quotaPerUnit <= 0) return undefined
 
@@ -384,15 +427,15 @@ function subscriptionPlanFromBiyuan(
   value: unknown
 ): ProviderBalanceSubscriptionPlan | undefined {
   const record = asRecord(value)
+  if (!Object.keys(record).length) return undefined
   const plan = asRecord(record.plan)
   const subscription = asRecord(record.subscription)
   const usage = asRecord(record.usage)
   const entitlements = asRecord(usage.entitlements)
   const title =
     stringValue(plan.title) ??
-    stringValue(plan.plan_code) ??
-    stringValue(subscription.name) ??
-    'Subscription'
+    stringValue(plan.plan_code)
+  if (!title) return undefined
   const planCode = stringValue(plan.plan_code)
   const startTime = numericValue(subscription.start_time)
   const endTime = numericValue(subscription.end_time)
@@ -511,6 +554,11 @@ function providerConsoleLink(providerName: string) {
 }
 
 export class TauriProvidersService extends DefaultProvidersService {
+  private readonly biyuanStatusSettingsCache = new Map<
+    string,
+    BiyuanQuotaDisplaySettings | undefined
+  >()
+
   fetch(): typeof fetch {
     // Tauri implementation uses Tauri's fetch to avoid CORS issues
     return fetchTauri as typeof fetch
@@ -901,16 +949,38 @@ export class TauriProvidersService extends DefaultProvidersService {
   }
 
   private async fetchBiyuanQuotaDisplaySettings(
-    provider: ModelProvider,
-    apiKey: string
+    provider: ModelProvider
   ): Promise<BiyuanQuotaDisplaySettings | undefined> {
-    const result = await this.fetchBalanceJson(
-      provider,
-      biyuanStatusUrl(provider),
-      apiKey
+    const url = biyuanStatusUrl(provider)
+    if (this.biyuanStatusSettingsCache.has(url)) {
+      return this.biyuanStatusSettingsCache.get(url)
+    }
+
+    const controller = new AbortController()
+    const timeoutId = setTimeout(
+      () => controller.abort(),
+      BIYUAN_STATUS_REQUEST_TIMEOUT_MS
     )
-    if ('state' in result) return undefined
-    return biyuanQuotaDisplaySettingsFrom(asRecord(result.json))
+
+    try {
+      const response = await fetchTauri(url, {
+        method: 'GET',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        signal: controller.signal,
+      })
+      if (!response.ok) return undefined
+      const settings = biyuanQuotaDisplaySettingsFrom(
+        asRecord(await response.json())
+      )
+      this.biyuanStatusSettingsCache.set(url, settings)
+      return settings
+    } catch {
+      return undefined
+    } finally {
+      clearTimeout(timeoutId)
+    }
   }
 
   private async fetchLegacyBiyuanTokenUsage(
@@ -1000,7 +1070,7 @@ export class TauriProvidersService extends DefaultProvidersService {
         total: 'total_granted',
       })
       const displaySettings = account
-        ? await this.fetchBiyuanQuotaDisplaySettings(provider, primaryKey)
+        ? await this.fetchBiyuanQuotaDisplaySettings(provider)
         : undefined
       const moneyBalance = moneyTotalsFromBiyuanQuota(account, displaySettings)
       const subscription = subscriptionFromBiyuan(data.subscription)

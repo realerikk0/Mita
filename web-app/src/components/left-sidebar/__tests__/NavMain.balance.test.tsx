@@ -206,4 +206,49 @@ describe('NavMain provider balance', () => {
     expect(settingsLink).toHaveTextContent('余额 7天 80%')
     expect(settingsLink).not.toHaveTextContent('$77.13')
   })
+
+  it('shows wallet balance on the settings nav item when billing preference is wallet_first', () => {
+    vi.mocked(useProviderBalance).mockReturnValue({
+      balance: {
+        state: 'supported',
+        provider: 'jingxing',
+        unit: 'quota',
+        fetchedAt: 1781260326,
+        accountBalance: { available: 38563951 },
+        moneyBalance: { available: 77.127902, currency: 'USD' },
+        subscription: {
+          active: true,
+          billingPreference: 'wallet_first',
+          subscriptions: [
+            {
+              title: 'Biyuan Pro',
+              planCode: 'biyuan_pro',
+              weeklyWindow: {
+                limit: 700000,
+                available: 560000,
+                availablePercent: 0.8,
+              },
+              fiveHourWindow: {
+                limit: 100000,
+                available: 25000,
+                availablePercent: 0.25,
+              },
+              features: ['text'],
+            },
+          ],
+        },
+      },
+      loading: false,
+      error: null,
+      refetch: vi.fn(),
+    })
+
+    render(<NavMain />)
+
+    const settingsLink = screen.getByRole('link', {
+      name: /common:settings/,
+    })
+    expect(settingsLink).toHaveTextContent('余额 $77.13')
+    expect(settingsLink).not.toHaveTextContent('7天 80%')
+  })
 })

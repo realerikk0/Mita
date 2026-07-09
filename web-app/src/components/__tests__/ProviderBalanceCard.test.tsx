@@ -17,6 +17,7 @@ vi.mock('@/i18n/react-i18next-compat', () => ({
         'common:providerBalance.notices.openrouterOverdrawn': '已透支 {{amount}}',
         'common:providerBalance.notices.deepseekUnavailable': '账户不可用',
         'common:providerBalance.keyLimitRemaining': '此 Key 限额剩余 {{value}}',
+        'common:providerBalance.walletBalance': '钱包余额',
         'common:providerBalance.accountUsed': '账户已用',
         'common:providerBalance.keyUsed': 'Key 已用',
         'common:providerBalance.updatedAt': '更新时间',
@@ -42,7 +43,13 @@ vi.mock('@/i18n/react-i18next-compat', () => ({
         'common:providerBalance.subscription.fiveHourReset': '5 小时窗口重置',
         'common:providerBalance.subscription.period': '套餐有效期',
         'common:providerBalance.subscription.status': '套餐 {{status}}',
-        'common:providerBalance.subscription.unavailable': '套餐信息不可用',
+        'common:providerBalance.subscription.statusActive': '生效中',
+        'common:providerBalance.subscription.statusCanceled': '已取消',
+        'common:providerBalance.subscription.statusDisabled': '已禁用',
+        'common:providerBalance.subscription.statusExpired': '已过期',
+        'common:providerBalance.subscription.startsAt': '{{value}} 开始',
+        'common:providerBalance.subscription.endsAt': '{{value}} 结束',
+        'common:providerBalance.subscription.unavailable': '旧版服务未提供套餐信息',
       }
       return (translations[key] ?? key).replace(/\{\{(\w+)\}\}/g, (_, name) =>
         String(options?.[name] ?? `{{${name}}}`)
@@ -176,7 +183,9 @@ describe('ProviderBalanceCard', () => {
     expect(screen.getByText(formatReset(1783814400))).toBeInTheDocument()
     expect(screen.getByText('5 小时窗口重置')).toBeInTheDocument()
     expect(screen.getByText(formatReset(1783227600))).toBeInTheDocument()
-    expect(screen.getByText('套餐 active')).toBeInTheDocument()
+    expect(screen.getByText('钱包余额')).toBeInTheDocument()
+    expect(screen.getByText('$77.13')).toBeInTheDocument()
+    expect(screen.getByText('套餐 生效中')).toBeInTheDocument()
     expect(screen.getByText('优先套餐')).toBeInTheDocument()
     expect(screen.getByText('Key 正常')).toBeInTheDocument()
     expect(screen.queryByText('1,000,000 额度点')).not.toBeInTheDocument()
@@ -296,7 +305,7 @@ describe('ProviderBalanceCard', () => {
       />
     )
 
-    expect(screen.getByText('套餐信息不可用')).toBeInTheDocument()
+    expect(screen.getByText('旧版服务未提供套餐信息')).toBeInTheDocument()
     expect(screen.getByText('此 Key 限额剩余 679 额度点')).toBeInTheDocument()
   })
 
@@ -354,6 +363,79 @@ describe('ProviderBalanceCard', () => {
         weeklyWindowLabel: '7天',
       })
     ).toBe('余额 7天 80%')
+  })
+
+  it('uses wallet balance first when Biyuan billing preference is wallet_first', () => {
+    const walletFirst = {
+      ...biyuanWithSubscription,
+      subscription: {
+        ...biyuanWithSubscription.subscription!,
+        billingPreference: 'wallet_first' as const,
+      },
+    }
+
+    render(
+      <ProviderBalanceContent
+        provider={{ provider: 'jingxing' } as ModelProvider}
+        balance={walletFirst}
+        loading={false}
+        onRefresh={() => undefined}
+      />
+    )
+
+    expect(screen.getByText('可用余额')).toBeInTheDocument()
+    expect(screen.getByText('$77.13')).toBeInTheDocument()
+    expect(screen.queryByText('Biyuan Pro · 7天 80% 可用')).not.toBeInTheDocument()
+    expect(
+      getProviderBalanceBadgeLabel(walletFirst, {
+        balancePrefix: '余额',
+        quotaUnitLabel: '额度点',
+        weeklyWindowLabel: '7天',
+      })
+    ).toBe('余额 $77.13')
+  })
+
+  it('chooses the first active subscription plan for Biyuan subscription display', () => {
+    const mixedPlans = {
+      ...biyuanWithSubscription,
+      subscription: {
+        ...biyuanWithSubscription.subscription!,
+        subscriptions: [
+          {
+            ...biyuanWithSubscription.subscription!.subscriptions[0],
+            title: 'Expired Pro',
+            status: 'expired',
+            weeklyWindow: {
+              limit: 700000,
+              available: 0,
+              availablePercent: 0,
+            },
+          },
+          {
+            ...biyuanWithSubscription.subscription!.subscriptions[0],
+            title: 'Active Pro',
+            status: 'active',
+            weeklyWindow: {
+              limit: 700000,
+              available: 350000,
+              availablePercent: 0.5,
+            },
+          },
+        ],
+      },
+    }
+
+    render(
+      <ProviderBalanceContent
+        provider={{ provider: 'jingxing' } as ModelProvider}
+        balance={mixedPlans}
+        loading={false}
+        onRefresh={() => undefined}
+      />
+    )
+
+    expect(screen.getByText('Active Pro · 7天 50% 可用')).toBeInTheDocument()
+    expect(screen.queryByText('Expired Pro · 7天 0% 可用')).not.toBeInTheDocument()
   })
 
   it('formats available money with two decimals when currency is omitted', () => {

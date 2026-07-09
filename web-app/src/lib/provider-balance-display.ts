@@ -1,5 +1,4 @@
 import type { ProviderBalanceStatus } from '@/services/providers/types'
-import { BIYUAN_PROVIDER_NAMES } from '@/constants/biyuan'
 
 type ProviderBalanceLabelOptions = {
   balancePrefix?: string
@@ -39,54 +38,11 @@ export function formatProviderPercent(value?: number) {
   }).format(value)
 }
 
-export function isBiyuanQuotaBalance(balance: ProviderBalanceStatus) {
-  return (
-    balance.state === 'supported' &&
-    balance.unit === 'quota' &&
-    (BIYUAN_PROVIDER_NAMES as readonly string[]).includes(balance.provider)
-  )
-}
-
-function primarySubscriptionPlan(balance: ProviderBalanceStatus) {
-  if (balance.state !== 'supported') return undefined
-  const subscription = balance.subscription
-  if (!subscription?.active || subscription.unavailable) return undefined
-  return subscription.subscriptions[0]
-}
-
-export function providerSubscriptionPrimaryLabel(
-  balance: ProviderBalanceStatus,
-  options: ProviderBalanceLabelOptions = {}
-) {
-  const plan = primarySubscriptionPlan(balance)
-  if (!plan) return null
-  const percent = formatProviderPercent(plan.weeklyWindow.availablePercent)
-  if (!percent) return plan.title
-  const windowLabel = options.weeklyWindowLabel ?? '7d'
-  const suffix = options.subscriptionAvailableSuffix
-    ? ` ${options.subscriptionAvailableSuffix}`
-    : ''
-  return `${plan.title} · ${windowLabel} ${percent}${suffix}`
-}
-
-export function providerSubscriptionBadgeLabel(
-  balance: ProviderBalanceStatus,
-  options: ProviderBalanceLabelOptions = {}
-) {
-  const plan = primarySubscriptionPlan(balance)
-  if (!plan) return null
-  const percent = formatProviderPercent(plan.weeklyWindow.availablePercent)
-  if (!percent) return plan.title
-  return `${options.weeklyWindowLabel ?? '7d'} ${percent}`
-}
-
-export function providerBalancePrimaryLabel(
+function walletBalanceLabel(
   balance: ProviderBalanceStatus,
   options: ProviderBalanceLabelOptions = {}
 ) {
   if (balance.state !== 'supported') return null
-  const subscriptionLabel = providerSubscriptionPrimaryLabel(balance, options)
-  if (subscriptionLabel) return subscriptionLabel
   if (balance.moneyBalance) {
     const currency = balance.moneyBalance.currency ?? balance.currency
     return currency
@@ -110,6 +66,66 @@ export function providerBalancePrimaryLabel(
   return formatted
 }
 
+function subscriptionPlanCanBeDisplayed(status?: string) {
+  if (!status) return true
+  return status.toLowerCase() === 'active'
+}
+
+export function primaryProviderSubscriptionPlan(balance: ProviderBalanceStatus) {
+  if (balance.state !== 'supported') return undefined
+  const subscription = balance.subscription
+  if (!subscription?.active || subscription.unavailable) return undefined
+  return subscription.subscriptions.find((plan) =>
+    subscriptionPlanCanBeDisplayed(plan.status)
+  )
+}
+
+export function shouldPrioritizeProviderWallet(balance: ProviderBalanceStatus) {
+  if (balance.state !== 'supported') return false
+  const preference = balance.subscription?.billingPreference
+  return preference === 'wallet_first' || preference === 'wallet_only'
+}
+
+export function providerSubscriptionPrimaryLabel(
+  balance: ProviderBalanceStatus,
+  options: ProviderBalanceLabelOptions = {}
+) {
+  const plan = primaryProviderSubscriptionPlan(balance)
+  if (!plan) return null
+  const percent = formatProviderPercent(plan.weeklyWindow.availablePercent)
+  if (!percent) return plan.title
+  const windowLabel = options.weeklyWindowLabel ?? '7d'
+  const suffix = options.subscriptionAvailableSuffix
+    ? ` ${options.subscriptionAvailableSuffix}`
+    : ''
+  return `${plan.title} · ${windowLabel} ${percent}${suffix}`
+}
+
+export function providerSubscriptionBadgeLabel(
+  balance: ProviderBalanceStatus,
+  options: ProviderBalanceLabelOptions = {}
+) {
+  const plan = primaryProviderSubscriptionPlan(balance)
+  if (!plan) return null
+  const percent = formatProviderPercent(plan.weeklyWindow.availablePercent)
+  if (!percent) return plan.title
+  return `${options.weeklyWindowLabel ?? '7d'} ${percent}`
+}
+
+export function providerBalancePrimaryLabel(
+  balance: ProviderBalanceStatus,
+  options: ProviderBalanceLabelOptions = {}
+) {
+  if (balance.state !== 'supported') return null
+  if (shouldPrioritizeProviderWallet(balance)) {
+    const walletLabel = walletBalanceLabel(balance, options)
+    if (walletLabel) return walletLabel
+  }
+  const subscriptionLabel = providerSubscriptionPrimaryLabel(balance, options)
+  if (subscriptionLabel) return subscriptionLabel
+  return walletBalanceLabel(balance, options)
+}
+
 export function getProviderBalanceBadgeLabel(
   balance?: ProviderBalanceStatus | null,
   options: ProviderBalanceLabelOptions = {}
@@ -121,9 +137,10 @@ export function getProviderBalanceBadgeLabel(
   ) {
     return null
   }
-  const primary =
-    providerSubscriptionBadgeLabel(balance, options) ??
-    providerBalancePrimaryLabel(balance, options)
+  const primary = shouldPrioritizeProviderWallet(balance)
+    ? providerBalancePrimaryLabel(balance, options)
+    : providerSubscriptionBadgeLabel(balance, options) ??
+      providerBalancePrimaryLabel(balance, options)
   if (!primary) return null
   return `${options.balancePrefix ?? 'Balance'} ${primary}`
 }

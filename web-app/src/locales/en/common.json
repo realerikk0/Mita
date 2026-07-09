@@ -775,6 +775,7 @@
     "unlimitedKey": "Unlimited key",
     "keyLimitRemaining": "Key limit remaining {{value}}",
     "keyStatus": "Key {{status}}",
+    "walletBalance": "Wallet balance",
     "accountUsed": "Account used",
     "keyUsed": "Key used",
     "updatedAt": "Updated",
@@ -798,7 +799,13 @@
       "fiveHourReset": "5-hour reset",
       "period": "Plan period",
       "status": "Plan {{status}}",
-      "unavailable": "Subscription unavailable"
+      "statusActive": "active",
+      "statusCanceled": "canceled",
+      "statusDisabled": "disabled",
+      "statusExpired": "expired",
+      "startsAt": "Starts {{value}}",
+      "endsAt": "Ends {{value}}",
+      "unavailable": "Subscription details unavailable"
     },
     "tokenStatus": {
       "normal": "normal",

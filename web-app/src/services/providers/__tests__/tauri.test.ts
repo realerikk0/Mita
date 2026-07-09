@@ -509,9 +509,13 @@ describe('TauriProvidersService', () => {
           ok: true,
           status: 200,
           json: vi.fn().mockResolvedValue({
-            quota_per_unit: 500000,
-            quota_display_type: 'USD',
-            usd_exchange_rate: 7,
+            success: true,
+            message: '',
+            data: {
+              quota_per_unit: 500000,
+              quota_display_type: 'USD',
+              usd_exchange_rate: 7,
+            },
           }),
         } as any)
 
@@ -529,14 +533,19 @@ describe('TauriProvidersService', () => {
       )
       expect(fetchTauri).toHaveBeenNthCalledWith(
         2,
-        'https://api.biyuan.ai/api/status',
+        'https://biyuan.ai/api/status',
         expect.objectContaining({
           method: 'GET',
-          headers: expect.objectContaining({
-            Authorization: 'Bearer sk-test',
-          }),
         })
       )
+      const statusHeaders = (
+        vi.mocked(fetchTauri).mock.calls[1]?.[1] as any
+      ).headers
+      expect(statusHeaders).toMatchObject({
+        'Content-Type': 'application/json',
+      })
+      expect(statusHeaders).not.toHaveProperty('Authorization')
+      expect(statusHeaders).not.toHaveProperty('x-api-key')
       expect(result).toMatchObject({
         state: 'supported',
         provider: 'jingxing',
@@ -584,8 +593,12 @@ describe('TauriProvidersService', () => {
           ok: true,
           status: 200,
           json: vi.fn().mockResolvedValue({
-            quota_per_unit: 500000,
-            quota_display_type: 'USD',
+            success: true,
+            message: '',
+            data: {
+              quota_per_unit: 500000,
+              quota_display_type: 'USD',
+            },
           }),
         } as any)
 
@@ -605,7 +618,7 @@ describe('TauriProvidersService', () => {
       )
       expect(fetchTauri).toHaveBeenNthCalledWith(
         2,
-        'https://proxy.example.com/api/status',
+        'https://proxy.example.com/openai/api/status',
         expect.any(Object)
       )
       expect(result).toMatchObject({
@@ -713,8 +726,12 @@ describe('TauriProvidersService', () => {
             ok: true,
             status: 200,
             json: vi.fn().mockResolvedValue({
-              quota_per_unit: 500000,
-              quota_display_type: 'USD',
+              success: true,
+              message: '',
+              data: {
+                quota_per_unit: 500000,
+                quota_display_type: 'USD',
+              },
             }),
           } as any)
 
@@ -870,9 +887,13 @@ describe('TauriProvidersService', () => {
           ok: true,
           status: 200,
           json: vi.fn().mockResolvedValue({
-            quota_per_unit: 500000,
-            quota_display_type: 'CNY',
-            usd_exchange_rate: 7,
+            success: true,
+            message: '',
+            data: {
+              quota_per_unit: 500000,
+              quota_display_type: 'CNY',
+              usd_exchange_rate: 7,
+            },
           }),
         } as any)
 
@@ -884,6 +905,11 @@ describe('TauriProvidersService', () => {
       expect(fetchTauri).toHaveBeenNthCalledWith(
         1,
         'https://api.biyuan.ai/v1/balance',
+        expect.any(Object)
+      )
+      expect(fetchTauri).toHaveBeenNthCalledWith(
+        2,
+        'https://biyuan.ai/api/status',
         expect.any(Object)
       )
       expect(fetchTauri).not.toHaveBeenCalledWith(
@@ -917,9 +943,82 @@ describe('TauriProvidersService', () => {
           ok: true,
           status: 200,
           json: vi.fn().mockResolvedValue({
-            quota_per_unit: 0,
-            quota_display_type: 'USD',
+            success: true,
+            message: '',
+            data: {
+              quota_per_unit: 0,
+              quota_display_type: 'USD',
+            },
           }),
+        } as any)
+
+      const result = await svc.fetchProviderBalance(biyuanProvider)
+
+      expect(result).toMatchObject({
+        state: 'supported',
+        accountBalance: {
+          available: 250000,
+        },
+      })
+      if (result.state === 'supported') {
+        expect(result.moneyBalance).toBeUndefined()
+      }
+    })
+
+    it('falls back to raw quota when the Biyuan API status host returns the API-only stub', async () => {
+      vi.mocked(providerRemoteApiKeyChain).mockReturnValue(['sk-test'])
+      vi.mocked(fetchTauri)
+        .mockResolvedValueOnce({
+          ok: true,
+          status: 200,
+          json: vi.fn().mockResolvedValue({
+            unit: 'quota',
+            fetched_at: 1781260326,
+            account: {
+              total_available: 250000,
+            },
+          }),
+        } as any)
+        .mockResolvedValueOnce({
+          ok: true,
+          status: 200,
+          json: vi.fn().mockResolvedValue({
+            service: 'Biyuan AI API',
+            message: 'This endpoint is for API access only.',
+          }),
+        } as any)
+
+      const result = await svc.fetchProviderBalance(biyuanProvider)
+
+      expect(result).toMatchObject({
+        state: 'supported',
+        accountBalance: {
+          available: 250000,
+        },
+      })
+      if (result.state === 'supported') {
+        expect(result.moneyBalance).toBeUndefined()
+      }
+    })
+
+    it('falls back to raw quota when Biyuan status returns HTTP 200 with non-JSON content', async () => {
+      vi.mocked(providerRemoteApiKeyChain).mockReturnValue(['sk-test'])
+      vi.mocked(fetchTauri)
+        .mockResolvedValueOnce({
+          ok: true,
+          status: 200,
+          json: vi.fn().mockResolvedValue({
+            unit: 'quota',
+            fetched_at: 1781260326,
+            account: {
+              total_available: 250000,
+            },
+          }),
+        } as any)
+        .mockResolvedValueOnce({
+          ok: true,
+          status: 200,
+          json: vi.fn().mockRejectedValue(new Error('not json')),
         } as any)
 
       const result = await svc.fetchProviderBalance(biyuanProvider)
@@ -956,6 +1055,15 @@ describe('TauriProvidersService', () => {
               active: true,
               billing_preference: 'subscription_first',
               subscriptions: [
+                null,
+                {
+                  usage: {
+                    weekly_window: {
+                      limit: 1,
+                      available: 1,
+                    },
+                  },
+                },
                 {
                   plan: {
                     title: 'Biyuan Pro',
@@ -1017,8 +1125,12 @@ describe('TauriProvidersService', () => {
           ok: true,
           status: 200,
           json: vi.fn().mockResolvedValue({
-            quota_per_unit: 500000,
-            quota_display_type: 'USD',
+            success: true,
+            message: '',
+            data: {
+              quota_per_unit: 500000,
+              quota_display_type: 'USD',
+            },
           }),
         } as any)
 
@@ -1066,6 +1178,97 @@ describe('TauriProvidersService', () => {
       }
     })
 
+    it('preserves mixed subscription statuses but skips malformed subscription entries', async () => {
+      vi.mocked(providerRemoteApiKeyChain).mockReturnValue(['sk-test'])
+      vi.mocked(fetchTauri)
+        .mockResolvedValueOnce({
+          ok: true,
+          status: 200,
+          json: vi.fn().mockResolvedValue({
+            unit: 'quota',
+            fetched_at: 1781260326,
+            account: {
+              total_available: 100000,
+            },
+            subscription: {
+              active: true,
+              billing_preference: 'subscription_first',
+              subscriptions: [
+                null,
+                {
+                  plan: {
+                    title: 'Expired Pro',
+                    plan_code: 'expired_pro',
+                  },
+                  subscription: {
+                    status: 'expired',
+                  },
+                  usage: {
+                    weekly_window: {
+                      limit: 100,
+                      available: 0,
+                    },
+                    five_hour_window: {
+                      limit: 100,
+                      available: 0,
+                    },
+                  },
+                },
+                {
+                  plan: {
+                    title: 'Active Pro',
+                    plan_code: 'active_pro',
+                  },
+                  subscription: {
+                    status: 'active',
+                  },
+                  usage: {
+                    weekly_window: {
+                      limit: 100,
+                      available: 80,
+                    },
+                    five_hour_window: {
+                      limit: 100,
+                      available: 50,
+                    },
+                  },
+                },
+                {
+                  usage: {
+                    weekly_window: {
+                      limit: 100,
+                      available: 100,
+                    },
+                  },
+                },
+              ],
+            },
+          }),
+        } as any)
+        .mockResolvedValueOnce({
+          ok: false,
+          status: 404,
+          statusText: 'Not Found',
+        } as any)
+
+      const result = await svc.fetchProviderBalance(biyuanProvider)
+
+      expect(result).toMatchObject({
+        state: 'supported',
+        subscription: {
+          active: true,
+          billingPreference: 'subscription_first',
+        },
+      })
+      if (result.state === 'supported') {
+        expect(result.subscription?.subscriptions).toHaveLength(2)
+        expect(result.subscription?.subscriptions.map((plan) => plan.title)).toEqual([
+          'Expired Pro',
+          'Active Pro',
+        ])
+      }
+    })
+
     it('uses provider error body messages for non-auth Biyuan failures', async () => {
       vi.mocked(providerRemoteApiKeyChain).mockReturnValue(['sk-test'])
       vi.mocked(fetchTauri).mockResolvedValueOnce({
@@ -1090,7 +1293,64 @@ describe('TauriProvidersService', () => {
       })
     })
 
-    it('falls back to legacy Biyuan token usage only when /v1/balance returns 404 or 405', async () => {
+    it.each([404, 405])(
+      'falls back to legacy Biyuan token usage only when /v1/balance returns %s',
+      async (status) => {
+        vi.mocked(providerRemoteApiKeyChain).mockReturnValue(['sk-test'])
+        vi.mocked(fetchTauri)
+          .mockResolvedValueOnce({
+            ok: false,
+            status,
+            statusText: status === 404 ? 'Not Found' : 'Method Not Allowed',
+          } as any)
+          .mockResolvedValueOnce({
+            ok: true,
+            status: 200,
+            json: vi.fn().mockResolvedValue({
+              success: true,
+              data: {
+                total_granted: 1000,
+                total_used: '321.5',
+                total_available: '678.5',
+                unlimited_quota: false,
+              },
+            }),
+          } as any)
+
+        const result = await svc.fetchProviderBalance({
+          ...biyuanProvider,
+          base_url: 'https://api.jingxing.uk/v1',
+        })
+
+        expect(fetchTauri).toHaveBeenNthCalledWith(
+          1,
+          'https://api.jingxing.uk/v1/balance',
+          expect.any(Object)
+        )
+        expect(fetchTauri).toHaveBeenNthCalledWith(
+          2,
+          'https://api.jingxing.uk/api/usage/token/',
+          expect.any(Object)
+        )
+        expect(result).toMatchObject({
+          state: 'supported',
+          provider: 'jingxing',
+          tokenLimit: {
+            available: 678.5,
+            used: 321.5,
+            total: 1000,
+            unlimited: false,
+          },
+          subscription: {
+            active: false,
+            subscriptions: [],
+            unavailable: true,
+          },
+        })
+      }
+    )
+
+    it('returns an error when legacy Biyuan token usage fallback also fails', async () => {
       vi.mocked(providerRemoteApiKeyChain).mockReturnValue(['sk-test'])
       vi.mocked(fetchTauri)
         .mockResolvedValueOnce({
@@ -1102,46 +1362,49 @@ describe('TauriProvidersService', () => {
           ok: true,
           status: 200,
           json: vi.fn().mockResolvedValue({
+            success: false,
+            message: 'legacy disabled',
+          }),
+        } as any)
+
+      const result = await svc.fetchProviderBalance(biyuanProvider)
+
+      expect(result).toMatchObject({
+        state: 'error',
+        provider: 'jingxing',
+        message: 'legacy disabled',
+      })
+    })
+
+    it('preserves custom proxy path prefixes for legacy Biyuan fallback', async () => {
+      vi.mocked(providerRemoteApiKeyChain).mockReturnValue(['sk-test'])
+      vi.mocked(fetchTauri)
+        .mockResolvedValueOnce({
+          ok: false,
+          status: 405,
+          statusText: 'Method Not Allowed',
+        } as any)
+        .mockResolvedValueOnce({
+          ok: true,
+          status: 200,
+          json: vi.fn().mockResolvedValue({
             success: true,
             data: {
-              total_granted: 1000,
-              total_used: '321.5',
-              total_available: '678.5',
-              unlimited_quota: false,
+              total_available: 500000,
             },
           }),
         } as any)
 
-      const result = await svc.fetchProviderBalance({
+      await svc.fetchProviderBalance({
         ...biyuanProvider,
-        base_url: 'https://api.jingxing.uk/v1',
+        base_url: 'https://proxy.example.com/openai/v1',
       })
 
       expect(fetchTauri).toHaveBeenNthCalledWith(
-        1,
-        'https://api.jingxing.uk/v1/balance',
-        expect.any(Object)
-      )
-      expect(fetchTauri).toHaveBeenNthCalledWith(
         2,
-        'https://api.jingxing.uk/api/usage/token/',
+        'https://proxy.example.com/openai/api/usage/token/',
         expect.any(Object)
       )
-      expect(result).toMatchObject({
-        state: 'supported',
-        provider: 'jingxing',
-        tokenLimit: {
-          available: 678.5,
-          used: 321.5,
-          total: 1000,
-          unlimited: false,
-        },
-        subscription: {
-          active: false,
-          subscriptions: [],
-          unavailable: true,
-        },
-      })
     })
 
     it('returns OpenRouter credit balance from credits endpoint', async () => {

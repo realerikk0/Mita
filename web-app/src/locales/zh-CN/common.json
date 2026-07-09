@@ -693,6 +693,7 @@
     "unlimitedKey": "不限额 Key",
     "keyLimitRemaining": "此 Key 限额剩余 {{value}}",
     "keyStatus": "Key {{status}}",
+    "walletBalance": "钱包余额",
     "accountUsed": "账户已用",
     "keyUsed": "Key 已用",
     "updatedAt": "更新时间",
@@ -716,7 +717,13 @@
       "fiveHourReset": "5 小时窗口重置",
       "period": "套餐有效期",
       "status": "套餐 {{status}}",
-      "unavailable": "套餐信息不可用"
+      "statusActive": "生效中",
+      "statusCanceled": "已取消",
+      "statusDisabled": "已禁用",
+      "statusExpired": "已过期",
+      "startsAt": "{{value}} 开始",
+      "endsAt": "{{value}} 结束",
+      "unavailable": "旧版服务未提供套餐信息"
     },
     "tokenStatus": {
       "normal": "正常",
