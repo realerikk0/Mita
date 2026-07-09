@@ -410,6 +410,19 @@ describe('ChatInput', () => {
     expect(screen.getByText('添加文档或文件').closest('button')).not.toBeDisabled()
   })
 
+  it('keeps project document attachment picker disabled when the model lacks tools', () => {
+    currentThreadIdState = undefined as unknown as string
+    selectedModelOverride = {
+      id: 'model-a',
+      capabilities: ['completion'],
+      provider: 'llamacpp',
+    }
+
+    renderInput({ initialMessage: true, projectId: 'project-1' })
+
+    expect(screen.getByText('添加文档或文件').closest('button')).toBeDisabled()
+  })
+
   it('does not render web search controls in the composer', () => {
     renderInput()
 
@@ -530,6 +543,38 @@ describe('ChatInput', () => {
       JSON.stringify({ text: 'temporary starter', files: [] })
     )
     expect(sessionStorage.getItem('initial-message-temporary')).toBeNull()
+    expect(navigateMock).toHaveBeenCalledWith({
+      to: '/threads/$threadId',
+      params: { threadId: 'temporary-chat' },
+    })
+  })
+
+  it('moves temporary chat document attachments before navigating', async () => {
+    currentThreadIdState = undefined as unknown as string
+    activePromptKey = 'temporary-chat'
+    promptState = 'temporary starter'
+    promptStateByKey = { 'temporary-chat': 'temporary starter' }
+    attachmentsList = [
+      {
+        type: 'document',
+        name: 'notes.txt',
+        path: '/tmp/notes.txt',
+        parseMode: 'inline',
+      },
+    ]
+    window.history.pushState({}, '', '/?temporary-chat=true')
+
+    renderInput()
+
+    await act(async () => {
+      fireEvent.keyDown(getTextarea(), { key: 'Enter' })
+    })
+
+    expect(transferAttachmentsMock).toHaveBeenCalledWith(
+      '__new_thread__',
+      'temporary-chat'
+    )
+    expect(sessionStorage.getItem('temp-chat-nav')).toBeNull()
     expect(navigateMock).toHaveBeenCalledWith({
       to: '/threads/$threadId',
       params: { threadId: 'temporary-chat' },

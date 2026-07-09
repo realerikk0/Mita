@@ -2727,6 +2727,7 @@ Tool result communication:
         showAutoRunToggle={!mitaTeamsConfig}
         autoRunPanelVisible={autoRunPanelVisible}
         onToggleAutoRunPanel={handleAutoRunPanelToggle}
+        projectId={thread?.metadata?.project?.id}
       />
     </>
   )

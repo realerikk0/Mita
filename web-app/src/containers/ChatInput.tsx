@@ -299,9 +299,11 @@ const ChatInput = memo(function ChatInput({
     (a) => a.type === 'document' && a.processing
   )
   const ingestingAny = attachments.some((a) => a.processing)
-  const canDropFiles = hasMmproj || attachmentsEnabled
   const modelSupportsTools =
     selectedModel?.capabilities?.includes('tools') === true
+  const canAttachDocumentFiles = !projectId || modelSupportsTools
+  const canDropFiles =
+    hasMmproj || (attachmentsEnabled && canAttachDocumentFiles)
   const documentParseMode =
     !projectId && !modelSupportsTools ? 'inline' : parsePreference
 
@@ -457,7 +459,9 @@ const ChatInput = memo(function ChatInput({
           `${SESSION_STORAGE_PREFIX.INITIAL_MESSAGE}${TEMPORARY_CHAT_ID}`,
           JSON.stringify(messagePayload)
         )
-        sessionStorage.setItem('temp-chat-nav', 'true')
+        if (attachments.length > 0) {
+          transferAttachments(NEW_THREAD_ATTACHMENT_KEY, TEMPORARY_CHAT_ID)
+        }
         // Transfer agent mode from home screen to temporary thread
         if (isAgentMode && agentModeKey !== TEMPORARY_CHAT_ID) {
           useAgentMode.getState().setAgentMode(TEMPORARY_CHAT_ID, true)
@@ -765,6 +769,12 @@ const ChatInput = memo(function ChatInput({
     try {
       if (!attachmentsEnabled) {
         toast.info('Attachments are disabled in Settings')
+        return
+      }
+      if (!canAttachDocumentFiles) {
+        toast.info(
+          'Select a tool-capable model to attach documents to a project'
+        )
         return
       }
       const selection = await serviceHub.dialog().open({
@@ -1422,6 +1432,12 @@ const ChatInput = memo(function ChatInput({
             toast.info('Attachments are disabled in Settings')
             return
           }
+          if (!canAttachDocumentFiles) {
+            toast.info(
+              'Select a tool-capable model to attach documents to a project'
+            )
+            return
+          }
 
           const missingPathFiles: string[] = []
           const documentInputs: DocumentFileInput[] = []
@@ -1793,6 +1809,7 @@ const ChatInput = memo(function ChatInput({
                     {/* RAG document attachments - desktop-only via dialog; shown when feature enabled */}
                     <DropdownMenuItem
                       onClick={handleAttachDocsIngest}
+                      disabled={!canAttachDocumentFiles}
                     >
                       {ingestingDocs ? (
                         <IconLoader2
@@ -1905,35 +1922,32 @@ const ChatInput = memo(function ChatInput({
                     useLastUsedModel={initialMessage}
                   />
                 )} */}
-                {!effectiveAgentMode && selectedModel?.capabilities?.includes('embeddings') && (
-                  <Tooltip>
-                    <TooltipTrigger asChild>
-                      <Button
-                          variant="ghost"
-                          size="icon-xs"
-                        >
-                        <IconCodeCircle2
-                          size={18}
-                          className="text-muted-foreground"
-                        />
-                      </Button>
-                    </TooltipTrigger>
-                    <TooltipContent>
-                      <p>{t('embeddings')}</p>
-                    </TooltipContent>
-                  </Tooltip>
-                )}
+                {!effectiveAgentMode &&
+                  selectedModel?.capabilities?.includes('embeddings') && (
+                    <Tooltip>
+                      <TooltipTrigger asChild>
+                        <Button variant="ghost" size="icon-xs">
+                          <IconCodeCircle2
+                            size={18}
+                            className="text-muted-foreground"
+                          />
+                        </Button>
+                      </TooltipTrigger>
+                      <TooltipContent>
+                        <p>{t('embeddings')}</p>
+                      </TooltipContent>
+                    </Tooltip>
+                  )}
 
-                {!effectiveAgentMode && selectedModel?.capabilities?.includes('tools') &&
+                {!effectiveAgentMode &&
+                  modelSupportsTools &&
                   hasActiveMCPServers &&
                   (MCPToolComponent ? (
                     // Use custom MCP component
                     <McpExtensionToolLoader
                       tools={tools}
                       hasActiveMCPServers={hasActiveMCPServers}
-                      selectedModelHasTools={
-                        selectedModel?.capabilities?.includes('tools') ?? false
-                      }
+                      selectedModelHasTools={modelSupportsTools}
                       initialMessage={initialMessage}
                       MCPToolComponent={MCPToolComponent}
                     />
@@ -1941,7 +1955,11 @@ const ChatInput = memo(function ChatInput({
                     // Use default tools dropdown
                     <Tooltip
                       open={tooltipShown === 'tools'}
-                      onOpenChange={(newValue) => newValue ? setTooltipShown('tools') : setTooltipShown(false)}
+                      onOpenChange={(newValue) =>
+                        newValue
+                          ? setTooltipShown('tools')
+                          : setTooltipShown(false)
+                      }
                     >
                       <TooltipTrigger
                         asChild
