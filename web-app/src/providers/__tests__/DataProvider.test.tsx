@@ -132,7 +132,7 @@ vi.mock('@/types/events', () => ({
 }))
 
 vi.mock('@/constants/routes', () => ({
-  route: { hub: { model: '/hub/model' } },
+  route: { home: '/', hub: { model: '/hub/model' } },
 }))
 
 // Override serviceHub per-test needs. We extend the global setup's mock.
@@ -506,6 +506,14 @@ describe('DataProvider', () => {
         to: '/hub/model',
         search: { repo: 'owner/repo' },
       })
+    })
+  })
+
+  it('navigates to a new chat when handling a chat launch deep link', async () => {
+    hubState.deeplinkGetCurrent.mockResolvedValue(['mita://chat/open'])
+    render(<DataProvider />)
+    await waitFor(() => {
+      expect(h.navigate).toHaveBeenCalledWith({ to: '/' })
     })
   })
 

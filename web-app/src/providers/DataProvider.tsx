@@ -207,6 +207,15 @@ const redactDeepLinkForLog = (deeplink: string) => {
   }
 }
 
+const isChatLaunchDeepLink = (deeplink: string) => {
+  try {
+    const url = new URL(deeplink)
+    return url.protocol === 'mita:' && url.hostname === 'chat' && url.pathname === '/open'
+  } catch {
+    return false
+  }
+}
+
 export function DataProvider() {
   const {
     addProvider,
@@ -252,6 +261,11 @@ export function DataProvider() {
       console.log('Received deeplink:', urls.map(redactDeepLinkForLog))
 
       for (const deeplink of urls) {
+        if (isChatLaunchDeepLink(deeplink)) {
+          navigate({ to: route.home })
+          return
+        }
+
         try {
           const importedConnection = parseProviderConnectionDeepLink(deeplink)
           if (importedConnection) {
