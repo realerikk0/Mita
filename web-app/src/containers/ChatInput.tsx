@@ -54,7 +54,6 @@ import { route } from '@/constants/routes'
 import {
   TEMPORARY_CHAT_ID,
   TEMPORARY_CHAT_QUERY_ID,
-  SESSION_STORAGE_KEY,
   SESSION_STORAGE_PREFIX,
 } from '@/constants/chat'
 import { localStorageKey } from '@/constants/localStorage'
@@ -147,7 +146,9 @@ const ChatInput = memo(function ChatInput({
   const cancelToolCall = useAppState((state) => state.cancelToolCall)
   const currentThreadId = useThreads((state) => state.currentThreadId)
   const promptKey = useMemo(
-    () => (projectId ? `project:${projectId}` : currentThreadId ?? TEMPORARY_CHAT_ID),
+    () =>
+      currentThreadId ??
+      (projectId ? `project:${projectId}` : TEMPORARY_CHAT_ID),
     [currentThreadId, projectId]
   )
   const setActivePromptKey = usePrompt((state) => state.setActivePromptKey)
@@ -300,7 +301,12 @@ const ChatInput = memo(function ChatInput({
     (a) => a.type === 'document' && a.processing
   )
   const ingestingAny = attachments.some((a) => a.processing)
+  const modelSupportsTools =
+    selectedModel?.capabilities?.includes('tools') === true
+  const canAttachDocumentFiles = !projectId || modelSupportsTools
   const canDropFiles = hasMmproj || attachmentsEnabled
+  const documentParseMode =
+    !projectId && !modelSupportsTools ? 'inline' : parsePreference
 
   const [, setFileIngestProgress] = useState<{
     completed: number
@@ -451,10 +457,13 @@ const ChatInput = memo(function ChatInput({
       if (isTemporaryChat) {
         // For temporary chat, store message and navigate to temporary thread
         sessionStorage.setItem(
-          SESSION_STORAGE_KEY.INITIAL_MESSAGE_TEMPORARY,
+          `${SESSION_STORAGE_PREFIX.INITIAL_MESSAGE}${TEMPORARY_CHAT_ID}`,
           JSON.stringify(messagePayload)
         )
-        sessionStorage.setItem('temp-chat-nav', 'true')
+        clearAttachmentsForThread(TEMPORARY_CHAT_ID)
+        if (attachments.length > 0) {
+          transferAttachments(NEW_THREAD_ATTACHMENT_KEY, TEMPORARY_CHAT_ID)
+        }
         // Transfer agent mode from home screen to temporary thread
         if (isAgentMode && agentModeKey !== TEMPORARY_CHAT_ID) {
           useAgentMode.getState().setAgentMode(TEMPORARY_CHAT_ID, true)
@@ -691,7 +700,7 @@ const ChatInput = memo(function ChatInput({
             path: file.path,
             fileType,
             size,
-            parseMode: parsePreference,
+            parseMode: documentParseMode,
           })
         )
       }
@@ -751,8 +760,8 @@ const ChatInput = memo(function ChatInput({
     },
     [
       attachmentsKey,
+      documentParseMode,
       maxFileSizeMB,
-      parsePreference,
       processNewDocumentAttachments,
       setAttachmentsForThread,
     ]
@@ -762,6 +771,12 @@ const ChatInput = memo(function ChatInput({
     try {
       if (!attachmentsEnabled) {
         toast.info('Attachments are disabled in Settings')
+        return
+      }
+      if (!canAttachDocumentFiles) {
+        toast.info(
+          'Select a tool-capable model to attach documents to a project'
+        )
         return
       }
       const selection = await serviceHub.dialog().open({
@@ -1419,6 +1434,12 @@ const ChatInput = memo(function ChatInput({
             toast.info('Attachments are disabled in Settings')
             return
           }
+          if (!canAttachDocumentFiles) {
+            toast.info(
+              'Select a tool-capable model to attach documents to a project'
+            )
+            return
+          }
 
           const missingPathFiles: string[] = []
           const documentInputs: DocumentFileInput[] = []
@@ -1790,7 +1811,7 @@ const ChatInput = memo(function ChatInput({
                     {/* RAG document attachments - desktop-only via dialog; shown when feature enabled */}
                     <DropdownMenuItem
                       onClick={handleAttachDocsIngest}
-                      disabled={!selectedModel?.capabilities?.includes('tools')}
+                      disabled={!canAttachDocumentFiles}
                     >
                       {ingestingDocs ? (
                         <IconLoader2
@@ -1903,35 +1924,32 @@ const ChatInput = memo(function ChatInput({
                     useLastUsedModel={initialMessage}
                   />
                 )} */}
-                {!effectiveAgentMode && selectedModel?.capabilities?.includes('embeddings') && (
-                  <Tooltip>
-                    <TooltipTrigger asChild>
-                      <Button
-                          variant="ghost"
-                          size="icon-xs"
-                        >
-                        <IconCodeCircle2
-                          size={18}
-                          className="text-muted-foreground"
-                        />
-                      </Button>
-                    </TooltipTrigger>
-                    <TooltipContent>
-                      <p>{t('embeddings')}</p>
-                    </TooltipContent>
-                  </Tooltip>
-                )}
+                {!effectiveAgentMode &&
+                  selectedModel?.capabilities?.includes('embeddings') && (
+                    <Tooltip>
+                      <TooltipTrigger asChild>
+                        <Button variant="ghost" size="icon-xs">
+                          <IconCodeCircle2
+                            size={18}
+                            className="text-muted-foreground"
+                          />
+                        </Button>
+                      </TooltipTrigger>
+                      <TooltipContent>
+                        <p>{t('embeddings')}</p>
+                      </TooltipContent>
+                    </Tooltip>
+                  )}
 
-                {!effectiveAgentMode && selectedModel?.capabilities?.includes('tools') &&
+                {!effectiveAgentMode &&
+                  modelSupportsTools &&
                   hasActiveMCPServers &&
                   (MCPToolComponent ? (
                     // Use custom MCP component
                     <McpExtensionToolLoader
                       tools={tools}
                       hasActiveMCPServers={hasActiveMCPServers}
-                      selectedModelHasTools={
-                        selectedModel?.capabilities?.includes('tools') ?? false
-                      }
+                      selectedModelHasTools={modelSupportsTools}
                       initialMessage={initialMessage}
                       MCPToolComponent={MCPToolComponent}
                     />
@@ -1939,7 +1957,11 @@ const ChatInput = memo(function ChatInput({
                     // Use default tools dropdown
                     <Tooltip
                       open={tooltipShown === 'tools'}
-                      onOpenChange={(newValue) => newValue ? setTooltipShown('tools') : setTooltipShown(false)}
+                      onOpenChange={(newValue) =>
+                        newValue
+                          ? setTooltipShown('tools')
+                          : setTooltipShown(false)
+                      }
                     >
                       <TooltipTrigger
                         asChild

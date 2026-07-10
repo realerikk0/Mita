@@ -220,8 +220,9 @@ vi.mock('@/containers/ChatInput', () => ({
     showAutoRunToggle,
     autoRunPanelVisible,
     onToggleAutoRunPanel,
+    projectId,
   }: any) => (
-    <div data-testid="chat-input">
+    <div data-testid="chat-input" data-project-id={projectId ?? ''}>
       <span data-testid="chat-status">{chatStatus}</span>
       {showAutoRunToggle && (
         <button
@@ -792,6 +793,26 @@ describe('ThreadDetail route', () => {
     expect(screen.getByTestId('auto-run-panel-toggle')).toHaveAttribute(
       'data-visible',
       'true'
+    )
+  })
+
+  it('passes project metadata id into ChatInput for project threads', () => {
+    h.threadsState.threads['thread-1'] = {
+      ...h.threadsState.threads['thread-1'],
+      metadata: {
+        project: {
+          id: 'project-1',
+          name: 'Project One',
+          updated_at: 1,
+        },
+      },
+    }
+
+    renderComponent()
+
+    expect(screen.getByTestId('chat-input')).toHaveAttribute(
+      'data-project-id',
+      'project-1'
     )
   })
 
