@@ -448,6 +448,10 @@
       "title": "Ověření modelu selhalo",
       "description": "Stažený model \"{{modelId}}\" selhal při ověření integrity a byl odstraněn. Soubor může být poškozen nebo zmanipulován."
     },
+    "modelNoVision": {
+      "title": "Model nepodporuje obrázky",
+      "description": "Chcete-li přiložit obrázky, vyberte model s podporou vidění."
+    },
     "downloadAndVerificationComplete": {
       "title": "Stahování dokončeno",
       "description": "Model \"{{item}}\" byl úspěšně stažen a ověřen"

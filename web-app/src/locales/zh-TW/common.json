@@ -457,6 +457,10 @@
       "title": "模型驗證失敗",
       "description": "已下載的模型 \"{{modelId}}\" 未通過完整性驗證並已被刪除。檔案可能損壞或被篡改。"
     },
+    "modelNoVision": {
+      "title": "目前模型不支援圖片",
+      "description": "請選擇支援視覺能力的模型後再新增圖片。"
+    },
     "downloadAndVerificationComplete": {
       "title": "下載完成",
       "description": "模型 \"{{item}}\" 下載並驗證成功"

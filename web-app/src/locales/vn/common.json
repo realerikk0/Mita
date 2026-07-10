@@ -448,6 +448,10 @@
       "title": "Xác thực mô hình thất bại",
       "description": "Mô hình đã tải xuống \"{{modelId}}\" không vượt qua kiểm tra tính toàn vẹn và đã bị xóa. Tệp có thể bị hỏng hoặc bị giả mạo."
     },
+    "modelNoVision": {
+      "title": "Mô hình không hỗ trợ hình ảnh",
+      "description": "Chọn mô hình có khả năng thị giác để đính kèm hình ảnh."
+    },
     "downloadAndVerificationComplete": {
       "title": "Tải xuống hoàn tất",
       "description": "Mô hình \"{{item}}\" đã được tải xuống và xác minh thành công"

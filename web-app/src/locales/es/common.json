@@ -487,6 +487,10 @@
       "title": "Validación del modelo fallida",
       "description": "El modelo descargado \"{{modelId}}\" no pasó la verificación de integridad y fue eliminado. El archivo puede estar corrupto o manipulado."
     },
+    "modelNoVision": {
+      "title": "El modelo no admite imágenes",
+      "description": "Elige un modelo con capacidad de visión para adjuntar imágenes."
+    },
     "downloadAndVerificationComplete": {
       "title": "Descarga completa",
       "description": "Modelo \"{{item}}\" descargado y verificado correctamente"

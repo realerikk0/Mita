@@ -445,6 +445,10 @@
       "title": "Falha na Validação do Modelo",
       "description": "O modelo baixado \"{{modelId}}\" falhou na verificação de integridade e foi removido. O arquivo pode estar corrompido ou adulterado."
     },
+    "modelNoVision": {
+      "title": "O modelo não suporta imagens",
+      "description": "Escolha um modelo com capacidade de visão para anexar imagens."
+    },
     "downloadAndVerificationComplete": {
       "title": "Download Concluído",
       "description": "Modelo \"{{item}}\" baixado e verificado com sucesso"

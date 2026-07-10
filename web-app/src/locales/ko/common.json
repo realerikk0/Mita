@@ -485,6 +485,10 @@
       "title": "모델 검증 실패",
       "description": "다운로드한 \"{{modelId}}\" 모델이 무결성 검증에 실패하여 제거되었습니다. 파일이 손상되었거나 변조되었을 수 있습니다."
     },
+    "modelNoVision": {
+      "title": "모델이 이미지를 지원하지 않습니다",
+      "description": "이미지를 첨부하려면 비전 지원 모델을 선택하세요."
+    },
     "downloadAndVerificationComplete": {
       "title": "다운로드 완료",
       "description": "\"{{item}}\" 모델이 성공적으로 다운로드 및 검증되었습니다"

@@ -1308,10 +1308,10 @@ const ChatInput = memo(function ChatInput({
   }, [serviceHub, processImageFiles])
 
   const notifyModelLacksVision = useCallback(() => {
-    toast.info('Selected model does not support images', {
-      description: 'Choose a vision-capable model to attach images.',
+    toast.info(t('common:toast.modelNoVision.title'), {
+      description: t('common:toast.modelNoVision.description'),
     })
-  }, [])
+  }, [t])
 
   const handleImagePickerClick = async () => {
     if (hasMmproj) {
