@@ -139,7 +139,9 @@ vi.mock('@/constants/routes', () => ({
 const hubState = vi.hoisted(() => ({
   unsubscribe: vi.fn(),
   deeplinkGetCurrent: vi.fn().mockResolvedValue(null),
-  deeplinkOnOpenUrl: vi.fn().mockResolvedValue(undefined),
+  deeplinkOnOpenUrl: vi
+    .fn<(handler: (urls: string[]) => void) => Promise<() => void>>()
+    .mockResolvedValue(() => {}),
   eventsListen: vi.fn(),
   getProviders: vi.fn().mockResolvedValue([]),
   updateSettings: vi.fn().mockResolvedValue(undefined),
@@ -202,6 +204,8 @@ const resetHubState = () => {
   hubState.startServer.mockResolvedValue(1337)
   hubState.startModel.mockResolvedValue(undefined)
   hubState.deeplinkGetCurrent.mockResolvedValue(null)
+  hubState.deeplinkOnOpenUrl.mockReset()
+  hubState.deeplinkOnOpenUrl.mockResolvedValue(() => {})
 }
 
 describe('DataProvider', () => {
@@ -512,6 +516,24 @@ describe('DataProvider', () => {
   it('navigates to a new chat when handling a chat launch deep link', async () => {
     hubState.deeplinkGetCurrent.mockResolvedValue(['mita://chat/open'])
     render(<DataProvider />)
+    await waitFor(() => {
+      expect(h.navigate).toHaveBeenCalledWith({ to: '/' })
+    })
+  })
+
+  it('navigates to a new chat when receiving a hot-launch deep link', async () => {
+    render(<DataProvider />)
+
+    await waitFor(() => {
+      expect(hubState.deeplinkOnOpenUrl).toHaveBeenCalledWith(expect.any(Function))
+    })
+    const openUrlHandler = hubState.deeplinkOnOpenUrl.mock.calls[0]?.[0]
+    expect(openUrlHandler).toBeDefined()
+
+    act(() => {
+      openUrlHandler?.(['mita://chat/open'])
+    })
+
     await waitFor(() => {
       expect(h.navigate).toHaveBeenCalledWith({ to: '/' })
     })

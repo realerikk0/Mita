@@ -148,9 +148,17 @@ pub fn run() {
         builder = builder.plugin(tauri_plugin_single_instance::init(|app, argv, _cwd| {
           println!("a new app instance was opened with {argv:?} and the deep link event was already triggered");
           if let Some(window) = app.get_webview_window("main") {
-              let _ = window.unminimize();
-              let _ = window.show();
-              let _ = window.set_focus();
+              if let Err(error) = window.unminimize() {
+                  log::warn!("Failed to unminimize main window after app activation: {error}");
+              }
+              if let Err(error) = window.show() {
+                  log::warn!("Failed to show main window after app activation: {error}");
+              }
+              if let Err(error) = window.set_focus() {
+                  log::warn!("Failed to focus main window after app activation: {error}");
+              }
+          } else {
+              log::warn!("Main window was not found after app activation");
           }
           // when defining deep link schemes at runtime, you must also check `argv` here
         }));

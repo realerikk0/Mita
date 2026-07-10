@@ -52,6 +52,7 @@ desktop = [
     # FoundationModels.framework, which prevents launch on older macOS.
 ]
 mobile = [
+    "deep-link",
     "tauri/protocol-asset",
     "tauri/test",
     "tauri/wry",
