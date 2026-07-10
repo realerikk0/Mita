@@ -1430,51 +1430,49 @@ const ChatInput = memo(function ChatInput({
   }
 
   const handlePaste = async (e: React.ClipboardEvent) => {
+    const clipboardItems = Array.from(e.clipboardData?.items ?? [])
+    const imageItems = clipboardItems.filter((item) =>
+      item.type.startsWith('image/')
+    )
+
     // Only process images if model supports mmproj
     if (hasMmproj) {
-      const clipboardItems = e.clipboardData?.items
       let hasProcessedImage = false
 
       // Try clipboardData.items first (traditional method)
-      if (clipboardItems && clipboardItems.length > 0) {
-        const imageItems = Array.from(clipboardItems).filter((item) =>
-          item.type.startsWith('image/')
-        )
+      if (imageItems.length > 0) {
+        e.preventDefault()
 
-        if (imageItems.length > 0) {
-          e.preventDefault()
+        const files: File[] = []
+        let processedCount = 0
 
-          const files: File[] = []
-          let processedCount = 0
-
-          imageItems.forEach((item) => {
-            const file = item.getAsFile()
-            if (file) {
-              files.push(file)
-            }
-            processedCount++
-
-            // When all items are processed, handle the valid files
-            if (processedCount === imageItems.length) {
-              if (files.length > 0) {
-                const syntheticEvent = {
-                  target: {
-                    files: files,
-                  },
-                } as unknown as React.ChangeEvent<HTMLInputElement>
-
-                handleFileChange(syntheticEvent)
-                hasProcessedImage = true
-              }
-            }
-          })
-
-          // If we found image items but couldn't get files, fall through to modern API
-          if (processedCount === imageItems.length && !hasProcessedImage) {
-            // Continue to modern clipboard API fallback below
-          } else {
-            return // Successfully processed with traditional method
+        imageItems.forEach((item) => {
+          const file = item.getAsFile()
+          if (file) {
+            files.push(file)
           }
+          processedCount++
+
+          // When all items are processed, handle the valid files
+          if (processedCount === imageItems.length) {
+            if (files.length > 0) {
+              const syntheticEvent = {
+                target: {
+                  files: files,
+                },
+              } as unknown as React.ChangeEvent<HTMLInputElement>
+
+              handleFileChange(syntheticEvent)
+              hasProcessedImage = true
+            }
+          }
+        })
+
+        // If we found image items but couldn't get files, fall through to modern API
+        if (processedCount === imageItems.length && !hasProcessedImage) {
+          // Continue to modern clipboard API fallback below
+        } else {
+          return // Successfully processed with traditional method
         }
       }
 
@@ -1530,17 +1528,19 @@ const ChatInput = memo(function ChatInput({
       console.log(
         'No image data found in clipboard, allowing normal text paste'
       )
-    } else {
-      // Match the picker and drop paths: surface the notice when the
-      // clipboard holds an image; no preventDefault so text still pastes.
-      const hasImageInClipboard = Array.from(e.clipboardData?.items ?? []).some(
-        (item) => item.type.startsWith('image/')
-      )
-      if (hasImageInClipboard) {
-        notifyModelLacksVision()
-      }
+    } else if (
+      imageItems.length > 0 &&
+      !clipboardItems.some((item) => item.type === 'text/plain')
+    ) {
+      // Match the picker and drop paths for image-intent pastes (screenshots,
+      // copied images carry no text/plain flavor). Pastes that also carry text
+      // (e.g. Excel cells ship an image rendition) fall through so the text
+      // pastes without a nag. Images visible only to the async Clipboard API
+      // are knowingly missed here — probing navigator.clipboard.read() on
+      // every paste isn't worth the permission prompts. No preventDefault, so
+      // normal text pasting always continues.
+      notifyModelLacksVision()
     }
-    // If hasMmproj is false or no images found, allow normal text pasting to continue
   }
 
   const isStreaming = chatStatus === 'submitted' || chatStatus === 'streaming'
