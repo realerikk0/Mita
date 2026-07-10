@@ -56,7 +56,6 @@ import {
   TEMPORARY_CHAT_QUERY_ID,
   SESSION_STORAGE_PREFIX,
 } from '@/constants/chat'
-import { localStorageKey } from '@/constants/localStorage'
 import { defaultModel } from '@/lib/models'
 import { useAssistant } from '@/hooks/useAssistant'
 import DropdownToolsAvailable from '@/containers/DropdownToolsAvailable'
@@ -89,7 +88,6 @@ import {
   createDocumentAttachment,
 } from '@/types/attachment'
 import { isBrowserMCPServerName } from '@/constants/mcp'
-import { PromptVisionModel } from '@/containers/PromptVisionModel'
 import { useAgentMode } from '@/hooks/useAgentMode'
 import { AssistantsMenu } from '@/components/AssistantsMenu'
 import { parseCompactCommand } from '@/lib/compact-thread'
@@ -166,9 +164,6 @@ const ChatInput = memo(function ChatInput({
   const updateCurrentThreadAssistant = useThreads(
     (state) => state.updateCurrentThreadAssistant
   )
-  const updateCurrentThreadModel = useThreads(
-    (state) => state.updateCurrentThreadModel
-  )
   const { t } = useTranslation()
   const spellCheckChatInput = useGeneralSetting(
     (state) => state.spellCheckChatInput
@@ -217,10 +212,6 @@ const ChatInput = memo(function ChatInput({
 
   const selectedModel = useModelProvider((state) => state.selectedModel)
   const selectedProvider = useModelProvider((state) => state.selectedProvider)
-  const selectModelProvider = useModelProvider(
-    (state) => state.selectModelProvider
-  )
-  const updateProvider = useModelProvider((state) => state.updateProvider)
   const [message, setMessage] = useState('')
   const [dropdownToolsAvailable, setDropdownToolsAvailable] = useState(false)
   const [tooltipShown, setTooltipShown] = useState<
@@ -228,7 +219,6 @@ const ChatInput = memo(function ChatInput({
   >(false)
   const [isDragOver, setIsDragOver] = useState(false)
   const [hasMmproj, setHasMmproj] = useState(false)
-  const [showVisionModelPrompt, setShowVisionModelPrompt] = useState(false)
   const activeModels = useAppState(useShallow((state) => state.activeModels))
   const wasPointerDown = useRef(false)
 
@@ -295,7 +285,6 @@ const ChatInput = memo(function ChatInput({
   const transferAttachments = useChatAttachments(
     (state) => state.transferAttachments
   )
-  const getProviderByName = useModelProvider((state) => state.getProviderByName)
 
   const ingestingDocs = attachments.some(
     (a) => a.type === 'document' && a.processing
@@ -1318,57 +1307,19 @@ const ChatInput = memo(function ChatInput({
     }
   }, [serviceHub, processImageFiles])
 
+  const notifyModelLacksVision = useCallback(() => {
+    toast.info('Selected model does not support images', {
+      description: 'Choose a vision-capable model to attach images.',
+    })
+  }, [])
+
   const handleImagePickerClick = async () => {
     if (hasMmproj) {
       await openImagePicker()
       return
     }
-    setShowVisionModelPrompt(true)
+    notifyModelLacksVision()
   }
-
-  const handleVisionModelDownloadComplete = useCallback(
-    (modelId: string) => {
-      setShowVisionModelPrompt(false)
-
-      try {
-        localStorage.setItem(
-          localStorageKey.lastUsedModel,
-          JSON.stringify({ provider: 'llamacpp', model: modelId })
-        )
-      } catch {
-        // Ignore localStorage errors
-      }
-
-      setTimeout(() => {
-        const provider = getProviderByName('llamacpp')
-        if (provider) {
-          const modelIndex = provider.models.findIndex((m) => m.id === modelId)
-          if (modelIndex !== -1) {
-            const model = provider.models[modelIndex]
-            const capabilities = model.capabilities || []
-
-            if (!capabilities.includes('vision')) {
-              const updatedModels = [...provider.models]
-              updatedModels[modelIndex] = {
-                ...model,
-                capabilities: [...capabilities, 'vision'],
-              }
-              updateProvider('llamacpp', { models: updatedModels })
-            }
-          }
-        }
-
-        selectModelProvider('llamacpp', modelId)
-        updateCurrentThreadModel({ id: modelId, provider: 'llamacpp' })
-      }, 500)
-    },
-    [
-      selectModelProvider,
-      getProviderByName,
-      updateProvider,
-      updateCurrentThreadModel,
-    ]
-  )
 
   const handleDragEnter = (e: React.DragEvent) => {
     e.preventDefault()
@@ -1425,7 +1376,7 @@ const ChatInput = memo(function ChatInput({
           if (hasMmproj) {
             await processImageFiles(imageFiles)
           } else {
-            setShowVisionModelPrompt(true)
+            notifyModelLacksVision()
           }
         }
 
@@ -1796,7 +1747,7 @@ const ChatInput = memo(function ChatInput({
                     </Button>
                   </DropdownMenuTrigger>
                   <DropdownMenuContent align="start">
-                    {/* Vision image attachment - always enabled, prompts to download vision model if needed */}
+                    {/* Vision image attachment - requires a vision-capable model */}
                     <DropdownMenuItem onClick={handleImagePickerClick}>
                       <IconPhoto size={18} className="text-muted-foreground" />
                       <span>{t('common:chatInputActions.addImages')}</span>
@@ -2197,13 +2148,6 @@ const ChatInput = memo(function ChatInput({
             />
           </div>
         )}
-
-      {/* Vision Model Download Prompt */}
-      <PromptVisionModel
-        open={showVisionModelPrompt}
-        onClose={() => setShowVisionModelPrompt(false)}
-        onDownloadComplete={handleVisionModelDownloadComplete}
-      />
     </div>
   )
 })

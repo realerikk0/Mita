@@ -11,14 +11,6 @@ export const DEFAULT_MODEL_QUANTIZATIONS = ['iq4_xs', 'q4_k_m']
  */
 export const SETUP_SCREEN_QUANTIZATIONS = ['q4_k_xl']
 
-export const RECOMMENDED_VISION_MODEL_HF_REPO = 'janhq/Jan-v2-VL-high-gguf'
-export const RECOMMENDED_VISION_QUANTIZATIONS = [
-  'q4_k_m',
-  'q4_k_s',
-  'q4_0',
-  'q3_k_m',
-]
-
 /**
  * Provider model capabilities - copied from token.js package
  */

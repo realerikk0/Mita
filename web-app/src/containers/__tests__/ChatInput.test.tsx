@@ -279,9 +279,6 @@ vi.mock('@/containers/AvatarEmoji', () => ({
 vi.mock('@/containers/McpExtensionToolLoader', () => ({
   McpExtensionToolLoader: () => null,
 }))
-vi.mock('@/containers/PromptVisionModel', () => ({
-  PromptVisionModel: () => null,
-}))
 vi.mock('@/containers/MovingBorder', () => ({
   MovingBorder: ({ children }: any) => <div>{children}</div>,
 }))
