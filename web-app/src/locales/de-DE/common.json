@@ -476,6 +476,11 @@
       "title": "Modellvalidierung fehlgeschlagen",
       "description": "Das heruntergeladene Modell \"{{modelId}}\" ist bei der Integritätsprüfung fehlgeschlagen und wurde entfernt. Die Datei könnte beschädigt oder manipuliert worden sein."
     },
+    "modelNoVision": {
+      "title": "Modell unterstützt keine Bilder",
+      "description": "Wählen Sie ein Modell mit Bildunterstützung, um Bilder anzuhängen.",
+      "action": "Hub öffnen"
+    },
     "downloadAndVerificationComplete": {
       "title": "Download abgeschlossen",
       "description": "Modell \"{{item}}\" erfolgreich heruntergeladen und verifiziert"

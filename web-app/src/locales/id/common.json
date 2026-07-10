@@ -392,6 +392,11 @@
       "title": "Validasi Model Gagal",
       "description": "Model yang diunduh \"{{modelId}}\" gagal verifikasi integritas dan telah dihapus. File mungkin rusak atau telah dimanipulasi."
     },
+    "modelNoVision": {
+      "title": "Model tidak mendukung gambar",
+      "description": "Pilih model dengan kemampuan visi untuk melampirkan gambar.",
+      "action": "Buka Hub"
+    },
     "downloadAndVerificationComplete": {
       "title": "Unduhan Selesai",
       "description": "Model \"{{item}}\" berhasil diunduh dan diverifikasi"

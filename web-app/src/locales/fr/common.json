@@ -447,6 +447,11 @@
       "title": "Échec de la validation du modèle",
       "description": "Le modèle téléchargé \"{{modelId}}\" a échoué à la vérification d'intégrité et a été supprimé. Le fichier peut être corrompu ou altéré."
     },
+    "modelNoVision": {
+      "title": "Le modèle ne prend pas en charge les images",
+      "description": "Choisissez un modèle doté de capacités de vision pour joindre des images.",
+      "action": "Ouvrir le Hub"
+    },
     "downloadAndVerificationComplete": {
       "title": "Téléchargement terminé",
       "description": "Le modèle \"{{item}}\" a été téléchargé et vérifié avec succès"

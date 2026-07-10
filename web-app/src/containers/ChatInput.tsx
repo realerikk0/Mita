@@ -56,7 +56,6 @@ import {
   TEMPORARY_CHAT_QUERY_ID,
   SESSION_STORAGE_PREFIX,
 } from '@/constants/chat'
-import { localStorageKey } from '@/constants/localStorage'
 import { defaultModel } from '@/lib/models'
 import { useAssistant } from '@/hooks/useAssistant'
 import DropdownToolsAvailable from '@/containers/DropdownToolsAvailable'
@@ -89,7 +88,6 @@ import {
   createDocumentAttachment,
 } from '@/types/attachment'
 import { isBrowserMCPServerName } from '@/constants/mcp'
-import { PromptVisionModel } from '@/containers/PromptVisionModel'
 import { useAgentMode } from '@/hooks/useAgentMode'
 import { AssistantsMenu } from '@/components/AssistantsMenu'
 import { parseCompactCommand } from '@/lib/compact-thread'
@@ -166,9 +164,6 @@ const ChatInput = memo(function ChatInput({
   const updateCurrentThreadAssistant = useThreads(
     (state) => state.updateCurrentThreadAssistant
   )
-  const updateCurrentThreadModel = useThreads(
-    (state) => state.updateCurrentThreadModel
-  )
   const { t } = useTranslation()
   const spellCheckChatInput = useGeneralSetting(
     (state) => state.spellCheckChatInput
@@ -217,10 +212,6 @@ const ChatInput = memo(function ChatInput({
 
   const selectedModel = useModelProvider((state) => state.selectedModel)
   const selectedProvider = useModelProvider((state) => state.selectedProvider)
-  const selectModelProvider = useModelProvider(
-    (state) => state.selectModelProvider
-  )
-  const updateProvider = useModelProvider((state) => state.updateProvider)
   const [message, setMessage] = useState('')
   const [dropdownToolsAvailable, setDropdownToolsAvailable] = useState(false)
   const [tooltipShown, setTooltipShown] = useState<
@@ -228,7 +219,6 @@ const ChatInput = memo(function ChatInput({
   >(false)
   const [isDragOver, setIsDragOver] = useState(false)
   const [hasMmproj, setHasMmproj] = useState(false)
-  const [showVisionModelPrompt, setShowVisionModelPrompt] = useState(false)
   const activeModels = useAppState(useShallow((state) => state.activeModels))
   const wasPointerDown = useRef(false)
 
@@ -295,7 +285,6 @@ const ChatInput = memo(function ChatInput({
   const transferAttachments = useChatAttachments(
     (state) => state.transferAttachments
   )
-  const getProviderByName = useModelProvider((state) => state.getProviderByName)
 
   const ingestingDocs = attachments.some(
     (a) => a.type === 'document' && a.processing
@@ -1318,57 +1307,24 @@ const ChatInput = memo(function ChatInput({
     }
   }, [serviceHub, processImageFiles])
 
+  const notifyModelLacksVision = useCallback(() => {
+    toast.info(t('common:toast.modelNoVision.title'), {
+      id: 'model-no-vision',
+      description: t('common:toast.modelNoVision.description'),
+      action: {
+        label: t('common:toast.modelNoVision.action'),
+        onClick: () => router.navigate({ to: route.hub.index }),
+      },
+    })
+  }, [t, router])
+
   const handleImagePickerClick = async () => {
     if (hasMmproj) {
       await openImagePicker()
       return
     }
-    setShowVisionModelPrompt(true)
+    notifyModelLacksVision()
   }
-
-  const handleVisionModelDownloadComplete = useCallback(
-    (modelId: string) => {
-      setShowVisionModelPrompt(false)
-
-      try {
-        localStorage.setItem(
-          localStorageKey.lastUsedModel,
-          JSON.stringify({ provider: 'llamacpp', model: modelId })
-        )
-      } catch {
-        // Ignore localStorage errors
-      }
-
-      setTimeout(() => {
-        const provider = getProviderByName('llamacpp')
-        if (provider) {
-          const modelIndex = provider.models.findIndex((m) => m.id === modelId)
-          if (modelIndex !== -1) {
-            const model = provider.models[modelIndex]
-            const capabilities = model.capabilities || []
-
-            if (!capabilities.includes('vision')) {
-              const updatedModels = [...provider.models]
-              updatedModels[modelIndex] = {
-                ...model,
-                capabilities: [...capabilities, 'vision'],
-              }
-              updateProvider('llamacpp', { models: updatedModels })
-            }
-          }
-        }
-
-        selectModelProvider('llamacpp', modelId)
-        updateCurrentThreadModel({ id: modelId, provider: 'llamacpp' })
-      }, 500)
-    },
-    [
-      selectModelProvider,
-      getProviderByName,
-      updateProvider,
-      updateCurrentThreadModel,
-    ]
-  )
 
   const handleDragEnter = (e: React.DragEvent) => {
     e.preventDefault()
@@ -1425,7 +1381,7 @@ const ChatInput = memo(function ChatInput({
           if (hasMmproj) {
             await processImageFiles(imageFiles)
           } else {
-            setShowVisionModelPrompt(true)
+            notifyModelLacksVision()
           }
         }
 
@@ -1474,51 +1430,49 @@ const ChatInput = memo(function ChatInput({
   }
 
   const handlePaste = async (e: React.ClipboardEvent) => {
+    const clipboardItems = Array.from(e.clipboardData?.items ?? [])
+    const imageItems = clipboardItems.filter((item) =>
+      item.type.startsWith('image/')
+    )
+
     // Only process images if model supports mmproj
     if (hasMmproj) {
-      const clipboardItems = e.clipboardData?.items
       let hasProcessedImage = false
 
       // Try clipboardData.items first (traditional method)
-      if (clipboardItems && clipboardItems.length > 0) {
-        const imageItems = Array.from(clipboardItems).filter((item) =>
-          item.type.startsWith('image/')
-        )
+      if (imageItems.length > 0) {
+        e.preventDefault()
 
-        if (imageItems.length > 0) {
-          e.preventDefault()
+        const files: File[] = []
+        let processedCount = 0
 
-          const files: File[] = []
-          let processedCount = 0
-
-          imageItems.forEach((item) => {
-            const file = item.getAsFile()
-            if (file) {
-              files.push(file)
-            }
-            processedCount++
-
-            // When all items are processed, handle the valid files
-            if (processedCount === imageItems.length) {
-              if (files.length > 0) {
-                const syntheticEvent = {
-                  target: {
-                    files: files,
-                  },
-                } as unknown as React.ChangeEvent<HTMLInputElement>
-
-                handleFileChange(syntheticEvent)
-                hasProcessedImage = true
-              }
-            }
-          })
-
-          // If we found image items but couldn't get files, fall through to modern API
-          if (processedCount === imageItems.length && !hasProcessedImage) {
-            // Continue to modern clipboard API fallback below
-          } else {
-            return // Successfully processed with traditional method
+        imageItems.forEach((item) => {
+          const file = item.getAsFile()
+          if (file) {
+            files.push(file)
           }
+          processedCount++
+
+          // When all items are processed, handle the valid files
+          if (processedCount === imageItems.length) {
+            if (files.length > 0) {
+              const syntheticEvent = {
+                target: {
+                  files: files,
+                },
+              } as unknown as React.ChangeEvent<HTMLInputElement>
+
+              handleFileChange(syntheticEvent)
+              hasProcessedImage = true
+            }
+          }
+        })
+
+        // If we found image items but couldn't get files, fall through to modern API
+        if (processedCount === imageItems.length && !hasProcessedImage) {
+          // Continue to modern clipboard API fallback below
+        } else {
+          return // Successfully processed with traditional method
         }
       }
 
@@ -1574,8 +1528,19 @@ const ChatInput = memo(function ChatInput({
       console.log(
         'No image data found in clipboard, allowing normal text paste'
       )
+    } else if (
+      imageItems.length > 0 &&
+      !clipboardItems.some((item) => item.type === 'text/plain')
+    ) {
+      // Match the picker and drop paths for image-intent pastes (screenshots,
+      // copied images carry no text/plain flavor). Pastes that also carry text
+      // (e.g. Excel cells ship an image rendition) fall through so the text
+      // pastes without a nag. Images visible only to the async Clipboard API
+      // are knowingly missed here — probing navigator.clipboard.read() on
+      // every paste isn't worth the permission prompts. No preventDefault, so
+      // normal text pasting always continues.
+      notifyModelLacksVision()
     }
-    // If hasMmproj is false or no images found, allow normal text pasting to continue
   }
 
   const isStreaming = chatStatus === 'submitted' || chatStatus === 'streaming'
@@ -1796,7 +1761,7 @@ const ChatInput = memo(function ChatInput({
                     </Button>
                   </DropdownMenuTrigger>
                   <DropdownMenuContent align="start">
-                    {/* Vision image attachment - always enabled, prompts to download vision model if needed */}
+                    {/* Vision image attachment - requires a vision-capable model */}
                     <DropdownMenuItem onClick={handleImagePickerClick}>
                       <IconPhoto size={18} className="text-muted-foreground" />
                       <span>{t('common:chatInputActions.addImages')}</span>
@@ -2197,13 +2162,6 @@ const ChatInput = memo(function ChatInput({
             />
           </div>
         )}
-
-      {/* Vision Model Download Prompt */}
-      <PromptVisionModel
-        open={showVisionModelPrompt}
-        onClose={() => setShowVisionModelPrompt(false)}
-        onDownloadComplete={handleVisionModelDownloadComplete}
-      />
     </div>
   )
 })

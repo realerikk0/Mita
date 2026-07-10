@@ -439,6 +439,11 @@
       "title": "モデルの検証に失敗しました",
       "description": "ダウンロードしたモデル「{{modelId}}」は整合性検証に失敗し、削除されました。ファイルが破損または改ざんされている可能性があります。"
     },
+    "modelNoVision": {
+      "title": "モデルは画像に対応していません",
+      "description": "画像を添付するには、ビジョン対応モデルを選択してください。",
+      "action": "ハブを開く"
+    },
     "downloadAndVerificationComplete": {
       "title": "ダウンロード完了",
       "description": "モデル「{{item}}」は正常にダウンロードおよび検証されました"

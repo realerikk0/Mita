@@ -449,6 +449,11 @@
       "title": "La validació del model ha fallat",
       "description": "El model descarregat \"{{modelId}}\" no ha superat la verificació d’integritat i s’ha eliminat. El fitxer pot estar corrupte o manipulat."
     },
+    "modelNoVision": {
+      "title": "El model no admet imatges",
+      "description": "Trieu un model amb capacitat de visió per adjuntar imatges.",
+      "action": "Obre el Hub"
+    },
     "downloadAndVerificationComplete": {
       "title": "Descàrrega completada",
       "description": "El model \"{{item}}\" s’ha descarregat i verificat correctament"
