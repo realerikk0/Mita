@@ -444,7 +444,8 @@
     },
     "modelNoVision": {
       "title": "Model nie obsługuje obrazów",
-      "description": "Wybierz model z obsługą wizji, aby dołączać obrazy."
+      "description": "Wybierz model z obsługą wizji, aby dołączać obrazy.",
+      "action": "Otwórz Centrum"
     },
     "downloadAndVerificationComplete": {
       "title": "Pobieranie Ukończone",

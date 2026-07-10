@@ -441,7 +441,8 @@
     },
     "modelNoVision": {
       "title": "モデルは画像に対応していません",
-      "description": "画像を添付するには、ビジョン対応モデルを選択してください。"
+      "description": "画像を添付するには、ビジョン対応モデルを選択してください。",
+      "action": "ハブを開く"
     },
     "downloadAndVerificationComplete": {
       "title": "ダウンロード完了",

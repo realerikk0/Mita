@@ -489,7 +489,8 @@
     },
     "modelNoVision": {
       "title": "El modelo no admite imágenes",
-      "description": "Elige un modelo con capacidad de visión para adjuntar imágenes."
+      "description": "Elige un modelo con capacidad de visión para adjuntar imágenes.",
+      "action": "Abrir Hub"
     },
     "downloadAndVerificationComplete": {
       "title": "Descarga completa",

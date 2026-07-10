@@ -478,7 +478,8 @@
     },
     "modelNoVision": {
       "title": "Modell unterstützt keine Bilder",
-      "description": "Wählen Sie ein Modell mit Bildunterstützung, um Bilder anzuhängen."
+      "description": "Wählen Sie ein Modell mit Bildunterstützung, um Bilder anzuhängen.",
+      "action": "Hub öffnen"
     },
     "downloadAndVerificationComplete": {
       "title": "Download abgeschlossen",

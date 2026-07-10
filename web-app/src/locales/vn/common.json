@@ -450,7 +450,8 @@
     },
     "modelNoVision": {
       "title": "Mô hình không hỗ trợ hình ảnh",
-      "description": "Chọn mô hình có khả năng thị giác để đính kèm hình ảnh."
+      "description": "Chọn mô hình có khả năng thị giác để đính kèm hình ảnh.",
+      "action": "Mở Hub"
     },
     "downloadAndVerificationComplete": {
       "title": "Tải xuống hoàn tất",

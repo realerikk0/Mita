@@ -451,7 +451,8 @@
     },
     "modelNoVision": {
       "title": "El model no admet imatges",
-      "description": "Trieu un model amb capacitat de visió per adjuntar imatges."
+      "description": "Trieu un model amb capacitat de visió per adjuntar imatges.",
+      "action": "Obre el Hub"
     },
     "downloadAndVerificationComplete": {
       "title": "Descàrrega completada",

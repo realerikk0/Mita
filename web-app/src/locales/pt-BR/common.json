@@ -447,7 +447,8 @@
     },
     "modelNoVision": {
       "title": "O modelo não suporta imagens",
-      "description": "Escolha um modelo com capacidade de visão para anexar imagens."
+      "description": "Escolha um modelo com capacidade de visão para anexar imagens.",
+      "action": "Abrir Hub"
     },
     "downloadAndVerificationComplete": {
       "title": "Download Concluído",

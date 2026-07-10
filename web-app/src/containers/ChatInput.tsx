@@ -1309,9 +1309,14 @@ const ChatInput = memo(function ChatInput({
 
   const notifyModelLacksVision = useCallback(() => {
     toast.info(t('common:toast.modelNoVision.title'), {
+      id: 'model-no-vision',
       description: t('common:toast.modelNoVision.description'),
+      action: {
+        label: t('common:toast.modelNoVision.action'),
+        onClick: () => router.navigate({ to: route.hub.index }),
+      },
     })
-  }, [t])
+  }, [t, router])
 
   const handleImagePickerClick = async () => {
     if (hasMmproj) {
@@ -1525,6 +1530,15 @@ const ChatInput = memo(function ChatInput({
       console.log(
         'No image data found in clipboard, allowing normal text paste'
       )
+    } else {
+      // Match the picker and drop paths: surface the notice when the
+      // clipboard holds an image; no preventDefault so text still pastes.
+      const hasImageInClipboard = Array.from(e.clipboardData?.items ?? []).some(
+        (item) => item.type.startsWith('image/')
+      )
+      if (hasImageInClipboard) {
+        notifyModelLacksVision()
+      }
     }
     // If hasMmproj is false or no images found, allow normal text pasting to continue
   }

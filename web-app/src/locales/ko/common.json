@@ -487,7 +487,8 @@
     },
     "modelNoVision": {
       "title": "모델이 이미지를 지원하지 않습니다",
-      "description": "이미지를 첨부하려면 비전 지원 모델을 선택하세요."
+      "description": "이미지를 첨부하려면 비전 지원 모델을 선택하세요.",
+      "action": "허브 열기"
     },
     "downloadAndVerificationComplete": {
       "title": "다운로드 완료",

@@ -459,7 +459,8 @@
     },
     "modelNoVision": {
       "title": "目前模型不支援圖片",
-      "description": "請選擇支援視覺能力的模型後再新增圖片。"
+      "description": "請選擇支援視覺能力的模型後再新增圖片。",
+      "action": "開啟中心"
     },
     "downloadAndVerificationComplete": {
       "title": "下載完成",

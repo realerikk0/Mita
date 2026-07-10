@@ -683,7 +683,8 @@
     },
     "modelNoVision": {
       "title": "Model Doesn't Support Images",
-      "description": "Choose a vision-capable model to attach images."
+      "description": "Choose a vision-capable model to attach images.",
+      "action": "Open Hub"
     },
     "downloadAndVerificationComplete": {
       "title": "Download Complete",

@@ -450,7 +450,8 @@
     },
     "modelNoVision": {
       "title": "Model nepodporuje obrázky",
-      "description": "Chcete-li přiložit obrázky, vyberte model s podporou vidění."
+      "description": "Chcete-li přiložit obrázky, vyberte model s podporou vidění.",
+      "action": "Otevřít Centrum"
     },
     "downloadAndVerificationComplete": {
       "title": "Stahování dokončeno",

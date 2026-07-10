@@ -394,7 +394,8 @@
     },
     "modelNoVision": {
       "title": "Model tidak mendukung gambar",
-      "description": "Pilih model dengan kemampuan visi untuk melampirkan gambar."
+      "description": "Pilih model dengan kemampuan visi untuk melampirkan gambar.",
+      "action": "Buka Hub"
     },
     "downloadAndVerificationComplete": {
       "title": "Unduhan Selesai",

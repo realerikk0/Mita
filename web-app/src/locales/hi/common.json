@@ -489,7 +489,8 @@
     },
     "modelNoVision": {
       "title": "मॉडल छवियों का समर्थन नहीं करता",
-      "description": "छवियां संलग्न करने के लिए विज़न-सक्षम मॉडल चुनें।"
+      "description": "छवियां संलग्न करने के लिए विज़न-सक्षम मॉडल चुनें।",
+      "action": "हब खोलें"
     },
     "downloadAndVerificationComplete": {
       "title": "डाउनलोड पूरा",

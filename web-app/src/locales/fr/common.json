@@ -449,7 +449,8 @@
     },
     "modelNoVision": {
       "title": "Le modèle ne prend pas en charge les images",
-      "description": "Choisissez un modèle doté de capacités de vision pour joindre des images."
+      "description": "Choisissez un modèle doté de capacités de vision pour joindre des images.",
+      "action": "Ouvrir le Hub"
     },
     "downloadAndVerificationComplete": {
       "title": "Téléchargement terminé",
