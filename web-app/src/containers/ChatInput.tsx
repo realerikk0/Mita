@@ -146,7 +146,9 @@ const ChatInput = memo(function ChatInput({
   const cancelToolCall = useAppState((state) => state.cancelToolCall)
   const currentThreadId = useThreads((state) => state.currentThreadId)
   const promptKey = useMemo(
-    () => (projectId ? `project:${projectId}` : currentThreadId ?? TEMPORARY_CHAT_ID),
+    () =>
+      currentThreadId ??
+      (projectId ? `project:${projectId}` : TEMPORARY_CHAT_ID),
     [currentThreadId, projectId]
   )
   const setActivePromptKey = usePrompt((state) => state.setActivePromptKey)
@@ -302,8 +304,7 @@ const ChatInput = memo(function ChatInput({
   const modelSupportsTools =
     selectedModel?.capabilities?.includes('tools') === true
   const canAttachDocumentFiles = !projectId || modelSupportsTools
-  const canDropFiles =
-    hasMmproj || (attachmentsEnabled && canAttachDocumentFiles)
+  const canDropFiles = hasMmproj || attachmentsEnabled
   const documentParseMode =
     !projectId && !modelSupportsTools ? 'inline' : parsePreference
 
@@ -459,6 +460,7 @@ const ChatInput = memo(function ChatInput({
           `${SESSION_STORAGE_PREFIX.INITIAL_MESSAGE}${TEMPORARY_CHAT_ID}`,
           JSON.stringify(messagePayload)
         )
+        clearAttachmentsForThread(TEMPORARY_CHAT_ID)
         if (attachments.length > 0) {
           transferAttachments(NEW_THREAD_ATTACHMENT_KEY, TEMPORARY_CHAT_ID)
         }

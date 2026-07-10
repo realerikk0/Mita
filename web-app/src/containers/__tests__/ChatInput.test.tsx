@@ -139,16 +139,21 @@ let attachmentsSettings: any = {
 const setAttachmentsMock = vi.fn()
 const clearAttachmentsMock = vi.fn()
 const transferAttachmentsMock = vi.fn()
-vi.mock('@/hooks/useChatAttachments', () => ({
-  NEW_THREAD_ATTACHMENT_KEY: '__new_thread__',
-  useChatAttachments: (selector: any) =>
-    selector({
-      getAttachments: () => attachmentsList,
-      setAttachments: setAttachmentsMock,
-      clearAttachments: clearAttachmentsMock,
-      transferAttachments: transferAttachmentsMock,
-    }),
-}))
+vi.mock('@/hooks/useChatAttachments', async (importOriginal) => {
+  const actual =
+    await importOriginal<typeof import('@/hooks/useChatAttachments')>()
+
+  return {
+    ...actual,
+    useChatAttachments: (selector: any) =>
+      selector({
+        getAttachments: () => attachmentsList,
+        setAttachments: setAttachmentsMock,
+        clearAttachments: clearAttachmentsMock,
+        transferAttachments: transferAttachmentsMock,
+      }),
+  }
+})
 
 vi.mock('@/hooks/useWebSearch', () => ({
   useWebSearch: (selector: any) =>
@@ -320,6 +325,8 @@ vi.mock('@/lib/platform/utils', () => ({
 
 // Import component AFTER all mocks
 import ChatInput from '../ChatInput'
+import { TEMPORARY_CHAT_ID } from '@/constants/chat'
+import { NEW_THREAD_ATTACHMENT_KEY } from '@/hooks/useChatAttachments'
 import { toast } from 'sonner'
 
 // Helpers -------------------------------------------------------------------
@@ -478,9 +485,16 @@ describe('ChatInput', () => {
   })
 
   it('uses a project-scoped draft key for project chat starters', () => {
+    currentThreadIdState = undefined as unknown as string
     renderInput({ projectId: 'project-1' })
 
     expect(setActivePromptKeyMock).toHaveBeenCalledWith('project:project-1')
+  })
+
+  it('keeps project thread drafts scoped to the current thread', () => {
+    renderInput({ projectId: 'project-1' })
+
+    expect(setActivePromptKeyMock).toHaveBeenCalledWith('thread-1')
   })
 
   it('submits via onSubmit prop when Enter is pressed', () => {
@@ -543,13 +557,15 @@ describe('ChatInput', () => {
       JSON.stringify({ text: 'temporary starter', files: [] })
     )
     expect(sessionStorage.getItem('initial-message-temporary')).toBeNull()
+    expect(clearAttachmentsMock).toHaveBeenCalledWith(TEMPORARY_CHAT_ID)
+    expect(transferAttachmentsMock).not.toHaveBeenCalled()
     expect(navigateMock).toHaveBeenCalledWith({
       to: '/threads/$threadId',
       params: { threadId: 'temporary-chat' },
     })
   })
 
-  it('moves temporary chat document attachments before navigating', async () => {
+  it('replaces stale temporary attachments before moving current attachments and navigating', async () => {
     currentThreadIdState = undefined as unknown as string
     activePromptKey = 'temporary-chat'
     promptState = 'temporary starter'
@@ -570,9 +586,16 @@ describe('ChatInput', () => {
       fireEvent.keyDown(getTextarea(), { key: 'Enter' })
     })
 
+    expect(clearAttachmentsMock).toHaveBeenCalledWith(TEMPORARY_CHAT_ID)
     expect(transferAttachmentsMock).toHaveBeenCalledWith(
-      '__new_thread__',
-      'temporary-chat'
+      NEW_THREAD_ATTACHMENT_KEY,
+      TEMPORARY_CHAT_ID
+    )
+    expect(clearAttachmentsMock.mock.invocationCallOrder[0]).toBeLessThan(
+      transferAttachmentsMock.mock.invocationCallOrder[0]
+    )
+    expect(transferAttachmentsMock.mock.invocationCallOrder[0]).toBeLessThan(
+      navigateMock.mock.invocationCallOrder[0]
     )
     expect(sessionStorage.getItem('temp-chat-nav')).toBeNull()
     expect(navigateMock).toHaveBeenCalledWith({
@@ -815,6 +838,35 @@ describe('ChatInput', () => {
       }),
     ])
     expect(showAttachmentPromptMock).not.toHaveBeenCalled()
+  })
+
+  it('keeps document drop feedback active in projects without tool support', async () => {
+    selectedModelOverride = {
+      id: 'model-a',
+      capabilities: ['completion'],
+      provider: 'llamacpp',
+    }
+    const txt = new File(['notes'], 'notes.txt', { type: 'text/plain' })
+    Object.defineProperty(txt, 'path', {
+      value: '/tmp/notes.txt',
+      configurable: true,
+    })
+    const { container } = renderInput({ projectId: 'project-1' })
+    const dropZone = container.querySelector('[data-drop-zone="true"]')
+
+    expect(dropZone).not.toBeNull()
+
+    await act(async () => {
+      fireEvent.drop(dropZone!, {
+        dataTransfer: {
+          files: [txt],
+        },
+      })
+    })
+
+    expect(toast.info).toHaveBeenCalledWith(
+      'Select a tool-capable model to attach documents to a project'
+    )
   })
 
   it('uses data transfer item paths when dropped document files omit them', async () => {
