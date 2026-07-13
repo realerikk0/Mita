@@ -4,6 +4,7 @@ import { localStorageKey } from '@/constants/localStorage'
 import { getServiceHub } from '@/hooks/useServiceHub'
 import { normalizeModelCapabilitiesForProvider } from '@/lib/models'
 import { modelSettings } from '@/lib/predefined'
+import { isBiyuanProvider } from '@/constants/biyuan'
 
 type ModelProviderState = {
   providers: ModelProvider[]
@@ -22,6 +23,44 @@ type ModelProviderState = {
   deleteProvider: (providerName: string) => void
   deleteModel: (modelId: string) => void
 }
+
+type ModelWithCapabilityPreference = Model & {
+  _userConfiguredCapabilities?: boolean
+}
+
+const providerBaseUrl = (provider: ModelProvider) => {
+  if (provider.base_url?.trim()) return provider.base_url
+
+  const settingValue = provider.settings?.find(
+    (setting) => setting.key === 'base-url'
+  )?.controller_props?.value
+  return typeof settingValue === 'string' ? settingValue : undefined
+}
+
+const normalizeProviderModel = (
+  provider: ModelProvider,
+  model: ModelWithCapabilityPreference
+): ModelWithCapabilityPreference => {
+  const normalizedCapabilities = normalizeModelCapabilitiesForProvider(
+    provider.provider,
+    model,
+    providerBaseUrl(provider)
+  )
+
+  return {
+    ...model,
+    ...(normalizedCapabilities
+      ? { capabilities: normalizedCapabilities }
+      : {}),
+  }
+}
+
+const normalizeProviderModels = (provider: ModelProvider): ModelProvider => ({
+  ...provider,
+  models: (provider.models || []).map((model) =>
+    normalizeProviderModel(provider, model as ModelWithCapabilityPreference)
+  ),
+})
 
 export const useModelProvider = create<ModelProviderState>()(
   persist(
@@ -44,14 +83,14 @@ export const useModelProvider = create<ModelProviderState>()(
             // Can remove after a couple of releases
             .filter((e) => e.provider !== 'llama.cpp')
             .map((provider) => {
-              return {
+              return normalizeProviderModels({
                 ...provider,
                 models: provider.models.filter(
                   (e) =>
                     ('id' in e || 'model' in e) &&
                     typeof (e.id ?? e.model) === 'string'
                 ),
-              }
+              })
             })
 
           let legacyModels: Model[] | undefined = []
@@ -73,6 +112,8 @@ export const useModelProvider = create<ModelProviderState>()(
             const existingProvider = existingProviders.find(
               (x) => x.provider === provider.provider
             )
+            const effectiveBaseUrl =
+              existingProvider?.base_url || provider.base_url
             const models = (existingProvider?.models || []).filter(
               (e) =>
                 ('id' in e || 'model' in e) &&
@@ -90,7 +131,8 @@ export const useModelProvider = create<ModelProviderState>()(
             ].map((model) => {
               const normalizedCapabilities = normalizeModelCapabilitiesForProvider(
                 provider.provider,
-                model as Model
+                model as Model,
+                effectiveBaseUrl
               )
               return {
                 ...model,
@@ -120,16 +162,21 @@ export const useModelProvider = create<ModelProviderState>()(
                 )?._userConfiguredCapabilities === true
 
               const normalizedModelCapabilities =
-                normalizeModelCapabilitiesForProvider(provider.provider, {
-                  ...model,
-                  _userConfiguredCapabilities: userConfiguredCapabilities,
-                })
+                normalizeModelCapabilitiesForProvider(
+                  provider.provider,
+                  {
+                    ...model,
+                    _userConfiguredCapabilities: userConfiguredCapabilities,
+                  },
+                  effectiveBaseUrl
+                )
 
               // When the user set tools/vision in Edit Model, honor that list on every
               // refresh from the engine; otherwise fresh engine data would re-add defaults.
               const mergedCapabilities = userConfiguredCapabilities
                 ? [...(existingModel?.capabilities || [])]
-                : provider.provider === 'jingxing' && normalizedModelCapabilities
+                : isBiyuanProvider(provider.provider, effectiveBaseUrl) &&
+                    normalizedModelCapabilities
                   ? normalizedModelCapabilities
                   : [
                       ...(model.capabilities || []),
@@ -176,13 +223,24 @@ export const useModelProvider = create<ModelProviderState>()(
               active: existingProvider ? existingProvider?.active : true,
             }
           })
+          const nextProviders = [
+            ...updatedProviders,
+            ...existingProviders.filter(
+              (e) => !updatedProviders.some((p) => p.provider === e.provider)
+            ),
+          ]
+          const selectedModel = state.selectedModel
+            ? nextProviders
+                .find(
+                  (provider) => provider.provider === state.selectedProvider
+                )
+                ?.models.find((model) => model.id === state.selectedModel?.id) ??
+              state.selectedModel
+            : null
+
           return {
-            providers: [
-              ...updatedProviders,
-              ...existingProviders.filter(
-                (e) => !updatedProviders.some((p) => p.provider === e.provider)
-              ),
-            ],
+            providers: nextProviders,
+            selectedModel,
           }
         }),
       updateProvider: (providerName, data) => {
@@ -621,9 +679,38 @@ export const useModelProvider = create<ModelProviderState>()(
             })
           })
         }
+        if (version <= 15 && state?.providers) {
+          state.providers.forEach((provider) => {
+            if (
+              !isBiyuanProvider(provider.provider, providerBaseUrl(provider)) ||
+              !provider.models
+            ) {
+              return
+            }
+
+            provider.models = provider.models.map((model) =>
+              normalizeProviderModel(
+                provider,
+                model as ModelWithCapabilityPreference
+              )
+            )
+          })
+
+          if (state.selectedModel) {
+            const selectedProvider = state.providers.find(
+              (provider) => provider.provider === state.selectedProvider
+            )
+            const restoredSelectedModel = selectedProvider?.models.find(
+              (model) => model.id === state.selectedModel?.id
+            )
+            if (restoredSelectedModel) {
+              state.selectedModel = restoredSelectedModel
+            }
+          }
+        }
         return state
       },
-      version: 15,
+      version: 16,
     }
   )
 )

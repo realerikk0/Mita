@@ -1,3 +1,5 @@
+import { isBiyuanProvider } from '@/constants/biyuan'
+
 export type ParsedProviderConnection = {
   provider: string
   name: string
@@ -16,6 +18,7 @@ export type ImportedProviderCustomHeader = {
 }
 
 const DEFAULT_PROVIDER_IMPORT_PROVIDER = 'jingxing'
+const CANONICAL_BIYUAN_PROVIDER = 'jingxing'
 
 const protectedImportedHeaderNames = new Set([
   'authorization',
@@ -216,6 +219,58 @@ export const mergeProviderCustomHeaders = (
   return merged
 }
 
+export const resolveProviderConnectionImportTarget = (
+  providers: ModelProvider[],
+  importedConnection: Pick<ParsedProviderConnection, 'provider' | 'baseUrl'>
+): {
+  providerName: string
+  existingProvider: ModelProvider | undefined
+} => {
+  const importedIsBiyuan = isBiyuanProvider(
+    importedConnection.provider,
+    importedConnection.baseUrl
+  )
+
+  if (!importedIsBiyuan) {
+    const existingProvider = providers.find(
+      (provider) => provider.provider === importedConnection.provider
+    )
+    return {
+      providerName: existingProvider?.provider ?? importedConnection.provider,
+      existingProvider,
+    }
+  }
+
+  // openai-compatible may point anywhere. Only reuse an exact-id match when
+  // its current URL is also Biyuan, so unrelated providers are not overwritten.
+  const exactProvider = providers.find(
+    (provider) =>
+      provider.provider === importedConnection.provider &&
+      isBiyuanProvider(provider.provider, provider.base_url)
+  )
+  if (exactProvider) {
+    return {
+      providerName: exactProvider.provider,
+      existingProvider: exactProvider,
+    }
+  }
+
+  const familyProvider = providers.find((provider) =>
+    isBiyuanProvider(provider.provider, provider.base_url)
+  )
+  if (familyProvider) {
+    return {
+      providerName: familyProvider.provider,
+      existingProvider: familyProvider,
+    }
+  }
+
+  return {
+    providerName: CANONICAL_BIYUAN_PROVIDER,
+    existingProvider: undefined,
+  }
+}
+
 const providerConnectionSettingMap: Record<
   string,
   keyof Pick<
@@ -260,7 +315,6 @@ export const applyProviderConnectionToProvider = (
     ...(options.active === undefined ? {} : { active: options.active }),
     settings,
     api_key: importedConnection.apiKey,
-    api_key_fallbacks: [],
     base_url: importedConnection.baseUrl,
     custom_header:
       importedHeaders.length > 0

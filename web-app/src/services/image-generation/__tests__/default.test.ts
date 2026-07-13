@@ -129,15 +129,30 @@ describe('DefaultImageGenerationService', () => {
     ])
   })
 
-  it('omits response_format for Biyuan image generation', async () => {
-    const fetchMock = vi.fn().mockResolvedValueOnce(
-      new Response(
-        JSON.stringify({
-          data: [{ b64_json: 'aGVsbG8=' }],
-        }),
-        { status: 200, headers: { 'content-type': 'application/json' } }
+  it('uses Biyuan-hosted async generation and polling without response_format', async () => {
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(
+        new Response(
+          JSON.stringify({
+            id: 'task_biyuan_1',
+            object: 'image.task',
+            status: 'queued',
+          }),
+          { status: 202, headers: { 'content-type': 'application/json' } }
+        )
       )
-    )
+      .mockResolvedValueOnce(
+        new Response(
+          JSON.stringify({
+            id: 'task_biyuan_1',
+            object: 'image.task',
+            status: 'succeeded',
+            data: [{ b64_json: 'aGVsbG8=' }],
+          }),
+          { status: 200, headers: { 'content-type': 'application/json' } }
+        )
+      )
     vi.stubGlobal('fetch', fetchMock)
 
     const service = new DefaultImageGenerationService()
@@ -154,6 +169,12 @@ describe('DefaultImageGenerationService', () => {
       mode: 'generate',
     })
 
+    expect(fetchMock.mock.calls[0][0]).toBe(
+      'https://api.biyuan.ai/v1/images/generations/async'
+    )
+    expect(fetchMock.mock.calls[1][0]).toBe(
+      'https://api.biyuan.ai/v1/images/tasks/task_biyuan_1'
+    )
     const init = fetchMock.mock.calls[0][1] as RequestInit & { body: string }
     expect(JSON.parse(init.body)).toMatchObject({
       model: 'gpt-image-2',
@@ -164,6 +185,35 @@ describe('DefaultImageGenerationService', () => {
     })
     expect(JSON.parse(init.body)).not.toHaveProperty('response_format')
     expect(result[0].b64Json).toBe('aGVsbG8=')
+  })
+
+  it('uses Biyuan async generation when the provider name is biyuan', async () => {
+    const fetchMock = vi.fn().mockResolvedValueOnce(
+      new Response(
+        JSON.stringify({ data: [{ b64_json: 'aGVsbG8=' }] }),
+        { status: 200, headers: { 'content-type': 'application/json' } }
+      )
+    )
+    vi.stubGlobal('fetch', fetchMock)
+
+    const service = new DefaultImageGenerationService()
+    await service.generateImages({
+      provider: {
+        ...provider,
+        provider: 'biyuan',
+        base_url: 'https://proxy.example.test/v1',
+      },
+      model,
+      prompt: 'moonlit desk',
+      ratio: '1:1',
+      qualityPreset: 'sd',
+      count: 1,
+      mode: 'generate',
+    })
+
+    expect(fetchMock.mock.calls[0][0]).toBe(
+      'https://proxy.example.test/v1/images/generations/async'
+    )
   })
 
   it('stops generation key fallback when provider reports quota exhaustion', async () => {
@@ -300,6 +350,45 @@ describe('DefaultImageGenerationService', () => {
       ],
     })
     expect(JSON.parse(init.body)).not.toHaveProperty('response_format')
+    expect(result[0].b64Json).toBe('aGVsbG8=')
+  })
+
+  it('uses Gemini chat completions for openai-compatible providers hosted by Biyuan', async () => {
+    const fetchMock = vi.fn().mockResolvedValueOnce(
+      new Response(
+        JSON.stringify({
+          choices: [
+            {
+              message: {
+                content: '![image](data:image/png;base64,aGVsbG8=)',
+              },
+            },
+          ],
+        }),
+        { status: 200, headers: { 'content-type': 'application/json' } }
+      )
+    )
+
+    vi.stubGlobal('fetch', fetchMock)
+
+    const service = new DefaultImageGenerationService()
+    const result = await service.generateImages({
+      provider: {
+        ...provider,
+        provider: 'openai-compatible',
+        base_url: 'https://api.biyuan.ai/v1',
+      },
+      model: geminiModel,
+      prompt: 'blue square',
+      ratio: '1:1',
+      qualityPreset: 'sd',
+      count: 1,
+      mode: 'generate',
+    })
+
+    expect(fetchMock.mock.calls[0][0]).toBe(
+      'https://api.biyuan.ai/v1/chat/completions'
+    )
     expect(result[0].b64Json).toBe('aGVsbG8=')
   })
 
@@ -465,7 +554,7 @@ describe('DefaultImageGenerationService', () => {
     expect(init.body.get('response_format')).toBe('b64_json')
   })
 
-  it('omits response_format for Biyuan non-gpt image edits', async () => {
+  it('uses Biyuan async edits while omitting response_format for non-gpt models', async () => {
     const fetchMock = vi
       .fn()
       .mockResolvedValueOnce(
@@ -477,9 +566,12 @@ describe('DefaultImageGenerationService', () => {
       .mockResolvedValueOnce(
         new Response(
           JSON.stringify({
+            id: 'task_biyuan_edit_1',
+            object: 'image.task',
+            status: 'succeeded',
             data: [{ b64_json: 'ZWRpdA==' }],
           }),
-          { status: 200, headers: { 'content-type': 'application/json' } }
+          { status: 202, headers: { 'content-type': 'application/json' } }
         )
       )
 
@@ -501,7 +593,7 @@ describe('DefaultImageGenerationService', () => {
     })
 
     expect(fetchMock.mock.calls[1][0]).toBe(
-      'https://api.biyuan.ai/v1/images/edits'
+      'https://api.biyuan.ai/v1/images/edits/async'
     )
     const init = fetchMock.mock.calls[1][1] as RequestInit & { body: FormData }
     expect(init.body.get('model')).toBe('doubao-seedream-4-5-251128')
@@ -585,6 +677,68 @@ describe('DefaultImageGenerationService', () => {
       sourceAssets: [sourceAsset],
     })
 
+    const init = fetchMock.mock.calls[1][1] as RequestInit & { body: FormData }
+    const uploaded = init.body.get('image') as File
+    expect(uploaded.name).toBe('source.png')
+    expect(uploaded.type).toBe('image/png')
+  })
+
+  it('normalizes Biyuan gpt-image reference assets before async edits', async () => {
+    const webpSourceAsset = {
+      ...sourceAsset,
+      path: 'asset://source.webp',
+      fileName: 'source.webp',
+      mimeType: 'image/webp',
+    }
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce({
+        ok: true,
+        blob: () =>
+          Promise.resolve(
+            new Blob([new Uint8Array([1, 2, 3])], { type: 'image/webp' })
+          ),
+      } as Response)
+      .mockResolvedValueOnce(
+        new Response(
+          JSON.stringify({ data: [{ b64_json: 'ZWRpdA==' }] }),
+          { status: 200, headers: { 'content-type': 'application/json' } }
+        )
+      )
+
+    vi.stubGlobal('fetch', fetchMock)
+
+    const service = new DefaultImageGenerationService()
+    const normalizeSpy = vi
+      .spyOn(
+        service as unknown as {
+          normalizeImageBlob: (blob: Blob) => Promise<Blob>
+        },
+        'normalizeImageBlob'
+      )
+      .mockResolvedValue(
+        new Blob([new Uint8Array([4, 5, 6])], { type: 'image/png' })
+      )
+
+    await service.generateImages({
+      provider: {
+        ...provider,
+        provider: 'openai-compatible',
+        base_url: 'https://api.biyuan.ai/v1',
+      },
+      model,
+      prompt: 'make it white',
+      ratio: '1:1',
+      qualityPreset: 'sd',
+      count: 1,
+      mode: 'edit',
+      sourceAssets: [webpSourceAsset],
+    })
+
+    expect(normalizeSpy).toHaveBeenCalledOnce()
+    expect(fetchMock.mock.calls[1][0]).toBe(
+      'https://api.biyuan.ai/v1/images/edits/async'
+    )
     const init = fetchMock.mock.calls[1][1] as RequestInit & { body: FormData }
     const uploaded = init.body.get('image') as File
     expect(uploaded.name).toBe('source.png')

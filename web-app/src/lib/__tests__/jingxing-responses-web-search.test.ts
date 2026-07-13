@@ -117,6 +117,40 @@ describe('canUseJingxingNativeWebSearch', () => {
     ).toBe(true)
   })
 
+  it('enables Biyuan-family providers without matching unrelated hosts', () => {
+    expect(
+      canUseJingxingNativeWebSearch({
+        providerName: 'biyuan',
+        modelId: 'gpt-5.4',
+        messages: textMessages,
+      })
+    ).toBe(true)
+    expect(
+      canUseJingxingNativeWebSearch({
+        providerName: 'openai-compatible',
+        baseUrl: 'https://api.biyuan.ai/v1',
+        modelId: 'gpt-5.4',
+        messages: textMessages,
+      })
+    ).toBe(true)
+    expect(
+      canUseJingxingNativeWebSearch({
+        providerName: 'openai-compatible',
+        baseUrl: 'https://api.biyuan.ai.example.com/v1',
+        modelId: 'gpt-5.4',
+        messages: textMessages,
+      })
+    ).toBe(false)
+    expect(
+      canUseJingxingNativeWebSearch({
+        providerName: 'third-party-biyuan-proxy',
+        baseUrl: 'https://api.example.test/v1',
+        modelId: 'gpt-5.4',
+        messages: textMessages,
+      })
+    ).toBe(false)
+  })
+
   it('builds Responses requests with dynamic unified web_search_options', () => {
     for (const modelId of ['gpt-5.4', 'grok-4.3', 'gpt-5.3-codex']) {
       const request = buildJingxingNativeWebSearchRequest({

@@ -164,6 +164,109 @@ describe('DefaultVideoGenerationService', () => {
     ])
   })
 
+  it.each([
+    [
+      'provider name',
+      {
+        ...provider,
+        provider: 'biyuan',
+        base_url: 'https://proxy.example.test/v1',
+      },
+    ],
+    [
+      'Biyuan API host',
+      {
+        ...provider,
+        provider: 'openai-compatible',
+        base_url: 'https://api.biyuan.ai/v1',
+      },
+    ],
+  ])('uses Biyuan-compatible video params for %s', async (_, providerConfig) => {
+    const fetchMock = vi.fn().mockResolvedValueOnce(
+      new Response(
+        JSON.stringify({
+          id: 'video-task-1',
+          task_id: 'video-task-1',
+          status: 'queued',
+        }),
+        { status: 202, headers: { 'content-type': 'application/json' } }
+      )
+    )
+    vi.stubGlobal('fetch', fetchMock)
+
+    const service = new DefaultVideoGenerationService()
+    await service.generateVideo({
+      provider: providerConfig as unknown as ModelProvider,
+      model,
+      prompt: 'A gold robot walks through a neon city.',
+      ratio: '16:9',
+      duration: 8,
+      resolution: '1080p',
+      fps: 24,
+      generateAudio: false,
+    })
+
+    const init = fetchMock.mock.calls[0][1] as RequestInit & { body: string }
+    expect(JSON.parse(init.body)).toMatchObject({
+      size: '1920x1080',
+      metadata: {
+        ratio: '16:9',
+        resolution: '1080p',
+        framespersecond: 24,
+      },
+    })
+  })
+
+  it.each([
+    ['ordinary provider', 'openai-compatible', 'https://api.example.test/v1'],
+    [
+      'lookalike provider name',
+      'third-party-biyuan-proxy',
+      'https://api.example.test/v1',
+    ],
+    [
+      'lookalike hostname',
+      'openai-compatible',
+      'https://api.biyuan.ai.example.com/v1',
+    ],
+  ])(
+    'does not add Biyuan-compatible video params for %s',
+    async (_, providerId, baseUrl) => {
+      const fetchMock = vi.fn().mockResolvedValueOnce(
+        new Response(
+          JSON.stringify({
+            id: 'video-task-1',
+            task_id: 'video-task-1',
+            status: 'queued',
+          }),
+          { status: 202, headers: { 'content-type': 'application/json' } }
+        )
+      )
+      vi.stubGlobal('fetch', fetchMock)
+
+      const service = new DefaultVideoGenerationService()
+      await service.generateVideo({
+        provider: {
+          ...provider,
+          provider: providerId,
+          base_url: baseUrl,
+        } as unknown as ModelProvider,
+        model,
+        prompt: 'A gold robot walks through a neon city.',
+        ratio: '16:9',
+        duration: 8,
+        resolution: '1080p',
+        fps: 24,
+        generateAudio: false,
+      })
+
+      const init = fetchMock.mock.calls[0][1] as RequestInit & { body: string }
+      const body = JSON.parse(init.body)
+      expect(body).not.toHaveProperty('size')
+      expect(body).not.toHaveProperty('metadata')
+    }
+  )
+
   it('polls wrapped Seedance-style responses and extracts the video URL', async () => {
     const fetchMock = vi.fn().mockResolvedValueOnce(
       new Response(

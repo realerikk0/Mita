@@ -7,6 +7,7 @@ import {
 import { useAssistant } from '@/hooks/useAssistant'
 import { useModelProvider } from '@/hooks/useModelProvider'
 import i18n from '@/i18n/setup'
+import { isBiyuanProvider } from '@/constants/biyuan'
 import { configuredChatModels } from '@/lib/configured-model-providers'
 import {
   defaultModel,
@@ -782,7 +783,7 @@ function buildAvailableModelOptions(): MitaTeamsModelOption[] {
           model.displayName || model.name || model.model
         ),
         nativeWebSearch:
-          provider.provider === 'jingxing' &&
+          isBiyuanProvider(provider.provider, provider.base_url) &&
           isJingxingNativeWebSearchModel(model.id),
       })
     }
@@ -791,6 +792,9 @@ function buildAvailableModelOptions(): MitaTeamsModelOption[] {
   const selectedProvider = state.selectedProvider
   const selectedModelId = state.selectedModel?.id
   if (selectedProvider && selectedModelId) {
+    const selectedProviderConfig = state.providers.find(
+      (provider) => provider.provider === selectedProvider
+    )
     const selectedKey = `${selectedProvider}:${selectedModelId}`
     const index = options.findIndex(
       (option) =>
@@ -815,7 +819,10 @@ function buildAvailableModelOptions(): MitaTeamsModelOption[] {
             state.selectedModel?.model
         ),
         nativeWebSearch:
-          selectedProvider === 'jingxing' &&
+          isBiyuanProvider(
+            selectedProvider,
+            selectedProviderConfig?.base_url
+          ) &&
           isJingxingNativeWebSearchModel(selectedModelId),
       })
     }
@@ -1136,6 +1143,7 @@ async function defaultGenerateRoleText({
     webSearch?.enabled &&
     canUseJingxingNativeWebSearch({
       providerName: resolved.providerName,
+      baseUrl: resolved.provider.base_url,
       modelId: resolved.modelId,
       messages,
     })
@@ -1514,6 +1522,7 @@ function roleNativeSearchBlockedReason(role: MitaTeamsRoleConfig): string | unde
     if (
       canUseJingxingNativeWebSearch({
         providerName: resolved.providerName,
+        baseUrl: resolved.provider.base_url,
         modelId: resolved.modelId,
         messages: rolePromptAsUiMessages('native web search capability check'),
       })

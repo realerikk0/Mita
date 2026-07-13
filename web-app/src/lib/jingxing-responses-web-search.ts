@@ -7,6 +7,7 @@ import {
   type UIMessageChunk,
 } from 'ai'
 import { fetch as httpFetch } from '@tauri-apps/plugin-http'
+import { isBiyuanProvider } from '@/constants/biyuan'
 import { isPlatformTauri } from '@/lib/platform/utils'
 import { providerRemoteApiKeyChain } from '@/lib/provider-api-keys'
 import { isJingxingNativeWebSearchModel } from '@/lib/models'
@@ -579,11 +580,12 @@ async function fetchJingxingNativeWebSearchWithKeyRotation(
 
 export function canUseJingxingNativeWebSearch(options: {
   providerName?: string
+  baseUrl?: string
   modelId?: string
   messages: UIMessage[]
 }) {
   return (
-    options.providerName === 'jingxing' &&
+    isBiyuanProvider(options.providerName, options.baseUrl) &&
     isJingxingNativeWebSearchModel(options.modelId) &&
     !options.messages.some(hasUnsupportedParts)
   )

@@ -29,6 +29,7 @@ import {
   applyProviderConnectionToProvider,
   maskProviderConnectionApiKey,
   parseProviderConnectionDeepLink,
+  resolveProviderConnectionImportTarget,
   type ParsedProviderConnection,
 } from '@/lib/provider-connection-import'
 import {
@@ -37,6 +38,7 @@ import {
   providerModelDescriptorHasMetadata,
   type ProviderModelDescriptor,
 } from '@/lib/provider-models'
+import { normalizeModelCapabilitiesForProvider } from '@/lib/models'
 import cloneDeep from 'lodash/cloneDeep'
 import { toast } from 'sonner'
 
@@ -116,10 +118,11 @@ const syncRemoteProviders = () => {
 }
 
 const createProviderForImportedConnection = (
-  importedConnection: ParsedProviderConnection
+  importedConnection: ParsedProviderConnection,
+  providerName = importedConnection.provider
 ): ModelProvider => {
   const predefinedProvider = predefinedProviders.find(
-    (provider) => provider.provider === importedConnection.provider
+    (provider) => provider.provider === providerName
   )
 
   if (predefinedProvider) {
@@ -128,7 +131,7 @@ const createProviderForImportedConnection = (
 
   return {
     active: true,
-    provider: importedConnection.provider,
+    provider: providerName,
     models: [],
     settings: cloneDeep(openAIProviderSettings) as ProviderSetting[],
     api_key: '',
@@ -140,8 +143,25 @@ const withProviderModelIds = (
   provider: ModelProvider,
   modelDescriptors: ProviderModelDescriptor[]
 ): ModelProvider => {
+  const normalizedExistingModels = provider.models.map((model) => {
+    const capabilities = normalizeModelCapabilitiesForProvider(
+      provider.provider,
+      model as Model & { _userConfiguredCapabilities?: boolean },
+      provider.base_url
+    )
+    const unchanged =
+      capabilities === undefined ||
+      (capabilities.length === (model.capabilities || []).length &&
+        capabilities.every(
+          (capability, index) => capability === model.capabilities?.[index]
+        ))
+
+    return unchanged ? model : { ...model, capabilities }
+  })
   const fetchedModels = modelDescriptors
-    .map((descriptor) => modelDescriptorToModel(provider.provider, descriptor))
+    .map((descriptor) =>
+      modelDescriptorToModel(provider.provider, descriptor, provider.base_url)
+    )
     .filter((model): model is Model => Boolean(model))
   const fetchedById = new Map(fetchedModels.map((model) => [model.id, model]))
   const metadataModelIds = new Set(
@@ -149,8 +169,8 @@ const withProviderModelIds = (
       .filter(providerModelDescriptorHasMetadata)
       .map(modelIdFromDescriptor)
   )
-  const existingIds = new Set(provider.models.map((model) => model.id))
-  const updatedExistingModels = provider.models.map((model) => {
+  const existingIds = new Set(normalizedExistingModels.map((model) => model.id))
+  const updatedExistingModels = normalizedExistingModels.map((model) => {
     const fetched = fetchedById.get(model.id)
     return fetched && metadataModelIds.has(model.id)
       ? { ...model, ...fetched, settings: model.settings }
@@ -298,9 +318,14 @@ export function DataProvider() {
     let refreshFailed = false
 
     try {
-      const existingProvider = getProviderByName(pendingProviderImport.provider)
+      const { existingProvider, providerName } =
+        resolveProviderConnectionImportTarget(
+          useModelProvider.getState().providers,
+          pendingProviderImport
+        )
       const targetProvider =
-        existingProvider ?? createProviderForImportedConnection(pendingProviderImport)
+        existingProvider ??
+        createProviderForImportedConnection(pendingProviderImport, providerName)
       let importedProvider = applyProviderConnectionToProvider(
         targetProvider,
         pendingProviderImport,
@@ -357,7 +382,6 @@ export function DataProvider() {
     }
   }, [
     addProvider,
-    getProviderByName,
     pendingProviderImport,
     selectModelProvider,
     serviceHub,

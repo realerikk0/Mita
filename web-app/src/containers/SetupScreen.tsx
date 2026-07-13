@@ -198,7 +198,8 @@ function SetupScreen() {
         .fetchModelsFromProvider(providerWithKey)
       const models = modelDescriptorsToModels(
         provider.provider,
-        modelDescriptors
+        modelDescriptors,
+        providerWithKey.base_url
       )
 
       if (models.length === 0) {

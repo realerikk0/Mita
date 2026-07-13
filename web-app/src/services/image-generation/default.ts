@@ -1,11 +1,15 @@
 import {
+  BIYUAN_DEFAULT_BASE_URL,
+  isBiyuanPrimaryApiHost,
+  isBiyuanProvider as isBiyuanProviderConfig,
+} from '@/constants/biyuan'
+import {
   apiQualityForImageEditPreset,
   apiQualityForPreset,
   arrayBufferToBase64,
   imageEditSizeForRatio,
   imageFileExtension,
   imageSizeForRatio,
-  isJingxingImageProvider,
   isGptImageModel,
   parseDataUrl,
 } from '@/lib/image-generation'
@@ -82,8 +86,8 @@ type JsonResponseResult = {
 }
 
 const RETRYABLE_KEY_STATUSES = [401, 403, 429]
-const JINGXING_TASK_POLL_INTERVAL_MS = 2500
-const JINGXING_TASK_TIMEOUT_MS = 600_000
+const BIYUAN_TASK_POLL_INTERVAL_MS = 2500
+const BIYUAN_TASK_TIMEOUT_MS = 600_000
 
 export class DefaultImageGenerationService implements ImageGenerationService {
   protected fetch(): typeof globalThis.fetch {
@@ -95,8 +99,8 @@ export class DefaultImageGenerationService implements ImageGenerationService {
   }
 
   async generateImages(request: ImageGenerationRequest): Promise<ImageApiImage[]> {
-    if (this.shouldUseJingxingGeminiChatCompletions(request)) {
-      return this.generateJingxingGeminiChatImages(request)
+    if (this.shouldUseBiyuanGeminiChatCompletions(request)) {
+      return this.generateBiyuanGeminiChatImages(request)
     }
 
     const endpoint = this.endpointForMode(request)
@@ -106,15 +110,15 @@ export class DefaultImageGenerationService implements ImageGenerationService {
         request,
         this.generationBody(request)
       )
-      const response = this.shouldPollJingxingImageTask(request, json)
-        ? await this.pollJingxingImageTask(request, json, apiKey)
+      const response = this.shouldPollBiyuanImageTask(request, json)
+        ? await this.pollBiyuanImageTask(request, json, apiKey)
         : json
       return this.parseImageResponse(response, request, apiKey)
     }
 
     const { json, apiKey } = await this.postForm(endpoint, request)
-    const response = this.shouldPollJingxingImageTask(request, json)
-      ? await this.pollJingxingImageTask(request, json, apiKey)
+    const response = this.shouldPollBiyuanImageTask(request, json)
+      ? await this.pollBiyuanImageTask(request, json, apiKey)
       : json
     return this.parseImageResponse(response, request, apiKey)
   }
@@ -159,14 +163,14 @@ export class DefaultImageGenerationService implements ImageGenerationService {
     const normalizedBase = baseUrl.replace(/\/$/, '')
     const endpoint =
       request.mode === 'generate'
-        ? this.shouldUseJingxingAsyncGeneration(request)
+        ? this.shouldUseBiyuanAsyncGeneration(request)
           ? '/images/generations/async'
           : '/images/generations'
-        : this.shouldUseJingxingAsyncEdit(request)
+        : this.shouldUseBiyuanAsyncEdit(request)
           ? '/images/edits/async'
-        : request.mode === 'variation'
-          ? '/images/variations'
-          : '/images/edits'
+          : request.mode === 'variation'
+            ? '/images/variations'
+            : '/images/edits'
     return `${normalizedBase}${endpoint}`
   }
 
@@ -187,61 +191,54 @@ export class DefaultImageGenerationService implements ImageGenerationService {
   }
 
   private shouldRequestJsonResponseFormat(provider: ModelProvider) {
-    const baseUrl = provider.base_url?.toLowerCase() ?? ''
-    return (
-      !this.isJingxingProvider(provider) && !baseUrl.includes('api.biyuan.ai')
-    )
+    return !this.isBiyuanProvider(provider)
   }
 
   private shouldRequestFormResponseFormat(request: ImageGenerationRequest) {
     return (
       !isGptImageModel(request.model.id) &&
-      !this.isBiyuanProvider(request.provider)
+      !isBiyuanPrimaryApiHost(request.provider.base_url)
     )
   }
 
   private isBiyuanProvider(provider: ModelProvider) {
-    return provider.base_url?.toLowerCase().includes('api.biyuan.ai') ?? false
+    return isBiyuanProviderConfig(provider.provider, provider.base_url)
   }
 
-  private isJingxingProvider(provider: ModelProvider) {
-    return isJingxingImageProvider(provider.provider, provider.base_url)
-  }
-
-  private isJingxingGeminiImageModel(model: Model) {
+  private isBiyuanGeminiImageModel(model: Model) {
     const id = model.id.toLowerCase()
     return id.startsWith('gemini-') && id.includes('image')
   }
 
-  private shouldUseJingxingGeminiChatCompletions(
+  private shouldUseBiyuanGeminiChatCompletions(
     request: ImageGenerationRequest
   ) {
     return (
-      this.isJingxingProvider(request.provider) &&
-      this.isJingxingGeminiImageModel(request.model)
+      this.isBiyuanProvider(request.provider) &&
+      this.isBiyuanGeminiImageModel(request.model)
     )
   }
 
-  private shouldUseJingxingAsyncGeneration(request: ImageGenerationRequest) {
+  private shouldUseBiyuanAsyncGeneration(request: ImageGenerationRequest) {
     return (
-      this.isJingxingProvider(request.provider) &&
-      !this.isJingxingGeminiImageModel(request.model)
+      this.isBiyuanProvider(request.provider) &&
+      !this.isBiyuanGeminiImageModel(request.model)
     )
   }
 
-  private shouldUseJingxingAsyncEdit(request: ImageGenerationRequest) {
+  private shouldUseBiyuanAsyncEdit(request: ImageGenerationRequest) {
     return (
       request.mode !== 'generate' &&
-      this.isJingxingProvider(request.provider) &&
-      !this.isJingxingGeminiImageModel(request.model) &&
+      this.isBiyuanProvider(request.provider) &&
+      !this.isBiyuanGeminiImageModel(request.model) &&
       (request.sourceAssets?.length ?? 0) > 0
     )
   }
 
-  private async generateJingxingGeminiChatImages(
+  private async generateBiyuanGeminiChatImages(
     request: ImageGenerationRequest
   ) {
-    const endpoint = this.jingxingChatCompletionsEndpoint(request)
+    const endpoint = this.biyuanChatCompletionsEndpoint(request)
     const requestedCount = Math.max(1, request.count)
     const images: ImageApiImage[] = []
 
@@ -249,7 +246,7 @@ export class DefaultImageGenerationService implements ImageGenerationService {
       const { json, apiKey } = await this.postJson(
         endpoint,
         request,
-        await this.jingxingGeminiChatBody(request)
+        await this.biyuanGeminiChatBody(request)
       )
       images.push(...(await this.parseImageResponse(json, request, apiKey)))
     }
@@ -257,14 +254,14 @@ export class DefaultImageGenerationService implements ImageGenerationService {
     return images.slice(0, requestedCount)
   }
 
-  private jingxingChatCompletionsEndpoint(request: ImageGenerationRequest) {
-    const baseUrl = request.provider.base_url || 'https://api.jingxing.uk/v1'
+  private biyuanChatCompletionsEndpoint(request: ImageGenerationRequest) {
+    const baseUrl = request.provider.base_url || BIYUAN_DEFAULT_BASE_URL
     return `${baseUrl.replace(/\/$/, '')}/chat/completions`
   }
 
-  private async jingxingGeminiChatBody(request: ImageGenerationRequest) {
+  private async biyuanGeminiChatBody(request: ImageGenerationRequest) {
     const sourceAssets = request.sourceAssets ?? []
-    const prompt = this.jingxingGeminiPrompt(request)
+    const prompt = this.biyuanGeminiPrompt(request)
     const text = `${prompt}\n\nAspect ratio: ${request.ratio}. Quality: ${
       request.qualityPreset === 'hd' ? 'HD' : 'SD'
     }. Return the generated image directly as a Markdown data URL.`
@@ -293,7 +290,7 @@ export class DefaultImageGenerationService implements ImageGenerationService {
     }
   }
 
-  private jingxingGeminiPrompt(request: ImageGenerationRequest) {
+  private biyuanGeminiPrompt(request: ImageGenerationRequest) {
     const prompt = request.prompt.trim()
     if (prompt) return prompt
 
@@ -480,7 +477,7 @@ export class DefaultImageGenerationService implements ImageGenerationService {
     form.append('model', request.model.id)
     const prompt =
       request.prompt.trim() ||
-      (this.shouldUseJingxingAsyncEdit(request) && request.mode === 'variation'
+      (this.shouldUseBiyuanAsyncEdit(request) && request.mode === 'variation'
         ? 'Create a fresh variation of this image.'
         : '')
     if (prompt) form.append('prompt', prompt)
@@ -549,7 +546,7 @@ export class DefaultImageGenerationService implements ImageGenerationService {
     blob: Blob
   ) {
     return (
-      this.isJingxingProvider(request.provider) &&
+      this.isBiyuanProvider(request.provider) &&
       isGptImageModel(request.model.id) &&
       request.sourceAssets !== undefined &&
       request.sourceAssets.length > 0 &&
@@ -691,19 +688,19 @@ export class DefaultImageGenerationService implements ImageGenerationService {
     })
   }
 
-  private shouldPollJingxingImageTask(
+  private shouldPollBiyuanImageTask(
     request: ImageGenerationRequest,
     response: RawImageResponse
   ) {
     return (
-      this.isJingxingProvider(request.provider) &&
+      this.isBiyuanProvider(request.provider) &&
       response.object === 'image.task' &&
       Boolean(response.id) &&
       this.imageItemsFromResponse(response).length === 0
     )
   }
 
-  private async pollJingxingImageTask(
+  private async pollBiyuanImageTask(
     request: ImageGenerationRequest,
     initialResponse: RawImageResponse,
     apiKey?: string
@@ -711,11 +708,11 @@ export class DefaultImageGenerationService implements ImageGenerationService {
     const taskId = initialResponse.id
     if (!taskId) return initialResponse
 
-    const taskEndpoint = this.jingxingTaskEndpoint(request, taskId)
+    const taskEndpoint = this.biyuanTaskEndpoint(request, taskId)
     const startedAt = Date.now()
     let currentApiKey = apiKey
 
-    while (Date.now() - startedAt <= JINGXING_TASK_TIMEOUT_MS) {
+    while (Date.now() - startedAt <= BIYUAN_TASK_TIMEOUT_MS) {
       this.throwIfAborted(request.signal)
       let result: JsonResponseResult
       try {
@@ -723,7 +720,7 @@ export class DefaultImageGenerationService implements ImageGenerationService {
       } catch (error) {
         if (providerQuotaErrorFromUnknown(error)) throw error
         if (this.isAbortError(error)) throw error
-        await this.sleep(JINGXING_TASK_POLL_INTERVAL_MS, request.signal)
+        await this.sleep(BIYUAN_TASK_POLL_INTERVAL_MS, request.signal)
         continue
       }
       currentApiKey = result.apiKey
@@ -735,7 +732,7 @@ export class DefaultImageGenerationService implements ImageGenerationService {
       }
 
       if (status === 'succeeded') {
-        const contentItems = await this.fetchJingxingTaskContents(
+        const contentItems = await this.fetchBiyuanTaskContents(
           request,
           taskId,
           currentApiKey
@@ -755,26 +752,26 @@ export class DefaultImageGenerationService implements ImageGenerationService {
         throw new Error(this.imageTaskFailureMessage(taskId, response))
       }
 
-      await this.sleep(JINGXING_TASK_POLL_INTERVAL_MS, request.signal)
+      await this.sleep(BIYUAN_TASK_POLL_INTERVAL_MS, request.signal)
     }
 
     throw new Error(
-      `Image task ${taskId} did not finish within ${JINGXING_TASK_TIMEOUT_MS / 1000}s`
+      `Image task ${taskId} did not finish within ${BIYUAN_TASK_TIMEOUT_MS / 1000}s`
     )
   }
 
-  private jingxingTaskEndpoint(request: ImageGenerationRequest, taskId: string) {
-    const baseUrl = request.provider.base_url || 'https://api.jingxing.uk/v1'
+  private biyuanTaskEndpoint(request: ImageGenerationRequest, taskId: string) {
+    const baseUrl = request.provider.base_url || BIYUAN_DEFAULT_BASE_URL
     return `${baseUrl.replace(/\/$/, '')}/images/tasks/${encodeURIComponent(taskId)}`
   }
 
-  private async fetchJingxingTaskContents(
+  private async fetchBiyuanTaskContents(
     request: ImageGenerationRequest,
     taskId: string,
     apiKey?: string
   ) {
     const items: RawImageItem[] = []
-    const taskEndpoint = this.jingxingTaskEndpoint(request, taskId)
+    const taskEndpoint = this.biyuanTaskEndpoint(request, taskId)
 
     for (let index = 0; index < request.count; index++) {
       const response = await this.getBinary(

@@ -51,7 +51,11 @@ export const DialogAddModel = ({ provider, trigger }: DialogAddModelProps) => {
       id: modelId,
       model: modelId,
       name: modelId,
-      capabilities: getModelCapabilities(provider.provider, modelId),
+      capabilities: getModelCapabilities(
+        provider.provider,
+        modelId,
+        provider.base_url
+      ),
       version: '1.0',
     }
 

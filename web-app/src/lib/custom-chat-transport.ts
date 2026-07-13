@@ -37,6 +37,7 @@ import { isArchivedCompactMessage } from './compact-thread'
 import { mcpOrchestrator } from '@/lib/mcp-orchestrator'
 import { isRouterModelSelectable } from '@/lib/mcp-router-model-filter'
 import { isBrowserMCPServerName } from '@/constants/mcp'
+import { isBiyuanProvider } from '@/constants/biyuan'
 import { useWebSearch } from '@/hooks/useWebSearch'
 import {
   canUseJingxingNativeWebSearch,
@@ -611,8 +612,12 @@ export class CustomChatTransport implements ChatTransport<UIMessage> {
       const n = typeof raw === 'number' ? raw : Number(raw)
       return isNaN(n) ? undefined : n
     })()
+    const isBiyuanFamilyProvider = isBiyuanProvider(
+      providerId,
+      effectiveProvider.base_url
+    )
     const maxOutputTokens = getProtectedMaxOutputTokens(
-      providerId === 'jingxing' ? modelId : undefined,
+      isBiyuanFamilyProvider ? modelId : undefined,
       configuredMaxOutputTokens
     )
 
@@ -684,7 +689,7 @@ export class CustomChatTransport implements ChatTransport<UIMessage> {
     const modelSupportsTools = this.currentModelSupportsTools()
     const shouldEnableTools = hasTools && modelSupportsTools
     const responsesChatEnabled =
-      providerId === 'jingxing' &&
+      isBiyuanFamilyProvider &&
       modelRequiresResponsesEndpoint(modelId, selectedModel)
     const streamTextToolsEnabled = shouldEnableTools && !responsesChatEnabled
     const webSearchState = useWebSearch.getState()
@@ -700,6 +705,7 @@ export class CustomChatTransport implements ChatTransport<UIMessage> {
       searchDecision.enabled &&
       canUseJingxingNativeWebSearch({
         providerName: providerId,
+        baseUrl: effectiveProvider.base_url,
         modelId,
         messages: mappedMessages,
       })
