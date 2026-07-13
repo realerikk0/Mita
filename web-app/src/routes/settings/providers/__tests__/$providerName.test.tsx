@@ -542,7 +542,7 @@ describe('ProviderDetail route', () => {
         'openai',
         expect.objectContaining({
           api_key: 'sk-imported',
-          api_key_fallbacks: [],
+          api_key_fallbacks: ['sk-fallback-1'],
           base_url: 'https://api.example.com/v1',
           custom_header: [
             {
@@ -578,7 +578,7 @@ describe('ProviderDetail route', () => {
         'openai',
         expect.objectContaining({
           api_key: 'sk-legacy',
-          api_key_fallbacks: [],
+          api_key_fallbacks: ['sk-fallback-1'],
           base_url: 'https://legacy.example.com',
         })
       )

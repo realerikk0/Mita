@@ -12,6 +12,12 @@ import {
   normalizeModelCapabilitiesForProvider,
 } from '../models'
 import { ModelCapabilities } from '@/types/models'
+import {
+  isBiyuanApiHost,
+  isBiyuanPrimaryApiHost,
+  isBiyuanProvider,
+  isBiyuanProviderName,
+} from '@/constants/biyuan'
 
 // Mock the token.js module
 vi.mock('token.js', () => ({
@@ -497,6 +503,106 @@ describe('getModelCapabilities', () => {
 
     expect(
       normalizeModelCapabilitiesForProvider('jingxing', {
+        id: 'gpt-image-2',
+        capabilities: [ModelCapabilities.COMPLETION],
+        _userConfiguredCapabilities: true,
+      })
+    ).toEqual([ModelCapabilities.COMPLETION])
+  })
+
+  it('treats Biyuan provider names and exact API hosts as one provider family', () => {
+    expect(isBiyuanProviderName('jingxing')).toBe(true)
+    expect(isBiyuanProviderName('biyuan')).toBe(true)
+    expect(isBiyuanProviderName('BIYUAN')).toBe(true)
+    expect(isBiyuanProviderName('openai-compatible')).toBe(false)
+
+    expect(
+      isBiyuanProvider('openai-compatible', 'https://api.biyuan.ai/v1')
+    ).toBe(true)
+    expect(isBiyuanProvider('custom', 'https://api.jingxing.io/v1')).toBe(true)
+    expect(isBiyuanProvider('custom', 'https://api.jingxing.uk/v1')).toBe(true)
+    expect(isBiyuanProvider('custom', 'https://jingxing.io/v1')).toBe(true)
+    expect(isBiyuanApiHost('api.biyuan.ai/v1')).toBe(true)
+    expect(isBiyuanPrimaryApiHost('https://api.biyuan.ai/v1')).toBe(true)
+    expect(isBiyuanPrimaryApiHost('https://api.jingxing.uk/v1')).toBe(false)
+  })
+
+  it('does not classify lookalike or ordinary OpenAI-compatible hosts as Biyuan', () => {
+    for (const baseUrl of [
+      'https://api.biyuan.ai.example.com/v1',
+      'https://jingxing.io.example.com/v1',
+      'https://example.com/api.biyuan.ai/v1',
+      'https://api.example.test/v1',
+      'not a valid URL',
+    ]) {
+      expect(isBiyuanProvider('openai-compatible', baseUrl)).toBe(false)
+    }
+  })
+
+  it('infers the same image capabilities for Biyuan names and hosted compatible providers', () => {
+    const expected = [
+      ModelCapabilities.IMAGE_GENERATION,
+      ModelCapabilities.TEXT_TO_IMAGE,
+      ModelCapabilities.IMAGE_TO_IMAGE,
+    ]
+
+    expect(getModelCapabilities('jingxing', 'gpt-image-2')).toEqual(expected)
+    expect(getModelCapabilities('biyuan', 'gpt-image-2')).toEqual(expected)
+    expect(
+      getModelCapabilities(
+        'openai-compatible',
+        'gpt-image-2',
+        'https://api.biyuan.ai/v1'
+      )
+    ).toEqual(expected)
+  })
+
+  it('does not infer Biyuan image capabilities for ordinary compatible providers or chat models', () => {
+    expect(
+      getModelCapabilities(
+        'openai-compatible',
+        'gpt-image-2',
+        'https://api.example.test/v1'
+      )
+    ).toEqual([ModelCapabilities.COMPLETION])
+
+    for (const modelId of ['gpt-4o', 'gpt-5.4']) {
+      const capabilities = getModelCapabilities('biyuan', modelId)
+      expect(capabilities).not.toContain(ModelCapabilities.IMAGE_GENERATION)
+      expect(capabilities).not.toContain(ModelCapabilities.TEXT_TO_IMAGE)
+      expect(capabilities).not.toContain(ModelCapabilities.IMAGE_TO_IMAGE)
+    }
+  })
+
+  it('normalizes persisted Biyuan-family image models without overriding user choices', () => {
+    expect(
+      normalizeModelCapabilitiesForProvider('biyuan', {
+        id: 'gpt-image-2',
+        capabilities: [ModelCapabilities.COMPLETION],
+      })
+    ).toEqual([
+      ModelCapabilities.IMAGE_GENERATION,
+      ModelCapabilities.TEXT_TO_IMAGE,
+      ModelCapabilities.IMAGE_TO_IMAGE,
+    ])
+
+    expect(
+      normalizeModelCapabilitiesForProvider(
+        'openai-compatible',
+        {
+          id: 'gpt-image-2',
+          capabilities: [ModelCapabilities.COMPLETION],
+        },
+        'https://api.biyuan.ai/v1'
+      )
+    ).toEqual([
+      ModelCapabilities.IMAGE_GENERATION,
+      ModelCapabilities.TEXT_TO_IMAGE,
+      ModelCapabilities.IMAGE_TO_IMAGE,
+    ])
+
+    expect(
+      normalizeModelCapabilitiesForProvider('biyuan', {
         id: 'gpt-image-2',
         capabilities: [ModelCapabilities.COMPLETION],
         _userConfiguredCapabilities: true,

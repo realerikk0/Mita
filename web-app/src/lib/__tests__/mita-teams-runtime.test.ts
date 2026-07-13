@@ -1438,8 +1438,9 @@ describe('mita teams runtime', () => {
       providers: [
         {
           active: true,
-          provider: 'jingxing',
-          api_key: 'sk-jingxing',
+          provider: 'biyuan',
+          base_url: 'https://api.biyuan.ai/v1',
+          api_key: 'sk-biyuan',
           settings: [],
           models: [
             { id: 'claude-opus-4-7', displayName: 'Claude Opus' },
@@ -1451,7 +1452,7 @@ describe('mita teams runtime', () => {
           ],
         },
       ],
-      selectedProvider: 'jingxing',
+      selectedProvider: 'biyuan',
       selectedModel: {
         id: 'claude-opus-4-7',
         displayName: 'Claude Opus',
@@ -1461,7 +1462,7 @@ describe('mita teams runtime', () => {
     try {
       const config = {
         ...createDefaultMitaTeamsConfig({
-          provider: 'jingxing',
+          provider: 'biyuan',
           id: 'claude-opus-4-7',
         }),
         // Pre-accept the scenario so this test exercises the playbook itself,

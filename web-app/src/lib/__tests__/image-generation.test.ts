@@ -45,6 +45,7 @@ describe('image generation helpers', () => {
             id: 'mai-image-2-5',
             capabilities: [ModelCapabilities.IMAGE_GENERATION],
           },
+          { id: 'gpt-4o', capabilities: [ModelCapabilities.COMPLETION] },
           { id: 'gpt-5.4', capabilities: [ModelCapabilities.COMPLETION] },
         ],
       },
@@ -56,6 +57,84 @@ describe('image generation helpers', () => {
     expect(getImageModels(providers).map(({ model }) => model.id)).toContain(
       'gemini-2.5-flash-image'
     )
+    expect(getImageModels(providers).map(({ model }) => model.id)).not.toContain(
+      'gpt-4o'
+    )
+    expect(getImageModels(providers).map(({ model }) => model.id)).not.toContain(
+      'gpt-5.4'
+    )
+  })
+
+  it.each([
+    ['jingxing', 'https://api.jingxing.uk/v1'],
+    ['biyuan', 'https://api.biyuan.ai/v1'],
+    ['openai-compatible', 'https://api.biyuan.ai/v1'],
+  ])(
+    'sorts %s Biyuan-family image models with the same priority',
+    (providerId, baseUrl) => {
+      const providers = [
+        {
+          provider: providerId,
+          base_url: baseUrl,
+          models: [
+            {
+              id: 'gemini-2.5-flash-image',
+              capabilities: [ModelCapabilities.IMAGE_GENERATION],
+            },
+            { id: 'gpt-5.4', capabilities: [ModelCapabilities.COMPLETION] },
+            {
+              id: 'mai-image-2-5',
+              capabilities: [ModelCapabilities.IMAGE_GENERATION],
+            },
+            {
+              id: 'gpt-image-2',
+              capabilities: [ModelCapabilities.IMAGE_GENERATION],
+            },
+            { id: 'gpt-4o', capabilities: [ModelCapabilities.COMPLETION] },
+            {
+              id: 'gpt-image-1.5',
+              capabilities: [ModelCapabilities.IMAGE_GENERATION],
+            },
+          ],
+        },
+      ] as ModelProvider[]
+
+      expect(getImageModels(providers).map(({ model }) => model.id)).toEqual([
+        'gpt-image-1.5',
+        'gpt-image-2',
+        'mai-image-2-5',
+        'gemini-2.5-flash-image',
+      ])
+    }
+  )
+
+  it('keeps ordinary openai-compatible image model ordering unchanged', () => {
+    const providers = [
+      {
+        provider: 'openai-compatible',
+        base_url: 'https://api.example.test/v1',
+        models: [
+          {
+            id: 'gemini-2.5-flash-image',
+            capabilities: [ModelCapabilities.IMAGE_GENERATION],
+          },
+          {
+            id: 'gpt-image-2',
+            capabilities: [ModelCapabilities.IMAGE_GENERATION],
+          },
+          {
+            id: 'gpt-image-1.5',
+            capabilities: [ModelCapabilities.IMAGE_GENERATION],
+          },
+        ],
+      },
+    ] as ModelProvider[]
+
+    expect(getImageModels(providers).map(({ model }) => model.id)).toEqual([
+      'gemini-2.5-flash-image',
+      'gpt-image-2',
+      'gpt-image-1.5',
+    ])
   })
 
   it('maps gpt-image models to supported fixed sizes and falls back otherwise', () => {
@@ -124,11 +203,35 @@ describe('image generation helpers', () => {
     ).toBe('medium')
     expect(
       apiQualityForImageEditPreset(
-        'sd',
+        'hd',
         'gpt-image-2',
         'openai-compatible',
         'https://api.example.test/v1'
       )
+    ).toBe('high')
+    expect(
+      apiQualityForImageEditPreset(
+        'hd',
+        'gpt-image-2',
+        'biyuan',
+        'https://proxy.example.test/v1'
+      )
     ).toBe('medium')
+    expect(
+      apiQualityForImageEditPreset(
+        'hd',
+        'gpt-image-2',
+        'openai-compatible',
+        'https://api.biyuan.ai/v1'
+      )
+    ).toBe('medium')
+    expect(
+      imageEditSizeForRatio(
+        '3:4',
+        'gpt-image-1.5',
+        'biyuan',
+        'https://proxy.example.test/v1'
+      )
+    ).toBe('1024x1792')
   })
 })

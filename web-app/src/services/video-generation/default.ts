@@ -1,3 +1,4 @@
+import { isBiyuanProvider } from '@/constants/biyuan'
 import { arrayBufferToBase64 } from '@/lib/image-generation'
 import { providerRemoteApiKeyChain } from '@/lib/provider-api-keys'
 import {
@@ -273,16 +274,7 @@ export class DefaultVideoGenerationService implements VideoGenerationService {
   }
 
   private usesJingxingCompatibleVideoParams(provider: ModelProvider) {
-    const providerId = provider.provider?.toLowerCase() ?? ''
-    const baseUrl = provider.base_url?.toLowerCase() ?? ''
-    return (
-      providerId.includes('jingxing') ||
-      providerId.includes('biyuan') ||
-      baseUrl.includes('api.jingxing.') ||
-      baseUrl.includes('jingxing.io') ||
-      baseUrl.includes('api.biyuan.ai') ||
-      baseUrl.includes('biyuan.ai')
-    )
+    return isBiyuanProvider(provider.provider, provider.base_url)
   }
 
   private videoSizeFor(resolution: VideoResolution, ratio: string) {

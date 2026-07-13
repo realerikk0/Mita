@@ -69,6 +69,7 @@ import { fetch as fetchTauri } from '@tauri-apps/plugin-http'
 import { EngineManager } from '@janhq/core'
 import { ExtensionManager } from '@/lib/extension'
 import { providerRemoteApiKeyChain } from '@/lib/provider-api-keys'
+import { getModelCapabilities } from '@/lib/models'
 import { ProviderQuotaError } from '@/lib/provider-quota-error'
 import { TauriProvidersService } from '../tauri'
 
@@ -87,6 +88,25 @@ describe('TauriProvidersService', () => {
   })
 
   describe('getProviders', () => {
+    it('passes each builtin provider base URL into capability inference', async () => {
+      vi.mocked(EngineManager.instance).mockReturnValue({
+        engines: new Map(),
+      } as any)
+
+      await svc.getProviders()
+
+      expect(getModelCapabilities).toHaveBeenCalledWith(
+        'openai',
+        'gpt-4',
+        'https://api.openai.com/v1'
+      )
+      expect(getModelCapabilities).toHaveBeenCalledWith(
+        'openai',
+        'gpt-3.5-turbo',
+        'https://api.openai.com/v1'
+      )
+    })
+
     it('returns builtin + runtime providers on success', async () => {
       const mockEngine = {
         list: vi.fn().mockResolvedValue([
@@ -478,6 +498,22 @@ describe('TauriProvidersService', () => {
       base_url: 'https://api.biyuan.ai/v1',
       active: true,
     } as any
+
+    it('recognizes a compatible provider on the legacy jingxing.io root host', async () => {
+      vi.mocked(providerRemoteApiKeyChain).mockReturnValue([])
+
+      const result = await svc.fetchProviderBalance({
+        provider: 'openai-compatible',
+        base_url: 'https://jingxing.io/v1',
+        active: true,
+      } as any)
+
+      expect(result).toMatchObject({
+        state: 'needs_extra_auth',
+        provider: 'openai-compatible',
+        reason: 'Enter a Biyuan API key to query account balance.',
+      })
+    })
 
     it('uses Biyuan account.total_available as the real account balance', async () => {
       vi.mocked(providerRemoteApiKeyChain).mockReturnValue(['sk-test'])

@@ -474,7 +474,11 @@ function ProviderDetail() {
         .fetchModelsFromProvider(provider)
 
       // Create new models from the fetched descriptors
-      const newModels = modelDescriptorsToModels(providerName, modelDescriptors)
+      const newModels = modelDescriptorsToModels(
+        providerName,
+        modelDescriptors,
+        provider.base_url
+      )
 
       // Filter out models that already exist
       const existingModelIds = provider.models.map((m) => m.id)

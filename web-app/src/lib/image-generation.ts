@@ -1,3 +1,4 @@
+import { isBiyuanProvider } from '@/constants/biyuan'
 import { ModelCapabilities } from '@/types/models'
 
 export const IMAGE_RATIOS = [
@@ -37,7 +38,7 @@ const LEGACY_SIZE_BY_RATIO: Record<ImageRatio, string> = {
   '16:9': '1536x1024',
 }
 
-const JINGXING_LEGACY_EDIT_SIZE_BY_RATIO: Record<ImageRatio, string> = {
+const BIYUAN_LEGACY_EDIT_SIZE_BY_RATIO: Record<ImageRatio, string> = {
   '21:9': '1792x1024',
   '9:16': '1024x1792',
   '4:3': '1792x1024',
@@ -65,7 +66,7 @@ export function isImageEditModel(model?: Pick<Model, 'capabilities'> | null) {
 }
 
 function imageModelSortKey(provider: ModelProvider, model: Pick<Model, 'id'>) {
-  if (provider.provider !== 'jingxing') return 100
+  if (!isBiyuanProvider(provider.provider, provider.base_url)) return 100
 
   const id = model.id.toLowerCase()
   if (id === 'gpt-image-1.5') return 0
@@ -103,35 +104,22 @@ export function imageSizeForRatio(ratio: ImageRatio, modelId?: string) {
     : LEGACY_SIZE_BY_RATIO[ratio]
 }
 
-export function isJingxingImageProvider(providerId?: string, baseUrl?: string) {
-  const normalizedProvider = providerId?.toLowerCase() ?? ''
-  const normalizedBaseUrl = baseUrl?.toLowerCase() ?? ''
-  return (
-    normalizedProvider === 'jingxing' ||
-    normalizedBaseUrl.includes('api.jingxing.uk') ||
-    normalizedBaseUrl.includes('api.jingxing.io') ||
-    normalizedBaseUrl.includes('jingxing.io')
-  )
-}
-
-export function usesJingxingCompatibleImageEditParams(
+export function usesBiyuanCompatibleImageEditParams(
   modelId?: string,
   providerId?: string,
   baseUrl?: string
 ) {
-  return (
-    isGptImageModel(modelId) && isJingxingImageProvider(providerId, baseUrl)
-  )
+  return isGptImageModel(modelId) && isBiyuanProvider(providerId, baseUrl)
 }
 
-export function usesJingxingLegacyImageEditSize(
+export function usesBiyuanLegacyImageEditSize(
   modelId?: string,
   providerId?: string,
   baseUrl?: string
 ) {
   return (
     modelId?.toLowerCase() === 'gpt-image-1.5' &&
-    isJingxingImageProvider(providerId, baseUrl)
+    isBiyuanProvider(providerId, baseUrl)
   )
 }
 
@@ -141,8 +129,8 @@ export function imageEditSizeForRatio(
   providerId?: string,
   baseUrl?: string
 ) {
-  return usesJingxingLegacyImageEditSize(modelId, providerId, baseUrl)
-    ? JINGXING_LEGACY_EDIT_SIZE_BY_RATIO[ratio]
+  return usesBiyuanLegacyImageEditSize(modelId, providerId, baseUrl)
+    ? BIYUAN_LEGACY_EDIT_SIZE_BY_RATIO[ratio]
     : imageSizeForRatio(ratio, modelId)
 }
 
@@ -170,8 +158,8 @@ export function apiQualityForImageEditPreset(
   providerId?: string,
   baseUrl?: string
 ) {
-  if (usesJingxingCompatibleImageEditParams(modelId, providerId, baseUrl)) {
-    // Jingxing gpt-image edits are synchronous today; high/auto often exceed the gateway timeout.
+  if (usesBiyuanCompatibleImageEditParams(modelId, providerId, baseUrl)) {
+    // Biyuan-family gpt-image edits use medium quality to avoid gateway timeouts.
     return 'medium'
   }
 

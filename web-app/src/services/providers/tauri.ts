@@ -29,7 +29,7 @@ import {
 } from '@/lib/provider-quota-error'
 import {
   BIYUAN_DEFAULT_BASE_URL,
-  BIYUAN_PROVIDER_NAMES,
+  isBiyuanProvider,
 } from '@/constants/biyuan'
 
 const tlsCertificateErrorFragments = [
@@ -507,15 +507,6 @@ async function providerErrorMessageFromResponse(response: Response) {
   }
 }
 
-function isBiyuanProvider(provider: ModelProvider) {
-  const baseUrl = provider.base_url ?? ''
-  return (
-    (BIYUAN_PROVIDER_NAMES as readonly string[]).includes(provider.provider) ||
-    baseUrl.includes('api.biyuan.ai') ||
-    baseUrl.includes('api.jingxing')
-  )
-}
-
 function isDeepSeekProvider(provider: ModelProvider) {
   return (
     provider.provider === 'deepseek' ||
@@ -579,7 +570,11 @@ export class TauriProvidersService extends DefaultProvidersService {
               // TODO: Check chat_template for tool call support
               return {
                 ...(modelManifest ?? { id: model, name: model }),
-                capabilities: getModelCapabilities(provider.provider, model),
+                capabilities: getModelCapabilities(
+                  provider.provider,
+                  model,
+                  provider.base_url
+                ),
               } as Model
             })
           }
@@ -1037,7 +1032,7 @@ export class TauriProvidersService extends DefaultProvidersService {
   ): Promise<ProviderBalanceStatus> {
     const primaryKey = providerRemoteApiKeyChain(provider)[0]?.trim()
 
-    if (isBiyuanProvider(provider)) {
+    if (isBiyuanProvider(provider.provider, provider.base_url)) {
       if (!primaryKey) {
         return {
           state: 'needs_extra_auth',

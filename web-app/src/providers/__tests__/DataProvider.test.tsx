@@ -1,5 +1,6 @@
 import { fireEvent, render, screen, waitFor, act } from '@testing-library/react'
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
+import { getImageModels } from '@/lib/image-generation'
 
 // Stub the build-time define used by DataProvider
 ;(globalThis as unknown as { UPDATE_CHECK_INTERVAL_MS: number }).UPDATE_CHECK_INTERVAL_MS = 60_000
@@ -568,6 +569,143 @@ describe('DataProvider', () => {
     expect(h.toastSuccess).toHaveBeenCalledWith('配置已导入', {
       description: undefined,
     })
+  })
+
+  it('imports a new biyuan deep link into canonical jingxing with an offline image model fallback', async () => {
+    hubState.deeplinkGetCurrent.mockResolvedValue([
+      'mita://provider/import?provider=biyuan&apiKey=sk-test-import&baseUrl=https%3A%2F%2Fapi.biyuan.ai%2Fv1&defaultModel=gpt-image-2',
+    ])
+    hubState.fetchModelsFromProvider.mockRejectedValue(
+      new Error('403 selfhold forbidden')
+    )
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {})
+
+    render(<DataProvider />)
+    fireEvent.click(await screen.findByText('确认导入'))
+
+    await waitFor(() => {
+      expect(h.addProvider).toHaveBeenCalledWith(
+        expect.objectContaining({
+          provider: 'jingxing',
+          base_url: 'https://api.biyuan.ai/v1',
+          models: [
+            expect.objectContaining({
+              id: 'gpt-image-2',
+              capabilities: expect.arrayContaining([
+                'image_generation',
+                'text_to_image',
+              ]),
+            }),
+          ],
+        })
+      )
+    })
+    expect(h.selectModelProvider).toHaveBeenCalledWith(
+      'jingxing',
+      'gpt-image-2'
+    )
+    const importedProvider = h.addProvider.mock.calls.at(-1)?.[0] as ModelProvider
+    expect(getImageModels([importedProvider])).toHaveLength(1)
+    expect(h.toastSuccess).toHaveBeenCalledWith('配置已导入', {
+      description: '模型列表刷新失败，可稍后手动刷新。',
+    })
+    warn.mockRestore()
+  })
+
+  it('reuses an existing jingxing family provider for a biyuan deep link', async () => {
+    const existingProvider = {
+      provider: 'jingxing',
+      active: true,
+      api_key: 'sk-old',
+      api_key_fallbacks: ['sk-fallback'],
+      base_url: 'https://api.biyuan.ai/v1',
+      models: [
+        {
+          id: 'gpt-image-2',
+          capabilities: ['completion'],
+          settings: { quality: { controller_props: { value: 'high' } } },
+        },
+      ],
+      settings: [],
+    }
+    h.providers = [existingProvider]
+    h.getProviderByName.mockImplementation((name) =>
+      name === 'jingxing' ? existingProvider : undefined
+    )
+    hubState.deeplinkGetCurrent.mockResolvedValue([
+      'mita://provider/import?provider=biyuan&apiKey=sk-new&baseUrl=https%3A%2F%2Fapi.biyuan.ai%2Fv1&defaultModel=gpt-image-2',
+    ])
+    hubState.fetchModelsFromProvider.mockRejectedValue(new Error('403'))
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {})
+
+    render(<DataProvider />)
+    // Startup hydration is mocked independently, so restore the persisted store
+    // snapshot immediately before confirming the pending import.
+    await screen.findByText('确认导入')
+    h.providers = [existingProvider]
+    fireEvent.click(screen.getByText('确认导入'))
+
+    await waitFor(() => {
+      expect(h.updateProvider).toHaveBeenCalledWith(
+        'jingxing',
+        expect.objectContaining({
+          provider: 'jingxing',
+          api_key: 'sk-new',
+          api_key_fallbacks: ['sk-fallback'],
+          models: [
+            expect.objectContaining({
+              id: 'gpt-image-2',
+              settings: existingProvider.models[0].settings,
+              capabilities: expect.arrayContaining([
+                'image_generation',
+                'text_to_image',
+              ]),
+            }),
+          ],
+        })
+      )
+    })
+    expect(h.addProvider).not.toHaveBeenCalled()
+    warn.mockRestore()
+  })
+
+  it('does not overwrite a third-party openai-compatible provider for a Biyuan-hosted import', async () => {
+    const thirdPartyProvider = {
+      provider: 'openai-compatible',
+      active: true,
+      api_key: 'sk-third-party',
+      base_url: 'https://api.example.com/v1',
+      models: [],
+      settings: [],
+    }
+    h.providers = [thirdPartyProvider]
+    h.getProviderByName.mockImplementation((name) =>
+      name === 'openai-compatible' ? thirdPartyProvider : undefined
+    )
+    hubState.deeplinkGetCurrent.mockResolvedValue([
+      'mita://provider/import?provider=openai-compatible&apiKey=sk-biyuan&baseUrl=https%3A%2F%2Fapi.biyuan.ai%2Fv1&defaultModel=gpt-image-2',
+    ])
+    hubState.fetchModelsFromProvider.mockResolvedValue([
+      {
+        id: 'gpt-image-2',
+        supported_endpoint_types: ['image-generation'],
+      },
+    ])
+
+    render(<DataProvider />)
+    await screen.findByText('确认导入')
+    h.providers = [thirdPartyProvider]
+    fireEvent.click(screen.getByText('确认导入'))
+
+    await waitFor(() => {
+      expect(h.addProvider).toHaveBeenCalledWith(
+        expect.objectContaining({
+          provider: 'jingxing',
+          base_url: 'https://api.biyuan.ai/v1',
+        })
+      )
+    })
+    expect(h.updateProvider).not.toHaveBeenCalled()
   })
 
   it('shows an error for invalid provider import deep links', async () => {

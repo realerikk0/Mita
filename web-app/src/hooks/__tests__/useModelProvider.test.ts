@@ -1,5 +1,6 @@
 import { describe, it, expect, beforeEach, vi } from 'vitest'
 import { act, renderHook } from '@testing-library/react'
+import { getImageModels } from '@/lib/image-generation'
 import { useModelProvider } from '../useModelProvider'
 
 // Mock getServiceHub
@@ -239,6 +240,103 @@ describe('useModelProvider - displayName functionality', () => {
 })
 
 describe('useModelProvider migrations', () => {
+  it('repairs persisted Biyuan image capabilities without changing provider identity or credentials', () => {
+    const persistApi = (useModelProvider as any).persist
+    const migrate = persistApi?.getOptions().migrate as
+      | ((state: unknown, version: number) => any)
+      | undefined
+    const settings = [
+      {
+        key: 'base-url',
+        controller_props: { value: 'https://api.biyuan.ai/v1' },
+      },
+    ]
+    const modelSettings = { quality: { controller_props: { value: 'high' } } }
+    const persistedState = {
+      providers: [
+        {
+          provider: 'biyuan',
+          active: true,
+          api_key: 'sk-primary',
+          api_key_fallbacks: ['sk-fallback'],
+          base_url: 'https://api.biyuan.ai/v1',
+          settings,
+          models: [
+            {
+              id: 'gpt-image-2',
+              capabilities: ['completion'],
+              settings: modelSettings,
+            },
+          ],
+        },
+      ],
+      selectedProvider: 'biyuan',
+      selectedModel: {
+        id: 'gpt-image-2',
+        capabilities: ['completion'],
+        settings: modelSettings,
+      },
+      deletedModels: [],
+    }
+
+    const migratedState = migrate!(persistedState, 15)
+    const provider = migratedState.providers[0]
+
+    expect(provider.provider).toBe('biyuan')
+    expect(provider.api_key).toBe('sk-primary')
+    expect(provider.api_key_fallbacks).toEqual(['sk-fallback'])
+    expect(provider.settings).toBe(settings)
+    expect(provider.models[0].settings).toBe(modelSettings)
+    expect(provider.models[0].capabilities).toEqual(
+      expect.arrayContaining(['image_generation', 'text_to_image'])
+    )
+    expect(migratedState.selectedProvider).toBe('biyuan')
+    expect(migratedState.selectedModel).toEqual(
+      expect.objectContaining({
+        id: 'gpt-image-2',
+        capabilities: expect.arrayContaining([
+          'image_generation',
+          'text_to_image',
+        ]),
+      })
+    )
+  })
+
+  it('repairs persisted Biyuan-hosted openai-compatible models only', () => {
+    const persistApi = (useModelProvider as any).persist
+    const migrate = persistApi?.getOptions().migrate as
+      | ((state: unknown, version: number) => any)
+      | undefined
+    const persistedState = {
+      providers: [
+        {
+          provider: 'openai-compatible',
+          base_url: 'https://api.biyuan.ai/v1',
+          settings: [],
+          models: [{ id: 'gpt-image-2', capabilities: ['completion'] }],
+        },
+        {
+          provider: 'third-party',
+          base_url: 'https://api.example.com/v1',
+          settings: [],
+          models: [{ id: 'gpt-image-2', capabilities: ['completion'] }],
+        },
+      ],
+      selectedProvider: 'third-party',
+      selectedModel: null,
+      deletedModels: [],
+    }
+
+    const migratedState = migrate!(persistedState, 15)
+
+    expect(migratedState.providers[0].models[0].capabilities).toEqual(
+      expect.arrayContaining(['image_generation', 'text_to_image'])
+    )
+    expect(migratedState.providers[1].models[0].capabilities).toEqual([
+      'completion',
+    ])
+  })
+
   it('migrates flash_attn setting to dropdown with default value', () => {
     const persistApi = (useModelProvider as any).persist
     const migrate = persistApi?.getOptions().migrate as
@@ -396,5 +494,112 @@ describe('useModelProvider migrations', () => {
 
     expect(migratedState.providers[0].base_url).toBe('https://api.mistral.ai/v1')
     expect(migratedState.providers[1].base_url).toBe('https://api.openai.com/v1')
+  })
+})
+
+describe('useModelProvider Biyuan restoration', () => {
+  beforeEach(() => {
+    localStorageMock.getItem.mockReturnValue('true')
+    act(() => {
+      useModelProvider.setState({
+        providers: [],
+        selectedProvider: 'jingxing',
+        selectedModel: null,
+        deletedModels: [],
+      })
+    })
+  })
+
+  it('repairs retained persisted Biyuan providers on every setProviders call', () => {
+    const modelSettings = { quality: { controller_props: { value: 'high' } } }
+    act(() => {
+      useModelProvider.setState({
+        providers: [
+          {
+            provider: 'biyuan',
+            active: true,
+            api_key: 'sk-primary',
+            api_key_fallbacks: ['sk-fallback'],
+            base_url: 'https://api.biyuan.ai/v1',
+            settings: [],
+            models: [
+              {
+                id: 'gpt-image-2',
+                capabilities: ['completion'],
+                settings: modelSettings,
+              },
+            ],
+          },
+        ] as any,
+        selectedProvider: 'biyuan',
+        selectedModel: {
+          id: 'gpt-image-2',
+          capabilities: ['completion'],
+          settings: modelSettings,
+        } as any,
+        deletedModels: [],
+      })
+    })
+
+    act(() => {
+      useModelProvider.getState().setProviders([])
+    })
+
+    const state = useModelProvider.getState()
+    const provider = state.providers[0]
+    expect(provider.provider).toBe('biyuan')
+    expect(provider.api_key).toBe('sk-primary')
+    expect(provider.api_key_fallbacks).toEqual(['sk-fallback'])
+    expect(provider.models[0].settings).toBe(modelSettings)
+    expect(provider.models[0].capabilities).toEqual(
+      expect.arrayContaining(['image_generation', 'text_to_image'])
+    )
+    expect(getImageModels([provider])).toHaveLength(1)
+    expect(state.selectedProvider).toBe('biyuan')
+    expect(state.selectedModel).toEqual(
+      expect.objectContaining({
+        id: 'gpt-image-2',
+        capabilities: expect.arrayContaining([
+          'image_generation',
+          'text_to_image',
+        ]),
+      })
+    )
+  })
+
+  it('repairs Biyuan-hosted openai-compatible models without changing third-party models', () => {
+    act(() => {
+      useModelProvider.setState({
+        providers: [
+          {
+            provider: 'openai-compatible',
+            active: true,
+            base_url: 'https://api.biyuan.ai/v1',
+            settings: [],
+            models: [{ id: 'gpt-image-2', capabilities: ['completion'] }],
+          },
+          {
+            provider: 'third-party',
+            active: true,
+            base_url: 'https://api.example.com/v1',
+            settings: [],
+            models: [{ id: 'gpt-image-2', capabilities: ['completion'] }],
+          },
+        ] as any,
+        selectedProvider: 'third-party',
+        selectedModel: null,
+        deletedModels: [],
+      })
+    })
+
+    act(() => {
+      useModelProvider.getState().setProviders([])
+    })
+
+    const providers = useModelProvider.getState().providers
+    expect(providers[0].models[0].capabilities).toEqual(
+      expect.arrayContaining(['image_generation', 'text_to_image'])
+    )
+    expect(providers[1].models[0].capabilities).toEqual(['completion'])
   })
 })

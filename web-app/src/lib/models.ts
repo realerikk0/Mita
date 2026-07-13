@@ -1,7 +1,27 @@
 import { providerModels as models } from '@/constants/models'
+import { isBiyuanProvider } from '@/constants/biyuan'
 import { ModelCapabilities } from '@/types/models'
 
 const REASONING_CAPABILITY = 'reasoning'
+
+const IMAGE_GENERATION_ENDPOINTS = new Set([
+  'image-generation',
+  'image-generations',
+  'images-generation',
+  'images-generations',
+  'images/generations',
+  'text-to-image',
+])
+
+const IMAGE_EDIT_ENDPOINTS = new Set([
+  'image-edit',
+  'image-edits',
+  'image-editing',
+  'images-edit',
+  'images-edits',
+  'images/edits',
+  'image-to-image',
+])
 
 const uniqueCapabilities = (capabilities: Array<string | undefined>) =>
   capabilities.filter(
@@ -12,6 +32,33 @@ const uniqueCapabilities = (capabilities: Array<string | undefined>) =>
 const includesModelId = (modelIds: string[], modelId: string) => {
   const normalized = modelId.toLowerCase()
   return modelIds.some((id) => id.toLowerCase() === normalized)
+}
+
+const normalizeEndpointType = (endpointType: string) =>
+  endpointType
+    .trim()
+    .toLowerCase()
+    .replace(/^\/?v1\//, '')
+    .replaceAll('_', '-')
+
+export const inferModelCapabilitiesFromEndpointTypes = (
+  endpointTypes?: readonly string[] | null
+): string[] => {
+  if (!Array.isArray(endpointTypes)) return []
+
+  const normalizedEndpointTypes = endpointTypes.map(normalizeEndpointType)
+  const supportsImageGeneration = normalizedEndpointTypes.some((endpointType) =>
+    IMAGE_GENERATION_ENDPOINTS.has(endpointType)
+  )
+  const supportsImageEditing = normalizedEndpointTypes.some((endpointType) =>
+    IMAGE_EDIT_ENDPOINTS.has(endpointType)
+  )
+
+  return uniqueCapabilities([
+    supportsImageGeneration ? ModelCapabilities.IMAGE_GENERATION : undefined,
+    supportsImageGeneration ? ModelCapabilities.TEXT_TO_IMAGE : undefined,
+    supportsImageEditing ? ModelCapabilities.IMAGE_TO_IMAGE : undefined,
+  ])
 }
 
 const isInferredOpenAIChatModel = (modelId: string): boolean => {
@@ -97,7 +144,12 @@ export const normalizeModelCapabilitiesForProvider = (
     model?: string
     capabilities?: string[]
     _userConfiguredCapabilities?: boolean
-  }
+    supported_endpoint_types?: string[]
+    supportedEndpointTypes?: string[]
+    endpoint_types?: string[]
+    endpoints?: string[]
+  },
+  baseUrl?: string
 ): string[] | undefined => {
   if (model._userConfiguredCapabilities === true) {
     return model.capabilities
@@ -108,18 +160,26 @@ export const normalizeModelCapabilitiesForProvider = (
     return model.capabilities
   }
 
-  if (providerName === 'jingxing') {
-    return inferJingxingModelCapabilities(modelId)
-  }
+  const endpointCapabilities = inferModelCapabilitiesFromEndpointTypes(
+    model.supported_endpoint_types ||
+      model.supportedEndpointTypes ||
+      model.endpoint_types ||
+      model.endpoints
+  )
+  let capabilities = model.capabilities
 
-  if (providerName === 'openai') {
-    return uniqueCapabilities([
+  if (isBiyuanProvider(providerName, baseUrl)) {
+    capabilities = inferJingxingModelCapabilities(modelId)
+  } else if (providerName === 'openai') {
+    capabilities = uniqueCapabilities([
       ...getModelCapabilities(providerName, modelId),
       ...(model.capabilities || []),
     ])
   }
 
-  return model.capabilities
+  return endpointCapabilities.length > 0
+    ? uniqueCapabilities([...(capabilities || []), ...endpointCapabilities])
+    : capabilities
 }
 
 export const defaultModel = (provider?: string) => {
@@ -141,9 +201,10 @@ export const defaultModel = (provider?: string) => {
  */
 export const getModelCapabilities = (
   providerName: string,
-  modelId: string
+  modelId: string,
+  baseUrl?: string
 ): string[] => {
-  if (providerName === 'jingxing') {
+  if (isBiyuanProvider(providerName, baseUrl)) {
     return inferJingxingModelCapabilities(modelId)
   }
 

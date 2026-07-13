@@ -4,16 +4,17 @@ import {
   normalizeModelCapabilitiesForProvider,
 } from '@/lib/models'
 
-export type ProviderModelDescriptor =
-  | string
-  | (Partial<Model> & {
-      id?: string
-      model?: string
-      supported_endpoint_types?: string[]
-      supportedEndpointTypes?: string[]
-      endpoint_types?: string[]
-      endpoints?: string[]
-    })
+type ProviderModelMetadata = Partial<Model> & {
+  id?: string
+  model?: string
+  supported_endpoint_types?: string[]
+  supportedEndpointTypes?: string[]
+  endpoint_types?: string[]
+  endpoints?: string[]
+  _userConfiguredCapabilities?: boolean
+}
+
+export type ProviderModelDescriptor = string | ProviderModelMetadata
 
 const JINGXING_GEMINI_NATIVE_WEB_SEARCH_MODELS = new Set([
   'gemini-3.5-flash',
@@ -146,22 +147,27 @@ export function modelRequiresResponsesEndpoint(
 
 export function modelDescriptorToModel(
   providerName: string,
-  descriptor: ProviderModelDescriptor
+  descriptor: ProviderModelDescriptor,
+  baseUrl?: string
 ): Model | null {
   const id = modelIdFromDescriptor(descriptor)
   if (!id) return null
 
-  const raw =
-    typeof descriptor === 'string'
-      ? ({ id } as Partial<Model>)
-      : ({ ...descriptor, id } as Partial<Model>)
+  const raw: ProviderModelMetadata =
+    typeof descriptor === 'string' ? { id } : { ...descriptor, id }
   const supportedEndpointTypes = supportedEndpointTypesFromModel(raw)
   const capabilities =
-    normalizeModelCapabilitiesForProvider(providerName, {
-      id,
-      model: raw.model,
-      capabilities: raw.capabilities,
-    }) ?? getModelCapabilities(providerName, id)
+    normalizeModelCapabilitiesForProvider(
+      providerName,
+      {
+        id,
+        model: raw.model,
+        capabilities: raw.capabilities,
+        _userConfiguredCapabilities: raw._userConfiguredCapabilities === true,
+        supported_endpoint_types: supportedEndpointTypes,
+      },
+      baseUrl
+    ) ?? getModelCapabilities(providerName, id, baseUrl)
 
   return {
     ...raw,
@@ -183,13 +189,14 @@ export function modelDescriptorToModel(
 
 export function modelDescriptorsToModels(
   providerName: string,
-  descriptors: ProviderModelDescriptor[]
+  descriptors: ProviderModelDescriptor[],
+  baseUrl?: string
 ): Model[] {
   const seen = new Set<string>()
   const models: Model[] = []
 
   for (const descriptor of descriptors) {
-    const model = modelDescriptorToModel(providerName, descriptor)
+    const model = modelDescriptorToModel(providerName, descriptor, baseUrl)
     if (!model || seen.has(model.id)) continue
     seen.add(model.id)
     models.push(model)
