@@ -5,7 +5,28 @@ import {
   validateCandidateWorkflow,
   validateCiWorkflow,
   validateFlatpakMetadata,
+  validateReleaseIdentity,
 } from '../release-policy-contracts.mjs'
+
+test('initial release train locks version, phase, schema, and Cargo.lock together', () => {
+  for (const [version, migrationPhase, dataSchema] of [
+    ['0.6.634', 'A', 1],
+    ['0.6.635', 'B', 2],
+    ['0.6.636', 'C', 3],
+  ]) {
+    assert.deepEqual(
+      validateReleaseIdentity({ version, migrationPhase, dataSchema, cargoLockVersion: version }),
+      [],
+    )
+  }
+
+  assert.ok(validateReleaseIdentity({
+    version: '0.6.634', migrationPhase: 'C', dataSchema: 3, cargoLockVersion: '0.6.634',
+  }).some((failure) => failure.includes('must attest A/1')))
+  assert.ok(validateReleaseIdentity({
+    version: '0.6.636', migrationPhase: 'C', dataSchema: 3, cargoLockVersion: '0.6.635',
+  }).some((failure) => failure.includes('Cargo.lock version')))
+})
 
 const candidateWorkflow = `jobs:
   preflight:

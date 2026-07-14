@@ -20,6 +20,30 @@ function jobNeeds(block, dependency) {
   return new RegExp(`(?:^|[\\s,[{-])${escapeRegExp(dependency)}(?:$|[\\s,\\]}])`).test(needs)
 }
 
+export function validateReleaseIdentity({ version, migrationPhase, dataSchema, cargoLockVersion }) {
+  const failures = []
+  const expectedSchema = { A: 1, B: 2, C: 3 }[migrationPhase]
+  if (!expectedSchema || dataSchema !== expectedSchema) {
+    failures.push(`invalid migration phase/data schema pairing: ${migrationPhase}/${dataSchema}`)
+  }
+  if (cargoLockVersion !== version) {
+    failures.push(`Cargo.lock version ${cargoLockVersion} does not match product version ${version}`)
+  }
+
+  const initialTrain = {
+    '0.6.634': { migrationPhase: 'A', dataSchema: 1 },
+    '0.6.635': { migrationPhase: 'B', dataSchema: 2 },
+    '0.6.636': { migrationPhase: 'C', dataSchema: 3 },
+  }[version]
+  if (initialTrain
+    && (migrationPhase !== initialTrain.migrationPhase || dataSchema !== initialTrain.dataSchema)) {
+    failures.push(
+      `initial release ${version} must attest ${initialTrain.migrationPhase}/${initialTrain.dataSchema}`,
+    )
+  }
+  return failures
+}
+
 export function validateCandidateWorkflow(source) {
   const failures = []
   const preflight = jobBlock(source, 'preflight')

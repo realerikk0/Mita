@@ -55,6 +55,8 @@ class ValidatedInputs:
 
 def migration_matrix() -> Tuple[MigrationCase, ...]:
     return (
+        MigrationCase("current-to-a", "current", ("current", "a"), "a"),
+        MigrationCase("a-to-b", "a", ("a", "b"), "b"),
         MigrationCase("current-to-a-to-b-to-c", "current", ("current", "a", "b", "c"), "c"),
         MigrationCase("current-to-b", "current", ("current", "b"), "b"),
         MigrationCase("current-to-c", "current", ("current", "c"), "c"),

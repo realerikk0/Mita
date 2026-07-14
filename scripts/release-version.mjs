@@ -14,6 +14,10 @@ const PRODUCT_VERSION_FILES = [
     file: 'src-tauri/Cargo.toml',
     kind: 'cargo',
   },
+  {
+    file: 'src-tauri/Cargo.lock',
+    kind: 'cargo',
+  },
 ]
 
 const BUILD_STAMP_JSON_FILES = [

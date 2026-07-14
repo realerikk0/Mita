@@ -62,6 +62,8 @@ class MigrationRunnerTests(unittest.TestCase):
         self.assertEqual(
             [case.name for case in migration_matrix()],
             [
+                "current-to-a",
+                "a-to-b",
                 "current-to-a-to-b-to-c",
                 "current-to-b",
                 "current-to-c",

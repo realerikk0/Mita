@@ -7,6 +7,7 @@ import {
   validateCandidateWorkflow,
   validateCiWorkflow,
   validateFlatpakMetadata,
+  validateReleaseIdentity,
 } from './release-policy-contracts.mjs'
 
 const repoRoot = path.resolve(import.meta.dirname, '../..')
@@ -23,9 +24,24 @@ function read(relative) {
 }
 
 const releaseMetadata = JSON.parse(read('biyan-release.json'))
-const expectedReleaseSchema = { A: 1, B: 2, C: 3 }[releaseMetadata.migrationPhase]
-if (releaseMetadata.schema !== 1 || releaseMetadata.dataSchema !== expectedReleaseSchema) {
-  fail('biyan-release.json has an invalid migration phase/data schema pairing')
+if (releaseMetadata.schema !== 1) {
+  fail('biyan-release.json has an unsupported metadata schema')
+}
+const tauriConfig = JSON.parse(read('src-tauri/tauri.conf.json'))
+const cargoPackage = read('src-tauri/Cargo.toml').match(/^version\s*=\s*"([^"]+)"/m)?.[1]
+const cargoLockPackage = read('src-tauri/Cargo.lock').match(
+  /^name\s*=\s*"Biyan"\s*\nversion\s*=\s*"([^"]+)"/m,
+)?.[1]
+if (!cargoPackage || cargoPackage !== tauriConfig.version) {
+  fail(`Cargo package version ${cargoPackage ?? 'missing'} does not match ${tauriConfig.version}`)
+}
+for (const message of validateReleaseIdentity({
+  version: tauriConfig.version,
+  migrationPhase: releaseMetadata.migrationPhase,
+  dataSchema: releaseMetadata.dataSchema,
+  cargoLockVersion: cargoLockPackage,
+})) {
+  fail(message)
 }
 
 function walk(root, callback) {
@@ -145,7 +161,6 @@ for (const relative of ['src-tauri/static/openapi.json', 'docs/public/openapi/bi
   }
 }
 
-const tauriConfig = JSON.parse(read('src-tauri/tauri.conf.json'))
 if (tauriConfig.productName !== 'Biyan') fail('stable Tauri productName must be Biyan')
 for (const relative of [
   'src-tauri/tauri.linux.conf.json',
