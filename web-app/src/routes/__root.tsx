@@ -9,12 +9,14 @@ import { InterfaceProvider } from '@/providers/InterfaceProvider'
 import { KeyboardShortcutsProvider } from '@/providers/KeyboardShortcuts'
 import { DataProvider } from '@/providers/DataProvider'
 import { route } from '@/constants/routes'
+import { getLocalizedAppName } from '@/constants/app'
 import { ExtensionProvider } from '@/providers/ExtensionProvider'
 import { ToasterProvider } from '@/providers/ToasterProvider'
 import { useAnalytic } from '@/hooks/useAnalytic'
 import { PromptAnalytic } from '@/containers/analytics/PromptAnalytic'
 import { AnalyticProvider } from '@/providers/AnalyticProvider'
 import { useLeftPanel } from '@/hooks/useLeftPanel'
+import { useGeneralSetting } from '@/hooks/useGeneralSetting'
 import ToolApproval from '@/containers/dialogs/ToolApproval'
 import { TranslationProvider } from '@/i18n/TranslationContext'
 import OutOfContextPromiseModal from '@/containers/dialogs/OutOfContextDialog'
@@ -38,12 +40,22 @@ export const Route = createRootRoute({
 
 const AppLayout = () => {
   const { productAnalyticPrompt } = useAnalytic()
+  const currentLanguage = useGeneralSetting((state) => state.currentLanguage)
+  const appName = getLocalizedAppName(currentLanguage)
   const {
     open: isLeftPanelOpen,
     setLeftPanel,
     width: sidebarWidth,
     setLeftPanelWidth,
   } = useLeftPanel()
+
+  useEffect(() => {
+    document.title = appName
+
+    if (IS_TAURI) {
+      void getCurrentWebviewWindow().setTitle(appName)
+    }
+  }, [appName])
 
   return (
     <div className="bg-neutral-50 dark:bg-background size-full relative">

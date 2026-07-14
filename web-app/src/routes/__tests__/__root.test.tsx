@@ -11,6 +11,7 @@ const h = vi.hoisted(() => ({
   sidebarWidth: 260,
   setLeftPanel: vi.fn(),
   setLeftPanelWidth: vi.fn(),
+  currentLanguage: 'en',
 }))
 
 // Tanstack router — avoid real router internals.
@@ -93,7 +94,9 @@ vi.mock('@/containers/PromptMitaModel', () => ({
   PromptMitaModel: () => <div data-testid="prompt-mita" />,
 }))
 vi.mock('@/containers/GlobalError', () => ({
-  default: ({ error }: any) => <div data-testid="global-error">{error?.message}</div>,
+  default: ({ error }: any) => (
+    <div data-testid="global-error">{error?.message}</div>
+  ),
 }))
 
 // Components
@@ -130,6 +133,12 @@ vi.mock('@/hooks/useLeftPanel', () => ({
   }),
 }))
 
+vi.mock('@/hooks/useGeneralSetting', () => ({
+  useGeneralSetting: (
+    selector: (state: { currentLanguage: string }) => unknown
+  ) => selector({ currentLanguage: h.currentLanguage }),
+}))
+
 vi.mock('@/constants/routes', () => ({
   route: {
     localApiServerlogs: '/local-api-server/logs',
@@ -139,7 +148,10 @@ vi.mock('@/constants/routes', () => ({
 }))
 
 vi.mock('../-preview-route-guard', () => ({
-  previewRoutePaths: new Set(['/loading-ribbon-demo', '/thinking-content-demo']),
+  previewRoutePaths: new Set([
+    '/loading-ribbon-demo',
+    '/thinking-content-demo',
+  ]),
 }))
 
 import { Route } from '../__root'
@@ -154,6 +166,7 @@ describe('__root route', () => {
     vi.clearAllMocks()
     h.productAnalyticPrompt = false
     h.showMitaModelPrompt = false
+    h.currentLanguage = 'en'
     // reset document state
     document.body.className = ''
     const loader = document.getElementById('initial-loader')
@@ -175,6 +188,18 @@ describe('__root route', () => {
     expect(screen.getByTestId('left-sidebar')).toBeInTheDocument()
     expect(screen.getByTestId('outlet')).toBeInTheDocument()
     expect(screen.getByTestId('sidebar-provider')).toBeInTheDocument()
+  })
+
+  it('uses the Chinese app name for the main window in Simplified Chinese', () => {
+    h.currentLanguage = 'zh-CN'
+    renderComponent()
+    expect(document.title).toBe('彼岩')
+  })
+
+  it('keeps the default app name for other languages', () => {
+    h.currentLanguage = 'en'
+    renderComponent()
+    expect(document.title).toBe('Biyan')
   })
 
   it('renders all persistent dialogs', () => {
@@ -276,7 +301,9 @@ describe('__root route', () => {
   })
 
   it('errorComponent renders GlobalError with provided error', () => {
-    const ErrComp = (Route as any).errorComponent as React.ComponentType<{ error: Error }>
+    const ErrComp = (Route as any).errorComponent as React.ComponentType<{
+      error: Error
+    }>
     render(<ErrComp error={new Error('broken')} />)
     expect(screen.getByTestId('global-error')).toHaveTextContent('broken')
   })
