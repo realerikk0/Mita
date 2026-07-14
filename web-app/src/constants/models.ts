@@ -2,15 +2,6 @@
  * Model-related constants
  */
 
-export const RECOMMENDED_CODE_HF_REPO = 'janhq/Jan-Code-4b-Gguf'
-export const DEFAULT_MODEL_QUANTIZATIONS = ['iq4_xs', 'q4_k_m']
-
-/**
- * Quantizations to check for SetupScreen quick start
- * Includes Q8 for higher quality on capable systems
- */
-export const SETUP_SCREEN_QUANTIZATIONS = ['q4_k_xl']
-
 /**
  * Provider model capabilities - copied from token.js package
  */

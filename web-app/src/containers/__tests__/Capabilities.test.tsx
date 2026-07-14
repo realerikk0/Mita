@@ -16,7 +16,6 @@ vi.mock('@tabler/icons-react', () => ({
   IconTool: () => <div data-testid="icon-tool">Tool Icon</div>,
   IconAtom: () => <div data-testid="icon-atom">Atom Icon</div>,
   IconWorld: () => <div data-testid="icon-world">World Icon</div>,
-  IconCodeCircle2: () => <div data-testid="icon-code">Code Icon</div>,
 }))
 
 describe('Capabilities', () => {
@@ -48,11 +47,10 @@ describe('Capabilities', () => {
     expect(worldIcon).toBeInTheDocument()
   })
 
-  it('should render embeddings capability with code icon', () => {
-    render(<Capabilities capabilities={['embeddings']} />)
+  it('should hide the retired embeddings capability', () => {
+    const { container } = render(<Capabilities capabilities={['embeddings']} />)
 
-    const codeIcon = screen.getByTestId('icon-code')
-    expect(codeIcon).toBeInTheDocument()
+    expect(container.querySelector('[data-testid^="icon-"]')).not.toBeInTheDocument()
   })
 
   it('should render multiple capabilities', () => {
@@ -64,13 +62,12 @@ describe('Capabilities', () => {
   })
 
   it('should render all capabilities in correct order', () => {
-    render(<Capabilities capabilities={['tools', 'vision', 'reasoning', 'web_search', 'embeddings']} />)
+    render(<Capabilities capabilities={['tools', 'vision', 'reasoning', 'web_search']} />)
 
     expect(screen.getByTestId('icon-tool')).toBeInTheDocument()
     expect(screen.getByTestId('icon-eye')).toBeInTheDocument()
     expect(screen.getByTestId('icon-atom')).toBeInTheDocument()
     expect(screen.getByTestId('icon-world')).toBeInTheDocument()
-    expect(screen.getByTestId('icon-code')).toBeInTheDocument()
   })
 
   it('should handle empty capabilities array', () => {

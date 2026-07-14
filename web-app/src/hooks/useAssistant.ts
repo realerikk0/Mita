@@ -1,15 +1,19 @@
 import { getServiceHub } from '@/hooks/useServiceHub'
-import { Assistant as CoreAssistant } from '@janhq/core'
+import { Assistant as CoreAssistant } from '@biyan/core'
 import { create } from 'zustand'
 import { localStorageKey } from '@/constants/localStorage'
 import {
   DEFAULT_ASSISTANT_ID,
+  BIYAN_ASSISTANT_DESCRIPTION,
+  BIYAN_ASSISTANT_INSTRUCTIONS,
+  ensureBiyanIdentityGuard,
+} from '@/lib/biyan-prompt'
+import {
   LEGACY_DEFAULT_ASSISTANT_IDS,
-  MITA_ASSISTANT_DESCRIPTION,
-  MITA_ASSISTANT_INSTRUCTIONS,
-  ensureMitaIdentityGuard,
   hasLegacyAssistantBranding,
-} from '@/lib/mita-prompt'
+} from '@/legacy_migrations/assistant'
+import { migratePersistedProjectAssistantSelections } from '@/legacy_migrations/project-assistants'
+import { hydrateProjectFoldersAfterAssistantMigration } from '@/hooks/useThreadManagement'
 
 interface AssistantState {
   assistants: Assistant[]
@@ -24,7 +28,10 @@ interface AssistantState {
     saveToStorage?: boolean
   ) => void
   setDefaultAssistant: (id: string) => void
-  setAssistants: (assistants: Assistant[] | null) => void
+  setAssistants: (
+    assistants: Assistant[] | null,
+    committedIdMap?: Record<string, string>
+  ) => void
 }
 
 const setLastUsedAssistantId = (assistantId: string) => {
@@ -48,8 +55,8 @@ export const defaultAssistant: Assistant = {
     auto_compact_threshold: 0.85,
   },
   avatar: '👋',
-  description: MITA_ASSISTANT_DESCRIPTION,
-  instructions: MITA_ASSISTANT_INSTRUCTIONS,
+  description: BIYAN_ASSISTANT_DESCRIPTION,
+  instructions: BIYAN_ASSISTANT_INSTRUCTIONS,
 }
 
 const isLegacyDefaultAssistantId = (id?: string) =>
@@ -63,17 +70,26 @@ const normalizeDefaultAssistantBranding = (assistant: Assistant): Assistant => {
   if (!isDefaultAssistant) return assistant
 
   const hasLegacyBranding = hasLegacyAssistantBranding(assistant)
+  if (assistantId !== DEFAULT_ASSISTANT_ID && !hasLegacyBranding) {
+    return {
+      ...assistant,
+      id: `legacy-import-${assistantId}`,
+    }
+  }
   const nextInstructions = hasLegacyBranding
     ? defaultAssistant.instructions
-    : ensureMitaIdentityGuard(assistant.instructions)
-  const nextName = hasLegacyBranding || !assistant.name
-    ? defaultAssistant.name
-    : assistant.name
-  const nextDescription = hasLegacyBranding || !assistant.description
-    ? defaultAssistant.description
-    : assistant.description
+    : ensureBiyanIdentityGuard(assistant.instructions)
+  const nextName =
+    hasLegacyBranding || !assistant.name
+      ? defaultAssistant.name
+      : assistant.name
+  const nextDescription =
+    hasLegacyBranding || !assistant.description
+      ? defaultAssistant.description
+      : assistant.description
 
   if (
+    assistant.id === DEFAULT_ASSISTANT_ID &&
     assistant.name === nextName &&
     assistant.description === nextDescription &&
     assistant.instructions === nextInstructions
@@ -114,7 +130,42 @@ const dedupeDefaultAssistant = (assistants: Assistant[]): Assistant[] => {
   return result
 }
 
-const getLastUsedAssistantId = (assistants: Assistant[]): string => {
+const buildLegacySelectionMap = (
+  assistants: Assistant[],
+  normalizations: Array<{ sourceId?: string; targetId?: string }>
+) => {
+  const validIds = new Set(
+    assistants.flatMap((assistant) =>
+      assistant.id ? [assistant.id.toString()] : []
+    )
+  )
+  const result = new Map<string, string>()
+  for (const { sourceId, targetId } of normalizations) {
+    if (
+      sourceId &&
+      targetId &&
+      isLegacyDefaultAssistantId(sourceId) &&
+      validIds.has(targetId) &&
+      !result.has(sourceId)
+    ) {
+      result.set(sourceId, targetId)
+    }
+  }
+  for (const legacyId of LEGACY_DEFAULT_ASSISTANT_IDS) {
+    if (result.has(legacyId)) continue
+    const prefix = `legacy-import-${legacyId}`
+    const candidates = [...validIds].filter(
+      (id) => id === prefix || id.startsWith(`${prefix}-`)
+    )
+    if (candidates.length === 1) result.set(legacyId, candidates[0])
+  }
+  return result
+}
+
+const getLastUsedAssistantId = (
+  assistants: Assistant[],
+  legacySelectionMap: Map<string, string>
+): string => {
   let lastUsedId
   try {
     lastUsedId = localStorage.getItem(localStorageKey.lastUsedAssistant)
@@ -123,6 +174,14 @@ const getLastUsedAssistantId = (assistants: Assistant[]): string => {
   }
 
   if (isLegacyDefaultAssistantId(lastUsedId ?? undefined)) {
+    const migratedId = legacySelectionMap.get(lastUsedId!)
+    if (migratedId) {
+      setLastUsedAssistantId(migratedId)
+      return migratedId
+    }
+    // Keep unresolved storage untouched so a transient bridge/read failure can
+    // retry. The current session safely falls back without guessing that a
+    // customized legacy assistant became the stock Biyan assistant.
     return defaultAssistant.id
   }
 
@@ -138,26 +197,38 @@ const getLastUsedAssistantId = (assistants: Assistant[]): string => {
   return defaultAssistant.id
 }
 
-const getDefaultAssistantId = (): string | null => {
+const getDefaultAssistantId = (
+  legacySelectionMap: Map<string, string>
+): string | null => {
   let defaultAssistantId: string | null = null
 
   try {
-    defaultAssistantId = localStorage.getItem(localStorageKey.defaultAssistantId)
+    defaultAssistantId = localStorage.getItem(
+      localStorageKey.defaultAssistantId
+    )
   } catch (error) {
     console.debug('Failed to get last used assistant from localStorage:', error)
   }
 
-  return isLegacyDefaultAssistantId(defaultAssistantId ?? undefined)
-    ? defaultAssistant.id
-    : defaultAssistantId
+  if (isLegacyDefaultAssistantId(defaultAssistantId ?? undefined)) {
+    const migratedId = legacySelectionMap.get(defaultAssistantId!)
+    if (!migratedId) return null
+    try {
+      localStorage.setItem(localStorageKey.defaultAssistantId, migratedId)
+    } catch {
+      // The in-memory migration still succeeds if storage is unavailable.
+    }
+    return migratedId
+  }
+
+  return defaultAssistantId
 }
 
 const setDefaultAssistantId = (assistantId: string) => {
   try {
     if (!assistantId) {
       localStorage.removeItem(localStorageKey.defaultAssistantId)
-    }
-    else {
+    } else {
       localStorage.setItem(localStorageKey.defaultAssistantId, assistantId)
     }
   } catch (error) {
@@ -225,7 +296,11 @@ export const useAssistant = create<AssistantState>((set, get) => ({
 
     // If the deleted assistant was current, fallback to default and update localStorage
     if (wasCurrentAssistant) {
-      set({ currentAssistant: state.assistants.find(a => a.id === defaultAssistant.id) })
+      set({
+        currentAssistant: state.assistants.find(
+          (a) => a.id === defaultAssistant.id
+        ),
+      })
       setLastUsedAssistantId(defaultAssistant.id)
     }
 
@@ -235,12 +310,11 @@ export const useAssistant = create<AssistantState>((set, get) => ({
     }
   },
   setDefaultAssistant: (id) => {
-    const newAssistant = get().assistants?.find(a => a.id === id)
+    const newAssistant = get().assistants?.find((a) => a.id === id)
     if (newAssistant) {
       set({ defaultAssistantId: id, currentAssistant: newAssistant })
       setLastUsedAssistantId(id)
-    }
-    else {
+    } else {
       set({ defaultAssistantId: id })
     }
     setDefaultAssistantId(id)
@@ -248,7 +322,8 @@ export const useAssistant = create<AssistantState>((set, get) => ({
   setCurrentAssistant: (assistant, saveToStorage = true) => {
     const currentAssistant = get().currentAssistant
     const defaultAssistantId = get().defaultAssistantId
-    if (defaultAssistantId && currentAssistant?.id === defaultAssistantId) return
+    if (defaultAssistantId && currentAssistant?.id === defaultAssistantId)
+      return
     if (currentAssistant !== assistant) {
       set({ currentAssistant: assistant })
       if (saveToStorage) {
@@ -256,25 +331,59 @@ export const useAssistant = create<AssistantState>((set, get) => ({
       }
     }
   },
-  setAssistants: (assistants) => {
+  setAssistants: (assistants, committedIdMap = {}) => {
     if (assistants) {
+      const normalizedEntries = assistants.map((a) => {
+        const sourceId = a.id?.toString()
+        const assistant = normalizeDefaultAssistantBranding({
+          ...a,
+          id: a.id?.toString(), // new String("id") !== "id"
+        })
+        return { sourceId, assistant }
+      })
       const normalizedAssistants = dedupeDefaultAssistant(
-        assistants.map((a) =>
-          normalizeDefaultAssistantBranding({
-            ...a,
-            id: a.id?.toString(), // new String("id") !== "id"
-          })
+        normalizedEntries.map(({ assistant }) => assistant)
+      )
+      const normalizations = [
+        ...Object.entries(committedIdMap).map(([sourceId, targetId]) => ({
+          sourceId,
+          targetId,
+        })),
+        ...normalizedEntries.flatMap(({ sourceId, assistant }) =>
+          isLegacyDefaultAssistantId(sourceId)
+            ? [{ sourceId, targetId: assistant.id?.toString() }]
+            : []
+        ),
+      ]
+      const legacySelectionMap = buildLegacySelectionMap(
+        normalizedAssistants,
+        normalizations
+      )
+      const migratedProjectFolders = migratePersistedProjectAssistantSelections(
+        normalizations,
+        normalizedAssistants.flatMap((assistant) =>
+          assistant.id ? [assistant.id.toString()] : []
         )
       )
-      const lastUsedId = getLastUsedAssistantId(normalizedAssistants)
-      const lastUsedAssist = normalizedAssistants.find((a) => a.id === lastUsedId)
-      const defaultAssistantId = getDefaultAssistantId() || ''
-      const defaultAssistant = normalizedAssistants.find((a) => a.id === defaultAssistantId)
+      if (migratedProjectFolders) {
+        hydrateProjectFoldersAfterAssistantMigration(migratedProjectFolders)
+      }
+      const lastUsedId = getLastUsedAssistantId(
+        normalizedAssistants,
+        legacySelectionMap
+      )
+      const lastUsedAssist = normalizedAssistants.find(
+        (a) => a.id === lastUsedId
+      )
+      const defaultAssistantId = getDefaultAssistantId(legacySelectionMap) || ''
+      const defaultAssistant = normalizedAssistants.find(
+        (a) => a.id === defaultAssistantId
+      )
       set({
         assistants: normalizedAssistants,
         currentAssistant: defaultAssistant || lastUsedAssist,
         defaultAssistantId,
-        loading: false
+        loading: false,
       })
     } else {
       set({ loading: false })

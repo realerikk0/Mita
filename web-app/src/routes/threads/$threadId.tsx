@@ -27,7 +27,7 @@ import { useTranslation } from '@/i18n/react-i18next-compat'
 import { useModelProvider } from '@/hooks/useModelProvider'
 import { useAssistant } from '@/hooks/useAssistant'
 import { renderInstructions } from '@/lib/instructionTemplate'
-import { ensureMitaIdentityGuard } from '@/lib/mita-prompt'
+import { ensureBiyanIdentityGuard } from '@/lib/biyan-prompt'
 import {
   Conversation,
   ConversationContent,
@@ -66,16 +66,13 @@ import {
   MessageStatus,
   ChatCompletionRole,
   ContentType,
-} from '@janhq/core'
+} from '@biyan/core'
 import { createImageAttachment } from '@/types/attachment'
 import {
   useChatAttachments,
   NEW_THREAD_ATTACHMENT_KEY,
 } from '@/hooks/useChatAttachments'
 import { processAttachmentsForSend } from '@/lib/attachmentProcessing'
-import { useAttachments } from '@/hooks/useAttachments'
-import { PromptProgress } from '@/components/PromptProgress'
-import { useToolAvailable } from '@/hooks/useToolAvailable'
 import { useMCPServers } from '@/hooks/useMCPServers'
 import { OUT_OF_CONTEXT_SIZE } from '@/utils/error'
 import { Button } from '@/components/ui/button'
@@ -83,13 +80,15 @@ import { Input } from '@/components/ui/input'
 import { IconAlertCircle, IconRefresh } from '@tabler/icons-react'
 import { useToolApproval } from '@/hooks/useToolApproval'
 import DropdownModelProvider from '@/containers/DropdownModelProvider'
-import { ExtensionTypeEnum, VectorDBExtension } from '@janhq/core'
-import { ExtensionManager } from '@/lib/extension'
 import { LoadingRibbonText } from '@/components/ai-elements/loading-ribbon'
 import { useAgentMode } from '@/hooks/useAgentMode'
 import { useAutoRunStore } from '@/stores/auto-run-store'
 import { useMessageQueue } from '@/stores/message-queue-store'
 import { useTokenCalibration } from '@/stores/token-calibration-store'
+import {
+  estimateThreadMessageTokens,
+  estimateTokens,
+} from '@/lib/context-manager'
 import { useWebSearch } from '@/hooks/useWebSearch'
 import { generateThreadTitle } from '@/lib/thread-title-summarizer'
 import { ModelFactory } from '@/lib/model-factory'
@@ -100,36 +99,45 @@ import {
   compactThreadMessages,
   normalizeAutoCompactThreshold,
   shouldAutoCompactThread,
-  type MitaCompactTrigger,
+  type BiyanCompactTrigger,
 } from '@/lib/compact-thread'
 import { useAutoScroll } from '@/hooks/useAutoScroll'
 import { toast } from 'sonner'
 import {
-  DEFAULT_MITA_AGENTS,
-  DEFAULT_MITA_AUTO_RUN,
-  type MitaAutoRunMetadata,
-  type MitaMessageMetadata,
-} from '@/types/mita-agent'
-import { MitaTeamsWorkspace } from '@/containers/MitaTeamsWorkspace'
+  DEFAULT_BIYAN_AGENTS,
+  DEFAULT_BIYAN_AUTO_RUN,
+  type BiyanAutoRunMetadata,
+  type BiyanMessageMetadata,
+} from '@/types/biyan-agent'
 import {
-  MITA_TEAMS_ORCHESTRATOR_ROLE_ID,
-  approveMitaTeamsPlan,
-  normalizeMitaTeamsConfig,
-  requestMitaTeamsPlanRevision,
-  resolveMitaTeamsRoleEditConfirmation,
-  renderMitaTeamsSystemInstructions,
-  type MitaTeamsConfig,
-} from '@/types/mita-teams'
-import { trackMitaEvent } from '@/lib/analytics'
+  createLegacyAgentMetadataMigrationPatch,
+  normalizeAgentMessageMetadata,
+  readLegacyAgentConfigs,
+  readLegacyAutoRunMetadata,
+} from '@/legacy_migrations/agent-metadata'
+import { BiyanTeamsWorkspace } from '@/containers/BiyanTeamsWorkspace'
 import {
-  answerMitaTeamsChoice,
-  answerMitaTeamsText,
-  withMitaTeamsRuntime,
-} from '@/lib/mita-teams-memory'
+  BIYAN_TEAMS_ORCHESTRATOR_ROLE_ID,
+  approveBiyanTeamsPlan,
+  createBiyanTeamsMetadataPatch,
+  normalizeBiyanTeamsConfig,
+  readBiyanTeamsMetadata,
+  requestBiyanTeamsPlanRevision,
+  resolveBiyanTeamsRoleEditConfirmation,
+  renderBiyanTeamsSystemInstructions,
+  type BiyanTeamsConfig,
+} from '@/types/biyan-teams'
+import { createLegacyBiyanTeamsMigrationPatch } from '@/legacy_migrations/biyan-teams-metadata'
+import { trackBiyanEvent } from '@/lib/analytics'
 import {
-  runMitaTeamsPrivateRoleChat,
-  runMitaTeamsRuntime,
-} from '@/lib/mita-teams-runtime'
+  answerBiyanTeamsChoice,
+  answerBiyanTeamsText,
+  withBiyanTeamsRuntime,
+} from '@/lib/biyan-teams-memory'
+import {
+  runBiyanTeamsPrivateRoleChat,
+  runBiyanTeamsRuntime,
+} from '@/lib/biyan-teams-runtime'
 
 const CHAT_STATUS = {
   STREAMING: 'streaming',
@@ -187,8 +195,8 @@ const createAutoRunPrompt = (round: number, maxRounds: number) =>
 
 const COMPUTER_AGENT_TOOL_PREFIX = 'computer_agent_'
 const LEGACY_COMPUTER_TOOL_PREFIX = 'computer_'
-const COMPUTER_AGENT_THREAD_APPROVAL_TOOL = '__mita_computer_agent_thread__'
-const COMPUTER_THREAD_ID_ARG = '_mitaThreadId'
+const COMPUTER_AGENT_THREAD_APPROVAL_TOOL = '__biyan_computer_agent_thread__'
+const COMPUTER_THREAD_ID_ARG = '_biyanThreadId'
 
 function isComputerAgentToolName(toolName: string) {
   return (
@@ -206,7 +214,6 @@ type PendingToolCall = {
 function getExecutablePseudoToolCalls(
   message: UIMessage,
   options: {
-    ragToolNames: Set<string>
     mcpToolNames: Set<string>
   }
 ): PendingToolCall[] {
@@ -226,7 +233,6 @@ function getExecutablePseudoToolCalls(
       if (!isPseudoToolTranscriptExecutable(transcript)) continue
       const toolName = transcript.toolName
       const toolIsAvailable =
-        options.ragToolNames.has(toolName) ||
         options.mcpToolNames.has(toolName) ||
         isComputerAgentToolName(toolName)
       if (!toolIsAvailable) continue
@@ -380,7 +386,7 @@ function ThreadDetail() {
   const titleAbortRef = useRef<AbortController | null>(null)
   const titleAttemptsRef = useRef(0)
   const pendingAutoRunResponseMetaRef = useRef<{
-    mita: MitaMessageMetadata
+    biyan: BiyanMessageMetadata
   } | null>(null)
   const autoRunSendingRef = useRef(false)
   const [autoRunPanelVisible, setAutoRunPanelVisible] = useState(true)
@@ -427,7 +433,7 @@ function ThreadDetail() {
   const thread = useThreads(useShallow((state) => state.threads[threadId]))
   const autoRun =
     useAutoRunStore((state) => state.runs[threadId]) ??
-    DEFAULT_MITA_AUTO_RUN
+    DEFAULT_BIYAN_AUTO_RUN
 
   // Get model and provider for useChat
   const selectedModel = useModelProvider((state) => state.selectedModel)
@@ -449,71 +455,82 @@ function ThreadDetail() {
     (state) => state.settings.computerAgentSandboxAccess
   )
   const threadRef = useRef(thread)
-  const projectId = threadRef.current?.metadata?.project?.id
   const threadModel = useMemo(
     () => searchThreadModel ?? thread?.model,
     [searchThreadModel, thread]
   )
-  const mitaTeamsConfig = useMemo(
-    () => normalizeMitaTeamsConfig(thread?.metadata?.mitaTeams, threadModel),
-    [thread?.metadata?.mitaTeams, threadModel]
+  const biyanTeamsConfig = useMemo(
+    () =>
+      normalizeBiyanTeamsConfig(
+        readBiyanTeamsMetadata(thread?.metadata),
+        threadModel
+      ),
+    [thread?.metadata, threadModel]
   )
-  const activeMitaChatRole = useMemo(() => {
-    if (!mitaTeamsConfig) return undefined
-    if (mitaTeamsConfig.workspaceView === 'role-chat') {
-      return mitaTeamsConfig.roles.find(
-        (role) => role.id === mitaTeamsConfig.activeRoleId
+  useEffect(() => {
+    const migrationPatch = createLegacyBiyanTeamsMigrationPatch(
+      thread?.metadata
+    )
+    if (!migrationPatch) return
+
+    updateThread(threadId, { metadata: migrationPatch })
+  }, [thread?.metadata, threadId, updateThread])
+  const activeBiyanChatRole = useMemo(() => {
+    if (!biyanTeamsConfig) return undefined
+    if (biyanTeamsConfig.workspaceView === 'role-chat') {
+      return biyanTeamsConfig.roles.find(
+        (role) => role.id === biyanTeamsConfig.activeRoleId
       )
     }
     return (
-      mitaTeamsConfig.roles.find(
-        (role) => role.id === MITA_TEAMS_ORCHESTRATOR_ROLE_ID
+      biyanTeamsConfig.roles.find(
+        (role) => role.id === BIYAN_TEAMS_ORCHESTRATOR_ROLE_ID
       ) ??
-      mitaTeamsConfig.roles[0]
+      biyanTeamsConfig.roles[0]
     )
-  }, [mitaTeamsConfig])
-  const activeMitaThreadModel = useMemo(() => {
-    if (!activeMitaChatRole?.provider || !activeMitaChatRole.modelId) {
+  }, [biyanTeamsConfig])
+  const activeBiyanThreadModel = useMemo(() => {
+    if (!activeBiyanChatRole?.provider || !activeBiyanChatRole.modelId) {
       return undefined
     }
-    const provider = getProviderByName(activeMitaChatRole.provider)
+    const provider = getProviderByName(activeBiyanChatRole.provider)
     const model = provider?.models.find(
-      (item) => item.id === activeMitaChatRole.modelId
+      (item) => item.id === activeBiyanChatRole.modelId
     )
 
     return {
       ...(model ?? {}),
-      id: activeMitaChatRole.modelId,
-      provider: activeMitaChatRole.provider,
+      id: activeBiyanChatRole.modelId,
+      provider: activeBiyanChatRole.provider,
     } as ThreadModel
-  }, [activeMitaChatRole, getProviderByName])
-  const effectiveThreadModel = mitaTeamsConfig
-    ? (activeMitaThreadModel ?? threadModel)
+  }, [activeBiyanChatRole, getProviderByName])
+  const effectiveThreadModel = biyanTeamsConfig
+    ? (activeBiyanThreadModel ?? threadModel)
     : threadModel
-  const [isEditingMitaTeamsTitle, setIsEditingMitaTeamsTitle] = useState(false)
-  const [mitaTeamsTitleDraft, setMitaTeamsTitleDraft] = useState(
+  const [isEditingBiyanTeamsTitle, setIsEditingBiyanTeamsTitle] = useState(false)
+  const [biyanTeamsTitleDraft, setBiyanTeamsTitleDraft] = useState(
     thread?.title || 'Biyan Teams'
   )
 
   useEffect(() => {
-    if (!isEditingMitaTeamsTitle) {
-      setMitaTeamsTitleDraft(thread?.title || 'Biyan Teams')
+    if (!isEditingBiyanTeamsTitle) {
+      setBiyanTeamsTitleDraft(thread?.title || 'Biyan Teams')
     }
-  }, [isEditingMitaTeamsTitle, thread?.title])
+  }, [isEditingBiyanTeamsTitle, thread?.title])
 
-  const commitMitaTeamsTitle = useCallback(() => {
-    const nextTitle = mitaTeamsTitleDraft.trim() || 'Biyan Teams'
+  const commitBiyanTeamsTitle = useCallback(() => {
+    const nextTitle = biyanTeamsTitleDraft.trim() || 'Biyan Teams'
     if (nextTitle !== thread?.title) {
       updateThread(threadId, { title: nextTitle })
     }
-    setIsEditingMitaTeamsTitle(false)
-  }, [mitaTeamsTitleDraft, thread?.title, threadId, updateThread])
+    setIsEditingBiyanTeamsTitle(false)
+  }, [biyanTeamsTitleDraft, thread?.title, threadId, updateThread])
 
-  // Always include the Biyan identity guard so model-native Jan/Menlo
-  // personas do not leak when a thread has no assigned assistant.
+  // Always include the Biyan identity guard so upstream model personas do not
+  // leak when a thread has no assigned assistant.
   const threadAssistant = thread?.assistants?.[0]
   const systemMessage = renderInstructions(
-    `${ensureMitaIdentityGuard(threadAssistant?.instructions)}
+    `${ensureBiyanIdentityGuard(threadAssistant?.instructions)}
 
 Tool result communication:
 - Treat tool cards as raw call records only; do not rely on them as the user-facing explanation.
@@ -522,8 +539,8 @@ Tool result communication:
 - Use the structured tool-calling channel only. Never write pseudo tool transcripts such as <tool_call>, <tool_response>, or web_search({...}) in normal assistant text.
 - If the structured tool channel is unavailable, say that you cannot use that tool right now instead of simulating a tool call or result.
 - If Biyan converts a pseudo tool transcript into a real tool call, summarize only the real tool output that Biyan provides.${
-      mitaTeamsConfig
-        ? `\n\n${renderMitaTeamsSystemInstructions(mitaTeamsConfig)}`
+      biyanTeamsConfig
+        ? `\n\n${renderBiyanTeamsSystemInstructions(biyanTeamsConfig)}`
         : ''
     }${
       computerAgentEnabled
@@ -553,36 +570,40 @@ Tool result communication:
   useEffect(() => {
     const metadata = thread?.metadata as
       | (Record<string, unknown> & {
-          mitaAutoRun?: MitaAutoRunMetadata
-          silenceAutoRun?: MitaAutoRunMetadata
+          biyanAutoRun?: BiyanAutoRunMetadata
         })
       | undefined
-    const storedAutoRun = metadata?.mitaAutoRun ?? metadata?.silenceAutoRun
+    const storedAutoRun =
+      metadata?.biyanAutoRun ?? readLegacyAutoRunMetadata(metadata)
     if (!storedAutoRun) return
 
     useAutoRunStore.getState().setRun(threadId, {
-      ...DEFAULT_MITA_AUTO_RUN,
+      ...DEFAULT_BIYAN_AUTO_RUN,
       ...storedAutoRun,
     })
-  }, [
-    threadId,
-    thread?.metadata?.mitaAutoRun,
-    thread?.metadata?.silenceAutoRun,
-  ])
+  }, [threadId, thread?.metadata])
+
+  useEffect(() => {
+    const migrationPatch = createLegacyAgentMetadataMigrationPatch(
+      thread?.metadata
+    )
+    if (!migrationPatch) return
+    updateThread(threadId, { metadata: migrationPatch })
+  }, [thread?.metadata, threadId, updateThread])
 
   const persistAutoRunState = useCallback(
-    (patch: Partial<MitaAutoRunMetadata>) => {
+    (patch: Partial<BiyanAutoRunMetadata>) => {
       const nextRun = useAutoRunStore.getState().patchRun(threadId, patch)
       const currentThread =
         useThreads.getState().threads[threadId] ?? threadRef.current
 
       useThreads.getState().updateThread(threadId, {
         metadata: {
-          mitaAutoRun: nextRun,
-          mitaAgents:
-            currentThread?.metadata?.mitaAgents ??
-            currentThread?.metadata?.silenceAgents ??
-            DEFAULT_MITA_AGENTS,
+          biyanAutoRun: nextRun,
+          biyanAgents:
+            currentThread?.metadata?.biyanAgents ??
+            readLegacyAgentConfigs(currentThread?.metadata) ??
+            DEFAULT_BIYAN_AGENTS,
         },
       })
 
@@ -601,14 +622,14 @@ Tool result communication:
     autoIncreaseAttempts > 0 &&
     autoIncreaseAttempts < MAX_AUTO_INCREASE_ATTEMPTS
   const [contextLimitError, setContextLimitError] = useState<Error | null>(null)
-  const [processingEmbeddings, setProcessingEmbeddings] = useState(false)
+  const [processingAttachments, setProcessingAttachments] = useState(false)
   const rawChatStatusRef = useRef<ChatStatus>('ready')
   const [settledChatStatus, setSettledChatStatus] =
     useState<ChatStatus | null>(null)
-  const mitaTeamsAbortRef = useRef<AbortController | null>(null)
-  const mitaTeamsLastUserTextRef = useRef<string>('')
-  const mitaTeamsAnsweredChoiceIdsRef = useRef<Set<string>>(new Set())
-  const [isMitaTeamsRuntimeBusy, setIsMitaTeamsRuntimeBusy] = useState(false)
+  const biyanTeamsAbortRef = useRef<AbortController | null>(null)
+  const biyanTeamsLastUserTextRef = useRef<string>('')
+  const biyanTeamsAnsweredChoiceIdsRef = useRef<Set<string>>(new Set())
+  const [isBiyanTeamsRuntimeBusy, setIsBiyanTeamsRuntimeBusy] = useState(false)
   const resetSettledChatStatus = useCallback(() => {
     setSettledChatStatus(null)
     rawChatStatusRef.current = CHAT_STATUS.SUBMITTED
@@ -707,7 +728,6 @@ Tool result communication:
     setMessages: setChatMessages,
     stop,
     addToolOutput,
-    updateRagToolsAvailability,
     setContinueFromContent,
   } = useChat({
     sessionId: threadId,
@@ -716,12 +736,10 @@ Tool result communication:
     experimental_throttle: 50,
     onFinish: ({ message, isAbort, isError }) => {
       const structuredToolCalls = [...sessionData.tools] as PendingToolCall[]
-      const ragToolNames = useAppState.getState().ragToolNames
       const mcpToolNames = useAppState.getState().mcpToolNames
       const pseudoToolCalls =
         !isAbort && structuredToolCalls.length === 0
           ? getExecutablePseudoToolCalls(message, {
-              ragToolNames,
               mcpToolNames,
             })
           : []
@@ -804,8 +822,8 @@ Tool result communication:
             unknown
           >
           if (pendingAutoRunResponseMetaRef.current) {
-            messageMetadata.mita =
-              pendingAutoRunResponseMetaRef.current.mita
+            messageMetadata.biyan =
+              pendingAutoRunResponseMetaRef.current.biyan
             pendingAutoRunResponseMetaRef.current = null
           }
 
@@ -854,9 +872,7 @@ Tool result communication:
             const toolName = toolCall.toolName
             const toolInput = asToolInput(toolCall.input)
             const isComputerAgentTool = isComputerAgentToolName(toolName)
-            const toolKind = ragToolNames.has(toolName)
-              ? 'rag'
-              : isComputerAgentTool
+            const toolKind = isComputerAgentTool
                 ? 'computer'
                 : mcpToolNames.has(toolName)
                   ? 'mcp'
@@ -876,10 +892,7 @@ Tool result communication:
                 .getState()
                 .isToolApproved(threadId, COMPUTER_AGENT_THREAD_APPROVAL_TOOL)
 
-            // Built-in RAG tools are internal and should not require approval.
-            const approved = ragToolNames.has(toolName)
-              ? true
-              : isComputerAgentTool && computerApproval === null
+            const approved = isComputerAgentTool && computerApproval === null
                 ? true
                 : hasComputerThreadApproval
                   ? true
@@ -906,7 +919,7 @@ Tool result communication:
 
             if (!approved) {
               // User denied the tool call
-              trackMitaEvent('mcp_tool_invoked', {
+              trackBiyanEvent('mcp_tool_invoked', {
                 tool_name: toolName,
                 tool_kind: toolKind,
                 status: 'denied',
@@ -923,16 +936,7 @@ Tool result communication:
 
             let result
 
-            // Route to the appropriate service based on tool name
-            if (ragToolNames.has(toolName)) {
-              result = await serviceHub.rag().callTool({
-                toolName,
-                arguments: toolInput,
-                threadId,
-                projectId: projectId,
-                scope: projectId ? 'project' : 'thread',
-              })
-            } else if (isComputerAgentTool || mcpToolNames.has(toolName)) {
+            if (isComputerAgentTool || mcpToolNames.has(toolName)) {
               result = await serviceHub.mcp().callTool({
                 toolName,
                 arguments: isComputerAgentTool
@@ -947,7 +951,7 @@ Tool result communication:
             }
 
             if (result.error) {
-              trackMitaEvent('mcp_tool_invoked', {
+              trackBiyanEvent('mcp_tool_invoked', {
                 tool_name: toolName,
                 tool_kind: toolKind,
                 status: 'failed',
@@ -960,7 +964,7 @@ Tool result communication:
                 errorText: `Error: ${result.error}`,
               })
             } else {
-              trackMitaEvent('mcp_tool_invoked', {
+              trackBiyanEvent('mcp_tool_invoked', {
                 tool_name: toolName,
                 tool_kind: toolKind,
                 status: 'succeeded',
@@ -976,7 +980,7 @@ Tool result communication:
             // Ignore abort errors
             if ((error as Error).name !== 'AbortError') {
               console.error('Tool call error:', error)
-              trackMitaEvent('mcp_tool_invoked', {
+              trackBiyanEvent('mcp_tool_invoked', {
                 tool_name: toolCall.toolName,
                 tool_kind: isComputerAgentToolName(toolCall.toolName)
                   ? 'computer'
@@ -1037,16 +1041,14 @@ Tool result communication:
     }
   }, [status])
 
-  const effectiveStatus = isMitaTeamsRuntimeBusy
+  const effectiveStatus = isBiyanTeamsRuntimeBusy
     ? CHAT_STATUS.SUBMITTED
     : (settledChatStatus ?? status)
 
-  const persistMitaTeamsConfig = useCallback(
-    (nextConfig: MitaTeamsConfig) => {
+  const persistBiyanTeamsConfig = useCallback(
+    (nextConfig: BiyanTeamsConfig) => {
       updateThread(threadId, {
-        metadata: {
-          mitaTeams: nextConfig,
-        },
+        metadata: createBiyanTeamsMetadataPatch(nextConfig),
       })
     },
     [threadId, updateThread]
@@ -1064,16 +1066,16 @@ Tool result communication:
     [setChatMessages]
   )
 
-  const appendMitaTeamsAssistantMessage = useCallback(
+  const appendBiyanTeamsAssistantMessage = useCallback(
     (
       content: string,
-      config: MitaTeamsConfig,
+      config: BiyanTeamsConfig,
       status: 'completed' | 'waiting-for-user' | 'stopped' | 'failed'
     ) => {
       const timestamp = Date.now()
       const assistantMessage = {
         ...newAssistantThreadContent(threadId, content, {
-          mitaTeams: {
+          biyanTeams: {
             runId: config.runtime.run?.id,
             status,
             projectMemoryVersion: config.runtime.projectMemory.version,
@@ -1093,8 +1095,8 @@ Tool result communication:
   // role's provider, so refresh those provider balances when it settles. The
   // sidebar then reflects actual spend (the true balance delta) with no price
   // table to maintain.
-  const refreshMitaTeamsProviderBalances = useCallback(
-    (config: MitaTeamsConfig) => {
+  const refreshBiyanTeamsProviderBalances = useCallback(
+    (config: BiyanTeamsConfig) => {
       const providers = new Set<string>()
       for (const role of config.roles) {
         if (role.provider) providers.add(role.provider)
@@ -1106,28 +1108,28 @@ Tool result communication:
     []
   )
 
-  const startMitaTeamsRuntime = useCallback(
-    async (config: MitaTeamsConfig, userText: string) => {
-      mitaTeamsLastUserTextRef.current = userText
-      mitaTeamsAbortRef.current?.abort()
+  const startBiyanTeamsRuntime = useCallback(
+    async (config: BiyanTeamsConfig, userText: string) => {
+      biyanTeamsLastUserTextRef.current = userText
+      biyanTeamsAbortRef.current?.abort()
       const controller = new AbortController()
-      mitaTeamsAbortRef.current = controller
+      biyanTeamsAbortRef.current = controller
       rawChatStatusRef.current = CHAT_STATUS.SUBMITTED
       setSettledChatStatus(CHAT_STATUS.SUBMITTED)
-      setIsMitaTeamsRuntimeBusy(true)
+      setIsBiyanTeamsRuntimeBusy(true)
 
       try {
-        const result = await runMitaTeamsRuntime({
+        const result = await runBiyanTeamsRuntime({
           config,
           userText,
           threadTitle: threadRef.current?.title,
           abortSignal: controller.signal,
-          onConfigChange: persistMitaTeamsConfig,
+          onConfigChange: persistBiyanTeamsConfig,
         })
 
-        persistMitaTeamsConfig(result.config)
+        persistBiyanTeamsConfig(result.config)
         if (result.finalResponse) {
-          appendMitaTeamsAssistantMessage(
+          appendBiyanTeamsAssistantMessage(
             result.finalResponse,
             result.config,
             result.status
@@ -1141,50 +1143,50 @@ Tool result communication:
           error instanceof Error ? error.message : 'Biyan Teams failed'
         toast.error(message)
       } finally {
-        if (mitaTeamsAbortRef.current === controller) {
-          mitaTeamsAbortRef.current = null
-          setIsMitaTeamsRuntimeBusy(false)
+        if (biyanTeamsAbortRef.current === controller) {
+          biyanTeamsAbortRef.current = null
+          setIsBiyanTeamsRuntimeBusy(false)
           const updateSessionStatus = useChatSessions.getState().updateStatus
           if (typeof updateSessionStatus === 'function') {
             updateSessionStatus(threadId, 'ready')
           }
           setSettledChatStatus('ready')
-          refreshMitaTeamsProviderBalances(config)
+          refreshBiyanTeamsProviderBalances(config)
         }
       }
     },
     [
-      appendMitaTeamsAssistantMessage,
-      persistMitaTeamsConfig,
-      refreshMitaTeamsProviderBalances,
+      appendBiyanTeamsAssistantMessage,
+      persistBiyanTeamsConfig,
+      refreshBiyanTeamsProviderBalances,
       summarizeThreadTitleFromText,
       threadId,
     ]
   )
 
-  const startMitaTeamsPrivateRoleChat = useCallback(
+  const startBiyanTeamsPrivateRoleChat = useCallback(
     async (
-      config: MitaTeamsConfig,
+      config: BiyanTeamsConfig,
       roleId: string,
       userText: string
     ) => {
-      mitaTeamsAbortRef.current?.abort()
+      biyanTeamsAbortRef.current?.abort()
       const controller = new AbortController()
-      mitaTeamsAbortRef.current = controller
+      biyanTeamsAbortRef.current = controller
       rawChatStatusRef.current = CHAT_STATUS.SUBMITTED
       setSettledChatStatus(CHAT_STATUS.SUBMITTED)
-      setIsMitaTeamsRuntimeBusy(true)
+      setIsBiyanTeamsRuntimeBusy(true)
 
       try {
-        const result = await runMitaTeamsPrivateRoleChat({
+        const result = await runBiyanTeamsPrivateRoleChat({
           config,
           roleId,
           userText,
           abortSignal: controller.signal,
-          onConfigChange: persistMitaTeamsConfig,
+          onConfigChange: persistBiyanTeamsConfig,
         })
 
-        persistMitaTeamsConfig(result.config)
+        persistBiyanTeamsConfig(result.config)
         if (result.status === 'failed' && result.finalResponse) {
           toast.error(result.finalResponse)
         }
@@ -1193,19 +1195,19 @@ Tool result communication:
           error instanceof Error ? error.message : 'Biyan Teams role chat failed'
         toast.error(message)
       } finally {
-        if (mitaTeamsAbortRef.current === controller) {
-          mitaTeamsAbortRef.current = null
-          setIsMitaTeamsRuntimeBusy(false)
+        if (biyanTeamsAbortRef.current === controller) {
+          biyanTeamsAbortRef.current = null
+          setIsBiyanTeamsRuntimeBusy(false)
           const updateSessionStatus = useChatSessions.getState().updateStatus
           if (typeof updateSessionStatus === 'function') {
             updateSessionStatus(threadId, 'ready')
           }
           setSettledChatStatus('ready')
-          refreshMitaTeamsProviderBalances(config)
+          refreshBiyanTeamsProviderBalances(config)
         }
       }
     },
-    [persistMitaTeamsConfig, refreshMitaTeamsProviderBalances, threadId]
+    [persistBiyanTeamsConfig, refreshBiyanTeamsProviderBalances, threadId]
   )
 
   const createCompactionModel = useCallback(async () => {
@@ -1241,7 +1243,7 @@ Tool result communication:
       customInstructions,
       maxRecentTokens,
     }: {
-      trigger: MitaCompactTrigger
+      trigger: BiyanCompactTrigger
       customInstructions?: string
       maxRecentTokens?: number
     }) => {
@@ -1308,7 +1310,7 @@ Tool result communication:
           console.debug(
             `[compact] Auto compacted thread ${threadId} at ${check.tokenEstimate}/${check.tokenLimit} estimated tokens`
           )
-          trackMitaEvent('context_compacted', {
+          trackBiyanEvent('context_compacted', {
             provider_id: selectedProvider,
             model_id: selectedModel?.id,
             source: 'auto',
@@ -1332,7 +1334,7 @@ Tool result communication:
           customInstructions,
         })
         if (compacted) {
-          trackMitaEvent('context_compacted', {
+          trackBiyanEvent('context_compacted', {
             provider_id: selectedProvider,
             model_id: selectedModel?.id,
             source: 'manual',
@@ -1340,7 +1342,7 @@ Tool result communication:
           })
           toast.success('Context compacted')
         } else {
-          trackMitaEvent('context_compacted', {
+          trackBiyanEvent('context_compacted', {
             provider_id: selectedProvider,
             model_id: selectedModel?.id,
             source: 'manual',
@@ -1356,54 +1358,6 @@ Tool result communication:
     },
     [runThreadCompaction, selectedModel?.id, selectedProvider]
   )
-
-  // Get disabled tools for this thread to trigger re-render when they change
-  const disabledTools = useToolAvailable((state) =>
-    state.getDisabledToolsForThread(threadId)
-  )
-
-  // Update RAG tools availability when documents, model, or tool availability changes
-  useEffect(() => {
-    const checkDocumentsAvailability = async () => {
-      const hasThreadDocuments = Boolean(thread?.metadata?.hasDocuments)
-      let hasProjectDocuments = false
-
-      // Check if thread belongs to a project and if that project has files
-      const projectId = thread?.metadata?.project?.id
-      if (projectId) {
-        try {
-          const ext = ExtensionManager.getInstance().get<VectorDBExtension>(
-            ExtensionTypeEnum.VectorDB
-          )
-          if (ext?.listAttachmentsForProject) {
-            const projectFiles = await ext.listAttachmentsForProject(projectId)
-            hasProjectDocuments = projectFiles.length > 0
-          }
-        } catch (error) {
-          console.warn('Failed to check project files:', error)
-        }
-      }
-
-      const hasDocuments = hasThreadDocuments || hasProjectDocuments
-      const ragFeatureAvailable = Boolean(useAttachments.getState().enabled)
-      const modelSupportsTools =
-        selectedModel?.capabilities?.includes('tools') ?? false
-
-      updateRagToolsAvailability(
-        hasDocuments,
-        modelSupportsTools,
-        ragFeatureAvailable
-      )
-    }
-
-    checkDocumentsAvailability()
-  }, [
-    thread?.metadata?.hasDocuments,
-    thread?.metadata?.project?.id,
-    selectedModel?.capabilities,
-    updateRagToolsAvailability,
-    disabledTools, // Re-run when tools are enabled/disabled
-  ])
 
   // Auto-scroll the reasoning container during streaming, pausing when the user scrolls up
   const {
@@ -1429,7 +1383,7 @@ Tool result communication:
 
   useEffect(() => {
     setCurrentThreadId(threadId)
-    trackMitaEvent('chat_selected', {
+    trackBiyanEvent('chat_selected', {
       has_documents: Boolean(thread?.metadata?.hasDocuments),
     })
     // Reset title summarization state for the new thread
@@ -1537,16 +1491,8 @@ Tool result communication:
       const hasDocuments = combinedAttachments.some(
         (a) => a.type === 'document' && !a.processed
       )
-      const hasEmbeddingDocuments = combinedAttachments.some(
-        (a) =>
-          a.type === 'document' &&
-          !a.processed &&
-          a.parseMode !== 'inline'
-      )
-
       // When there are unprocessed documents (e.g. first-message flow),
-      // show the user message in the conversation immediately so the UI
-      // doesn't hang while embeddings are generated.
+      // show the user message immediately while full parsing completes.
       if (hasDocuments) {
         const previewMessage = newUserThreadContent(
           threadId,
@@ -1563,44 +1509,51 @@ Tool result communication:
       // about to be sent or visible in the preview message above.
       clearAttachmentsForThread(attachmentsKey)
 
-      // Process attachments (ingest images, parse/index documents)
+      // Process attachments (native file input or complete local parsing).
       let processedAttachments = combinedAttachments
-      const projectId = thread?.metadata?.project?.id
-      const providerForSend =
-        activeMitaChatRole?.provider && activeMitaChatRole.modelId
-          ? activeMitaChatRole.provider
-          : selectedProvider
-      if (activeMitaChatRole?.provider && activeMitaChatRole.modelId) {
-        selectModelProvider(activeMitaChatRole.provider, activeMitaChatRole.modelId)
+      if (activeBiyanChatRole?.provider && activeBiyanChatRole.modelId) {
+        selectModelProvider(activeBiyanChatRole.provider, activeBiyanChatRole.modelId)
       }
       if (combinedAttachments.length > 0) {
-        if (hasEmbeddingDocuments) setProcessingEmbeddings(true)
+        if (hasDocuments) setProcessingAttachments(true)
         try {
-          const parsePreference = useAttachments.getState().parseMode
+          const assistantParameters =
+            useAssistant.getState().currentAssistant?.parameters ?? {}
+          const maxContextTokens =
+            getConfiguredMaxContextTokens(assistantParameters, selectedModel) ||
+            32_768
+          const charsPerToken = useTokenCalibration
+            .getState()
+            .getCharsPerToken(selectedModel?.id)
+          const existingTokens = useMessages
+            .getState()
+            .getMessages(threadId)
+            .reduce(
+              (total, message) =>
+                total + estimateThreadMessageTokens(message, charsPerToken),
+              estimateTokens(text, charsPerToken) +
+                estimateTokens(systemMessage ?? '', charsPerToken)
+            )
+          const outputReserve = Math.min(
+            4_096,
+            Math.floor(maxContextTokens * 0.15)
+          )
           const result = await processAttachmentsForSend({
             attachments: combinedAttachments,
-            threadId,
-            projectId,
-            serviceHub,
-            selectedProvider: providerForSend,
-            parsePreference,
+            modelCapabilities: biyanTeamsConfig
+              ? []
+              : selectedModel?.capabilities,
+            contextAvailableTokens: Math.max(
+              0,
+              maxContextTokens - existingTokens - outputReserve
+            ),
+            estimateTokens: (content) =>
+              estimateTokens(content, charsPerToken),
           })
           processedAttachments = result.processedAttachments
-
-          // Update thread metadata if documents were embedded
-          if (result.hasEmbeddedDocuments) {
-            const toolApproval = useToolApproval.getState()
-            const ragTools = useAppState.getState().ragToolNames
-            for (const toolName of ragTools) {
-              toolApproval.approveToolForThread(threadId, toolName)
-            }
-            useThreads.getState().updateThread(threadId, {
-              metadata: { hasDocuments: true },
-            })
-          }
         } catch (error) {
           console.error('Failed to process attachments:', error)
-          trackMitaEvent('attachment_processing_failed', {
+          trackBiyanEvent('attachment_processing_failed', {
             provider_id: selectedProvider,
             model_id: selectedModel?.id,
             attachment_count: combinedAttachments.length,
@@ -1610,6 +1563,10 @@ Tool result communication:
               (a) => a.type === 'document'
             ).length,
             error_kind: 'processing',
+          })
+          toast.error('Unable to attach document', {
+            description:
+              error instanceof Error ? error.message : String(error),
           })
           // Remove the preview message on failure
           if (hasDocuments) {
@@ -1630,7 +1587,7 @@ Tool result communication:
           }
           return
         } finally {
-          setProcessingEmbeddings(false)
+          setProcessingAttachments(false)
         }
       }
 
@@ -1650,10 +1607,10 @@ Tool result communication:
       const messageText = userMessage.content[0].text?.value ?? text
 
       if (
-        mitaTeamsConfig?.workspaceView === 'role-chat' &&
-        activeMitaChatRole
+        biyanTeamsConfig?.workspaceView === 'role-chat' &&
+        activeBiyanChatRole
       ) {
-        trackMitaEvent('message_sent', {
+        trackBiyanEvent('message_sent', {
           provider_id: selectedProvider,
           model_id: selectedModel?.id,
           model_capabilities: selectedModel?.capabilities ?? [],
@@ -1665,12 +1622,12 @@ Tool result communication:
             (a) => a.type === 'document'
           ).length,
           message_length_bucket: messageLengthBucket(messageText),
-          source: 'mita_teams_role_chat',
+          source: 'biyan_teams_role_chat',
           web_search_enabled: useWebSearch.getState().enabled,
         })
-        void startMitaTeamsPrivateRoleChat(
-          mitaTeamsConfig,
-          activeMitaChatRole.id,
+        void startBiyanTeamsPrivateRoleChat(
+          biyanTeamsConfig,
+          activeBiyanChatRole.id,
           messageText
         )
         return
@@ -1679,7 +1636,7 @@ Tool result communication:
       await maybeAutoCompactBeforeSend(messageText)
 
       addMessage(userMessage)
-      trackMitaEvent('message_sent', {
+      trackBiyanEvent('message_sent', {
         provider_id: selectedProvider,
         model_id: selectedModel?.id,
         model_capabilities: selectedModel?.capabilities ?? [],
@@ -1695,13 +1652,15 @@ Tool result communication:
         web_search_enabled: useWebSearch.getState().enabled,
       })
 
-      if (mitaTeamsConfig) {
+      if (biyanTeamsConfig) {
         appendThreadMessageToChat(userMessage)
-        void startMitaTeamsRuntime(mitaTeamsConfig, messageText)
+        void startBiyanTeamsRuntime(biyanTeamsConfig, messageText)
         return
       }
 
-      // Build parts for AI SDK (only images are sent as file parts)
+      // Build AI SDK parts. Native document parts are sent only when the
+      // selected model advertises file-input support; all others were parsed
+      // and injected into the text metadata above.
       const parts: Array<
         | { type: 'text'; text: string }
         | { type: 'file'; mediaType: string; url: string }
@@ -1721,6 +1680,21 @@ Tool result communication:
           })
         })
       }
+      processedAttachments
+        .filter(
+          (attachment) =>
+            attachment.type === 'document' &&
+            attachment.injectionMode === 'native' &&
+            attachment.nativeDataUrl &&
+            attachment.nativeMediaType
+        )
+        .forEach((attachment) => {
+          parts.push({
+            type: 'file',
+            mediaType: attachment.nativeMediaType!,
+            url: attachment.nativeDataUrl!,
+          })
+        })
 
       sendMessage({
         parts,
@@ -1741,16 +1715,16 @@ Tool result communication:
       serviceHub,
       selectedModel,
       selectedProvider,
-      activeMitaChatRole,
+      activeBiyanChatRole,
       selectModelProvider,
       maybeAutoCompactBeforeSend,
       resetSettledChatStatus,
       deleteThread,
       router,
-      mitaTeamsConfig,
+      biyanTeamsConfig,
       appendThreadMessageToChat,
-      startMitaTeamsRuntime,
-      startMitaTeamsPrivateRoleChat,
+      startBiyanTeamsRuntime,
+      startBiyanTeamsPrivateRoleChat,
     ]
   )
 
@@ -1760,12 +1734,16 @@ Tool result communication:
     async (text: string, metadata?: Record<string, unknown>) => {
       resetSettledChatStatus()
       const messageId = generateId()
+      const canonicalMetadata = normalizeAgentMessageMetadata(metadata)
+      const autoRunMetadata = canonicalMetadata?.biyan as
+        | BiyanMessageMetadata
+        | undefined
       const userMessage = newUserThreadContent(
         threadId,
         text,
         [],
         messageId,
-        metadata
+        canonicalMetadata
       )
 
       await maybeAutoCompactBeforeSend(
@@ -1773,19 +1751,19 @@ Tool result communication:
       )
 
       addMessage(userMessage)
-      trackMitaEvent('message_sent', {
+      trackBiyanEvent('message_sent', {
         provider_id: selectedProvider,
         model_id: selectedModel?.id,
         has_attachments: false,
         attachment_count: 0,
         message_length_bucket: messageLengthBucket(text),
-        source: metadata?.mita ? 'auto_run' : 'queue',
+        source: autoRunMetadata ? 'auto_run' : 'queue',
         web_search_enabled: useWebSearch.getState().enabled,
       })
 
-      if (metadata?.mita) {
+      if (autoRunMetadata) {
         pendingAutoRunResponseMetaRef.current = {
-          mita: metadata.mita as MitaMessageMetadata,
+          biyan: autoRunMetadata,
         }
       }
 
@@ -1809,7 +1787,7 @@ Tool result communication:
   const handleAutoRunStart = useCallback(
     (maxRounds: number) => {
       const now = new Date().toISOString()
-      trackMitaEvent('auto_run_started', {
+      trackBiyanEvent('auto_run_started', {
         max_rounds: maxRounds,
         provider_id: selectedProvider,
         model_id: selectedModel?.id,
@@ -1895,57 +1873,57 @@ Tool result communication:
 
   const handleStop = useCallback(() => {
     resetSettledChatStatus()
-    trackMitaEvent('generation_cancelled', {
+    trackBiyanEvent('generation_cancelled', {
       provider_id: selectedProvider,
       model_id: selectedModel?.id,
-      source: mitaTeamsAbortRef.current ? 'mita_teams_stop' : 'chat_stop',
+      source: biyanTeamsAbortRef.current ? 'biyan_teams_stop' : 'chat_stop',
     })
-    if (mitaTeamsAbortRef.current) {
-      mitaTeamsAbortRef.current.abort()
-      mitaTeamsAbortRef.current = null
-      setIsMitaTeamsRuntimeBusy(false)
+    if (biyanTeamsAbortRef.current) {
+      biyanTeamsAbortRef.current.abort()
+      biyanTeamsAbortRef.current = null
+      setIsBiyanTeamsRuntimeBusy(false)
       setSettledChatStatus('ready')
       return
     }
     stop()
   }, [resetSettledChatStatus, selectedModel?.id, selectedProvider, stop])
 
-  const handleMitaTeamsChoiceSelect = useCallback(
+  const handleBiyanTeamsChoiceSelect = useCallback(
     (optionId: string) => {
-      const choice = mitaTeamsConfig?.runtime.userChoiceRequest
+      const choice = biyanTeamsConfig?.runtime.userChoiceRequest
       const answeredChoiceKey = choice ? `${threadId}:${choice.id}` : undefined
       if (
-        !mitaTeamsConfig ||
+        !biyanTeamsConfig ||
         !choice ||
         choice.status !== 'pending' ||
-        isMitaTeamsRuntimeBusy ||
+        isBiyanTeamsRuntimeBusy ||
         !answeredChoiceKey ||
-        mitaTeamsAnsweredChoiceIdsRef.current.has(answeredChoiceKey)
+        biyanTeamsAnsweredChoiceIdsRef.current.has(answeredChoiceKey)
       ) {
         return
       }
 
       const option = choice.options.find((item) => item.id === optionId)
       if (!option) return
-      mitaTeamsAnsweredChoiceIdsRef.current.add(answeredChoiceKey)
+      biyanTeamsAnsweredChoiceIdsRef.current.add(answeredChoiceKey)
 
       if (choice.kind === 'scenario_offer') {
         const accept = optionId === 'use_scenario'
-        const answeredRuntime = answerMitaTeamsChoice(
-          mitaTeamsConfig.runtime,
+        const answeredRuntime = answerBiyanTeamsChoice(
+          biyanTeamsConfig.runtime,
           optionId
         )
         // Accept → mark the scenario accepted (it applies on the re-run);
         // decline → remember the dismissal so it never re-prompts here.
         const nextConfig = {
-          ...withMitaTeamsRuntime(mitaTeamsConfig, {
+          ...withBiyanTeamsRuntime(biyanTeamsConfig, {
             ...answeredRuntime,
             scenarioOfferDismissed: accept ? undefined : true,
           }),
           scenarioId: accept ? ('market_research' as const) : undefined,
         }
         // Re-run on the owner's original goal, not the choice label.
-        const goalText = mitaTeamsLastUserTextRef.current
+        const goalText = biyanTeamsLastUserTextRef.current
         const userText = [`选择：${option.label}`, option.description]
           .filter(Boolean)
           .join('\n')
@@ -1955,7 +1933,7 @@ Tool result communication:
           [],
           generateId(),
           {
-            mitaTeams: {
+            biyanTeams: {
               choiceRequestId: choice.id,
               selectedOptionId: optionId,
               action: 'scenario_offer',
@@ -1963,22 +1941,22 @@ Tool result communication:
           }
         )
 
-        persistMitaTeamsConfig(nextConfig)
+        persistBiyanTeamsConfig(nextConfig)
         addMessage(userMessage)
         appendThreadMessageToChat(userMessage)
-        void startMitaTeamsRuntime(nextConfig, goalText || userText)
+        void startBiyanTeamsRuntime(nextConfig, goalText || userText)
         return
       }
 
       if (choice.kind === 'keep_role_edits') {
         const keepRoleEdits = optionId === 'keep'
-        const nextConfig = resolveMitaTeamsRoleEditConfirmation(
-          mitaTeamsConfig,
+        const nextConfig = resolveBiyanTeamsRoleEditConfirmation(
+          biyanTeamsConfig,
           keepRoleEdits
         )
         const revision =
           nextConfig.runtime.pendingPlanRevision ??
-          mitaTeamsConfig.runtime.pendingPlanRevision ??
+          biyanTeamsConfig.runtime.pendingPlanRevision ??
           ''
         const userText = [
           `Keep role edits: ${keepRoleEdits ? 'yes' : 'no'}`,
@@ -1992,7 +1970,7 @@ Tool result communication:
           [],
           generateId(),
           {
-            mitaTeams: {
+            biyanTeams: {
               choiceRequestId: choice.id,
               selectedOptionId: optionId,
               action: 'keep_role_edits',
@@ -2000,18 +1978,18 @@ Tool result communication:
           }
         )
 
-        persistMitaTeamsConfig(nextConfig)
+        persistBiyanTeamsConfig(nextConfig)
         addMessage(userMessage)
         appendThreadMessageToChat(userMessage)
-        void startMitaTeamsRuntime(nextConfig, userText)
+        void startBiyanTeamsRuntime(nextConfig, userText)
         return
       }
 
-      const nextRuntime = answerMitaTeamsChoice(
-        mitaTeamsConfig.runtime,
+      const nextRuntime = answerBiyanTeamsChoice(
+        biyanTeamsConfig.runtime,
         optionId
       )
-      const nextConfig = withMitaTeamsRuntime(mitaTeamsConfig, nextRuntime)
+      const nextConfig = withBiyanTeamsRuntime(biyanTeamsConfig, nextRuntime)
       const userText = [
         `选择：${option?.label ?? optionId}`,
         option?.description,
@@ -2024,53 +2002,53 @@ Tool result communication:
         [],
         generateId(),
         {
-          mitaTeams: {
+          biyanTeams: {
             choiceRequestId: choice.id,
             selectedOptionId: optionId,
           },
         }
       )
 
-      persistMitaTeamsConfig(nextConfig)
+      persistBiyanTeamsConfig(nextConfig)
       addMessage(userMessage)
       appendThreadMessageToChat(userMessage)
-      void startMitaTeamsRuntime(nextConfig, userText)
+      void startBiyanTeamsRuntime(nextConfig, userText)
     },
     [
       addMessage,
       appendThreadMessageToChat,
-      isMitaTeamsRuntimeBusy,
-      mitaTeamsConfig,
-      persistMitaTeamsConfig,
-      startMitaTeamsRuntime,
+      isBiyanTeamsRuntimeBusy,
+      biyanTeamsConfig,
+      persistBiyanTeamsConfig,
+      startBiyanTeamsRuntime,
       threadId,
     ]
   )
 
-  const handleMitaTeamsTextResponse = useCallback(
+  const handleBiyanTeamsTextResponse = useCallback(
     (text: string) => {
-      const choice = mitaTeamsConfig?.runtime.userChoiceRequest
+      const choice = biyanTeamsConfig?.runtime.userChoiceRequest
       const trimmed = text.trim()
       const answeredChoiceKey = choice ? `${threadId}:${choice.id}` : undefined
       if (
-        !mitaTeamsConfig ||
+        !biyanTeamsConfig ||
         !choice ||
         choice.status !== 'pending' ||
         choice.kind !== 'free_text' ||
         !trimmed ||
-        isMitaTeamsRuntimeBusy ||
+        isBiyanTeamsRuntimeBusy ||
         !answeredChoiceKey ||
-        mitaTeamsAnsweredChoiceIdsRef.current.has(answeredChoiceKey)
+        biyanTeamsAnsweredChoiceIdsRef.current.has(answeredChoiceKey)
       ) {
         return
       }
 
-      mitaTeamsAnsweredChoiceIdsRef.current.add(answeredChoiceKey)
-      const nextRuntime = answerMitaTeamsText(
-        mitaTeamsConfig.runtime,
+      biyanTeamsAnsweredChoiceIdsRef.current.add(answeredChoiceKey)
+      const nextRuntime = answerBiyanTeamsText(
+        biyanTeamsConfig.runtime,
         trimmed
       )
-      const nextConfig = withMitaTeamsRuntime(mitaTeamsConfig, nextRuntime)
+      const nextConfig = withBiyanTeamsRuntime(biyanTeamsConfig, nextRuntime)
       const userText = `填写：${trimmed}`
       const userMessage = newUserThreadContent(
         threadId,
@@ -2078,81 +2056,81 @@ Tool result communication:
         [],
         generateId(),
         {
-          mitaTeams: {
+          biyanTeams: {
             choiceRequestId: choice.id,
             responseText: trimmed,
           },
         }
       )
 
-      persistMitaTeamsConfig(nextConfig)
+      persistBiyanTeamsConfig(nextConfig)
       addMessage(userMessage)
       appendThreadMessageToChat(userMessage)
-      void startMitaTeamsRuntime(nextConfig, userText)
+      void startBiyanTeamsRuntime(nextConfig, userText)
     },
     [
       addMessage,
       appendThreadMessageToChat,
-      isMitaTeamsRuntimeBusy,
-      mitaTeamsConfig,
-      persistMitaTeamsConfig,
-      startMitaTeamsRuntime,
+      isBiyanTeamsRuntimeBusy,
+      biyanTeamsConfig,
+      persistBiyanTeamsConfig,
+      startBiyanTeamsRuntime,
       threadId,
     ]
   )
 
-  const handleMitaTeamsPlanApprove = useCallback((keptRoleIds?: string[]) => {
-    const plan = mitaTeamsConfig?.runtime.planDraft
+  const handleBiyanTeamsPlanApprove = useCallback((keptRoleIds?: string[]) => {
+    const plan = biyanTeamsConfig?.runtime.planDraft
     const approvalKey = plan ? `${threadId}:plan:${plan.id}:approve` : undefined
     if (
-      !mitaTeamsConfig ||
+      !biyanTeamsConfig ||
       !plan ||
-      isMitaTeamsRuntimeBusy ||
+      isBiyanTeamsRuntimeBusy ||
       !approvalKey ||
-      mitaTeamsAnsweredChoiceIdsRef.current.has(approvalKey)
+      biyanTeamsAnsweredChoiceIdsRef.current.has(approvalKey)
     ) {
       return
     }
 
-    mitaTeamsAnsweredChoiceIdsRef.current.add(approvalKey)
-    const nextConfig = approveMitaTeamsPlan(
-      mitaTeamsConfig,
+    biyanTeamsAnsweredChoiceIdsRef.current.add(approvalKey)
+    const nextConfig = approveBiyanTeamsPlan(
+      biyanTeamsConfig,
       keptRoleIds ? { keepRoleIds: keptRoleIds } : undefined
     )
     const userText = `Approved Biyan Teams plan "${plan.goal}". Continue with the approved role snapshot.`
 
-    persistMitaTeamsConfig(nextConfig)
-    void startMitaTeamsRuntime(nextConfig, userText)
+    persistBiyanTeamsConfig(nextConfig)
+    void startBiyanTeamsRuntime(nextConfig, userText)
   }, [
-    isMitaTeamsRuntimeBusy,
-    mitaTeamsConfig,
-    persistMitaTeamsConfig,
-    startMitaTeamsRuntime,
+    isBiyanTeamsRuntimeBusy,
+    biyanTeamsConfig,
+    persistBiyanTeamsConfig,
+    startBiyanTeamsRuntime,
     threadId,
   ])
 
-  const handleMitaTeamsRetry = useCallback(() => {
-    if (!mitaTeamsConfig || isMitaTeamsRuntimeBusy) return
+  const handleBiyanTeamsRetry = useCallback(() => {
+    if (!biyanTeamsConfig || isBiyanTeamsRuntimeBusy) return
     // Re-run the team from its persisted state using the last owner request,
     // so a failed/stopped run is one click to recover instead of a dead-end.
-    const retryText = mitaTeamsLastUserTextRef.current || '继续。'
-    void startMitaTeamsRuntime(mitaTeamsConfig, retryText)
-  }, [isMitaTeamsRuntimeBusy, mitaTeamsConfig, startMitaTeamsRuntime])
+    const retryText = biyanTeamsLastUserTextRef.current || '继续。'
+    void startBiyanTeamsRuntime(biyanTeamsConfig, retryText)
+  }, [isBiyanTeamsRuntimeBusy, biyanTeamsConfig, startBiyanTeamsRuntime])
 
-  const handleMitaTeamsUseExample = useCallback((goal: string) => {
+  const handleBiyanTeamsUseExample = useCallback((goal: string) => {
     // Prefill the composer so the owner can tweak the example before sending.
     usePrompt.getState().setPrompt(goal)
   }, [])
 
-  const handleMitaTeamsPlanRevise = useCallback(
+  const handleBiyanTeamsPlanRevise = useCallback(
     (revision: string) => {
-      const plan = mitaTeamsConfig?.runtime.planDraft
+      const plan = biyanTeamsConfig?.runtime.planDraft
       const trimmed = revision.trim()
-      if (!mitaTeamsConfig || !plan || !trimmed || isMitaTeamsRuntimeBusy) {
+      if (!biyanTeamsConfig || !plan || !trimmed || isBiyanTeamsRuntimeBusy) {
         return
       }
 
-      const nextConfig = requestMitaTeamsPlanRevision(mitaTeamsConfig, trimmed)
+      const nextConfig = requestBiyanTeamsPlanRevision(biyanTeamsConfig, trimmed)
       const userText = `Plan revision request:\n${trimmed}`
       const userMessage = newUserThreadContent(
         threadId,
@@ -2160,28 +2138,28 @@ Tool result communication:
         [],
         generateId(),
         {
-          mitaTeams: {
+          biyanTeams: {
             planId: plan.id,
             action: 'revise_plan',
           },
         }
       )
 
-      persistMitaTeamsConfig(nextConfig)
+      persistBiyanTeamsConfig(nextConfig)
       addMessage(userMessage)
       appendThreadMessageToChat(userMessage)
 
       if (nextConfig.runtime.phase !== 'awaiting_role_edit_confirmation') {
-        void startMitaTeamsRuntime(nextConfig, userText)
+        void startBiyanTeamsRuntime(nextConfig, userText)
       }
     },
     [
       addMessage,
       appendThreadMessageToChat,
-      isMitaTeamsRuntimeBusy,
-      mitaTeamsConfig,
-      persistMitaTeamsConfig,
-      startMitaTeamsRuntime,
+      isBiyanTeamsRuntimeBusy,
+      biyanTeamsConfig,
+      persistBiyanTeamsConfig,
+      startBiyanTeamsRuntime,
       threadId,
     ]
   )
@@ -2191,7 +2169,7 @@ Tool result communication:
   // - For assistant messages: finds the closest preceding user message, deletes from there
   const handleRegenerate = useCallback((messageId?: string) => {
     resetSettledChatStatus()
-    trackMitaEvent('message_regenerated', {
+    trackBiyanEvent('message_regenerated', {
       provider_id: selectedProvider,
       model_id: selectedModel?.id,
       source: messageId ? 'message_action' : 'latest',
@@ -2259,7 +2237,7 @@ Tool result communication:
       if (messageIndex === -1) return
 
       const originalMessage = currentLocalMessages[messageIndex]
-      trackMitaEvent('message_edited', {
+      trackBiyanEvent('message_edited', {
         provider_id: selectedProvider,
         model_id: selectedModel?.id,
         message_length_bucket: messageLengthBucket(newText),
@@ -2328,7 +2306,7 @@ Tool result communication:
   )
 
   // Handler for increasing context size
-  const handleContextSizeIncrease = useCallback(async () => {
+  const handleContextSizeIncrease = useCallback(() => {
     if (!selectedModel) return
 
     const updateProvider = useModelProvider.getState().updateProvider
@@ -2384,16 +2362,11 @@ Tool result communication:
       models: updatedModels,
     })
 
-    await serviceHub.models().stopModel(selectedModel.id)
-
-    setTimeout(() => {
-      handleRegenerate()
-    }, 1000)
+    handleRegenerate()
   }, [
     selectedModel,
     selectedProvider,
     getProviderByName,
-    serviceHub,
     handleRegenerate,
   ])
 
@@ -2460,7 +2433,7 @@ Tool result communication:
   }, [effectiveStatus, threadId, sendQueuedMessage, sessionData.tools.length])
 
   useEffect(() => {
-    if (mitaTeamsConfig) return
+    if (biyanTeamsConfig) return
     if (effectiveStatus !== 'ready' || autoRunSendingRef.current) return
     if (sessionData.tools.length > 0) return
     const queueState = useMessageQueue.getState()
@@ -2474,7 +2447,7 @@ Tool result communication:
     if (run.status !== 'running') return
 
     if (run.currentRound >= run.maxRounds) {
-      trackMitaEvent('auto_run_completed', {
+      trackBiyanEvent('auto_run_completed', {
         current_round: run.currentRound,
         max_rounds: run.maxRounds,
         status: 'completed',
@@ -2495,11 +2468,11 @@ Tool result communication:
     })
 
     sendQueuedMessage(createAutoRunPrompt(round, run.maxRounds), {
-      mita: {
+      biyan: {
         runId,
         round,
         mode: 'single-thread',
-      } satisfies MitaMessageMetadata,
+      } satisfies BiyanMessageMetadata,
     })
       .catch((error) => {
         persistAutoRunState({
@@ -2516,7 +2489,7 @@ Tool result communication:
     autoRun.currentRound,
     autoRun.maxRounds,
     autoRun.status,
-    mitaTeamsConfig,
+    biyanTeamsConfig,
     persistAutoRunState,
     sendQueuedMessage,
     sessionData.tools.length,
@@ -2630,7 +2603,7 @@ Tool result communication:
           isAnimating={false}
         />
       )}
-      {processingEmbeddings && (
+      {processingAttachments && (
         <div className="flex flex-row items-center gap-2">
           <LoadingRibbonText
             icon="tool"
@@ -2639,7 +2612,7 @@ Tool result communication:
           />
         </div>
       )}
-      {(!mitaTeamsConfig &&
+      {(!biyanTeamsConfig &&
         (effectiveStatus === CHAT_STATUS.SUBMITTED ||
         isAutoIncreasingContext) && (
           <div className="flex flex-row items-center gap-2">
@@ -2650,7 +2623,6 @@ Tool result communication:
                 variant="glint"
               />
             )}
-            {effectiveStatus === CHAT_STATUS.SUBMITTED && <PromptProgress />}
           </div>
         ))}
       {activeError && !isAutoIncreasingContext && (
@@ -2707,7 +2679,7 @@ Tool result communication:
 
   const inputArea = (
     <>
-      {!mitaTeamsConfig && autoRunPanelVisible && (
+      {!biyanTeamsConfig && autoRunPanelVisible && (
         <AutoRunPanel
           threadId={threadId}
           disabled={Boolean(autoRunBlockedReason)}
@@ -2724,7 +2696,7 @@ Tool result communication:
         onCompact={handleManualCompact}
         onStop={handleStop}
         chatStatus={effectiveStatus}
-        showAutoRunToggle={!mitaTeamsConfig}
+        showAutoRunToggle={!biyanTeamsConfig}
         autoRunPanelVisible={autoRunPanelVisible}
         onToggleAutoRunPanel={handleAutoRunPanelToggle}
         projectId={thread?.metadata?.project?.id}
@@ -2735,24 +2707,24 @@ Tool result communication:
   return (
     <div className="flex flex-col h-[calc(100dvh-(env(safe-area-inset-bottom)+env(safe-area-inset-top)))]">
       <HeaderPage>
-        {mitaTeamsConfig ? (
+        {biyanTeamsConfig ? (
           <div className="relative z-30 flex w-full items-center pr-2">
-            {isEditingMitaTeamsTitle ? (
+            {isEditingBiyanTeamsTitle ? (
               <Input
                 autoFocus
-                value={mitaTeamsTitleDraft}
+                value={biyanTeamsTitleDraft}
                 className="h-8 max-w-72 rounded-full bg-background text-sm font-medium"
                 onChange={(event) =>
-                  setMitaTeamsTitleDraft(event.target.value)
+                  setBiyanTeamsTitleDraft(event.target.value)
                 }
-                onBlur={commitMitaTeamsTitle}
+                onBlur={commitBiyanTeamsTitle}
                 onKeyDown={(event) => {
                   if (event.key === 'Enter') {
                     event.currentTarget.blur()
                   }
                   if (event.key === 'Escape') {
-                    setMitaTeamsTitleDraft(thread?.title || 'Biyan Teams')
-                    setIsEditingMitaTeamsTitle(false)
+                    setBiyanTeamsTitleDraft(thread?.title || 'Biyan Teams')
+                    setIsEditingBiyanTeamsTitle(false)
                   }
                 }}
               />
@@ -2762,8 +2734,8 @@ Tool result communication:
                 variant="ghost"
                 size="sm"
                 className="h-8 max-w-72 justify-start rounded-full px-3 text-sm font-medium"
-                onClick={() => setIsEditingMitaTeamsTitle(true)}
-                title={t('mita-teams:editActivityTitle')}
+                onClick={() => setIsEditingBiyanTeamsTitle(true)}
+                title={t('biyan-teams:editActivityTitle')}
               >
                 <span className="truncate">{thread?.title || 'Biyan Teams'}</span>
               </Button>
@@ -2775,21 +2747,21 @@ Tool result communication:
           </div>
         )}
       </HeaderPage>
-      {mitaTeamsConfig ? (
-        <MitaTeamsWorkspace
+      {biyanTeamsConfig ? (
+        <BiyanTeamsWorkspace
           thread={thread}
-          config={mitaTeamsConfig}
+          config={biyanTeamsConfig}
           messages={chatMessages}
           messageItems={messageItems}
           inputArea={inputArea}
-          isRuntimeBusy={isMitaTeamsRuntimeBusy}
-          onChoiceSelect={handleMitaTeamsChoiceSelect}
-          onTextResponse={handleMitaTeamsTextResponse}
-          onPlanApprove={handleMitaTeamsPlanApprove}
-          onPlanRevise={handleMitaTeamsPlanRevise}
-          onRetry={handleMitaTeamsRetry}
-          onUseExample={handleMitaTeamsUseExample}
-          onConfigChange={persistMitaTeamsConfig}
+          isRuntimeBusy={isBiyanTeamsRuntimeBusy}
+          onChoiceSelect={handleBiyanTeamsChoiceSelect}
+          onTextResponse={handleBiyanTeamsTextResponse}
+          onPlanApprove={handleBiyanTeamsPlanApprove}
+          onPlanRevise={handleBiyanTeamsPlanRevise}
+          onRetry={handleBiyanTeamsRetry}
+          onUseExample={handleBiyanTeamsUseExample}
+          onConfigChange={persistBiyanTeamsConfig}
         />
       ) : (
         <div className="flex flex-1 flex-col h-full overflow-hidden">

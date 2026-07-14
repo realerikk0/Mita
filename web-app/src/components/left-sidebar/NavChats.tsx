@@ -53,6 +53,7 @@ import { ThreadProjectMenuItems } from "@/containers/ThreadProjectMenuItems"
 import { useThreadManagement } from "@/hooks/useThreadManagement"
 import type { ThreadFolder } from "@/services/projects/types"
 import { MediaProjectMenuItems } from "@/containers/MediaProjectMenuItems"
+import { isBiyanTeamsThread } from '@/types/biyan-teams'
 
 type HistoryEntry =
   | {
@@ -88,10 +89,6 @@ function timestampFromIso(value?: string) {
   if (!value) return 0
   const time = new Date(value).getTime()
   return Number.isFinite(time) ? time : 0
-}
-
-function isMitaTeamsThread(thread: Thread) {
-  return Boolean(thread.metadata?.mitaTeams)
 }
 
 function threadPinnedAt(thread: Thread) {
@@ -412,11 +409,11 @@ export function NavChats() {
     }
 
     refreshMediaAssets()
-    window.addEventListener('mita-media-history-updated', refreshMediaAssets)
+    window.addEventListener('biyan-media-history-updated', refreshMediaAssets)
     return () => {
       mounted = false
       window.removeEventListener(
-        'mita-media-history-updated',
+        'biyan-media-history-updated',
         refreshMediaAssets
       )
     }
@@ -433,7 +430,7 @@ export function NavChats() {
           current.filter((asset) => asset.id !== entry.id)
         )
       }
-      window.dispatchEvent(new Event('mita-media-history-updated'))
+      window.dispatchEvent(new Event('biyan-media-history-updated'))
     } catch (error) {
       console.error('Failed to delete media history entry:', error)
       toast.error(
@@ -463,7 +460,7 @@ export function NavChats() {
   const historyEntries = useMemo<HistoryEntry[]>(() => {
     const activeProjectIds = new Set(folders.map((folder) => folder.id))
     const threadEntries: HistoryEntry[] = threadsWithoutProject.map((thread) => {
-      const team = isMitaTeamsThread(thread)
+      const team = isBiyanTeamsThread(thread)
       return {
         id: thread.id,
         kind: team ? 'team' : 'chat',

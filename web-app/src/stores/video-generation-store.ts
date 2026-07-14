@@ -4,6 +4,10 @@ import { toast } from 'sonner'
 
 import { getServiceHub } from '@/hooks/useServiceHub'
 import { useModelProvider } from '@/hooks/useModelProvider'
+import {
+  createLegacyFallbackStateStorage,
+  legacyStorage,
+} from '@/legacy_migrations/storage'
 import { videoDebugError, videoDebugLog } from '@/lib/video-generation-debug'
 import { videoFileExtension } from '@/lib/video-generation'
 import type { ImageRatio } from '@/lib/image-generation'
@@ -216,7 +220,7 @@ async function finishTask(
     })
     setRuntime(key, { status: 'succeeded', asset: saved, error: undefined })
     removePersisted(key)
-    window.dispatchEvent(new Event('mita-media-history-updated'))
+    window.dispatchEvent(new Event('biyan-media-history-updated'))
   } catch (error) {
     // Aborted/superseded runs (cancel()/reset()/regenerate) already cleaned up
     // and may have started a newer run for this key — don't touch state.
@@ -414,8 +418,10 @@ export const useVideoGenerationStore = create<VideoGenerationStoreState>()(
       },
     }),
     {
-      name: 'mita-video-generation-tasks',
-      storage: createJSONStorage(() => localStorage),
+      name: 'biyan-video-generation-tasks',
+      storage: createJSONStorage(() =>
+        createLegacyFallbackStateStorage(legacyStorage.videoGenerationTasks)
+      ),
       // Only the resumable task descriptors are durable; runtime is rebuilt.
       partialize: (state) => ({ tasks: state.tasks }),
     }

@@ -1,7 +1,7 @@
 use super::models::{
     ImageAssetProject, ImageAssetRecord, ImportImageAssetRequest, SaveImageAssetRequest,
 };
-use crate::core::app::commands::get_mita_data_folder_path;
+use crate::core::app::commands::get_biyan_data_folder_path;
 use base64::{engine::general_purpose, Engine as _};
 use chrono::Utc;
 use std::{
@@ -68,7 +68,7 @@ fn strip_data_url(input: &str) -> &str {
 }
 
 fn assets_root<R: Runtime>(app: &tauri::AppHandle<R>) -> PathBuf {
-    get_mita_data_folder_path(app.clone()).join(IMAGE_ASSETS_DIR)
+    get_biyan_data_folder_path(app.clone()).join(IMAGE_ASSETS_DIR)
 }
 
 fn metadata_path(asset_dir: &Path) -> PathBuf {

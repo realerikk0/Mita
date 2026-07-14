@@ -1,5 +1,0 @@
-pub const MAX_PDF_FILE_SIZE: u64 = 20 * 1024 * 1024;
-pub const MAX_CSV_FILE_SIZE: u64 = 20 * 1024 * 1024;
-pub const MAX_SPREADSHEET_FILE_SIZE: u64 = 20 * 1024 * 1024;
-pub const MAX_PPTX_FILE_SIZE: u64 = 20 * 1024 * 1024;
-pub const MAX_DOCX_FILE_SIZE: u64 = 20 * 1024 * 1024;

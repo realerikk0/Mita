@@ -3,7 +3,7 @@ param(
   [int]$ServerTimeoutSeconds = 90,
   [int]$TauriWarmupSeconds = 90,
   [int]$TauriSettleSeconds = 8,
-  [string[]]$TauriProcessNames = @("Biyan", "Mita")
+  [string[]]$TauriProcessNames = @("Biyan")
 )
 
 $ErrorActionPreference = "Stop"
@@ -63,7 +63,7 @@ function Test-IsRepoVerificationProcess {
 
   return (
     $CommandLine.Contains($RepoRoot) -or
-    $CommandLine.Contains("Mita-loading-ribbon-test") -or
+    $CommandLine.Contains("Biyan-loading-ribbon-test") -or
     $CommandLine.Contains("verify-loading-ribbon") -or
     $CommandLine.Contains("dev:web") -or
     $CommandLine.Contains("loading-ribbon-demo") -or

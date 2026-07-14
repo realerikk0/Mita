@@ -263,7 +263,7 @@ pub fn read_user_logs<R: Runtime>(
         .unwrap_or(DEFAULT_LOG_LIMIT)
         .clamp(1, MAX_LOG_LIMIT);
     let log_dir = resolve_user_logs_directory(&app)?;
-    let legacy_log = crate::core::app::commands::get_mita_data_folder_path(app)
+    let legacy_log = crate::core::app::commands::get_biyan_data_folder_path(app)
         .join("logs")
         .join("app.log");
     read_recent_logs(&log_dir, Some(&legacy_log), limit)
@@ -272,7 +272,7 @@ pub fn read_user_logs<R: Runtime>(
 #[tauri::command]
 pub fn clear_user_logs<R: Runtime>(app: AppHandle<R>) -> Result<(), String> {
     let log_dir = resolve_user_logs_directory(&app)?;
-    let legacy_log = crate::core::app::commands::get_mita_data_folder_path(app)
+    let legacy_log = crate::core::app::commands::get_biyan_data_folder_path(app)
         .join("logs")
         .join("app.log");
     clear_user_log_files(&log_dir)?;

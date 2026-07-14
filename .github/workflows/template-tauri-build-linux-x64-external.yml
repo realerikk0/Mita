@@ -86,19 +86,9 @@ jobs:
           echo "---------./src-tauri/plugins/tauri-plugin-hardware/package.json---------"
           cat ./src-tauri/plugins/tauri-plugin-hardware/package.json
 
-          jq --arg version "${{ inputs.new_version }}" '.version = $version' ./src-tauri/plugins/tauri-plugin-llamacpp/package.json > /tmp/package.json
-          mv /tmp/package.json ./src-tauri/plugins/tauri-plugin-llamacpp/package.json
-
-          echo "---------./src-tauri/plugins/tauri-plugin-llamacpp/package.json---------"
-          cat ./src-tauri/plugins/tauri-plugin-llamacpp/package.json
-
           ctoml ./src-tauri/plugins/tauri-plugin-hardware/Cargo.toml package.version "${{ inputs.new_version }}"
           echo "---------./src-tauri/plugins/tauri-plugin-hardware/Cargo.toml---------"
           cat ./src-tauri/plugins/tauri-plugin-hardware/Cargo.toml
-
-          ctoml ./src-tauri/plugins/tauri-plugin-llamacpp/Cargo.toml package.version "${{ inputs.new_version }}"
-          echo "---------./src-tauri/plugins/tauri-plugin-llamacpp/Cargo.toml---------"
-          cat ./src-tauri/plugins/tauri-plugin-llamacpp/Cargo.toml
 
           ctoml ./src-tauri/Cargo.toml package.version "${{ inputs.new_version }}"
           echo "---------./src-tauri/Cargo.toml---------"
@@ -107,18 +97,12 @@ jobs:
           ctoml ./src-tauri/Cargo.toml dependencies.tauri.features[] "devtools"
 
           if [ "${{ inputs.channel }}" != "stable" ]; then
-            if [[ "${{ inputs.channel }}" == "nightly" ]]; then
-              jq '.plugins.updater.endpoints = ["https://updates.mita.so/mita/update-check", "https://updates.mita.so/mita/${{ inputs.channel }}/latest.json"]' ./src-tauri/tauri.conf.json > /tmp/tauri.conf.json
-            else
-              jq '.plugins.updater.endpoints = ["https://updates.mita.so/mita/${{ inputs.channel }}/latest.json"]' ./src-tauri/tauri.conf.json > /tmp/tauri.conf.json
-            fi
+            jq '.plugins.updater.endpoints = ["https://updates.mita.so/biyan/${{ inputs.channel }}/latest.json"]' ./src-tauri/tauri.conf.json > /tmp/tauri.conf.json
             mv /tmp/tauri.conf.json ./src-tauri/tauri.conf.json
             chmod +x .github/scripts/rename-tauri-app.sh
             .github/scripts/rename-tauri-app.sh ./src-tauri/tauri.conf.json ${{ inputs.channel }}
             node .github/scripts/rename-cargo-channel-app.mjs ./src-tauri/Cargo.toml "${{ inputs.channel }}"
             ctoml ./src-tauri/Cargo.toml dependencies.tauri.features[] "devtools"
-            chmod +x .github/scripts/rename-workspace.sh
-            .github/scripts/rename-workspace.sh ./package.json ${{ inputs.channel }}
           fi
 
       - name: Config Yarn
@@ -140,11 +124,11 @@ jobs:
       - name: Upload Artifact
         uses: actions/upload-artifact@v4
         with:
-          name: mita-linux-amd64-${{ inputs.new_version }}-deb
+          name: biyan-linux-amd64-external-${{ inputs.new_version }}-deb
           path: ./src-tauri/target/release/bundle/deb/*.deb
 
       - name: Upload Artifact
         uses: actions/upload-artifact@v4
         with:
-          name: mita-linux-amd64-${{ inputs.new_version }}-AppImage
+          name: biyan-linux-amd64-external-${{ inputs.new_version }}-AppImage
           path: ./src-tauri/target/release/bundle/appimage/*.AppImage

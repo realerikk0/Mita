@@ -7,7 +7,7 @@ vi.mock('@/lib/utils', () => ({
   isDev: vi.fn(() => false),
 }))
 
-vi.mock('@janhq/core', () => ({
+vi.mock('@biyan/core', () => ({
   events: {
     on: vi.fn(),
     off: vi.fn(),
@@ -20,34 +20,20 @@ vi.mock('@janhq/core', () => ({
   },
 }))
 
-vi.mock('@/types/events', () => ({
-  SystemEvent: {
-    KILL_SIDECAR: 'KILL_SIDECAR',
-  },
-}))
-
 // Mock the ServiceHub
-const mockStopAllModels = vi.fn()
 const mockUpdaterCheck = vi.fn()
 const mockUpdaterDownloadAndInstall = vi.fn()
 const mockUpdaterDownloadAndInstallWithProgress = vi.fn()
 const mockUpdaterDownloadUpdateWithProgress = vi.fn()
 const mockUpdaterInstallDownloadedUpdate = vi.fn()
-const mockEventsEmit = vi.fn()
 vi.mock('@/hooks/useServiceHub', () => ({
   getServiceHub: () => ({
-    models: () => ({
-      stopAllModels: mockStopAllModels,
-    }),
     updater: () => ({
       check: mockUpdaterCheck,
       downloadAndInstall: mockUpdaterDownloadAndInstall,
       downloadAndInstallWithProgress: mockUpdaterDownloadAndInstallWithProgress,
       downloadUpdateWithProgress: mockUpdaterDownloadUpdateWithProgress,
       installDownloadedUpdate: mockUpdaterInstallDownloadedUpdate,
-    }),
-    events: () => ({
-      emit: mockEventsEmit,
     }),
   }),
 }))
@@ -69,7 +55,7 @@ Object.defineProperty(global, 'AUTO_UPDATER_DISABLED', {
 })
 
 import { isDev } from '@/lib/utils'
-import { events } from '@janhq/core'
+import { events } from '@biyan/core'
 
 describe('useAppUpdater', () => {
   const mockEvents = events as any
@@ -302,8 +288,6 @@ describe('useAppUpdater', () => {
         await result.current.downloadUpdate()
       })
 
-      expect(mockStopAllModels).not.toHaveBeenCalled()
-      expect(mockEventsEmit).not.toHaveBeenCalledWith('KILL_SIDECAR')
       expect(mockUpdaterDownloadUpdateWithProgress).toHaveBeenCalled()
       expect(mockRelaunch).not.toHaveBeenCalled()
       expect(result.current.updateState.isUpdateReadyToInstall).toBe(true)
@@ -341,8 +325,6 @@ describe('useAppUpdater', () => {
         await result.current.installDownloadedUpdate()
       })
 
-      expect(mockStopAllModels).toHaveBeenCalled()
-      expect(mockEventsEmit).toHaveBeenCalledWith('KILL_SIDECAR')
       expect(mockUpdaterInstallDownloadedUpdate).toHaveBeenCalled()
       expect(mockRelaunch).toHaveBeenCalled()
     })

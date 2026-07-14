@@ -32,17 +32,11 @@ const SettingsMenu = () => {
   const visibleProviders = getVisibleModelProviders(providers)
 
   const activeProviders = visibleProviders.filter((provider) => {
-    if (!provider.active) return false
-    if (!IS_MACOS && provider.provider === 'mlx') return false
-    if (provider.provider === 'foundation-models') return false
-    return true
+    return provider.active
   })
 
   const hiddenProviders = visibleProviders.filter((provider) => {
-    if (provider.active) return false
-    if (!IS_MACOS && provider.provider === 'mlx') return false
-    if (provider.provider === 'foundation-models') return false
-    return true
+    return !provider.active
   })
 
   // Check if current route has a providerName parameter and expand providers submenu
@@ -180,10 +174,7 @@ const SettingsMenu = () => {
                     key={provider.provider}
                     className={cn(
                       'flex px-2 items-center gap-1.5 cursor-pointer hover:bg-secondary/60 py-1 w-full rounded-sm text-foreground',
-                      isRouteActive && 'bg-secondary',
-                      provider.provider === 'llama.cpp' &&
-                        stepSetupRemoteProvider &&
-                        'hidden'
+                      isRouteActive && 'bg-secondary'
                     )}
                     onClick={() =>
                       navigate({

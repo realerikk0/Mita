@@ -109,11 +109,10 @@
   "openclawAgent": "OpenClaw 에이전트",
   "favorites": "즐겨찾기",
   "recents": "최근 항목",
-  "hub": "허브",
   "helpSupport": "도움말 및 지원",
-  "helpUsImproveMita": "Biyan 개선에 참여하기",
-  "helpUsImproveMitaDescription": "기능 사용을 이해하기 위해 익명 데이터를 수집합니다. 채팅과 개인 정보는 절대 추적하지 않습니다. 설정 > 개인정보 보호에서 언제든지 변경할 수 있습니다.",
-  "helpUsImproveMitaQuestion": "Biyan 개선에 참여하시겠어요?",
+  "helpUsImproveBiyan": "Biyan 개선에 참여하기",
+  "helpUsImproveBiyanDescription": "기능 사용을 이해하기 위해 익명 데이터를 수집합니다. 채팅과 개인 정보는 절대 추적하지 않습니다. 설정 > 개인정보 보호에서 언제든지 변경할 수 있습니다.",
+  "helpUsImproveBiyanQuestion": "Biyan 개선에 참여하시겠어요?",
   "unstarAll": "모든 즐겨찾기 해제",
   "unstar": "즐겨찾기 해제",
   "deleteAll": "모두 삭제",
@@ -168,12 +167,7 @@
   "noResultsFound": "검색 결과가 없습니다",
   "noThreadsYet": "아직 스레드가 없습니다",
   "noThreadsYetDesc": "새 대화를 시작하면 여기에 스레드 기록이 표시됩니다.",
-  "downloads": "다운로드",
-  "downloading": "다운로드 중",
   "uploadingAttachments": "첨부 파일 업로드 중…",
-  "cancelDownload": "다운로드 취소",
-  "downloadCancelled": "다운로드 취소됨",
-  "downloadComplete": "다운로드 완료",
   "thinking": "생각 중...",
   "thought": "생각",
   "callingTool": "도구 호출 중",
@@ -192,7 +186,7 @@
   "noModels": "모델을 찾을 수 없습니다",
   "customAvatar": "사용자 지정 아바타",
   "editAssistant": "어시스턴트 수정",
-  "mita": "Biyan",
+  "biyan": "Biyan",
   "metadata": "메타데이터",
   "regenerate": "다시 생성",
   "threadImage": "스레드 이미지",
@@ -414,14 +408,7 @@
     "noProjectsFound": "프로젝트를 찾을 수 없습니다",
     "tryDifferentSearch": "다른 검색어를 시도해 보세요"
   },
-  "attachmentsIngestion": {
-    "title": "첨부 파일 수집 방식 선택",
-    "description": "이 파일들을 채팅에 직접 삽입할지, 아니면 임베딩으로 인덱싱할지 선택하세요.",
-    "inline": "채팅에 삽입",
-    "embeddings": "임베딩 사용"
-  },
   "attachmentInjectedIndicator": "채팅에 삽입됨",
-  "attachmentEmbeddedIndicator": "RAG용으로 임베딩됨",
   "viewInjectedContent": "삽입된 콘텐츠 보기",
   "injectedContentTitle": "삽입된 파일 콘텐츠",
   "errorDialog": {
@@ -469,30 +456,14 @@
       "title": "다운로드 완료",
       "description": "{{item}} 다운로드됨"
     },
-    "downloadCancelled": {
-      "title": "다운로드 취소됨",
-      "description": "다운로드 프로세스가 취소되었습니다"
-    },
     "downloadFailed": {
       "title": "다운로드 실패",
       "description": "{{item}} 다운로드를 실패했습니다"
     },
-    "modelValidationStarted": {
-      "title": "모델 검증 중",
-      "description": "\"{{modelId}}\" 모델을 성공적으로 다운로드했습니다. 무결성을 확인하는 중..."
-    },
-    "modelValidationFailed": {
-      "title": "모델 검증 실패",
-      "description": "다운로드한 \"{{modelId}}\" 모델이 무결성 검증에 실패하여 제거되었습니다. 파일이 손상되었거나 변조되었을 수 있습니다."
-    },
     "modelNoVision": {
       "title": "모델이 이미지를 지원하지 않습니다",
       "description": "이미지를 첨부하려면 비전 지원 모델을 선택하세요.",
-      "action": "허브 열기"
-    },
-    "downloadAndVerificationComplete": {
-      "title": "다운로드 완료",
-      "description": "\"{{item}}\" 모델이 성공적으로 다운로드 및 검증되었습니다"
+      "action": "제공자 설정 열기"
     },
     "projectCreated": {
       "title": "프로젝트 생성됨",

@@ -29,23 +29,23 @@ ${StrLoc}
 !define WEBVIEW2APPGUID "{F3017226-FE2A-4295-8BDF-00C3A9A7E4C5}"
 
 !define MANUFACTURER "Jingxing"
-!define PRODUCTNAME "mita_productname"
-!define VERSION "mita_version"
-!define VERSIONWITHBUILD "mita_build"
+!define PRODUCTNAME "biyan_productname"
+!define VERSION "biyan_version"
+!define VERSIONWITHBUILD "biyan_build"
 !define HOMEPAGE ""
 !define INSTALLMODE "currentUser"
 !define LICENSE ""
-!define INSTALLERICON "D:\a\Mita\Mita\src-tauri\icons\icon.ico"
+!define INSTALLERICON "{{installer_icon}}"
 !define SIDEBARIMAGE ""
 !define HEADERIMAGE ""
-!define MAINBINARYNAME "mita_mainbinaryname"
-!define MAINBINARYSRCPATH "D:\a\Mita\Mita\src-tauri\target\release\mita_mainbinaryname.exe"
-!define BUNDLEID "uk.jingxing.mita"
+!define MAINBINARYNAME "biyan_mainbinaryname"
+!define MAINBINARYSRCPATH "{{main_binary_path}}"
+!define BUNDLEID "{{bundle_id}}"
 !define COPYRIGHT ""
 !define OUTFILE "nsis-output.exe"
 !define ARCH "x64"
-!define ADDITIONALPLUGINSPATH "D:\a\Mita\Mita\src-tauri\target\release\nsis\x64\Plugins\x86-unicode\additional"
-!define ALLOWDOWNGRADES "true"
+!define ADDITIONALPLUGINSPATH "{{additional_plugins_path}}"
+!define ALLOWDOWNGRADES "false"
 !define DISPLAYLANGUAGESELECTOR "false"
 !define INSTALLWEBVIEW2MODE "downloadBootstrapper"
 !define WEBVIEW2INSTALLERARGS "/silent"
@@ -473,7 +473,9 @@ FunctionEnd
 ;Languages
 !insertmacro MUI_LANGUAGE "English"
 !insertmacro MUI_RESERVEFILE_LANGDLL
-  !include "D:\a\jan\jan\src-tauri\target\release\nsis\x64\English.nsh"
+{{#each language_files}}
+  !include "{{this}}"
+{{/each}}
 
 Function .onInit
   ${GetOptions} $CMDLINE "/P" $PassiveMode
@@ -715,24 +717,27 @@ Section Install
   File "${MAINBINARYSRCPATH}"
 
   ; Copy resources
-    CreateDirectory "$INSTDIR\resources"
-    CreateDirectory "$INSTDIR\resources\pre-install"
-    CreateDirectory "$INSTDIR\resources\bin"
-    SetOutPath $INSTDIR
-    File /a "/oname=LICENSE" "D:\a\Mita\Mita\src-tauri\resources\LICENSE"
-    SetOutPath "$INSTDIR\resources\pre-install"
-    File /nonfatal /a /r "D:\a\Mita\Mita\src-tauri\resources\pre-install\"
-    SetOutPath "$INSTDIR\resources\bin"
-    File /a "/oname=mita-cli.exe" "D:\a\Mita\Mita\src-tauri\resources\bin\mita-cli.exe"
-    SetOutPath $INSTDIR
+  {{#each resources_dirs}}
+    CreateDirectory "$INSTDIR\\{{this}}"
+  {{/each}}
+  {{#each resources}}
+    File /a "/oname={{this.[1]}}" "{{no-escape @key}}"
+  {{/each}}
 
   ; Copy external binaries
-    File /a "/oname=bun.exe" "D:\a\Mita\Mita\src-tauri\resources\bin\bun-x86_64-pc-windows-msvc.exe"
-    File /a "/oname=uv.exe" "D:\a\Mita\Mita\src-tauri\resources\bin\uv-x86_64-pc-windows-msvc.exe"
+  {{#each binaries}}
+    File /a "/oname={{this}}" "{{no-escape @key}}"
+  {{/each}}
 
   ; Create file associations
 
   ; Register deep links
+  {{#each deep_link_protocols as |protocol| ~}}
+    WriteRegStr SHCTX "Software\Classes\\{{protocol}}" "URL Protocol" ""
+    WriteRegStr SHCTX "Software\Classes\\{{protocol}}" "" "URL:${BUNDLEID} protocol"
+    WriteRegStr SHCTX "Software\Classes\\{{protocol}}\DefaultIcon" "" "$\"$INSTDIR\${MAINBINARYNAME}.exe$\",0"
+    WriteRegStr SHCTX "Software\Classes\\{{protocol}}\shell\open\command" "" "$\"$INSTDIR\${MAINBINARYNAME}.exe$\" $\"%1$\""
+  {{/each}}
 
   ; Create uninstaller
   WriteUninstaller "$INSTDIR\uninstall.exe"
@@ -852,24 +857,25 @@ Section Uninstall
   ; Copy main executable
   Delete "$INSTDIR\${MAINBINARYNAME}.exe"
 
-  ; Delete LICENSE file
-    Delete "$INSTDIR\LICENSE"
-
   ; Delete resources
-    Delete "$INSTDIR\resources\pre-install\janhq-assistant-extension-1.0.2.tgz"
-    Delete "$INSTDIR\resources\pre-install\janhq-conversational-extension-1.0.0.tgz"
-    Delete "$INSTDIR\resources\pre-install\janhq-engine-management-extension-1.0.3.tgz"
-    Delete "$INSTDIR\resources\pre-install\janhq-hardware-management-extension-1.0.0.tgz"
-    Delete "$INSTDIR\resources\pre-install\janhq-inference-cortex-extension-1.0.25.tgz"
-    Delete "$INSTDIR\resources\pre-install\janhq-model-extension-1.0.36.tgz"
+  {{#each resources}}
+    Delete "$INSTDIR\\{{this.[1]}}"
+  {{/each}}
 
   ; Delete external binaries
-    Delete "$INSTDIR\bun.exe"
-    Delete "$INSTDIR\uv.exe"
+  {{#each binaries}}
+    Delete "$INSTDIR\\{{this}}"
+  {{/each}}
 
   ; Delete app associations
 
   ; Delete deep links
+  {{#each deep_link_protocols as |protocol| ~}}
+    ReadRegStr $R7 SHCTX "Software\Classes\\{{protocol}}\shell\open\command" ""
+    ${If} $R7 == "$\"$INSTDIR\${MAINBINARYNAME}.exe$\" $\"%1$\""
+      DeleteRegKey SHCTX "Software\Classes\\{{protocol}}"
+    ${EndIf}
+  {{/each}}
 
 
   ; Delete uninstaller

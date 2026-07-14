@@ -3,21 +3,21 @@ name: Manual trigger AutoQA Test Runner
 on:
   workflow_dispatch:
     inputs:
-      mita_app_url_windows:
-        description: 'URL to download Mita app for Windows (.exe)'
+      biyan_app_url_windows:
+        description: 'URL to download Biyan app for Windows (.exe)'
         required: true
         type: string
-        default: 'https://updates.mita.so/mita/nightly/Mita-nightly_0.6.5-758_x64-setup.exe'
-      mita_app_url_ubuntu:
-        description: 'URL to download Mita app for Ubuntu (.deb)'
+        default: 'https://updates.mita.so/biyan/nightly/Biyan-nightly_0.6.634_x64-setup.exe'
+      biyan_app_url_ubuntu:
+        description: 'URL to download Biyan app for Ubuntu (.deb)'
         required: true
         type: string
-        default: 'https://updates.mita.so/mita/nightly/Mita-nightly_0.6.5-758_amd64.deb'
-      mita_app_url_macos:
-        description: 'URL to download Mita app for macOS (.dmg)'
+        default: 'https://updates.mita.so/biyan/nightly/Biyan-nightly_0.6.634_amd64.deb'
+      biyan_app_url_macos:
+        description: 'URL to download Biyan app for macOS (.dmg)'
         required: true
         type: string
-        default: 'https://updates.mita.so/mita/nightly/Mita-nightly_0.6.5-758_universal.dmg'
+        default: 'https://updates.mita.so/biyan/nightly/Biyan-nightly_0.6.634_universal.dmg'
       is_nightly:
         description: 'Is this a nightly build?'
         required: true
@@ -28,9 +28,9 @@ jobs:
   call-autoqa-template:
     uses: ./.github/workflows/autoqa-template.yml
     with:
-      mita_app_windows_source: ${{ inputs.mita_app_url_windows }}
-      mita_app_ubuntu_source: ${{ inputs.mita_app_url_ubuntu }}
-      mita_app_macos_source: ${{ inputs.mita_app_url_macos }}
+      biyan_app_windows_source: ${{ inputs.biyan_app_url_windows }}
+      biyan_app_ubuntu_source: ${{ inputs.biyan_app_url_ubuntu }}
+      biyan_app_macos_source: ${{ inputs.biyan_app_url_macos }}
       is_nightly: ${{ inputs.is_nightly }}
       source_type: 'url'
     secrets:

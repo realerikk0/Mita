@@ -12,7 +12,7 @@
   "stop": "停止",
   "start": "開始",
   "noModelFound": "モデルが見つかりません",
-  "noModelFoundDesc": "利用可能なモデルはここにリストされます。まだモデルがない場合は、ハブにアクセスしてダウンロードしてください。",
+  "noModelFoundDesc": "Available models from the configured remote provider will be listed here. Refresh after adding or changing provider credentials.",
   "configuration": "設定",
   "apiEndpoint": "APIエンドポイント",
   "testConnection": "接続をテスト",

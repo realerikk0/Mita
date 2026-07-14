@@ -1,0 +1,486 @@
+import {
+  type BiyanTeamsConfig,
+  type BiyanTeamsChannelId,
+  type BiyanTeamsProjectMemory,
+  type BiyanTeamsRoleConfig,
+  type BiyanTeamsRoleMemory,
+  type BiyanTeamsRoleState,
+  type BiyanTeamsRoleStreamMessage,
+  type BiyanTeamsRuntime,
+  type BiyanTeamsTeamEvent,
+  normalizeBiyanTeamsRuntime,
+} from '@/types/biyan-teams'
+
+const LIST_LIMIT = 12
+const EVENT_LIMIT = 80
+const STREAM_LIMIT = 40
+
+const nowIso = () => new Date().toISOString()
+
+const stableId = (prefix: string) =>
+  `${prefix}-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`
+
+const trimText = (value: string, max = 240) => {
+  const normalized = value.replace(/\s+/g, ' ').trim()
+  return normalized.length > max ? `${normalized.slice(0, max - 3)}...` : normalized
+}
+
+const uniqueAppend = (base: string[], additions: string[], limit = LIST_LIMIT) => {
+  const seen = new Set(base.map((item) => item.toLowerCase()))
+  const merged = [...base]
+
+  for (const addition of additions) {
+    const normalized = trimText(addition)
+    if (!normalized) continue
+    const key = normalized.toLowerCase()
+    if (seen.has(key)) continue
+    seen.add(key)
+    merged.push(normalized)
+  }
+
+  return merged.slice(-limit)
+}
+
+const firstSentences = (text: string, limit = 2) =>
+  text
+    .split(/(?<=[.!?。！？])\s+/)
+    .map((item) => trimText(item, 180))
+    .filter(Boolean)
+    .slice(0, limit)
+
+function extractMemorySignals(text: string) {
+  const lines = text
+    .split(/\n+/)
+    .map((line) => line.replace(/^[-*•\d.)\s]+/, '').trim())
+    .filter(Boolean)
+
+  const facts: string[] = []
+  const decisions: string[] = []
+  const openQuestions: string[] = []
+  const workingNotes: string[] = []
+
+  for (const line of lines) {
+    const lower = line.toLowerCase()
+    if (
+      lower.includes('decision') ||
+      lower.includes('decide') ||
+      lower.includes('therefore') ||
+      line.includes('决定') ||
+      line.includes('结论')
+    ) {
+      decisions.push(line)
+    } else if (
+      line.endsWith('?') ||
+      line.endsWith('？') ||
+      lower.includes('question') ||
+      lower.includes('need to ask') ||
+      line.includes('需要确认')
+    ) {
+      openQuestions.push(line)
+    } else if (
+      lower.includes('fact') ||
+      lower.includes('found') ||
+      lower.includes('confirmed') ||
+      line.includes('事实') ||
+      line.includes('已确认')
+    ) {
+      facts.push(line)
+    } else {
+      workingNotes.push(line)
+    }
+  }
+
+  if (
+    facts.length === 0 &&
+    decisions.length === 0 &&
+    openQuestions.length === 0
+  ) {
+    facts.push(...firstSentences(text, 2))
+  }
+
+  return {
+    facts: facts.slice(0, 4),
+    decisions: decisions.slice(0, 4),
+    openQuestions: openQuestions.slice(0, 4),
+    workingNotes: workingNotes.slice(0, 4),
+  }
+}
+
+export function getBiyanTeamsRuntime(config: BiyanTeamsConfig): BiyanTeamsRuntime {
+  return normalizeBiyanTeamsRuntime(config.runtime, config.roles)
+}
+
+export function withBiyanTeamsRuntime(
+  config: BiyanTeamsConfig,
+  runtime: BiyanTeamsRuntime
+): BiyanTeamsConfig {
+  return {
+    ...config,
+    runtime: normalizeBiyanTeamsRuntime(runtime, config.roles),
+    updatedAt: nowIso(),
+  }
+}
+
+export function appendBiyanTeamsEvent(
+  runtime: BiyanTeamsRuntime,
+  event: Omit<BiyanTeamsTeamEvent, 'id' | 'createdAt'>
+): BiyanTeamsRuntime {
+  return {
+    ...runtime,
+    teamEvents: [
+      ...runtime.teamEvents,
+      {
+        ...event,
+        id: stableId('event'),
+        createdAt: nowIso(),
+      },
+    ].slice(-EVENT_LIMIT),
+  }
+}
+
+export function appendRoleStreamMessage(
+  runtime: BiyanTeamsRuntime,
+  role: BiyanTeamsRoleConfig,
+  message: Omit<BiyanTeamsRoleStreamMessage, 'id' | 'createdAt' | 'roleId'>
+): BiyanTeamsRuntime {
+  const current = runtime.roleStates[role.id]
+  const state: BiyanTeamsRoleState = current ?? {
+    roleId: role.id,
+    status: 'idle',
+    stream: [],
+    memory: {
+      roleId: role.id,
+      version: 0,
+      summary: '',
+      facts: [],
+      decisions: [],
+      openQuestions: [],
+      workingNotes: [],
+      updatedAt: nowIso(),
+    },
+  }
+
+  return {
+    ...runtime,
+    roleStates: {
+      ...runtime.roleStates,
+      [role.id]: {
+        ...state,
+        stream: [
+          ...state.stream,
+          {
+            ...message,
+            id: stableId(`role-${role.id}`),
+            roleId: role.id,
+            createdAt: nowIso(),
+          },
+        ].slice(-STREAM_LIMIT),
+      },
+    },
+  }
+}
+
+export function updateRoleStreamMessageContent(
+  runtime: BiyanTeamsRuntime,
+  role: BiyanTeamsRoleConfig,
+  message: Pick<BiyanTeamsRoleStreamMessage, 'turnId' | 'role' | 'content'> &
+    Partial<Pick<BiyanTeamsRoleStreamMessage, 'channelId' | 'model'>>
+): BiyanTeamsRuntime {
+  const current = runtime.roleStates[role.id]
+
+  if (!current) {
+    return appendRoleStreamMessage(runtime, role, message)
+  }
+
+  let updated = false
+  const stream = current.stream.map((item) => {
+    if (
+      item.turnId !== message.turnId ||
+      item.role !== message.role ||
+      item.roleId !== role.id
+    ) {
+      return item
+    }
+
+    updated = true
+    return {
+      ...item,
+      content: message.content,
+      channelId: message.channelId ?? item.channelId,
+      model: message.model ?? item.model,
+    }
+  })
+
+  if (!updated) {
+    return appendRoleStreamMessage(runtime, role, message)
+  }
+
+  return {
+    ...runtime,
+    roleStates: {
+      ...runtime.roleStates,
+      [role.id]: {
+        ...current,
+        stream,
+      },
+    },
+  }
+}
+
+export function recordRoleTurnMemory(
+  runtime: BiyanTeamsRuntime,
+  role: BiyanTeamsRoleConfig,
+  output: string,
+  turnId: string,
+  model?: ThreadModel,
+  channelId?: BiyanTeamsChannelId
+): BiyanTeamsRuntime {
+  const signals = extractMemorySignals(output)
+  const current = runtime.roleStates[role.id]
+  const previousMemory =
+    current?.memory ??
+    ({
+      roleId: role.id,
+      version: 0,
+      summary: '',
+      facts: [],
+      decisions: [],
+      openQuestions: [],
+      workingNotes: [],
+      updatedAt: nowIso(),
+    } satisfies BiyanTeamsRoleMemory)
+  const summarySeed = firstSentences(output, 2).join(' ')
+  const memory: BiyanTeamsRoleMemory = {
+    ...previousMemory,
+    version: previousMemory.version + 1,
+    summary: trimText(summarySeed || previousMemory.summary, 320),
+    facts: uniqueAppend(previousMemory.facts, signals.facts),
+    decisions: uniqueAppend(previousMemory.decisions, signals.decisions),
+    openQuestions: uniqueAppend(
+      previousMemory.openQuestions,
+      signals.openQuestions
+    ),
+    workingNotes: uniqueAppend(previousMemory.workingNotes, signals.workingNotes),
+    updatedAt: nowIso(),
+  }
+  let updatedExistingAssistant = false
+  const updatedStream = (current?.stream ?? []).map((message) => {
+    if (
+      message.turnId !== turnId ||
+      message.role !== 'assistant' ||
+      message.roleId !== role.id
+    ) {
+      return message
+    }
+
+    updatedExistingAssistant = true
+    return {
+      ...message,
+      channelId: channelId ?? message.channelId,
+      content: output,
+      model: model ?? message.model,
+    }
+  })
+  const state: BiyanTeamsRoleState = {
+    roleId: role.id,
+    status: 'done',
+    stream: (
+      updatedExistingAssistant
+        ? updatedStream
+        : [
+            ...(current?.stream ?? []),
+            {
+              id: stableId(`role-${role.id}`),
+              turnId,
+              roleId: role.id,
+              channelId,
+              role: 'assistant' as const,
+              content: output,
+              createdAt: nowIso(),
+              model,
+            },
+          ]
+    ).slice(-STREAM_LIMIT),
+    memory,
+    lastTurnId: turnId,
+  }
+
+  return appendBiyanTeamsEvent(
+    {
+      ...runtime,
+      roleStates: {
+        ...runtime.roleStates,
+        [role.id]: state,
+      },
+    },
+    {
+      type: 'role_completed',
+      title: `${role.name} completed a turn`,
+      detail: trimText(output, 160),
+      roleId: role.id,
+      channelId,
+    }
+  )
+}
+
+export function mergeProjectMemory(
+  runtime: BiyanTeamsRuntime,
+  roles: BiyanTeamsRoleConfig[]
+): BiyanTeamsRuntime {
+  const previous = runtime.projectMemory
+  let changed = false
+  let facts = previous.facts
+  let decisions = previous.decisions
+  let openQuestions = previous.openQuestions
+  const sourceVersions: BiyanTeamsProjectMemory['sourceRoleMemoryVersions'] = {
+    ...previous.sourceRoleMemoryVersions,
+  }
+
+  for (const role of roles) {
+    const memory = runtime.roleStates[role.id]?.memory
+    if (!memory) continue
+    if (sourceVersions[role.id] === memory.version) continue
+
+    changed = true
+    sourceVersions[role.id] = memory.version
+    facts = uniqueAppend(facts, memory.facts, 20)
+    decisions = uniqueAppend(decisions, memory.decisions, 20)
+    openQuestions = uniqueAppend(openQuestions, memory.openQuestions, 20)
+  }
+
+  if (!changed) return runtime
+
+  const summaryParts = [
+    decisions[decisions.length - 1],
+    facts[facts.length - 1],
+    openQuestions.length
+      ? `Open question: ${openQuestions[openQuestions.length - 1]}`
+      : undefined,
+  ].filter(Boolean)
+
+  const projectMemory: BiyanTeamsProjectMemory = {
+    ...previous,
+    version: previous.version + 1,
+    summary: trimText(summaryParts.join(' '), 420),
+    facts,
+    decisions,
+    openQuestions,
+    milestones: uniqueAppend(previous.milestones, runtime.milestones.map((m) => m.title), 20),
+    sourceRoleMemoryVersions: sourceVersions,
+    updatedAt: nowIso(),
+  }
+
+  return appendBiyanTeamsEvent(
+    {
+      ...runtime,
+      projectMemory,
+    },
+    {
+      type: 'memory_merged',
+      title: 'Project memory updated',
+      detail: projectMemory.summary || 'Role memories were merged.',
+    }
+  )
+}
+
+export function answerBiyanTeamsChoice(
+  runtime: BiyanTeamsRuntime,
+  optionId: string
+): BiyanTeamsRuntime {
+  const choice = runtime.userChoiceRequest
+  if (!choice || choice.status !== 'pending') return runtime
+  const option = choice.options.find((item) => item.id === optionId)
+  if (!option) return runtime
+
+  const answered = {
+    ...choice,
+    status: 'answered' as const,
+    selectedOptionId: optionId,
+    answeredAt: nowIso(),
+  }
+
+  return appendBiyanTeamsEvent(
+    {
+      ...runtime,
+      userChoiceRequest: answered,
+    },
+    {
+      type: 'choice_answered',
+      title: 'Owner selected an option',
+      detail: option?.label ?? optionId,
+    }
+  )
+}
+
+export function answerBiyanTeamsText(
+  runtime: BiyanTeamsRuntime,
+  responseText: string
+): BiyanTeamsRuntime {
+  const choice = runtime.userChoiceRequest
+  const trimmed = responseText.trim()
+  const storedText =
+    trimmed.length > 1200 ? `${trimmed.slice(0, 1197)}...` : trimmed
+  if (
+    !choice ||
+    choice.status !== 'pending' ||
+    choice.kind !== 'free_text' ||
+    !storedText
+  ) {
+    return runtime
+  }
+
+  const answered = {
+    ...choice,
+    status: 'answered' as const,
+    responseText: storedText,
+    answeredAt: nowIso(),
+  }
+
+  return appendBiyanTeamsEvent(
+    {
+      ...runtime,
+      userChoiceRequest: answered,
+    },
+    {
+      type: 'choice_answered',
+      title: 'Owner answered with text',
+      detail: trimText(storedText),
+    }
+  )
+}
+
+export function roleMemoryText(memory: BiyanTeamsRoleMemory): string {
+  return [
+    memory.summary ? `Summary: ${memory.summary}` : undefined,
+    memory.facts.length ? `Facts:\n- ${memory.facts.join('\n- ')}` : undefined,
+    memory.decisions.length
+      ? `Decisions:\n- ${memory.decisions.join('\n- ')}`
+      : undefined,
+    memory.openQuestions.length
+      ? `Open questions:\n- ${memory.openQuestions.join('\n- ')}`
+      : undefined,
+    memory.workingNotes.length
+      ? `Working notes:\n- ${memory.workingNotes.join('\n- ')}`
+      : undefined,
+  ]
+    .filter(Boolean)
+    .join('\n\n')
+}
+
+export function projectMemoryText(memory: BiyanTeamsProjectMemory): string {
+  return [
+    memory.summary ? `Summary: ${memory.summary}` : undefined,
+    memory.facts.length ? `Facts:\n- ${memory.facts.join('\n- ')}` : undefined,
+    memory.decisions.length
+      ? `Decisions:\n- ${memory.decisions.join('\n- ')}`
+      : undefined,
+    memory.openQuestions.length
+      ? `Open questions:\n- ${memory.openQuestions.join('\n- ')}`
+      : undefined,
+    memory.milestones.length
+      ? `Milestones:\n- ${memory.milestones.join('\n- ')}`
+      : undefined,
+  ]
+    .filter(Boolean)
+    .join('\n\n')
+}

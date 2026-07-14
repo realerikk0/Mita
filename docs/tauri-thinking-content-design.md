@@ -258,7 +258,7 @@ Expected Windows evidence package:
 - `output/playwright/thinking-content-demo-mobile.png`
 - `output/playwright/thinking-content-tauri-windows.png`
 
-The Windows verifier starts the Vite demo server, runs the Edge/WebView2 browser check with `PLAYWRIGHT_CHANNEL=msedge`, launches the focused Tauri shell when `-IncludeTauri` is passed, foregrounds the `Biyan`/`Mita` window, then captures the desktop screenshot.
+The Windows verifier starts the Vite demo server, runs the Edge/WebView2 browser check with `PLAYWRIGHT_CHANNEL=msedge`, launches the focused Tauri shell when `-IncludeTauri` is passed, foregrounds the `Biyan` window, then captures the desktop screenshot.
 
 ## Usage Examples
 

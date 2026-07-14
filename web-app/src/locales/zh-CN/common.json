@@ -21,7 +21,7 @@
   "newChat": "新建聊天",
   "newImage": "新建图片",
   "newMedia": "新建媒体",
-  "newMitaTeams": "新建彼岩小组",
+  "newBiyanTeams": "新建彼岩小组",
   "imageGeneration": {
     "today": "今天",
     "emptyState": "生成的图片会显示在这里。",
@@ -283,11 +283,10 @@
   "pinToTop": "置顶",
   "unpin": "取消置顶",
   "recents": "最近",
-  "hub": "中心",
   "helpSupport": "帮助与支持",
-  "helpUsImproveMita": "帮助我们改进彼岩",
-  "helpUsImproveMitaDescription": "我们会收集匿名数据来了解功能使用情况。你的聊天和个人信息永远不会被跟踪。你可以随时在设置 > 隐私中更改。",
-  "helpUsImproveMitaQuestion": "愿意帮助我们改进彼岩吗？",
+  "helpUsImproveBiyan": "帮助我们改进彼岩",
+  "helpUsImproveBiyanDescription": "我们会收集匿名数据来了解功能使用情况。你的聊天和个人信息永远不会被跟踪。你可以随时在设置 > 隐私中更改。",
+  "helpUsImproveBiyanQuestion": "愿意帮助我们改进彼岩吗？",
   "unstarAll": "取消所有收藏",
   "unstar": "取消收藏",
   "deleteAll": "全部删除",
@@ -337,12 +336,7 @@
   "noResultsFound": "未找到结果",
   "noThreadsYet": "暂无会话",
   "noThreadsYetDesc": "开始新的对话以在此处查看您的会话历史记录。",
-  "downloads": "下载",
-  "downloading": "下载中",
   "uploadingAttachments": "正在上传附件…",
-  "cancelDownload": "取消下载",
-  "downloadCancelled": "下载已取消",
-  "downloadComplete": "下载完成",
   "thinking": "思考中...",
   "thought": "思考",
   "callingTool": "调用工具",
@@ -373,7 +367,7 @@
   },
   "customAvatar": "自定义头像",
   "editAssistant": "编辑助手",
-  "mita": "彼岩",
+  "biyan": "彼岩",
   "metadata": "元数据",
   "regenerate": "重新生成",
   "threadImage": "会话图片",
@@ -402,7 +396,7 @@
   "apiKeyRequired": "需要 API 密钥",
   "enterTrustedHosts": "输入受信任的主机",
   "placeholder": {
-    "mitaTeamsChatInput": "描述一个目标，交给你的团队来完成…",
+    "biyanTeamsChatInput": "描述一个目标，交给你的团队来完成…",
     "chatInput": "随便问我什么..."
   },
   "confirm": "确认",
@@ -612,30 +606,14 @@
       "title": "下载完成",
       "description": "{{item}} 已下载"
     },
-    "downloadCancelled": {
-      "title": "下载已取消",
-      "description": "下载过程已取消"
-    },
     "downloadFailed": {
       "title": "下载失败",
       "description": "{{item}} 下载失败"
     },
-    "modelValidationStarted": {
-      "title": "正在验证模型",
-      "description": "模型 \"{{modelId}}\" 下载成功。正在验证完整性..."
-    },
-    "modelValidationFailed": {
-      "title": "模型验证失败",
-      "description": "已下载的模型 \"{{modelId}}\" 未通过完整性验证并已被删除。文件可能损坏或被篡改。"
-    },
     "modelNoVision": {
       "title": "当前模型不支持图片",
       "description": "请选择支持视觉能力的模型后再添加图片。",
-      "action": "打开中心"
-    },
-    "downloadAndVerificationComplete": {
-      "title": "下载完成",
-      "description": "模型 \"{{item}}\" 下载并验证成功"
+      "action": "打开 Provider 设置"
     },
     "projectCreated": {
       "title": "项目已创建",

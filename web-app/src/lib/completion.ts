@@ -4,7 +4,7 @@ import {
   ChatCompletionRole,
   ThreadMessage,
   MessageStatus,
-} from '@janhq/core'
+} from '@biyan/core'
 import { ulid } from 'ulidx'
 import { Attachment } from '@/types/attachment'
 import { injectFilesIntoPrompt } from './fileMetadata'
@@ -39,7 +39,6 @@ export const newUserThreadContent = (
       name: doc.name,
       type: doc.fileType,
       size: typeof doc.size === 'number' ? doc.size : undefined,
-      chunkCount: typeof doc.chunkCount === 'number' ? doc.chunkCount : undefined,
       injectionMode: doc.injectionMode,
     }))
 

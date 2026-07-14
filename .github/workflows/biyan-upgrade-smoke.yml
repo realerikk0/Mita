@@ -1,0 +1,67 @@
+name: Biyan Upgrade Smoke
+
+on:
+  workflow_dispatch:
+    inputs:
+      upgrade_smoke_url:
+        description: "HTTPS JSON report produced by the real Windows/macOS/Linux upgrade test run"
+        required: true
+        type: string
+      upgrade_smoke_sha256:
+        description: "SHA-256 of the upgrade smoke report"
+        required: true
+        type: string
+      rollout_health_url:
+        description: "HTTPS JSON report produced by rollout telemetry"
+        required: true
+        type: string
+      rollout_health_sha256:
+        description: "SHA-256 of the rollout health report"
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+jobs:
+  attest:
+    name: Verify external real-upgrade evidence
+    runs-on: ubuntu-latest
+    environment: updater-smoke-approval
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Download immutable evidence
+        env:
+          SMOKE_URL: ${{ inputs.upgrade_smoke_url }}
+          HEALTH_URL: ${{ inputs.rollout_health_url }}
+        run: |
+          set -euo pipefail
+          [[ "$SMOKE_URL" = https://* ]]
+          [[ "$HEALTH_URL" = https://* ]]
+          mkdir -p dist/input dist/verified
+          curl --proto '=https' --tlsv1.2 -fsSL --retry 5 "$SMOKE_URL" \
+            -o dist/input/upgrade-smoke.json
+          curl --proto '=https' --tlsv1.2 -fsSL --retry 5 "$HEALTH_URL" \
+            -o dist/input/rollout-health.json
+
+      - name: Verify digests and evidence schemas
+        run: |
+          node scripts/updater/verify-promotion-evidence.mjs \
+            --smoke dist/input/upgrade-smoke.json \
+            --smoke-sha256 "${{ inputs.upgrade_smoke_sha256 }}" \
+            --health dist/input/rollout-health.json \
+            --health-sha256 "${{ inputs.rollout_health_sha256 }}" \
+            --output-dir dist/verified
+          cp dist/input/upgrade-smoke.json dist/verified/upgrade-smoke.json
+          cp dist/input/rollout-health.json dist/verified/rollout-health.json
+
+      - name: Upload promotion evidence
+        uses: actions/upload-artifact@v4
+        with:
+          name: biyan-promotion-evidence
+          if-no-files-found: error
+          retention-days: 30
+          path: |
+            dist/verified/upgrade-smoke.json
+            dist/verified/rollout-health.json

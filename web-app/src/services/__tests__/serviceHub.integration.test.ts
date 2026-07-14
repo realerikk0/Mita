@@ -16,15 +16,6 @@ vi.mock('@jan/extensions-web', () => ({
   WEB_EXTENSIONS: {}
 }))
 
-// Mock @janhq/core EngineManager to prevent initialization issues
-vi.mock('@janhq/core', () => ({
-  EngineManager: {
-    instance: vi.fn(() => ({
-      engines: new Map()
-    }))
-  }
-}))
-
 // Mock token.js to avoid initialization issues
 vi.mock('token.js', () => ({
   models: {}
@@ -34,7 +25,7 @@ vi.mock('token.js', () => ({
 vi.mock('@/lib/extension', () => ({
   ExtensionManager: {
     getInstance: vi.fn(() => ({
-      getEngine: vi.fn()
+      get: vi.fn()
     }))
   }
 }))

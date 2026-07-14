@@ -44,7 +44,6 @@ export function useChat(
 
   // Get serviceHub and model metadata from app state
   const mcpToolNames = useAppState((state) => state.mcpToolNames)
-  const ragToolNames = useAppState((state) => state.ragToolNames)
 
   const existingSessionTransport = sessionId
     ? useChatSessions.getState().sessions[sessionId]?.transport
@@ -117,40 +116,21 @@ export function useChat(
     }
   }, [chatResult.status, resetTokenSpeed])
 
-  // Refresh tools when MCP or RAG tool names change (e.g., when MCP servers start/stop)
+  // Refresh tools when MCP tool names change (e.g., when servers start/stop).
   useEffect(() => {
     if (transportRef.current) {
       // Use forceRefreshTools to update the transport's tool cache
       // This ensures the transport has the latest tools when MCP server status changes
       transportRef.current.refreshTools()
     }
-  }, [mcpToolNames, ragToolNames])
+  }, [mcpToolNames])
 
   const setContinueFromContent = useCallback((content: string) => {
     transportRef.current?.setContinueFromContent(content)
   }, [])
 
-  // Expose method to update RAG tools availability
-  const updateRagToolsAvailability = useCallback(
-    async (
-      hasDocuments: boolean,
-      modelSupportsTools: boolean,
-      ragFeatureAvailable: boolean
-    ) => {
-      if (transportRef.current) {
-        await transportRef.current.updateRagToolsAvailability(
-          hasDocuments,
-          modelSupportsTools,
-          ragFeatureAvailable
-        )
-      }
-    },
-    []
-  )
-
   return {
     ...chatResult,
-    updateRagToolsAvailability,
     setContinueFromContent,
   }
 }

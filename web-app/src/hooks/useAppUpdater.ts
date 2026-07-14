@@ -1,8 +1,7 @@
 import { isDev } from '@/lib/utils'
 import { useState, useCallback, useEffect } from 'react'
-import { events, AppEvent } from '@janhq/core'
+import { events, AppEvent } from '@biyan/core'
 import type { UpdateInfo } from '@/services/updater/types'
-import { SystemEvent } from '@/types/events'
 import { getServiceHub } from '@/hooks/useServiceHub'
 
 export interface UpdateState {
@@ -316,10 +315,6 @@ export const useAppUpdater = () => {
         ...newState,
       }))
       syncStateToOtherInstances(newState)
-
-      await getServiceHub().models().stopAllModels()
-      getServiceHub().events().emit(SystemEvent.KILL_SIDECAR)
-      await new Promise((resolve) => setTimeout(resolve, 1000))
 
       await getServiceHub().updater().installDownloadedUpdate()
       await window.core?.api?.relaunch()

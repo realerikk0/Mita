@@ -14,7 +14,7 @@ if (!/^[A-Za-z0-9._-]+$/.test(channel)) {
   process.exit(1)
 }
 
-const appName = `Mita-${channel}`
+const appName = `Biyan-${channel}`
 const source = fs.readFileSync(cargoTomlPath, 'utf8')
 const lines = source.split('\n')
 

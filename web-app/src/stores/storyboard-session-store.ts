@@ -1,6 +1,10 @@
 import { create } from 'zustand'
 import { createJSONStorage, persist } from 'zustand/middleware'
 
+import {
+  createLegacyFallbackStateStorage,
+  legacyStorage,
+} from '@/legacy_migrations/storage'
 import type { MediaMode, StoryboardSession } from '@/routes/images'
 
 type StoryboardSessionStoreState = {
@@ -23,8 +27,10 @@ export const useStoryboardSessionStore = create<StoryboardSessionStoreState>()(
       clear: () => set({ session: null, mediaMode: null }),
     }),
     {
-      name: 'mita-storyboard-session',
-      storage: createJSONStorage(() => localStorage),
+      name: 'biyan-storyboard-session',
+      storage: createJSONStorage(() =>
+        createLegacyFallbackStateStorage(legacyStorage.storyboardSession)
+      ),
     }
   )
 )

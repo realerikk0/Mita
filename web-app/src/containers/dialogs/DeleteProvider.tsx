@@ -12,7 +12,6 @@ import {
 
 import { toast } from 'sonner'
 import { CardItem } from '../Card'
-import { EngineManager } from '@janhq/core'
 import { useModelProvider } from '@/hooks/useModelProvider'
 import { useRouter } from '@tanstack/react-router'
 import { route } from '@/constants/routes'
@@ -30,8 +29,7 @@ const DeleteProvider = ({ provider }: Props) => {
   const router = useRouter()
   if (
     !provider ||
-    predefinedProviders.some((e) => e.provider === provider.provider) ||
-    EngineManager.instance().get(provider.provider)
+    predefinedProviders.some((e) => e.provider === provider.provider)
   )
     return null
 

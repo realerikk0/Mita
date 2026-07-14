@@ -65,7 +65,7 @@ describe('useThreads', () => {
     expect(result.current.threads['thread1']).toEqual(threads[0])
     expect(result.current.threads['thread2']).toEqual(threads[1])
   })
-  it('should set threads with cortex model migrated', () => {
+  it('should preserve historical local model metadata for read-only threads', () => {
     const { result } = renderHook(() => useThreads())
 
     const threads = [
@@ -88,10 +88,10 @@ describe('useThreads', () => {
     })
 
     expect(Object.keys(result.current.threads)).toHaveLength(2)
-    expect(result.current.threads['thread1'].model.id).toEqual('thread1/free')
-    expect(result.current.threads['thread1'].model.provider).toEqual('llamacpp')
-    expect(result.current.threads['thread2'].model.id).toEqual('thread2/test')
-    expect(result.current.threads['thread2'].model.provider).toEqual('llamacpp')
+    expect(result.current.threads['thread1'].model.id).toEqual('thread1:free')
+    expect(result.current.threads['thread1'].model.provider).toEqual('llama.cpp')
+    expect(result.current.threads['thread2'].model.id).toEqual('thread2:test')
+    expect(result.current.threads['thread2'].model.provider).toEqual('llama.cpp')
   })
 
   it('should set current thread ID', () => {

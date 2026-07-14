@@ -1,0 +1,411 @@
+name: Promote Desktop Update
+
+on:
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Signed candidate tag, for example v0.6.634"
+        required: true
+        type: string
+      phase:
+        description: "Migration phase carried by this candidate"
+        required: true
+        type: choice
+        options: [A, B, C, RECOVERY]
+      from_version:
+        description: "Only this installed version may receive the update"
+        required: true
+        type: string
+      expected_current:
+        description: "Logical CAS value currently stored in stable policy"
+        required: true
+        type: string
+      rollout:
+        description: "Stable cohort percentage"
+        required: true
+        type: choice
+        options: ["0", "5", "25", "100"]
+      dry_run:
+        description: "Validate and render policy without changing production"
+        required: true
+        default: true
+        type: boolean
+      confirmation:
+        description: "For a real promotion type PROMOTE"
+        required: false
+        type: string
+      smoke_run_id:
+        description: "Successful Biyan Upgrade Smoke workflow run ID"
+        required: true
+        type: string
+      smoke_evidence_sha256:
+        description: "SHA-256 of upgrade-smoke.json from that run"
+        required: true
+        type: string
+      health_evidence_sha256:
+        description: "SHA-256 of rollout-health.json from that run"
+        required: true
+        type: string
+
+permissions:
+  contents: write
+
+concurrency:
+  group: biyan-stable-updater-promotion
+  cancel-in-progress: false
+
+jobs:
+  promote:
+    name: Verify, snapshot, and promote signed candidate
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    environment: updater-production
+    env:
+      GH_TOKEN: ${{ github.token }}
+      AWS_ACCESS_KEY_ID: ${{ secrets.CLOUDFLARE_R2_ACCESS_KEY_ID }}
+      AWS_SECRET_ACCESS_KEY: ${{ secrets.CLOUDFLARE_R2_SECRET_ACCESS_KEY }}
+      AWS_DEFAULT_REGION: auto
+      CLOUDFLARE_R2_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_R2_ACCOUNT_ID }}
+      CLOUDFLARE_R2_BUCKET: ${{ secrets.CLOUDFLARE_R2_BUCKET }}
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+      CLOUDFLARE_ZONE_ID: ${{ secrets.CLOUDFLARE_ZONE_ID }}
+      ALIYUN_ACCESS_KEY_ID: ${{ secrets.ALIYUN_ACCESS_KEY_ID }}
+      ALIYUN_ACCESS_KEY_SECRET: ${{ secrets.ALIYUN_ACCESS_KEY_SECRET }}
+      ALIYUN_OSS_BUCKET: ${{ secrets.ALIYUN_OSS_BUCKET || vars.ALIYUN_OSS_BUCKET || 'mita-static' }}
+      ALIYUN_OSS_ENDPOINT: ${{ vars.ALIYUN_OSS_ENDPOINT || 'oss-cn-hangzhou.aliyuncs.com' }}
+      ALIYUN_REGION: ${{ vars.ALIYUN_REGION || 'cn-hangzhou' }}
+      DYNAMIC_UPDATER_BASE_URL: ${{ vars.BIYAN_DYNAMIC_UPDATER_BASE_URL || 'https://updates.mita.so/biyan/v1/stable' }}
+      LEGACY_ALIYUN_KEY: "mita/latest.json"
+      LEGACY_R2_KEY: "mita/latest.json"
+      LEGACY_ALIYUN_URL: "https://static.mitapp.cn/mita/latest.json"
+      LEGACY_R2_URL: "https://updates.mita.so/mita/latest.json"
+      POLICY_KEY: "biyan/updater/stable/policy.json"
+      BIYAN_SIGNING_KEY: ${{ secrets.BIYAN_SIGNING_KEY }}
+      ROLLOUT_SALT: ${{ secrets.BIYAN_UPDATER_ROLLOUT_SALT }}
+    steps:
+      - name: Checkout trusted promotion tooling
+        uses: actions/checkout@v4
+
+      - name: Validate operator intent
+        env:
+          TAG: ${{ inputs.tag }}
+          DRY_RUN: ${{ inputs.dry_run }}
+          CONFIRMATION: ${{ inputs.confirmation }}
+        run: |
+          set -euo pipefail
+          [[ "$TAG" =~ ^v[0-9]+\.[0-9]+\.[0-9]+([+-][0-9A-Za-z.-]+)?$ ]]
+          if [ "$DRY_RUN" != "true" ] && [ "$CONFIRMATION" != "PROMOTE" ]; then
+            echo "Real promotion requires confirmation PROMOTE" >&2
+            exit 1
+          fi
+
+      - name: Download immutable candidate
+        env:
+          TAG: ${{ inputs.tag }}
+        run: |
+          set -euo pipefail
+          mkdir -p dist/candidate
+          gh release view "$TAG" --json tagName,isDraft,isPrerelease,targetCommitish > dist/release.json
+          test "$(jq -r .tagName dist/release.json)" = "$TAG"
+          for pattern in candidate.json latest.json SHA256SUMS "Biyan.app.tar.gz*" \
+            "Biyan_*_x64-setup.exe*" "Biyan_*_amd64.AppImage*"; do
+            gh release download "$TAG" --dir dist/candidate --pattern "$pattern" --clobber
+          done
+          (cd dist/candidate && sha256sum --check SHA256SUMS)
+          node scripts/updater/verify-candidate.mjs dist/candidate "$TAG"
+          git fetch --force --no-tags origin "refs/tags/${TAG}:refs/tags/${TAG}"
+          test "$(git rev-list -n 1 "$TAG")" = "$(jq -r .sourceCommit dist/candidate/candidate.json)"
+
+      - name: Require successful upgrade smoke and health evidence
+        env:
+          SMOKE_RUN_ID: ${{ inputs.smoke_run_id }}
+          SMOKE_SHA256: ${{ inputs.smoke_evidence_sha256 }}
+          HEALTH_SHA256: ${{ inputs.health_evidence_sha256 }}
+        run: |
+          set -euo pipefail
+          [[ "$SMOKE_RUN_ID" =~ ^[0-9]+$ ]]
+          gh run view "$SMOKE_RUN_ID" \
+            --json conclusion,headSha,workflowName,url > dist/smoke-run.json
+          test "$(jq -r .conclusion dist/smoke-run.json)" = "success"
+          test "$(jq -r .workflowName dist/smoke-run.json)" = "Biyan Upgrade Smoke"
+          test "$(jq -r .headSha dist/smoke-run.json)" = \
+            "$(jq -r .sourceCommit dist/candidate/candidate.json)"
+          mkdir -p dist/evidence
+          gh run download "$SMOKE_RUN_ID" --name biyan-promotion-evidence --dir dist/evidence
+          node scripts/updater/verify-promotion-evidence.mjs \
+            --smoke dist/evidence/upgrade-smoke.json \
+            --smoke-sha256 "$SMOKE_SHA256" \
+            --health dist/evidence/rollout-health.json \
+            --health-sha256 "$HEALTH_SHA256" \
+            --output-dir dist/state
+
+      - name: Configure production stores
+        if: inputs.dry_run != true
+        run: |
+          set -euo pipefail
+          required=(
+            AWS_ACCESS_KEY_ID AWS_SECRET_ACCESS_KEY CLOUDFLARE_R2_ACCOUNT_ID
+            CLOUDFLARE_R2_BUCKET ALIYUN_ACCESS_KEY_ID ALIYUN_ACCESS_KEY_SECRET
+            ALIYUN_OSS_BUCKET ALIYUN_OSS_ENDPOINT CLOUDFLARE_API_TOKEN
+            CLOUDFLARE_ZONE_ID BIYAN_SIGNING_KEY ROLLOUT_SALT
+          )
+          for name in "${required[@]}"; do
+            [ -n "${!name:-}" ] || { echo "Missing production setting: $name" >&2; exit 1; }
+          done
+          /bin/bash -c "$(curl -fsSL https://aliyuncli.alicdn.com/install.sh)"
+          aliyun configure set --profile release --mode AK --region "$ALIYUN_REGION" \
+            --access-key-id "$ALIYUN_ACCESS_KEY_ID" \
+            --access-key-secret "$ALIYUN_ACCESS_KEY_SECRET"
+
+      - name: Build logical CAS proposal
+        env:
+          PHASE: ${{ inputs.phase }}
+          FROM_VERSION: ${{ inputs.from_version }}
+          EXPECTED_CURRENT: ${{ inputs.expected_current }}
+          ROLLOUT: ${{ inputs.rollout }}
+          DRY_RUN: ${{ inputs.dry_run }}
+        run: |
+          set -euo pipefail
+          mkdir -p dist/state
+          if [ -n "${AWS_ACCESS_KEY_ID:-}" ] && [ -n "${AWS_SECRET_ACCESS_KEY:-}" ] \
+            && [ -n "${CLOUDFLARE_R2_ACCOUNT_ID:-}" ] && [ -n "${CLOUDFLARE_R2_BUCKET:-}" ]; then
+            r2_endpoint="https://${CLOUDFLARE_R2_ACCOUNT_ID}.r2.cloudflarestorage.com"
+            if aws s3 cp "s3://${CLOUDFLARE_R2_BUCKET}/${POLICY_KEY}" dist/state/current-policy.json \
+              --endpoint-url "$r2_endpoint"; then
+              touch dist/state/current-policy.exists
+            fi
+          elif [ "$DRY_RUN" != "true" ]; then
+            echo "Production R2 credentials are required for CAS" >&2
+            exit 1
+          fi
+          node scripts/updater/prepare-promotion.mjs \
+            --candidate dist/candidate/candidate.json \
+            --policy dist/state/current-policy.json \
+            --phase "$PHASE" \
+            --from-version "$FROM_VERSION" \
+            --expected-current "$EXPECTED_CURRENT" \
+            --rollout "$ROLLOUT" \
+            --promoted-at "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
+            --smoke-evidence dist/state/verified-smoke.json \
+            --health-evidence dist/state/verified-health.json \
+            --output dist/state/next-policy.json
+          cat dist/state/next-policy.json
+
+      - name: Publish with rollback protection
+        if: inputs.dry_run != true
+        env:
+          PHASE: ${{ inputs.phase }}
+          FROM_VERSION: ${{ inputs.from_version }}
+          ROLLOUT: ${{ inputs.rollout }}
+        run: |
+          set -euo pipefail
+          r2_endpoint="https://${CLOUDFLARE_R2_ACCOUNT_ID}.r2.cloudflarestorage.com"
+          oss_endpoint="${ALIYUN_OSS_ENDPOINT#https://}"
+          oss_endpoint="https://${oss_endpoint#http://}"
+          snapshot="biyan/updater/backups/$(date -u +%Y%m%dT%H%M%SZ)-${GITHUB_RUN_ID}"
+          legacy_staging_key="biyan/updater/staging/${GITHUB_RUN_ID}/legacy-latest.json"
+          policy_existed=false
+          legacy_aliyun_existed=false
+          legacy_r2_existed=false
+          target_version="$(jq -r .version dist/candidate/candidate.json)"
+          effective_phase="$(jq -r --arg version "$target_version" \
+            '.releases[$version].effectivePhase' dist/state/next-policy.json)"
+          update_legacy=false
+          if [ "$effective_phase" = "A" ]; then
+            update_legacy=true
+          fi
+
+          if [ -f dist/state/current-policy.exists ]; then
+            policy_existed=true
+            aws s3 cp "s3://${CLOUDFLARE_R2_BUCKET}/${POLICY_KEY}" dist/state/cas-policy.json \
+              --endpoint-url "$r2_endpoint"
+            cmp dist/state/current-policy.json dist/state/cas-policy.json
+            aws s3 cp dist/state/current-policy.json "s3://${CLOUDFLARE_R2_BUCKET}/${snapshot}/policy.json" \
+              --endpoint-url "$r2_endpoint" --content-type application/json
+          elif aws s3api head-object --bucket "$CLOUDFLARE_R2_BUCKET" --key "$POLICY_KEY" \
+            --endpoint-url "$r2_endpoint" >/dev/null 2>&1; then
+            echo "CAS failed: updater policy appeared during promotion" >&2
+            exit 1
+          fi
+
+          if [ "$update_legacy" = true ]; then
+            if aliyun --profile release oss cp "oss://${ALIYUN_OSS_BUCKET}/${LEGACY_ALIYUN_KEY}" \
+              dist/state/legacy-aliyun.json --endpoint "$oss_endpoint"; then
+              legacy_aliyun_existed=true
+              aliyun --profile release oss cp dist/state/legacy-aliyun.json \
+                "oss://${ALIYUN_OSS_BUCKET}/${snapshot}/legacy-aliyun.json" \
+                --endpoint "$oss_endpoint" --force
+            fi
+            if aws s3 cp "s3://${CLOUDFLARE_R2_BUCKET}/${LEGACY_R2_KEY}" dist/state/legacy-r2.json \
+              --endpoint-url "$r2_endpoint"; then
+              legacy_r2_existed=true
+              aws s3 cp dist/state/legacy-r2.json \
+                "s3://${CLOUDFLARE_R2_BUCKET}/${snapshot}/legacy-r2.json" \
+                --endpoint-url "$r2_endpoint" --content-type application/json
+            fi
+          fi
+
+          rollback() {
+            echo "Promotion failed; restoring mutable updater state" >&2
+            if [ "$policy_existed" = true ]; then
+              aws s3 cp dist/state/current-policy.json "s3://${CLOUDFLARE_R2_BUCKET}/${POLICY_KEY}" \
+                --endpoint-url "$r2_endpoint" --content-type application/json || true
+            else
+              aws s3 rm "s3://${CLOUDFLARE_R2_BUCKET}/${POLICY_KEY}" \
+                --endpoint-url "$r2_endpoint" || true
+            fi
+            if [ "$update_legacy" = true ]; then
+              if [ "$legacy_aliyun_existed" = true ]; then
+                aliyun --profile release oss cp dist/state/legacy-aliyun.json \
+                  "oss://${ALIYUN_OSS_BUCKET}/${LEGACY_ALIYUN_KEY}" \
+                  --endpoint "$oss_endpoint" --force || true
+              else
+                aliyun --profile release oss rm \
+                  "oss://${ALIYUN_OSS_BUCKET}/${LEGACY_ALIYUN_KEY}" \
+                  --endpoint "$oss_endpoint" --force || true
+              fi
+              if [ "$legacy_r2_existed" = true ]; then
+                aws s3 cp dist/state/legacy-r2.json \
+                  "s3://${CLOUDFLARE_R2_BUCKET}/${LEGACY_R2_KEY}" \
+                  --endpoint-url "$r2_endpoint" --content-type application/json || true
+              else
+                aws s3 rm "s3://${CLOUDFLARE_R2_BUCKET}/${LEGACY_R2_KEY}" \
+                  --endpoint-url "$r2_endpoint" || true
+              fi
+              aliyun --profile release oss rm \
+                "oss://${ALIYUN_OSS_BUCKET}/${legacy_staging_key}" \
+                --endpoint "$oss_endpoint" --force || true
+              aws s3 rm "s3://${CLOUDFLARE_R2_BUCKET}/${legacy_staging_key}" \
+                --endpoint-url "$r2_endpoint" || true
+              # Restoring the origins is not sufficient: either CDN may still
+              # serve the failed candidate. Purge both legacy entrypoints again
+              # so old clients see the restored byte-identical manifests.
+              aliyun --profile release cdn RefreshObjectCaches \
+                --ObjectPath "$LEGACY_ALIYUN_URL" --ObjectType File || true
+              curl -fsS -X POST \
+                "https://api.cloudflare.com/client/v4/zones/${CLOUDFLARE_ZONE_ID}/purge_cache" \
+                -H "Authorization: Bearer ${CLOUDFLARE_API_TOKEN}" \
+                -H "Content-Type: application/json" \
+                --data "{\"files\":[\"${LEGACY_R2_URL}\"]}" >/dev/null || true
+            fi
+          }
+          trap rollback ERR
+
+          while IFS=$'\t' read -r file signature_file object_key; do
+            for pair in "$file:$object_key" "$signature_file:${object_key}.sig"; do
+              local_file="dist/candidate/${pair%%:*}"
+              remote_key="${pair#*:}"
+              existing="dist/state/existing-$(basename "$remote_key")"
+              if aliyun --profile release oss cp "oss://${ALIYUN_OSS_BUCKET}/${remote_key}" \
+                "$existing" --endpoint "$oss_endpoint" >/dev/null 2>&1; then
+                cmp "$local_file" "$existing"
+              else
+                aliyun --profile release oss cp "$local_file" \
+                  "oss://${ALIYUN_OSS_BUCKET}/${remote_key}" --endpoint "$oss_endpoint" \
+                  --meta "Cache-Control:public, max-age=31536000, immutable" --force
+              fi
+            done
+          done < <(jq -r '.assets[] | [.file, .signatureFile, .objectKey] | @tsv' dist/candidate/candidate.json)
+
+          manifest_key="$(jq -r .manifestKey dist/candidate/candidate.json)"
+          if aliyun --profile release oss cp "oss://${ALIYUN_OSS_BUCKET}/${manifest_key}" \
+            dist/state/existing-manifest-aliyun.json --endpoint "$oss_endpoint" >/dev/null 2>&1; then
+            cmp dist/candidate/latest.json dist/state/existing-manifest-aliyun.json
+          else
+            aliyun --profile release oss cp dist/candidate/latest.json \
+              "oss://${ALIYUN_OSS_BUCKET}/${manifest_key}" --endpoint "$oss_endpoint" \
+              --meta "Cache-Control:public, max-age=31536000, immutable#Content-Type:application/json" --force
+          fi
+          if aws s3 cp "s3://${CLOUDFLARE_R2_BUCKET}/${manifest_key}" \
+            dist/state/existing-manifest-r2.json --endpoint-url "$r2_endpoint" >/dev/null 2>&1; then
+            cmp dist/candidate/latest.json dist/state/existing-manifest-r2.json
+          else
+            aws s3 cp dist/candidate/latest.json "s3://${CLOUDFLARE_R2_BUCKET}/${manifest_key}" \
+              --endpoint-url "$r2_endpoint" --content-type application/json \
+              --cache-control "public, max-age=31536000, immutable"
+          fi
+          aws s3 cp dist/state/next-policy.json "s3://${CLOUDFLARE_R2_BUCKET}/${POLICY_KEY}" \
+            --endpoint-url "$r2_endpoint" --content-type application/json --cache-control "no-store"
+
+          if [ "$update_legacy" = true ]; then
+            aliyun --profile release oss cp dist/candidate/latest.json \
+              "oss://${ALIYUN_OSS_BUCKET}/${legacy_staging_key}" --endpoint "$oss_endpoint" \
+              --meta "Cache-Control:public, max-age=60, must-revalidate#Content-Type:application/json" --force
+            aws s3 cp dist/candidate/latest.json "s3://${CLOUDFLARE_R2_BUCKET}/${legacy_staging_key}" \
+              --endpoint-url "$r2_endpoint" --content-type application/json \
+              --cache-control "public, max-age=60, must-revalidate"
+            aliyun --profile release oss cp "oss://${ALIYUN_OSS_BUCKET}/${legacy_staging_key}" \
+              dist/state/staged-legacy-aliyun.json --endpoint "$oss_endpoint"
+            aws s3 cp "s3://${CLOUDFLARE_R2_BUCKET}/${legacy_staging_key}" \
+              dist/state/staged-legacy-r2.json --endpoint-url "$r2_endpoint"
+            cmp dist/candidate/latest.json dist/state/staged-legacy-aliyun.json
+            cmp dist/state/staged-legacy-aliyun.json dist/state/staged-legacy-r2.json
+            aliyun --profile release oss cp dist/state/staged-legacy-aliyun.json \
+              "oss://${ALIYUN_OSS_BUCKET}/${LEGACY_ALIYUN_KEY}" --endpoint "$oss_endpoint" \
+              --meta "Cache-Control:public, max-age=60, must-revalidate#Content-Type:application/json" --force
+            aws s3 cp dist/state/staged-legacy-r2.json \
+              "s3://${CLOUDFLARE_R2_BUCKET}/${LEGACY_R2_KEY}" \
+              --endpoint-url "$r2_endpoint" --content-type application/json \
+              --cache-control "public, max-age=60, must-revalidate"
+          fi
+
+          if [ "$update_legacy" = true ]; then
+            aliyun --profile release cdn RefreshObjectCaches \
+              --ObjectPath "$LEGACY_ALIYUN_URL" --ObjectType File
+            curl -fsS -X POST "https://api.cloudflare.com/client/v4/zones/${CLOUDFLARE_ZONE_ID}/purge_cache" \
+              -H "Authorization: Bearer ${CLOUDFLARE_API_TOKEN}" \
+              -H "Content-Type: application/json" \
+              --data "{\"files\":[\"${LEGACY_R2_URL}\"]}" > dist/state/cache-purge.json
+            jq -e '.success == true' dist/state/cache-purge.json >/dev/null
+          fi
+
+          curl -fsSL --retry 10 --retry-delay 6 "$LEGACY_ALIYUN_URL" -o dist/state/public-legacy-aliyun.json
+          curl -fsSL --retry 10 --retry-delay 6 "$LEGACY_R2_URL" -o dist/state/public-legacy-r2.json
+          cmp dist/state/public-legacy-aliyun.json dist/state/public-legacy-r2.json
+          expected_legacy="$(jq -r .legacyBridgeVersion dist/state/next-policy.json)"
+          test "$(jq -r .version dist/state/public-legacy-aliyun.json)" = "$expected_legacy"
+
+          node scripts/updater/sign-request.mjs --current-version "$FROM_VERSION" \
+            --target-version "$target_version" --rollout "$ROLLOUT" --salt "$ROLLOUT_SALT" \
+            --output dist/state/probe-headers.json
+          endpoint="${DYNAMIC_UPDATER_BASE_URL}/windows/x86_64/${FROM_VERSION}"
+          curl_args=(-sS -o dist/state/probe-response.json -w '%{http_code}' "$endpoint")
+          while IFS=$'\t' read -r key value; do curl_args+=(-H "$key: $value"); done \
+            < <(jq -r 'to_entries[] | [.key, .value] | @tsv' dist/state/probe-headers.json)
+          status="$(curl "${curl_args[@]}")"
+          if ! jq -e --arg from "$FROM_VERSION" '.transitions[$from]' \
+            dist/state/next-policy.json >/dev/null; then
+            test "$status" = "204"
+          elif [ "$ROLLOUT" = "0" ]; then
+            test "$status" = "204"
+          else
+            test "$status" = "200"
+            test "$(jq -r .version dist/state/probe-response.json)" = "$target_version"
+          fi
+          if [ "$update_legacy" = true ]; then
+            aliyun --profile release oss rm \
+              "oss://${ALIYUN_OSS_BUCKET}/${legacy_staging_key}" \
+              --endpoint "$oss_endpoint" --force
+            aws s3 rm "s3://${CLOUDFLARE_R2_BUCKET}/${legacy_staging_key}" \
+              --endpoint-url "$r2_endpoint"
+          fi
+          trap - ERR
+
+      - name: Publish promoted GitHub release
+        if: inputs.dry_run != true
+        env:
+          TAG: ${{ inputs.tag }}
+        run: gh release edit "$TAG" --draft=false --latest
+
+      - name: Upload promotion evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: updater-promotion-${{ inputs.tag }}-${{ github.run_id }}
+          if-no-files-found: ignore
+          path: |
+            dist/release.json
+            dist/smoke-run.json
+            dist/candidate/candidate.json
+            dist/candidate/latest.json
+            dist/state/*.json

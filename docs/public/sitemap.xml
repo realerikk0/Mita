@@ -1,4 +1,11 @@
 <?xml version="1.0" encoding="UTF-8"?>
-<sitemapindex xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">
-<sitemap><loc>https://jan.ai/sitemap-0.xml</loc></sitemap>
-</sitemapindex>
+<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">
+  <url><loc>https://docs.biyan.ai/</loc></url>
+  <url><loc>https://docs.biyan.ai/docs/desktop</loc></url>
+  <url><loc>https://docs.biyan.ai/docs/desktop/quickstart</loc></url>
+  <url><loc>https://docs.biyan.ai/docs/desktop/data-folder</loc></url>
+  <url><loc>https://docs.biyan.ai/docs/desktop/file-upload</loc></url>
+  <url><loc>https://docs.biyan.ai/docs/desktop/remote-models/openai</loc></url>
+  <url><loc>https://docs.biyan.ai/docs/desktop/mcp</loc></url>
+  <url><loc>https://docs.biyan.ai/docs/desktop/troubleshooting</loc></url>
+</urlset>

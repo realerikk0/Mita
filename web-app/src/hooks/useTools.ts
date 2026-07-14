@@ -4,11 +4,10 @@ import { SystemEvent } from '@/types/events'
 import { useAppState } from './useAppState'
 import { useToolAvailable } from './useToolAvailable'
 import { ExtensionManager } from '@/lib/extension'
-import { ExtensionTypeEnum, MCPExtension } from '@janhq/core'
+import { ExtensionTypeEnum, MCPExtension } from '@biyan/core'
 
 export const useTools = () => {
   const updateTools = useAppState((state) => state.updateTools)
-  const updateRagToolNames = useAppState((state) => state.updateRagToolNames)
   const updateMcpToolNames = useAppState((state) => state.updateMcpToolNames)
   const { isDefaultsInitialized, setDefaultDisabledTools, markDefaultsAsInitialized } = useToolAvailable()
 
@@ -20,18 +19,13 @@ export const useTools = () => {
           ExtensionTypeEnum.MCP
         )
 
-        // Fetch tools and tool names in parallel
-        const [mcpTools, ragToolNames] = await Promise.all([
-          getServiceHub().mcp().getTools(),
-          getServiceHub().rag().getToolNames?.() ?? Promise.resolve([]),
-        ])
+        const mcpTools = await getServiceHub().mcp().getTools()
 
         // Update MCP tools
         updateTools(mcpTools)
 
         // Update cached tool names for fast synchronous access
         updateMcpToolNames(mcpTools.map((t) => t.name))
-        updateRagToolNames(ragToolNames)
 
         // Initialize default disabled tools for new users (only once)
         if (!isDefaultsInitialized() && mcpTools.length > 0 && mcpExtension?.getDefaultDisabledTools) {

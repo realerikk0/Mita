@@ -12,7 +12,7 @@
   "stop": "停止",
   "start": "开始",
   "noModelFound": "未找到模型",
-  "noModelFoundDesc": "可用模型将在此处列出。如果您还没有任何模型，请访问中心下载。",
+  "noModelFoundDesc": "Available models from the configured remote provider will be listed here. Refresh after adding or changing provider credentials.",
   "configuration": "配置",
   "apiEndpoint": "API 端点",
   "testConnection": "测试连接",

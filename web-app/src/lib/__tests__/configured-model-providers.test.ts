@@ -10,6 +10,7 @@ const provider = (
 ): ModelProvider => ({
   active: true,
   provider: data.provider,
+  base_url: 'https://provider.example.com/v1',
   settings: [],
   models: [{ id: 'gpt-5' }],
   ...data,
@@ -27,10 +28,10 @@ describe('configured model providers', () => {
     ).toBe(true)
   })
 
-  it('keeps local and custom providers with selectable models', () => {
+  it('rejects retired local providers and keeps remote custom providers', () => {
     expect(
       isConfiguredModelProvider(provider({ provider: 'llamacpp' }))
-    ).toBe(true)
+    ).toBe(false)
     expect(isConfiguredModelProvider(provider({ provider: 'custom' }))).toBe(
       true
     )

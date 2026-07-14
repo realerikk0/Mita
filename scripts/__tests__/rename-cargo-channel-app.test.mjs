@@ -34,18 +34,18 @@ name = "Biyan"
 path = "src/main.rs"
 
 [[bin]]
-name = "mita-cli"
-path = "src/bin/mita-cli.rs"
+name = "biyan-cli"
+path = "src/bin/biyan-cli.rs"
 `,
   )
 
   execFileSync(process.execPath, [scriptPath, cargoTomlPath, 'nightly'])
 
   const updated = fs.readFileSync(cargoTomlPath, 'utf8')
-  assert.match(updated, /\[package\]\nname = "Mita-nightly"/)
-  assert.match(updated, /default-run = "Mita-nightly"/)
-  assert.match(updated, /\[\[bin\]\]\nname = "Mita-nightly"\npath = "src\/main\.rs"/)
-  assert.match(updated, /\[\[bin\]\]\nname = "mita-cli"/)
+  assert.match(updated, /\[package\]\nname = "Biyan-nightly"/)
+  assert.match(updated, /default-run = "Biyan-nightly"/)
+  assert.match(updated, /\[\[bin\]\]\nname = "Biyan-nightly"\npath = "src\/main\.rs"/)
+  assert.match(updated, /\[\[bin\]\]\nname = "biyan-cli"/)
 })
 
 test('channel build templates use the Cargo channel rename helper', () => {
@@ -58,7 +58,7 @@ test('channel build templates use the Cargo channel rename helper', () => {
     )
     assert.doesNotMatch(
       workflow,
-      /ctoml \.\/src-tauri\/Cargo\.toml package\.default-run "Mita-\$\{\{ inputs\.channel \}\}"/,
+      /ctoml \.\/src-tauri\/Cargo\.toml package\.default-run "Biyan-\$\{\{ inputs\.channel \}\}"/,
       `${workflowPath} should not leave default-run pointing at an absent bin`,
     )
   }

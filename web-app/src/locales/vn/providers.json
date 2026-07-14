@@ -12,7 +12,7 @@
   "stop": "Dừng",
   "start": "Bắt đầu",
   "noModelFound": "Không tìm thấy mô hình nào",
-  "noModelFoundDesc": "Các mô hình có sẵn sẽ được liệt kê ở đây. Nếu bạn chưa có bất kỳ mô hình nào, hãy truy cập Hub để tải xuống.",
+  "noModelFoundDesc": "Available models from the configured remote provider will be listed here. Refresh after adding or changing provider credentials.",
   "configuration": "Cấu hình",
   "apiEndpoint": "Điểm cuối API",
   "testConnection": "Kiểm tra kết nối",

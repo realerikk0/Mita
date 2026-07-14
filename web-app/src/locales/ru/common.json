@@ -104,11 +104,10 @@
   "chats": "Чаты",
   "favorites": "Избранное",
   "recents": "Недавние",
-  "hub": "Хаб",
   "helpSupport": "Справка и поддержка",
-  "helpUsImproveMita": "Помогите нам улучшить Biyan",
-  "helpUsImproveMitaDescription": "Мы собираем анонимные данные, чтобы понимать использование функций. Ваши чаты и личная информация никогда не отслеживаются. Это можно изменить в любое время в Настройки > Конфиденциальность.",
-  "helpUsImproveMitaQuestion": "Хотите помочь нам улучшить Biyan?",
+  "helpUsImproveBiyan": "Помогите нам улучшить Biyan",
+  "helpUsImproveBiyanDescription": "Мы собираем анонимные данные, чтобы понимать использование функций. Ваши чаты и личная информация никогда не отслеживаются. Это можно изменить в любое время в Настройки > Конфиденциальность.",
+  "helpUsImproveBiyanQuestion": "Хотите помочь нам улучшить Biyan?",
   "unstarAll": "Очистить избранное",
   "unstar": "Удалить из избранного",
   "deleteAll": "Удалить все",
@@ -158,12 +157,7 @@
   "noResultsFound": "Результаты не найдены",
   "noThreadsYet": "Обсуждений пока нет",
   "noThreadsYetDesc": "Начните новый диалог, чтобы увидеть историю ваших обсуждений.",
-  "downloads": "Загрузки",
-  "downloading": "Загрузка",
   "uploadingAttachments": "Загрузка вложений…",
-  "cancelDownload": "Отменить загрузку",
-  "downloadCancelled": "Загрузка отменена",
-  "downloadComplete": "Загрузка завершена",
   "thinking": "Размышление...",
   "thought": "Размышление",
   "callingTool": "Вызов инструмента",
@@ -182,7 +176,7 @@
   "noModels": "Модели не найдены",
   "customAvatar": "Свой аватар",
   "editAssistant": "Редактировать ассистента",
-  "mita": "Biyan",
+  "biyan": "Biyan",
   "metadata": "Метаданные",
   "regenerate": "Сгенерировать заново",
   "threadImage": "Изображение обсуждения",
@@ -387,14 +381,7 @@
     "tryDifferentSearch": "Попробуйте другой поисковый запрос",
     "uploadingFiles": "Загрузка файлов…"
   },
-  "attachmentsIngestion": {
-    "title": "Выберите способ обработки вложений",
-    "description": "Выберите, вставить содержимое файлов непосредственно в чат или индексировать их как эмбеддинги.",
-    "inline": "Вставить в чат",
-    "embeddings": "Использовать эмбеддинги"
-  },
   "attachmentInjectedIndicator": "Вставлено в чат",
-  "attachmentEmbeddedIndicator": "Эмбеддинг для RAG",
   "viewInjectedContent": "Просмотреть вставленный контент",
   "injectedContentTitle": "Содержимое файла",
   "errorDialog": {
@@ -442,30 +429,14 @@
       "title": "Загрузка завершена",
       "description": "Загружено: {{item}}"
     },
-    "downloadCancelled": {
-      "title": "Загрузка отменена",
-      "description": "Процесс загрузки был отменен."
-    },
     "downloadFailed": {
       "title": "Ошибка загрузки",
       "description": "Не удалось загрузить {{item}}"
     },
-    "modelValidationStarted": {
-      "title": "Проверка модели",
-      "description": "Модель \"{{modelId}}\" успешно загружена. Проверка целостности…"
-    },
-    "modelValidationFailed": {
-      "title": "Проверка модели не пройдена",
-      "description": "Загруженная модель \"{{modelId}}\" не прошла проверку целостности и была удалена. Файл может быть повреждён или изменён."
-    },
     "modelNoVision": {
       "title": "Модель не поддерживает изображения",
       "description": "Выберите модель с поддержкой зрения, чтобы прикреплять изображения.",
-      "action": "Открыть Хаб"
-    },
-    "downloadAndVerificationComplete": {
-      "title": "Загрузка завершена",
-      "description": "Модель \"{{item}}\" успешно загружена и проверена."
+      "action": "Открыть настройки провайдеров"
     },
     "projectCreated": {
       "title": "Проект создан",

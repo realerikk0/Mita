@@ -3,10 +3,10 @@ use std::{
     path::{Component, Path, PathBuf},
 };
 
-use jan_utils::normalize_path;
+use biyan_utils::normalize_path;
 
 const WORKSPACE_DIR: &str = "agent-workspaces";
-const HIDDEN_THREAD_ID_ARG: &str = "_mitaThreadId";
+const HIDDEN_THREAD_ID_ARG: &str = "_biyanThreadId";
 
 #[derive(Debug, Clone)]
 pub struct ComputerAgentScope {
@@ -16,12 +16,12 @@ pub struct ComputerAgentScope {
 
 impl ComputerAgentScope {
     pub fn new(
-        mita_data_folder: &Path,
+        biyan_data_folder: &Path,
         thread_id: &str,
         configured_roots: &[String],
     ) -> Result<Self, String> {
         let thread_id = sanitize_thread_id(thread_id)?;
-        let raw_workspace_root = mita_data_folder.join(WORKSPACE_DIR).join(&thread_id);
+        let raw_workspace_root = biyan_data_folder.join(WORKSPACE_DIR).join(&thread_id);
         let workspace_root = normalize_scope_path(
             canonicalize_existing_or_parent(&raw_workspace_root).unwrap_or(raw_workspace_root),
         );
@@ -195,7 +195,7 @@ pub fn sanitize_file_stem(input: &str) -> String {
         .replace(' ', "-");
 
     if stem.is_empty() {
-        "mita-note".to_string()
+        "biyan-note".to_string()
     } else {
         stem.chars().take(80).collect()
     }

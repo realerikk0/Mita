@@ -1,6 +1,6 @@
 import type { UIMessage } from '@ai-sdk/react'
 import { generateText, type LanguageModel } from 'ai'
-import type { ThreadMessage } from '@janhq/core'
+import type { ThreadMessage } from '@biyan/core'
 
 /**
  * Approximate token count using a character-based heuristic.
@@ -9,7 +9,7 @@ import type { ThreadMessage } from '@janhq/core'
  * Callers may pass a per-model calibrated value (see token-calibration-store)
  * once real usage has been observed; otherwise this default is used as a
  * cold-start prior and as the fallback for models that don't report usage
- * (e.g. some local models).
+ * (for example, providers with small context windows).
  */
 export const DEFAULT_CHARS_PER_TOKEN = 3.5
 
@@ -86,7 +86,7 @@ export function estimateThreadMessageTokens(
   return estimateTokens(threadMessageToText(message), charsPerToken) + 4
 }
 
-export const MITA_COMPACT_PROMPT_TEMPLATE = `You are performing MITA CONTEXT COMPACTION.
+export const BIYAN_COMPACT_PROMPT_TEMPLATE = `You are performing BIYAN CONTEXT COMPACTION.
 
 Your job is to create a continuation handoff summary for a future assistant turn. The raw conversation before this compact point may no longer be available, so the summary must preserve everything needed to continue accurately without replaying the full transcript.
 
@@ -133,7 +133,7 @@ If custom compact instructions are provided below, follow them with highest prio
 </custom_compact_instructions>`
 
 export function buildCompactPrompt(customInstructions?: string): string {
-  return MITA_COMPACT_PROMPT_TEMPLATE.replace(
+  return BIYAN_COMPACT_PROMPT_TEMPLATE.replace(
     '{{customInstructions}}',
     customInstructions?.trim() || 'None.'
   )

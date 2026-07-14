@@ -22,7 +22,7 @@ const DEFAULT_READ_LIMIT_BYTES: u64 = 64 * 1024;
 const MAX_READ_LIMIT_BYTES: u64 = 256 * 1024;
 
 pub async fn handle_computer_agent_tool(
-    mita_data_folder: PathBuf,
+    biyan_data_folder: PathBuf,
     settings: McpSettings,
     tool_name: &str,
     arguments: Option<Map<String, Value>>,
@@ -35,7 +35,7 @@ pub async fn handle_computer_agent_tool(
     let thread_id = string_arg(&args, hidden_thread_id_arg())
         .ok_or_else(|| "Computer Agent tool call is missing the current thread id".to_string())?;
     let scope = ComputerAgentScope::new(
-        &mita_data_folder,
+        &biyan_data_folder,
         &thread_id,
         &settings.computer_agent_allowed_roots,
     )?;
@@ -283,13 +283,13 @@ fn move_to_trash(path: &Path) -> Result<(), String> {
         let is_dir = path.is_dir();
         let script = if is_dir {
             r#"
-$p = $env:MITA_TRASH_PATH
+$p = $env:BIYAN_TRASH_PATH
 Add-Type -AssemblyName Microsoft.VisualBasic
 [Microsoft.VisualBasic.FileIO.FileSystem]::DeleteDirectory($p, 'OnlyErrorDialogs', 'SendToRecycleBin')
 "#
         } else {
             r#"
-$p = $env:MITA_TRASH_PATH
+$p = $env:BIYAN_TRASH_PATH
 Add-Type -AssemblyName Microsoft.VisualBasic
 [Microsoft.VisualBasic.FileIO.FileSystem]::DeleteFile($p, 'OnlyErrorDialogs', 'SendToRecycleBin')
 "#
@@ -297,7 +297,7 @@ Add-Type -AssemblyName Microsoft.VisualBasic
         let mut command = Command::new("powershell");
         command
             .args(["-NoProfile", "-NonInteractive", "-Command", script])
-            .env("MITA_TRASH_PATH", path);
+            .env("BIYAN_TRASH_PATH", path);
         #[cfg(windows)]
         {
             use std::os::windows::process::CommandExt;
@@ -318,8 +318,8 @@ Add-Type -AssemblyName Microsoft.VisualBasic
     if cfg!(target_os = "macos") {
         let status = Command::new("osascript")
             .arg("-e")
-            .arg(r#"tell application "Finder" to delete POSIX file (system attribute "MITA_TRASH_PATH")"#)
-            .env("MITA_TRASH_PATH", path)
+            .arg(r#"tell application "Finder" to delete POSIX file (system attribute "BIYAN_TRASH_PATH")"#)
+            .env("BIYAN_TRASH_PATH", path)
             .status()
             .map_err(|e| format!("Failed to move '{}' to Trash: {}", path.display(), e))?;
         if status.success() {

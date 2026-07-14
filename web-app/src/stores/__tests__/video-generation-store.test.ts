@@ -125,7 +125,7 @@ describe('useVideoGenerationStore', () => {
     // Persisted task is cleared once the asset is saved (idempotent resume).
     expect(useVideoGenerationStore.getState().tasks['sb1']).toBeUndefined()
     expect(dispatchSpy).toHaveBeenCalledWith(
-      expect.objectContaining({ type: 'mita-media-history-updated' })
+      expect.objectContaining({ type: 'biyan-media-history-updated' })
     )
   })
 

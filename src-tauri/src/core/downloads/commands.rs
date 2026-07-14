@@ -1,11 +1,37 @@
-use super::helpers::{_download_files_internal, err_to_string};
+use super::helpers::{_download_files_internal, err_to_string, is_retired_download_url};
 use super::models::DownloadItem;
-use crate::core::app::commands::get_mita_data_folder_path;
-use crate::core::filesystem::helpers::resolve_path_within_mita_data_folder;
+use crate::core::app::commands::get_biyan_data_folder_path;
+use crate::core::filesystem::helpers::resolve_path_within_biyan_data_folder;
 use crate::core::state::AppState;
 use std::collections::HashMap;
 use tauri::{Runtime, State};
 use tokio_util::sync::CancellationToken;
+
+const RETIRED_MODEL_EXTENSIONS: &[&str] =
+    &["gguf", "safetensors", "ckpt", "pth", "onnx", "mlmodel"];
+
+pub(super) fn reject_retired_model_download(item: &DownloadItem) -> Result<(), String> {
+    let save_path = item.save_path.replace('\\', "/").to_ascii_lowercase();
+    let has_retired_directory = save_path.split('/').any(|component| {
+        matches!(
+            component,
+            "llamacpp" | "mlx" | "models" | "hub" | "rag" | "vector-db" | "embedding-models"
+        )
+    });
+    let has_model_extension = save_path
+        .rsplit('.')
+        .next()
+        .is_some_and(|ext| RETIRED_MODEL_EXTENSIONS.contains(&ext));
+
+    let parsed_url = url::Url::parse(&item.url).map_err(|_| "download_invalid_url".to_string())?;
+    if has_retired_directory || has_model_extension || is_retired_download_url(&parsed_url) {
+        return Err(
+            "LOCAL_RUNTIME_REMOVED: model and embedding downloads are no longer supported"
+                .to_string(),
+        );
+    }
+    Ok(())
+}
 
 #[tauri::command]
 pub async fn download_files<R: Runtime>(
@@ -15,6 +41,10 @@ pub async fn download_files<R: Runtime>(
     task_id: &str,
     headers: HashMap<String, String>,
 ) -> Result<(), String> {
+    for item in &items {
+        reject_retired_model_download(item)?;
+    }
+
     // insert cancel tokens
     let cancel_token = CancellationToken::new();
     {
@@ -46,10 +76,10 @@ pub async fn download_files<R: Runtime>(
 
     // delete files if cancelled
     if cancel_token.is_cancelled() {
-        let mita_data_folder = get_mita_data_folder_path(app.clone());
+        let biyan_data_folder = get_biyan_data_folder_path(app.clone());
         for item in items {
             if let Ok((_, save_path)) =
-                resolve_path_within_mita_data_folder(&mita_data_folder, &item.save_path)
+                resolve_path_within_biyan_data_folder(&biyan_data_folder, &item.save_path)
             {
                 let _ = std::fs::remove_file(&save_path); // don't check error
             }
@@ -61,7 +91,6 @@ pub async fn download_files<R: Runtime>(
 
 #[tauri::command]
 pub async fn cancel_download_task(state: State<'_, AppState>, task_id: &str) -> Result<(), String> {
-    // NOTE: might want to add User-Agent header
     let mut download_manager = state.download_manager.lock().await;
     if let Some(token) = download_manager.cancel_tokens.remove(task_id) {
         token.cancel();

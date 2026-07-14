@@ -18,8 +18,7 @@ use std::sync::OnceLock;
 use tauri::{AppHandle, Manager, Runtime};
 use tokio::sync::Mutex;
 
-const DB_NAME: &str = "mita.db";
-const LEGACY_DB_NAMES: &[&str] = &["jan.db"];
+const DB_NAME: &str = "biyan.db";
 
 /// Global database pool for mobile platforms
 static DB_POOL: OnceLock<Mutex<Option<SqlitePool>>> = OnceLock::new();
@@ -36,24 +35,57 @@ pub async fn init_database<R: Runtime>(app: &AppHandle<R>) -> Result<(), String>
     std::fs::create_dir_all(&app_data_dir)
         .map_err(|e| format!("Failed to create app data dir: {}", e))?;
 
-    // Create database path, preserving legacy mobile data when present.
-    let db_path = app_data_dir.join(DB_NAME);
-    if !db_path.exists() {
-        for legacy_name in LEGACY_DB_NAMES {
-            let legacy_path = app_data_dir.join(legacy_name);
-            if legacy_path.exists() {
-                std::fs::copy(&legacy_path, &db_path).map_err(|e| {
-                    format!(
-                        "Failed to copy legacy database {} to {}: {}",
-                        legacy_path.display(),
-                        db_path.display(),
-                        e
-                    )
-                })?;
-                break;
-            }
+    let migration_config_dir = app
+        .path()
+        .data_dir()
+        .map_err(|e| format!("Failed to resolve Biyan migration state dir: {e}"))?
+        .join(crate::core::app::constants::APP_NAME);
+    crate::core::legacy_migrations::record_retained_legacy_sources(
+        &migration_config_dir,
+        ["mita.db", "jan.db"]
+            .into_iter()
+            .map(|name| app_data_dir.join(name)),
+    )?;
+    crate::core::legacy_migrations::mark_component_migration_running(
+        &migration_config_dir,
+        "mobile_db_v1",
+        1,
+    )?;
+
+    let result = initialize_database_pool(&app_data_dir).await;
+    let pool = match result {
+        Ok(pool) => pool,
+        Err(error) => {
+            let _ = crate::core::legacy_migrations::mark_component_migration_failed(
+                &migration_config_dir,
+                "mobile_db_v1",
+                1,
+                &error,
+            );
+            return Err(error);
         }
-    }
+    };
+
+    crate::core::legacy_migrations::mark_component_migration(
+        &migration_config_dir,
+        "mobile_db_v1",
+        1,
+    )?;
+
+    DB_POOL
+        .get_or_init(|| Mutex::new(None))
+        .lock()
+        .await
+        .replace(pool);
+
+    log::info!("SQLite database initialized successfully for mobile platform");
+    Ok(())
+}
+
+async fn initialize_database_pool(app_data_dir: &std::path::Path) -> Result<SqlitePool, String> {
+    // Prepare the canonical database through the isolated cumulative migration layer.
+    let db_path = app_data_dir.join(DB_NAME);
+    crate::core::legacy_migrations::prepare_mobile_database(app_data_dir, &db_path).await?;
     let db_url = format!("sqlite:{}", db_path.display());
 
     log::info!("Initializing SQLite database at: {}", db_url);
@@ -70,6 +102,11 @@ pub async fn init_database<R: Runtime>(app: &AppHandle<R>) -> Result<(), String>
         .await
         .map_err(|e| format!("Failed to create connection pool: {}", e))?;
 
+    let mut schema_transaction = pool
+        .begin()
+        .await
+        .map_err(|error| format!("Failed to begin mobile schema transaction: {error}"))?;
+
     // Run migrations
     sqlx::query(
         r#"
@@ -81,7 +118,7 @@ pub async fn init_database<R: Runtime>(app: &AppHandle<R>) -> Result<(), String>
         );
         "#,
     )
-    .execute(&pool)
+    .execute(&mut *schema_transaction)
     .await
     .map_err(|e| format!("Failed to create threads table: {}", e))?;
 
@@ -96,30 +133,66 @@ pub async fn init_database<R: Runtime>(app: &AppHandle<R>) -> Result<(), String>
         );
         "#,
     )
-    .execute(&pool)
+    .execute(&mut *schema_transaction)
     .await
     .map_err(|e| format!("Failed to create messages table: {}", e))?;
 
     // Create indexes
     sqlx::query("CREATE INDEX IF NOT EXISTS idx_messages_thread_id ON messages(thread_id);")
-        .execute(&pool)
+        .execute(&mut *schema_transaction)
         .await
         .map_err(|e| format!("Failed to create thread_id index: {}", e))?;
 
     sqlx::query("CREATE INDEX IF NOT EXISTS idx_messages_created_at ON messages(created_at);")
-        .execute(&pool)
+        .execute(&mut *schema_transaction)
         .await
         .map_err(|e| format!("Failed to create created_at index: {}", e))?;
 
-    // Store pool globally
-    DB_POOL
-        .get_or_init(|| Mutex::new(None))
-        .lock()
+    schema_transaction
+        .commit()
         .await
-        .replace(pool);
+        .map_err(|error| format!("Failed to commit mobile schema transaction: {error}"))?;
 
-    log::info!("SQLite database initialized successfully for mobile platform");
-    Ok(())
+    Ok(pool)
+}
+
+pub async fn reconcile_mobile_assistant_references<R: Runtime>(
+    app: &AppHandle<R>,
+) -> Result<(), String> {
+    let migration_config_dir = app
+        .path()
+        .data_dir()
+        .map_err(|error| format!("Failed to resolve Biyan migration state dir: {error}"))?
+        .join(crate::core::app::constants::APP_NAME);
+    crate::core::legacy_migrations::mark_component_migration_running(
+        &migration_config_dir,
+        "assistant_db_refs_v1",
+        1,
+    )?;
+    let result = async {
+        let assistant_map =
+            crate::core::legacy_migrations::assistant_id_map_in(&migration_config_dir)?;
+        let pool = get_pool().await?;
+        crate::core::legacy_migrations::migrate_mobile_assistant_references(&pool, &assistant_map)
+            .await
+    }
+    .await;
+    match result {
+        Ok(()) => crate::core::legacy_migrations::mark_component_migration(
+            &migration_config_dir,
+            "assistant_db_refs_v1",
+            1,
+        ),
+        Err(error) => {
+            let _ = crate::core::legacy_migrations::mark_component_migration_failed(
+                &migration_config_dir,
+                "assistant_db_refs_v1",
+                1,
+                &error,
+            );
+            Err(error)
+        }
+    }
 }
 
 /// Get database pool

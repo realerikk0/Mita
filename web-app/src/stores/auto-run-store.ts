@@ -1,23 +1,23 @@
 import { create } from 'zustand'
 import {
-  DEFAULT_MITA_AUTO_RUN,
-  type MitaAutoRunMetadata,
-} from '@/types/mita-agent'
+  DEFAULT_BIYAN_AUTO_RUN,
+  type BiyanAutoRunMetadata,
+} from '@/types/biyan-agent'
 
 type AutoRunStoreState = {
-  runs: Record<string, MitaAutoRunMetadata>
-  getRun: (threadId: string) => MitaAutoRunMetadata
-  setRun: (threadId: string, run: MitaAutoRunMetadata) => void
+  runs: Record<string, BiyanAutoRunMetadata>
+  getRun: (threadId: string) => BiyanAutoRunMetadata
+  setRun: (threadId: string, run: BiyanAutoRunMetadata) => void
   patchRun: (
     threadId: string,
-    patch: Partial<MitaAutoRunMetadata>
-  ) => MitaAutoRunMetadata
+    patch: Partial<BiyanAutoRunMetadata>
+  ) => BiyanAutoRunMetadata
   clearRun: (threadId: string) => void
 }
 
 export const useAutoRunStore = create<AutoRunStoreState>((set, get) => ({
   runs: {},
-  getRun: (threadId) => get().runs[threadId] ?? DEFAULT_MITA_AUTO_RUN,
+  getRun: (threadId) => get().runs[threadId] ?? DEFAULT_BIYAN_AUTO_RUN,
   setRun: (threadId, run) => {
     set((state) => ({
       runs: {

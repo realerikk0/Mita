@@ -95,6 +95,15 @@ mod tests {
         assert_eq!(config.port, 8080);
     }
 
+    #[tokio::test]
+    async fn retired_local_runtime_has_stable_410_contract() {
+        let response = proxy::local_runtime_removed_response("localhost", "", &[]);
+        assert_eq!(response.status(), hyper::StatusCode::GONE);
+        let body = hyper::body::to_bytes(response.into_body()).await.unwrap();
+        let payload: serde_json::Value = serde_json::from_slice(&body).unwrap();
+        assert_eq!(payload["error"]["code"], "LOCAL_RUNTIME_REMOVED");
+    }
+
     #[test]
     fn test_allowed_methods() {
         let allowed_methods = ["GET", "POST", "PUT", "DELETE", "OPTIONS", "PATCH"];

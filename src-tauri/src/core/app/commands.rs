@@ -1,107 +1,16 @@
-use std::{
-    fs,
-    path::{Path, PathBuf},
-};
+use std::{fs, path::PathBuf};
 use tauri::{AppHandle, Manager, Runtime, State};
 
 use super::{
-    constants::{
-        APP_NAME, CONFIGURATION_FILE_NAME, LEGACY_APP_NAME, LEGACY_SILENCE_APP_NAME,
-        LEGACY_SILENCE_TAURI_BUNDLE_IDENTIFIER, LEGACY_TAURI_BUNDLE_IDENTIFIER,
-        TAURI_BUNDLE_IDENTIFIER,
-    },
+    constants::{APP_NAME, CONFIGURATION_FILE_NAME},
     helpers::copy_dir_recursive,
     models::AppConfiguration,
 };
 use crate::core::state::AppState;
 
-/// Canonical Mita app support directory (`%APPDATA%/Mita` on Windows).
+/// Canonical Biyan app support directory (`%APPDATA%/Biyan` on Windows).
 fn resolve_human_readable_app_data_dir() -> Option<PathBuf> {
     dirs::data_dir().map(|d| d.join(APP_NAME))
-}
-
-/// Tauri bundle-id app support directory (e.g. `%APPDATA%/uk.jingxing.mita` on Windows).
-fn resolve_bundle_app_data_dir() -> Option<PathBuf> {
-    dirs::data_dir().map(|d| d.join(TAURI_BUNDLE_IDENTIFIER))
-}
-
-/// Keep `%APPDATA%/Mita/settings.json` as canonical, but recover from legacy or
-/// alternate locations if users removed one directory (#7898).
-fn migrate_legacy_app_configuration(app_data_dir: &Path) -> std::io::Result<()> {
-    fs::create_dir_all(app_data_dir)?;
-    let canonical = app_data_dir.join(CONFIGURATION_FILE_NAME);
-    if canonical.exists() {
-        return Ok(());
-    }
-
-    migrate_from_candidates(&canonical, legacy_app_config_candidate_paths(app_data_dir))
-}
-
-fn migrate_from_candidates(canonical: &Path, candidates: Vec<PathBuf>) -> std::io::Result<()> {
-    if let Some(parent) = canonical.parent() {
-        fs::create_dir_all(parent)?;
-    }
-
-    for legacy in candidates {
-        if legacy.is_file() {
-            log::info!(
-                "Recovering app configuration from {} to {}",
-                legacy.display(),
-                canonical.display()
-            );
-            fs::copy(&legacy, canonical)?;
-            return Ok(());
-        }
-    }
-    Ok(())
-}
-
-fn legacy_app_config_candidate_paths(_app_data_dir: &Path) -> Vec<PathBuf> {
-    let mut paths = Vec::new();
-
-    if let Some(bundle_dir) = resolve_bundle_app_data_dir() {
-        paths.push(bundle_dir.join(CONFIGURATION_FILE_NAME));
-    }
-    if let Some(data_dir) = dirs::data_dir() {
-        paths.push(
-            data_dir
-                .join(LEGACY_SILENCE_APP_NAME)
-                .join(CONFIGURATION_FILE_NAME),
-        );
-        paths.push(
-            data_dir
-                .join(LEGACY_SILENCE_TAURI_BUNDLE_IDENTIFIER)
-                .join(CONFIGURATION_FILE_NAME),
-        );
-        paths.push(data_dir.join(LEGACY_APP_NAME).join(CONFIGURATION_FILE_NAME));
-        paths.push(
-            data_dir
-                .join(LEGACY_TAURI_BUNDLE_IDENTIFIER)
-                .join(CONFIGURATION_FILE_NAME),
-        );
-    }
-
-    #[cfg(target_os = "linux")]
-    {
-        if let Some(config_dir) = dirs::config_dir() {
-            let legacy = config_dir.join(APP_NAME).join(CONFIGURATION_FILE_NAME);
-            if legacy != _app_data_dir.join(CONFIGURATION_FILE_NAME) {
-                paths.push(legacy);
-            }
-            paths.push(
-                config_dir
-                    .join(LEGACY_SILENCE_APP_NAME)
-                    .join(CONFIGURATION_FILE_NAME),
-            );
-            paths.push(
-                config_dir
-                    .join(LEGACY_APP_NAME)
-                    .join(CONFIGURATION_FILE_NAME),
-            );
-        }
-    }
-
-    paths
 }
 
 fn app_data_dir_with_fallback<R: Runtime>(app_handle: &tauri::AppHandle<R>) -> PathBuf {
@@ -123,8 +32,8 @@ fn app_data_dir_with_fallback<R: Runtime>(app_handle: &tauri::AppHandle<R>) -> P
         .join(APP_NAME)
 }
 
-/// Resolve the Mita config file path without an AppHandle (for CLI use).
-/// Canonical location is `%APPDATA%/Mita/settings.json` (or OS equivalent),
+/// Resolve the Biyan config file path without an AppHandle (for CLI use).
+/// Canonical location is `%APPDATA%/Biyan/settings.json` (or OS equivalent),
 /// with fallback recovery from bundle-id location when needed.
 pub fn resolve_config_file_path() -> PathBuf {
     let app_data = resolve_human_readable_app_data_dir().unwrap_or_else(|| {
@@ -134,16 +43,12 @@ pub fn resolve_config_file_path() -> PathBuf {
         PathBuf::from(home).join(APP_NAME)
     });
 
-    if let Err(err) = migrate_legacy_app_configuration(&app_data) {
-        log::warn!("Legacy app config migration (CLI) skipped: {err}");
-    }
-
     app_data.join(CONFIGURATION_FILE_NAME)
 }
 
-/// Resolve the Mita data folder path without an AppHandle (for CLI use).
+/// Resolve the Biyan data folder path without an AppHandle (for CLI use).
 /// Reads AppConfiguration from the config file; falls back to the default location.
-pub fn resolve_mita_data_folder() -> PathBuf {
+pub fn resolve_biyan_data_folder() -> PathBuf {
     let config_file = resolve_config_file_path();
 
     if config_file.exists() {
@@ -154,7 +59,7 @@ pub fn resolve_mita_data_folder() -> PathBuf {
         }
     }
 
-    // Default: data_dir/Mita/data  (mirrors default_data_folder_path)
+    // Default: data_dir/Biyan/data  (mirrors default_data_folder_path)
     let app_name = std::env::var("APP_NAME").unwrap_or_else(|_| APP_NAME.to_string());
     if let Some(data_dir) = dirs::data_dir() {
         return data_dir.join(&app_name).join("data");
@@ -174,10 +79,6 @@ pub fn get_app_configurations<R: Runtime>(app_handle: tauri::AppHandle<R>) -> Ap
     }
 
     let app_path = app_data_dir_with_fallback(&app_handle);
-    if let Err(err) = migrate_legacy_app_configuration(&app_path) {
-        log::warn!("Legacy app config migration skipped: {err}");
-    }
-
     let configuration_file = app_path.join(CONFIGURATION_FILE_NAME);
 
     let default_data_folder = default_data_folder_path(app_handle.clone());
@@ -236,7 +137,7 @@ pub fn update_app_configuration<R: Runtime>(
 }
 
 #[tauri::command]
-pub fn get_mita_data_folder_path<R: Runtime>(app_handle: tauri::AppHandle<R>) -> PathBuf {
+pub fn get_biyan_data_folder_path<R: Runtime>(app_handle: tauri::AppHandle<R>) -> PathBuf {
     if cfg!(test) {
         use std::cell::RefCell;
         thread_local! {
@@ -266,21 +167,8 @@ pub fn get_mita_data_folder_path<R: Runtime>(app_handle: tauri::AppHandle<R>) ->
 }
 
 #[tauri::command]
-pub fn get_jan_data_folder_path<R: Runtime>(app_handle: tauri::AppHandle<R>) -> PathBuf {
-    get_mita_data_folder_path(app_handle)
-}
-
-#[tauri::command]
-pub fn get_silence_data_folder_path<R: Runtime>(app_handle: tauri::AppHandle<R>) -> PathBuf {
-    get_mita_data_folder_path(app_handle)
-}
-
-#[tauri::command]
 pub fn get_configuration_file_path<R: Runtime>(app_handle: tauri::AppHandle<R>) -> PathBuf {
     let app_path = app_data_dir_with_fallback(&app_handle);
-    if let Err(err) = migrate_legacy_app_configuration(&app_path) {
-        log::warn!("Legacy app config migration skipped: {err}");
-    }
     app_path.join(CONFIGURATION_FILE_NAME)
 }
 
@@ -322,7 +210,7 @@ pub fn change_app_data_folder<R: Runtime>(
     new_data_folder: String,
 ) -> Result<(), String> {
     // Get current data folder path
-    let current_data_folder = get_mita_data_folder_path(app_handle.clone());
+    let current_data_folder = get_biyan_data_folder_path(app_handle.clone());
     let new_data_folder_path = PathBuf::from(&new_data_folder);
 
     // Create the new data folder if it doesn't exist
@@ -368,58 +256,6 @@ pub fn app_token(state: State<'_, AppState>) -> Option<String> {
 mod tests {
     use super::*;
     use serde_json::Value;
-    use tempfile::tempdir;
-
-    #[test]
-    fn migration_copies_legacy_when_canonical_missing() {
-        let tmp = tempdir().expect("temp dir");
-        let canonical_dir = tmp.path().join(APP_NAME);
-        let canonical = canonical_dir.join(CONFIGURATION_FILE_NAME);
-        let legacy = tmp
-            .path()
-            .join(LEGACY_TAURI_BUNDLE_IDENTIFIER)
-            .join(CONFIGURATION_FILE_NAME);
-
-        fs::create_dir_all(legacy.parent().unwrap()).expect("create legacy dir");
-        fs::write(&legacy, r#"{"data_folder":"D:\\jan.ai"}"#).expect("write legacy config");
-
-        migrate_from_candidates(&canonical, vec![legacy.clone()]).expect("migration succeeds");
-
-        let recovered = fs::read_to_string(&canonical).expect("read canonical");
-        assert!(recovered.contains(r#""data_folder":"D:\\jan.ai""#));
-        assert!(legacy.exists(), "migration should be copy-only");
-    }
-
-    #[test]
-    fn migration_skips_when_canonical_exists() {
-        let tmp = tempdir().expect("temp dir");
-        let canonical_dir = tmp.path().join(APP_NAME);
-        let canonical = canonical_dir.join(CONFIGURATION_FILE_NAME);
-        let legacy = tmp
-            .path()
-            .join(LEGACY_TAURI_BUNDLE_IDENTIFIER)
-            .join(CONFIGURATION_FILE_NAME);
-
-        fs::create_dir_all(canonical.parent().unwrap()).expect("create canonical dir");
-        fs::create_dir_all(legacy.parent().unwrap()).expect("create legacy dir");
-        fs::write(&canonical, r#"{"data_folder":"D:\\kept"}"#).expect("write canonical config");
-        fs::write(&legacy, r#"{"data_folder":"D:\\legacy"}"#).expect("write legacy config");
-
-        migrate_legacy_app_configuration(&canonical_dir).expect("migration succeeds");
-
-        let current = fs::read_to_string(&canonical).expect("read canonical");
-        assert!(current.contains(r#""data_folder":"D:\\kept""#));
-    }
-
-    #[test]
-    fn migration_handles_missing_legacy_files() {
-        let tmp = tempdir().expect("temp dir");
-        let canonical = tmp.path().join(APP_NAME).join(CONFIGURATION_FILE_NAME);
-        let missing = tmp.path().join("missing").join(CONFIGURATION_FILE_NAME);
-
-        migrate_from_candidates(&canonical, vec![missing]).expect("migration succeeds");
-        assert!(!canonical.exists(), "canonical should remain absent");
-    }
 
     #[test]
     fn bundle_identifier_matches_tauri_conf() {
@@ -432,7 +268,8 @@ mod tests {
             .expect("identifier field exists");
 
         assert_eq!(
-            identifier, TAURI_BUNDLE_IDENTIFIER,
+            identifier,
+            crate::core::app::constants::TAURI_BUNDLE_IDENTIFIER,
             "TAURI_BUNDLE_IDENTIFIER must stay synced with tauri.conf.json"
         );
     }

@@ -1,7 +1,7 @@
 [package]
 name = "Biyan"
-version = "0.6.633"
-description = "Use offline LLMs with your own data. Run open source models like Llama2 or Falcon on your internal computers/servers."
+version = "0.6.636"
+description = "Biyan remote AI desktop client."
 authors = ["Jingxing"]
 license = "MIT"
 repository = "https://github.com/realerikk0/Mita"
@@ -20,13 +20,13 @@ name = "app_lib"
 crate-type = ["staticlib", "cdylib", "rlib"]
 
 [[bin]]
-name = "mita-cli"
-path = "src/bin/mita-cli.rs"
+name = "biyan-cli"
+path = "src/bin/biyan-cli.rs"
 required-features = ["cli"]
 
 [[bin]]
-name = "mita-computer-agent-runner"
-path = "src/bin/mita-computer-agent-runner.rs"
+name = "biyan-computer-agent-runner"
+path = "src/bin/biyan-computer-agent-runner.rs"
 required-features = ["computer-agent-runner"]
 
 [features]
@@ -42,14 +42,9 @@ default = [
 ]
 hardware = ["dep:tauri-plugin-hardware"]
 deep-link = ["dep:tauri-plugin-deep-link"]
-mlx = ["dep:tauri-plugin-mlx"]
-foundation-models = ["dep:tauri-plugin-foundation-models"]
 desktop = [
     "deep-link",
     "hardware",
-    "mlx",
-    # Keep Foundation Models opt-in: fm-rs strongly links the macOS 26
-    # FoundationModels.framework, which prevents launch on older macOS.
 ]
 mobile = [
     "tauri/protocol-asset",
@@ -57,7 +52,6 @@ mobile = [
     "tauri/wry",
     "dep:sqlx",
 ]
-# foundation-models excluded from test-tauri - framework not available in CI
 test-tauri = [
     "tauri/wry",
     "tauri/x11",
@@ -67,17 +61,13 @@ test-tauri = [
     "tauri/test",
     "deep-link",
     "hardware",
-    "mlx",
 ]
-cli = ["dep:env_logger", "dep:dialoguer", "dep:indicatif", "dep:console"]
+cli = []
 computer-agent-runner = []
 
 [build-dependencies]
 tauri-build = { version = "2.0.2", features = [] }
 serde_json = "1.0"
-
-[patch.crates-io]
-fm-rs = { path = "vendor/fm-rs" }
 
 [dependencies]
 dirs = "6.0.0"
@@ -85,12 +75,12 @@ async-trait = "0.1"
 env = "1.0.1"
 fix-path-env = { git = "https://github.com/tauri-apps/fix-path-env-rs" }
 flate2 = "1.0"
+fs2 = "0.4"
 futures-util = "0.3.31"
 hex = "0.4"
 hmac = "0.12"
 hyper = { version = "0.14", features = ["server"] }
-jan-utils = { path = "./utils" }
-libloading = "0.8.7"
+biyan-utils = { path = "./utils" }
 log = "0.4"
 rand = "0.8"
 rmcp = { version = "0.8.5", features = [
@@ -111,11 +101,7 @@ tar = "0.4"
 zip = "0.6"
 tauri-plugin-deep-link = { version = "2", optional = true }
 tauri-plugin-hardware = { path = "./plugins/tauri-plugin-hardware", optional = true }
-tauri-plugin-llamacpp = { path = "./plugins/tauri-plugin-llamacpp" }
-tauri-plugin-mlx = { path = "./plugins/tauri-plugin-mlx", optional = true }
-tauri-plugin-foundation-models = { path = "./plugins/tauri-plugin-foundation-models", optional = true }
-tauri-plugin-vector-db = { path = "./plugins/tauri-plugin-vector-db" }
-tauri-plugin-rag = { path = "./plugins/tauri-plugin-rag" }
+tauri-plugin-document-parser = { path = "./plugins/tauri-plugin-document-parser" }
 tauri-plugin-http = { version = "2", default-features = false, features = [
   "charset",
   "cookies",
@@ -146,10 +132,6 @@ hostname = "0.4"
 base64 = "0.22"
 glob = "0.3"
 clap = { version = "4", features = ["derive"] }
-dialoguer = { version = "0.11", optional = true }
-env_logger = { version = "0.11", optional = true }
-indicatif = { version = "0.17", optional = true }
-console = { version = "0.15", optional = true }
 
 [dependencies.tauri]
 version = "2.8.5"

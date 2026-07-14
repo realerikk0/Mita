@@ -2,7 +2,6 @@ import { createRootRoute, Outlet, useLocation } from '@tanstack/react-router'
 // import { TanStackRouterDevtools } from '@tanstack/react-router-devtools'
 
 import DialogAppUpdater from '@/containers/dialogs/AppUpdater'
-import BackendUpdater from '@/containers/dialogs/BackendUpdater'
 import { Fragment } from 'react/jsx-runtime'
 import { ThemeProvider } from '@/providers/ThemeProvider'
 import { InterfaceProvider } from '@/providers/InterfaceProvider'
@@ -20,7 +19,6 @@ import { useGeneralSetting } from '@/hooks/useGeneralSetting'
 import ToolApproval from '@/containers/dialogs/ToolApproval'
 import { TranslationProvider } from '@/i18n/TranslationContext'
 import OutOfContextPromiseModal from '@/containers/dialogs/OutOfContextDialog'
-import AttachmentIngestionDialog from '@/containers/dialogs/AttachmentIngestionDialog'
 import { useEffect, type MouseEvent } from 'react'
 import GlobalError from '@/containers/GlobalError'
 import { GlobalEventHandler } from '@/providers/GlobalEventHandler'
@@ -30,7 +28,6 @@ import { LeftSidebar } from '@/components/left-sidebar'
 import { WindowControls } from '@/components/WindowControls'
 import { getCurrentWebviewWindow } from '@tauri-apps/api/webviewWindow'
 import ErrorDialog from '@/containers/dialogs/ErrorDialog'
-import MissingDependenciesDialog from '@/containers/dialogs/MissingDependenciesDialog'
 import { previewRoutePaths } from './-preview-route-guard'
 
 export const Route = createRootRoute({
@@ -85,7 +82,6 @@ const AppLayout = () => {
           />
         )}
         <DialogAppUpdater />
-        <BackendUpdater />
         <LeftSidebar />
         <SidebarInset>
           <div className="bg-neutral-50 dark:bg-background size-full">
@@ -172,9 +168,7 @@ function RootLayout() {
           </ExtensionProvider>
           {/* <TanStackRouterDevtools position="bottom-right" /> */}
           <ToolApproval />
-          <AttachmentIngestionDialog />
           <ErrorDialog />
-          <MissingDependenciesDialog />
           <OutOfContextPromiseModal />
         </TranslationProvider>
       </ServiceHubProvider>

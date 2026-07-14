@@ -1,40 +1,37 @@
 ---
-title: File Upload
-description: Upload images and documents to chat with Jan
-keywords:
-  [
-    Jan,
-    file upload,
-    image upload,
-    PDF,
-    document,
-    vision,
-    local AI,
-  ]
+title: Images and Documents
+description: How Biyan sends images and documents to cloud model providers.
+keywords: [Biyan, file upload, image, PDF, document, cloud provider]
 ---
 
-# File Upload
+import { Callout } from 'nextra/components'
 
-Jan lets you upload images and documents directly in the chat. Click the **+** button in the message input to add files.
+# Images and Documents
 
-![File Upload](./_assets/file-upload.png)
+Use the **+** button in the message input to attach an image or document to the next message.
 
-## Supported File Types
+## Images
 
-- **Images** — Share screenshots, photos, or diagrams for the model to analyze
-- **Documents & Files** — Upload PDFs or other files for the model to read and reason about
+Images require a selected provider/model that advertises image input. Biyan blocks the send if the selected model lacks that capability; it does not download or substitute a local vision model.
 
-## How to Upload
+## Documents
 
-1. Click the **+** button at the bottom left of the chat input
-2. Choose **Add Images** or **Add documents or files**
-3. Select your file — it will be attached to your next message
-4. Type your question and send
+Biyan uses one of two explicit paths:
 
-### Vision Model Required for Images
+1. **Native file input:** when the selected provider/model supports the file type, Biyan sends the file through that provider's native file interface.
+2. **Local text extraction:** otherwise Biyan extracts the complete readable text on the device and includes that text in the provider request.
 
-If your current model does not support vision, Jan will automatically prompt you to download **Jan V2 VL** — the recommended vision model (~5GB). Click **Download** to install it, then you'll be ready to chat with images.
+The local parser supports the product's listed PDF, text, source-code, CSV, spreadsheet, presentation, HTML, and DOCX formats. Scanned or image-only PDFs require provider-native support because local OCR is not provided.
 
-![Vision Model Prompt](./_assets/file-upload-vision-prompt.png)
+## Limits
 
-All files are processed locally on your machine. When using a local model such as Jan's built-in models, your files never leave your device — inference happens entirely on your own hardware with full privacy. If you use a cloud model provider (e.g. OpenAI, Anthropic), files are sent to that provider's API as part of the request.
+- Maximum file size: **20 MB per file**.
+- The complete extracted text must fit within the selected model/provider context budget together with the conversation and instructions.
+- When either limit is exceeded, Biyan blocks the send and explains the constraint.
+- Biyan does not silently truncate or automatically summarize a document.
+
+<Callout type="warning">
+  Native files, extracted text, images, prompts, and relevant conversation context are sent to the selected cloud provider. Review that provider's retention and data-use policy before sending sensitive material.
+</Callout>
+
+Projects organize chats and files, but do not create a knowledge base or RAG/vector index. See [Projects](/docs/desktop/projects).

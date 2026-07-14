@@ -3,19 +3,15 @@ import { route } from '@/constants/routes'
 import SettingsMenu from '@/containers/SettingsMenu'
 import HeaderPage from '@/containers/HeaderPage'
 import { Card, CardItem } from '@/containers/Card'
-import { Switch } from '@/components/ui/switch'
 import { Progress } from '@/components/ui/progress'
 import { useTranslation } from '@/i18n/react-i18next-compat'
 import { useHardware } from '@/hooks/useHardware'
-import { useLlamacppDevices } from '@/hooks/useLlamacppDevices'
 import { useEffect, useState } from 'react'
 import { IconDeviceDesktopAnalytics } from '@tabler/icons-react'
 import { useServiceHub } from '@/hooks/useServiceHub'
 import type { HardwareData, SystemUsage } from '@/services/hardware/types'
 import { cn, formatMegaBytes } from '@/lib/utils'
 import { toNumber } from '@/utils/number'
-import { useModelProvider } from '@/hooks/useModelProvider'
-import { useAppState } from '@/hooks/useAppState'
 import { Button } from '@/components/ui/button'
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -34,36 +30,6 @@ function HardwareContent() {
     updateSystemUsage,
     pollingPaused,
   } = useHardware()
-  const setActiveModels = useAppState((state) => state.setActiveModels)
-
-  const { providers } = useModelProvider()
-  const llamacpp = providers.find((p) => p.provider === 'llamacpp')
-
-  // Llamacpp devices hook
-  const llamacppDevicesResult = useLlamacppDevices()
-
-  // Use default values on macOS since llamacpp devices are not relevant
-  const {
-    devices: llamacppDevices,
-    loading: llamacppDevicesLoading,
-    error: llamacppDevicesError,
-    toggleDevice,
-    fetchDevices,
-  } = IS_MACOS
-    ? {
-        devices: [],
-        loading: false,
-        error: null,
-        toggleDevice: () => {},
-        fetchDevices: () => {},
-      }
-    : llamacppDevicesResult
-
-  // Fetch llamacpp devices when component mounts
-  useEffect(() => {
-    fetchDevices()
-  }, [fetchDevices])
-
   // Fetch initial hardware info and system usage
   useEffect(() => {
     setIsLoading(true)
@@ -128,7 +94,6 @@ function HardwareContent() {
       ])
       if (hardwareData) setHardwareData(hardwareData)
       if (systemUsage) updateSystemUsage(systemUsage)
-      if (!IS_MACOS) fetchDevices()
     } catch (error) {
       console.error('Failed to refresh hardware:', error)
     } finally {
@@ -141,15 +106,26 @@ function HardwareContent() {
       <HeaderPage>
         <div className={cn("flex items-center justify-between w-full mr-2 pr-3", !IS_MACOS && "pr-30")}>
           <span className='font-medium text-base font-studio'>{t('common:settings')}</span>
-          <Button
-            variant="outline"
-            size="sm"
-            className="flex items-center gap-2 relative z-50"
-            onClick={handleClickSystemMonitor}
-          >
-            <IconDeviceDesktopAnalytics className="text-muted-foreground size-5" />
-            <p>{t('settings:hardware.systemMonitor')}</p>
-          </Button>
+          <div className="flex gap-2">
+            <Button
+              variant="outline"
+              size="sm"
+              className="relative z-50"
+              onClick={handleRefreshHardware}
+              disabled={isLoading}
+            >
+              {isLoading ? '...' : 'Refresh'}
+            </Button>
+            <Button
+              variant="outline"
+              size="sm"
+              className="flex items-center gap-2 relative z-50"
+              onClick={handleClickSystemMonitor}
+            >
+              <IconDeviceDesktopAnalytics className="text-muted-foreground size-5" />
+              <p>{t('settings:hardware.systemMonitor')}</p>
+            </Button>
+          </div>
         </div>
       </HeaderPage>
       <div className="flex h-[calc(100%-60px)]">
@@ -291,85 +267,20 @@ function HardwareContent() {
                 />
               </Card>
 
-              {/* Llamacpp Devices Information */}
-              {!IS_MACOS && llamacpp && (
-                <Card
-                  title="GPUs"
-                  header={
-                    <div className="flex items-center justify-end mb-2">
-                      <Button
-                        variant="ghost"
-                        size="sm"
-                        onClick={handleRefreshHardware}
-                        disabled={isLoading}
-                      >
-                        {isLoading ? '...' : 'Refresh'}
-                      </Button>
-                    </div>
-                  }
-                >
-                  {llamacppDevicesLoading ? (
-                    <CardItem title="Loading devices..." actions={<></>} />
-                  ) : llamacppDevicesError ? (
+              {hardwareData.gpus.length > 0 && (
+                <Card title="GPUs">
+                  {hardwareData.gpus.map((gpu) => (
                     <CardItem
-                      title="Error loading devices"
+                      key={gpu.uuid || gpu.name}
+                      title={gpu.name}
+                      description={gpu.vendor}
                       actions={
-                        <span className="text-destructive text-sm">
-                          {llamacppDevicesError}
+                        <span className="text-foreground">
+                          {formatMegaBytes(gpu.total_memory)}
                         </span>
                       }
                     />
-                  ) : llamacppDevices.length > 0 ? (
-                    llamacppDevices.map((device, index) => (
-                      <Card key={index}>
-                        <CardItem
-                          title={device.name}
-                          actions={
-                            <div className="flex items-center gap-4">
-                              {/* <div className="flex flex-col items-end gap-1">
-                            <span className="text-foreground text-sm">
-                              ID: {device.id}
-                            </span>
-                            <span className="text-foreground text-sm">
-                              Memory: {formatMegaBytes(device.mem)} /{' '}
-                              {formatMegaBytes(device.free)} free
-                            </span>
-                          </div> */}
-                              <Switch
-                                checked={device.activated}
-                                onCheckedChange={() => {
-                                  toggleDevice(device.id)
-                                  serviceHub.models().stopAllModels()
-
-                                  // Refresh active models after stopping
-                                  serviceHub
-                                    .models()
-                                    .getActiveModels()
-                                    .then((models) =>
-                                      setActiveModels(models || [])
-                                    )
-                                }}
-                              />
-                            </div>
-                          }
-                        />
-                        <div className="mt-3">
-                          <CardItem
-                            title={t('settings:hardware.vram')}
-                            actions={
-                              <span className="text-foreground">
-                                {formatMegaBytes(device.free)}{' '}
-                                {t('settings:hardware.freeOf')}{' '}
-                                {formatMegaBytes(device.mem)}
-                              </span>
-                            }
-                          />
-                        </div>
-                      </Card>
-                    ))
-                  ) : (
-                    <CardItem title="No devices found" actions={<></>} />
-                  )}
+                  ))}
                 </Card>
               )}
             </div>

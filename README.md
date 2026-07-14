@@ -1,104 +1,73 @@
-# Mita
+# Biyan (彼岩)
 
-Mita is a desktop AI chat client built on top of the Jan desktop stack. It keeps the Tauri, Rust, React, and TypeScript foundation while focusing on online model workflows, OpenAI-compatible providers, controlled auto-run conversations, web research, and future multi-agent capabilities.
+[中文](README.zh.md) · [日本語](README.ja.md) · English
 
-> Chinese name: 幂塔
+Biyan is a cross-platform desktop AI client for working with cloud and OpenAI-compatible model providers. It is built with Tauri, Rust, React, and TypeScript and keeps conversations and application settings on your device.
 
-## Features
+## What Biyan supports
 
-- Cross-platform desktop app powered by Tauri, Rust, React, TypeScript, and Vite.
-- OpenAI-compatible provider support for model listing and chat completions.
-- Built-in Jingxing-compatible provider preset.
-- Native web-search path for supported online models.
-- Local thread storage compatible with Jan-style conversations.
-- Controlled auto-run conversations for iterative task continuation.
-- Mita Web Research MCP sidecar for browser-assisted research workflows.
-- Foundation for future multi-agent workflows.
-- Data migration compatibility for selected upstream and legacy configurations.
+- Cloud providers including OpenAI, Anthropic, Google, Azure OpenAI, Groq, Mistral AI, OpenRouter, Hugging Face Inference, and compatible custom endpoints.
+- Projects, assistants, images, document attachments, MCP tools, web research, and a remote-only local API gateway.
+- Local conversation storage and controlled migration from earlier Mita, Silence, and Jan-derived installations.
 
-## Tech Stack
+Biyan does **not** download or run local language models. The former llama.cpp, MLX, Foundation Models, model Hub, RAG, embedding, and vector-database runtimes have been retired.
 
-- Desktop: Tauri 2, Rust
-- Frontend: React, TypeScript, Vite
-- Package manager: Yarn 4
-- Testing: Vitest
-- Local services and extensions: Rust, Node.js, MCP-compatible sidecars
+## Files and documents
 
-## Getting Started
+- Images are sent only to a selected provider/model that supports image input.
+- If a provider supports native file input, Biyan sends the attachment through that provider's file interface.
+- Otherwise Biyan extracts the full document text locally and includes it in the request.
+- Biyan blocks the send when a file exceeds 20 MB or cannot fit within the provider/model context limit. It does not silently truncate or summarize the document.
 
-### Prerequisites
+Cloud providers process the content included in their requests. Review the selected provider's data policy before sending sensitive information.
+
+## Getting started
+
+1. Install Biyan from the [Biyan website](https://biyan.ai/).
+2. Open **Settings → Model Providers**.
+3. Configure a provider and API key, then select one of its models in a chat.
+
+Detailed instructions are available at [docs.biyan.ai](https://docs.biyan.ai/).
+
+## Build from source
+
+### Requirements
 
 - Node.js 20 or later
 - Yarn 4.5.3 via Corepack
 - Rust and Cargo
 - Make
-- Platform build tools:
-  - macOS: Xcode Command Line Tools
-  - Windows: Microsoft C++ Build Tools
-  - Linux: common desktop build dependencies for Tauri
-
-### Install Dependencies
+- Platform build tools for Tauri
 
 ```bash
 git clone https://github.com/realerikk0/Mita.git
 cd Mita
 corepack enable
 yarn install
-```
-
-### Start The Desktop App
-
-```bash
 yarn dev
 ```
 
-or:
+Common checks:
 
 ```bash
-make dev
-```
-
-## Common Commands
-
-```bash
-# Run all configured tests
 yarn test
-
-# Run web app tests
 yarn test:web
-
-# Build the web app
 yarn build:web
-
-# Build the desktop app
 yarn build:tauri
-
-# Build everything
-yarn build
 ```
 
-## Project Structure
+## Upgrading from an earlier release
 
-```text
-core/                 Shared core package
-web-app/              React frontend
-src-tauri/            Tauri desktop shell and Rust services
-extensions/           Built-in extensions
-mlx-server/           MLX runtime service
-docs/                 Documentation site sources
-autoqa/               Automation and QA scripts
-```
+The supported upgrade train is **current → A → B → C**. Each later release also carries the complete cumulative migrator, so a user who was offline may install a later version directly.
 
-## Upstream
+Migration copies supported data into Biyan's canonical data location, validates it, and switches atomically. It does not modify or automatically delete the old source directory, downloaded local models, or former RAG/vector data. See the [data migration guide](https://docs.biyan.ai/docs/desktop/data-folder) before cleaning up old files.
 
-Mita is derived from [Jan](https://github.com/janhq/jan). Some upstream package names, namespaces, and attribution files are intentionally retained while the fork evolves.
+## Support
 
-The upstream baseline is recorded in [UPSTREAM_JAN_COMMIT.md](UPSTREAM_JAN_COMMIT.md).
+For help, email [help@biyan.ai](mailto:help@biyan.ai). Do not include API keys, full logs, private prompts, or original documents unless specifically requested through a trusted support channel.
 
-## Contributing
+## Upstream and license
 
-Contributions are welcome. Please read [CONTRIBUTING.md](CONTRIBUTING.md) before opening pull requests.
+Biyan is derived from the Jan desktop stack. Original copyright notices, licenses, and attribution are retained; the historical baseline is recorded in [UPSTREAM_JAN_COMMIT.md](UPSTREAM_JAN_COMMIT.md).
 
-## License
-
-This project keeps the upstream license terms. See [LICENSE](LICENSE).
+See [LICENSE](LICENSE) and package-level license files for the applicable terms.

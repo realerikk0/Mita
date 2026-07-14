@@ -6,7 +6,6 @@ import React from 'react'
 
 const h = vi.hoisted(() => ({
   productAnalyticPrompt: false,
-  showMitaModelPrompt: false,
   leftPanelOpen: true,
   sidebarWidth: 260,
   setLeftPanel: vi.fn(),
@@ -72,26 +71,17 @@ vi.mock('@/i18n/TranslationContext', () => ({
 vi.mock('@/containers/dialogs/AppUpdater', () => ({
   default: () => <div data-testid="app-updater" />,
 }))
-vi.mock('@/containers/dialogs/BackendUpdater', () => ({
-  default: () => <div data-testid="backend-updater" />,
-}))
 vi.mock('@/containers/dialogs/ToolApproval', () => ({
   default: () => <div data-testid="tool-approval" />,
 }))
 vi.mock('@/containers/dialogs/OutOfContextDialog', () => ({
   default: () => <div data-testid="oocp" />,
 }))
-vi.mock('@/containers/dialogs/AttachmentIngestionDialog', () => ({
-  default: () => <div data-testid="attach-ingest" />,
-}))
 vi.mock('@/containers/dialogs/ErrorDialog', () => ({
   default: () => <div data-testid="error-dialog" />,
 }))
 vi.mock('@/containers/analytics/PromptAnalytic', () => ({
   PromptAnalytic: () => <div data-testid="prompt-analytic" />,
-}))
-vi.mock('@/containers/PromptMitaModel', () => ({
-  PromptMitaModel: () => <div data-testid="prompt-mita" />,
 }))
 vi.mock('@/containers/GlobalError', () => ({
   default: ({ error }: any) => (
@@ -118,11 +108,6 @@ vi.mock('@/components/ui/sidebar', () => ({
 // Hooks
 vi.mock('@/hooks/useAnalytic', () => ({
   useAnalytic: () => ({ productAnalyticPrompt: h.productAnalyticPrompt }),
-}))
-vi.mock('@/hooks/useMitaModelPrompt', () => ({
-  useMitaModelPrompt: () => ({
-    showMitaModelPrompt: h.showMitaModelPrompt,
-  }),
 }))
 vi.mock('@/hooks/useLeftPanel', () => ({
   useLeftPanel: () => ({
@@ -165,7 +150,6 @@ describe('__root route', () => {
   beforeEach(() => {
     vi.clearAllMocks()
     h.productAnalyticPrompt = false
-    h.showMitaModelPrompt = false
     h.currentLanguage = 'en'
     // reset document state
     document.body.className = ''
@@ -205,11 +189,9 @@ describe('__root route', () => {
   it('renders all persistent dialogs', () => {
     renderComponent()
     expect(screen.getByTestId('tool-approval')).toBeInTheDocument()
-    expect(screen.getByTestId('attach-ingest')).toBeInTheDocument()
     expect(screen.getByTestId('error-dialog')).toBeInTheDocument()
     expect(screen.getByTestId('oocp')).toBeInTheDocument()
     expect(screen.getByTestId('app-updater')).toBeInTheDocument()
-    expect(screen.getByTestId('backend-updater')).toBeInTheDocument()
   })
 
   it('renders PromptAnalytic when productAnalyticPrompt is true', () => {
@@ -222,12 +204,6 @@ describe('__root route', () => {
     h.productAnalyticPrompt = false
     renderComponent()
     expect(screen.queryByTestId('prompt-analytic')).not.toBeInTheDocument()
-  })
-
-  it('does not render the Mita local model prompt', () => {
-    h.showMitaModelPrompt = true
-    renderComponent()
-    expect(screen.queryByTestId('prompt-mita')).not.toBeInTheDocument()
   })
 
   it('uses LogsLayout on /logs path (no sidebar)', () => {

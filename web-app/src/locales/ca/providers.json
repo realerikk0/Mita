@@ -12,7 +12,7 @@
   "stop": "Atura",
   "start": "Inicia",
   "noModelFound": "No s’ha trobat cap model",
-  "noModelFoundDesc": "Els models disponibles apareixeran aquí. Si encara no en tens cap, visita el Hub per descarregar-ne.",
+  "noModelFoundDesc": "Available models from the configured remote provider will be listed here. Refresh after adding or changing provider credentials.",
   "configuration": "Configuració",
   "apiEndpoint": "Extrem de l’API",
   "testConnection": "Prova la connexió",

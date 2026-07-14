@@ -21,11 +21,13 @@ export type Attachment = {
   // For documents (local files)
   path?: string
   fileType?: string // e.g., 'pdf', 'docx'
-  parseMode?: 'auto' | 'inline' | 'embeddings' | 'prompt'
+  nativeDataUrl?: string
+  nativeMediaType?: string
 
-  // After processing (images uploaded, documents ingested)
+  // After processing. Legacy ids/chunk counts remain readable, but are never
+  // produced by the remote-only document path.
   id?: string
-  injectionMode?: 'inline' | 'embeddings'
+  injectionMode?: 'inline' | 'native'
   inlineContent?: string
 }
 
@@ -50,10 +52,12 @@ export function createImageAttachment(data: {
  */
 export function createDocumentAttachment(data: {
   name: string
-  path: string
+  path?: string
   fileType?: string
   size?: number
-  parseMode?: 'auto' | 'inline' | 'embeddings' | 'prompt'
+  nativeDataUrl?: string
+  nativeMediaType?: string
+  inlineContent?: string
 }): Attachment {
   return {
     ...data,

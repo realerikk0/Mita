@@ -23,13 +23,12 @@ import { memo, useMemo, useState } from 'react'
 import { Link } from '@tanstack/react-router'
 import { RenameThreadDialog, DeleteThreadDialog } from '@/containers/dialogs'
 import { cn } from '@/lib/utils'
-import { ThreadMessage } from '@janhq/core'
+import { ThreadMessage } from '@biyan/core'
 import { ThreadProjectMenuItems } from '@/containers/ThreadProjectMenuItems'
 import type { ThreadFolder } from '@/services/projects/types'
+import { isLegacyIntroThreadTitle } from '@/legacy_migrations/thread-title'
 
 const INTRO_THREAD_TITLE = 'What is Biyan?'
-const LEGACY_INTRO_THREAD_TITLE = 'What is Jan?'
-const LEGACY_SILENCE_INTRO_THREAD_TITLE = 'What is Silence?'
 
 const ThreadItem = memo(
   ({
@@ -103,14 +102,13 @@ const ThreadItem = memo(
       return textContent?.text?.value
     }, [messages])
 
-    const displayTitle = thread.title === LEGACY_INTRO_THREAD_TITLE || thread.title === LEGACY_SILENCE_INTRO_THREAD_TITLE
+    const displayTitle = isLegacyIntroThreadTitle(thread.title)
       ? INTRO_THREAD_TITLE
       : thread.title
     const isProtectedIntroThread =
       !localStorage.getItem('setup-completed') &&
       (
-        thread.title === LEGACY_INTRO_THREAD_TITLE ||
-        thread.title === LEGACY_SILENCE_INTRO_THREAD_TITLE ||
+        isLegacyIntroThreadTitle(thread.title) ||
         thread.title === INTRO_THREAD_TITLE
       )
 

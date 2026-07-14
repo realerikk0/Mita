@@ -1,0 +1,129 @@
+{
+  "openapi": "3.0.3",
+  "info": {
+    "title": "Biyan API Server Endpoints",
+    "version": "1.0.0",
+    "description": "OpenAI-compatible local gateway for remote providers configured in Biyan. This API does not provide local inference."
+  },
+  "servers": [
+    { "url": "http://127.0.0.1:1337/v1", "description": "Default local gateway" }
+  ],
+  "security": [{ "bearerAuth": [] }],
+  "paths": {
+    "/models": {
+      "get": {
+        "summary": "List configured remote models",
+        "operationId": "listRemoteModels",
+        "responses": {
+          "200": {
+            "description": "Configured remote models",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "object": { "type": "string", "example": "list" },
+                    "data": {
+                      "type": "array",
+                      "items": { "$ref": "#/components/schemas/Model" }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "401": { "$ref": "#/components/responses/Unauthorized" }
+        }
+      }
+    },
+    "/chat/completions": {
+      "post": {
+        "summary": "Create a remote chat completion",
+        "operationId": "createRemoteChatCompletion",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": { "$ref": "#/components/schemas/ChatCompletionRequest" }
+            }
+          }
+        },
+        "responses": {
+          "200": { "description": "Provider response or stream" },
+          "401": { "$ref": "#/components/responses/Unauthorized" },
+          "410": {
+            "description": "Requested model belongs to a retired local runtime",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/RetiredRuntimeError" }
+              }
+            }
+          },
+          "502": { "description": "Remote provider request failed" }
+        }
+      }
+    }
+  },
+  "components": {
+    "securitySchemes": {
+      "bearerAuth": { "type": "http", "scheme": "bearer" }
+    },
+    "responses": {
+      "Unauthorized": {
+        "description": "Missing or invalid local gateway API key"
+      }
+    },
+    "schemas": {
+      "Model": {
+        "type": "object",
+        "required": ["id", "object"],
+        "properties": {
+          "id": { "type": "string", "example": "provider/model-id" },
+          "object": { "type": "string", "example": "model" },
+          "owned_by": { "type": "string", "example": "configured-provider" }
+        }
+      },
+      "ChatMessage": {
+        "type": "object",
+        "required": ["role", "content"],
+        "properties": {
+          "role": {
+            "type": "string",
+            "enum": ["system", "user", "assistant", "tool"]
+          },
+          "content": {
+            "oneOf": [
+              { "type": "string" },
+              { "type": "array", "items": { "type": "object", "additionalProperties": true } }
+            ]
+          }
+        }
+      },
+      "ChatCompletionRequest": {
+        "type": "object",
+        "required": ["model", "messages"],
+        "properties": {
+          "model": { "type": "string", "example": "provider/model-id" },
+          "messages": {
+            "type": "array",
+            "items": { "$ref": "#/components/schemas/ChatMessage" }
+          },
+          "stream": { "type": "boolean", "default": false },
+          "temperature": { "type": "number" },
+          "max_tokens": { "type": "integer", "minimum": 1 }
+        }
+      },
+      "RetiredRuntimeError": {
+        "type": "object",
+        "required": ["code", "message"],
+        "properties": {
+          "code": { "type": "string", "example": "LOCAL_RUNTIME_REMOVED" },
+          "message": {
+            "type": "string",
+            "example": "Local model runtimes are no longer supported. Select a configured remote provider model."
+          }
+        }
+      }
+    }
+  }
+}

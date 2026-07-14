@@ -97,11 +97,10 @@
   },
   "favorites": "Preferits",
   "recents": "Recents",
-  "hub": "Hub",
   "helpSupport": "Ajuda i suport",
-  "helpUsImproveMita": "Ajuda’ns a millorar Biyan",
-  "helpUsImproveMitaDescription": "Recollim dades anònimes per entendre l’ús de les funcions. Els teus xats i la teva informació personal no es registren mai. Ho pots canviar en qualsevol moment a Configuració > Privadesa.",
-  "helpUsImproveMitaQuestion": "Vols ajudar-nos a millorar Biyan?",
+  "helpUsImproveBiyan": "Ajuda’ns a millorar Biyan",
+  "helpUsImproveBiyanDescription": "Recollim dades anònimes per entendre l’ús de les funcions. Els teus xats i la teva informació personal no es registren mai. Ho pots canviar en qualsevol moment a Configuració > Privadesa.",
+  "helpUsImproveBiyanQuestion": "Vols ajudar-nos a millorar Biyan?",
   "unstarAll": "Desmarca-ho tot",
   "unstar": "Desmarca",
   "deleteAll": "Suprimeix-ho tot",
@@ -150,12 +149,7 @@
   "noResultsFound": "No s’han trobat resultats",
   "noThreadsYet": "Encara no hi ha cap fil",
   "noThreadsYetDesc": "Inicia una conversa nova per veure aquí l’historial dels teus fils.",
-  "downloads": "Descàrregues",
-  "downloading": "S’està descarregant",
   "uploadingAttachments": "S’estan pujant els fitxers adjunts…",
-  "cancelDownload": "Cancel·la la descàrrega",
-  "downloadCancelled": "Descàrrega cancel·lada",
-  "downloadComplete": "Descàrrega completada",
   "thinking": "Pensant...",
   "thought": "Pensament",
   "callingTool": "S’està cridant l’eina",
@@ -174,7 +168,7 @@
   "noModels": "No s’han trobat models",
   "customAvatar": "Avatar personalitzat",
   "editAssistant": "Edita l’assistent",
-  "mita": "Biyan",
+  "biyan": "Biyan",
   "metadata": "Metadades",
   "regenerate": "Regenera",
   "threadImage": "Imatge del fil",
@@ -378,14 +372,7 @@
     "tryDifferentSearch": "Prova amb un terme de cerca diferent",
     "uploadingFiles": "S’estan pujant els fitxers…"
   },
-  "attachmentsIngestion": {
-    "title": "Tria com ingerir els adjunts",
-    "description": "Decideix si vols incloure aquests fitxers directament al xat o indexar-los com a incrustacions.",
-    "inline": "Injecta al xat",
-    "embeddings": "Utilitza incrustacions"
-  },
   "attachmentInjectedIndicator": "Injectat al xat",
-  "attachmentEmbeddedIndicator": "Incrustat per a RAG",
   "viewInjectedContent": "Mostra el contingut injectat",
   "injectedContentTitle": "Contingut del fitxer injectat",
   "errorDialog": {
@@ -433,30 +420,14 @@
       "title": "Descàrrega completada",
       "description": "{{item}} s’ha descarregat"
     },
-    "downloadCancelled": {
-      "title": "Descàrrega cancel·lada",
-      "description": "S’ha cancel·lat el procés de descàrrega"
-    },
     "downloadFailed": {
       "title": "Error de descàrrega",
       "description": "La descàrrega de {{item}} ha fallat"
     },
-    "modelValidationStarted": {
-      "title": "S’està validant el model",
-      "description": "El model \"{{modelId}}\" s’ha descarregat correctament. Verificant la integritat..."
-    },
-    "modelValidationFailed": {
-      "title": "La validació del model ha fallat",
-      "description": "El model descarregat \"{{modelId}}\" no ha superat la verificació d’integritat i s’ha eliminat. El fitxer pot estar corrupte o manipulat."
-    },
     "modelNoVision": {
       "title": "El model no admet imatges",
       "description": "Trieu un model amb capacitat de visió per adjuntar imatges.",
-      "action": "Obre el Hub"
-    },
-    "downloadAndVerificationComplete": {
-      "title": "Descàrrega completada",
-      "description": "El model \"{{item}}\" s’ha descarregat i verificat correctament"
+      "action": "Obre la configuració de proveïdors"
     },
     "projectCreated": {
       "title": "Projecte creat",

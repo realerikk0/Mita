@@ -2,8 +2,9 @@
   "app": {
     "windows": [
       {
-        "label": "main",
-        "title": "Biyan",
+      "label": "main",
+      "url": "migration-recovery.html?boot=1",
+      "title": "Biyan",
         "width": 1200,
         "minWidth": 1024,
         "height": 800,
@@ -32,10 +33,9 @@
     "targets": ["app", "dmg"],
     "resources": [
       "resources/LICENSE",
-      "resources/bin/mita-cli",
+      "resources/bin/biyan-cli",
       "resources/computer-agent-runner/**/*",
-      "resources/bin/mita-web-research-mcp.mjs",
-      "resources/embedding-models/**/*",
+      "resources/bin/biyan-web-research-mcp.mjs",
       "resources/pre-install/**/*",
       "resources/ms-playwright/**/*",
       "resources/node_modules/playwright/**/*",

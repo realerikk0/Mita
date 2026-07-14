@@ -1,5 +1,5 @@
 import { fireEvent, render, screen, waitFor, act } from '@testing-library/react'
-import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
+import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { getImageModels } from '@/lib/image-generation'
 
 // Stub the build-time define used by DataProvider
@@ -19,10 +19,6 @@ const h = vi.hoisted(() => {
     setSettings: vi.fn(),
     setAssistants: vi.fn(),
     setThreads: vi.fn(),
-    setLastServerModels: vi.fn(),
-    setServerPort: vi.fn(),
-    setServerStatus: vi.fn(),
-    navigate: vi.fn(),
     invoke: vi.fn().mockResolvedValue(undefined),
     isDev: vi.fn().mockReturnValue(false),
     providerHasRemoteApiKeys: vi.fn().mockReturnValue(true),
@@ -30,20 +26,6 @@ const h = vi.hoisted(() => {
     toastSuccess: vi.fn(),
     toastError: vi.fn(),
     toastWarning: vi.fn(),
-    eventsOn: vi.fn(),
-    localApi: {
-      enableOnStartup: false,
-      serverHost: '127.0.0.1',
-      serverPort: 1337,
-      apiPrefix: '/v1',
-      apiKey: '',
-      trustedHosts: [],
-      corsEnabled: true,
-      verboseLogs: false,
-      proxyTimeout: 0,
-      lastServerModels: [] as Array<{ model: string; provider: string }>,
-      defaultModelLocalApiServer: null as null | { model: string; provider: string },
-    },
   }
 })
 
@@ -83,23 +65,6 @@ vi.mock('@/hooks/useThreads', () => ({
   useThreads: () => ({ setThreads: h.setThreads }),
 }))
 
-vi.mock('@/hooks/useLocalApiServer', () => ({
-  useLocalApiServer: () => ({
-    ...h.localApi,
-    setLastServerModels: h.setLastServerModels,
-    setServerPort: h.setServerPort,
-  }),
-}))
-
-vi.mock('@/hooks/useAppState', () => ({
-  useAppState: (sel: (s: { setServerStatus: unknown }) => unknown) =>
-    sel({ setServerStatus: h.setServerStatus }),
-}))
-
-vi.mock('@tanstack/react-router', () => ({
-  useNavigate: () => h.navigate,
-}))
-
 vi.mock('@/lib/utils', () => ({
   cn: (...classes: Array<string | false | null | undefined>) =>
     classes.filter(Boolean).join(' '),
@@ -115,11 +80,6 @@ vi.mock('@tauri-apps/api/core', () => ({
   invoke: (...args: unknown[]) => h.invoke(...args),
 }))
 
-vi.mock('@janhq/core', () => ({
-  AppEvent: { onModelImported: 'onModelImported' },
-  events: { on: (...a: unknown[]) => h.eventsOn(...a) },
-}))
-
 vi.mock('sonner', () => ({
   toast: {
     success: (...args: unknown[]) => h.toastSuccess(...args),
@@ -130,10 +90,6 @@ vi.mock('sonner', () => ({
 
 vi.mock('@/types/events', () => ({
   SystemEvent: { DEEP_LINK: 'deep-link' },
-}))
-
-vi.mock('@/constants/routes', () => ({
-  route: { hub: { model: '/hub/model' } },
 }))
 
 // Override serviceHub per-test needs. We extend the global setup's mock.
@@ -148,10 +104,6 @@ const hubState = vi.hoisted(() => ({
   getMCPConfig: vi.fn().mockResolvedValue({ mcpServers: { a: 1 }, mcpSettings: { s: 1 } }),
   getAssistants: vi.fn().mockResolvedValue([]),
   fetchThreads: vi.fn().mockResolvedValue([]),
-  getServerStatus: vi.fn().mockResolvedValue(false),
-  startModel: vi.fn().mockResolvedValue(undefined),
-  getActiveModels: vi.fn().mockResolvedValue([]),
-  startServer: vi.fn().mockResolvedValue(1337),
 }))
 
 vi.mock('@/hooks/useServiceHub', () => {
@@ -174,11 +126,6 @@ vi.mock('@/hooks/useServiceHub', () => {
         return Promise.resolve(hubState.unsubscribe)
       },
     }),
-    app: () => ({ getServerStatus: hubState.getServerStatus }),
-    models: () => ({
-      startModel: hubState.startModel,
-      getActiveModels: hubState.getActiveModels,
-    }),
   }
   return {
     useServiceHub: () => hub,
@@ -198,16 +145,10 @@ const resetHubState = () => {
   hubState.getMCPConfig.mockResolvedValue({ mcpServers: { a: 1 }, mcpSettings: { s: 1 } })
   hubState.getAssistants.mockResolvedValue([])
   hubState.fetchThreads.mockResolvedValue([])
-  hubState.getServerStatus.mockResolvedValue(false)
-  hubState.getActiveModels.mockResolvedValue([])
-  hubState.startServer.mockResolvedValue(1337)
-  hubState.startModel.mockResolvedValue(undefined)
   hubState.deeplinkGetCurrent.mockResolvedValue(null)
 }
 
 describe('DataProvider', () => {
-  const originalWindowCore = (window as unknown as { core?: unknown }).core
-
   beforeEach(() => {
     resetHubState()
     h.providers = []
@@ -225,16 +166,6 @@ describe('DataProvider', () => {
     h.toastSuccess.mockClear()
     h.toastError.mockClear()
     h.toastWarning.mockClear()
-    h.localApi.enableOnStartup = false
-    h.localApi.defaultModelLocalApiServer = null
-    h.localApi.lastServerModels = []
-    ;(window as unknown as { core: unknown }).core = {
-      api: { startServer: hubState.startServer },
-    }
-  })
-
-  afterEach(() => {
-    ;(window as unknown as { core?: unknown }).core = originalWindowCore
   })
 
   it('renders null (no DOM output)', () => {
@@ -385,9 +316,15 @@ describe('DataProvider', () => {
 
   it('skips registration when provider has no API key chain', async () => {
     h.providerRemoteApiKeyChain.mockReturnValue([])
-    h.providers = [
-      { provider: 'openai', active: true, models: [], custom_header: [] },
-    ]
+    hubState.getProviders.mockResolvedValue([
+      {
+        provider: 'openai',
+        active: true,
+        base_url: 'https://api.openai.com/v1',
+        models: [],
+        custom_header: [],
+      },
+    ])
     render(<DataProvider />)
     await waitFor(() => {
       expect(h.providerRemoteApiKeyChain).toHaveBeenCalled()
@@ -400,7 +337,13 @@ describe('DataProvider', () => {
     const err = vi.spyOn(console, 'error').mockImplementation(() => {})
     h.invoke.mockRejectedValue(new Error('nope'))
     hubState.getProviders.mockResolvedValue([
-      { provider: 'openai', active: true, models: [], custom_header: [] },
+      {
+        provider: 'openai',
+        active: true,
+        base_url: 'https://api.openai.com/v1',
+        models: [],
+        custom_header: [],
+      },
     ])
     render(<DataProvider />)
     await waitFor(() => {
@@ -410,13 +353,6 @@ describe('DataProvider', () => {
       )
     })
     err.mockRestore()
-  })
-
-  it('registers a listener for onModelImported events', async () => {
-    render(<DataProvider />)
-    await waitFor(() => {
-      expect(h.eventsOn).toHaveBeenCalledWith('onModelImported', expect.any(Function))
-    })
   })
 
   it('skips update check when in dev mode', async () => {
@@ -441,73 +377,17 @@ describe('DataProvider', () => {
     vi.useRealTimers()
   })
 
-  it('does not start server on mount when enableOnStartup is false', async () => {
-    render(<DataProvider />)
-    await act(async () => {
-      await Promise.resolve()
-    })
-    expect(hubState.getServerStatus).not.toHaveBeenCalled()
-    expect(hubState.startServer).not.toHaveBeenCalled()
-  })
-
-  it('short-circuits when server is already running', async () => {
-    h.localApi.enableOnStartup = true
-    hubState.getServerStatus.mockResolvedValue(true)
-    render(<DataProvider />)
-    await waitFor(() => {
-      expect(h.setServerStatus).toHaveBeenCalledWith('running')
-    })
-    expect(hubState.startServer).not.toHaveBeenCalled()
-  })
-
-  it('starts default model and local API server when enabled', async () => {
-    h.localApi.enableOnStartup = true
-    h.localApi.defaultModelLocalApiServer = { model: 'm1', provider: 'openai' }
-    h.getProviderByName.mockReturnValue({ provider: 'openai' })
-    hubState.getServerStatus.mockResolvedValue(false)
-    hubState.startServer.mockResolvedValue(2000)
-    hubState.getActiveModels.mockResolvedValue(['m1'])
-    h.providers = [{ provider: 'openai', models: [{ id: 'm1' }] }]
-    hubState.getProviders.mockResolvedValue(h.providers)
-
-    render(<DataProvider />)
-
-    await waitFor(() => {
-      expect(h.setServerStatus).toHaveBeenCalledWith('pending')
-      expect(hubState.startModel).toHaveBeenCalled()
-      expect(hubState.startServer).toHaveBeenCalled()
-    })
-
-    await waitFor(() => {
-      expect(h.setServerPort).toHaveBeenCalledWith(2000)
-      expect(h.setServerStatus).toHaveBeenCalledWith('running')
-      expect(h.setLastServerModels).toHaveBeenCalledWith([
-        { model: 'm1', provider: 'openai' },
-      ])
-    })
-  })
-
-  it('sets server status to stopped on startup failure', async () => {
-    const err = vi.spyOn(console, 'error').mockImplementation(() => {})
-    h.localApi.enableOnStartup = true
-    hubState.getServerStatus.mockRejectedValue(new Error('fail'))
-    render(<DataProvider />)
-    await waitFor(() => {
-      expect(h.setServerStatus).toHaveBeenCalledWith('stopped')
-    })
-    err.mockRestore()
-  })
-
-  it('navigates to hub model route when handling a valid deep link', async () => {
+  it('ignores retired local-model import deep links', async () => {
+    const info = vi.spyOn(console, 'info').mockImplementation(() => {})
     const deeplinkUrl = 'mita://host/action/owner/repo'
     hubState.deeplinkGetCurrent.mockResolvedValue([deeplinkUrl])
     render(<DataProvider />)
     await waitFor(() => {
-      expect(h.navigate).toHaveBeenCalledWith({
-        to: '/hub/model',
-        search: { repo: 'owner/repo' },
-      })
+      expect(info).toHaveBeenCalledWith(
+        'Ignored unsupported deep link. Local model imports are retired.'
+      )
     })
+    info.mockRestore()
   })
 
   it('opens a confirmation dialog for provider import deep links', async () => {
@@ -520,7 +400,6 @@ describe('DataProvider', () => {
     expect(await screen.findByText('导入 AI 供应商配置')).toBeInTheDocument()
     expect(screen.getByText('https://api.example.com/v1')).toBeInTheDocument()
     expect(screen.getByText('sk-i***1234')).toBeInTheDocument()
-    expect(h.navigate).not.toHaveBeenCalled()
   })
 
   it('imports provider settings after confirmation', async () => {
@@ -729,7 +608,6 @@ describe('DataProvider', () => {
     await act(async () => {
       await Promise.resolve()
     })
-    expect(h.navigate).not.toHaveBeenCalled()
   })
 
   it('ignores null deep link payload', async () => {
@@ -738,6 +616,5 @@ describe('DataProvider', () => {
     await act(async () => {
       await Promise.resolve()
     })
-    expect(h.navigate).not.toHaveBeenCalled()
   })
 })

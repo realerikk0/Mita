@@ -2,12 +2,10 @@ import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { Extension, ExtensionManager } from '../extension'
 
 // Mock dependencies
-vi.mock('@janhq/core', () => ({
-  AIEngine: class MockAIEngine {},
+vi.mock('@biyan/core', () => ({
   BaseExtension: class MockBaseExtension {},
   ExtensionTypeEnum: {
     SystemMonitor: 'system-monitor',
-    Model: 'model',
     Assistant: 'assistant',
   },
 }))

@@ -18,21 +18,13 @@ const PRODUCT_VERSION_FILES = [
 
 const BUILD_STAMP_JSON_FILES = [
   'web-app/package.json',
-  'src-tauri/plugins/tauri-plugin-foundation-models/package.json',
   'src-tauri/plugins/tauri-plugin-hardware/package.json',
-  'src-tauri/plugins/tauri-plugin-llamacpp/package.json',
-  'src-tauri/plugins/tauri-plugin-mlx/package.json',
-  'src-tauri/plugins/tauri-plugin-rag/package.json',
-  'src-tauri/plugins/tauri-plugin-vector-db/package.json',
+  'src-tauri/plugins/tauri-plugin-document-parser/package.json',
 ]
 
 const BUILD_STAMP_CARGO_FILES = [
-  'src-tauri/plugins/tauri-plugin-foundation-models/Cargo.toml',
   'src-tauri/plugins/tauri-plugin-hardware/Cargo.toml',
-  'src-tauri/plugins/tauri-plugin-llamacpp/Cargo.toml',
-  'src-tauri/plugins/tauri-plugin-mlx/Cargo.toml',
-  'src-tauri/plugins/tauri-plugin-rag/Cargo.toml',
-  'src-tauri/plugins/tauri-plugin-vector-db/Cargo.toml',
+  'src-tauri/plugins/tauri-plugin-document-parser/Cargo.toml',
 ]
 
 function usage() {
@@ -193,10 +185,10 @@ function stampWindowsBuildFiles(version) {
     const { fileVersion, productVersion } = windowsVersionInfo(version)
     const next = fs
       .readFileSync(templatePath, 'utf8')
-      .replaceAll('mita_productname', 'Biyan')
-      .replaceAll('mita_mainbinaryname', 'Biyan')
-      .replaceAll('mita_version', fileVersion)
-      .replaceAll('mita_build', productVersion)
+      .replaceAll('biyan_productname', 'Biyan')
+      .replaceAll('biyan_mainbinaryname', 'Biyan')
+      .replaceAll('biyan_version', fileVersion)
+      .replaceAll('biyan_build', productVersion)
       .replace(/^!define UNINSTALLERSIGNCOMMAND .*$/m, '!define UNINSTALLERSIGNCOMMAND ""')
     fs.writeFileSync(templatePath, next)
   }

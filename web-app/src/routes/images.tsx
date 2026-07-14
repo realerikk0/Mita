@@ -57,7 +57,7 @@ import {
 import { toast } from 'sonner'
 import { IconLayoutSidebar } from '@tabler/icons-react'
 import { getCurrentWebviewWindow } from '@tauri-apps/api/webviewWindow'
-import { fs } from '@janhq/core'
+import { fs } from '@biyan/core'
 
 import { ProviderQuotaActions } from '@/components/ProviderQuotaActions'
 import { Button } from '@/components/ui/button'
@@ -106,7 +106,7 @@ import {
   imageGenerationRequestErrorFromUnknown,
   type ImageGenerationRequestErrorDetails,
 } from '@/lib/image-generation-errors'
-import { trackMitaEvent } from '@/lib/analytics'
+import { trackBiyanEvent } from '@/lib/analytics'
 import { ModelCapabilities } from '@/types/models'
 import { DownloadManagement } from '@/containers/DownloadManegement'
 import { useLeftPanel } from '@/hooks/useLeftPanel'
@@ -4726,7 +4726,7 @@ function Images() {
         requestError: undefined,
         retryAvailableAt: undefined,
       })
-      trackMitaEvent('image_generation_started', {
+      trackBiyanEvent('image_generation_started', {
         provider_id: match.provider.provider,
         model_id: match.model.id,
         mode: task.mode,
@@ -4787,7 +4787,7 @@ function Images() {
 
         upsertAsset(saved)
         updateTask(task.id, { status: 'succeeded', asset: saved })
-        trackMitaEvent('image_generation_completed', {
+        trackBiyanEvent('image_generation_completed', {
           provider_id: match.provider.provider,
           model_id: match.model.id,
           mode: task.mode,
@@ -4796,7 +4796,7 @@ function Images() {
           source_asset_count: sourceAssets.length,
           status: 'succeeded',
         })
-        trackMitaEvent('image_asset_saved', {
+        trackBiyanEvent('image_asset_saved', {
           provider_id: match.provider.provider,
           model_id: match.model.id,
           mode: task.mode,
@@ -4832,7 +4832,7 @@ function Images() {
             ? undefined
             : retryAvailableAt,
         })
-        trackMitaEvent('image_generation_failed', {
+        trackBiyanEvent('image_generation_failed', {
           provider_id: match.provider.provider,
           model_id: match.model.id,
           mode: task.mode,

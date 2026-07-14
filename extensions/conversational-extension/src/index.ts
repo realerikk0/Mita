@@ -3,13 +3,13 @@ import {
   Thread,
   ThreadAssistantInfo,
   ThreadMessage,
-} from '@janhq/core'
+} from '@biyan/core'
 
 /**
- * MitaConversationalExtension is a ConversationalExtension implementation that provides
+ * BiyanConversationalExtension is a ConversationalExtension implementation that provides
  * functionality for managing threads.
  */
-export default class MitaConversationalExtension extends ConversationalExtension {
+export default class BiyanConversationalExtension extends ConversationalExtension {
   /**
    * Called when the extension is loaded.
    */

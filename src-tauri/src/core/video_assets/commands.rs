@@ -1,5 +1,5 @@
 use super::models::{SaveVideoAssetRequest, VideoAssetProject, VideoAssetRecord};
-use crate::core::app::commands::get_mita_data_folder_path;
+use crate::core::app::commands::get_biyan_data_folder_path;
 use base64::{engine::general_purpose, Engine as _};
 use chrono::Utc;
 use futures_util::StreamExt;
@@ -55,7 +55,7 @@ fn strip_data_url(input: &str) -> &str {
 }
 
 fn assets_root<R: Runtime>(app: &tauri::AppHandle<R>) -> PathBuf {
-    get_mita_data_folder_path(app.clone()).join(VIDEO_ASSETS_DIR)
+    get_biyan_data_folder_path(app.clone()).join(VIDEO_ASSETS_DIR)
 }
 
 fn metadata_path(asset_dir: &Path) -> PathBuf {

@@ -1,4 +1,5 @@
 import { isBiyuanProvider } from '@/constants/biyuan'
+import { isAcceptedProviderImportProtocol } from '@/legacy_migrations/deep-link'
 
 export type ParsedProviderConnection = {
   provider: string
@@ -136,7 +137,7 @@ export function parseProviderConnectionDeepLink(
 
   const importPath = url.pathname.replace(/\/+$/, '')
   if (
-    url.protocol !== 'mita:' ||
+    !isAcceptedProviderImportProtocol(url.protocol) ||
     url.hostname !== 'provider' ||
     importPath !== '/import'
   ) {

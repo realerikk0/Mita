@@ -111,11 +111,10 @@
   "openclawAgent": "Agente OpenClaw",
   "favorites": "Favoritos",
   "recents": "Recientes",
-  "hub": "Hub",
   "helpSupport": "Ayuda y soporte",
-  "helpUsImproveMita": "Ayúdanos a mejorar Biyan",
-  "helpUsImproveMitaDescription": "Recopilamos datos anónimos para entender el uso de las funciones. Tus chats e información personal nunca se rastrean. Puedes cambiar esto cuando quieras en Configuración > Privacidad.",
-  "helpUsImproveMitaQuestion": "¿Quieres ayudarnos a mejorar Biyan?",
+  "helpUsImproveBiyan": "Ayúdanos a mejorar Biyan",
+  "helpUsImproveBiyanDescription": "Recopilamos datos anónimos para entender el uso de las funciones. Tus chats e información personal nunca se rastrean. Puedes cambiar esto cuando quieras en Configuración > Privacidad.",
+  "helpUsImproveBiyanQuestion": "¿Quieres ayudarnos a mejorar Biyan?",
   "unstarAll": "Quitar todas las estrellas",
   "unstar": "Quitar estrella",
   "deleteAll": "Eliminar todo",
@@ -170,12 +169,7 @@
   "noResultsFound": "No se encontraron resultados",
   "noThreadsYet": "Aún no hay hilos",
   "noThreadsYetDesc": "Inicia una nueva conversación para ver tu historial de hilos aquí.",
-  "downloads": "Descargas",
-  "downloading": "Descargando",
   "uploadingAttachments": "Subiendo archivos adjuntos…",
-  "cancelDownload": "Cancelar descarga",
-  "downloadCancelled": "Descarga cancelada",
-  "downloadComplete": "Descarga completa",
   "thinking": "Pensando...",
   "thought": "Pensamiento",
   "callingTool": "Llamando herramienta",
@@ -194,7 +188,7 @@
   "noModels": "No se encontraron modelos",
   "customAvatar": "Avatar personalizado",
   "editAssistant": "Editar asistente",
-  "mita": "Biyan",
+  "biyan": "Biyan",
   "metadata": "Metadatos",
   "regenerate": "Regenerar",
   "threadImage": "Imagen del hilo",
@@ -416,14 +410,7 @@
     "noProjectsFound": "No se encontraron proyectos",
     "tryDifferentSearch": "Prueba con un término de búsqueda diferente"
   },
-  "attachmentsIngestion": {
-    "title": "Elige cómo procesar los adjuntos",
-    "description": "Elige si incluir estos archivos directamente en el chat o indexarlos como embeddings.",
-    "inline": "Inyectar en el chat",
-    "embeddings": "Usar embeddings"
-  },
   "attachmentInjectedIndicator": "Inyectado en el chat",
-  "attachmentEmbeddedIndicator": "Embebido para RAG",
   "viewInjectedContent": "Ver contenido inyectado",
   "injectedContentTitle": "Contenido del archivo inyectado",
   "errorDialog": {
@@ -471,30 +458,14 @@
       "title": "Descarga completa",
       "description": "{{item}} se ha descargado"
     },
-    "downloadCancelled": {
-      "title": "Descarga cancelada",
-      "description": "El proceso de descarga fue cancelado"
-    },
     "downloadFailed": {
       "title": "Error en la descarga",
       "description": "La descarga de {{item}} falló"
     },
-    "modelValidationStarted": {
-      "title": "Validando modelo",
-      "description": "Modelo \"{{modelId}}\" descargado correctamente. Verificando integridad..."
-    },
-    "modelValidationFailed": {
-      "title": "Validación del modelo fallida",
-      "description": "El modelo descargado \"{{modelId}}\" no pasó la verificación de integridad y fue eliminado. El archivo puede estar corrupto o manipulado."
-    },
     "modelNoVision": {
       "title": "El modelo no admite imágenes",
       "description": "Elige un modelo con capacidad de visión para adjuntar imágenes.",
-      "action": "Abrir Hub"
-    },
-    "downloadAndVerificationComplete": {
-      "title": "Descarga completa",
-      "description": "Modelo \"{{item}}\" descargado y verificado correctamente"
+      "action": "Abrir configuración de proveedores"
     },
     "projectCreated": {
       "title": "Proyecto creado",

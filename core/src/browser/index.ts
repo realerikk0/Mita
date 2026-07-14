@@ -27,9 +27,3 @@ export * from './extension'
  * @module
  */
 export * from './extensions'
-
-/**
- * Export all base models.
- * @module
- */
-export * from './models'

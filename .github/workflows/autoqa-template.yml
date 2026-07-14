@@ -3,15 +3,15 @@ name: Auto QA Test Runner Template
 on:
   workflow_call:
     inputs:
-      mita_app_windows_source:
+      biyan_app_windows_source:
         description: 'Windows app source - can be URL or local path'
         required: true
         type: string
-      mita_app_ubuntu_source:
+      biyan_app_ubuntu_source:
         description: 'Ubuntu app source - can be URL or local path'
         required: true
         type: string
-      mita_app_macos_source:
+      biyan_app_macos_source:
         description: 'macOS app source - can be URL or local path'
         required: true
         type: string
@@ -51,7 +51,7 @@ jobs:
     timeout-minutes: 60
 
     env:
-      DEFAULT_MITA_APP_URL: 'https://updates.mita.so/mita/nightly/Mita-nightly_0.6.5-758_x64-setup.exe'
+      DEFAULT_BIYAN_APP_URL: 'https://updates.mita.so/biyan/nightly/Biyan-nightly_0.6.634_x64-setup.exe'
       DEFAULT_IS_NIGHTLY: 'true'
 
     steps:
@@ -70,12 +70,12 @@ jobs:
           name: ${{ inputs.artifact_name_windows }}
           path: ${{ runner.temp }}/windows-artifact
 
-      - name: Clean existing Mita installations
+      - name: Clean existing Biyan installations
         shell: powershell
         run: |
           .\autoqa\scripts\windows_cleanup.ps1 -IsNightly "${{ inputs.is_nightly }}"
 
-      - name: Download/Prepare Mita app
+      - name: Download/Prepare Biyan app
         shell: powershell
         run: |
           if ("${{ inputs.source_type }}" -eq "local") {
@@ -83,9 +83,9 @@ jobs:
             $exeFile = Get-ChildItem -Path "${{ runner.temp }}/windows-artifact" -Recurse -Filter "*.exe" | Select-Object -First 1
             if ($exeFile) {
               Write-Host "[SUCCESS] Found local installer: $($exeFile.FullName)"
-              Copy-Item -Path $exeFile.FullName -Destination "$env:TEMP\mita-installer.exe" -Force
-              Write-Host "[SUCCESS] Installer copied to: $env:TEMP\mita-installer.exe"
-              # Don't set MITA_APP_PATH here - let the install script set it to the correct installed app path
+              Copy-Item -Path $exeFile.FullName -Destination "$env:TEMP\biyan-installer.exe" -Force
+              Write-Host "[SUCCESS] Installer copied to: $env:TEMP\biyan-installer.exe"
+              # The install script records the final executable path after installation.
               echo "IS_NIGHTLY=${{ inputs.is_nightly }}" >> $env:GITHUB_ENV
             } else {
               Write-Error "[FAILED] No .exe file found in artifact"
@@ -94,15 +94,15 @@ jobs:
           } else {
             # Use the existing download script for URLs
             .\autoqa\scripts\windows_download.ps1 `
-              -WorkflowInputUrl "${{ inputs.mita_app_windows_source }}" `
+              -WorkflowInputUrl "${{ inputs.biyan_app_windows_source }}" `
               -WorkflowInputIsNightly "${{ inputs.is_nightly }}" `
-              -RepoVariableUrl "${{ vars.MITA_APP_URL }}" `
+              -RepoVariableUrl "${{ vars.BIYAN_APP_URL }}" `
               -RepoVariableIsNightly "${{ vars.IS_NIGHTLY }}" `
-              -DefaultUrl "$env:DEFAULT_MITA_APP_URL" `
+              -DefaultUrl "$env:DEFAULT_BIYAN_APP_URL" `
               -DefaultIsNightly "$env:DEFAULT_IS_NIGHTLY"
           }
 
-      - name: Install Mita app
+      - name: Install Biyan app
         shell: powershell
         run: |
           .\autoqa\scripts\windows_install.ps1 -IsNightly "$env:IS_NIGHTLY"
@@ -125,17 +125,17 @@ jobs:
           DELAY_BETWEEN_TESTS: '3'
           LAUNCH_NAME: 'CI AutoQA Run Windows - ${{ github.run_number }} - ${{ github.ref_name }}'
         run: |
-          .\scripts\run_tests.ps1 -JanAppPath "$env:MITA_APP_PATH" -ProcessName "$env:MITA_PROCESS_NAME" -RpToken "$env:RP_TOKEN"
+          .\scripts\run_tests.ps1 -BiyanAppPath "$env:BIYAN_APP_PATH" -ProcessName "$env:BIYAN_PROCESS_NAME" -RpToken "$env:RP_TOKEN"
 
-      - name: Collect Mita logs for artifact upload
+      - name: Collect Biyan logs for artifact upload
         if: always()
         shell: powershell
         run: |
           $logDirs = @(
-            "$env:APPDATA\Mita-nightly\data\logs",
-            "$env:APPDATA\Mita\data\logs"
+            "$env:APPDATA\Biyan-nightly\data\logs",
+            "$env:APPDATA\Biyan\data\logs"
           )
-          $dest = "autoqa\mita-logs"
+          $dest = "autoqa\biyan-logs"
           mkdir $dest -Force | Out-Null
           foreach ($dir in $logDirs) {
             if (Test-Path $dir) {
@@ -148,15 +148,15 @@ jobs:
         uses: actions/upload-artifact@v4
         continue-on-error: true
         with:
-          name: ${{ inputs.is_nightly && 'mita-nightly' || 'jan' }}-recordings-${{ github.run_number }}-${{ runner.os }}
+          name: ${{ inputs.is_nightly && 'biyan-nightly' || 'biyan' }}-recordings-${{ github.run_number }}-${{ runner.os }}
           path: autoqa/recordings/
 
-      - name: Upload Mita logs
+      - name: Upload Biyan logs
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: ${{ inputs.is_nightly && 'mita-nightly' || 'jan' }}-logs-${{ github.run_number }}-${{ runner.os }}
-          path: autoqa/mita-logs/
+          name: ${{ inputs.is_nightly && 'biyan-nightly' || 'biyan' }}-logs-${{ github.run_number }}-${{ runner.os }}
+          path: autoqa/biyan-logs/
 
       - name: Cleanup after tests
         if: always()
@@ -169,7 +169,7 @@ jobs:
     timeout-minutes: 60
 
     env:
-      DEFAULT_MITA_APP_URL: 'https://updates.mita.so/mita/nightly/Mita-nightly_0.6.4-728_amd64.deb'
+      DEFAULT_BIYAN_APP_URL: 'https://updates.mita.so/biyan/nightly/Biyan-nightly_0.6.634_amd64.deb'
       DEFAULT_IS_NIGHTLY: 'true'
 
     steps:
@@ -217,25 +217,24 @@ jobs:
           chmod +x autoqa/scripts/setup_permissions.sh
           ./autoqa/scripts/setup_permissions.sh
 
-      - name: Clean existing Mita installations
+      - name: Clean existing Biyan installations
         run: |
           ./autoqa/scripts/ubuntu_cleanup.sh
 
-      - name: Download/Prepare Mita app
+      - name: Download/Prepare Biyan app
         run: |
           if [ "${{ inputs.source_type }}" = "local" ]; then
             # Find the deb file in the artifact
             DEB_FILE=$(find "${{ runner.temp }}/ubuntu-artifact" -name "*.deb" -type f | head -1)
             if [ -n "$DEB_FILE" ]; then
               echo "[SUCCESS] Found local installer: $DEB_FILE"
-              cp "$DEB_FILE" "/tmp/mita-installer.deb"
-              echo "[SUCCESS] Installer copied to: /tmp/mita-installer.deb"
-              echo "MITA_APP_PATH=/tmp/mita-installer.deb" >> $GITHUB_ENV
+              cp "$DEB_FILE" "/tmp/biyan-installer.deb"
+              echo "[SUCCESS] Installer copied to: /tmp/biyan-installer.deb"
               echo "IS_NIGHTLY=${{ inputs.is_nightly }}" >> $GITHUB_ENV
               if [ "${{ inputs.is_nightly }}" = "true" ]; then
-                echo "MITA_PROCESS_NAME=Mita-nightly" >> $GITHUB_ENV
+                echo "BIYAN_PROCESS_NAME=Biyan-nightly" >> $GITHUB_ENV
               else
-                echo "MITA_PROCESS_NAME=Mita" >> $GITHUB_ENV
+                echo "BIYAN_PROCESS_NAME=Biyan" >> $GITHUB_ENV
               fi
             else
               echo "[FAILED] No .deb file found in artifact"
@@ -244,23 +243,22 @@ jobs:
           else
             # Use the existing download script for URLs
             ./autoqa/scripts/ubuntu_download.sh \
-              "${{ inputs.mita_app_ubuntu_source }}" \
+              "${{ inputs.biyan_app_ubuntu_source }}" \
               "${{ inputs.is_nightly }}" \
-              "${{ vars.MITA_APP_URL_LINUX }}" \
+              "${{ vars.BIYAN_APP_URL_LINUX }}" \
               "${{ vars.IS_NIGHTLY }}" \
-              "$DEFAULT_MITA_APP_URL" \
+              "$DEFAULT_BIYAN_APP_URL" \
               "$DEFAULT_IS_NIGHTLY"
             
-            # Set the correct environment variables for the test runner
-            echo "MITA_APP_PATH=/tmp/mita-installer.deb" >> $GITHUB_ENV
+            # Set the expected process name; the install script records the executable path.
             if [ "${{ inputs.is_nightly }}" = "true" ]; then
-              echo "MITA_PROCESS_NAME=Mita-nightly" >> $GITHUB_ENV
+              echo "BIYAN_PROCESS_NAME=Biyan-nightly" >> $GITHUB_ENV
             else
-              echo "MITA_PROCESS_NAME=Mita" >> $GITHUB_ENV
+              echo "BIYAN_PROCESS_NAME=Biyan" >> $GITHUB_ENV
             fi
           fi
 
-      - name: Install Mita app
+      - name: Install Biyan app
         run: |
           ./autoqa/scripts/ubuntu_install.sh "$IS_NIGHTLY"
 
@@ -281,29 +279,29 @@ jobs:
           DELAY_BETWEEN_TESTS: '3'
           LAUNCH_NAME: 'CI AutoQA Run Ubuntu - ${{ github.run_number }} - ${{ github.ref_name }}'
         run: |
-          ./scripts/run_tests.sh "$MITA_APP_PATH" "$MITA_PROCESS_NAME" "$RP_TOKEN" "ubuntu"
+          ./scripts/run_tests.sh "$BIYAN_APP_PATH" "$BIYAN_PROCESS_NAME" "$RP_TOKEN" "ubuntu"
 
-      - name: Collect Mita logs for artifact upload
+      - name: Collect Biyan logs for artifact upload
         if: always()
         run: |
-          mkdir -p autoqa/mita-logs
-          cp ~/.local/share/Mita-nightly/data/logs/*.log autoqa/mita-logs/ 2>/dev/null || true
-          cp ~/.local/share/Mita/data/logs/*.log autoqa/mita-logs/ 2>/dev/null || true
+          mkdir -p autoqa/biyan-logs
+          cp ~/.local/share/Biyan-nightly/data/logs/*.log autoqa/biyan-logs/ 2>/dev/null || true
+          cp ~/.local/share/Biyan/data/logs/*.log autoqa/biyan-logs/ 2>/dev/null || true
 
       - name: Upload screen recordings
         if: always()
         uses: actions/upload-artifact@v4
         continue-on-error: true
         with:
-          name: ${{ inputs.is_nightly && 'mita-nightly' || 'jan' }}-recordings-${{ github.run_number }}-${{ runner.os }}
+          name: ${{ inputs.is_nightly && 'biyan-nightly' || 'biyan' }}-recordings-${{ github.run_number }}-${{ runner.os }}
           path: autoqa/recordings/
 
-      - name: Upload Mita logs
+      - name: Upload Biyan logs
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: ${{ inputs.is_nightly && 'mita-nightly' || 'jan' }}-logs-${{ github.run_number }}-${{ runner.os }}
-          path: autoqa/mita-logs/
+          name: ${{ inputs.is_nightly && 'biyan-nightly' || 'biyan' }}-logs-${{ github.run_number }}-${{ runner.os }}
+          path: autoqa/biyan-logs/
 
       - name: Cleanup after tests
         if: always()
@@ -315,7 +313,7 @@ jobs:
     timeout-minutes: 60
 
     env:
-      DEFAULT_MITA_APP_URL: 'https://updates.mita.so/mita/nightly/Mita-nightly_0.6.4-728_universal.dmg'
+      DEFAULT_BIYAN_APP_URL: 'https://updates.mita.so/biyan/nightly/Biyan-nightly_0.6.634_universal.dmg'
       DEFAULT_IS_NIGHTLY: 'true'
 
     steps:
@@ -339,25 +337,24 @@ jobs:
           chmod +x autoqa/scripts/setup_permissions.sh
           ./autoqa/scripts/setup_permissions.sh
 
-      - name: Clean existing Mita installations
+      - name: Clean existing Biyan installations
         run: |
           ./autoqa/scripts/macos_cleanup.sh
 
-      - name: Download/Prepare Mita app
+      - name: Download/Prepare Biyan app
         run: |
           if [ "${{ inputs.source_type }}" = "local" ]; then
             # Find the dmg file in the artifact
             DMG_FILE=$(find "${{ runner.temp }}/macos-artifact" -name "*.dmg" -type f | head -1)
             if [ -n "$DMG_FILE" ]; then
               echo "[SUCCESS] Found local installer: $DMG_FILE"
-              cp "$DMG_FILE" "/tmp/mita-installer.dmg"
-              echo "[SUCCESS] Installer copied to: /tmp/mita-installer.dmg"
-              echo "MITA_APP_PATH=/tmp/mita-installer.dmg" >> $GITHUB_ENV
+              cp "$DMG_FILE" "/tmp/biyan-installer.dmg"
+              echo "[SUCCESS] Installer copied to: /tmp/biyan-installer.dmg"
               echo "IS_NIGHTLY=${{ inputs.is_nightly }}" >> $GITHUB_ENV
               if [ "${{ inputs.is_nightly }}" = "true" ]; then
-                echo "PROCESS_NAME=Mita-nightly" >> $GITHUB_ENV
+                echo "BIYAN_PROCESS_NAME=Biyan-nightly" >> $GITHUB_ENV
               else
-                echo "PROCESS_NAME=Mita" >> $GITHUB_ENV
+                echo "BIYAN_PROCESS_NAME=Biyan" >> $GITHUB_ENV
               fi
             else
               echo "[FAILED] No .dmg file found in artifact"
@@ -366,23 +363,22 @@ jobs:
           else
             # Use the existing download script for URLs
             ./autoqa/scripts/macos_download.sh \
-              "${{ inputs.mita_app_macos_source }}" \
+              "${{ inputs.biyan_app_macos_source }}" \
               "${{ inputs.is_nightly }}" \
-              "${{ vars.MITA_APP_URL }}" \
+              "${{ vars.BIYAN_APP_URL }}" \
               "${{ vars.IS_NIGHTLY }}" \
-              "$DEFAULT_MITA_APP_URL" \
+              "$DEFAULT_BIYAN_APP_URL" \
               "$DEFAULT_IS_NIGHTLY"
             
-            # Set the correct environment variables for the test runner
-            echo "MITA_APP_PATH=/tmp/mita-installer.dmg" >> $GITHUB_ENV
+            # Set the expected process name; the install script records the executable path.
             if [ "${{ inputs.is_nightly }}" = "true" ]; then
-              echo "PROCESS_NAME=Mita-nightly" >> $GITHUB_ENV
+              echo "BIYAN_PROCESS_NAME=Biyan-nightly" >> $GITHUB_ENV
             else
-              echo "PROCESS_NAME=Mita" >> $GITHUB_ENV
+              echo "BIYAN_PROCESS_NAME=Biyan" >> $GITHUB_ENV
             fi
           fi
 
-      - name: Install Mita app
+      - name: Install Biyan app
         run: |
           ./autoqa/scripts/macos_install.sh
 
@@ -437,33 +433,33 @@ jobs:
           echo "Starting E2E test execution..."
 
           echo "Environment variables:"
-          echo "MITA_APP_PATH: $MITA_APP_PATH"
-          echo "PROCESS_NAME: $PROCESS_NAME"
+          echo "BIYAN_APP_PATH: $BIYAN_APP_PATH"
+          echo "BIYAN_PROCESS_NAME: $BIYAN_PROCESS_NAME"
           echo "IS_NIGHTLY: $IS_NIGHTLY"
 
-          ./scripts/run_tests.sh "$MITA_APP_PATH" "$PROCESS_NAME" "$RP_TOKEN" "macos"
+          ./scripts/run_tests.sh "$BIYAN_APP_PATH" "$BIYAN_PROCESS_NAME" "$RP_TOKEN" "macos"
 
-      - name: Collect Mita logs for artifact upload
+      - name: Collect Biyan logs for artifact upload
         if: always()
         run: |
-          mkdir -p autoqa/mita-logs
-          cp ~/Library/Application\ Support/Mita-nightly/data/logs/*.log autoqa/mita-logs/ 2>/dev/null || true
-          cp ~/Library/Application\ Support/Mita/data/logs/*.log autoqa/mita-logs/ 2>/dev/null || true
+          mkdir -p autoqa/biyan-logs
+          cp ~/Library/Application\ Support/Biyan-nightly/data/logs/*.log autoqa/biyan-logs/ 2>/dev/null || true
+          cp ~/Library/Application\ Support/Biyan/data/logs/*.log autoqa/biyan-logs/ 2>/dev/null || true
 
       - name: Upload screen recordings
         if: always()
         uses: actions/upload-artifact@v4
         continue-on-error: true
         with:
-          name: ${{ inputs.is_nightly && 'mita-nightly' || 'jan' }}-recordings-${{ github.run_number }}-${{ runner.os }}
+          name: ${{ inputs.is_nightly && 'biyan-nightly' || 'biyan' }}-recordings-${{ github.run_number }}-${{ runner.os }}
           path: autoqa/recordings/
 
-      - name: Upload Mita logs
+      - name: Upload Biyan logs
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: ${{ inputs.is_nightly && 'mita-nightly' || 'jan' }}-logs-${{ github.run_number }}-${{ runner.os }}
-          path: autoqa/mita-logs/
+          name: ${{ inputs.is_nightly && 'biyan-nightly' || 'biyan' }}-logs-${{ github.run_number }}-${{ runner.os }}
+          path: autoqa/biyan-logs/
 
       - name: Cleanup after tests
         if: always()

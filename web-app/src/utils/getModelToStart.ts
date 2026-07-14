@@ -1,5 +1,14 @@
 import { localStorageKey } from '@/constants/localStorage'
-import type { ModelInfo } from '@janhq/core'
+import type { ModelInfo } from '@biyan/core'
+import {
+  isConfiguredModelProvider,
+  type RemoteModelProvider,
+} from '@/lib/configured-model-providers'
+
+const isRemoteUsableProvider = (
+  provider?: ModelProvider
+): provider is RemoteModelProvider =>
+  Boolean(provider && isConfiguredModelProvider(provider))
 
 export const getLastUsedModel = (): {
   provider: string
@@ -14,56 +23,43 @@ export const getLastUsedModel = (): {
   }
 }
 
-// Helper function to determine which model to start
+// Resolve a configured remote model. This never starts a local runtime.
 export const getModelToStart = (params: {
   selectedModel?: ModelInfo | null
   selectedProvider?: string | null
   getProviderByName: (name: string) => ModelProvider | undefined
+  providers?: ModelProvider[]
 }): { model: string; provider: ModelProvider } | null => {
-  const { selectedModel, selectedProvider, getProviderByName } = params
+  const { selectedModel, selectedProvider, getProviderByName, providers = [] } =
+    params
 
   // Use last used model if available
   const lastUsedModel = getLastUsedModel()
   if (lastUsedModel) {
     const provider = getProviderByName(lastUsedModel.provider)
-    if (provider && provider.models.some((m) => m.id === lastUsedModel.model)) {
+    if (
+      isRemoteUsableProvider(provider) &&
+      provider.models.some((model) => model.id === lastUsedModel.model)
+    ) {
       return { model: lastUsedModel.model, provider }
-    } else {
-      // Last used model not found under provider, fallback to first llamacpp model
-      const llamacppProvider = getProviderByName('llamacpp')
-      if (
-        llamacppProvider &&
-        llamacppProvider.models &&
-        llamacppProvider.models.length > 0
-      ) {
-        return {
-          model: llamacppProvider.models[0].id,
-          provider: llamacppProvider,
-        }
-      }
     }
   }
 
   // Use selected model if available
   if (selectedModel && selectedProvider) {
     const provider = getProviderByName(selectedProvider)
-    if (provider) {
+    if (
+      isRemoteUsableProvider(provider) &&
+      provider.models.some((model) => model.id === selectedModel.id)
+    ) {
       return { model: selectedModel.id, provider }
     }
   }
 
-  // Use first model from llamacpp provider
-  const llamacppProvider = getProviderByName('llamacpp')
-  if (
-    llamacppProvider &&
-    llamacppProvider.models &&
-    llamacppProvider.models.length > 0
-  ) {
-    return {
-      model: llamacppProvider.models[0].id,
-      provider: llamacppProvider,
-    }
-  }
+  const firstProvider = providers.find(
+    (provider) => isRemoteUsableProvider(provider) && provider.models.length > 0
+  )
+  if (firstProvider) return { model: firstProvider.models[0].id, provider: firstProvider }
 
   return null
 }

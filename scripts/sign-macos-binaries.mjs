@@ -12,8 +12,8 @@ const root = process.cwd()
 const resourcesRoot = join(root, 'src-tauri', 'resources')
 const universalTargetRoot = join(root, 'src-tauri', 'target', 'universal-apple-darwin', 'release')
 const extraMachOPaths = [
-  join(universalTargetRoot, 'mita-cli'),
-  join(universalTargetRoot, 'mita-computer-agent-runner'),
+  join(universalTargetRoot, 'biyan-cli'),
+  join(universalTargetRoot, 'biyan-computer-agent-runner'),
 ]
 const entitlements = join(root, 'src-tauri', 'Entitlements.plist')
 const dryRun = process.argv.includes('--dry-run')
@@ -106,9 +106,8 @@ function isLikelyBinaryCandidate(filePath) {
     [
       'bun',
       'uv',
-      'mita-cli',
-      'mlx-server',
-      'mita-computer-agent-runner',
+      'biyan-cli',
+      'biyan-computer-agent-runner',
       'chrome-headless-shell',
       'ffmpeg-mac',
     ].includes(name)

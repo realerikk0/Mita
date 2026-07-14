@@ -14,8 +14,8 @@ const root = process.cwd()
 const manifestPath = join(root, 'src-tauri', 'Cargo.toml')
 const runnerName =
   process.platform === 'win32'
-    ? 'mita-computer-agent-runner.exe'
-    : 'mita-computer-agent-runner'
+    ? 'biyan-computer-agent-runner.exe'
+    : 'biyan-computer-agent-runner'
 const universalSource = join(
   root,
   'src-tauri',
@@ -36,7 +36,7 @@ const cargoArgs = [
   '--features',
   'computer-agent-runner',
   '--bin',
-  'mita-computer-agent-runner',
+  'biyan-computer-agent-runner',
 ]
 
 if (release) {

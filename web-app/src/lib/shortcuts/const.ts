@@ -23,7 +23,7 @@ export const PlatformShortcuts: ShortcutMap = {
   [ShortcutAction.NEW_IMAGE]: { key: 'i', usePlatformMetaKey: true },
 
   // New Biyan Teams - opens a new Biyan Teams workspace
-  [ShortcutAction.NEW_MITA_TEAMS]: { key: 't', usePlatformMetaKey: true },
+  [ShortcutAction.NEW_BIYAN_TEAMS]: { key: 't', usePlatformMetaKey: true },
 
   // New agent chat - opens home screen with agent mode pre-enabled
   [ShortcutAction.NEW_AGENT_CHAT]: { key: 'm', usePlatformMetaKey: true },

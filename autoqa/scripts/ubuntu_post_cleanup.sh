@@ -1,44 +1,12 @@
-#!/bin/bash
-# Ubuntu post-test cleanup script
+#!/usr/bin/env bash
+set -euo pipefail
 
-IS_NIGHTLY="$1"
-
-echo "Cleaning up after tests..."
-
-# Kill any running Jan processes (both regular and nightly)
-pkill -f "Jan" || true
-pkill -f "jan" || true
-pkill -f "Jan-nightly" || true
-pkill -f "jan-nightly" || true
-
-# Remove Jan data folders (both regular and nightly)
-rm -rf ~/.config/Jan
-rm -rf ~/.config/Jan-nightly
-rm -rf ~/.local/share/Jan
-rm -rf ~/.local/share/Jan-nightly
-rm -rf ~/.cache/jan
-rm -rf ~/.cache/jan-nightly
-rm -rf ~/.local/share/jan-nightly.ai.app
-rm -rf ~/.local/share/jan.ai.app
-
-# Try to uninstall Jan app
-if [ "$IS_NIGHTLY" = "true" ]; then
-    PACKAGE_NAME="jan-nightly"
-else
-    PACKAGE_NAME="jan"
-fi
-
-echo "Attempting to uninstall package: $PACKAGE_NAME"
-
-if dpkg -l | grep -q "$PACKAGE_NAME"; then
-    echo "Found package $PACKAGE_NAME, uninstalling..."
-    sudo dpkg -r "$PACKAGE_NAME" || true
-    sudo apt-get autoremove -y || true
-else
-    echo "Package $PACKAGE_NAME not found in dpkg list"
-fi
-
-# Clean up downloaded installer
-rm -f "/tmp/jan-installer.deb"
-
-echo "Cleanup completed"
+is_nightly="${1:-false}"
+pkill -f Biyan || true
+package_name=biyan
+if [ "$is_nightly" = "true" ]; then package_name=biyan-nightly; fi
+sudo apt-get remove --purge -y "$package_name" 2>/dev/null || true
+rm -rf ~/.config/Biyan ~/.config/Biyan-nightly
+rm -rf ~/.local/share/Biyan ~/.local/share/Biyan-nightly
+rm -rf ~/.cache/Biyan ~/.cache/Biyan-nightly
+rm -f /tmp/biyan-installer.deb

@@ -8,7 +8,7 @@
 
 import { TauriCoreService } from './tauri'
 import type { ExtensionManifest } from '@/lib/extension'
-import MitaConversationalExtension from '@janhq/conversational-extension'
+import BiyanConversationalExtension from '@biyan/conversational-extension'
 
 export class MobileCoreService extends TauriCoreService {
   /**
@@ -45,9 +45,9 @@ export class MobileCoreService extends TauriCoreService {
    * Private method to return pre-bundled mobile extensions
    */
   private getBundledExtensions(): ExtensionManifest[] {
-    const conversationalExt = new MitaConversationalExtension(
+    const conversationalExt = new BiyanConversationalExtension(
       'built-in',
-      '@janhq/conversational-extension',
+      '@biyan/conversational-extension',
       'Conversational Extension',
       true,
       'Manages conversation threads and messages',
@@ -56,7 +56,7 @@ export class MobileCoreService extends TauriCoreService {
 
     return [
       {
-        name: '@janhq/conversational-extension',
+        name: '@biyan/conversational-extension',
         productName: 'Conversational Extension',
         url: 'built-in',
         active: true,

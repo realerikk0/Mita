@@ -1,10 +1,10 @@
-# Makefile for Mita Desktop App - Build, Lint, Test, and Clean
+# Makefile for Biyan Desktop App - Build, Lint, Test, and Clean
 
 REPORT_PORTAL_URL ?= ""
 REPORT_PORTAL_API_KEY ?= ""
 REPORT_PORTAL_PROJECT_NAME ?= ""
-REPORT_PORTAL_LAUNCH_NAME ?= "Mita App"
-REPORT_PORTAL_DESCRIPTION ?= "Mita App report"
+REPORT_PORTAL_LAUNCH_NAME ?= "Biyan App"
+REPORT_PORTAL_DESCRIPTION ?= "Biyan App report"
 MACOS_SIGNING_IDENTITY ?= Developer ID Application: LILYN DYNAMICS (7NZP53ZJ4D)
 
 # Detect OS
@@ -66,7 +66,6 @@ install-ios-rust-targets:
 
 dev: install-and-build
 	yarn download:bin
-	make build-mlx-server-if-exists
 	make build-cli-dev
 	yarn dev
 
@@ -131,114 +130,61 @@ endif
 	node --test ./scripts/__tests__/rename-cargo-channel-app.test.mjs
 	yarn copy:assets:tauri
 	yarn build:icon
-	yarn build:mlx-server
 	bash ./scripts/prepare-tauri-test-resources.sh
 	node ./scripts/build-cli.mjs --release --cli-only
 	cargo test --manifest-path src-tauri/Cargo.toml --no-default-features --features test-tauri -- --test-threads=1
 	cargo test --manifest-path src-tauri/plugins/tauri-plugin-hardware/Cargo.toml
-	cargo test --manifest-path src-tauri/plugins/tauri-plugin-llamacpp/Cargo.toml
+	cargo test --manifest-path src-tauri/plugins/tauri-plugin-document-parser/Cargo.toml
 	cargo test --manifest-path src-tauri/utils/Cargo.toml
 
-# Build MLX server (macOS Apple Silicon only) - always builds
-build-mlx-server:
-ifeq ($(DETECTED_OS),Darwin)
-	@echo "Building MLX server for Apple Silicon..."
-	cd mlx-server && swift build -c release
-	@echo "Copying build products..."
-	@BUILD_DIR=$$(cd mlx-server && swift build -c release --show-bin-path); \
-	if [ -z "$$BUILD_DIR" ]; then \
-		echo "Error: Could not find build products"; \
-		exit 1; \
-	fi; \
-	mkdir -p src-tauri/resources/bin; \
-	echo "Copying mlx-server from $$BUILD_DIR..."; \
-	cp "$$BUILD_DIR/mlx-server" src-tauri/resources/bin/mlx-server; \
-	if [ -d "$$BUILD_DIR/mlx-swift_Cmlx.bundle" ]; then \
-		cp -r "$$BUILD_DIR/mlx-swift_Cmlx.bundle" src-tauri/resources/bin/; \
-	else \
-		mkdir -p src-tauri/resources/bin/mlx-swift_Cmlx.bundle; \
-	fi; \
-	chmod +x src-tauri/resources/bin/mlx-server; \
-	echo "MLX server built and copied successfully"; \
-	echo "Checking for code signing identity..."; \
-	SIGNING_IDENTITY="$${APPLE_SIGNING_IDENTITY:-$(MACOS_SIGNING_IDENTITY)}"; \
-	if security find-identity -v -p codesigning | grep -F "\"$$SIGNING_IDENTITY\"" >/dev/null; then \
-		echo "Signing mlx-server with identity: $$SIGNING_IDENTITY"; \
-		codesign --force --options runtime --timestamp --sign "$$SIGNING_IDENTITY" src-tauri/resources/bin/mlx-server; \
-		if [ -f "src-tauri/resources/bin/mlx-swift_Cmlx.bundle/Contents/Info.plist" ]; then \
-			echo "Signing mlx-swift_Cmlx.bundle..."; \
-			codesign --force --options runtime --timestamp --sign "$$SIGNING_IDENTITY" --deep src-tauri/resources/bin/mlx-swift_Cmlx.bundle; \
-		else \
-			echo "Skipping empty mlx-swift_Cmlx.bundle placeholder"; \
-		fi; \
-		echo "Code signing completed successfully"; \
-	else \
-		echo "Warning: Developer ID identity not found: $$SIGNING_IDENTITY. Skipping code signing (notarization will fail)."; \
-	fi
-else
-	@echo "Skipping MLX server build (macOS only)"
-endif
-
-# Build MLX server only if not already present (for dev)
-build-mlx-server-if-exists:
-ifeq ($(DETECTED_OS),Darwin)
-	@if [ -f "src-tauri/resources/bin/mlx-server" ]; then \
-		echo "MLX server already exists at src-tauri/resources/bin/mlx-server, skipping build..."; \
-	else \
-		make build-mlx-server; \
-	fi
-else
-	@echo "Skipping MLX server build (macOS only)"
-endif
-
-# Build Mita CLI (release, platform-aware) → src-tauri/resources/bin/mita-cli[.exe]
+# Build Biyan CLI (release, platform-aware) → src-tauri/resources/bin/biyan-cli[.exe]
 build-cli:
 ifeq ($(DETECTED_OS),Darwin)
-	cd src-tauri && cargo build --release --features cli --bin mita-cli --target aarch64-apple-darwin
-	cd src-tauri && cargo build --release --features cli --bin mita-cli --target x86_64-apple-darwin
+	cd src-tauri && cargo build --release --features cli --bin biyan-cli --target aarch64-apple-darwin
+	cd src-tauri && cargo build --release --features cli --bin biyan-cli --target x86_64-apple-darwin
 	$(call MKDIR,'src-tauri/resources/bin')
 	lipo -create \
-		src-tauri/target/aarch64-apple-darwin/release/mita-cli \
-		src-tauri/target/x86_64-apple-darwin/release/mita-cli \
-		-output src-tauri/resources/bin/mita-cli
+		src-tauri/target/aarch64-apple-darwin/release/biyan-cli \
+		src-tauri/target/x86_64-apple-darwin/release/biyan-cli \
+		-output src-tauri/resources/bin/biyan-cli
 	$(call MKDIR,'src-tauri/target/universal-apple-darwin/release')
-	cd src-tauri && cargo build --release --features computer-agent-runner --bin mita-computer-agent-runner --target aarch64-apple-darwin
-	cd src-tauri && cargo build --release --features computer-agent-runner --bin mita-computer-agent-runner --target x86_64-apple-darwin
+	cd src-tauri && cargo build --release --features computer-agent-runner --bin biyan-computer-agent-runner --target aarch64-apple-darwin
+	cd src-tauri && cargo build --release --features computer-agent-runner --bin biyan-computer-agent-runner --target x86_64-apple-darwin
 	lipo -create \
-		src-tauri/target/aarch64-apple-darwin/release/mita-computer-agent-runner \
-		src-tauri/target/x86_64-apple-darwin/release/mita-computer-agent-runner \
-		-output src-tauri/target/universal-apple-darwin/release/mita-computer-agent-runner
-	chmod +x src-tauri/resources/bin/mita-cli
-	chmod +x src-tauri/target/universal-apple-darwin/release/mita-computer-agent-runner
+		src-tauri/target/aarch64-apple-darwin/release/biyan-computer-agent-runner \
+		src-tauri/target/x86_64-apple-darwin/release/biyan-computer-agent-runner \
+		-output src-tauri/target/universal-apple-darwin/release/biyan-computer-agent-runner
+	chmod +x src-tauri/resources/bin/biyan-cli
+	chmod +x src-tauri/target/universal-apple-darwin/release/biyan-computer-agent-runner
 
 	echo "Checking for code signing identity..."; \
 	SIGNING_IDENTITY="$${APPLE_SIGNING_IDENTITY:-$(MACOS_SIGNING_IDENTITY)}"; \
 	if security find-identity -v -p codesigning | grep -F "\"$$SIGNING_IDENTITY\"" >/dev/null; then \
-		echo "Signing mita-cli with identity: $$SIGNING_IDENTITY"; \
-		codesign --force --options runtime --timestamp --sign "$$SIGNING_IDENTITY" src-tauri/resources/bin/mita-cli; \
+		echo "Signing biyan-cli with identity: $$SIGNING_IDENTITY"; \
+		codesign --force --options runtime --timestamp --sign "$$SIGNING_IDENTITY" src-tauri/resources/bin/biyan-cli; \
 		echo "Code signing completed successfully"; \
 	else \
 		echo "Warning: Developer ID identity not found: $$SIGNING_IDENTITY. Skipping code signing (notarization will fail)."; \
 	fi
 
-	cp src-tauri/resources/bin/mita-cli src-tauri/target/universal-apple-darwin/release/mita-cli
+	cp src-tauri/resources/bin/biyan-cli src-tauri/target/universal-apple-darwin/release/biyan-cli
 else ifeq ($(DETECTED_OS),Windows)
-	cd src-tauri && cargo build --release --features cli --bin mita-cli
+	cd src-tauri && cargo build --release --features cli --bin biyan-cli
 	$(call MKDIR,src-tauri\resources\bin)
-	copy /Y src-tauri\target\release\mita-cli.exe src-tauri\resources\bin\mita-cli.exe
+	copy /Y src-tauri\target\release\biyan-cli.exe src-tauri\resources\bin\biyan-cli.exe
 else
-	cd src-tauri && cargo build --release --features cli --bin mita-cli
-	cp src-tauri/target/release/mita-cli src-tauri/resources/bin/mita-cli
+	cd src-tauri && cargo build --release --features cli --bin biyan-cli
+	cp src-tauri/target/release/biyan-cli src-tauri/resources/bin/biyan-cli
 endif
 
 # Debug build for local dev (faster, native arch only)
 build-cli-dev:
 	$(call MKDIR,src-tauri\resources\bin)
-	cd src-tauri && cargo build --features cli --bin mita-cli
+	cd src-tauri && cargo build --features cli --bin biyan-cli
 ifeq ($(DETECTED_OS),Windows)
-	copy /Y src-tauri\target\debug\mita-cli.exe src-tauri\resources\bin\mita-cli.exe
+	copy /Y src-tauri\target\debug\biyan-cli.exe src-tauri\resources\bin\biyan-cli.exe
 else
-	install -m755 src-tauri/target/debug/mita-cli src-tauri/resources/bin/mita-cli
+	install -m755 src-tauri/target/debug/biyan-cli src-tauri/resources/bin/biyan-cli
 endif
 
 # Build
@@ -254,7 +200,6 @@ ifeq ($(DETECTED_OS),Windows)
 	-powershell -Command "Remove-Item -Recurse -Force ./electron/pre-install/*.tgz"
 	-powershell -Command "Remove-Item -Recurse -Force ./src-tauri/resources"
 	-powershell -Command "Remove-Item -Recurse -Force ./src-tauri/target"
-	-powershell -Command "if (Test-Path \"$($env:USERPROFILE)\jan\extensions\") { Remove-Item -Path \"$($env:USERPROFILE)\jan\extensions\" -Recurse -Force }"
 else ifeq ($(DETECTED_OS),Linux)
 	find . -name "node_modules" -type d -prune -exec rm -rf '{}' +
 	find . -name ".next" -type d -exec rm -rf '{}' +
@@ -270,8 +215,6 @@ else ifeq ($(DETECTED_OS),Linux)
 	rm -rf ./electron/pre-install/*.tgz
 	rm -rf ./src-tauri/resources
 	rm -rf ./src-tauri/target
-	rm -rf "~/jan/extensions"
-	rm -rf "~/.cache/jan*"
 	rm -rf "./.cache"
 else
 	find . -name "node_modules" -type d -prune -exec rm -rfv '{}' +
@@ -287,6 +230,4 @@ else
 	rm -rfv ./electron/pre-install/*.tgz
 	rm -rfv ./src-tauri/resources
 	rm -rfv ./src-tauri/target
-	rm -rfv ~/jan/extensions
-	rm -rfv ~/Library/Caches/jan*
 endif

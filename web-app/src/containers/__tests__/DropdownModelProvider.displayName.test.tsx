@@ -13,6 +13,7 @@ type ModelProvider = {
   provider: string
   active: boolean
   api_key?: string
+  base_url?: string
   models: Array<{
     id: string
     displayName?: string
@@ -45,17 +46,6 @@ vi.mock('@/hooks/useModelProvider', () => ({
 vi.mock('@/hooks/useThreads', () => ({
   useThreads: vi.fn(() => ({
     updateCurrentThreadModel: vi.fn(),
-  })),
-}))
-
-vi.mock('@/hooks/useServiceHub', () => ({
-  useServiceHub: vi.fn(() => ({
-    models: () => ({
-      checkMmprojExists: vi.fn(() => Promise.resolve(false)),
-      checkMmprojExistsAndUpdateOffloadMMprojSetting: vi.fn(() =>
-        Promise.resolve()
-      ),
-    }),
   })),
 }))
 
@@ -153,19 +143,12 @@ vi.mock('../Capabilities', () => ({
   ),
 }))
 
-vi.mock('../ModelSetting', () => ({
-  ModelSetting: () => <div data-testid="model-setting" />,
-}))
-
-vi.mock('../ModelSupportStatus', () => ({
-  ModelSupportStatus: () => <div data-testid="model-support-status" />,
-}))
-
 describe('DropdownModelProvider - Display Name Integration', () => {
   const mockProviders: ModelProvider[] = [
     {
-      provider: 'llamacpp',
+      provider: 'remote-test',
       active: true,
+      base_url: 'https://api.example.com/v1',
       models: [
         {
           id: 'model1.gguf',
@@ -205,7 +188,7 @@ describe('DropdownModelProvider - Display Name Integration', () => {
     // Reset the mock for each test
     vi.mocked(useModelProvider).mockReturnValue({
       providers: mockProviders,
-      selectedProvider: 'llamacpp',
+      selectedProvider: 'remote-test',
       selectedModel: mockSelectedModel,
       getProviderByName: vi.fn((name: string) =>
         mockProviders.find((p: ModelProvider) => p.provider === name)
@@ -235,7 +218,7 @@ describe('DropdownModelProvider - Display Name Integration', () => {
     vi.mocked(useProviderBalance).mockReturnValue({
       balance: {
         state: 'supported',
-        provider: 'llamacpp',
+        provider: 'remote-test',
         unit: 'usd',
         fetchedAt: 1781260326,
         accountBalance: { available: 77.13 },
@@ -253,7 +236,7 @@ describe('DropdownModelProvider - Display Name Integration', () => {
   it('should fall back to model ID when no displayName is set', () => {
     vi.mocked(useModelProvider).mockReturnValue({
       providers: mockProviders,
-      selectedProvider: 'llamacpp',
+      selectedProvider: 'remote-test',
       selectedModel: mockProviders[0].models[2], // model3 without displayName
       getProviderByName: vi.fn((name: string) =>
         mockProviders.find((p: ModelProvider) => p.provider === name)
@@ -309,7 +292,7 @@ describe('DropdownModelProvider - Display Name Integration', () => {
 
     vi.mocked(useModelProvider).mockReturnValue({
       providers: mockProviders,
-      selectedProvider: 'llamacpp',
+      selectedProvider: 'remote-test',
       selectedModel: mockSelectedModel,
       getProviderByName: vi.fn((name: string) =>
         mockProviders.find((p: ModelProvider) => p.provider === name)
@@ -335,7 +318,7 @@ describe('DropdownModelProvider - Display Name Integration', () => {
     // Set up mock for model2 selection
     vi.mocked(useModelProvider).mockReturnValue({
       providers: mockProviders,
-      selectedProvider: 'llamacpp',
+      selectedProvider: 'remote-test',
       selectedModel: mockProviders[0].models[1], // model2 with displayName "Short Name"
       getProviderByName: vi.fn((name: string) =>
         mockProviders.find((p: ModelProvider) => p.provider === name)
@@ -366,6 +349,7 @@ describe('DropdownModelProvider - Display Name Integration', () => {
         provider: 'jingxing',
         active: true,
         api_key: 'test-token',
+        base_url: 'https://api.example.com/v1',
         models: [
           {
             id: 'gpt-5.4',
@@ -402,6 +386,7 @@ describe('DropdownModelProvider - Display Name Integration', () => {
         provider: 'jingxing',
         active: true,
         api_key: 'test-token',
+        base_url: 'https://api.example.com/v1',
         models: [
           {
             id: 'gpt-5.4',
@@ -451,6 +436,7 @@ describe('DropdownModelProvider - Display Name Integration', () => {
       provider,
       active: true,
       api_key: 'test-token',
+      base_url: `https://${provider}.example.com/v1`,
       models: [
         {
           id: `${provider}-chat-model`,

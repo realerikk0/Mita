@@ -335,7 +335,7 @@ The script reuses the existing Playwright dependency and launches an installed d
 Current focused tests:
 
 ```bash
-yarn exec vitest run --project @janhq/web-app \
+yarn exec vitest run --project @biyan/web-app \
   web-app/src/components/ai-elements/__tests__/loading-ribbon.test.tsx \
   web-app/src/components/ai-elements/__tests__/chain-of-thought.test.tsx \
   web-app/src/components/ai-elements/__tests__/tool.test.tsx \
@@ -351,7 +351,7 @@ Result on 2026-06-22:
 Build/typecheck:
 
 ```bash
-yarn workspace @janhq/core build && yarn workspace @janhq/web-app build
+yarn workspace @biyan/core build && yarn workspace @biyan/web-app build
 ```
 
 Result on 2026-06-22:
@@ -359,7 +359,7 @@ Result on 2026-06-22:
 - Passed.
 - Vite emitted existing large-chunk/dynamic-import warnings unrelated to this component.
 - Generated CSS artifact for the ribbon component was about 3.80 kB before gzip and about 1.07 kB gzip in the production build output.
-- Current rerun also passed `yarn workspace @janhq/core build` and `yarn workspace @janhq/web-app build`.
+- Current rerun also passed `yarn workspace @biyan/core build` and `yarn workspace @biyan/web-app build`.
 
 Browser preview on macOS Chrome:
 
@@ -394,12 +394,12 @@ Screenshot artifacts:
 macOS Tauri shell check on 2026-06-22:
 
 ```bash
-yarn tauri dev --no-watch --target aarch64-apple-darwin --config '{"build":{"devUrl":"http://localhost:1420/loading-ribbon-demo"},"bundle":{"externalBin":[],"resources":{"resources/LICENSE":"resources/LICENSE","resources/bin/mita-web-research-mcp.mjs":"resources/bin/mita-web-research-mcp.mjs","resources/embedding-models":"resources/embedding-models","resources/ms-playwright":"resources/ms-playwright"}}}'
+yarn tauri dev --no-watch --target aarch64-apple-darwin --config '{"build":{"devUrl":"http://localhost:1420/loading-ribbon-demo"},"bundle":{"externalBin":[],"resources":{"resources/LICENSE":"resources/LICENSE","resources/NOTICE":"resources/NOTICE","resources/bin/biyan-web-research-mcp.mjs":"resources/bin/biyan-web-research-mcp.mjs","resources/ms-playwright":"resources/ms-playwright"}}}'
 ```
 
 Result:
 
-- Passed through Rust compile and launched `target/aarch64-apple-darwin/debug/Mita`.
+- Passed through Rust compile and launched `target/aarch64-apple-darwin/debug/Biyan`.
 - Runtime logs showed the app setup completed and the bundled Biyan Web Research MCP server initialized successfully.
 - `http://localhost:1420/loading-ribbon-demo` returned HTTP 200 while the Tauri process was running.
 - Initial default `x86_64-apple-darwin` dev attempt failed before app launch because Apple `cc` crashed with `Segmentation fault: 11` while linking a build script.
@@ -425,8 +425,8 @@ yarn dev:loading-ribbon:tauri
 Result:
 
 - Dry run selected `--target aarch64-apple-darwin` and `--config scripts/loading-ribbon-tauri-demo.config.json`.
-- `yarn dev:loading-ribbon:tauri` compiled and launched `target/aarch64-apple-darwin/debug/Mita`.
-- The Tauri app process was visible as `target/aarch64-apple-darwin/debug/Mita`.
+- `yarn dev:loading-ribbon:tauri` compiled and launched `target/aarch64-apple-darwin/debug/Biyan`.
+- The Tauri app process was visible as `target/aarch64-apple-darwin/debug/Biyan`.
 - `http://localhost:1420/loading-ribbon-demo` returned HTTP 200 while the Tauri shell was running.
 
 Remaining before full cross-platform sign-off:

@@ -46,6 +46,7 @@ import { route } from "@/constants/routes"
 import { cn } from "@/lib/utils"
 import { ThreadProjectMenuItems } from "@/containers/ThreadProjectMenuItems"
 import { MediaProjectMenuItems } from "@/containers/MediaProjectMenuItems"
+import { isBiyanTeamsThread } from '@/types/biyan-teams'
 
 type ProjectChildEntry =
   | {
@@ -78,10 +79,6 @@ function timestampFromIso(value?: string) {
   if (!value) return 0
   const time = new Date(value).getTime()
   return Number.isFinite(time) ? time : 0
-}
-
-function isMitaTeamsThread(thread: Thread) {
-  return Boolean(thread.metadata?.mitaTeams)
 }
 
 function mediaTitle(
@@ -384,11 +381,11 @@ export function NavProjects() {
     }
 
     refreshMediaAssets()
-    window.addEventListener('mita-media-history-updated', refreshMediaAssets)
+    window.addEventListener('biyan-media-history-updated', refreshMediaAssets)
     return () => {
       mounted = false
       window.removeEventListener(
-        'mita-media-history-updated',
+        'biyan-media-history-updated',
         refreshMediaAssets
       )
     }
@@ -403,7 +400,7 @@ export function NavProjects() {
       const entries = projectId ? result.get(projectId) : undefined
       if (!entries) return
 
-      const team = isMitaTeamsThread(thread)
+      const team = isBiyanTeamsThread(thread)
       entries.push({
         id: thread.id,
         kind: team ? 'team' : 'chat',

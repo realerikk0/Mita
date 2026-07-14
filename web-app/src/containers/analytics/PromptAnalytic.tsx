@@ -2,14 +2,14 @@ import { Button } from '@/components/ui/button'
 import { useAnalytic } from '@/hooks/useAnalytic'
 import { IconFileTextShield } from '@tabler/icons-react'
 import { useTranslation } from '@/i18n/react-i18next-compat'
-import { setMitaAnalyticsConsent } from '@/lib/analytics'
+import { setBiyanAnalyticsConsent } from '@/lib/analytics'
 
 export function PromptAnalytic() {
   const { t } = useTranslation()
   const { setProductAnalyticPrompt, setProductAnalytic } = useAnalytic()
 
   const handleProductAnalytics = (isAllowed: boolean) => {
-    setMitaAnalyticsConsent(isAllowed)
+    setBiyanAnalyticsConsent(isAllowed)
     setProductAnalytic(isAllowed)
     setProductAnalyticPrompt(false)
   }
@@ -19,14 +19,14 @@ export function PromptAnalytic() {
       <div className="flex items-center gap-2">
         <IconFileTextShield className="text-muted-foreground" />
         <h2 className="font-medium">
-          {t('helpUsImproveMita')}
+          {t('helpUsImproveBiyan')}
         </h2>
       </div>
       <p className="mt-2 text-xs text-muted-foreground leading-normal">
-        {t('helpUsImproveMitaDescription')}
+        {t('helpUsImproveBiyanDescription')}
       </p>
       <p className="mt-2 text-sm">
-        {t('helpUsImproveMitaQuestion')}
+        {t('helpUsImproveBiyanQuestion')}
       </p>
       <div className="mt-4 flex justify-end space-x-2">
         <Button

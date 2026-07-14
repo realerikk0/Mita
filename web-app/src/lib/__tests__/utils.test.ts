@@ -13,18 +13,12 @@ import {
 
 describe('getProviderLogo', () => {
   it('returns correct logo paths for known providers', () => {
-    expect(getProviderLogo('llamacpp')).toBe(
-      '/images/model-provider/llamacpp.svg'
-    )
     expect(getProviderLogo('anthropic')).toBe(
       '/images/model-provider/anthropic.svg'
     )
     expect(getProviderLogo('openai')).toBe('/images/model-provider/openai.svg')
     expect(getProviderLogo('gemini')).toBe('/images/model-provider/gemini.svg')
     expect(getProviderLogo('nvidia')).toBe('/images/model-provider/nvidia.svg')
-    expect(getProviderLogo('foundation-models')).toBe(
-      '/images/model-provider/apple-intelligence.svg'
-    )
   })
 
   it('returns undefined for unknown providers', () => {
@@ -35,12 +29,11 @@ describe('getProviderLogo', () => {
 
 describe('getProviderTitle', () => {
   it('returns formatted titles for special providers', () => {
-    expect(getProviderTitle('llamacpp')).toBe('Llama.cpp')
     expect(getProviderTitle('openai')).toBe('OpenAI')
     expect(getProviderTitle('openrouter')).toBe('OpenRouter')
     expect(getProviderTitle('gemini')).toBe('Gemini')
     expect(getProviderTitle('nvidia')).toBe('NVIDIA NIM')
-    expect(getProviderTitle('foundation-models')).toBe('Apple Intelligence')
+    expect(getProviderTitle('jingxing')).toBe('Biyuan AI')
   })
 
   it('capitalizes first letter for unknown providers', () => {

@@ -8,9 +8,7 @@ if (typeof window === 'undefined') {
 // Mock window.core for browser tests
 if (!window.core) {
   Object.defineProperty(window, 'core', {
-    value: {
-      engineManager: undefined
-    },
+    value: {},
     writable: true,
     configurable: true
   })

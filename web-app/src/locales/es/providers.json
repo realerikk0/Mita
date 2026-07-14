@@ -12,7 +12,7 @@
   "stop": "Detener",
   "start": "Iniciar",
   "noModelFound": "No se encontró ningún modelo",
-  "noModelFoundDesc": "Los modelos disponibles se mostrarán aquí. Si aún no tienes modelos, visita el Hub para descargar.",
+  "noModelFoundDesc": "Available models from the configured remote provider will be listed here. Refresh after adding or changing provider credentials.",
   "configuration": "Configuración",
   "apiEndpoint": "Endpoint de API",
   "testConnection": "Probar conexión",

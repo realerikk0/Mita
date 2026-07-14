@@ -12,7 +12,7 @@
   "stop": "Hentikan",
   "start": "Mulai",
   "noModelFound": "Tidak ada model yang ditemukan",
-  "noModelFoundDesc": "Model yang tersedia akan dicantumkan di sini. Jika Anda belum memiliki model, kunjungi Hub untuk mengunduh.",
+  "noModelFoundDesc": "Available models from the configured remote provider will be listed here. Refresh after adding or changing provider credentials.",
   "configuration": "Konfigurasi",
   "apiEndpoint": "Titik Akhir API",
   "testConnection": "Uji Koneksi",

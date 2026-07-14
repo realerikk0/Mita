@@ -104,11 +104,10 @@
   "chats": "チャット",
   "favorites": "お気に入り",
   "recents": "最近の項目",
-  "hub": "ハブ",
   "helpSupport": "ヘルプとサポート",
-  "helpUsImproveMita": "Biyanの改善にご協力ください",
-  "helpUsImproveMitaDescription": "機能の利用状況を把握するために匿名データを収集します。チャットや個人情報が追跡されることはありません。これはいつでも設定 > プライバシーで変更できます。",
-  "helpUsImproveMitaQuestion": "Biyan の改善に協力しますか？",
+  "helpUsImproveBiyan": "Biyanの改善にご協力ください",
+  "helpUsImproveBiyanDescription": "機能の利用状況を把握するために匿名データを収集します。チャットや個人情報が追跡されることはありません。これはいつでも設定 > プライバシーで変更できます。",
+  "helpUsImproveBiyanQuestion": "Biyan の改善に協力しますか？",
   "unstarAll": "すべてのスターを解除",
   "unstar": "スターを解除",
   "deleteAll": "すべて削除",
@@ -158,12 +157,7 @@
   "noResultsFound": "結果が見つかりません",
   "noThreadsYet": "スレッドはまだありません",
   "noThreadsYetDesc": "新しい会話を始めると、ここにスレッドの履歴が表示されます。",
-  "downloads": "ダウンロード",
-  "downloading": "ダウンロード中",
   "uploadingAttachments": "添付ファイルをアップロードしています…",
-  "cancelDownload": "ダウンロードをキャンセル",
-  "downloadCancelled": "ダウンロードがキャンセルされました",
-  "downloadComplete": "ダウンロード完了",
   "thinking": "考え中...",
   "thought": "思考",
   "callingTool": "ツールを呼び出し中",
@@ -181,7 +175,7 @@
   "noModels": "モデルが見つかりません",
   "customAvatar": "カスタムアバター",
   "editAssistant": "アシスタントを編集",
-  "mita": "Biyan",
+  "biyan": "Biyan",
   "metadata": "メタデータ",
   "regenerate": "再生成",
   "threadImage": "スレッド画像",
@@ -423,30 +417,14 @@
       "title": "ダウンロード完了",
       "description": "{{item}}がダウンロードされました"
     },
-    "downloadCancelled": {
-      "title": "ダウンロードがキャンセルされました",
-      "description": "ダウンロード処理はキャンセルされました"
-    },
     "downloadFailed": {
       "title": "ダウンロードに失敗しました",
       "description": "{{item}}のダウンロードに失敗しました"
     },
-    "modelValidationStarted": {
-      "title": "モデルを検証中",
-      "description": "ダウンロードしたモデル「{{modelId}}」を正常に完了しました。整合性を検証しています..."
-    },
-    "modelValidationFailed": {
-      "title": "モデルの検証に失敗しました",
-      "description": "ダウンロードしたモデル「{{modelId}}」は整合性検証に失敗し、削除されました。ファイルが破損または改ざんされている可能性があります。"
-    },
     "modelNoVision": {
       "title": "モデルは画像に対応していません",
       "description": "画像を添付するには、ビジョン対応モデルを選択してください。",
-      "action": "ハブを開く"
-    },
-    "downloadAndVerificationComplete": {
-      "title": "ダウンロード完了",
-      "description": "モデル「{{item}}」は正常にダウンロードおよび検証されました"
+      "action": "プロバイダー設定を開く"
     },
     "projectCreated": {
       "title": "プロジェクトが作成されました",

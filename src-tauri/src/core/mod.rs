@@ -1,11 +1,10 @@
 pub mod app;
-#[cfg(feature = "cli")]
-pub mod cli;
 pub mod computer_agent;
 pub mod downloads;
 pub mod extensions;
 pub mod filesystem;
 pub mod image_assets;
+pub mod legacy_migrations;
 pub mod mcp;
 pub mod server;
 pub mod setup;

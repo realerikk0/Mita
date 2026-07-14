@@ -1,8 +1,56 @@
+use super::commands::reject_retired_model_download;
 use super::helpers::*;
 use super::models::*;
-use crate::core::filesystem::helpers::resolve_path_within_mita_data_folder;
+use crate::core::filesystem::helpers::resolve_path_within_biyan_data_folder;
 use reqwest::header::HeaderMap;
 use std::collections::HashMap;
+
+fn download_item(url: &str, save_path: &str) -> DownloadItem {
+    DownloadItem {
+        url: url.to_string(),
+        save_path: save_path.to_string(),
+        proxy: None,
+        sha256: None,
+        size: None,
+    }
+}
+
+#[test]
+fn rejects_model_artifacts_and_hub_repo_files() {
+    for candidate in [
+        download_item("https://example.com/model.gguf", "assets/model.gguf"),
+        download_item("https://example.com/file", "llamacpp/models/file"),
+        download_item(
+            "https://huggingface.co/org/repo/resolve/main/config.json",
+            "assets/config.json",
+        ),
+        download_item(
+            "https://catalog.jan.ai/models/catalog.json",
+            "catalog/catalog.json",
+        ),
+        download_item(
+            "https://github.com/janhq/llama.cpp/releases/download/v1/backend.tar.gz",
+            "downloads/backend.tar.gz",
+        ),
+        download_item(
+            "https://api.github.com/repos/janhq/llama.cpp/releases/latest",
+            "downloads/backend-release.json",
+        ),
+    ] {
+        assert!(reject_retired_model_download(&candidate)
+            .unwrap_err()
+            .starts_with("LOCAL_RUNTIME_REMOVED"));
+    }
+}
+
+#[test]
+fn permits_generic_remote_assets() {
+    assert!(reject_retired_model_download(&download_item(
+        "https://cdn.example.com/generated/image.png",
+        "image-assets/image.png",
+    ))
+    .is_ok());
+}
 
 // Helper function to create a minimal proxy config for testing
 fn create_test_proxy_config(url: &str) -> ProxyConfig {
@@ -197,7 +245,6 @@ fn test_download_item_with_ssl_proxy() {
         proxy: Some(proxy_config),
         sha256: None,
         size: None,
-        model_id: None,
     };
 
     assert!(download_item.proxy.is_some());
@@ -217,7 +264,6 @@ fn test_client_creation_with_ssl_settings() {
         proxy: Some(proxy_config),
         sha256: None,
         size: None,
-        model_id: None,
     };
 
     let header_map = HeaderMap::new();
@@ -261,15 +307,14 @@ fn test_proxy_config_with_socks_and_ssl_settings() {
 fn test_download_item_creation() {
     let item = DownloadItem {
         url: "https://example.com/file.tar.gz".to_string(),
-        save_path: "models/test.tar.gz".to_string(),
+        save_path: "downloads/test.tar.gz".to_string(),
         proxy: None,
         sha256: None,
         size: None,
-        model_id: None,
     };
 
     assert_eq!(item.url, "https://example.com/file.tar.gz");
-    assert_eq!(item.save_path, "models/test.tar.gz");
+    assert_eq!(item.save_path, "downloads/test.tar.gz");
 }
 
 #[cfg(unix)]
@@ -295,7 +340,7 @@ fn test_download_scope_accepts_absolute_path_inside_canonical_root() {
     symlink(&canonical_root, &configured_root).unwrap();
 
     let candidate = canonical_root.join("llamacpp/backends/v1/backend.tar.gz");
-    let (_, resolved_path) = resolve_path_within_mita_data_folder(
+    let (_, resolved_path) = resolve_path_within_biyan_data_folder(
         &configured_root,
         candidate.to_string_lossy().as_ref(),
     )
@@ -388,49 +433,11 @@ fn test_download_item_deserialization() {
     assert_eq!(item.save_path, "downloads/file.zip");
 }
 
-// ===== convert_to_mirror_url =====
-
 #[test]
-fn test_convert_to_mirror_url_huggingface() {
-    let url = "https://huggingface.co/some/repo/resolve/main/model.gguf";
-    let mirror = convert_to_mirror_url(url).expect("should produce a mirror url");
-    assert!(mirror.starts_with("https://apps") && mirror.contains(".jan.ai/"));
-    assert!(mirror.ends_with("huggingface.co/some/repo/resolve/main/model.gguf"));
-}
-
-#[test]
-fn test_convert_to_mirror_url_huggingface_subdomain() {
-    // Subdomains of mirror domains should also be mirrored
-    let url = "https://cdn.huggingface.co/file.bin";
-    let mirror = convert_to_mirror_url(url).expect("subdomain should mirror");
-    assert!(mirror.ends_with("cdn.huggingface.co/file.bin"));
-}
-
-#[test]
-fn test_convert_to_mirror_url_http_scheme() {
-    let url = "http://huggingface.co/file";
-    let mirror = convert_to_mirror_url(url).expect("http should be stripped too");
-    assert!(mirror.ends_with("huggingface.co/file"));
-    assert!(!mirror.contains("http://huggingface.co"));
-}
-
-#[test]
-fn test_convert_to_mirror_url_non_mirror_domain() {
-    assert!(convert_to_mirror_url("https://example.com/file.bin").is_none());
-    assert!(convert_to_mirror_url("https://github.com/x/y").is_none());
-}
-
-#[test]
-fn test_convert_to_mirror_url_invalid_url() {
-    assert!(convert_to_mirror_url("not a url").is_none());
-    assert!(convert_to_mirror_url("").is_none());
-}
-
-#[test]
-fn test_convert_to_mirror_url_not_substring_match() {
-    // A domain that merely contains "huggingface.co" as substring (not as suffix) must NOT match
-    let url = "https://huggingface.co.evil.com/file";
-    assert!(convert_to_mirror_url(url).is_none());
+fn test_downloads_do_not_rewrite_hugging_face_urls() {
+    let source = include_str!("helpers.rs");
+    assert!(!source.contains("MODEL_MIRROR_PREFIX"));
+    assert!(!source.contains("convert_to_mirror_url"));
 }
 
 // ===== err_to_string =====
@@ -539,7 +546,6 @@ fn test_get_client_for_item_no_proxy() {
         proxy: None,
         sha256: None,
         size: None,
-        model_id: None,
     };
     assert!(_get_client_for_item(&item, &HeaderMap::new()).is_ok());
 }
@@ -555,7 +561,6 @@ fn test_get_client_for_item_with_bypassed_proxy() {
         proxy: Some(proxy),
         sha256: None,
         size: None,
-        model_id: None,
     };
     assert!(_get_client_for_item(&item, &HeaderMap::new()).is_ok());
 }
@@ -568,7 +573,6 @@ fn test_get_client_for_item_invalid_proxy_url() {
         proxy: Some(create_test_proxy_config("not-a-url")),
         sha256: None,
         size: None,
-        model_id: None,
     };
     assert!(_get_client_for_item(&item, &HeaderMap::new()).is_err());
 }
@@ -636,17 +640,26 @@ async fn test_progress_tracker_clone_shares_state() {
 #[test]
 fn test_download_item_full_deserialization() {
     let json = r#"{
-        "url": "https://huggingface.co/m/file.gguf",
-        "save_path": "models/m/file.gguf",
+        "url": "https://cdn.example.com/assets/archive.zip",
+        "save_path": "downloads/archive.zip",
         "sha256": "abc123",
-        "size": 4096,
-        "model_id": "m"
+        "size": 4096
     }"#;
     let item: DownloadItem = serde_json::from_str(json).unwrap();
     assert_eq!(item.sha256.as_deref(), Some("abc123"));
     assert_eq!(item.size, Some(4096));
-    assert_eq!(item.model_id.as_deref(), Some("m"));
     assert!(item.proxy.is_none());
+}
+
+#[test]
+fn test_download_item_rejects_retired_model_fields() {
+    let json = r#"{
+        "url": "https://cdn.example.com/assets/archive.zip",
+        "save_path": "downloads/archive.zip",
+        "model_id": "legacy-model"
+    }"#;
+
+    assert!(serde_json::from_str::<DownloadItem>(json).is_err());
 }
 
 #[test]

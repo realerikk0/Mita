@@ -70,7 +70,7 @@ function storageKeyForProvider(provider: ModelProvider) {
     .join('|') ?? ''
 
   return [
-    'mita-provider-balance-cache:',
+    'biyan-provider-balance-cache:',
     provider.provider,
     '|',
     provider.base_url ?? '',
@@ -209,7 +209,7 @@ describe('useProviderBalance', () => {
     await waitFor(() => {
       expect(
         storageKeys().some((key) =>
-          key.startsWith('mita-provider-balance-cache:provider-a|')
+          key.startsWith('biyan-provider-balance-cache:provider-a|')
         )
       ).toBe(true)
     })
@@ -221,7 +221,7 @@ describe('useProviderBalance', () => {
 
     expect(
       storageKeys().some((key) =>
-        key.startsWith('mita-provider-balance-cache:provider-a|')
+        key.startsWith('biyan-provider-balance-cache:provider-a|')
       )
     ).toBe(false)
   })
@@ -261,7 +261,7 @@ describe('useProviderBalance', () => {
     )
 
     const cacheKey = storageKeys().find((key) =>
-      key.startsWith('mita-provider-balance-cache:provider-a|')
+      key.startsWith('biyan-provider-balance-cache:provider-a|')
     )
     expect(cacheKey).toBeDefined()
     const cached = JSON.parse(localStorage.getItem(cacheKey!) ?? '{}')
@@ -321,11 +321,11 @@ describe('useProviderBalance', () => {
     const now = Date.now()
     for (let index = 0; index < 21; index += 1) {
       localStorage.setItem(
-        `mita-provider-balance-cache:seed-${index}|url|hash`,
+        `biyan-provider-balance-cache:seed-${index}|url|hash`,
         storedBalanceEntry(balanceFor(`seed-${index}`), now - 10_000 + index)
       )
     }
-    const invalidKey = 'mita-provider-balance-cache:invalid|url|hash'
+    const invalidKey = 'biyan-provider-balance-cache:invalid|url|hash'
     localStorage.setItem(invalidKey, '{bad json')
     fetchProviderBalance.mockResolvedValue(balanceFor('provider-a'))
     const provider = providerFor('provider-a')
@@ -336,18 +336,18 @@ describe('useProviderBalance', () => {
       expect(result.current.balance?.state).toBe('supported')
     )
     const cacheKeys = storageKeys().filter((key) =>
-      key.startsWith('mita-provider-balance-cache:')
+      key.startsWith('biyan-provider-balance-cache:')
     )
     expect(cacheKeys).toHaveLength(20)
     expect(cacheKeys).toContain(storageKeyForProvider(provider))
-    expect(localStorage.getItem('mita-provider-balance-cache:seed-0|url|hash'))
+    expect(localStorage.getItem('biyan-provider-balance-cache:seed-0|url|hash'))
       .toBeNull()
     expect(localStorage.getItem(invalidKey)).toBeNull()
   })
 
   it('only clears the selected provider balance storage prefix', () => {
-    const providerAKey = 'mita-provider-balance-cache:provider-a|hash'
-    const providerABKey = 'mita-provider-balance-cache:provider-ab|hash'
+    const providerAKey = 'biyan-provider-balance-cache:provider-a|hash'
+    const providerABKey = 'biyan-provider-balance-cache:provider-ab|hash'
     const cached = storedBalanceEntry(balanceFor('provider-a'))
     localStorage.setItem(providerAKey, cached)
     localStorage.setItem(providerABKey, cached)

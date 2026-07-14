@@ -82,14 +82,14 @@ vi.mock('@/hooks/useGeneralSetting', () => ({
 let selectedModelOverride: any = {
   id: 'model-a',
   capabilities: ['tools'],
-  provider: 'llamacpp',
+  provider: 'remote-test',
 }
 const getProviderByNameMock = vi.fn()
 vi.mock('@/hooks/useModelProvider', () => ({
   useModelProvider: (selector: any) =>
     selector({
       selectedModel: selectedModelOverride,
-      selectedProvider: { provider: 'llamacpp' },
+      selectedProvider: { provider: 'remote-test' },
       selectModelProvider: vi.fn(),
       updateProvider: vi.fn(),
       getProviderByName: getProviderByNameMock,
@@ -133,7 +133,6 @@ vi.mock('@/hooks/useAttachments', () => ({
 let attachmentsList: any[] = []
 let attachmentsSettings: any = {
   enabled: true,
-  parseMode: 'auto',
   maxFileSizeMB: 10,
 }
 const setAttachmentsMock = vi.fn()
@@ -164,26 +163,13 @@ vi.mock('@/hooks/useWebSearch', () => ({
     }),
 }))
 
-vi.mock('@/hooks/useMitaWebResearch', () => ({
-  useMitaWebResearch: () => ({
+vi.mock('@/hooks/useBiyanWebResearch', () => ({
+  useBiyanWebResearch: () => ({
     hasConfig: false,
     isActive: false,
     isLoading: false,
     setActive: vi.fn(),
   }),
-}))
-
-const showAttachmentPromptMock = vi.fn().mockResolvedValue('embeddings')
-function useAttachmentIngestionPromptImpl(selector?: any) {
-  const state = { showPrompt: showAttachmentPromptMock }
-  if (selector) return selector(state)
-  return state
-}
-;(useAttachmentIngestionPromptImpl as any).getState = () => ({
-  showPrompt: showAttachmentPromptMock,
-})
-vi.mock('@/hooks/useAttachmentIngestionPrompt', () => ({
-  useAttachmentIngestionPrompt: useAttachmentIngestionPromptImpl,
 }))
 
 // Message queue store — it's imported as a zustand hook and also invoked via
@@ -225,10 +211,9 @@ vi.mock('@/lib/extension', () => ({
   },
 }))
 
-vi.mock('@janhq/core', () => ({
-  ExtensionTypeEnum: { MCP: 'mcp', VectorDB: 'vectordb' },
+vi.mock('@biyan/core', () => ({
+  ExtensionTypeEnum: { MCP: 'mcp' },
   MCPExtension: class {},
-  VectorDBExtension: class {},
   fs: {
     existsSync: vi.fn().mockResolvedValue(false),
     fileStat: vi.fn().mockResolvedValue({ size: 123 }),
@@ -251,7 +236,6 @@ vi.mock('@/i18n/react-i18next-compat', () => ({
       ({
         'common:chatInputActions.addImages': '添加图片',
         'common:chatInputActions.addDocumentsOrFiles': '添加文档或文件',
-        'common:chatInputActions.indexingDocuments': '正在索引文档…',
         'common:chatInputActions.useAssistant': '使用助手',
       })[k] ?? k,
   }),
@@ -338,20 +322,18 @@ const resetAll = () => {
   attachmentsList = []
   attachmentsSettings = {
     enabled: true,
-    parseMode: 'auto',
     maxFileSizeMB: 10,
   }
   agentModeOn = false
   selectedModelOverride = {
     id: 'model-a',
     capabilities: ['tools'],
-    provider: 'llamacpp',
+    provider: 'remote-test',
   }
   setPromptMock.mockClear()
   setAttachmentsMock.mockReset()
   clearAttachmentsMock.mockClear()
   transferAttachmentsMock.mockClear()
-  showAttachmentPromptMock.mockClear()
   addToHistoryMock.mockClear()
   navigateHistoryMock.mockClear()
   enqueueMock.mockClear()
@@ -394,11 +376,11 @@ describe('ChatInput', () => {
     expect(screen.getByText('使用助手')).toBeInTheDocument()
   })
 
-  it('renders localized document indexing label', () => {
+  it('renders generic document processing feedback', () => {
     attachmentsList = [{ type: 'document', processing: true }]
     renderInput()
 
-    expect(screen.getByText('正在索引文档…')).toBeInTheDocument()
+    expect(screen.getByText('Processing files…')).toBeInTheDocument()
   })
 
   it('keeps document attachment picker enabled on a new chat before tool-capable model selection', () => {
@@ -406,7 +388,7 @@ describe('ChatInput', () => {
     selectedModelOverride = {
       id: 'model-a',
       capabilities: ['completion'],
-      provider: 'llamacpp',
+      provider: 'remote-test',
     }
 
     renderInput({ initialMessage: true })
@@ -414,17 +396,17 @@ describe('ChatInput', () => {
     expect(screen.getByText('添加文档或文件').closest('button')).not.toBeDisabled()
   })
 
-  it('keeps project document attachment picker disabled when the model lacks tools', () => {
+  it('keeps project document attachment picker independent from tool support', () => {
     currentThreadIdState = undefined as unknown as string
     selectedModelOverride = {
       id: 'model-a',
       capabilities: ['completion'],
-      provider: 'llamacpp',
+      provider: 'remote-test',
     }
 
     renderInput({ initialMessage: true, projectId: 'project-1' })
 
-    expect(screen.getByText('添加文档或文件').closest('button')).toBeDisabled()
+    expect(screen.getByText('添加文档或文件').closest('button')).not.toBeDisabled()
   })
 
   it('does not render web search controls in the composer', () => {
@@ -512,7 +494,7 @@ describe('ChatInput', () => {
     createThreadMock.mockResolvedValue({
       id: 'thread-new',
       title: 'starter prompt',
-      model: { id: 'model-a', provider: 'llamacpp' },
+      model: { id: 'model-a', provider: 'remote-test' },
       updated: Date.now() / 1000,
       assistants: [],
       metadata: {},
@@ -572,7 +554,6 @@ describe('ChatInput', () => {
         type: 'document',
         name: 'notes.txt',
         path: '/tmp/notes.txt',
-        parseMode: 'inline',
       },
     ]
     window.history.pushState({}, '', '/?temporary-chat=true')
@@ -759,7 +740,6 @@ describe('ChatInput', () => {
   it('attaches dropped document files instead of rejecting them as images', async () => {
     attachmentsSettings = {
       enabled: true,
-      parseMode: 'embeddings',
       maxFileSizeMB: 10,
     }
     setAttachmentsMock.mockImplementation((_key, updater) => {
@@ -789,21 +769,20 @@ describe('ChatInput', () => {
         path: '/tmp/report.pdf',
         fileType: 'pdf',
         size: pdf.size,
-        parseMode: 'embeddings',
+        nativeMediaType: 'application/pdf',
       }),
     ])
     expect(screen.queryByText(/Invalid file type/)).not.toBeInTheDocument()
   })
 
-  it('defaults new document attachments to inline when the selected model lacks tool support', async () => {
+  it('keeps document attachments independent from tool support', async () => {
     selectedModelOverride = {
       id: 'model-a',
       capabilities: ['completion'],
-      provider: 'llamacpp',
+      provider: 'remote-test',
     }
     attachmentsSettings = {
       enabled: true,
-      parseMode: 'embeddings',
       maxFileSizeMB: 10,
     }
     setAttachmentsMock.mockImplementation((_key, updater) => {
@@ -831,18 +810,21 @@ describe('ChatInput', () => {
         type: 'document',
         name: 'notes.txt',
         path: '/tmp/notes.txt',
-        parseMode: 'inline',
+        nativeMediaType: 'text/plain',
       }),
     ])
-    expect(showAttachmentPromptMock).not.toHaveBeenCalled()
   })
 
-  it('keeps document drop feedback active in projects without tool support', async () => {
+  it('accepts document drops in projects without tool support', async () => {
     selectedModelOverride = {
       id: 'model-a',
       capabilities: ['completion'],
-      provider: 'llamacpp',
+      provider: 'remote-test',
     }
+    setAttachmentsMock.mockImplementation((_key, updater) => {
+      attachmentsList =
+        typeof updater === 'function' ? updater(attachmentsList) : updater
+    })
     const txt = new File(['notes'], 'notes.txt', { type: 'text/plain' })
     Object.defineProperty(txt, 'path', {
       value: '/tmp/notes.txt',
@@ -861,15 +843,18 @@ describe('ChatInput', () => {
       })
     })
 
-    expect(toast.info).toHaveBeenCalledWith(
-      'Select a tool-capable model to attach documents to a project'
-    )
+    expect(attachmentsList).toEqual([
+      expect.objectContaining({
+        type: 'document',
+        name: 'notes.txt',
+        path: '/tmp/notes.txt',
+      }),
+    ])
   })
 
   it('uses data transfer item paths when dropped document files omit them', async () => {
     attachmentsSettings = {
       enabled: true,
-      parseMode: 'embeddings',
       maxFileSizeMB: 10,
     }
     setAttachmentsMock.mockImplementation((_key, updater) => {
@@ -910,7 +895,7 @@ describe('ChatInput', () => {
         path: '/tmp/report.pdf',
         fileType: 'pdf',
         size: pdf.size,
-        parseMode: 'embeddings',
+        nativeMediaType: 'application/pdf',
       }),
     ])
     expect(toast.info).not.toHaveBeenCalledWith(

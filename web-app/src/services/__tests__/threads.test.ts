@@ -1,7 +1,7 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { DefaultThreadsService } from '../threads/default'
 import { ExtensionManager } from '@/lib/extension'
-import { ConversationalExtension, ExtensionTypeEnum } from '@janhq/core'
+import { ConversationalExtension, ExtensionTypeEnum } from '@biyan/core'
 
 // Mock ExtensionManager
 vi.mock('@/lib/extension', () => ({
@@ -101,7 +101,7 @@ describe('DefaultThreadsService', () => {
       })
     })
 
-    it('should default provider to llamacpp when engine is missing in stored thread', async () => {
+    it('does not infer a retired local provider when engine is missing', async () => {
       mockConversationalExtension.listThreads.mockResolvedValue([
         {
           id: '1',
@@ -111,7 +111,7 @@ describe('DefaultThreadsService', () => {
         },
       ])
       const result = await threadsService.fetchThreads()
-      expect(result[0].model).toEqual({ id: 'my-model', provider: 'llamacpp' })
+      expect(result[0].model).toEqual({ id: 'my-model', provider: '' })
     })
 
     it('should handle empty threads array', async () => {
@@ -365,7 +365,7 @@ describe('DefaultThreadsService', () => {
         id: '1',
         title: 'New Thread',
         updated: 1234567890,
-        assistants: [{ ...realAssistant, model: { id: '*', engine: 'llamacpp' } }],
+        assistants: [{ ...realAssistant, model: { id: '*', engine: '' } }],
         metadata: { order: 1 },
       }
 
@@ -379,7 +379,7 @@ describe('DefaultThreadsService', () => {
         expect.objectContaining({
           assistants: [
             expect.objectContaining({
-              model: { id: '*', engine: 'llamacpp' },
+              model: { id: '*', engine: '' },
             }),
           ],
         })
@@ -440,7 +440,7 @@ describe('DefaultThreadsService', () => {
           assistants: [
             {
               model: { id: 'gpt-4', engine: 'openai' },
-              id: 'mita',
+              id: 'biyan',
               name: 'Biyan',
             },
           ],
@@ -470,7 +470,7 @@ describe('DefaultThreadsService', () => {
         expect.objectContaining({
           assistants: [
             expect.objectContaining({
-              model: { id: '*', engine: 'llamacpp' },
+              model: { id: '*', engine: '' },
             }),
           ],
         })

@@ -6,7 +6,10 @@ import { useModelProvider } from '@/hooks/useModelProvider'
 import { usePrompt } from '@/hooks/usePrompt'
 import { useThreads } from '@/hooks/useThreads'
 import { defaultModel } from '@/lib/models'
-import { createDefaultMitaTeamsConfig } from '@/types/mita-teams'
+import {
+  createBiyanTeamsMetadataPatch,
+  createDefaultBiyanTeamsConfig,
+} from '@/types/biyan-teams'
 
 type NavigateHome = (options: { to: string }) => void | Promise<unknown>
 type NavigateThread = (options: {
@@ -34,7 +37,7 @@ export function startNewAgentChat(navigate: NavigateHome) {
   navigate({ to: route.home })
 }
 
-export async function startNewMitaTeams(navigate: NavigateThread) {
+export async function startNewBiyanTeams(navigate: NavigateThread) {
   useAgentMode.getState().removeThread(TEMPORARY_CHAT_ID)
 
   const modelState = useModelProvider.getState()
@@ -48,9 +51,9 @@ export async function startNewMitaTeams(navigate: NavigateThread) {
     .createThread(model, 'Biyan Teams')
 
   useThreads.getState().updateThread(thread.id, {
-    metadata: {
-      mitaTeams: createDefaultMitaTeamsConfig(model),
-    },
+    metadata: createBiyanTeamsMetadataPatch(
+      createDefaultBiyanTeamsConfig(model)
+    ),
   })
 
   navigate({

@@ -4,7 +4,7 @@ import {
   ContentType,
   MessageStatus,
   type ThreadMessage,
-} from '@janhq/core'
+} from '@biyan/core'
 import {
   buildCompactPrompt,
   mergeExistingSummaries,
@@ -77,14 +77,14 @@ describe('compact-thread helpers', () => {
     })
   })
 
-  it('builds the Mita compact prompt with default and custom instructions', () => {
+  it('builds the Biyan compact prompt with default and custom instructions', () => {
     const defaultPrompt = buildCompactPrompt()
-    expect(defaultPrompt).toContain('MITA CONTEXT COMPACTION')
+    expect(defaultPrompt).toContain('BIYAN CONTEXT COMPACTION')
     expect(defaultPrompt).toContain('# Stable Context')
     expect(defaultPrompt).toContain('None.')
 
     const prompt = buildCompactPrompt('focus on tests')
-    expect(prompt).toContain('MITA CONTEXT COMPACTION')
+    expect(prompt).toContain('BIYAN CONTEXT COMPACTION')
     expect(prompt).toContain('# Stable Context')
     expect(prompt).toContain('focus on tests')
     expect(buildCompactPrompt('聚焦测试结果')).toContain('聚焦测试结果')
@@ -128,7 +128,7 @@ describe('compact-thread helpers', () => {
   it('filters archived messages and sorts visible messages by created_at', () => {
     const archived = makeMessage('1', ChatCompletionRole.User, 'old', 1)
     archived.metadata = {
-      mitaCompact: {
+      biyanCompact: {
         kind: 'archived',
         compactId: 'c1',
         trigger: 'manual',
@@ -206,7 +206,7 @@ describe('compact-thread helpers', () => {
     expect(result.archivedMessages.map((message) => message.id)).toEqual(['1', '2'])
     expect(result.archivedMessages.every(isArchivedCompactMessage)).toBe(true)
     expect(result.summaryMessage?.metadata).toMatchObject({
-      mitaCompact: {
+      biyanCompact: {
         kind: 'summary',
         sourceMessageCount: 2,
         instructions: 'focus on files',
@@ -221,7 +221,7 @@ describe('compact-thread helpers', () => {
     ])
   })
 
-  it('feeds an earlier Mita summary into the next compaction input', async () => {
+  it('feeds an earlier Biyan summary into the next compaction input', async () => {
     const previousSummary = makeMessage(
       's1',
       ChatCompletionRole.System,
@@ -229,7 +229,7 @@ describe('compact-thread helpers', () => {
       1
     )
     previousSummary.metadata = {
-      mitaCompact: {
+      biyanCompact: {
         kind: 'summary',
         compactId: 'old-compact',
         trigger: 'manual',
@@ -256,7 +256,7 @@ describe('compact-thread helpers', () => {
 
     const prompt = aiMock.generateText.mock.calls[0]?.[0]?.prompt
     expect(prompt).toContain('old durable decision')
-    expect(prompt).toContain('mitaCompact=summary')
+    expect(prompt).toContain('biyanCompact=summary')
   })
 
   it('omits reasoning content from the compaction input', async () => {

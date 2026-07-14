@@ -18,7 +18,9 @@ describe('predefinedParams', () => {
     expect(keys).toContain('frequency_penalty')
     expect(keys).toContain('presence_penalty')
     expect(keys).toContain('top_p')
-    expect(keys).toContain('top_k')
+    expect(keys).not.toContain('top_k')
+    expect(keys).not.toContain('mirostat')
+    expect(keys).not.toContain('grammar')
   })
 
   it('each param has key, value, title, description', () => {

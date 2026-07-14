@@ -1,0 +1,17 @@
+name = "biyan-stable-updater"
+main = "worker.mjs"
+compatibility_date = "2026-07-14"
+workers_dev = false
+
+# The deployment workflow replaces this placeholder in a temporary copy. Never
+# commit a production bucket name or signing key to this file.
+[[r2_buckets]]
+binding = "UPDATER_BUCKET"
+bucket_name = "__UPDATER_BUCKET__"
+
+[vars]
+POLICY_KEY = "biyan/updater/stable/policy.json"
+
+[[routes]]
+pattern = "updates.mita.so/biyan/v1/stable/*"
+zone_name = "mita.so"

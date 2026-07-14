@@ -1,226 +1,83 @@
 ---
-title: Jan Data Folder
-description: A guide to Jan's data structure.
-sidebar_position: 2
-keywords:
-  [
-    Jan,
-    Customizable Intelligence, LLM,
-    local AI,
-    privacy focus,
-    free and open source,
-    private and offline,
-    conversational AI,
-    no-subscription fee,
-    large language models,
-    quickstart,
-    getting started,
-    using AI model,
-  ]
+title: Biyan Data and Migration
+description: Biyan's local data layout and cumulative current → A → B → C migration.
+keywords: [Biyan, migration, data folder, backup]
 ---
 
-import { Tabs } from 'nextra/components'
-import { Callout, Steps } from 'nextra/components'
-import { Settings, FolderOpen } from 'lucide-react'
+import { Callout } from 'nextra/components'
 
+# Biyan Data and Migration
 
-# Jan Data Folder
-Jan stores your data locally in JSON format. Your data is yours alone.
+Biyan stores conversation history, settings, assistants, MCP configuration, and migration state on your device. Provider requests still leave the device and follow the selected provider's data policy.
 
-## Open Jan Data Folder
+## Default location
 
-Via Jan:
-1. Settings (<Settings width={16} height={16} style={{display:"inline"}}/>) > General > App Logs
-2. Click **Open Logs**
-
-![Open Jan Data Folder](./_assets/server-troubleshooting.png)
-
-Via Terminal:
-
-```bash
+```text
 # Windows
-cd %APPDATA%/Jan/data
+%APPDATA%\Biyan\
 
-# Mac
-cd ~/Library/Application\ Support/Jan/data
+# macOS
+~/Library/Application Support/Biyan/
 
 # Linux
-cd $XDG_CONFIG_HOME/Jan/data  # Custom install
-cd ~/.config/Jan/data         # Default install
+$XDG_CONFIG_HOME/Biyan/   # when XDG_CONFIG_HOME is set
+~/.config/Biyan/          # default
 ```
 
-## Directory Structure
+The canonical mobile database is `biyan.db`. Desktop migrations write `migration-state.json` separately from the application-version marker.
 
-<Callout type="info">
-Root directory: `~/jan`
+If you configured a custom data folder, Biyan keeps that path and migrates the data in place through a staging area instead of silently moving it back to the default location.
+
+## Upgrade path
+
+The supported stable release train is:
+
+| Stage | App version | Data schema | Purpose |
+| --- | --- | --- | --- |
+| Current | 0.6.633 | 0 | Earlier Mita/Jan-compatible layout |
+| A | 0.6.634 | 1 | Establish Biyan layout and stop retired runtimes |
+| B | 0.6.635 | 2 | Remove local/RAG components and finish package branding |
+| C | 0.6.636 | 3 | Remove normal-path legacy aliases |
+
+Patch releases may increase these application versions. The data schema, not the app version string, decides which migration steps are missing.
+
+Every later release contains the complete cumulative migrator. A direct Current→C installation therefore executes the same missing steps in order rather than skipping them.
+
+## Source selection
+
+When no custom folder is configured, Biyan looks for valid data in this fixed order:
+
+1. Biyan
+2. Mita
+3. Silence
+4. Jan
+5. the legacy bundle-identifier location
+
+If several valid sources exist, Biyan uses the first one and reports the other detected locations. It never merges them automatically.
+
+## Safety guarantees
+
+Before switching to the new data, Biyan:
+
+1. acquires an inter-process migration lock;
+2. verifies that enough disk space is available;
+3. copies into a staging location without modifying the legacy source;
+4. applies each missing schema step;
+5. validates JSON and runs SQLite `PRAGMA quick_check` where applicable;
+6. atomically activates the validated Biyan data;
+7. reconciles extensions, CLI, assistants, and MCP configuration;
+8. records the individual step as completed only after success.
+
+`jan.db` or `mita.db` is migrated through a staging copy and activated as `biyan.db`. A failed migration must not replace valid data with an empty profile.
+
+<Callout type="warning">
+  Biyan does not dual-write legacy folders and does not automatically delete them. Do not remove old data until Biyan has started successfully and your conversations and settings have been verified.
 </Callout>
 
-```sh
-/assistants/
-  /jan/
-    assistant.json
-/engines/
-  /llama.cpp/
-/extensions/
-  extensions.json
-/@janhq/
-  /assistant-extension/
-    /conversational-extension/
-    /download-extension/
-    /engine-management-extension/
-    /hardware-management-extension/
-    /inference-cortex-extension/
-    /model-extension/
-/files/
-/logs/
-  app.log
-/models/
-  /huggingface.co/
-    /Model_Provider_A/
-      /Model_A
-        model_A.gguf
-        model_A.yaml
-/threads/
-  /thread_A/
-    messages.jsonl
-    thread.json
+## Retired data
 
-```
+Downloaded local models, old RAG/vector indexes, and former engine files are not loaded after migration. They remain user-owned files and can consume significant disk space. Biyan only removes them through an explicit cleanup action that lists the affected paths and requires confirmation.
 
-### `assistants/`
-Where AI personalities live. The default one (`/assistants/jan/`):
+## Recovery
 
-```json
-{
-  "avatar": "👋",
-  "id": "jan",
-  "object": "assistant",
-  "created_at": 1750945742.536,
-  "name": "Jan",
-  "description": "Jan is a helpful AI assistant that can use tools and help complete tasks for its users.",
-  "model": "*",
-  "instructions": "You have access to a set of tools to help you answer the user’s question. You can use only one tool per message, and you’ll receive the result of that tool in the user’s next response. To complete a task, use tools step by step—each step should be guided by the outcome of the previous one.\nTool Usage Rules:\n1. Always provide the correct values as arguments when using tools. Do not pass variable names—use actual values instead.\n2. You may perform multiple tool steps to complete a task.\n3. Avoid repeating a tool call with exactly the same parameters to prevent infinite loops.",
-  "tools": [
-    {
-      "type": "retrieval",
-      "enabled": false,
-      "useTimeWeightedRetriever": false,
-      "settings": {
-        "top_k": 2,
-        "chunk_size": 1024,
-        "chunk_overlap": 64,
-        "retrieval_template": "Use the following pieces of context to answer the question at the end.\n----------------\nCONTEXT: {CONTEXT}\n----------------\nQUESTION: {QUESTION}\n----------------\nHelpful Answer:"
-      }
-    }
-  ],
-  "file_ids": []
-}
-```
-
-Parameters:
-
-| Parameter               | Description                                                  | Type    | Default |
-|------------------------|--------------------------------------------------------------|---------|---------|
-| id                     | Assistant identifier                                         | string  | jan     |
-| avatar                 | Assistant image                                              | string  | None    |
-| object                 | OpenAI API compatibility marker                              | string  | None    |
-| created_at             | Creation timestamp                                          | string  | None    |
-| name                   | Display name                                                | string  | Jan     |
-| description            | Role description                                            | string  | Default |
-| model                  | Allowed models (* = all)                                    | string  | *       |
-| instructions           | Default thread instructions                                 | string  | None    |
-| file_ids              | OpenAI compatibility field                                  | string  | None    |
-| tools                  | Available tools (retrieval only currently)                  | array   | retrieval|
-| type                   | Tool type                                                   | string  | retrieval|
-| enabled               | Tool status                                                 | boolean | true    |
-| useTimeWeightedRetriever| Time-weighted retrieval toggle                            | boolean | false   |
-| settings              | Tool configuration                                          | object  | None    |
-| top_k                 | Max retrieval results                                       | number  | 2       |
-| chunk_size            | Text chunk size                                             | number  | 1024    |
-| chunk_overlap         | Chunk overlap amount                                        | number  | 64      |
-| retrieval_template    | Response format template                                    | string  | None    |
-
-### `extensions/`
-Add-on central. Organization extensions live in `@janhq/`, solo ones in root.
-
-### `logs/`
-Debugging headquarters (`/logs/app.txt`):
-- **[APP]**: Core logs
-- **[SERVER]**: API drama
-- **[SPECS]**: Hardware confessions
-
-### `models/`
-The silicon brain collection. Each model has its own `model.yml`:
-
-```yaml
-model_path: llamacpp/models/janhq/Jan-v3-4B-base-instruct-gguf/Jan-v3-4b-base-instruct-Q4_K_XL.gguf
-name: Jan-v3-4B-base-instruct-gguf
-size_bytes: 2999182272
-embedding: false
-model_sha256: 1dc700f26bfb10e53d1b2daebd86d4c5f2accc50fe13acd863c59453f9abfa48
-```
-
-<Callout type="info">
-Full parameters: [here](/docs/desktop/model-parameters)
-</Callout>
-
-### `threads/`
-Chat archive. Each thread (`/threads/jan_unixstamp/`) contains:
-
-- `messages.jsonl`:
-```json
-  {
-    "completed_at": 0,
-    "content": [
-      {
-        "text": {
-          "annotations": [],
-          "value": "Hello! I can help you with various tasks. I can search for information on the internet, including news, videos, images, shopping, and more. I can also scrape webpages to extract specific information. Let me know what you need!"
-        },
-        "type": "text"
-      }
-    ],
-    "created_at": 1751012639307,
-    "id": "01JYR7S0JB5ZBGMJV52KWMW5VW",
-    "metadata": {
-      "assistant": {
-        "avatar": "👋",
-        "id": "jan",
-        "instructions": "You have access to a set of tools to help you answer the user's question. You can use only one tool per message, and you'll receive the result of that tool in the user's next response. To complete a task, use tools step by step—each step should be guided by the outcome of the previous one.\nTool Usage Rules:\n1. Always provide the correct values as arguments when using tools. Do not pass variable names—use actual values instead.\n2. You may perform multiple tool steps to complete a task.\n3. Avoid repeating a tool call with exactly the same parameters to prevent infinite loops.",
-        "name": "Jan",
-        "parameters": ""
-      },
-      "tokenSpeed": {
-        "lastTimestamp": 1751012637097,
-        "message": "01JYR7S0GW5M9PSHMRE7T8VQJM",
-        "tokenCount": 49,
-        "tokenSpeed": 22.653721682847895
-      }
-    },
-    "object": "thread.message",
-    "role": "assistant",
-    "status": "ready",
-    "thread_id": "8f2c9922-db49-4d1e-8620-279c05baf2d0",
-    "type": "text"
-  }
-```
-
-- `thread.json`:
-
-| Parameter   | Description                                    |
-|------------|------------------------------------------------|
-| assistants | Assistant configuration clone                  |
-| created    | Creation timestamp                             |
-| id         | Thread identifier                              |
-| metadata   | Additional thread data                         |
-| model      | Active model settings                          |
-| object     | OpenAI compatibility marker                    |
-| title      | Thread name                                    |
-| updated    | Updated timestamp                              |
-
-
-
-
-## Delete Jan Data
-Uninstall guides: [Mac](/docs/desktop/install/mac#step-2-clean-up-data-optional),
-[Windows](/docs/desktop/install/windows#step-2-handle-jan-data), or [Linux](docs/desktop/install/linux#uninstall-jan).
+If migration cannot finish, Biyan shows a recovery screen instead of opening an empty workspace. Use **Retry**, **Open migration log**, or **Open legacy folder**. Send only a redacted error code and app/OS version to [help@biyan.ai](mailto:help@biyan.ai); never email API keys or complete private data.

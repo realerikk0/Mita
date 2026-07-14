@@ -21,7 +21,7 @@ vi.mock('@/lib/extension', () => ({
   },
 }))
 
-vi.mock('@janhq/core', () => ({
+vi.mock('@biyan/core', () => ({
   ConversationalExtension: class {},
   ExtensionTypeEnum: { Conversational: 'conversational' },
 }))

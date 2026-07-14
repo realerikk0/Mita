@@ -2,7 +2,7 @@ import { describe, it, expect, vi } from 'vitest'
 import { openExternalUrl } from './core'
 import { joinPath } from './core'
 import { openFileExplorer } from './core'
-import { getMitaDataFolderPath } from './core'
+import { getBiyanDataFolderPath } from './core'
 import { executeOnMain } from './core'
 
 describe('test core apis', () => {
@@ -42,17 +42,17 @@ describe('test core apis', () => {
     expect(result).toBe('opened')
   })
 
-  it('should get mita data folder path', async () => {
+  it('should get Biyan data folder path', async () => {
     globalThis.core = {
       api: {
-        getMitaDataFolderPath: vi
+        getBiyanDataFolderPath: vi
           .fn()
-          .mockResolvedValue('/path/to/mita/data'),
+          .mockResolvedValue('/path/to/biyan/data'),
       },
     }
-    const result = await getMitaDataFolderPath()
-    expect(globalThis.core.api.getMitaDataFolderPath).toHaveBeenCalled()
-    expect(result).toBe('/path/to/mita/data')
+    const result = await getBiyanDataFolderPath()
+    expect(globalThis.core.api.getBiyanDataFolderPath).toHaveBeenCalled()
+    expect(result).toBe('/path/to/biyan/data')
   })
 })
 

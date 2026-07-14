@@ -1,255 +1,95 @@
-import { describe, it, expect, vi, beforeEach } from 'vitest'
+import { beforeEach, describe, expect, it, vi } from 'vitest'
+
+const invoke = vi.hoisted(() => vi.fn())
+vi.mock('@tauri-apps/api/core', () => ({ invoke }))
+
 import {
   processAttachmentsForSend,
-  type AttachmentProcessingResult,
+  supportsNativeFileInput,
 } from '../attachmentProcessing'
-import type { Attachment } from '@/types/attachment'
 
-// Minimal mock for ServiceHub methods used by processAttachmentsForSend
-const createMockServiceHub = (overrides: Record<string, unknown> = {}) => ({
-  uploads: () => ({
-    ingestImage: vi
-      .fn()
-      .mockResolvedValue({ id: 'img-1', size: 100 }),
-    ingestFileAttachment: vi
-      .fn()
-      .mockResolvedValue({ id: 'doc-1', size: 500, chunkCount: 3 }),
-    ingestFileAttachmentForProject: vi
-      .fn()
-      .mockResolvedValue({ id: 'proj-doc-1', size: 500, chunkCount: 5 }),
-    ...overrides,
-  }),
-  rag: () => ({
-    parseDocument: vi.fn().mockResolvedValue('parsed document text'),
-  }),
-})
+describe('remote-only attachment processing', () => {
+  beforeEach(() => vi.clearAllMocks())
 
-const docAttachment = (overrides: Partial<Attachment> = {}): Attachment => ({
-  name: 'report.pdf',
-  type: 'document',
-  path: '/tmp/report.pdf',
-  fileType: 'pdf',
-  ...overrides,
-})
+  it('uses native provider file input when declared by the model', async () => {
+    const attachment = {
+      type: 'document' as const,
+      name: 'report.pdf',
+      nativeDataUrl: 'data:application/pdf;base64,AAAA',
+      nativeMediaType: 'application/pdf',
+      size: 4,
+    }
 
-const imageAttachment = (overrides: Partial<Attachment> = {}): Attachment => ({
-  name: 'photo.jpg',
-  type: 'image',
-  base64: 'abc123',
-  mimeType: 'image/jpeg',
-  ...overrides,
-})
-
-describe('processAttachmentsForSend', () => {
-  const threadId = 'thread-1'
-
-  describe('images', () => {
-    it('ingests unprocessed images and returns them with id', async () => {
-      const hub = createMockServiceHub()
-      const img = imageAttachment()
-
-      const result = await processAttachmentsForSend({
-        attachments: [img],
-        threadId,
-        serviceHub: hub as any,
-        parsePreference: 'auto',
-      })
-
-      expect(result.processedAttachments).toHaveLength(1)
-      expect(result.processedAttachments[0].id).toBe('img-1')
-      expect(result.processedAttachments[0].processed).toBe(true)
+    const result = await processAttachmentsForSend({
+      attachments: [attachment],
+      modelCapabilities: ['file_input'],
     })
 
-    it('skips already-processed images', async () => {
-      const hub = createMockServiceHub()
-      const img = imageAttachment({ processed: true, id: 'existing-id' })
+    expect(supportsNativeFileInput(['file_input'])).toBe(true)
+    expect(result.processedAttachments[0]).toMatchObject({
+      injectionMode: 'native',
+      processed: true,
+    })
+    expect(invoke).not.toHaveBeenCalled()
+  })
 
-      const result = await processAttachmentsForSend({
-        attachments: [img],
-        threadId,
-        serviceHub: hub as any,
-        parsePreference: 'auto',
-      })
+  it('injects the parser complete text without indexing or truncation', async () => {
+    invoke.mockResolvedValue('complete parsed document')
 
-      expect(result.processedAttachments[0].id).toBe('existing-id')
-      expect(hub.uploads().ingestImage).not.toHaveBeenCalled()
+    const result = await processAttachmentsForSend({
+      attachments: [
+        {
+          type: 'document',
+          name: 'report.pdf',
+          path: '/tmp/report.pdf',
+          fileType: 'pdf',
+          size: 1024,
+        },
+      ],
+      modelCapabilities: ['tools'],
+      contextAvailableTokens: 100,
+      estimateTokens: () => 10,
+    })
+
+    expect(invoke).toHaveBeenCalledWith(
+      'plugin:document-parser|parse_document',
+      { filePath: '/tmp/report.pdf', fileType: 'pdf' }
+    )
+    expect(result.processedAttachments[0]).toMatchObject({
+      injectionMode: 'inline',
+      inlineContent: 'complete parsed document',
     })
   })
 
-  describe('documents — parseMode routing', () => {
-    it('uses inline mode when parseMode is "inline"', async () => {
-      const hub = createMockServiceHub()
-      const doc = docAttachment({ parseMode: 'inline' })
-
-      const result = await processAttachmentsForSend({
-        attachments: [doc],
-        threadId,
-        serviceHub: hub as any,
-        parsePreference: 'auto',
+  it('blocks when complete text exceeds the remaining context', async () => {
+    await expect(
+      processAttachmentsForSend({
+        attachments: [
+          {
+            type: 'document',
+            name: 'large.txt',
+            inlineContent: 'full text',
+            size: 9,
+          },
+        ],
+        contextAvailableTokens: 5,
+        estimateTokens: () => 10,
       })
-
-      expect(result.processedAttachments[0].injectionMode).toBe('inline')
-      expect(result.processedAttachments[0].inlineContent).toBe(
-        'parsed document text'
-      )
-      expect(result.hasEmbeddedDocuments).toBe(false)
-    })
-
-    it('uses embeddings mode when parseMode is "embeddings"', async () => {
-      const hub = createMockServiceHub()
-      const doc = docAttachment({ parseMode: 'embeddings' })
-
-      const result = await processAttachmentsForSend({
-        attachments: [doc],
-        threadId,
-        serviceHub: hub as any,
-        parsePreference: 'auto',
-      })
-
-      expect(result.processedAttachments[0].injectionMode).toBe('embeddings')
-      expect(result.processedAttachments[0].id).toBe('doc-1')
-      expect(result.hasEmbeddedDocuments).toBe(true)
-    })
-
-    it('falls back to embeddings when inline parsing fails', async () => {
-      const failingParse = vi.fn().mockRejectedValue(new Error('parse failed'))
-      const hub = {
-        ...createMockServiceHub(),
-        rag: () => ({ parseDocument: failingParse }),
-      }
-      const doc = docAttachment({ parseMode: 'inline' })
-
-      const result = await processAttachmentsForSend({
-        attachments: [doc],
-        threadId,
-        serviceHub: hub as any,
-        parsePreference: 'auto',
-      })
-
-      // Falls back to embeddings since parsedContent is absent
-      expect(result.processedAttachments[0].injectionMode).toBe('embeddings')
-      expect(result.hasEmbeddedDocuments).toBe(true)
-    })
-
-    it('skips already-processed documents', async () => {
-      const hub = createMockServiceHub()
-      const doc = docAttachment({
-        processed: true,
-        id: 'existing-doc',
-        injectionMode: 'embeddings',
-      })
-
-      const result = await processAttachmentsForSend({
-        attachments: [doc],
-        threadId,
-        serviceHub: hub as any,
-        parsePreference: 'auto',
-      })
-
-      expect(result.processedAttachments[0].id).toBe('existing-doc')
-      expect(hub.uploads().ingestFileAttachment).not.toHaveBeenCalled()
-    })
-
-    it('forces embeddings for project files', async () => {
-      const hub = createMockServiceHub()
-      const doc = docAttachment({ parseMode: 'inline' })
-
-      const result = await processAttachmentsForSend({
-        attachments: [doc],
-        threadId,
-        projectId: 'proj-1',
-        serviceHub: hub as any,
-        parsePreference: 'auto',
-      })
-
-      expect(result.processedAttachments[0].injectionMode).toBe('embeddings')
-      expect(result.processedAttachments[0].id).toBe('proj-doc-1')
-    })
+    ).rejects.toThrow('will not truncate or summarize')
   })
 
-  describe('auto mode with perFileChoices', () => {
-    it('respects per-file user choice for auto-mode documents', async () => {
-      const hub = createMockServiceHub()
-      const doc = docAttachment({ parseMode: 'auto' })
-      const choices = new Map<string, 'inline' | 'embeddings'>([
-        ['/tmp/report.pdf', 'inline'],
-      ])
-
-      const result = await processAttachmentsForSend({
-        attachments: [doc],
-        threadId,
-        serviceHub: hub as any,
-        parsePreference: 'auto',
-        perFileChoices: choices,
+  it('enforces the fixed 20 MB file cap', async () => {
+    await expect(
+      processAttachmentsForSend({
+        attachments: [
+          {
+            type: 'document',
+            name: 'too-large.pdf',
+            path: '/tmp/too-large.pdf',
+            size: 20 * 1024 * 1024 + 1,
+          },
+        ],
       })
-
-      expect(result.processedAttachments[0].injectionMode).toBe('inline')
-    })
-  })
-
-  describe('callbacks', () => {
-    it('calls updateAttachmentProcessing for each document', async () => {
-      const hub = createMockServiceHub()
-      const doc = docAttachment({ parseMode: 'embeddings' })
-      const updateFn = vi.fn()
-
-      await processAttachmentsForSend({
-        attachments: [doc],
-        threadId,
-        serviceHub: hub as any,
-        parsePreference: 'auto',
-        updateAttachmentProcessing: updateFn,
-      })
-
-      // Called with 'processing' then 'done'
-      expect(updateFn).toHaveBeenCalledWith('report.pdf', 'processing')
-      expect(updateFn).toHaveBeenCalledWith(
-        'report.pdf',
-        'done',
-        expect.objectContaining({ processed: true, injectionMode: 'embeddings' })
-      )
-    })
-
-    it('fires onIngestProgress for multi-file uploads', async () => {
-      const hub = createMockServiceHub()
-      const docs = [
-        docAttachment({ name: 'a.pdf', path: '/a.pdf', parseMode: 'embeddings' }),
-        docAttachment({ name: 'b.pdf', path: '/b.pdf', parseMode: 'embeddings' }),
-      ]
-      const progressFn = vi.fn()
-
-      await processAttachmentsForSend({
-        attachments: docs,
-        threadId,
-        serviceHub: hub as any,
-        parsePreference: 'auto',
-        onIngestProgress: progressFn,
-      })
-
-      // Initial: {completed: 0, total: 2}, then increments
-      expect(progressFn).toHaveBeenCalledWith({ completed: 0, total: 2 })
-      expect(progressFn).toHaveBeenCalledWith({ completed: 1, total: 2 })
-      expect(progressFn).toHaveBeenCalledWith({ completed: 2, total: 2 })
-    })
-  })
-
-  describe('mixed attachments', () => {
-    it('processes images and documents together', async () => {
-      const hub = createMockServiceHub()
-      const img = imageAttachment()
-      const doc = docAttachment({ parseMode: 'embeddings' })
-
-      const result = await processAttachmentsForSend({
-        attachments: [img, doc],
-        threadId,
-        serviceHub: hub as any,
-        parsePreference: 'auto',
-      })
-
-      expect(result.processedAttachments).toHaveLength(2)
-      expect(result.processedAttachments[0].type).toBe('image')
-      expect(result.processedAttachments[1].type).toBe('document')
-      expect(result.hasEmbeddedDocuments).toBe(true)
-    })
+    ).rejects.toThrow('20 MB document limit')
   })
 })

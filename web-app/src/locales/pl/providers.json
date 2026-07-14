@@ -12,7 +12,7 @@
   "stop": "Zatrzymaj",
   "start": "Uruchom",
   "noModelFound": "Brak modeli",
-  "noModelFoundDesc": "Tutaj będą wymienione dostępne modele. Odwiedź Centrum Modeli żeby jakiś pobrać.",
+  "noModelFoundDesc": "Available models from the configured remote provider will be listed here. Refresh after adding or changing provider credentials.",
   "configuration": "Ustawienia",
   "apiEndpoint": "Punkt Końcowy API",
   "testConnection": "Sprawdź Połączenie",

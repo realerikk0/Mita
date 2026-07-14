@@ -1,184 +1,67 @@
-# Jan - 开源 ChatGPT 替代方案
+# 彼岩（Biyan）
 
-<img width="2048" height="280" alt="github jan banner" src="https://github.com/user-attachments/assets/f3f87889-c133-433b-b250-236218150d3f" />
+中文 · [English](README.md) · [日本語](README.ja.md)
 
-<p align="center">
-  <a href="README.md">English</a> ·
-  <strong>中文</strong> ·
-  <a href="README.ja.md">日本語</a>
-</p>
+彼岩是一款跨平台桌面 AI 客户端，面向云端模型 Provider 和 OpenAI-compatible 服务。应用基于 Tauri、Rust、React 与 TypeScript 构建，对话和应用设置保存在本机。
 
-<p align="center">
-  <!-- ALL-CONTRIBUTORS-BADGE:START - Do not remove or modify this section -->
-  <img alt="GitHub commit activity" src="https://img.shields.io/github/commit-activity/m/janhq/jan"/>
-  <img alt="Github Last Commit" src="https://img.shields.io/github/last-commit/janhq/jan"/>
-  <img alt="Github Contributors" src="https://img.shields.io/github/contributors/janhq/jan"/>
-  <img alt="GitHub closed issues" src="https://img.shields.io/github/issues-closed/janhq/jan"/>
-  <img alt="Discord" src="https://img.shields.io/discord/1107178041848909847?label=discord"/>
-</p>
+## 主要能力
 
-<p align="center">
-  <a href="https://jan.ai/docs/desktop">快速开始</a>
-  - <a href="https://discord.gg/Exe46xPMbK">社区</a>
-  - <a href="https://jan.ai/changelog">更新日志</a>
-  - <a href="https://github.com/janhq/jan/issues">问题反馈</a>
-</p>
+- 支持 OpenAI、Anthropic、Google、Azure OpenAI、Groq、Mistral AI、OpenRouter、Hugging Face Inference 以及兼容的自定义服务。
+- 支持项目、助手、图片、文档附件、MCP 工具、Web Research，以及仅代理远程 Provider 的本地 API 网关。
+- 支持从旧 Mita、Silence 和 Jan 衍生版本平稳迁移本地对话与配置。
 
-Jan 致力于通过易于使用的产品，将开源 AI 的精华呈现给大众。下载并运行大语言模型 (LLMs)，享有**完全的控制权**和**隐私保护**。
+彼岩**不再下载或运行本地大模型**。旧 llama.cpp、MLX、Foundation Models、模型 Hub、RAG、Embedding 和向量数据库运行时均已退役。
 
-## 安装 (Installation)
+## 图片与文档
 
-<p align="center">
-  <table>
-    <tr>
-      <!-- Microsoft Store Badge -->
-      <td align="center" valign="middle">
-        <a href="https://apps.microsoft.com/detail/xpdcnfn5cpzlqb">
-          <img height="60"
-            width="200"
-               alt="从 Microsoft Store 获取"
-               src="https://get.microsoft.com/images/en-us%20dark.svg"/>
-        </a>
-      </td>
-      <!-- Spacer -->
-      <td width="20"></td>
-      <!-- Flathub Official Badge -->
-      <td align="center" valign="middle">
-        <a href="https://flathub.org/apps/ai.jan.Jan">
-          <img height="60"
-            width="200"
-               alt="在 Flathub 上获取"
-               src="https://flathub.org/assets/badges/flathub-badge-en.svg"/>
-        </a>
-      </td>
-    </tr>
-  </table>
-</p>
+- 图片只会发送给已选择且支持图片输入的 Provider/模型。
+- Provider 支持原生文件输入时，彼岩使用其文件接口发送附件。
+- 否则，彼岩在本机提取文档完整文本，并将文本加入请求。
+- 文件超过 20 MB，或完整内容无法容纳在 Provider/模型上下文中时，彼岩会阻止发送并说明原因，不会静默截断或自动摘要。
 
-最简单的入门方式是根据您的操作系统下载以下版本之一：
+云端 Provider 会处理请求中包含的内容。发送敏感信息前，请先阅读所选 Provider 的数据政策。
 
-<table>
-  <tr>
-    <td><b>平台</b></td>
-    <td><b>下载链接</b></td>
-  </tr>
-  <tr>
-    <td><b>Windows</b></td>
-    <td><a href='https://app.jan.ai/download/latest/win-x64'>jan.exe</a></td>
-  </tr>
-  <tr>
-    <td><b>macOS</b></td>
-    <td><a href='https://app.jan.ai/download/latest/mac-universal'>jan.dmg</a></td>
-  </tr>
-  <tr>
-    <td><b>Linux (deb)</b></td>
-    <td><a href='https://app.jan.ai/download/latest/linux-amd64-deb'>jan.deb</a></td>
-  </tr>
-  <tr>
-    <td><b>Linux (AppImage)</b></td>
-    <td><a href='https://app.jan.ai/download/latest/linux-amd64-appimage'>jan.AppImage</a></td>
-  </tr>
-  <tr>
-    <td><b>Linux (Arm64)</b></td>
-    <td><a href='https://github.com/janhq/jan/issues/4543#issuecomment-3734911349'>操作指南</a></td>
-  </tr>
-</table>
+## 快速开始
 
+1. 从[彼岩官网](https://biyan.ai/)安装应用。
+2. 打开 **设置 → 模型 Provider**。
+3. 配置 Provider 和 API Key，然后在聊天中选择其模型。
 
-您可以从 [jan.ai](https://jan.ai/) 或 [GitHub Releases](https://github.com/janhq/jan/releases) 下载。
+详细文档位于 [docs.biyan.ai](https://docs.biyan.ai/)。
 
-## 核心功能 (Features)
+## 从源码构建
 
-- **本地 AI 模型**：从 HuggingFace 下载并运行大语言模型（Llama, Gemma, Qwen, GPT-oss 等）
-- **云端集成**：通过 OpenAI 连接 GPT 模型，通过 Anthropic 连接 Claude 模型，以及 Mistral, Groq 等
-- **自定义助手**：为您的任务创建专门的 AI 助手
-- **兼容 OpenAI 的 API**：在 `localhost:1337` 运行本地服务器，供其他应用程序调用
-- **模型上下文协议 (MCP)**：集成 MCP 以实现 Agent 自动化能力
-- **隐私优先**：当您需要时，所有内容均在本地运行
-
-## 源码构建 (Build from Source)
-
-适合喜欢探索过程的用户：
-
-### 前置要求 (Prerequisites)
-
-- Node.js ≥ 20.0.0
-- Yarn ≥ 4.5.3
-- Make ≥ 3.81
-- Rust (用于 Tauri 构建)
-- (仅限 macOS Apple Silicon) MetalToolchain 命令：`xcodebuild -downloadComponent MetalToolchain`
-
-### 使用 Make 运行
+需要 Node.js 20+、通过 Corepack 使用的 Yarn 4.5.3、Rust/Cargo、Make 和对应平台的 Tauri 构建工具。
 
 ```bash
-git clone https://github.com/janhq/jan
-cd jan
-make dev
-```
-
-这将处理所有步骤：安装依赖、构建核心组件并启动应用程序。
-
-**可用的 make 命令：**
-- `make dev` - 完整的开发环境设置与启动
-- `make build` - 生产版本构建
-- `make test` - 运行测试和 lint 检查
-- `make clean` - 清除所有生成文件并重新开始
-
-### 手动构建命令
-
-```bash
+git clone https://github.com/realerikk0/Mita.git
+cd Mita
+corepack enable
 yarn install
-yarn build:tauri:plugin:api
-yarn build:core
-yarn build:extensions
 yarn dev
 ```
 
-## 系统要求 (System Requirements)
+常用检查：
 
-**获得良好体验的最低配置：**
+```bash
+yarn test
+yarn test:web
+yarn build:web
+yarn build:tauri
+```
 
-- **macOS**: 13.6+ (3B 模型需 8GB RAM，7B 需 16GB，13B 需 32GB)
-- **Windows**: 10+，支持 NVIDIA/AMD/Intel Arc GPU 加速
-- **Linux**: 大多数发行版均可，支持 GPU 加速
+## 旧版本迁移
 
-有关详细的兼容性说明，请查看我们的[安装指南](https://jan.ai/docs/desktop/mac)。
+正式升级路径为 **当前版本 → A → B → C**。每个后续版本也都永久携带完整的累计迁移器，因此长期离线用户直接安装较新版本时，仍会按顺序执行缺失的数据迁移。
 
-## 故障排除 (Troubleshooting)
+迁移会把受支持的数据复制到彼岩标准数据目录，完成校验后再原子切换。旧源目录、已下载的本地模型以及旧 RAG/向量数据不会被修改或自动删除。清理前请阅读[数据迁移指南](https://docs.biyan.ai/docs/desktop/data-folder)。
 
-如果运行出现问题：
+## 支持
 
-1. 查看我们的[故障排除文档](https://jan.ai/docs/desktop/troubleshooting)
-2. 复制您的错误日志和系统规格信息
-3. 在我们的 Discord `#🆘|jan-help` 频道寻求帮助：[Discord](https://discord.gg/FTk2MvZwJH)
+如需帮助，请发送邮件至 [help@biyan.ai](mailto:help@biyan.ai)。请勿主动附上 API Key、完整日志、私密提示词或原始文档。
 
+## 上游与许可证
 
-## 贡献 (Contributing)
+彼岩衍生自 Jan 桌面技术栈，保留原始版权、许可证与上游署名；历史基线记录在 [UPSTREAM_JAN_COMMIT.md](UPSTREAM_JAN_COMMIT.md)。
 
-欢迎参与贡献！请参阅 [CONTRIBUTING.md](CONTRIBUTING.md) 以获取完整信息。
-
-## 相关链接 (Links)
-
-- [文档](https://jan.ai/docs) - 建议阅读的操作手册
-- [API 参考](https://jan.ai/api-reference) - 供开发者参考
-- [更新日志](https://jan.ai/changelog) - 了解修复和变更内容
-- [Discord](https://discord.gg/FTk2MvZwJH) - 社区所在地
-
-## 联系我们 (Contact)
-
-- **Bug 反馈**: [GitHub Issues](https://github.com/janhq/jan/issues)
-- **商务合作**: hello@jan.ai
-- **人才招聘**: hr@jan.ai
-- **综合讨论**: [Discord](https://discord.gg/FTk2MvZwJH)
-
-## 许可证 (License)
-
-Apache 2.0 - 因为分享即是关爱。
-
-## 致谢 (Acknowledgements)
-
-站在巨人的肩膀上构建：
-
-- [Llama.cpp](https://github.com/ggerganov/llama.cpp)
-- [Tauri](https://tauri.app/)
-- [Scalar](https://github.com/scalar/scalar)
+适用条款请查看 [LICENSE](LICENSE) 和各包的许可证文件。

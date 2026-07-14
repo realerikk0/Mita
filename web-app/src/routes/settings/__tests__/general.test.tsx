@@ -23,11 +23,10 @@ const webSearchMocks = vi.hoisted(() => ({
 
 const serviceHubMocks = vi.hoisted(() => ({
   factoryReset: vi.fn(),
-  getMitaDataFolder: vi.fn().mockResolvedValue('/test/data/folder'),
+  getBiyanDataFolder: vi.fn().mockResolvedValue('/test/data/folder'),
   getLogsDirectory: vi.fn().mockResolvedValue('/test/logs/folder'),
   clearLogs: vi.fn().mockResolvedValue(undefined),
-  relocateMitaDataFolder: vi.fn(),
-  stopAllModels: vi.fn(),
+  relocateBiyanDataFolder: vi.fn(),
   dialogOpen: vi.fn().mockResolvedValue('/test/path'),
   emit: vi.fn(),
   openLogsWindow: vi.fn(),
@@ -93,8 +92,6 @@ vi.mock('@/hooks/useGeneralSetting', () => ({
   useGeneralSetting: () => ({
     spellCheckChatInput: true,
     setSpellCheckChatInput: vi.fn(),
-    huggingfaceToken: 'test-token',
-    setHuggingfaceToken: vi.fn(),
   }),
 }))
 
@@ -107,8 +104,8 @@ vi.mock('@/hooks/useWebSearch', () => ({
     }),
 }))
 
-vi.mock('@/hooks/useMitaWebResearch', () => ({
-  useMitaWebResearch: () => ({
+vi.mock('@/hooks/useBiyanWebResearch', () => ({
+  useBiyanWebResearch: () => ({
     hasConfig: webSearchMocks.state.hasConfig,
     isActive: webSearchMocks.state.isActive,
     isLoading: webSearchMocks.state.isLoading,
@@ -174,25 +171,6 @@ vi.mock('@/components/ui/button', () => ({
   ),
 }))
 
-vi.mock('@/components/ui/input', () => ({
-  Input: ({
-    value,
-    onChange,
-    placeholder,
-  }: {
-    value: string
-    onChange: (e: React.ChangeEvent<HTMLInputElement>) => void
-    placeholder?: string
-  }) => (
-    <input
-      data-testid="input"
-      value={value}
-      onChange={onChange}
-      placeholder={placeholder}
-    />
-  ),
-}))
-
 vi.mock('@/components/ui/dialog', () => ({
   Dialog: ({ children }: { children: React.ReactNode }) => (
     <div data-testid="dialog">{children}</div>
@@ -223,14 +201,8 @@ vi.mock('@/components/ui/dialog', () => ({
 vi.mock('@/services/app/web', () => ({
   WebAppService: vi.fn().mockImplementation(() => ({
     factoryReset: vi.fn(),
-    getMitaDataFolder: vi.fn().mockResolvedValue('/test/data/folder'),
-    relocateMitaDataFolder: vi.fn(),
-  })),
-}))
-
-vi.mock('@/services/models/default', () => ({
-  DefaultModelsService: vi.fn().mockImplementation(() => ({
-    stopAllModels: vi.fn(),
+    getBiyanDataFolder: vi.fn().mockResolvedValue('/test/data/folder'),
+    relocateBiyanDataFolder: vi.fn(),
   })),
 }))
 
@@ -238,13 +210,10 @@ vi.mock('@/hooks/useServiceHub', () => ({
   useServiceHub: () => ({
     app: () => ({
       factoryReset: serviceHubMocks.factoryReset,
-      getMitaDataFolder: serviceHubMocks.getMitaDataFolder,
+      getBiyanDataFolder: serviceHubMocks.getBiyanDataFolder,
       getLogsDirectory: serviceHubMocks.getLogsDirectory,
       clearLogs: serviceHubMocks.clearLogs,
-      relocateMitaDataFolder: serviceHubMocks.relocateMitaDataFolder,
-    }),
-    models: () => ({
-      stopAllModels: serviceHubMocks.stopAllModels,
+      relocateBiyanDataFolder: serviceHubMocks.relocateBiyanDataFolder,
     }),
     dialog: () => ({
       open: serviceHubMocks.dialogOpen,
@@ -374,7 +343,7 @@ describe('General Settings Route', () => {
     webSearchMocks.state.isActive = false
     webSearchMocks.state.isLoading = false
     webSearchMocks.setActive.mockResolvedValue(true)
-    serviceHubMocks.getMitaDataFolder.mockResolvedValue('/test/data/folder')
+    serviceHubMocks.getBiyanDataFolder.mockResolvedValue('/test/data/folder')
     serviceHubMocks.getLogsDirectory.mockResolvedValue('/test/logs/folder')
     serviceHubMocks.clearLogs.mockResolvedValue(undefined)
   })
@@ -446,17 +415,6 @@ describe('General Settings Route', () => {
   //   expect(screen.getByTestId('language-switcher')).toBeInTheDocument()
   // })
 
-  it('should render huggingface token input', async () => {
-    const Component = GeneralRoute.component as React.ComponentType
-    await act(async () => {
-      render(<Component />)
-    })
-
-    const input = screen.getByTestId('input')
-    expect(input).toBeInTheDocument()
-    expect(input).toHaveValue('test-token')
-  })
-
   it('should handle spell check toggle', async () => {
     const Component = GeneralRoute.component as React.ComponentType
     await act(async () => {
@@ -495,22 +453,6 @@ describe('General Settings Route', () => {
 
     expect(webSearchMocks.setEnabled).toHaveBeenCalledWith(true)
     expect(webSearchMocks.setActive).toHaveBeenCalledWith(true)
-  })
-
-  it('should handle huggingface token change', async () => {
-    const Component = GeneralRoute.component as React.ComponentType
-    await act(async () => {
-      render(<Component />)
-    })
-
-    const input = screen.getByTestId('input')
-    expect(input).toBeInTheDocument()
-
-    // Test that input is interactive
-    await act(async () => {
-      fireEvent.change(input, { target: { value: 'new-token' } })
-    })
-    expect(input).toBeInTheDocument()
   })
 
   it('should handle check for updates', async () => {

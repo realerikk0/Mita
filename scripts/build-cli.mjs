@@ -46,7 +46,7 @@ if (process.platform !== 'win32' && !cliOnly) {
   process.exit(0)
 }
 
-const cliBinaryName = process.platform === 'win32' ? 'mita-cli.exe' : 'mita-cli'
+const cliBinaryName = process.platform === 'win32' ? 'biyan-cli.exe' : 'biyan-cli'
 
 const cargoArgs = [
   'build',
@@ -55,7 +55,7 @@ const cargoArgs = [
   '--features',
   'cli',
   '--bin',
-  'mita-cli',
+  'biyan-cli',
 ]
 
 if (!isDev) {

@@ -30,7 +30,7 @@ import { extractFilesFromPrompt, FileMetadata } from '@/lib/fileMetadata'
 import { useMemo } from 'react'
 import { Button } from '@/components/ui/button'
 import {
-  getMitaCompactMetadata,
+  getBiyanCompactMetadata,
   isCompactSummaryMessage,
 } from '@/lib/compact-thread'
 
@@ -458,10 +458,7 @@ export const MessageItem = memo(
                           : 'h-auto opacity-100'
                       )}
                     >
-                      <Streamdown
-                        animate={true}
-                        animationDuration={500}
-                      >
+                      <Streamdown animated={{ duration: 500 }}>
                         {part.text}
                       </Streamdown>
                     </div>
@@ -526,7 +523,7 @@ export const MessageItem = memo(
     }, [message.parts, isStreaming, isReasoningAtBottom])
 
     if (message.role === 'system' && isCompactSummaryMessage(message)) {
-      const compactMetadata = getMitaCompactMetadata(message)
+      const compactMetadata = getBiyanCompactMetadata(message)
       const summary = getFullTextContent()
       const sourceMessageCount =
         compactMetadata?.kind === 'summary'

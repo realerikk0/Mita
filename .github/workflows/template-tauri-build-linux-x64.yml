@@ -44,8 +44,8 @@ on:
         required: false
       TAURI_SIGNING_PRIVATE_KEY_PASSWORD:
         required: false
-      MITA_SIGNING_KEY:
-        required: false
+      BIYAN_SIGNING_KEY:
+        required: true
     outputs:
       DEB_SIG:
         value: ${{ jobs.build-linux-x64.outputs.DEB_SIG }}
@@ -126,19 +126,9 @@ jobs:
           echo "---------./src-tauri/plugins/tauri-plugin-hardware/package.json---------"
           cat ./src-tauri/plugins/tauri-plugin-hardware/package.json
 
-          jq --arg version "${{ inputs.new_version }}" '.version = $version' ./src-tauri/plugins/tauri-plugin-llamacpp/package.json > /tmp/package.json
-          mv /tmp/package.json ./src-tauri/plugins/tauri-plugin-llamacpp/package.json
-
-          echo "---------./src-tauri/plugins/tauri-plugin-llamacpp/package.json---------"
-          cat ./src-tauri/plugins/tauri-plugin-llamacpp/package.json
-
           ctoml ./src-tauri/plugins/tauri-plugin-hardware/Cargo.toml package.version "${{ inputs.new_version }}"
           echo "---------./src-tauri/plugins/tauri-plugin-hardware/Cargo.toml---------"
           cat ./src-tauri/plugins/tauri-plugin-hardware/Cargo.toml
-
-          ctoml ./src-tauri/plugins/tauri-plugin-llamacpp/Cargo.toml package.version "${{ inputs.new_version }}"
-          echo "---------./src-tauri/plugins/tauri-plugin-llamacpp/Cargo.toml---------"
-          cat ./src-tauri/plugins/tauri-plugin-llamacpp/Cargo.toml
 
           ctoml ./src-tauri/Cargo.toml package.version "${{ inputs.new_version }}"
           echo "---------./src-tauri/Cargo.toml---------"
@@ -150,11 +140,7 @@ jobs:
 
           # Change app name for beta and nightly builds
           if [ "${{ inputs.channel }}" != "stable" ]; then
-            if [[ "${{ inputs.channel }}" == "nightly" ]]; then
-              jq '.plugins.updater.endpoints = ["https://updates.mita.so/mita/update-check", "https://updates.mita.so/mita/${{ inputs.channel }}/latest.json"]' ./src-tauri/tauri.conf.json > /tmp/tauri.conf.json
-            else
-              jq '.plugins.updater.endpoints = ["https://updates.mita.so/mita/${{ inputs.channel }}/latest.json"]' ./src-tauri/tauri.conf.json > /tmp/tauri.conf.json
-            fi
+            jq '.plugins.updater.endpoints = ["https://updates.mita.so/biyan/${{ inputs.channel }}/latest.json"]' ./src-tauri/tauri.conf.json > /tmp/tauri.conf.json
             mv /tmp/tauri.conf.json ./src-tauri/tauri.conf.json
 
             chmod +x .github/scripts/rename-tauri-app.sh
@@ -168,9 +154,6 @@ jobs:
             echo "------------------"
             cat ./src-tauri/Cargo.toml
 
-            chmod +x .github/scripts/rename-workspace.sh
-            .github/scripts/rename-workspace.sh ./package.json ${{ inputs.channel }}
-            cat ./package.json
           fi
 
       - name: Config Yarn
@@ -198,7 +181,7 @@ jobs:
           TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
           TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
           AUTO_UPDATER_DISABLED: ${{ inputs.disable_updater && 'true' || 'false' }}
-          MITA_SIGNING_KEY: ${{ secrets.MITA_SIGNING_KEY }}
+          BIYAN_SIGNING_KEY: ${{ secrets.BIYAN_SIGNING_KEY }}
           TAURI_TRAY: libappindicator3
       # Publish app
 
@@ -207,14 +190,14 @@ jobs:
         if: inputs.public_provider != 'github'
         uses: actions/upload-artifact@v4
         with:
-          name: mita-linux-amd64-${{ inputs.new_version }}-deb
+          name: biyan-linux-amd64-${{ inputs.new_version }}-deb
           path: ./src-tauri/target/release/bundle/deb/*.deb
 
       - name: Upload Artifact
         if: inputs.public_provider != 'github'
         uses: actions/upload-artifact@v4
         with:
-          name: mita-linux-amd64-${{ inputs.new_version }}-AppImage
+          name: biyan-linux-amd64-${{ inputs.new_version }}-AppImage
           path: ./src-tauri/target/release/bundle/appimage/*.AppImage
 
       ## Set output filename for linux
@@ -224,15 +207,15 @@ jobs:
           cd ./src-tauri/target/release/bundle
 
           if [ "${{ inputs.channel }}" != "stable" ]; then
-            DEB_FILE_NAME=Mita-${{ inputs.channel }}_${{ inputs.new_version }}_amd64.deb
-            APPIMAGE_FILE_NAME=Mita-${{ inputs.channel }}_${{ inputs.new_version }}_amd64.AppImage
-            DEB_SIG=$(cat deb/Mita-${{ inputs.channel }}_${{ inputs.new_version }}_amd64.deb.sig)
-            APPIMAGE_SIG=$(cat appimage/Mita-${{ inputs.channel }}_${{ inputs.new_version }}_amd64.AppImage.sig)
+            DEB_FILE_NAME=Biyan-${{ inputs.channel }}_${{ inputs.new_version }}_amd64.deb
+            APPIMAGE_FILE_NAME=Biyan-${{ inputs.channel }}_${{ inputs.new_version }}_amd64.AppImage
+            DEB_SIG=$(cat deb/Biyan-${{ inputs.channel }}_${{ inputs.new_version }}_amd64.deb.sig)
+            APPIMAGE_SIG=$(cat appimage/Biyan-${{ inputs.channel }}_${{ inputs.new_version }}_amd64.AppImage.sig)
           else
-            DEB_FILE_NAME=Mita_${{ inputs.new_version }}_amd64.deb
-            APPIMAGE_FILE_NAME=Mita_${{ inputs.new_version }}_amd64.AppImage
-            DEB_SIG=$(cat deb/Mita_${{ inputs.new_version }}_amd64.deb.sig)
-            APPIMAGE_SIG=$(cat appimage/Mita_${{ inputs.new_version }}_amd64.AppImage.sig)
+            DEB_FILE_NAME=Biyan_${{ inputs.new_version }}_amd64.deb
+            APPIMAGE_FILE_NAME=Biyan_${{ inputs.new_version }}_amd64.AppImage
+            DEB_SIG=$(cat deb/Biyan_${{ inputs.new_version }}_amd64.deb.sig)
+            APPIMAGE_SIG=$(cat appimage/Biyan_${{ inputs.new_version }}_amd64.AppImage.sig)
           fi
 
           echo "DEB_SIG=$DEB_SIG" >> $GITHUB_OUTPUT
@@ -247,10 +230,10 @@ jobs:
           cd ./src-tauri/target/release/bundle
 
           # Upload for tauri updater
-          aws s3 cp ./appimage/Mita-${{ inputs.channel }}_${{ inputs.new_version }}_amd64.AppImage s3://${{ secrets.DELTA_AWS_S3_BUCKET_NAME }}/temp-${{ inputs.channel }}/Mita-${{ inputs.channel }}_${{ inputs.new_version }}_amd64.AppImage
-          aws s3 cp ./deb/Mita-${{ inputs.channel }}_${{ inputs.new_version }}_amd64.deb s3://${{ secrets.DELTA_AWS_S3_BUCKET_NAME }}/temp-${{ inputs.channel }}/Mita-${{ inputs.channel }}_${{ inputs.new_version }}_amd64.deb
-          aws s3 cp ./appimage/Mita-${{ inputs.channel }}_${{ inputs.new_version }}_amd64.AppImage.sig s3://${{ secrets.DELTA_AWS_S3_BUCKET_NAME }}/temp-${{ inputs.channel }}/Mita-${{ inputs.channel }}_${{ inputs.new_version }}_amd64.AppImage.sig
-          aws s3 cp ./deb/Mita-${{ inputs.channel }}_${{ inputs.new_version }}_amd64.deb.sig s3://${{ secrets.DELTA_AWS_S3_BUCKET_NAME }}/temp-${{ inputs.channel }}/Mita-${{ inputs.channel }}_${{ inputs.new_version }}_amd64.deb.sig
+          aws s3 cp ./appimage/Biyan-${{ inputs.channel }}_${{ inputs.new_version }}_amd64.AppImage s3://${{ secrets.DELTA_AWS_S3_BUCKET_NAME }}/temp-${{ inputs.channel }}/Biyan-${{ inputs.channel }}_${{ inputs.new_version }}_amd64.AppImage
+          aws s3 cp ./deb/Biyan-${{ inputs.channel }}_${{ inputs.new_version }}_amd64.deb s3://${{ secrets.DELTA_AWS_S3_BUCKET_NAME }}/temp-${{ inputs.channel }}/Biyan-${{ inputs.channel }}_${{ inputs.new_version }}_amd64.deb
+          aws s3 cp ./appimage/Biyan-${{ inputs.channel }}_${{ inputs.new_version }}_amd64.AppImage.sig s3://${{ secrets.DELTA_AWS_S3_BUCKET_NAME }}/temp-${{ inputs.channel }}/Biyan-${{ inputs.channel }}_${{ inputs.new_version }}_amd64.AppImage.sig
+          aws s3 cp ./deb/Biyan-${{ inputs.channel }}_${{ inputs.new_version }}_amd64.deb.sig s3://${{ secrets.DELTA_AWS_S3_BUCKET_NAME }}/temp-${{ inputs.channel }}/Biyan-${{ inputs.channel }}_${{ inputs.new_version }}_amd64.deb.sig
         env:
           AWS_ACCESS_KEY_ID: ${{ secrets.DELTA_AWS_ACCESS_KEY_ID }}
           AWS_SECRET_ACCESS_KEY: ${{ secrets.DELTA_AWS_SECRET_ACCESS_KEY }}

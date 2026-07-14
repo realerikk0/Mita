@@ -31,8 +31,8 @@ use crate::core::{
         handlers::handle_computer_agent_tool,
         permissions::{sanitize_file_stem, unique_txt_path, ComputerAgentScope},
         tools::{
-            computer_agent_summary, computer_agent_tools, is_computer_agent_tool, CREATE_TEXT_FILE,
-            CREATE_DIRECTORY, LIST_DIRECTORY, READ_TEXT_FILE, RUN_SHELL,
+            computer_agent_summary, computer_agent_tools, is_computer_agent_tool, CREATE_DIRECTORY,
+            CREATE_TEXT_FILE, LIST_DIRECTORY, READ_TEXT_FILE, RUN_SHELL,
         },
         windows_runner::{
             refused_response, validate_runner_request, RunnerRequest, RunnerResponseStatus,
@@ -265,7 +265,7 @@ async fn run_shell_requires_shell_setting_for_canonical_and_legacy_names() {
             settings_enabled(),
             tool_name,
             Some(args(json!({
-                "_mitaThreadId": thread_id,
+                "_biyanThreadId": thread_id,
                 "command": "echo should-not-run",
                 "cwd": ".",
                 "timeoutSeconds": 1,
@@ -304,7 +304,7 @@ async fn read_only_sandbox_rejects_write_open_and_shell_tools() {
         settings.clone(),
         READ_TEXT_FILE,
         Some(args(json!({
-            "_mitaThreadId": "thread-read-only",
+            "_biyanThreadId": "thread-read-only",
             "path": "notes.txt"
         }))),
     )
@@ -315,7 +315,7 @@ async fn read_only_sandbox_rejects_write_open_and_shell_tools() {
         (
             CREATE_TEXT_FILE,
             args(json!({
-                "_mitaThreadId": "thread-read-only",
+                "_biyanThreadId": "thread-read-only",
                 "suggestedName": "blocked",
                 "content": "nope"
             })),
@@ -323,14 +323,14 @@ async fn read_only_sandbox_rejects_write_open_and_shell_tools() {
         (
             "computer_open_path",
             args(json!({
-                "_mitaThreadId": "thread-read-only",
+                "_biyanThreadId": "thread-read-only",
                 "path": "notes.txt"
             })),
         ),
         (
             RUN_SHELL,
             args(json!({
-                "_mitaThreadId": "thread-read-only",
+                "_biyanThreadId": "thread-read-only",
                 "command": "echo nope",
                 "cwd": "."
             })),
@@ -460,16 +460,16 @@ fn windows_runner_candidates_include_packaged_resource_path() {
     let candidates = runner_candidate_paths_from(current_exe, Some(manifest_dir));
 
     assert!(candidates.contains(&PathBuf::from(
-        r"C:\Program Files\Biyan\resources\bin\mita-computer-agent-runner.exe"
+        r"C:\Program Files\Biyan\resources\bin\biyan-computer-agent-runner.exe"
     )));
     assert!(candidates.contains(&PathBuf::from(
-        r"C:\Program Files\Biyan\resources\computer-agent-runner\mita-computer-agent-runner.exe"
+        r"C:\Program Files\Biyan\resources\computer-agent-runner\biyan-computer-agent-runner.exe"
     )));
     assert!(candidates.contains(&PathBuf::from(
-        r"E:\codexprojects\Biyan\src-tauri\resources\computer-agent-runner\mita-computer-agent-runner.exe"
+        r"E:\codexprojects\Biyan\src-tauri\resources\computer-agent-runner\biyan-computer-agent-runner.exe"
     )));
     assert!(candidates.contains(&PathBuf::from(
-        r"E:\codexprojects\Biyan\src-tauri\target\debug\mita-computer-agent-runner.exe"
+        r"E:\codexprojects\Biyan\src-tauri\target\debug\biyan-computer-agent-runner.exe"
     )));
 }
 
@@ -500,7 +500,7 @@ fn windows_runner_diagnostic_is_local_and_stage_based() {
 async fn create_and_read_text_file_in_thread_workspace() {
     let tmp = tempdir().unwrap();
     let mut create_args = args(json!({
-        "_mitaThreadId": "thread-1",
+        "_biyanThreadId": "thread-1",
         "suggestedName": "Meeting Notes",
         "content": "  hello\n"
     }));
@@ -544,7 +544,7 @@ async fn shell_relative_cwd_creates_thread_workspace_before_status_check() {
         settings,
         RUN_SHELL,
         Some(args(json!({
-            "_mitaThreadId": "thread-shell-default-cwd",
+            "_biyanThreadId": "thread-shell-default-cwd",
             "command": "echo shell-default-cwd",
             "cwd": ".",
             "timeoutSeconds": 1,
@@ -568,16 +568,16 @@ async fn shell_relative_cwd_creates_thread_workspace_before_status_check() {
 
 #[cfg(windows)]
 #[tokio::test]
-#[ignore = "requires cargo build --bin mita-computer-agent-runner and AppContainer support"]
+#[ignore = "requires cargo build --bin biyan-computer-agent-runner and AppContainer support"]
 async fn windows_shell_runs_through_runner_when_enabled() {
     let _guard = windows_runner_env_lock().lock().unwrap();
     let runner = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
         .join("target")
         .join("debug")
-        .join("mita-computer-agent-runner.exe");
+        .join("biyan-computer-agent-runner.exe");
     assert!(
         runner.is_file(),
-        "runner binary not found at {}; run cargo build --bin mita-computer-agent-runner first",
+        "runner binary not found at {}; run cargo build --bin biyan-computer-agent-runner first",
         runner.display()
     );
 
@@ -597,7 +597,7 @@ async fn windows_shell_runs_through_runner_when_enabled() {
         },
         RUN_SHELL,
         Some(args(json!({
-            "_mitaThreadId": "thread-shell",
+            "_biyanThreadId": "thread-shell",
             "command": "echo hello && echo ok>inside.txt",
             "cwd": workspace,
             "timeoutSeconds": 10,
@@ -623,7 +623,7 @@ async fn windows_shell_runs_through_runner_when_enabled() {
 fn windows_runner_status_is_available_without_enable_env_when_runner_exists() {
     let _guard = windows_runner_env_lock().lock().unwrap();
     let tmp = tempdir().unwrap();
-    let runner = tmp.path().join("mita-computer-agent-runner.exe");
+    let runner = tmp.path().join("biyan-computer-agent-runner.exe");
     fs::write(&runner, "").unwrap();
 
     let previous_path = env::var_os(RUNNER_PATH_ENV);
@@ -674,7 +674,7 @@ impl Drop for EnvVarGuard {
 
 #[cfg(windows)]
 #[test]
-#[ignore = "requires cargo build --bin mita-computer-agent-runner and AppContainer support"]
+#[ignore = "requires cargo build --bin biyan-computer-agent-runner and AppContainer support"]
 fn windows_runner_refuses_direct_execution_without_gate() {
     let tmp = tempdir().unwrap();
     let response = run_runner_request(
@@ -696,7 +696,7 @@ fn windows_runner_refuses_direct_execution_without_gate() {
 
 #[cfg(target_os = "macos")]
 #[test]
-#[ignore = "requires cargo build --bin mita-computer-agent-runner --features computer-agent-runner"]
+#[ignore = "requires cargo build --bin biyan-computer-agent-runner --features computer-agent-runner"]
 fn macos_runner_refuses_direct_execution_without_gate() {
     let tmp = tempdir().unwrap();
     let response = run_runner_request(
@@ -718,7 +718,7 @@ fn macos_runner_refuses_direct_execution_without_gate() {
 
 #[cfg(target_os = "macos")]
 #[test]
-#[ignore = "requires cargo build --bin mita-computer-agent-runner --features computer-agent-runner"]
+#[ignore = "requires cargo build --bin biyan-computer-agent-runner --features computer-agent-runner"]
 fn macos_runner_allows_writes_inside_workspace_and_allowed_root() {
     let tmp = tempdir().unwrap();
     let workspace = tmp.path().join("workspace");
@@ -758,7 +758,7 @@ fn macos_runner_allows_writes_inside_workspace_and_allowed_root() {
 
 #[cfg(target_os = "macos")]
 #[test]
-#[ignore = "requires cargo build --bin mita-computer-agent-runner --features computer-agent-runner"]
+#[ignore = "requires cargo build --bin biyan-computer-agent-runner --features computer-agent-runner"]
 fn macos_runner_blocks_writes_outside_roots() {
     let tmp = tempdir().unwrap();
     let workspace = tmp.path().join("workspace");
@@ -787,7 +787,7 @@ fn macos_runner_blocks_writes_outside_roots() {
 
 #[cfg(target_os = "macos")]
 #[test]
-#[ignore = "requires cargo build --bin mita-computer-agent-runner --features computer-agent-runner"]
+#[ignore = "requires cargo build --bin biyan-computer-agent-runner --features computer-agent-runner"]
 fn macos_runner_blocks_loopback_network() {
     let listener = TcpListener::bind("127.0.0.1:0").unwrap();
     listener.set_nonblocking(true).unwrap();
@@ -816,7 +816,7 @@ fn macos_runner_blocks_loopback_network() {
 
 #[cfg(target_os = "macos")]
 #[test]
-#[ignore = "requires cargo build --bin mita-computer-agent-runner --features computer-agent-runner"]
+#[ignore = "requires cargo build --bin biyan-computer-agent-runner --features computer-agent-runner"]
 fn macos_runner_timeout_kills_process_group() {
     let tmp = tempdir().unwrap();
     let workspace = tmp.path().join("workspace");
@@ -844,7 +844,7 @@ fn macos_runner_timeout_kills_process_group() {
 
 #[cfg(target_os = "macos")]
 #[test]
-#[ignore = "requires cargo build --bin mita-computer-agent-runner --features computer-agent-runner"]
+#[ignore = "requires cargo build --bin biyan-computer-agent-runner --features computer-agent-runner"]
 fn macos_runner_truncates_large_output() {
     let tmp = tempdir().unwrap();
     let workspace = tmp.path().join("workspace");
@@ -870,7 +870,7 @@ fn macos_runner_truncates_large_output() {
 
 #[cfg(target_os = "macos")]
 #[test]
-#[ignore = "requires cargo build --bin mita-computer-agent-runner --features computer-agent-runner"]
+#[ignore = "requires cargo build --bin biyan-computer-agent-runner --features computer-agent-runner"]
 fn macos_runner_allows_dev_null_and_isolated_tmpdir() {
     let tmp = tempdir().unwrap();
     let workspace = tmp.path().join("workspace");
@@ -898,7 +898,7 @@ fn macos_runner_allows_dev_null_and_isolated_tmpdir() {
 
 #[cfg(target_os = "macos")]
 #[test]
-#[ignore = "requires cargo build --bin mita-computer-agent-runner --features computer-agent-runner"]
+#[ignore = "requires cargo build --bin biyan-computer-agent-runner --features computer-agent-runner"]
 fn macos_runner_rejects_symlink_inside_workspace() {
     let tmp = tempdir().unwrap();
     let workspace = tmp.path().join("workspace");
@@ -929,7 +929,7 @@ fn macos_runner_rejects_symlink_inside_workspace() {
 
 #[cfg(target_os = "macos")]
 #[test]
-#[ignore = "requires cargo build --bin mita-computer-agent-runner --features computer-agent-runner"]
+#[ignore = "requires cargo build --bin biyan-computer-agent-runner --features computer-agent-runner"]
 fn macos_runner_scrubs_user_environment() {
     let tmp = tempdir().unwrap();
     let workspace = tmp.path().join("workspace");
@@ -959,13 +959,13 @@ fn macos_runner_scrubs_user_environment() {
     assert!(response
         .stdout
         .lines()
-        .any(|line| line.contains(".mita-computer-agent-runner-tmp")));
+        .any(|line| line.contains(".biyan-computer-agent-runner-tmp")));
     assert!(response.stdout.lines().any(|line| line == "unset"));
 }
 
 #[cfg(windows)]
 #[test]
-#[ignore = "requires cargo build --bin mita-computer-agent-runner and AppContainer support"]
+#[ignore = "requires cargo build --bin biyan-computer-agent-runner and AppContainer support"]
 fn windows_runner_blocks_writes_outside_workspace() {
     let tmp = tempdir().unwrap();
     let workspace = tmp.path().join("workspace");
@@ -994,7 +994,7 @@ fn windows_runner_blocks_writes_outside_workspace() {
 
 #[cfg(windows)]
 #[test]
-#[ignore = "requires cargo build --bin mita-computer-agent-runner and AppContainer support"]
+#[ignore = "requires cargo build --bin biyan-computer-agent-runner and AppContainer support"]
 fn windows_runner_allows_writes_inside_allowed_root_and_cleans_acl() {
     let tmp = tempdir().unwrap();
     let workspace = tmp.path().join("workspace");
@@ -1034,7 +1034,7 @@ fn windows_runner_allows_writes_inside_allowed_root_and_cleans_acl() {
 
 #[cfg(windows)]
 #[test]
-#[ignore = "requires cargo build --bin mita-computer-agent-runner and AppContainer support"]
+#[ignore = "requires cargo build --bin biyan-computer-agent-runner and AppContainer support"]
 fn windows_runner_timeout_cleans_allowed_root_acl() {
     let tmp = tempdir().unwrap();
     let workspace = tmp.path().join("workspace");
@@ -1070,7 +1070,7 @@ fn windows_runner_timeout_cleans_allowed_root_acl() {
 
 #[cfg(windows)]
 #[test]
-#[ignore = "requires cargo build --bin mita-computer-agent-runner and AppContainer support"]
+#[ignore = "requires cargo build --bin biyan-computer-agent-runner and AppContainer support"]
 fn windows_runner_reports_local_diagnostic_for_missing_workspace() {
     let tmp = tempdir().unwrap();
     let workspace = tmp.path().join("missing-workspace");
@@ -1103,7 +1103,7 @@ fn windows_runner_reports_local_diagnostic_for_missing_workspace() {
 
 #[cfg(windows)]
 #[test]
-#[ignore = "requires cargo build --bin mita-computer-agent-runner and AppContainer support"]
+#[ignore = "requires cargo build --bin biyan-computer-agent-runner and AppContainer support"]
 fn windows_runner_blocks_user_profile_read_write() {
     let _guard = windows_runner_env_lock().lock().unwrap();
     let tmp = tempdir().unwrap();
@@ -1146,7 +1146,7 @@ fn windows_runner_blocks_user_profile_read_write() {
 
 #[cfg(windows)]
 #[test]
-#[ignore = "requires cargo build --bin mita-computer-agent-runner and AppContainer support"]
+#[ignore = "requires cargo build --bin biyan-computer-agent-runner and AppContainer support"]
 fn windows_runner_blocks_real_hkcu_registry_read_write() {
     let tmp = tempdir().unwrap();
     let workspace = tmp.path().join("workspace");
@@ -1187,7 +1187,7 @@ fn windows_runner_blocks_real_hkcu_registry_read_write() {
 
 #[cfg(windows)]
 #[test]
-#[ignore = "requires cargo build --bin mita-computer-agent-runner and AppContainer support"]
+#[ignore = "requires cargo build --bin biyan-computer-agent-runner and AppContainer support"]
 fn windows_runner_truncates_large_output() {
     let tmp = tempdir().unwrap();
     let workspace = tmp.path().join("workspace");
@@ -1213,7 +1213,7 @@ fn windows_runner_truncates_large_output() {
 
 #[cfg(windows)]
 #[test]
-#[ignore = "requires cargo build --bin mita-computer-agent-runner and AppContainer support"]
+#[ignore = "requires cargo build --bin biyan-computer-agent-runner and AppContainer support"]
 fn windows_runner_timeout_kills_cmd_process_tree() {
     assert_process_tree_child_is_killed(
         "cmd",
@@ -1233,7 +1233,7 @@ fn windows_runner_timeout_kills_cmd_process_tree() {
 
 #[cfg(windows)]
 #[test]
-#[ignore = "requires cargo build --bin mita-computer-agent-runner and AppContainer support"]
+#[ignore = "requires cargo build --bin biyan-computer-agent-runner and AppContainer support"]
 fn windows_runner_timeout_kills_powershell_process_tree() {
     assert_process_tree_child_is_killed(
         "powershell",
@@ -1246,7 +1246,7 @@ fn windows_runner_timeout_kills_powershell_process_tree() {
 
 #[cfg(windows)]
 #[test]
-#[ignore = "requires cargo build --bin mita-computer-agent-runner and AppContainer support"]
+#[ignore = "requires cargo build --bin biyan-computer-agent-runner and AppContainer support"]
 fn windows_runner_next_run_cleans_crashed_runner_acl_journal() {
     let tmp = tempdir().unwrap();
     let workspace = tmp.path().join("workspace");
@@ -1326,7 +1326,7 @@ fn windows_runner_next_run_cleans_crashed_runner_acl_journal() {
 
 #[cfg(windows)]
 #[test]
-#[ignore = "requires cargo build --bin mita-computer-agent-runner and AppContainer support"]
+#[ignore = "requires cargo build --bin biyan-computer-agent-runner and AppContainer support"]
 fn windows_runner_timeout_kills_node_process_tree() {
     let Some(node) = find_program(&["node.exe"], &[]) else {
         eprintln!("node.exe not found; skipping Node process-tree regression");
@@ -1343,7 +1343,7 @@ fn windows_runner_timeout_kills_node_process_tree() {
 
 #[cfg(windows)]
 #[test]
-#[ignore = "requires cargo build --bin mita-computer-agent-runner and AppContainer support"]
+#[ignore = "requires cargo build --bin biyan-computer-agent-runner and AppContainer support"]
 fn windows_runner_timeout_kills_python_process_tree() {
     let Some(python) = find_program(&["python.exe", "python3.exe"], &[]) else {
         eprintln!("python.exe not found; skipping Python process-tree regression");
@@ -1360,7 +1360,7 @@ fn windows_runner_timeout_kills_python_process_tree() {
 
 #[cfg(windows)]
 #[test]
-#[ignore = "requires cargo build --bin mita-computer-agent-runner and AppContainer support"]
+#[ignore = "requires cargo build --bin biyan-computer-agent-runner and AppContainer support"]
 fn windows_runner_timeout_kills_git_bash_process_tree() {
     let Some(bash) = find_program(
         &["bash.exe"],
@@ -1385,7 +1385,7 @@ fn windows_runner_timeout_kills_git_bash_process_tree() {
 
 #[cfg(windows)]
 #[test]
-#[ignore = "requires cargo build --bin mita-computer-agent-runner and AppContainer support"]
+#[ignore = "requires cargo build --bin biyan-computer-agent-runner and AppContainer support"]
 fn windows_runner_blocks_loopback_network() {
     let listener = TcpListener::bind("127.0.0.1:0").unwrap();
     listener.set_nonblocking(true).unwrap();
@@ -1435,7 +1435,7 @@ fn windows_runner_blocks_loopback_network() {
 
 #[cfg(windows)]
 #[test]
-#[ignore = "requires cargo build --bin mita-computer-agent-runner and AppContainer support"]
+#[ignore = "requires cargo build --bin biyan-computer-agent-runner and AppContainer support"]
 fn windows_runner_blocks_junction_escape() {
     let tmp = tempdir().unwrap();
     let workspace = tmp.path().join("workspace");
@@ -1468,7 +1468,7 @@ fn windows_runner_blocks_junction_escape() {
 
 #[cfg(windows)]
 #[test]
-#[ignore = "requires cargo build --bin mita-computer-agent-runner and AppContainer support"]
+#[ignore = "requires cargo build --bin biyan-computer-agent-runner and AppContainer support"]
 fn windows_runner_blocks_directory_symlink_escape() {
     let tmp = tempdir().unwrap();
     let workspace = tmp.path().join("workspace");
@@ -1501,7 +1501,7 @@ fn windows_runner_blocks_directory_symlink_escape() {
 
 #[cfg(windows)]
 #[test]
-#[ignore = "requires cargo build --bin mita-computer-agent-runner and AppContainer support"]
+#[ignore = "requires cargo build --bin biyan-computer-agent-runner and AppContainer support"]
 fn windows_runner_blocks_file_symlink_escape() {
     let tmp = tempdir().unwrap();
     let workspace = tmp.path().join("workspace");
@@ -1716,7 +1716,7 @@ fn spawn_runner_request(request: RunnerRequest, execute: bool) -> Child {
         .join(RUNNER_BINARY_NAME);
     assert!(
         runner.is_file(),
-        "runner binary not found at {}; run cargo build --bin mita-computer-agent-runner first",
+        "runner binary not found at {}; run cargo build --bin biyan-computer-agent-runner first",
         runner.display()
     );
 

@@ -23,19 +23,6 @@ describe('DefaultHardwareService', () => {
     })
   })
 
-  describe('getLlamacppDevices', () => {
-    it('returns empty array', async () => {
-      const result = await svc.getLlamacppDevices()
-      expect(result).toEqual([])
-    })
-  })
-
-  describe('setActiveGpus', () => {
-    it('resolves without error', async () => {
-      await expect(svc.setActiveGpus({ gpus: [0, 1] })).resolves.toBeUndefined()
-    })
-  })
-
   describe('refreshHardwareInfo', () => {
     it('resolves without error', async () => {
       await expect(svc.refreshHardwareInfo()).resolves.toBeUndefined()

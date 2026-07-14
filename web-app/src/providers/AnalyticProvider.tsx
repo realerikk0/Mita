@@ -5,10 +5,10 @@ import { useEffect, useRef } from 'react'
 import { useServiceHub } from '@/hooks/useServiceHub'
 import { useAnalytic } from '@/hooks/useAnalytic'
 import {
-  registerMitaAnalyticsSuperProperties,
+  registerBiyanAnalyticsSuperProperties,
   sanitizeAnalyticsProperties,
-  setMitaAnalyticsConsent,
-  trackMitaEvent,
+  setBiyanAnalyticsConsent,
+  trackBiyanEvent,
 } from '@/lib/analytics'
 
 export function AnalyticProvider() {
@@ -79,26 +79,26 @@ export function AnalyticProvider() {
           if (id) posthog.identify(id)
         })
         .finally(() => {
-          setMitaAnalyticsConsent(true)
-          registerMitaAnalyticsSuperProperties({
+          setBiyanAnalyticsConsent(true)
+          registerBiyanAnalyticsSuperProperties({
             app_version: VERSION,
             platform: 'desktop',
           })
           serviceHub.analytic().updateDistinctId(posthog.get_distinct_id())
           if (!launchedRef.current) {
             launchedRef.current = true
-            trackMitaEvent('app_launched')
+            trackBiyanEvent('app_launched')
           }
         })
     } else {
-      setMitaAnalyticsConsent(false)
+      setBiyanAnalyticsConsent(false)
       launchedRef.current = false
     }
   }, [productAnalytic, serviceHub])
 
   useEffect(() => {
     if (!productAnalytic) return
-    trackMitaEvent('screen_viewed', {
+    trackBiyanEvent('screen_viewed', {
       screen: pathname,
     })
   }, [pathname, productAnalytic])
@@ -108,7 +108,7 @@ export function AnalyticProvider() {
 
     const trackBackground = () => {
       if (document.visibilityState === 'hidden') {
-        trackMitaEvent('app_backgrounded')
+        trackBiyanEvent('app_backgrounded')
       }
     }
 

@@ -209,7 +209,7 @@ describe('NavChats history stream', () => {
     useImageGenerationStore.getState().reset()
   })
 
-  it('mixes chats, generated media, and Mita Teams in updated order', async () => {
+  it('mixes chats, generated media, and Biyan Teams in updated order', async () => {
     h.threads = [
       makeThread({
         id: 'chat-1',
@@ -220,7 +220,7 @@ describe('NavChats history stream', () => {
         id: 'team-1',
         title: 'Launch group',
         updated: Date.parse('2026-06-04T00:00:00Z') / 1000,
-        metadata: { mitaTeams: { enabled: true } },
+        metadata: { biyanTeams: { enabled: true } },
       }),
     ]
     h.imageAssets = [

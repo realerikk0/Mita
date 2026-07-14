@@ -2,7 +2,7 @@
  * MCP Service Types
  */
 
-import { MCPTool, MCPToolCallResult } from '@janhq/core'
+import { MCPTool, MCPToolCallResult } from '@biyan/core'
 import type { MCPServerConfig, MCPServers, MCPSettings } from '@/hooks/useMCPServers'
 
 export interface MCPConfig {
@@ -45,5 +45,5 @@ export interface MCPService {
   // MCP Server lifecycle management
   activateMCPServer(name: string, config: MCPServerConfig): Promise<void>
   deactivateMCPServer(name: string): Promise<void>
-  checkMitaWebResearchConnected(): Promise<boolean>
+  checkBiyanWebResearchConnected(): Promise<boolean>
 }

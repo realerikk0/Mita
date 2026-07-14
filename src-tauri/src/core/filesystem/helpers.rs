@@ -1,5 +1,5 @@
-use crate::core::app::commands::get_mita_data_folder_path;
-use jan_utils::{normalize_file_path, normalize_path};
+use crate::core::app::commands::get_biyan_data_folder_path;
+use biyan_utils::{normalize_file_path, normalize_path};
 use std::path::{Path, PathBuf};
 use tauri::Runtime;
 
@@ -10,7 +10,7 @@ pub fn resolve_path<R: Runtime>(app_handle: tauri::AppHandle<R>, path: &str) -> 
             .trim_start_matches(std::path::MAIN_SEPARATOR)
             .trim_start_matches('/')
             .trim_start_matches('\\');
-        get_mita_data_folder_path(app_handle).join(relative_normalized)
+        get_biyan_data_folder_path(app_handle).join(relative_normalized)
     } else {
         PathBuf::from(path)
     };
@@ -22,14 +22,14 @@ pub fn resolve_path<R: Runtime>(app_handle: tauri::AppHandle<R>, path: &str) -> 
     }
 }
 
-fn resolve_path_input(path: &str, mita_data_folder: &Path) -> PathBuf {
+fn resolve_path_input(path: &str, biyan_data_folder: &Path) -> PathBuf {
     if path.starts_with("file:/") || path.starts_with("file:\\") {
         let normalized = normalize_file_path(path);
         let relative_normalized = normalized
             .trim_start_matches(std::path::MAIN_SEPARATOR)
             .trim_start_matches('/')
             .trim_start_matches('\\');
-        mita_data_folder.join(relative_normalized)
+        biyan_data_folder.join(relative_normalized)
     } else {
         PathBuf::from(path)
     }
@@ -74,12 +74,12 @@ fn normalize_scope_path(path: PathBuf) -> PathBuf {
     normalize_path(&path)
 }
 
-pub fn resolve_path_within_mita_data_folder(
-    mita_data_folder: &Path,
+pub fn resolve_path_within_biyan_data_folder(
+    biyan_data_folder: &Path,
     path: &str,
 ) -> Result<(PathBuf, PathBuf), String> {
-    let canonical_data = normalize_scope_path(canonicalize_for_scope(mita_data_folder));
-    let input_path = resolve_path_input(path, mita_data_folder);
+    let canonical_data = normalize_scope_path(canonicalize_for_scope(biyan_data_folder));
+    let input_path = resolve_path_input(path, biyan_data_folder);
     let resolved_path = if input_path.is_absolute() {
         normalize_path(&input_path)
     } else {
@@ -111,7 +111,7 @@ mod tests {
         fs::create_dir_all(data.join("threads")).unwrap();
 
         let (root, resolved) =
-            resolve_path_within_mita_data_folder(&data, "threads").expect("resolves");
+            resolve_path_within_biyan_data_folder(&data, "threads").expect("resolves");
         assert!(resolved.starts_with(&root));
         assert!(resolved.ends_with("threads"));
     }
@@ -124,7 +124,7 @@ mod tests {
         fs::write(data.join("models/info.json"), "{}").unwrap();
 
         let (root, resolved) =
-            resolve_path_within_mita_data_folder(&data, "file://models/info.json")
+            resolve_path_within_biyan_data_folder(&data, "file://models/info.json")
                 .expect("resolves");
         assert!(resolved.starts_with(&root));
         assert!(resolved.ends_with("info.json"));
@@ -139,7 +139,7 @@ mod tests {
         fs::create_dir_all(&outside).unwrap();
         fs::write(outside.join("secret.txt"), "x").unwrap();
 
-        let result = resolve_path_within_mita_data_folder(&data, "../outside/secret.txt");
+        let result = resolve_path_within_biyan_data_folder(&data, "../outside/secret.txt");
         assert!(
             result.is_err(),
             "expected escape to be rejected, got {result:?}"
@@ -155,7 +155,7 @@ mod tests {
         let absolute = inner.to_string_lossy().to_string();
 
         let (root, resolved) =
-            resolve_path_within_mita_data_folder(&data, &absolute).expect("resolves");
+            resolve_path_within_biyan_data_folder(&data, &absolute).expect("resolves");
         assert!(resolved.starts_with(&root));
     }
 
@@ -167,7 +167,7 @@ mod tests {
         fs::create_dir_all(&data).unwrap();
         fs::create_dir_all(&elsewhere).unwrap();
 
-        let result = resolve_path_within_mita_data_folder(&data, &elsewhere.to_string_lossy());
+        let result = resolve_path_within_biyan_data_folder(&data, &elsewhere.to_string_lossy());
         assert!(result.is_err());
     }
 
@@ -177,18 +177,17 @@ mod tests {
         let tmp = TempDir::new().unwrap();
         let data = tmp.path().to_path_buf();
 
-        let (root, resolved) =
-            resolve_path_within_mita_data_folder(&data, "new/nested/file.txt")
-                .expect("resolves nonexistent child");
+        let (root, resolved) = resolve_path_within_biyan_data_folder(&data, "new/nested/file.txt")
+            .expect("resolves nonexistent child");
         assert!(resolved.starts_with(&root));
         assert!(resolved.ends_with("file.txt"));
     }
 }
 
-pub fn resolve_app_path_within_mita_data_folder<R: Runtime>(
+pub fn resolve_app_path_within_biyan_data_folder<R: Runtime>(
     app_handle: tauri::AppHandle<R>,
     path: &str,
 ) -> Result<(PathBuf, PathBuf), String> {
-    let mita_data_folder = get_mita_data_folder_path(app_handle);
-    resolve_path_within_mita_data_folder(&mita_data_folder, path)
+    let biyan_data_folder = get_biyan_data_folder_path(app_handle);
+    resolve_path_within_biyan_data_folder(&biyan_data_folder, path)
 }

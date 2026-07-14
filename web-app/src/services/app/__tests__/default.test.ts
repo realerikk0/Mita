@@ -43,16 +43,16 @@ describe('DefaultAppService', () => {
     })
   })
 
-  describe('getMitaDataFolder', () => {
+  describe('getBiyanDataFolder', () => {
     it('returns undefined', async () => {
-      const result = await svc.getMitaDataFolder()
+      const result = await svc.getBiyanDataFolder()
       expect(result).toBeUndefined()
     })
   })
 
-  describe('relocateMitaDataFolder', () => {
+  describe('relocateBiyanDataFolder', () => {
     it('resolves without error', async () => {
-      await expect(svc.relocateMitaDataFolder('/new/path')).resolves.toBeUndefined()
+      await expect(svc.relocateBiyanDataFolder('/new/path')).resolves.toBeUndefined()
     })
   })
 

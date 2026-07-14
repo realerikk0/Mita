@@ -5,9 +5,7 @@
  * It handles the complexity of initializing different AI SDK providers with their specific
  * configurations and returns a standard LanguageModel interface.
  *
- * Supported Providers:
- * - llamacpp: Local models via llama.cpp (requires running session)
- * - mlx: Local models via MLX-Swift on Apple Silicon (requires running session)
+ * Supported Providers are remote APIs only:
  * - anthropic: Claude models via Anthropic API (@ai-sdk/anthropic v2.0)
  * - google/gemini: Gemini models via Google Generative AI API (@ai-sdk/google v2.0)
  * - openai: OpenAI models via OpenAI API (@ai-sdk/openai)
@@ -20,7 +18,6 @@
  *
  * The factory automatically:
  * - Handles provider-specific authentication and headers
- * - Manages llamacpp session discovery and connection
  * - Configures custom headers for each provider
  * - Returns a unified LanguageModel interface compatible with Vercel AI SDK
  */
@@ -50,80 +47,18 @@ import {
 import { createOpenAI } from '@ai-sdk/openai'
 import {
   createOpenAICompatible,
-  MetadataExtractor,
-  OpenAICompatibleChatLanguageModel,
 } from '@ai-sdk/openai-compatible'
 import { createAnthropic } from '@ai-sdk/anthropic'
 import { createGoogleGenerativeAI } from '@ai-sdk/google'
 import { createXai } from '@ai-sdk/xai'
-import { invoke } from '@tauri-apps/api/core'
-import { SessionInfo } from '@janhq/core'
 import { fetch as httpFetch } from '@tauri-apps/plugin-http'
 import { isPlatformTauri } from '@/lib/platform/utils'
 import { providerRemoteApiKeyChain } from '@/lib/provider-api-keys'
 import { parseProviderErrorResponse } from '@/lib/provider-quota-error'
-import { LLAMACPP_ONLY_PARAM_KEYS } from '@/lib/predefinedParams'
-
-/**
- * Llama.cpp timings structure from the response
- */
-interface LlamaCppTimings {
-  prompt_n?: number
-  predicted_n?: number
-  predicted_per_second?: number
-  prompt_per_second?: number
-}
-
-interface LlamaCppChunk {
-  timings?: LlamaCppTimings
-}
-
-/**
- * Custom metadata extractor for MLX that extracts timing information
- * and converts it to token usage format. MLX uses the same timing structure
- * as llama.cpp.
- */
-const providerMetadataExtractor: MetadataExtractor = {
-  extractMetadata: async ({ parsedBody }: { parsedBody: unknown }) => {
-    const body = parsedBody as LlamaCppChunk
-    if (body?.timings) {
-      return {
-        providerMetadata: {
-          promptTokens: body.timings.prompt_n ?? null,
-          completionTokens: body.timings.predicted_n ?? null,
-          tokensPerSecond: body.timings.predicted_per_second ?? null,
-          promptPerSecond: body.timings.prompt_per_second ?? null,
-        },
-      }
-    }
-    return undefined
-  },
-  createStreamExtractor: () => {
-    let lastTimings: LlamaCppTimings | undefined
-
-    return {
-      processChunk: (parsedChunk: unknown) => {
-        const chunk = parsedChunk as LlamaCppChunk
-        if (chunk?.timings) {
-          lastTimings = chunk.timings
-        }
-      },
-      buildMetadata: () => {
-        if (lastTimings) {
-          return {
-            providerMetadata: {
-              promptTokens: lastTimings.prompt_n ?? null,
-              completionTokens: lastTimings.predicted_n ?? null,
-              tokensPerSecond: lastTimings.predicted_per_second ?? null,
-              promptPerSecond: lastTimings.prompt_per_second ?? null,
-            },
-          }
-        }
-        return undefined
-      },
-    }
-  },
-}
+import {
+  isRemoteProviderEndpoint,
+  RETIRED_LOCAL_PROVIDER_IDS,
+} from '@/lib/configured-model-providers'
 
 /**
  * Keys from inference parameters that are client-side only and must not
@@ -139,6 +74,25 @@ const CLIENT_SIDE_PARAM_KEYS: ReadonlySet<string> = new Set([
 const REMOTE_UNSUPPORTED_PARAM_KEYS: ReadonlySet<string> = new Set([
   'top_k',
   'repeat_penalty',
+  'n_gpu_layers',
+  'n_batch',
+  'batch_size',
+  'ubatch_size',
+  'threads',
+  'n_threads',
+  'n_threads_batch',
+  'flash_attn',
+  'use_mmap',
+  'use_mlock',
+  'no_kv_offload',
+  'cpu_moe',
+  'n_cpu_moe',
+  'override_tensor_buffer_t',
+  'offload_mmproj',
+  'cont_batching',
+  'chat_template',
+  'cache_type_k',
+  'cache_type_v',
 ])
 
 function isClaudeModel(modelId: string): boolean {
@@ -159,18 +113,15 @@ function isClaudeOpus47OrLaterModel(modelId: string): boolean {
 function normalizeInferenceParameters(
   parameters: Record<string, unknown>,
   options: {
-    keepLlamacppOnly?: boolean
     modelId?: string
-    remote?: boolean
   } = {}
 ): Record<string, unknown> {
-  const { keepLlamacppOnly = false, modelId, remote = !keepLlamacppOnly } = options
+  const { modelId } = options
   const normalised: Record<string, unknown> = {}
 
   for (const [key, value] of Object.entries(parameters)) {
     if (CLIENT_SIDE_PARAM_KEYS.has(key)) continue
-    if (!keepLlamacppOnly && LLAMACPP_ONLY_PARAM_KEYS.has(key)) continue
-    if (remote && REMOTE_UNSUPPORTED_PARAM_KEYS.has(key)) continue
+    if (REMOTE_UNSUPPORTED_PARAM_KEYS.has(key)) continue
 
     const targetKey = key === 'max_output_tokens' ? 'max_tokens' : key
     normalised[targetKey] = value
@@ -196,16 +147,6 @@ function normalizeInferenceParameters(
   return normalised
 }
 
-function filterParameters(
-  parameters: Record<string, unknown>,
-  keepLlamacppOnly: boolean
-): Record<string, unknown> {
-  return normalizeInferenceParameters(parameters, {
-    keepLlamacppOnly,
-    remote: false,
-  })
-}
-
 /**
  * Create a custom fetch function that injects additional parameters into the
  * request body, normalising key names for OpenAI-compatible APIs:
@@ -216,18 +157,13 @@ function filterParameters(
 function createCustomFetch(
   baseFetch: typeof globalThis.fetch,
   parameters: Record<string, unknown>,
-  keepLlamacppOnly = false,
   modelId?: string
 ): typeof globalThis.fetch {
   return async (input: RequestInfo | URL, init?: RequestInit): Promise<Response> => {
     if (init?.method === 'POST' || !init?.method) {
       const body = init?.body ? JSON.parse(init.body as string) : {}
 
-      const normalised = normalizeInferenceParameters(parameters, {
-        keepLlamacppOnly,
-        modelId,
-        remote: !keepLlamacppOnly,
-      })
+      const normalised = normalizeInferenceParameters(parameters, { modelId })
 
       init = { ...init, body: JSON.stringify({ ...body, ...normalised }) }
     }
@@ -247,7 +183,7 @@ function createApiKeyRotatingFetch(
   modelId?: string,
   providerName?: string
 ): typeof globalThis.fetch {
-  const inner = createCustomFetch(baseFetch, parameters, false, modelId)
+  const inner = createCustomFetch(baseFetch, parameters, modelId)
   if (apiKeys.length <= 1) {
     return inner
   }
@@ -282,7 +218,7 @@ function createProviderErrorAwareFetch(
   modelId?: string,
   providerName?: string
 ): typeof globalThis.fetch {
-  const inner = createCustomFetch(baseFetch, parameters, false, modelId)
+  const inner = createCustomFetch(baseFetch, parameters, modelId)
   return async (
     input: RequestInfo | URL,
     init?: RequestInit
@@ -306,95 +242,6 @@ function getRuntimeFetch(): typeof globalThis.fetch {
   return isPlatformTauri() && hasTauriRuntime
     ? (httpFetch as typeof globalThis.fetch)
     : globalThis.fetch
-}
-
-/**
- * Custom fetch for Foundation Models that routes through Tauri IPC
- * instead of HTTP, emulating an OpenAI-compatible fetch interface.
- */
-function createFoundationModelsFetch(
-  parameters: Record<string, unknown>
-): typeof globalThis.fetch {
-  return async (
-    _input: RequestInfo | URL,
-    init?: RequestInit
-  ): Promise<Response> => {
-    const rawBody = init?.body ? JSON.parse(init.body as string) : {}
-    const body = { ...rawBody, ...parameters }
-    const isStreaming = body.stream === true
-
-    if (!isStreaming) {
-      const result = await invoke<string>(
-        'plugin:foundation-models|foundation_models_chat_completion',
-        { body: JSON.stringify(body) }
-      )
-      return new Response(result, {
-        status: 200,
-        headers: { 'Content-Type': 'application/json' },
-      })
-    }
-
-    const requestId = crypto.randomUUID()
-    const { listen } = await import('@tauri-apps/api/event')
-
-    let unlistenFn: (() => void) | null = null
-    const stream = new ReadableStream<Uint8Array>({
-      async start(controller) {
-        const encoder = new TextEncoder()
-
-        unlistenFn = await listen(
-          `foundation-models-stream-${requestId}`,
-          (event: { payload: { data?: string; done?: boolean; error?: string } }) => {
-            const payload = event.payload
-            if (payload.done) {
-              controller.enqueue(encoder.encode('data: [DONE]\n\n'))
-              try {
-                controller.close()
-              } catch {
-                /* already closed */
-              }
-              unlistenFn?.()
-            } else if (payload.error) {
-              try {
-                controller.error(new Error(payload.error))
-              } catch {
-                /* already errored */
-              }
-              unlistenFn?.()
-            } else if (payload.data) {
-              controller.enqueue(
-                encoder.encode(`data: ${payload.data}\n\n`)
-              )
-            }
-          }
-        )
-
-        invoke(
-          'plugin:foundation-models|foundation_models_chat_completion_stream',
-          { body: JSON.stringify(body), requestId }
-        ).catch((err) => {
-          try {
-            controller.error(err)
-          } catch {
-            /* already errored */
-          }
-          unlistenFn?.()
-        })
-      },
-      cancel() {
-        unlistenFn?.()
-        invoke(
-          'plugin:foundation-models|abort_foundation_models_stream',
-          { requestId }
-        ).catch(() => {})
-      },
-    })
-
-    return new Response(stream, {
-      status: 200,
-      headers: { 'Content-Type': 'text/event-stream' },
-    })
-  }
 }
 
 /**
@@ -439,16 +286,19 @@ export class ModelFactory {
   ): Promise<LanguageModel> {
     const providerName = provider.provider.toLowerCase()
 
+    if (
+      RETIRED_LOCAL_PROVIDER_IDS.has(providerName) ||
+      !isRemoteProviderEndpoint(provider)
+    ) {
+      throw Object.assign(
+        new Error(
+          'Local model runtimes have been retired. Select a configured remote provider to continue.'
+        ),
+        { code: 'LOCAL_RUNTIME_REMOVED' }
+      )
+    }
+
     switch (providerName) {
-      case 'llamacpp':
-        return this.createLlamaCppModel(modelId, provider, parameters)
-
-      case 'mlx':
-        return this.createMlxModel(modelId, provider, parameters)
-
-      case 'foundation-models':
-        return this.createFoundationModelsModel(modelId, provider, parameters)
-
       case 'anthropic':
         return this.createAnthropicModel(modelId, provider, parameters)
 
@@ -475,233 +325,6 @@ export class ModelFactory {
       default:
         return this.createOpenAICompatibleModel(modelId, provider, parameters)
     }
-  }
-
-  /**
-   * Create a llamacpp model by starting the model and finding the running session
-   */
-  private static async createLlamaCppModel(
-    modelId: string,
-    provider?: ProviderObject,
-    parameters: Record<string, unknown> = {}
-  ): Promise<LanguageModel> {
-    // Start the model first if provider is available
-    if (provider) {
-      try {
-        const { useServiceStore } = await import('@/hooks/useServiceHub')
-        const serviceHub = useServiceStore.getState().serviceHub
-
-        if (serviceHub) {
-          await serviceHub.models().startModel(provider, modelId)
-        }
-      } catch (error) {
-        console.error('Failed to start llamacpp model:', error)
-        throw new Error(
-          `Failed to start model: ${error instanceof Error ? error.message : JSON.stringify(error)}`
-        )
-      }
-    }
-
-    // Get session info which includes port and api_key
-    const sessionInfo = await invoke<SessionInfo | null>(
-      'plugin:llamacpp|find_session_by_model',
-      { modelId }
-    )
-
-    if (!sessionInfo) {
-      throw new Error(`No running session found for model: ${modelId}`)
-    }
-
-    const customFetch = createCustomFetch(httpFetch, parameters, true)
-
-    const model = new OpenAICompatibleChatLanguageModel(modelId, {
-      provider: 'llamacpp',
-      headers: () => ({
-        Authorization: `Bearer ${sessionInfo.api_key}`,
-        Origin: 'tauri://localhost',
-      }),
-      url: ({ path }) => {
-        const url = new URL(`http://localhost:${sessionInfo.port}/v1${path}`)
-        return url.toString()
-      },
-      includeUsage: true,
-      fetch: customFetch,
-      metadataExtractor: providerMetadataExtractor,
-    })
-
-    return wrapLanguageModel({
-      model,
-      middleware: extractReasoningMiddleware({
-        tagName: getReasoningTagName(modelId),
-        separator: '\n',
-      }),
-    })
-  }
-
-  /**
-   * Create an MLX model by starting the model and finding the running session.
-   * MLX uses the same OpenAI-compatible API pattern as llamacpp.
-   */
-  private static async createMlxModel(
-    modelId: string,
-    provider?: ProviderObject,
-    parameters: Record<string, unknown> = {}
-  ): Promise<LanguageModel> {
-    parameters = filterParameters(parameters, false)
-    // Start the model first if provider is available
-    if (provider) {
-      try {
-        const { useServiceStore } = await import('@/hooks/useServiceHub')
-        const serviceHub = useServiceStore.getState().serviceHub
-
-        if (serviceHub) {
-          await serviceHub.models().startModel(provider, modelId)
-        }
-      } catch (error) {
-        console.error('Failed to start MLX model:', error)
-        throw new Error(
-          `Failed to start model: ${error instanceof Error ? error.message : JSON.stringify(error)}`
-        )
-      }
-    }
-
-    // Get session info which includes port and api_key
-    const sessionInfo = await invoke<SessionInfo | null>(
-      'plugin:mlx|find_mlx_session_by_model',
-      { modelId }
-    )
-
-    if (!sessionInfo) {
-      throw new Error(`No running MLX session found for model: ${modelId}`)
-    }
-
-    const baseUrl = `http://localhost:${sessionInfo.port}`
-    const authHeaders = {
-      Authorization: `Bearer ${sessionInfo.api_key}`,
-      Origin: 'tauri://localhost',
-    }
-
-    // Custom fetch that merges parameters and calls /cancel on abort
-    const customFetch: typeof httpFetch = async (
-      input: RequestInfo | URL,
-      init?: RequestInit
-    ): Promise<Response> => {
-      if (init?.method === 'POST' || !init?.method) {
-        const body = init?.body ? JSON.parse(init.body as string) : {}
-        const mergedBody = { ...body, ...parameters }
-        init = { ...init, body: JSON.stringify(mergedBody) }
-      }
-
-      // When the request is aborted, also call the server's /cancel endpoint
-      // to stop MLX inference immediately
-      if (init?.signal) {
-        init.signal.addEventListener('abort', () => {
-          httpFetch(`${baseUrl}/v1/cancel`, {
-            method: 'POST',
-            headers: { ...authHeaders, 'Content-Type': 'application/json' },
-            body: JSON.stringify({}),
-          }).catch(() => {
-            // Ignore cancel request errors
-          })
-        })
-      }
-
-      return httpFetch(input, init)
-    }
-
-    const model = new OpenAICompatibleChatLanguageModel(modelId, {
-      provider: 'mlx',
-      headers: () => authHeaders,
-      url: ({ path }) => {
-        const url = new URL(`${baseUrl}/v1${path}`)
-        return url.toString()
-      },
-      fetch: customFetch,
-      metadataExtractor: providerMetadataExtractor,
-    })
-
-    return wrapLanguageModel({
-      model: model,
-      middleware: extractReasoningMiddleware({
-        tagName: getReasoningTagName(modelId),
-        separator: '\n',
-      }),
-    })
-  }
-
-  /**
-   * Create a Foundation Models model (Apple on-device) via direct Tauri IPC
-   * to the fm-rs Rust bindings — no HTTP server involved.
-   */
-  private static async createFoundationModelsModel(
-    modelId: string,
-    provider?: ProviderObject,
-    parameters: Record<string, unknown> = {}
-  ): Promise<LanguageModel> {
-    parameters = filterParameters(parameters, false)
-    const availability = await invoke<string>(
-      'plugin:foundation-models|check_foundation_models_availability',
-      {}
-    )
-
-    if (availability !== 'available') {
-      const messages: Record<string, string> = {
-        notEligible:
-          'Apple Intelligence is not supported on this device. An Apple Silicon Mac (M1 or later) with macOS 26+ is required.',
-        appleIntelligenceNotEnabled:
-          'Apple Intelligence is not enabled. Please enable it in System Settings > Apple Intelligence & Siri.',
-        modelNotReady:
-          'The Apple on-device model is still preparing. Please wait and try again shortly.',
-        unavailable:
-          'Apple Foundation Models are currently unavailable on this device.',
-      }
-      throw new Error(messages[availability] ?? messages.unavailable)
-    }
-
-    if (provider) {
-      try {
-        const { useServiceStore } = await import('@/hooks/useServiceHub')
-        const serviceHub = useServiceStore.getState().serviceHub
-
-        if (serviceHub) {
-          await serviceHub.models().startModel(provider, modelId)
-        }
-      } catch (error) {
-        console.error('Failed to start Foundation Models:', error)
-        throw new Error(
-          `Failed to start model: ${error instanceof Error ? error.message : JSON.stringify(error)}`
-        )
-      }
-    }
-
-    const loaded = await invoke<boolean>(
-      'plugin:foundation-models|is_foundation_models_loaded',
-      {}
-    )
-
-    if (!loaded) {
-      throw new Error(
-        'No running Foundation Models session. The model may have failed to load — please check the logs.'
-      )
-    }
-
-    const customFetch = createFoundationModelsFetch(parameters)
-
-    const model = new OpenAICompatibleChatLanguageModel(modelId, {
-      provider: 'foundation-models',
-      headers: () => ({}),
-      url: ({ path }) => `foundation-models://local/v1${path}`,
-      fetch: customFetch as typeof httpFetch,
-      metadataExtractor: providerMetadataExtractor,
-    })
-
-    return wrapLanguageModel({
-      model,
-      middleware: extractReasoningMiddleware({
-        tagName: getReasoningTagName(modelId),
-        separator: '\n',
-      }),
-    })
   }
 
   /**

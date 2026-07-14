@@ -9,7 +9,7 @@ Native Rust plugins for hardware access, process management, and system integrat
 ### `/tauri-plugin-hardware`
 - Hardware detection (CPU, GPU, memory)
 
-### `/tauri-plugin-llamacpp`  
+### `/tauri-plugin-document-parser`
 - llama.cpp process management and model inference
 
 ## Plugin Structure

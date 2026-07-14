@@ -49,8 +49,8 @@ on:
         required: false
       TAURI_SIGNING_PRIVATE_KEY_PASSWORD:
         required: false
-      MITA_SIGNING_KEY:
-        required: false
+      BIYAN_SIGNING_KEY:
+        required: true
     outputs:
       MAC_UNIVERSAL_SIG:
         value: ${{ jobs.build-macos.outputs.MAC_UNIVERSAL_SIG }}
@@ -114,19 +114,9 @@ jobs:
           echo "---------./src-tauri/plugins/tauri-plugin-hardware/package.json---------"
           cat ./src-tauri/plugins/tauri-plugin-hardware/package.json
 
-          jq --arg version "${{ inputs.new_version }}" '.version = $version' ./src-tauri/plugins/tauri-plugin-llamacpp/package.json > /tmp/package.json
-          mv /tmp/package.json ./src-tauri/plugins/tauri-plugin-llamacpp/package.json
-
-          echo "---------./src-tauri/plugins/tauri-plugin-llamacpp/package.json---------"
-          cat ./src-tauri/plugins/tauri-plugin-llamacpp/package.json
-
           ctoml ./src-tauri/plugins/tauri-plugin-hardware/Cargo.toml package.version "${{ inputs.new_version }}"
           echo "---------./src-tauri/plugins/tauri-plugin-hardware/Cargo.toml---------"
           cat ./src-tauri/plugins/tauri-plugin-hardware/Cargo.toml
-
-          ctoml ./src-tauri/plugins/tauri-plugin-llamacpp/Cargo.toml package.version "${{ inputs.new_version }}"
-          echo "---------./src-tauri/plugins/tauri-plugin-llamacpp/Cargo.toml---------"
-          cat ./src-tauri/plugins/tauri-plugin-llamacpp/Cargo.toml
 
           ctoml ./src-tauri/Cargo.toml package.version "${{ inputs.new_version }}"
           echo "---------./src-tauri/Cargo.toml---------"
@@ -138,11 +128,7 @@ jobs:
 
           # Change app name for beta and nightly builds
           if [ "${{ inputs.channel }}" != "stable" ]; then
-            if [[ "${{ inputs.channel }}" == "nightly" ]]; then
-              jq '.plugins.updater.endpoints = ["https://updates.mita.so/mita/update-check", "https://updates.mita.so/mita/${{ inputs.channel }}/latest.json"]' ./src-tauri/tauri.conf.json > /tmp/tauri.conf.json
-            else
-              jq '.plugins.updater.endpoints = ["https://updates.mita.so/mita/${{ inputs.channel }}/latest.json"]' ./src-tauri/tauri.conf.json > /tmp/tauri.conf.json
-            fi
+            jq '.plugins.updater.endpoints = ["https://updates.mita.so/biyan/${{ inputs.channel }}/latest.json"]' ./src-tauri/tauri.conf.json > /tmp/tauri.conf.json
             mv /tmp/tauri.conf.json ./src-tauri/tauri.conf.json
 
             chmod +x .github/scripts/rename-tauri-app.sh
@@ -156,9 +142,6 @@ jobs:
             echo "------------------"
             cat ./src-tauri/Cargo.toml
 
-            chmod +x .github/scripts/rename-workspace.sh
-            .github/scripts/rename-workspace.sh ./package.json ${{ inputs.channel }}
-            cat ./package.json
           fi
       - name: Get key for notarize
         run: base64 -d <<< "$NOTARIZE_P8_BASE64" > /tmp/notary-key.p8
@@ -195,41 +178,17 @@ jobs:
           APPLE_API_KEY_PATH: /tmp/notary-key.p8
           TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
           TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
-          MITA_SIGNING_KEY: ${{ secrets.MITA_SIGNING_KEY }}
+          BIYAN_SIGNING_KEY: ${{ secrets.BIYAN_SIGNING_KEY }}
 
-      - name: Verify bundled pre-install extensions
+      - name: Reject retired local runtime extensions
         shell: bash
         run: |
           set -euo pipefail
-
           app_root="src-tauri/target/universal-apple-darwin/release/bundle/macos"
-          app_found=false
-          required_extensions=(
-            "janhq-rag-extension"
-            "janhq-conversational-extension"
-          )
-
-          while IFS= read -r app; do
-            app_found=true
-            pre_install_dir="$app/Contents/Resources/resources/pre-install"
-            if [ ! -d "$pre_install_dir" ]; then
-              echo "Missing pre-install directory: $pre_install_dir" >&2
-              exit 1
-            fi
-
-            for extension in "${required_extensions[@]}"; do
-              if ! find "$pre_install_dir" -maxdepth 1 -type f -name "${extension}-*.tgz" | grep -q .; then
-                echo "Missing required bundled extension ${extension} in $pre_install_dir" >&2
-                exit 1
-              fi
-            done
-
-            echo "Verified bundled pre-install extensions in $pre_install_dir"
-            find "$pre_install_dir" -maxdepth 1 -type f -name "*.tgz" -print | sort
-          done < <(find "$app_root" -maxdepth 1 -type d -name "*.app" | sort)
-
-          if [ "$app_found" != "true" ]; then
-            echo "No macOS app bundle found under $app_root" >&2
+          test -d "$app_root"
+          if find "$app_root" -type f \
+            | grep -Ei '/[^/]*(llama|mlx|foundation|rag|vector)[^/]*$'; then
+            echo "Retired local runtime extension found in app bundle" >&2
             exit 1
           fi
 
@@ -240,7 +199,7 @@ jobs:
         if: inputs.public_provider != 'github'
         uses: actions/upload-artifact@v4
         with:
-          name: mita-${{ inputs.channel }}-mac-universal-${{ inputs.new_version }}.dmg
+          name: biyan-${{ inputs.channel }}-mac-universal-${{ inputs.new_version }}.dmg
           path: |
             ./src-tauri/target/universal-apple-darwin/release/bundle/dmg/*.dmg
 
@@ -249,14 +208,14 @@ jobs:
         run: |
           cd ./src-tauri/target/universal-apple-darwin/release/bundle/macos
           if [ "${{ inputs.channel }}" != "stable" ]; then
-            zip -r mita-${{ inputs.channel }}-mac-universal-${{ inputs.new_version }}.zip Mita-${{ inputs.channel }}.app
-            FILE_NAME=mita-${{ inputs.channel }}-mac-universal-${{ inputs.new_version }}.zip
-            DMG_NAME=Mita-${{ inputs.channel }}_${{ inputs.new_version }}_universal.dmg
-            MAC_UNIVERSAL_SIG=$(cat Mita-${{ inputs.channel }}.app.tar.gz.sig)
-            TAR_NAME=Mita-${{ inputs.channel }}.app.tar.gz
+            zip -r biyan-${{ inputs.channel }}-mac-universal-${{ inputs.new_version }}.zip Biyan-${{ inputs.channel }}.app
+            FILE_NAME=biyan-${{ inputs.channel }}-mac-universal-${{ inputs.new_version }}.zip
+            DMG_NAME=Biyan-${{ inputs.channel }}_${{ inputs.new_version }}_universal.dmg
+            MAC_UNIVERSAL_SIG=$(cat Biyan-${{ inputs.channel }}.app.tar.gz.sig)
+            TAR_NAME=Biyan-${{ inputs.channel }}.app.tar.gz
           else
-            zip -r mita-mac-universal-${{ inputs.new_version }}.zip Biyan.app
-            FILE_NAME=mita-mac-universal-${{ inputs.new_version }}.zip
+            zip -r biyan-mac-universal-${{ inputs.new_version }}.zip Biyan.app
+            FILE_NAME=biyan-mac-universal-${{ inputs.new_version }}.zip
             MAC_UNIVERSAL_SIG=$(cat Biyan.app.tar.gz.sig)
             DMG_NAME=Biyan_${{ inputs.new_version }}_universal.dmg
             TAR_NAME=Biyan.app.tar.gz
@@ -275,9 +234,9 @@ jobs:
           cd ./src-tauri/target/universal-apple-darwin/release/bundle
 
           # Upload for tauri updater
-          aws s3 cp ./dmg/Mita-${{ inputs.channel }}_${{ inputs.new_version }}_universal.dmg s3://${{ secrets.DELTA_AWS_S3_BUCKET_NAME }}/temp-${{ inputs.channel }}/Mita-${{ inputs.channel }}_${{ inputs.new_version }}_universal.dmg
-          aws s3 cp ./macos/Mita-${{ inputs.channel }}.app.tar.gz s3://${{ secrets.DELTA_AWS_S3_BUCKET_NAME }}/temp-${{ inputs.channel }}/Mita-${{ inputs.channel }}_${{ inputs.new_version }}.app.tar.gz
-          aws s3 cp ./macos/Mita-${{ inputs.channel }}.app.tar.gz.sig s3://${{ secrets.DELTA_AWS_S3_BUCKET_NAME }}/temp-${{ inputs.channel }}/Mita-${{ inputs.channel }}_${{ inputs.new_version }}.app.tar.gz.sig
+          aws s3 cp ./dmg/Biyan-${{ inputs.channel }}_${{ inputs.new_version }}_universal.dmg s3://${{ secrets.DELTA_AWS_S3_BUCKET_NAME }}/temp-${{ inputs.channel }}/Biyan-${{ inputs.channel }}_${{ inputs.new_version }}_universal.dmg
+          aws s3 cp ./macos/Biyan-${{ inputs.channel }}.app.tar.gz s3://${{ secrets.DELTA_AWS_S3_BUCKET_NAME }}/temp-${{ inputs.channel }}/Biyan-${{ inputs.channel }}_${{ inputs.new_version }}.app.tar.gz
+          aws s3 cp ./macos/Biyan-${{ inputs.channel }}.app.tar.gz.sig s3://${{ secrets.DELTA_AWS_S3_BUCKET_NAME }}/temp-${{ inputs.channel }}/Biyan-${{ inputs.channel }}_${{ inputs.new_version }}.app.tar.gz.sig
         env:
           AWS_ACCESS_KEY_ID: ${{ secrets.DELTA_AWS_ACCESS_KEY_ID }}
           AWS_SECRET_ACCESS_KEY: ${{ secrets.DELTA_AWS_SECRET_ACCESS_KEY }}

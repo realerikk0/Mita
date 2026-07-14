@@ -3,10 +3,14 @@
  */
 
 import { ExtensionManager } from '@/lib/extension'
-import { Assistant, AssistantExtension, ExtensionTypeEnum } from '@janhq/core'
+import { Assistant, AssistantExtension, ExtensionTypeEnum } from '@biyan/core'
 import type { AssistantsService } from './types'
 
 export class DefaultAssistantsService implements AssistantsService {
+  async getCommittedAssistantIdMap(): Promise<Record<string, string>> {
+    return {}
+  }
+
   async getAssistants(): Promise<Assistant[] | null> {
     const extension = ExtensionManager.getInstance().get<AssistantExtension>(
       ExtensionTypeEnum.Assistant

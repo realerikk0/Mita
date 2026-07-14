@@ -1,18 +1,21 @@
 import { invoke } from '@tauri-apps/api/core'
 import { listen } from '@tauri-apps/api/event'
-import { BaseExtension, events } from '@janhq/core'
-
-export enum Settings {
-  hfToken = 'hf-token',
-}
+import { BaseExtension, events } from '@biyan/core'
 
 interface DownloadItem {
   url: string
   save_path: string
-  proxy?: Record<string, string | string[] | boolean>
+  proxy?: ProxyConfig
   sha256?: string
   size?: number
-  model_id?: string
+}
+
+interface ProxyConfig {
+  url: string
+  username?: string
+  password?: string
+  no_proxy?: string[]
+  ignore_ssl?: boolean
 }
 
 type DownloadEvent = {
@@ -21,12 +24,7 @@ type DownloadEvent = {
 }
 
 export default class DownloadManager extends BaseExtension {
-  hfToken?: string
-
-  async onLoad() {
-    this.registerSettings(SETTINGS)
-    this.hfToken = await this.getSetting<string>(Settings.hfToken, undefined)
-  }
+  async onLoad() {}
 
   async onUnload() {}
 
@@ -34,20 +32,17 @@ export default class DownloadManager extends BaseExtension {
     url: string,
     savePath: string,
     taskId: string,
-    proxyConfig: Record<string, string | string[] | boolean> = {},
+    proxyConfig?: ProxyConfig,
     onProgress?: (transferred: number, total: number) => void
   ) {
+    const item: DownloadItem = { url, save_path: savePath }
+    if (proxyConfig) item.proxy = proxyConfig
+
     return await this.downloadFiles(
-      [{ url, save_path: savePath, proxy: proxyConfig }],
+      [item],
       taskId,
       onProgress
     )
-  }
-
-  onSettingUpdate<T>(key: string, value: T): void {
-    if (key === Settings.hfToken) {
-      this.hfToken = value as string
-    }
   }
 
   async downloadFiles(
@@ -70,7 +65,7 @@ export default class DownloadManager extends BaseExtension {
       await invoke<void>('download_files', {
         items,
         taskId,
-        headers: this._getHeaders(),
+        headers: {},
       })
     } catch (error) {
       console.error('Error downloading task', taskId, error)
@@ -86,12 +81,6 @@ export default class DownloadManager extends BaseExtension {
     } catch (error) {
       console.error('Error cancelling download:', error)
       throw error
-    }
-  }
-
-  _getHeaders() {
-    return {
-      ...(this.hfToken && { Authorization: `Bearer ${this.hfToken}` }),
     }
   }
 }

@@ -1,7 +1,9 @@
-import {
-  ChatCompletionMessage,
-  chatCompletionRequestMessage,
-} from '@janhq/core'
+import type { ChatCompletionMessage } from '@biyan/core'
+
+type MessageWithReasoning = {
+  reasoning?: string | null
+  reasoning_content?: string | null
+}
 
 // Helper function to get reasoning content from an object
 function getReasoning(
@@ -42,10 +44,10 @@ export function removeReasoningContent(content: string): string {
 
 // Extract reasoning from a message (for completed responses)
 export function extractReasoningFromMessage(
-  message: chatCompletionRequestMessage | ChatCompletionMessage
+  message: MessageWithReasoning | ChatCompletionMessage
 ): string | null {
   if (!message) return null
 
-  const extendedMessage = message as chatCompletionRequestMessage
+  const extendedMessage = message as MessageWithReasoning
   return getReasoning(extendedMessage)
 }

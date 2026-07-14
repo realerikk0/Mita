@@ -49,16 +49,14 @@ def get_computer_config():
             "os_type": "linux"
         }
 
-def get_default_jan_path():
-    """Get default Jan app path based on OS"""
+def get_default_biyan_path():
+    """Get default Biyan app path based on OS."""
     if IS_WINDOWS:
         # Try multiple common locations on Windows
         possible_paths = [
-            os.path.expanduser(r"~\AppData\Local\Programs\jan\Jan.exe"),
-            os.path.join(os.environ.get('LOCALAPPDATA', ''), 'Programs', 'jan', 'Jan.exe'),
-            os.path.join(os.environ.get('APPDATA', ''), 'jan', 'Jan.exe'),
-            r"C:\Program Files\jan\Jan.exe",
-            r"C:\Program Files (x86)\jan\Jan.exe"
+            os.path.join(os.environ.get('LOCALAPPDATA', ''), 'Programs', 'Biyan', 'Biyan.exe'),
+            r"C:\Program Files\Biyan\Biyan.exe",
+            r"C:\Program Files (x86)\Biyan\Biyan.exe"
         ]
         
         # Return first existing path, or first option as default
@@ -72,10 +70,10 @@ def get_default_jan_path():
     elif IS_LINUX:
         # Linux possible locations
         possible_paths = [
-            "/usr/bin/Jan",
-            "/usr/local/bin/Jan",
-            os.path.expanduser("~/Applications/Jan/Jan"),
-            "/opt/Jan/Jan"
+            "/usr/bin/Biyan",
+            "/usr/local/bin/Biyan",
+            os.path.expanduser("~/Applications/Biyan/Biyan"),
+            "/opt/Biyan/Biyan"
         ]
         
         # Return first existing path, or first option as default
@@ -84,13 +82,13 @@ def get_default_jan_path():
                 return path
         
         # Default to nightly build path
-        return "/usr/bin/Jan"
+        return "/usr/bin/Biyan"
     
     elif IS_MACOS:
         # macOS defaults
         possible_paths = [
-            "/Applications/Jan.app/Contents/MacOS/Jan",
-            os.path.expanduser("~/Applications/Jan.app/Contents/MacOS/Jan")
+            "/Applications/Biyan.app/Contents/MacOS/Biyan",
+            os.path.expanduser("~/Applications/Biyan.app/Contents/MacOS/Biyan")
         ]
         
         for path in possible_paths:
@@ -101,7 +99,7 @@ def get_default_jan_path():
     
     else:
         # Unknown platform
-        return "jan"
+        return "biyan"
 
 def start_computer_server():
     """Start computer server in background thread"""
@@ -177,8 +175,8 @@ Examples:
   # Run with ReportPortal integration
   python main.py --enable-reportportal --rp-token YOUR_TOKEN
   
-  # Run with custom Jan app path
-  python main.py --jan-app-path "C:/Custom/Path/Jan.exe"
+  # Run with custom Biyan app path
+  python main.py --biyan-app-path "C:/Custom/Path/Biyan.exe"
   
   # Run with different model
   python main.py --model-name "gpt-4" --model-base-url "https://api.openai.com/v1"
@@ -188,8 +186,8 @@ Examples:
         """
     )
     
-    # Get default Jan path
-    default_jan_path = get_default_jan_path()
+    # Get default Biyan path
+    default_biyan_path = get_default_biyan_path()
     
     # Computer server arguments
     server_group = parser.add_argument_group('Computer Server Configuration')
@@ -229,17 +227,17 @@ Examples:
         help='Custom launch name for ReportPortal (env: LAUNCH_NAME, default: auto-generated with timestamp)'
     )
     
-    # Jan app arguments
-    jan_group = parser.add_argument_group('Jan Application Configuration')
-    jan_group.add_argument(
-        '--jan-app-path',
-        default=os.getenv('JAN_APP_PATH', default_jan_path),
-        help=f'Path to Jan application executable (env: JAN_APP_PATH, default: auto-detected or {default_jan_path})'
+    # Biyan app arguments
+    biyan_group = parser.add_argument_group('Biyan Application Configuration')
+    biyan_group.add_argument(
+        '--biyan-app-path',
+        default=os.getenv('BIYAN_APP_PATH', default_biyan_path),
+        help=f'Path to Biyan application executable (env: BIYAN_APP_PATH, default: {default_biyan_path})'
     )
-    jan_group.add_argument(
-        '--jan-process-name',
-        default=os.getenv('JAN_PROCESS_NAME', 'Jan.exe' if IS_WINDOWS else ('Jan' if IS_MACOS else 'Jan-nightly')),
-        help='Jan process name for monitoring (env: JAN_PROCESS_NAME, default: platform-specific)'
+    biyan_group.add_argument(
+        '--biyan-process-name',
+        default=os.getenv('BIYAN_PROCESS_NAME', 'Biyan.exe' if IS_WINDOWS else 'Biyan'),
+        help='Biyan process name for monitoring (env: BIYAN_PROCESS_NAME, default: platform-specific)'
     )
     
     # Model/Agent arguments
@@ -328,9 +326,9 @@ async def main():
         logger.info(f"Tests directory: {args.tests_dir}")
         logger.info(f"Max turns per test: {args.max_turns}")
         logger.info(f"Delay between tests: {args.delay_between_tests}s")
-        logger.info(f"Jan app path: {args.jan_app_path}")
-        logger.info(f"Jan app exists: {os.path.exists(args.jan_app_path)}")
-        logger.info(f"Jan process name: {args.jan_process_name}")
+        logger.info(f"Biyan app path: {args.biyan_app_path}")
+        logger.info(f"Biyan app exists: {os.path.exists(args.biyan_app_path)}")
+        logger.info(f"Biyan process name: {args.biyan_process_name}")
         logger.info(f"Model: {args.model_name}")
         logger.info(f"Model URL: {args.model_base_url}")
         logger.info(f"Model provider: {args.model_provider}")
@@ -420,8 +418,8 @@ async def main():
                     rp_client=rp_client,  # Can be None
                     launch_id=launch_id,  # Can be None
                     max_turns=args.max_turns,
-                    jan_app_path=args.jan_app_path,
-                    jan_process_name=args.jan_process_name,
+                    biyan_app_path=args.biyan_app_path,
+                    biyan_process_name=args.biyan_process_name,
                     agent_config=agent_config,
                     enable_reportportal=args.enable_reportportal
                 )

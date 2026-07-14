@@ -1,138 +1,79 @@
 import React, { Fragment } from 'react'
 import { useConfig, DocsThemeConfig } from 'nextra-theme-docs'
-import LogoMark from '@/components/LogoMark'
+import { useRouter } from 'next/router'
+import Navbar from '@/components/Navbar'
 import FooterMenu from '@/components/FooterMenu'
 import JSONLD from '@/components/JSONLD'
-import { useRouter } from 'next/router'
-import Link from 'next/link'
-import { LibraryBig, Blocks, BrainCircuit, Computer } from 'lucide-react'
-import { AiOutlineGithub } from 'react-icons/ai'
-import { BiLogoDiscordAlt } from 'react-icons/bi'
-import { RiTwitterXFill } from 'react-icons/ri'
-import Navbar from '@/components/Navbar'
 
-const defaultUrl = 'https://jan.ai'
-const defaultImage = 'https://jan.ai/assets/images/general/og-image.png'
+const defaultUrl = 'https://docs.biyan.ai'
 
 const structuredData = {
   '@context': 'https://schema.org',
-  '@type': 'Organization',
-  'name': 'Jan',
-  'url': `${defaultUrl}`,
-  'logo': `${defaultImage}`,
+  '@type': 'SoftwareApplication',
+  name: 'Biyan',
+  alternateName: '彼岩',
+  applicationCategory: 'ProductivityApplication',
+  operatingSystem: 'macOS, Windows, Linux',
+  url: defaultUrl,
 }
 
 const config: DocsThemeConfig = {
-  logo: (
-    <span className="flex gap-x-8 items-center">
-      <div className="flex">
-        <LogoMark />
-        <span className="ml-2 text-lg font-semibold">Jan</span>
-      </div>
-    </span>
-  ),
-  docsRepositoryBase: 'https://github.com/janhq/jan/tree/dev/docs',
+  logo: <span className="text-lg font-semibold">Biyan Docs</span>,
+  docsRepositoryBase:
+    'https://github.com/realerikk0/Mita/tree/mita-main/docs',
   feedback: {
-    content: 'Question? Give us feedback →',
-    labels: 'feedback',
+    content: 'Need help? Email help@biyan.ai →',
+    useLink: () => 'mailto:help@biyan.ai',
   },
   editLink: {
     text: 'Edit this page on GitHub →',
   },
   useNextSeoProps() {
     return {
-      titleTemplate: '%s - Jan',
-      twitter: {
-        cardType: 'summary_large_image',
-        site: '@jandotai',
-      },
-      openGraph: {
-        type: 'website',
-      },
+      titleTemplate: '%s - Biyan Docs',
+      openGraph: { type: 'website' },
     }
   },
-  navbar: {
-    component: <Navbar />,
-  },
+  navbar: { component: <Navbar /> },
   sidebar: {
     defaultMenuCollapseLevel: 1,
-    autoCollapse: true
+    autoCollapse: true,
   },
   darkMode: false,
-  toc: {
-    backToTop: true,
-  },
+  toc: { backToTop: true },
   head: function useHead() {
     const { title, frontMatter } = useConfig()
     const { asPath } = useRouter()
+    const pageTitle = frontMatter?.title || title || 'Biyan Documentation'
+    const description =
+      frontMatter?.description ||
+      'Documentation for Biyan, a desktop AI client for cloud and OpenAI-compatible model providers.'
+    const canonical = `${defaultUrl}${asPath === '/' ? '' : asPath.split('#')[0].split('?')[0]}`
 
     return (
       <Fragment>
         <meta name="viewport" content="width=device-width, initial-scale=1.0" />
         <meta httpEquiv="Content-Language" content="en" />
-        <title>{frontMatter?.title || title || 'Jan'}</title>
-        <meta name="og:title" content={frontMatter?.title || title || 'Jan'} />
-        <meta
-          name="description"
-          content={
-            frontMatter?.description ||
-            `Run LLMs like Qwen3 or Llama3 locally and offline on your computer, or connect to remote AI APIs like OpenAI's GPT-4 or Groq.`
-          }
-        />
-        <meta
-          name="og:description"
-          content={
-            frontMatter?.description ||
-            `Run LLMs like Qwen3 or Llama3 locally and offline on your computer, or connect to remote AI APIs like OpenAI's GPT-4 or Groq.`
-          }
-        />
-        <link
-          rel="canonical"
-          href={frontMatter?.ogImage ? 'https://jan.ai' + asPath : defaultUrl}
-        />
-        <meta
-          property="og:url"
-          content={
-            frontMatter?.ogImage ? 'https://jan.ai' + asPath : defaultUrl
-          }
-        />
-        <meta
-          property="og:image"
-          content={
-            frontMatter?.ogImage
-              ? 'https://jan.ai/' + frontMatter?.ogImage
-              : asPath.includes('/docs')
-                ? 'https://jan.ai/assets/images/general/og-image-docs.png'
-                : 'https://jan.ai/assets/images/general/og-image.png'
-          }
-        />
-        <meta property="og:image:alt" content="Jan-OGImage" />
+        <title>{pageTitle}</title>
+        <meta name="description" content={description} />
+        <meta property="og:title" content={pageTitle} />
+        <meta property="og:description" content={description} />
+        <meta property="og:url" content={canonical} />
+        <meta property="og:type" content="website" />
+        <link rel="canonical" href={canonical} />
+        <link rel="icon" href="/favicon.svg" type="image/svg+xml" />
         <meta
           name="keywords"
           content={
-            frontMatter?.keywords?.map((keyword: string) => keyword) || [
-              'Jan',
-              'Customizable Intelligence, LLM',
-              'local AI',
-              'privacy focus',
-              'free and open source',
-              'private and offline',
-              'conversational AI',
-              'no-subscription fee',
-              'large language models',
-              'build in public',
-              'remote team',
-              'how we work',
-            ]
+            frontMatter?.keywords?.join(', ') ||
+            'Biyan, 彼岩, cloud AI, model providers, MCP, desktop AI'
           }
         />
         <JSONLD data={structuredData} />
       </Fragment>
     )
   },
-  footer: {
-    text: <FooterMenu />,
-  },
+  footer: { text: <FooterMenu /> },
   nextThemes: {
     defaultTheme: 'light',
     forcedTheme: 'light',

@@ -6,30 +6,8 @@ vi.mock('@tauri-apps/api/core', () => ({
   invoke: vi.fn(),
 }))
 
-// Mock EngineManager
-vi.mock('@janhq/core', async (importOriginal) => {
-  const actual = await importOriginal()
-  return {
-    ...actual,
-    EngineManager: {
-      instance: () => ({
-        engines: new Map([
-          ['engine1', {
-            getLoadedModels: vi.fn().mockResolvedValue(['model1', 'model2']),
-            unload: vi.fn().mockResolvedValue(undefined),
-          }],
-        ]),
-      }),
-    },
-  }
-})
-
 vi.mock('@tauri-apps/api/event', () => ({
   emit: vi.fn(),
-}))
-
-vi.mock('../models', () => ({
-  stopAllModels: vi.fn(),
 }))
 
 // Mock the global window object
@@ -259,24 +237,24 @@ describe('TauriAppService', () => {
     })
   })
 
-  describe('getMitaDataFolder', () => {
+  describe('getBiyanDataFolder', () => {
     it('should get mita data folder path', async () => {
       const mockConfig = { data_folder: '/path/to/mita/data' }
       mockWindow.core.api.getAppConfigurations.mockResolvedValue(mockConfig)
 
-      const result = await appService.getMitaDataFolder()
+      const result = await appService.getBiyanDataFolder()
 
       expect(mockWindow.core.api.getAppConfigurations).toHaveBeenCalled()
       expect(result).toBe('/path/to/mita/data')
     })
   })
 
-  describe('relocateMitaDataFolder', () => {
+  describe('relocateBiyanDataFolder', () => {
     it('should relocate mita data folder', async () => {
       const newPath = '/new/path/to/mita/data'
       mockWindow.core.api.changeAppDataFolder.mockResolvedValue(undefined)
 
-      await appService.relocateMitaDataFolder(newPath)
+      await appService.relocateBiyanDataFolder(newPath)
 
       expect(mockWindow.core.api.changeAppDataFolder).toHaveBeenCalledWith({
         newDataFolder: newPath,

@@ -1,0 +1,69 @@
+name: Stable Updater Kill Switch
+
+on:
+  workflow_dispatch:
+    inputs:
+      expected_current:
+        description: "Logical CAS value currently stored in stable policy"
+        required: true
+        type: string
+      state:
+        description: "Emergency action; resuming requires a health-gated promotion"
+        required: true
+        type: choice
+        options: [paused]
+      confirmation:
+        description: "Type APPLY"
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: biyan-stable-updater-promotion
+  cancel-in-progress: false
+
+jobs:
+  update:
+    runs-on: ubuntu-latest
+    environment: updater-production
+    env:
+      AWS_ACCESS_KEY_ID: ${{ secrets.CLOUDFLARE_R2_ACCESS_KEY_ID }}
+      AWS_SECRET_ACCESS_KEY: ${{ secrets.CLOUDFLARE_R2_SECRET_ACCESS_KEY }}
+      AWS_DEFAULT_REGION: auto
+      R2_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_R2_ACCOUNT_ID }}
+      R2_BUCKET: ${{ secrets.CLOUDFLARE_R2_BUCKET }}
+      POLICY_KEY: biyan/updater/stable/policy.json
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Apply fail-closed policy state
+        env:
+          EXPECTED_CURRENT: ${{ inputs.expected_current }}
+          STATE: ${{ inputs.state }}
+          CONFIRMATION: ${{ inputs.confirmation }}
+        run: |
+          set -euo pipefail
+          test "$CONFIRMATION" = "APPLY"
+          endpoint="https://${R2_ACCOUNT_ID}.r2.cloudflarestorage.com"
+          mkdir -p dist
+          aws s3 cp "s3://${R2_BUCKET}/${POLICY_KEY}" dist/policy-before.json --endpoint-url "$endpoint"
+          node scripts/updater/set-policy-state.mjs \
+            dist/policy-before.json dist/policy-after.json "$EXPECTED_CURRENT" "$STATE"
+          aws s3 cp "s3://${R2_BUCKET}/${POLICY_KEY}" dist/policy-cas.json --endpoint-url "$endpoint"
+          cmp dist/policy-before.json dist/policy-cas.json
+          snapshot="biyan/updater/backups/$(date -u +%Y%m%dT%H%M%SZ)-kill-switch-${GITHUB_RUN_ID}.json"
+          aws s3 cp dist/policy-before.json "s3://${R2_BUCKET}/${snapshot}" \
+            --endpoint-url "$endpoint" --content-type application/json
+          aws s3 cp dist/policy-after.json "s3://${R2_BUCKET}/${POLICY_KEY}" \
+            --endpoint-url "$endpoint" --content-type application/json --cache-control "no-store"
+          aws s3 cp "s3://${R2_BUCKET}/${POLICY_KEY}" dist/policy-verified.json --endpoint-url "$endpoint"
+          cmp dist/policy-after.json dist/policy-verified.json
+
+      - name: Upload kill-switch evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: updater-kill-switch-${{ github.run_id }}
+          path: dist/*.json

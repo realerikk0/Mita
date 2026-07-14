@@ -104,11 +104,10 @@
   "chats": "Discussions",
   "favorites": "Favoris",
   "recents": "Récents",
-  "hub": "Concentrateur Hub",
   "helpSupport": "Aide & Support",
-  "helpUsImproveMita": "Aidez-nous à améliorer Biyan",
-  "helpUsImproveMitaDescription": "Nous collectons des données anonymes pour comprendre l’utilisation des fonctionnalités. Vos discussions et informations personnelles ne sont jamais suivies. Vous pouvez modifier cela à tout moment dans Configurations > Confidentialité.",
-  "helpUsImproveMitaQuestion": "Voulez-vous nous aider à améliorer Biyan ?",
+  "helpUsImproveBiyan": "Aidez-nous à améliorer Biyan",
+  "helpUsImproveBiyanDescription": "Nous collectons des données anonymes pour comprendre l’utilisation des fonctionnalités. Vos discussions et informations personnelles ne sont jamais suivies. Vous pouvez modifier cela à tout moment dans Configurations > Confidentialité.",
+  "helpUsImproveBiyanQuestion": "Voulez-vous nous aider à améliorer Biyan ?",
   "unstarAll": "Enlever toutes les étoiles",
   "unstar": "Désélectionner",
   "deleteAll": "Tout supprimer",
@@ -158,12 +157,7 @@
   "noResultsFound": "Aucun résultat trouvé",
   "noThreadsYet": "Aucune discussion pour le moment",
   "noThreadsYetDesc": "Commencez une nouvelle conversation pour voir l'historique de vos discussions ici.",
-  "downloads": "Téléchargements",
-  "downloading": "Téléchargement en cours",
   "uploadingAttachments": "Téléversement des pièces jointes…",
-  "cancelDownload": "Annuler le téléchargement",
-  "downloadCancelled": "Téléchargement annulé",
-  "downloadComplete": "Téléchargement terminé",
   "thinking": "Réflexion...",
   "thought": "Pensée",
   "callingTool": "Appel de l'outil",
@@ -182,7 +176,7 @@
   "noModels": "Aucun modèle trouvé",
   "customAvatar": "Avatar personnalisé",
   "editAssistant": "Modifier l'assistant",
-  "mita": "Biyan",
+  "biyan": "Biyan",
   "metadata": "Métadonnées",
   "regenerate": "Régénérer",
   "threadImage": "Image de la discussion",
@@ -431,30 +425,14 @@
       "title": "Téléchargement terminé",
       "description": "{{item}} a été téléchargé"
     },
-    "downloadCancelled": {
-      "title": "Téléchargement annulé",
-      "description": "Le processus de téléchargement a été annulé"
-    },
     "downloadFailed": {
       "title": "Échec du téléchargement",
       "description": "Le téléchargement de {{item}} a échoué"
     },
-    "modelValidationStarted": {
-      "title": "Validation du modèle",
-      "description": "Modèle \"{{modelId}}\" téléchargé avec succès. Vérification de l'intégrité..."
-    },
-    "modelValidationFailed": {
-      "title": "Échec de la validation du modèle",
-      "description": "Le modèle téléchargé \"{{modelId}}\" a échoué à la vérification d'intégrité et a été supprimé. Le fichier peut être corrompu ou altéré."
-    },
     "modelNoVision": {
       "title": "Le modèle ne prend pas en charge les images",
       "description": "Choisissez un modèle doté de capacités de vision pour joindre des images.",
-      "action": "Ouvrir le Hub"
-    },
-    "downloadAndVerificationComplete": {
-      "title": "Téléchargement terminé",
-      "description": "Le modèle \"{{item}}\" a été téléchargé et vérifié avec succès"
+      "action": "Ouvrir les paramètres des fournisseurs"
     },
     "projectCreated": {
       "title": "Projet créé",
@@ -486,7 +464,6 @@
     }
   },
   "attachmentInjectedIndicator": "Injecté dans la discussion",
-  "attachmentEmbeddedIndicator": "Intégré pour RAG",
   "viewInjectedContent": "Voir le contenu injecté",
   "injectedContentTitle": "Contenu du fichier injecté",
   "providerQuota": {

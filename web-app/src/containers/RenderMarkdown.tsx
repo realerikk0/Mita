@@ -105,8 +105,7 @@ function RenderMarkdownComponent({
 
   const streamdownEl = (
     <Streamdown
-        animate={isAnimating ?? true}
-        animationDuration={500}
+        animated={(isAnimating ?? true) ? { duration: 500 } : false}
         linkSafety={{
           enabled: false,
         }}

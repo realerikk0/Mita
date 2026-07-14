@@ -1,10 +1,10 @@
 {
-  "name": "@janhq/conversational-extension",
+  "name": "@biyan/conversational-extension",
+  "private": true,
   "productName": "Conversational",
   "version": "1.0.0",
   "description": "Enables conversations and state persistence via your file system.",
   "main": "dist/index.js",
-  "author": "Jan <service@jan.ai>",
   "license": "MIT",
   "scripts": {
     "build": "rolldown -c rolldown.config.mjs",
@@ -22,7 +22,7 @@
     "typescript": "5.9.2"
   },
   "dependencies": {
-    "@janhq/core": "../../core/package.tgz"
+    "@biyan/core": "../../core/package.tgz"
   },
   "engines": {
     "node": ">=18.0.0"

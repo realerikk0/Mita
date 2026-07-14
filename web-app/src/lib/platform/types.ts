@@ -18,14 +18,8 @@ export enum PlatformFeature {
 
   SHORTCUT = 'shortcut',
 
-  // Local model inference (llama.cpp)
-  LOCAL_INFERENCE = 'localInference',
-
   // Local API server
   LOCAL_API_SERVER = 'localApiServer',
-
-  // Hub/model downloads
-  MODEL_HUB = 'modelHub',
 
   // System integrations (logs, file explorer, etc.)
   SYSTEM_INTEGRATIONS = 'systemIntegrations',
@@ -40,9 +34,6 @@ export enum PlatformFeature {
 
   // Analytics and telemetry
   ANALYTICS = 'analytics',
-
-  // Web-specific automatic model selection from the local model provider
-  WEB_AUTO_MODEL_SELECTION = 'webAutoModelSelection',
 
   // Model provider settings page management
   MODEL_PROVIDER_SETTINGS = 'modelProviderSettings',
@@ -59,6 +50,6 @@ export enum PlatformFeature {
   // Assistant functionality (creation, editing, management)
   ASSISTANTS = 'assistants',
 
-  // File attachments/RAG UI and tooling (desktop-only for now)
+  // Neutral file attachments and document parsing
   FILE_ATTACHMENTS = 'fileAttachments',
 }

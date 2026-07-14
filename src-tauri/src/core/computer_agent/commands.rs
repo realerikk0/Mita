@@ -2,7 +2,7 @@ use std::path::{Path, PathBuf};
 
 use tauri::{AppHandle, Runtime};
 
-use crate::core::app::commands::get_mita_data_folder_path;
+use crate::core::app::commands::get_biyan_data_folder_path;
 
 use super::{
     permissions::ComputerAgentScope,
@@ -19,7 +19,7 @@ pub fn get_computer_agent_workspace_path<R: Runtime>(
     app: AppHandle<R>,
     thread_id: String,
 ) -> Result<String, String> {
-    let data_folder = get_mita_data_folder_path(app);
+    let data_folder = get_biyan_data_folder_path(app);
     let scope = ComputerAgentScope::new(&data_folder, &thread_id, &[])?;
     scope.ensure_workspace()?;
     Ok(scope.workspace_root.to_string_lossy().into_owned())

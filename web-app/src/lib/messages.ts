@@ -1,5 +1,5 @@
 /* eslint-disable @typescript-eslint/no-explicit-any */
-import { ThreadMessage, ContentType, MessageStatus } from '@janhq/core'
+import { ThreadMessage, ContentType, MessageStatus } from '@biyan/core'
 import type { UIMessage } from '@ai-sdk/react'
 import { getVisibleThreadMessages } from './compact-thread'
 // Attachments are now handled upstream in newUserThreadContent
@@ -7,7 +7,7 @@ import { getVisibleThreadMessages } from './compact-thread'
 type ThreadContent = NonNullable<ThreadMessage['content']>[number]
 
 /**
- * Convert AI SDK UIMessage to Mita ThreadMessage format.
+ * Convert AI SDK UIMessage to Biyan ThreadMessage format.
  * This allows using chatMessages from useChat with ThreadContent component.
  */
 export function convertUIMessageToThreadMessage(
@@ -109,7 +109,7 @@ export function convertUIMessageToThreadMessage(
 }
 
 /**
- * Convert an array of AI SDK UIMessages to Mita ThreadMessage format.
+ * Convert an array of AI SDK UIMessages to Biyan ThreadMessage format.
  */
 export function convertUIMessagesToThreadMessages(
   uiMessages: UIMessage[],
@@ -172,7 +172,7 @@ export const parseReasoning = (text: string) => {
 }
 
 /**
- * Convert Mita ThreadMessage format to AI SDK UIMessage format.
+ * Convert Biyan ThreadMessage format to AI SDK UIMessage format.
  * This is used to load existing messages into the AI SDK chat.
  * Tool calls are now part of the content array and will be converted to tool parts.
  */
@@ -327,7 +327,7 @@ export function convertThreadMessageToUIMessage(
 }
 
 /**
- * Convert an array of Mita ThreadMessages to AI SDK UIMessage format.
+ * Convert an array of Biyan ThreadMessages to AI SDK UIMessage format.
  * Tool calls are now part of the content array, so no special merging is needed.
  */
 export function convertThreadMessagesToUIMessages(

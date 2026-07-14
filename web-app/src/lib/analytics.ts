@@ -1,7 +1,7 @@
 import posthog from 'posthog-js'
 import type { Properties } from 'posthog-js'
 
-export type MitaAnalyticsEventName =
+export type BiyanAnalyticsEventName =
   | 'app_launched'
   | 'app_backgrounded'
   | 'screen_viewed'
@@ -44,7 +44,7 @@ export type MitaAnalyticsEventName =
   | 'network_error_shown'
   | 'rage_click_detected'
 
-export type MitaAnalyticsProperties = Record<string, unknown>
+export type BiyanAnalyticsProperties = Record<string, unknown>
 
 type PostHogWithSessionRecording = typeof posthog & {
   get_session_id?: () => string
@@ -149,7 +149,7 @@ function sanitizeValue(value: unknown): unknown {
 }
 
 export function sanitizeAnalyticsProperties(
-  properties: MitaAnalyticsProperties | Properties = {}
+  properties: BiyanAnalyticsProperties | Properties = {}
 ): Properties {
   const sanitized: Properties = {}
 
@@ -176,8 +176,8 @@ function currentTheme() {
   return 'system'
 }
 
-export function getMitaAnalyticsContext(
-  properties: MitaAnalyticsProperties = {}
+export function getBiyanAnalyticsContext(
+  properties: BiyanAnalyticsProperties = {}
 ): Properties {
   const sessionId = configuredPostHog().get_session_id?.()
   const pathname =
@@ -198,42 +198,42 @@ export function getMitaAnalyticsContext(
   })
 }
 
-export function registerMitaAnalyticsSuperProperties(
-  properties: MitaAnalyticsProperties = {}
+export function registerBiyanAnalyticsSuperProperties(
+  properties: BiyanAnalyticsProperties = {}
 ) {
   if (!hasPostHogEnv()) return
-  posthog.register(getMitaAnalyticsContext(properties))
+  posthog.register(getBiyanAnalyticsContext(properties))
 }
 
-export function trackMitaEvent(
-  eventName: MitaAnalyticsEventName,
-  properties: MitaAnalyticsProperties = {}
+export function trackBiyanEvent(
+  eventName: BiyanAnalyticsEventName,
+  properties: BiyanAnalyticsProperties = {}
 ) {
   if (!hasPostHogEnv()) return
 
   try {
-    posthog.capture(eventName, getMitaAnalyticsContext(properties))
+    posthog.capture(eventName, getBiyanAnalyticsContext(properties))
   } catch (error) {
     console.warn('[analytics] Failed to capture event', eventName, error)
   }
 }
 
-export function setMitaAnalyticsConsent(enabled: boolean) {
+export function setBiyanAnalyticsConsent(enabled: boolean) {
   if (!hasPostHogEnv()) return
 
   if (enabled) {
     posthog.opt_in_capturing()
-    registerMitaAnalyticsSuperProperties()
-    trackMitaEvent('analytics_consent_updated', { enabled: true })
+    registerBiyanAnalyticsSuperProperties()
+    trackBiyanEvent('analytics_consent_updated', { enabled: true })
     return
   }
 
-  trackMitaEvent('analytics_consent_updated', { enabled: false })
+  trackBiyanEvent('analytics_consent_updated', { enabled: false })
   configuredPostHog().stopSessionRecording?.()
   posthog.opt_out_capturing()
 }
 
-export function startMitaSessionReplay() {
+export function startBiyanSessionReplay() {
   if (!hasPostHogEnv()) return
   configuredPostHog().startSessionRecording?.()
 }

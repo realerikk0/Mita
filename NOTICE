@@ -1,0 +1,16 @@
+Biyan
+
+This distribution includes software derived from Jan and includes software
+developed by Menlo Research (https://menlo.ai).
+
+Jan
+Copyright 2025 Menlo Research
+
+Modifications have been made for the Biyan distribution. This statement does
+not identify or assert a separate legal entity or copyright holder, and it does
+not replace any upstream copyright, license, or attribution notice.
+
+See LICENSE for the applicable upstream notice. Individual components and
+third-party dependencies may be governed by additional license terms declared
+in their own manifests or bundled license materials; those terms remain in
+effect for the corresponding components.

@@ -4,13 +4,12 @@ use serde::{Deserialize, Serialize};
 
 pub const RUNNER_PROTOCOL_VERSION: u32 = 2;
 pub const RUNNER_BINARY_NAME: &str = if cfg!(windows) {
-    "mita-computer-agent-runner.exe"
+    "biyan-computer-agent-runner.exe"
 } else {
-    "mita-computer-agent-runner"
+    "biyan-computer-agent-runner"
 };
-pub const RUNNER_PATH_ENV: &str = "MITA_COMPUTER_AGENT_RUNNER";
-pub const LEGACY_WINDOWS_RUNNER_PATH_ENV: &str = "MITA_WINDOWS_COMPUTER_AGENT_RUNNER";
-pub const RUNNER_EXECUTE_ENV: &str = "MITA_COMPUTER_AGENT_RUNNER_EXECUTE";
+pub const RUNNER_PATH_ENV: &str = "BIYAN_COMPUTER_AGENT_RUNNER";
+pub const RUNNER_EXECUTE_ENV: &str = "BIYAN_COMPUTER_AGENT_RUNNER_EXECUTE";
 pub const RUNNER_PHASE: &str = if cfg!(target_os = "macos") {
     "phase-4-macos-seatbelt-runner"
 } else {
@@ -240,7 +239,7 @@ pub(crate) fn cleanup_journal_path_for_test(workspace_root: &Path) -> PathBuf {
 #[cfg(all(not(windows), test))]
 #[allow(dead_code)]
 pub(crate) fn cleanup_journal_path_for_test(workspace_root: &Path) -> PathBuf {
-    workspace_root.join(".mita-computer-agent-runner-cleanup-unused")
+    workspace_root.join(".biyan-computer-agent-runner-cleanup-unused")
 }
 
 pub fn validate_runner_request(request: &RunnerRequest) -> Result<(), String> {
@@ -303,7 +302,7 @@ pub fn discover_runner_binary() -> Option<PathBuf> {
             return Some(path);
         }
     }
-    if let Some(path) = std::env::var_os(LEGACY_WINDOWS_RUNNER_PATH_ENV).map(PathBuf::from) {
+    if let Some(path) = crate::core::legacy_migrations::legacy_windows_runner_override() {
         if path.is_file() {
             return Some(path);
         }
@@ -464,7 +463,7 @@ mod macos_native {
     use super::{completed_response, error_response, RunnerRequest, RunnerResponse};
 
     const DIAGNOSTIC_PREFIX: &str = "macOS Computer Agent sandbox diagnostic";
-    const TEMP_DIR_NAME: &str = ".mita-computer-agent-runner-tmp";
+    const TEMP_DIR_NAME: &str = ".biyan-computer-agent-runner-tmp";
 
     pub fn execute_sandboxed(request: RunnerRequest) -> RunnerResponse {
         match execute_sandboxed_inner(request) {
@@ -882,7 +881,7 @@ mod native {
 
     const HRESULT_ALREADY_EXISTS: i32 = 0x800700B7_u32 as i32;
     const WAIT_FAILED: u32 = 0xFFFF_FFFF;
-    const CLEANUP_DIR_NAME: &str = ".mita-computer-agent-runner-cleanups";
+    const CLEANUP_DIR_NAME: &str = ".biyan-computer-agent-runner-cleanups";
 
     pub fn execute_sandboxed(request: RunnerRequest) -> RunnerResponse {
         match execute_sandboxed_inner(request) {
@@ -1187,7 +1186,7 @@ mod native {
     impl AppContainerProfile {
         fn create() -> Result<Self, String> {
             let name = format!(
-                "mita-computer-agent-runner-{}-{}",
+                "biyan-computer-agent-runner-{}-{}",
                 std::process::id(),
                 SystemTime::now()
                     .duration_since(UNIX_EPOCH)
@@ -1393,7 +1392,7 @@ mod native {
     ) -> Result<(), String> {
         if !record
             .profile_name
-            .starts_with("mita-computer-agent-runner-")
+            .starts_with("biyan-computer-agent-runner-")
             || record.profile_name.chars().any(char::is_control)
         {
             return Err(
