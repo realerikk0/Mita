@@ -19,6 +19,13 @@ artifacts; it must not overwrite a stable manifest.
 6. Attach signed candidate metadata to the GitHub release without changing the
    stable updater route.
 
+The initial A/B/C tag commits are deliberately thin checkpoints over the same
+reviewed remote-only source baseline. Only the release attestation and product
+version files change between them; the candidate workflow compiles the
+attested `dataSchema` through `BIYAN_DATA_SCHEMA`. Retired runtime source and
+package graphs remain forbidden in every phase rather than being restored in
+earlier checkpoints.
+
 ## Promotion
 
 Use `.github/workflows/promote-desktop-update.yml` only after environment

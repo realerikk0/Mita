@@ -19,6 +19,14 @@ read-only, conversion happens in staging, integrity checks run before the
 atomic switch, and failures do not advance migration markers. See
 `docs/src/pages/docs/desktop/data-folder.mdx` for the user-facing contract.
 
+The A, B, and C tags share one audited remote-only source baseline. Their
+immutable checkpoint commits differ only in release attestation and product
+version (`biyan-release.json`, `src-tauri/tauri.conf.json`,
+`src-tauri/Cargo.toml`, and `src-tauri/Cargo.lock`). `BIYAN_DATA_SCHEMA`
+compiles the attested target schema into each candidate. Do not resurrect
+retired runtime source or package graphs to manufacture artificial phase
+diffs: release policy forbids those paths for every phase.
+
 ## Release invariants
 
 - Only `BIYAN_SIGNING_KEY` is accepted for formal builds.
