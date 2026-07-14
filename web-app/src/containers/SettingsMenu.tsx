@@ -1,7 +1,7 @@
 import { Link } from '@tanstack/react-router'
 import { route } from '@/constants/routes'
 import { useTranslation } from '@/i18n/react-i18next-compat'
-import { useState, useEffect, useCallback } from 'react'
+import { useState, useEffect } from 'react'
 import {
   IconAdjustmentsHorizontal,
   IconChevronDown,
@@ -10,7 +10,6 @@ import {
   IconDeviceDesktopCog,
   IconFeather,
   IconPalette,
-  IconPlus,
   IconTopologyStar3,
   IconLock,
 } from '@tabler/icons-react'
@@ -20,11 +19,7 @@ import { cn } from '@/lib/utils'
 import { useModelProvider } from '@/hooks/useModelProvider'
 import { getProviderTitle } from '@/lib/utils'
 import ProvidersAvatar from '@/containers/ProvidersAvatar'
-import { AddProviderDialog } from '@/containers/dialogs'
-import { openAIProviderSettings } from '@/constants/providers'
-import cloneDeep from 'lodash/cloneDeep'
-import { toast } from 'sonner'
-import { Button } from '@/components/ui/button'
+import { getVisibleModelProviders } from '@/constants/visible-model-providers'
 
 const SettingsMenu = () => {
   const { t } = useTranslation()
@@ -33,43 +28,17 @@ const SettingsMenu = () => {
   const matches = useMatches()
   const navigate = useNavigate()
 
-  const { providers, selectedProvider, addProvider } = useModelProvider()
+  const { providers, selectedProvider } = useModelProvider()
+  const visibleProviders = getVisibleModelProviders(providers)
 
-  const createProvider = useCallback(
-    (name: string) => {
-      if (
-        providers.some((e) => e.provider.toLowerCase() === name.toLowerCase())
-      ) {
-        toast.error(t('provider:providerAlreadyExists', { name }))
-        return
-      }
-      const newProvider: ProviderObject = {
-        provider: name,
-        active: true,
-        models: [],
-        settings: cloneDeep(openAIProviderSettings) as ProviderSetting[],
-        api_key: '',
-        base_url: 'https://api.openai.com/v1',
-      }
-      addProvider(newProvider)
-      setTimeout(() => {
-        navigate({
-          to: route.settings.providers,
-          params: { providerName: name },
-        })
-      }, 0)
-    },
-    [providers, addProvider, t, navigate]
-  )
-
-  const activeProviders = providers.filter((provider) => {
+  const activeProviders = visibleProviders.filter((provider) => {
     if (!provider.active) return false
     if (!IS_MACOS && provider.provider === 'mlx') return false
     if (provider.provider === 'foundation-models') return false
     return true
   })
 
-  const hiddenProviders = providers.filter((provider) => {
+  const hiddenProviders = visibleProviders.filter((provider) => {
     if (provider.active) return false
     if (!IS_MACOS && provider.provider === 'mlx') return false
     if (provider.provider === 'foundation-models') return false
@@ -112,7 +81,11 @@ const SettingsMenu = () => {
       route: route.settings.interface,
       icon: IconPalette,
     },
-    { title: 'common:assistants', route: route.settings.assistant, icon: IconFeather },
+    {
+      title: 'common:assistants',
+      route: route.settings.assistant,
+      icon: IconFeather,
+    },
     {
       title: 'common:keyboardShortcuts',
       route: route.settings.shortcuts,
@@ -152,7 +125,10 @@ const SettingsMenu = () => {
                 className="block px-2 gap-1.5 cursor-pointer hover:dark:bg-secondary/60 hover:bg-secondary py-1 w-full rounded-sm [&.active]:dark:bg-secondary/80 [&.active]:bg-secondary"
               >
                 <div className="flex items-center gap-2">
-                  <menu.icon size={18} className="shrink-0 text-muted-foreground" />
+                  <menu.icon
+                    size={18}
+                    className="shrink-0 text-muted-foreground"
+                  />
                   <span>{t(menu.title)}</span>
                 </div>
               </Link>
@@ -174,7 +150,10 @@ const SettingsMenu = () => {
                   to={menu.route}
                   className="flex items-center gap-2 px-2 py-1 cursor-pointer hover:dark:bg-secondary/60 hover:bg-secondary rounded-sm [&.active]:dark:bg-secondary/80 [&.active]:bg-secondary"
                 >
-                  <menu.icon size={18} className="shrink-0 text-muted-foreground" />
+                  <menu.icon
+                    size={18}
+                    className="shrink-0 text-muted-foreground"
+                  />
                   <span>{t(menu.title)}</span>
                 </Link>
               ))}
@@ -183,15 +162,10 @@ const SettingsMenu = () => {
 
           {/* Model Providers section */}
           <div className="mt-4">
-            <div className="flex items-center justify-between pl-2">
+            <div className="flex items-center pl-2">
               <span className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">
                 {t('common:modelProviders')}
               </span>
-              <AddProviderDialog onCreateProvider={createProvider}>
-                <Button variant="ghost" size="icon-xs">
-                  <IconPlus size={12} />
-                </Button>
-              </AddProviderDialog>
             </div>
             <div className="mt-1 flex flex-col gap-0.5">
               {activeProviders.map((provider) => {

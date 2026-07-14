@@ -73,7 +73,6 @@ vi.mock('@/containers/ProvidersAvatar', () => ({
   ),
 }))
 
-
 describe('SettingsMenu', () => {
   const mockNavigate = vi.fn()
   const mockMatches = [
@@ -110,7 +109,9 @@ describe('SettingsMenu', () => {
     expect(screen.getByText('common:keyboardShortcuts')).toBeInTheDocument()
     expect(screen.getByText('common:assistants')).toBeInTheDocument()
     expect(screen.getByText('common:privacy')).toBeInTheDocument()
-    expect(screen.queryByText('common:local_api_server')).not.toBeInTheDocument()
+    expect(
+      screen.queryByText('common:local_api_server')
+    ).not.toBeInTheDocument()
   })
 
   it('renders integrations links', () => {
@@ -120,12 +121,13 @@ describe('SettingsMenu', () => {
     expect(screen.queryByText('common:claude_code')).not.toBeInTheDocument()
   })
 
-  it('shows provider expansion chevron when providers are active', () => {
+  it('hides providers outside the supported provider list', () => {
     render(<SettingsMenu />)
 
-    // There should be at least one button (the chevron)
-    const chevronButtons = screen.getAllByRole('button')
-    expect(chevronButtons.length).toBeGreaterThan(0)
+    expect(screen.getByTestId('provider-avatar-openai')).toBeInTheDocument()
+    expect(
+      screen.queryByTestId('provider-avatar-llama.cpp')
+    ).not.toBeInTheDocument()
   })
 
   it('shows expanded providers by default', () => {
@@ -155,7 +157,9 @@ describe('SettingsMenu', () => {
     await user.click(toggleButton)
 
     // After collapsing, anthropic should be hidden
-    expect(screen.queryByTestId('provider-avatar-anthropic')).not.toBeInTheDocument()
+    expect(
+      screen.queryByTestId('provider-avatar-anthropic')
+    ).not.toBeInTheDocument()
   })
 
   it('auto-expands providers when on provider route', () => {
@@ -218,23 +222,24 @@ describe('SettingsMenu', () => {
     expect(mockNavigate).toHaveBeenCalled()
   })
 
-  it('hides llama.cpp during setup remote provider step', () => {
-    vi.mocked(useMatches).mockReturnValue([
-      {
-        routeId: '/settings/providers/',
-        params: {},
-        search: { step: 'setup_remote_provider' },
-      },
-    ])
+  it('orders supported providers according to the shared display order', () => {
+    vi.mocked(useModelProvider).mockReturnValue({
+      providers: [
+        { provider: 'gemini', active: true, models: [] },
+        { provider: 'anthropic', active: true, models: [] },
+        { provider: 'jingxing', active: true, models: [] },
+        { provider: 'openai', active: true, models: [] },
+      ],
+      addProvider: vi.fn(),
+    })
 
     render(<SettingsMenu />)
 
-    // openai should be visible during remote provider setup
-    expect(screen.getByTestId('provider-avatar-openai')).toBeInTheDocument()
+    const providerNames = screen
+      .getAllByTestId(/^provider-avatar-/)
+      .map((provider) => provider.textContent)
 
-    // llama.cpp should have 'hidden' class during setup_remote_provider step
-    const llamaCpp = screen.getByTestId('provider-avatar-llama.cpp').closest('div[class*="cursor-pointer"]')
-    expect(llamaCpp?.className).toContain('hidden')
+    expect(providerNames).toEqual(['jingxing', 'openai', 'anthropic', 'gemini'])
   })
 
   it('shows inactive providers in disabled section', () => {

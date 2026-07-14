@@ -52,7 +52,9 @@ vi.mock('@/hooks/useServiceHub', () => ({
   useServiceHub: vi.fn(() => ({
     models: () => ({
       checkMmprojExists: vi.fn(() => Promise.resolve(false)),
-      checkMmprojExistsAndUpdateOffloadMMprojSetting: vi.fn(() => Promise.resolve()),
+      checkMmprojExistsAndUpdateOffloadMMprojSetting: vi.fn(() =>
+        Promise.resolve()
+      ),
     }),
   })),
 }))
@@ -97,8 +99,7 @@ describe('DropdownModelProvider - Chat Model Sorting', () => {
 
     expect(
       shuffledProviders.sort(
-        (a, b) =>
-          getChatModelFamilySortRank(a) - getChatModelFamilySortRank(b)
+        (a, b) => getChatModelFamilySortRank(a) - getChatModelFamilySortRank(b)
       )
     ).toEqual(orderedProviders)
   })
@@ -129,7 +130,9 @@ describe('DropdownModelProvider - Chat Model Sorting', () => {
 
 // Mock UI components
 vi.mock('@/components/ui/popover', () => ({
-  Popover: ({ children }: { children: React.ReactNode }) => <div>{children}</div>,
+  Popover: ({ children }: { children: React.ReactNode }) => (
+    <div>{children}</div>
+  ),
   PopoverTrigger: ({ children }: { children: React.ReactNode }) => (
     <div data-testid="popover-trigger">{children}</div>
   ),
@@ -293,8 +296,12 @@ describe('DropdownModelProvider - Display Name Integration', () => {
     } as Model
 
     expect(getModelDisplayName(modelWithDisplayName)).toBe('Short Name')
-    expect(getModelDisplayName(modelWithoutDisplayName)).toBe('model-without-display-name.gguf')
-    expect(getModelDisplayName(modelWithEmptyDisplayName)).toBe('model-with-empty.gguf')
+    expect(getModelDisplayName(modelWithoutDisplayName)).toBe(
+      'model-without-display-name.gguf'
+    )
+    expect(getModelDisplayName(modelWithEmptyDisplayName)).toBe(
+      'model-with-empty.gguf'
+    )
   })
 
   it('should maintain model ID for internal operations while showing display name', () => {
@@ -348,7 +355,9 @@ describe('DropdownModelProvider - Display Name Integration', () => {
     // Short Name appears in dropdown (at least 1 occurrence)
     expect(screen.getAllByText('Short Name').length).toBeGreaterThanOrEqual(1)
     // Custom Model 1 is also in the dropdown
-    expect(screen.getAllByText('Custom Model 1').length).toBeGreaterThanOrEqual(1)
+    expect(screen.getAllByText('Custom Model 1').length).toBeGreaterThanOrEqual(
+      1
+    )
   })
 
   it('should show original model provider avatars for Jingxing models', () => {
@@ -424,5 +433,69 @@ describe('DropdownModelProvider - Display Name Integration', () => {
 
     expect(screen.getByTestId('provider-avatar-jingxing')).toBeInTheDocument()
     expect(screen.getAllByTestId('provider-avatar-openai')).toHaveLength(2)
+  })
+
+  it('shows only supported providers in the requested order for a new chat', () => {
+    const providerNames = [
+      'gemini',
+      'mistral',
+      'xai',
+      'deepseek',
+      'openrouter',
+      'anthropic',
+      'azure',
+      'openai',
+      'jingxing',
+    ]
+    const providers = providerNames.map((provider) => ({
+      provider,
+      active: true,
+      api_key: 'test-token',
+      models: [
+        {
+          id: `${provider}-chat-model`,
+          capabilities: ['completion'],
+        },
+      ],
+      settings: [],
+    }))
+
+    vi.mocked(useModelProvider).mockReturnValue({
+      providers,
+      selectedProvider: 'jingxing',
+      selectedModel: providers.at(-1)!.models[0],
+      getProviderByName: vi.fn((name: string) =>
+        providers.find((provider) => provider.provider === name)
+      ),
+      selectModelProvider: vi.fn(),
+      getModelBy: vi.fn((id: string) =>
+        providers
+          .flatMap((provider) => provider.models)
+          .find((model) => model.id === id)
+      ),
+      updateProvider: vi.fn(),
+    } as MockHookReturn)
+
+    render(<DropdownModelProvider restrictToVisibleProviders />)
+
+    const providerLabels = [
+      'Biyuan AI',
+      'OpenAI',
+      'Azure',
+      'Anthropic',
+      'OpenRouter',
+      'DeepSeek',
+      'xAI',
+      'Gemini',
+    ].map((label) => screen.getByText(label))
+
+    providerLabels.slice(0, -1).forEach((label, index) => {
+      expect(
+        label.compareDocumentPosition(providerLabels[index + 1]) &
+          Node.DOCUMENT_POSITION_FOLLOWING
+      ).toBeTruthy()
+    })
+    expect(screen.queryByText('Mistral')).not.toBeInTheDocument()
+    expect(screen.queryByText('mistral-chat-model')).not.toBeInTheDocument()
   })
 })

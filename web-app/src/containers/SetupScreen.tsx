@@ -9,6 +9,7 @@ import {
 import { Input } from '@/components/ui/input'
 import { Textarea } from '@/components/ui/textarea'
 import { predefinedProviders } from '@/constants/providers'
+import { getVisibleModelProviders } from '@/constants/visible-model-providers'
 import { route } from '@/constants/routes'
 import { useServiceHub } from '@/hooks/useServiceHub'
 import { useModelProvider } from '@/hooks/useModelProvider'
@@ -33,6 +34,7 @@ const providerLabels: Record<string, string> = {
   openai: 'OpenAI',
   anthropic: 'Anthropic',
   openrouter: 'OpenRouter',
+  deepseek: 'DeepSeek',
   gemini: 'Gemini',
   xai: 'xAI',
   groq: 'Groq',
@@ -60,13 +62,12 @@ function getProviderSettingValue(
   key: string,
   fallback = ''
 ) {
-  const providerFallback = key === 'api-key' ? provider.api_key : provider.base_url
-  return (
-    provider.settings.find((setting) => setting.key === key)?.controller_props
-      ?.value ??
+  const providerFallback =
+    key === 'api-key' ? provider.api_key : provider.base_url
+  return (provider.settings.find((setting) => setting.key === key)
+    ?.controller_props?.value ??
     providerFallback ??
-    fallback
-  ) as string
+    fallback) as string
 }
 
 function withProviderSettings(
@@ -82,7 +83,10 @@ function withProviderSettings(
     active: true,
     custom_header:
       importedCustomHeaders.length > 0
-        ? mergeProviderCustomHeaders(provider.custom_header, importedCustomHeaders)
+        ? mergeProviderCustomHeaders(
+            provider.custom_header,
+            importedCustomHeaders
+          )
         : provider.custom_header,
     settings: provider.settings.map((setting) => {
       if (setting.key === 'api-key') {
@@ -120,13 +124,15 @@ function SetupScreen() {
 
   const availableProviders = useMemo(
     () =>
-      predefinedProviders.filter((provider) =>
+      getVisibleModelProviders(predefinedProviders).filter((provider) =>
         provider.settings.some((setting) => setting.key === 'api-key')
       ) as ModelProvider[],
     []
   )
   const [selectedProviderName, setSelectedProviderName] = useState(
-    availableProviders.some((provider) => provider.provider === DEFAULT_PROVIDER)
+    availableProviders.some(
+      (provider) => provider.provider === DEFAULT_PROVIDER
+    )
       ? DEFAULT_PROVIDER
       : availableProviders[0]?.provider || ''
   )
@@ -149,7 +155,7 @@ function SetupScreen() {
     setApiKey(getProviderSettingValue(provider, 'api-key'))
     setBaseUrl(getProviderSettingValue(provider, 'base-url', provider.base_url))
     setImportedCustomHeaders([])
-  }, [provider?.provider])
+  }, [provider])
 
   const handleImportProviderConnection = () => {
     try {
@@ -299,7 +305,9 @@ function SetupScreen() {
               {availableProviders.map((candidate) => (
                 <option key={candidate.provider} value={candidate.provider}>
                   {providerLabel(candidate.provider)}
-                  {candidate.provider === DEFAULT_PROVIDER ? ' (Recommended)' : ''}
+                  {candidate.provider === DEFAULT_PROVIDER
+                    ? ' (Recommended)'
+                    : ''}
                 </option>
               ))}
             </select>
@@ -324,7 +332,8 @@ function SetupScreen() {
             )}
             <div className="space-y-1">
               <div className="text-sm font-medium">
-                {provider ? providerLabel(provider.provider) : 'Provider'} API Key
+                {provider ? providerLabel(provider.provider) : 'Provider'} API
+                Key
               </div>
             </div>
             <Input

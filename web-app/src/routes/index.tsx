@@ -9,8 +9,8 @@ import { cn } from '@/lib/utils'
 import { useModelProvider } from '@/hooks/useModelProvider'
 import SetupScreen from '@/containers/SetupScreen'
 import { route } from '@/constants/routes'
-import { predefinedProviders } from '@/constants/providers'
 import { providerHasRemoteApiKeys } from '@/lib/provider-api-keys'
+import { isVisibleModelProvider } from '@/constants/visible-model-providers'
 import {
   getNewChatGreetingText,
   useNewChatGreeting,
@@ -48,26 +48,11 @@ function Index() {
   const greetingIndex = useNewChatGreeting((state) => state.greetingIndex)
   useTools()
 
-  // Conditional to check if there are any valid providers
-  // required min 1 api_key or 1 local model provider model
-  // Custom providers (not in predefinedProviders) don't require api_key but need models
-  const hasValidProviders = providers.some((provider) => {
-    const isPredefinedProvider = predefinedProviders.some(
-      (p) => p.provider === provider.provider
-    )
-
-    // Custom providers don't need API key validation but must have models
-    if (!isPredefinedProvider) {
-      return provider.models.length > 0
-    }
-
-    // Predefined providers need either API key or local models
-    return (
-      providerHasRemoteApiKeys(provider) ||
-      (provider.provider === 'llamacpp' && provider.models.length) ||
-      (provider.provider === 'jan' && provider.models.length)
-    )
-  })
+  const hasValidProviders = providers.some(
+    (provider) =>
+      isVisibleModelProvider(provider.provider) &&
+      providerHasRemoteApiKeys(provider)
+  )
 
   useEffect(() => {
     setCurrentThreadId(undefined)
@@ -87,7 +72,10 @@ function Index() {
     <div className="flex h-full flex-col justify-center">
       <HeaderPage>
         <div className="flex items-center gap-2 w-full">
-          <DropdownModelProvider model={threadModel} />
+          <DropdownModelProvider
+            model={threadModel}
+            restrictToVisibleProviders
+          />
         </div>
       </HeaderPage>
       <div
@@ -95,17 +83,9 @@ function Index() {
           'h-full overflow-y-auto inline-flex flex-col gap-2 justify-center px-3'
         )}
       >
-        <div
-          className={cn(
-            'mx-auto w-full md:w-4/5 xl:w-4/6 -mt-20',
-          )}
-        >
+        <div className={cn('mx-auto w-full md:w-4/5 xl:w-4/6 -mt-20')}>
           <div className={cn('text-center mb-4')}>
-            <h1
-              className={cn(
-                'text-2xl mt-2 font-studio font-medium',
-              )}
-            >
+            <h1 className={cn('text-2xl mt-2 font-studio font-medium')}>
               {newChatGreeting}
             </h1>
           </div>
