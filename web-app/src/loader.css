@@ -11,6 +11,9 @@
   z-index: 9999;
   opacity: 1;
   transition: opacity 0.3s ease-in-out;
+  cursor: default;
+  user-select: none;
+  -webkit-user-select: none;
 }
 
 /* Light mode (default) */
@@ -35,6 +38,8 @@
   animation: breathe-logo 2.4s ease-in-out infinite;
   transform-origin: center;
   will-change: transform, opacity, filter;
+  pointer-events: none;
+  -webkit-user-drag: none;
 }
 
 #initial-loader::before {
