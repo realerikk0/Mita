@@ -133,14 +133,16 @@ vi.mock('@/types/events', () => ({
 }))
 
 vi.mock('@/constants/routes', () => ({
-  route: { hub: { model: '/hub/model' } },
+  route: { home: '/', hub: { model: '/hub/model' } },
 }))
 
 // Override serviceHub per-test needs. We extend the global setup's mock.
 const hubState = vi.hoisted(() => ({
   unsubscribe: vi.fn(),
   deeplinkGetCurrent: vi.fn().mockResolvedValue(null),
-  deeplinkOnOpenUrl: vi.fn().mockResolvedValue(undefined),
+  deeplinkOnOpenUrl: vi
+    .fn<(handler: (urls: string[]) => void) => Promise<() => void>>()
+    .mockResolvedValue(() => {}),
   eventsListen: vi.fn(),
   getProviders: vi.fn().mockResolvedValue([]),
   updateSettings: vi.fn().mockResolvedValue(undefined),
@@ -203,6 +205,8 @@ const resetHubState = () => {
   hubState.startServer.mockResolvedValue(1337)
   hubState.startModel.mockResolvedValue(undefined)
   hubState.deeplinkGetCurrent.mockResolvedValue(null)
+  hubState.deeplinkOnOpenUrl.mockReset()
+  hubState.deeplinkOnOpenUrl.mockResolvedValue(() => {})
 }
 
 describe('DataProvider', () => {
@@ -507,6 +511,32 @@ describe('DataProvider', () => {
         to: '/hub/model',
         search: { repo: 'owner/repo' },
       })
+    })
+  })
+
+  it('navigates to a new chat when handling a chat launch deep link', async () => {
+    hubState.deeplinkGetCurrent.mockResolvedValue(['mita://chat/open'])
+    render(<DataProvider />)
+    await waitFor(() => {
+      expect(h.navigate).toHaveBeenCalledWith({ to: '/' })
+    })
+  })
+
+  it('navigates to a new chat when receiving a hot-launch deep link', async () => {
+    render(<DataProvider />)
+
+    await waitFor(() => {
+      expect(hubState.deeplinkOnOpenUrl).toHaveBeenCalledWith(expect.any(Function))
+    })
+    const openUrlHandler = hubState.deeplinkOnOpenUrl.mock.calls[0]?.[0]
+    expect(openUrlHandler).toBeDefined()
+
+    act(() => {
+      openUrlHandler?.(['mita://chat/open'])
+    })
+
+    await waitFor(() => {
+      expect(h.navigate).toHaveBeenCalledWith({ to: '/' })
     })
   })
 
