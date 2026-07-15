@@ -1,12 +1,23 @@
 import assert from 'node:assert/strict'
+import fs from 'node:fs'
 import test from 'node:test'
 
 import {
+  validateBundledLegalResources,
   validateCandidateWorkflow,
   validateCiWorkflow,
   validateFlatpakMetadata,
   validateReleaseIdentity,
 } from '../release-policy-contracts.mjs'
+
+const platformConfigPaths = [
+  'src-tauri/tauri.conf.json',
+  'src-tauri/tauri.macos.conf.json',
+  'src-tauri/tauri.windows.conf.json',
+  'src-tauri/tauri.linux.conf.json',
+  'src-tauri/tauri.android.conf.json',
+  'src-tauri/tauri.ios.conf.json',
+]
 
 test('initial release train locks version, phase, schema, and Cargo.lock together', () => {
   for (const [version, migrationPhase, dataSchema] of [
@@ -15,17 +26,63 @@ test('initial release train locks version, phase, schema, and Cargo.lock togethe
     ['0.6.636', 'C', 3],
   ]) {
     assert.deepEqual(
-      validateReleaseIdentity({ version, migrationPhase, dataSchema, cargoLockVersion: version }),
-      [],
+      validateReleaseIdentity({
+        version,
+        migrationPhase,
+        dataSchema,
+        cargoLockVersion: version,
+      }),
+      []
     )
   }
 
-  assert.ok(validateReleaseIdentity({
-    version: '0.6.634', migrationPhase: 'C', dataSchema: 3, cargoLockVersion: '0.6.634',
-  }).some((failure) => failure.includes('must attest A/1')))
-  assert.ok(validateReleaseIdentity({
-    version: '0.6.636', migrationPhase: 'C', dataSchema: 3, cargoLockVersion: '0.6.635',
-  }).some((failure) => failure.includes('Cargo.lock version')))
+  assert.ok(
+    validateReleaseIdentity({
+      version: '0.6.634',
+      migrationPhase: 'C',
+      dataSchema: 3,
+      cargoLockVersion: '0.6.634',
+    }).some((failure) => failure.includes('must attest A/1'))
+  )
+  assert.ok(
+    validateReleaseIdentity({
+      version: '0.6.636',
+      migrationPhase: 'C',
+      dataSchema: 3,
+      cargoLockVersion: '0.6.635',
+    }).some((failure) => failure.includes('Cargo.lock version'))
+  )
+})
+
+test('every platform bundle includes LICENSE and NOTICE', () => {
+  const platformConfigs = Object.fromEntries(
+    platformConfigPaths.map((configPath) => [
+      configPath,
+      JSON.parse(fs.readFileSync(configPath, 'utf8')),
+    ])
+  )
+  assert.deepEqual(validateBundledLegalResources(platformConfigs), [])
+
+  const withoutNotice = structuredClone(platformConfigs)
+  const macosConfigPath = 'src-tauri/tauri.macos.conf.json'
+  withoutNotice[macosConfigPath].bundle.resources = withoutNotice[
+    macosConfigPath
+  ].bundle.resources.filter((resource) => resource !== 'resources/NOTICE')
+  assert.ok(
+    validateBundledLegalResources(withoutNotice).some((failure) =>
+      failure.includes('resources/NOTICE')
+    )
+  )
+
+  const withoutBaseLicense = structuredClone(platformConfigs)
+  delete withoutBaseLicense['src-tauri/tauri.conf.json'].bundle.resources[
+    'resources/LICENSE'
+  ]
+  assert.ok(
+    validateBundledLegalResources(withoutBaseLicense).some((failure) =>
+      failure.includes('resources/LICENSE')
+    )
+  )
 })
 
 const candidateWorkflow = `jobs:
@@ -40,6 +97,8 @@ const candidateWorkflow = `jobs:
       - run: node --test scripts/updater/__tests__/updater.test.mjs
   build-macos:
     needs: [preflight, quality-gate]
+    steps:
+      - run: make verify-macos-candidate APP=Biyan.app DMG=Biyan.dmg VERSION=0.6.636
   build-windows:
     needs:
       - preflight
@@ -53,10 +112,22 @@ test('candidate workflow gates every platform build on exact-tag tests', () => {
 
   const withoutUpdaterContracts = candidateWorkflow.replace(
     'node --test scripts/updater/__tests__/updater.test.mjs',
-    'echo skipped',
+    'echo skipped'
   )
   assert.ok(
-    validateCandidateWorkflow(withoutUpdaterContracts).some((failure) => failure.includes('updater contract tests')),
+    validateCandidateWorkflow(withoutUpdaterContracts).some((failure) =>
+      failure.includes('updater contract tests')
+    )
+  )
+
+  const withoutMacCandidateVerification = candidateWorkflow.replace(
+    'make verify-macos-candidate',
+    'echo skipped-candidate-verification'
+  )
+  assert.ok(
+    validateCandidateWorkflow(withoutMacCandidateVerification).some((failure) =>
+      failure.includes('signed app and DMG')
+    )
   )
 
   const ungatedWindows = candidateWorkflow.replace(
@@ -65,10 +136,12 @@ test('candidate workflow gates every platform build on exact-tag tests', () => {
       - preflight
       - quality-gate`,
     `  build-windows:
-    needs: preflight`,
+    needs: preflight`
   )
   assert.ok(
-    validateCandidateWorkflow(ungatedWindows).some((failure) => failure.includes('build-windows')),
+    validateCandidateWorkflow(ungatedWindows).some((failure) =>
+      failure.includes('build-windows')
+    )
   )
 })
 
@@ -84,8 +157,9 @@ test('PR CI gate includes release policy and updater contracts', () => {
 `
   assert.deepEqual(validateCiWorkflow(workflow), [])
   assert.ok(
-    validateCiWorkflow(workflow.replace('needs: [release-safety]', 'needs: []'))
-      .some((failure) => failure.includes('PR CI Gate')),
+    validateCiWorkflow(
+      workflow.replace('needs: [release-safety]', 'needs: []')
+    ).some((failure) => failure.includes('PR CI Gate'))
   )
 })
 
@@ -109,9 +183,15 @@ build-commands:
 
   const retiredClaim = metainfo.replace(
     'Biyan requires cloud providers and does not bundle or run local AI models.',
-    'Mita runs 100% offline with Llama.cpp.',
+    'Mita runs 100% offline with Llama.cpp.'
   )
   const failures = validateFlatpakMetadata(manifest, retiredClaim)
-  assert.ok(failures.some((failure) => failure.includes('retired product name')))
-  assert.ok(failures.some((failure) => failure.includes('offline or local-model behavior')))
+  assert.ok(
+    failures.some((failure) => failure.includes('retired product name'))
+  )
+  assert.ok(
+    failures.some((failure) =>
+      failure.includes('offline or local-model behavior')
+    )
+  )
 })

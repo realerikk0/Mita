@@ -31,7 +31,7 @@ ifeq ($(DETECTED_OS),Windows)
 else ifeq ($(DETECTED_OS),Linux)
 	chmod +x src-tauri/build-utils/*
 endif
-	yarn install
+	yarn install --immutable
 	yarn build:tauri:plugin:api
 	yarn build:core
 	yarn build:extensions
@@ -71,7 +71,7 @@ dev: install-and-build
 
 # Web application targets
 install-web-app:
-	yarn install
+	yarn install --immutable
 
 dev-web-app: install-web-app
 	yarn build:core
@@ -128,14 +128,22 @@ endif
 	yarn test
 	node --test ./scripts/__tests__/windows-installer-template.test.mjs
 	node --test ./scripts/__tests__/rename-cargo-channel-app.test.mjs
+	node --test ./scripts/__tests__/asset-copy.test.mjs
+	node --test ./scripts/__tests__/download-bin.test.mjs
+	node --test ./scripts/__tests__/web-research-runtime.test.mjs
+	node --test ./scripts/__tests__/macos-architecture-policy.test.mjs
+	node --test ./scripts/__tests__/rust-workspace-lock.test.mjs
+	node --test ./scripts/__tests__/release-version-stamp.test.mjs
+	node --test ./scripts/__tests__/verify-macos-candidate.test.mjs
+	node --test ./scripts/ci/__tests__/release-policy.test.mjs
 	yarn copy:assets:tauri
 	yarn build:icon
 	bash ./scripts/prepare-tauri-test-resources.sh
 	node ./scripts/build-cli.mjs --release --cli-only
-	cargo test --manifest-path src-tauri/Cargo.toml --no-default-features --features test-tauri -- --test-threads=1
-	cargo test --manifest-path src-tauri/plugins/tauri-plugin-hardware/Cargo.toml
-	cargo test --manifest-path src-tauri/plugins/tauri-plugin-document-parser/Cargo.toml
-	cargo test --manifest-path src-tauri/utils/Cargo.toml
+	cargo test --locked --manifest-path src-tauri/Cargo.toml --no-default-features --features test-tauri -- --test-threads=1
+	cargo test --locked --manifest-path src-tauri/plugins/tauri-plugin-hardware/Cargo.toml
+	cargo test --locked --manifest-path src-tauri/plugins/tauri-plugin-document-parser/Cargo.toml
+	cargo test --locked --manifest-path src-tauri/utils/Cargo.toml
 
 # Build Biyan CLI (release, platform-aware) → src-tauri/resources/bin/biyan-cli[.exe]
 build-cli:
@@ -190,6 +198,17 @@ endif
 # Build
 build: install-and-build install-rust-targets
 	yarn build
+
+verify-macos-candidate:
+ifeq ($(DETECTED_OS),Darwin)
+	@test -n "$(APP)" || (echo "APP=<path-to-Biyan.app> is required" >&2 && exit 1)
+	@test -n "$(DMG)" || (echo "DMG=<path-to-Biyan_VERSION_universal.dmg> is required" >&2 && exit 1)
+	@test -n "$(VERSION)" || (echo "VERSION=<semver> is required" >&2 && exit 1)
+	yarn verify:macos-candidate --app "$(APP)" --dmg "$(DMG)" --version "$(VERSION)"
+else
+	@echo "macOS candidate verification requires a macOS host" >&2
+	@exit 1
+endif
 
 clean:
 ifeq ($(DETECTED_OS),Windows)

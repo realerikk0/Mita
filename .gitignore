@@ -77,6 +77,8 @@ src-tauri/resources/bin/*
 src-tauri/resources/computer-agent-runner/*
 !src-tauri/resources/computer-agent-runner/.gitkeep
 !src-tauri/resources/ms-playwright/
+src-tauri/resources/.ms-playwright-staging-*
+src-tauri/resources/ms-playwright.previous-*
 src-tauri/resources/ms-playwright/*
 !src-tauri/resources/ms-playwright/.gitkeep
 !src-tauri/resources/node_modules/

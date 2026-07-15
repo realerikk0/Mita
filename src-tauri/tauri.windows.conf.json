@@ -2,9 +2,9 @@
   "app": {
     "windows": [
       {
-      "label": "main",
-      "url": "migration-recovery.html?boot=1",
-      "title": "Biyan",
+        "label": "main",
+        "url": "migration-recovery.html?boot=1",
+        "title": "Biyan",
         "width": 1200,
         "minWidth": 1024,
         "height": 800,
@@ -33,6 +33,7 @@
     "targets": ["nsis", "msi"],
     "resources": [
       "resources/LICENSE",
+      "resources/NOTICE",
       "resources/bin/biyan-cli.exe",
       "resources/computer-agent-runner/**/*",
       "resources/bin/biyan-web-research-mcp.mjs",

@@ -235,6 +235,7 @@ jobs:
           touch src-tauri/resources/node_modules/playwright-core/.gitkeep
           touch src-tauri/resources/computer-agent-runner/.gitkeep
           touch src-tauri/resources/LICENSE
+          touch src-tauri/resources/NOTICE
           touch src-tauri/resources/bin/biyan-cli
           touch src-tauri/resources/bin/biyan-web-research-mcp.mjs
           chmod +x src-tauri/resources/bin/biyan-cli src-tauri/resources/bin/biyan-web-research-mcp.mjs

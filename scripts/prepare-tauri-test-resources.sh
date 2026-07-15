@@ -24,6 +24,7 @@ ensure_executable() {
 }
 
 ensure_file "$RESOURCE_DIR/LICENSE"
+ensure_file "$RESOURCE_DIR/NOTICE"
 ensure_executable "$BIN_DIR/biyan-cli"
 ensure_executable "$BIN_DIR/biyan-cli.exe"
 ensure_executable "$BIN_DIR/biyan-web-research-mcp.mjs"

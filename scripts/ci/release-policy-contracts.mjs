@@ -10,24 +10,41 @@ function jobBlock(source, jobName) {
   const start = match.index
   const remainder = source.slice(start + match[0].length)
   const nextJob = /^  [A-Za-z0-9_-]+:\s*$/m.exec(remainder)
-  return source.slice(start, nextJob ? start + match[0].length + nextJob.index : source.length)
+  return source.slice(
+    start,
+    nextJob ? start + match[0].length + nextJob.index : source.length
+  )
 }
 
 function jobNeeds(block, dependency) {
   if (!block) return false
-  const needs = /^    needs:\s*(?:\[[^\n]*\]|[^\n]*)(?:\n(?:      - [^\n]+\n?)*)?/m.exec(block)?.[0]
+  const needs =
+    /^    needs:\s*(?:\[[^\n]*\]|[^\n]*)(?:\n(?:      - [^\n]+\n?)*)?/m.exec(
+      block
+    )?.[0]
   if (!needs) return false
-  return new RegExp(`(?:^|[\\s,[{-])${escapeRegExp(dependency)}(?:$|[\\s,\\]}])`).test(needs)
+  return new RegExp(
+    `(?:^|[\\s,[{-])${escapeRegExp(dependency)}(?:$|[\\s,\\]}])`
+  ).test(needs)
 }
 
-export function validateReleaseIdentity({ version, migrationPhase, dataSchema, cargoLockVersion }) {
+export function validateReleaseIdentity({
+  version,
+  migrationPhase,
+  dataSchema,
+  cargoLockVersion,
+}) {
   const failures = []
   const expectedSchema = { A: 1, B: 2, C: 3 }[migrationPhase]
   if (!expectedSchema || dataSchema !== expectedSchema) {
-    failures.push(`invalid migration phase/data schema pairing: ${migrationPhase}/${dataSchema}`)
+    failures.push(
+      `invalid migration phase/data schema pairing: ${migrationPhase}/${dataSchema}`
+    )
   }
   if (cargoLockVersion !== version) {
-    failures.push(`Cargo.lock version ${cargoLockVersion} does not match product version ${version}`)
+    failures.push(
+      `Cargo.lock version ${cargoLockVersion} does not match product version ${version}`
+    )
   }
 
   const initialTrain = {
@@ -35,11 +52,36 @@ export function validateReleaseIdentity({ version, migrationPhase, dataSchema, c
     '0.6.635': { migrationPhase: 'B', dataSchema: 2 },
     '0.6.636': { migrationPhase: 'C', dataSchema: 3 },
   }[version]
-  if (initialTrain
-    && (migrationPhase !== initialTrain.migrationPhase || dataSchema !== initialTrain.dataSchema)) {
+  if (
+    initialTrain &&
+    (migrationPhase !== initialTrain.migrationPhase ||
+      dataSchema !== initialTrain.dataSchema)
+  ) {
     failures.push(
-      `initial release ${version} must attest ${initialTrain.migrationPhase}/${initialTrain.dataSchema}`,
+      `initial release ${version} must attest ${initialTrain.migrationPhase}/${initialTrain.dataSchema}`
     )
+  }
+  return failures
+}
+
+export function validateBundledLegalResources(platformConfigs) {
+  const failures = []
+  for (const [platform, config] of Object.entries(platformConfigs)) {
+    const resources = config?.bundle?.resources
+    const bundledPaths = Array.isArray(resources)
+      ? resources
+      : resources && typeof resources === 'object'
+        ? Object.keys(resources)
+        : null
+    if (!bundledPaths) {
+      failures.push(`${platform} bundle resources must be an array or object`)
+      continue
+    }
+    for (const legalFile of ['resources/LICENSE', 'resources/NOTICE']) {
+      if (!bundledPaths.includes(legalFile)) {
+        failures.push(`${platform} bundle must include ${legalFile}`)
+      }
+    }
   }
   return failures
 }
@@ -53,10 +95,18 @@ export function validateCandidateWorkflow(source) {
     failures.push('desktop release is missing the immutable preflight job')
   } else {
     if (!preflight.includes('node scripts/ci/verify-release-policy.mjs')) {
-      failures.push('desktop release preflight does not run the release policy scan')
+      failures.push(
+        'desktop release preflight does not run the release policy scan'
+      )
     }
-    if (!preflight.includes('node --test scripts/ci/__tests__/release-policy.test.mjs')) {
-      failures.push('desktop release preflight does not test release policy contracts')
+    if (
+      !preflight.includes(
+        'node --test scripts/ci/__tests__/release-policy.test.mjs'
+      )
+    ) {
+      failures.push(
+        'desktop release preflight does not test release policy contracts'
+      )
     }
   }
 
@@ -69,8 +119,14 @@ export function validateCandidateWorkflow(source) {
     if (!/(?:^|\n)\s*(?:-\s*)?run:\s*make test\s*(?:\n|$)/.test(qualityGate)) {
       failures.push('candidate quality gate must run the full make test suite')
     }
-    if (!qualityGate.includes('node --test scripts/updater/__tests__/updater.test.mjs')) {
-      failures.push('candidate quality gate does not run updater contract tests')
+    if (
+      !qualityGate.includes(
+        'node --test scripts/updater/__tests__/updater.test.mjs'
+      )
+    ) {
+      failures.push(
+        'candidate quality gate does not run updater contract tests'
+      )
     }
   }
 
@@ -82,6 +138,14 @@ export function validateCandidateWorkflow(source) {
     }
     if (!jobNeeds(block, 'preflight') || !jobNeeds(block, 'quality-gate')) {
       failures.push(`${buildJob} must depend on preflight and quality-gate`)
+    }
+    if (
+      buildJob === 'build-macos' &&
+      !block.includes('make verify-macos-candidate')
+    ) {
+      failures.push(
+        'build-macos must verify the signed app and DMG candidate contents'
+      )
     }
   }
 
@@ -117,7 +181,10 @@ export function validateCiWorkflow(source) {
 function productFacingMetainfo(metainfo) {
   return metainfo
     .replace(/<!--[\s\S]*?-->/g, '')
-    .replace(/<(?:id|icon|launchable|url|image)\b[^>]*>[\s\S]*?<\/(?:id|icon|launchable|url|image)>/gi, '')
+    .replace(
+      /<(?:id|icon|launchable|url|image)\b[^>]*>[\s\S]*?<\/(?:id|icon|launchable|url|image)>/gi,
+      ''
+    )
     .replace(/<[^>]+>/g, ' ')
 }
 
@@ -127,27 +194,49 @@ export function validateFlatpakMetadata(manifest, metainfo) {
   if (!/^id: uk\.jingxing\.Mita$/m.test(manifest)) {
     failures.push('Flatpak must retain the published uk.jingxing.Mita app ID')
   }
-  if (!/^command: Biyan$/m.test(manifest) || !/usr\/bin\/Biyan \/app\/bin\/Biyan/.test(manifest)) {
+  if (
+    !/^command: Biyan$/m.test(manifest) ||
+    !/usr\/bin\/Biyan \/app\/bin\/Biyan/.test(manifest)
+  ) {
     failures.push('Flatpak runtime entry points must use Biyan')
   }
-  if (!/flatpak\/Biyan_[^/\s]*\.deb/.test(manifest) || /flatpak\/Mita_[^/\s]*\.deb/i.test(manifest)) {
+  if (
+    !/flatpak\/Biyan_[^/\s]*\.deb/.test(manifest) ||
+    /flatpak\/Mita_[^/\s]*\.deb/i.test(manifest)
+  ) {
     failures.push('Flatpak source artifact must be Biyan-branded')
   }
-  if (/--device=all|extensions\/cuda|OpenCL\/vendors|name:\s*(?:volk|vulkan-headers|vulkan-tools|shaderc)\b/i.test(manifest)) {
-    failures.push('Flatpak still requests or bundles retired local model GPU compute support')
+  if (
+    /--device=all|extensions\/cuda|OpenCL\/vendors|name:\s*(?:volk|vulkan-headers|vulkan-tools|shaderc)\b/i.test(
+      manifest
+    )
+  ) {
+    failures.push(
+      'Flatpak still requests or bundles retired local model GPU compute support'
+    )
   }
 
   if (!/<name>Biyan<\/name>/i.test(metainfo)) {
     failures.push('Flatpak product name must be Biyan')
   }
   if (!/does\s+not bundle or run local AI models/i.test(metainfo)) {
-    failures.push('Flatpak metadata must state the remote-only local-model boundary')
+    failures.push(
+      'Flatpak metadata must state the remote-only local-model boundary'
+    )
   }
   if (/\b(?:Mita|Jan|Silence)\b/i.test(productFacingMetainfo(metainfo))) {
-    failures.push('Flatpak product-facing metadata exposes a retired product name')
+    failures.push(
+      'Flatpak product-facing metadata exposes a retired product name'
+    )
   }
-  if (/Private offline|100% offline|Local AI models:|offline by default|localhost:1337|Llama\.cpp|Mita Hub|Native MLX/i.test(metainfo)) {
-    failures.push('Flatpak metadata advertises retired offline or local-model behavior')
+  if (
+    /Private offline|100% offline|Local AI models:|offline by default|localhost:1337|Llama\.cpp|Mita Hub|Native MLX/i.test(
+      metainfo
+    )
+  ) {
+    failures.push(
+      'Flatpak metadata advertises retired offline or local-model behavior'
+    )
   }
 
   return failures

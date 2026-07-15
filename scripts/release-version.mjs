@@ -26,11 +26,6 @@ const BUILD_STAMP_JSON_FILES = [
   'src-tauri/plugins/tauri-plugin-document-parser/package.json',
 ]
 
-const BUILD_STAMP_CARGO_FILES = [
-  'src-tauri/plugins/tauri-plugin-hardware/Cargo.toml',
-  'src-tauri/plugins/tauri-plugin-document-parser/Cargo.toml',
-]
-
 function usage() {
   console.error(`Usage:
   node scripts/release-version.mjs bump <version>
@@ -47,7 +42,9 @@ function normalizeVersion(raw) {
   const version = value.startsWith('v') ? value.slice(1) : value
 
   if (!/^\d+\.\d+\.\d+(?:[-+][0-9A-Za-z.-]+)?$/.test(version)) {
-    throw new Error(`Invalid release version "${value}". Expected semver like 0.6.617 or v0.6.617.`)
+    throw new Error(
+      `Invalid release version "${value}". Expected semver like 0.6.617 or v0.6.617.`
+    )
   }
 
   return version
@@ -55,7 +52,12 @@ function normalizeVersion(raw) {
 
 function resolveVersion(args) {
   const positional = args.find((arg) => !arg.startsWith('--'))
-  return normalizeVersion(positional ?? process.env.VERSION ?? process.env.RELEASE_VERSION ?? process.env.GITHUB_REF_NAME)
+  return normalizeVersion(
+    positional ??
+      process.env.VERSION ??
+      process.env.RELEASE_VERSION ??
+      process.env.GITHUB_REF_NAME
+  )
 }
 
 function readJson(file) {
@@ -81,7 +83,10 @@ function writeCargoVersion(file, version) {
   if (!/^version\s*=\s*"[^"]+"/m.test(source)) {
     throw new Error(`Could not find package version in ${file}`)
   }
-  const next = source.replace(/^version\s*=\s*"[^"]+"/m, `version = "${version}"`)
+  const next = source.replace(
+    /^version\s*=\s*"[^"]+"/m,
+    `version = "${version}"`
+  )
   fs.writeFileSync(file, next)
 }
 
@@ -100,7 +105,10 @@ function writeProductVersion(entry, version) {
     if (!/^(\s*"version"\s*:\s*)"[^"]+"/m.test(source)) {
       throw new Error(`Could not update JSON version in ${entry.file}`)
     }
-    const next = source.replace(/^(\s*"version"\s*:\s*)"[^"]+"/m, `$1"${version}"`)
+    const next = source.replace(
+      /^(\s*"version"\s*:\s*)"[^"]+"/m,
+      `$1"${version}"`
+    )
     fs.writeFileSync(entry.file, next)
     return
   }
@@ -122,7 +130,9 @@ function check(version) {
   })
 
   if (mismatches.length > 0) {
-    const details = mismatches.map(({ file, actual }) => `- ${file}: ${actual}`).join('\n')
+    const details = mismatches
+      .map(({ file, actual }) => `- ${file}: ${actual}`)
+      .join('\n')
     throw new Error(
       `Release version mismatch. Expected ${version}, found:\n${details}\n\nRun: yarn release:version ${version}, commit it, then push tag v${version}.`
     )
@@ -160,10 +170,6 @@ function stamp(version, options) {
     writeJsonVersion(file, version)
   }
 
-  for (const file of BUILD_STAMP_CARGO_FILES) {
-    writeCargoVersion(file, version)
-  }
-
   if (options.windows) {
     stampWindowsBuildFiles(version)
   }
@@ -193,7 +199,10 @@ function stampWindowsBuildFiles(version) {
       .replaceAll('biyan_mainbinaryname', 'Biyan')
       .replaceAll('biyan_version', fileVersion)
       .replaceAll('biyan_build', productVersion)
-      .replace(/^!define UNINSTALLERSIGNCOMMAND .*$/m, '!define UNINSTALLERSIGNCOMMAND ""')
+      .replace(
+        /^!define UNINSTALLERSIGNCOMMAND .*$/m,
+        '!define UNINSTALLERSIGNCOMMAND ""'
+      )
     fs.writeFileSync(templatePath, next)
   }
 }

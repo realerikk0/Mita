@@ -34,37 +34,37 @@ __metadata:
 
 "@biyan/core@file:../../core/package.tgz::locator=%40biyan%2Fassistant-extension%40workspace%3Aassistant-extension":
   version: 0.1.10
-  resolution: "@biyan/core@file:../../core/package.tgz#../../core/package.tgz::hash=90a51c&locator=%40biyan%2Fassistant-extension%40workspace%3Aassistant-extension"
+  resolution: "@biyan/core@file:../../core/package.tgz#../../core/package.tgz::hash=90f0a0&locator=%40biyan%2Fassistant-extension%40workspace%3Aassistant-extension"
   dependencies:
     rxjs: "npm:^7.8.1"
     ulidx: "npm:^2.3.0"
   peerDependencies:
     react: 19.0.0
-  checksum: 10c0/d45c095db5725c8e9beb230c2db07c5dde598f55407cdf950ad4a9ce2eb41f00d05f227edde4db93b3b683b981a8b56c22ddb6ab6497b585a8175da990dcf1a0
+  checksum: 10c0/652e7350418cfc2cf06a6f79c0a9f7f3a1d72fc6c848083ae20d0151826ca2d1eb08b91b5c189f9bd558c5621fa8f81f65134f586a4734fb6527c5e093b42aa6
   languageName: node
   linkType: hard
 
 "@biyan/core@file:../../core/package.tgz::locator=%40biyan%2Fconversational-extension%40workspace%3Aconversational-extension":
   version: 0.1.10
-  resolution: "@biyan/core@file:../../core/package.tgz#../../core/package.tgz::hash=90a51c&locator=%40biyan%2Fconversational-extension%40workspace%3Aconversational-extension"
+  resolution: "@biyan/core@file:../../core/package.tgz#../../core/package.tgz::hash=90f0a0&locator=%40biyan%2Fconversational-extension%40workspace%3Aconversational-extension"
   dependencies:
     rxjs: "npm:^7.8.1"
     ulidx: "npm:^2.3.0"
   peerDependencies:
     react: 19.0.0
-  checksum: 10c0/d45c095db5725c8e9beb230c2db07c5dde598f55407cdf950ad4a9ce2eb41f00d05f227edde4db93b3b683b981a8b56c22ddb6ab6497b585a8175da990dcf1a0
+  checksum: 10c0/652e7350418cfc2cf06a6f79c0a9f7f3a1d72fc6c848083ae20d0151826ca2d1eb08b91b5c189f9bd558c5621fa8f81f65134f586a4734fb6527c5e093b42aa6
   languageName: node
   linkType: hard
 
 "@biyan/core@file:../../core/package.tgz::locator=%40biyan%2Fdownload-extension%40workspace%3Adownload-extension":
   version: 0.1.10
-  resolution: "@biyan/core@file:../../core/package.tgz#../../core/package.tgz::hash=90a51c&locator=%40biyan%2Fdownload-extension%40workspace%3Adownload-extension"
+  resolution: "@biyan/core@file:../../core/package.tgz#../../core/package.tgz::hash=90f0a0&locator=%40biyan%2Fdownload-extension%40workspace%3Adownload-extension"
   dependencies:
     rxjs: "npm:^7.8.1"
     ulidx: "npm:^2.3.0"
   peerDependencies:
     react: 19.0.0
-  checksum: 10c0/d45c095db5725c8e9beb230c2db07c5dde598f55407cdf950ad4a9ce2eb41f00d05f227edde4db93b3b683b981a8b56c22ddb6ab6497b585a8175da990dcf1a0
+  checksum: 10c0/652e7350418cfc2cf06a6f79c0a9f7f3a1d72fc6c848083ae20d0151826ca2d1eb08b91b5c189f9bd558c5621fa8f81f65134f586a4734fb6527c5e093b42aa6
   languageName: node
   linkType: hard
 

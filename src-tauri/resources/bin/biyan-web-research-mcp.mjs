@@ -138,6 +138,11 @@ async function searchWeb(args) {
 
 async function ensureBrowserPage() {
   if (page) return page
+  if (!HEADLESS) {
+    throw new Error(
+      'Biyan Web Research bundles Chromium Headless Shell only; BIYAN_WEB_RESEARCH_HEADLESS=false is not supported.'
+    )
+  }
 
   let playwright
   try {

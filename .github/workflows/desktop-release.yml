@@ -20,7 +20,7 @@ concurrency:
 
 env:
   NODE_OPTIONS: "--max-old-space-size=4196"
-  YARN_ENABLE_IMMUTABLE_INSTALLS: "false"
+  YARN_ENABLE_IMMUTABLE_INSTALLS: "true"
 
 jobs:
   preflight:
@@ -102,7 +102,6 @@ jobs:
         run: |
           corepack enable
           corepack prepare yarn@4.5.3 --activate
-          yarn config set -H enableImmutableInstalls false
 
       - name: Install Rust and Tauri system dependencies
         run: |
@@ -141,7 +140,6 @@ jobs:
         run: |
           corepack enable
           corepack prepare yarn@4.5.3 --activate
-          yarn config set -H enableImmutableInstalls false
 
       - name: Setup Rust targets
         shell: bash
@@ -196,15 +194,16 @@ jobs:
           BIYAN_DATA_SCHEMA: ${{ needs.preflight.outputs.data_schema }}
         run: make build
 
-      - name: Reject retired local runtime payloads
+      - name: Verify macOS candidate
         shell: bash
+        env:
+          VERSION: ${{ needs.preflight.outputs.version }}
         run: |
           set -euo pipefail
-          if find src-tauri/target/universal-apple-darwin/release/bundle \
-            -type f | grep -Ei '/[^/]*(llama|mlx|foundation|rag|vector)[^/]*$'; then
-            echo "Retired local runtime payload found in macOS candidate" >&2
-            exit 1
-          fi
+          make verify-macos-candidate \
+            APP="src-tauri/target/universal-apple-darwin/release/bundle/macos/Biyan.app" \
+            DMG="src-tauri/target/universal-apple-darwin/release/bundle/dmg/Biyan_${VERSION}_universal.dmg" \
+            VERSION="$VERSION"
 
       - name: Notarize and verify DMGs
         shell: bash
@@ -261,7 +260,6 @@ jobs:
         run: |
           corepack enable
           corepack prepare yarn@4.5.3 --activate
-          yarn config set -H enableImmutableInstalls false
 
       - name: Setup Rust and GNU make
         shell: pwsh
@@ -345,7 +343,6 @@ jobs:
         run: |
           corepack enable
           corepack prepare yarn@4.5.3 --activate
-          yarn config set -H enableImmutableInstalls false
 
       - name: Install Tauri system dependencies
         run: |

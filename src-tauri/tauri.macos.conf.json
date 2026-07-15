@@ -2,9 +2,9 @@
   "app": {
     "windows": [
       {
-      "label": "main",
-      "url": "migration-recovery.html?boot=1",
-      "title": "Biyan",
+        "label": "main",
+        "url": "migration-recovery.html?boot=1",
+        "title": "Biyan",
         "width": 1200,
         "minWidth": 1024,
         "height": 800,
@@ -33,6 +33,7 @@
     "targets": ["app", "dmg"],
     "resources": [
       "resources/LICENSE",
+      "resources/NOTICE",
       "resources/bin/biyan-cli",
       "resources/computer-agent-runner/**/*",
       "resources/bin/biyan-web-research-mcp.mjs",
@@ -45,6 +46,7 @@
     "macOS": {
       "entitlements": "./Entitlements.plist",
       "hardenedRuntime": true,
+      "minimumSystemVersion": "12.0",
       "signingIdentity": "Developer ID Application: LILYN DYNAMICS (7NZP53ZJ4D)",
       "providerShortName": "7NZP53ZJ4D"
     }
