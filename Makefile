@@ -129,6 +129,7 @@ endif
 	node --test ./scripts/__tests__/windows-installer-template.test.mjs
 	node --test ./scripts/__tests__/rename-cargo-channel-app.test.mjs
 	node --test ./scripts/__tests__/asset-copy.test.mjs
+	node --test ./scripts/__tests__/install-extensions.test.mjs
 	node --test ./scripts/__tests__/download-bin.test.mjs
 	node --test ./scripts/__tests__/web-research-runtime.test.mjs
 	node --test ./scripts/__tests__/macos-architecture-policy.test.mjs
@@ -211,42 +212,24 @@ else
 endif
 
 clean:
+	git clean -fdx -- ":(glob)**/node_modules/**" ":(glob)**/.next/**" ":(glob)**/dist/**" ":(glob)**/build/**" ":(glob)**/out/**" ":(glob)**/.turbo/**" ":(glob)**/.yarn/**" ":(glob)**/package-lock.json" ":(glob)**/tsconfig.tsbuildinfo"
 ifeq ($(DETECTED_OS),Windows)
-	-powershell -Command "Get-ChildItem -Path . -Include node_modules, .next, dist, build, out, .turbo, .yarn -Recurse -Directory | Remove-Item -Recurse -Force"
-	-powershell -Command "Get-ChildItem -Path . -Include package-lock.json, tsconfig.tsbuildinfo -Recurse -File | Remove-Item -Recurse -Force"
 	-powershell -Command "Remove-Item -Recurse -Force ./pre-install/*.tgz"
 	-powershell -Command "Remove-Item -Recurse -Force ./extensions/*/*.tgz"
 	-powershell -Command "Remove-Item -Recurse -Force ./electron/pre-install/*.tgz"
-	-powershell -Command "Remove-Item -Recurse -Force ./src-tauri/resources"
+	-git clean -fdX -- src-tauri/resources
 	-powershell -Command "Remove-Item -Recurse -Force ./src-tauri/target"
 else ifeq ($(DETECTED_OS),Linux)
-	find . -name "node_modules" -type d -prune -exec rm -rf '{}' +
-	find . -name ".next" -type d -exec rm -rf '{}' +
-	find . -name "dist" -type d -exec rm -rf '{}' +
-	find . -name "build" -type d -exec rm -rf '{}' +
-	find . -name "out" -type d -exec rm -rf '{}' +
-	find . -name ".turbo" -type d -exec rm -rf '{}' +
-	find . -name ".yarn" -type d -exec rm -rf '{}' +
-	find . -name "packake-lock.json" -type f -exec rm -rf '{}' +
-	find . -name "package-lock.json" -type f -exec rm -rf '{}' +
 	rm -rf ./pre-install/*.tgz
 	rm -rf ./extensions/*/*.tgz
 	rm -rf ./electron/pre-install/*.tgz
-	rm -rf ./src-tauri/resources
+	git clean -fdX -- src-tauri/resources
 	rm -rf ./src-tauri/target
 	rm -rf "./.cache"
 else
-	find . -name "node_modules" -type d -prune -exec rm -rfv '{}' +
-	find . -name ".next" -type d -exec rm -rfv '{}' +
-	find . -name "dist" -type d -exec rm -rfv '{}' +
-	find . -name "build" -type d -exec rm -rfv '{}' +
-	find . -name "out" -type d -exec rm -rfv '{}' +
-	find . -name ".turbo" -type d -exec rm -rfv '{}' +
-	find . -name ".yarn" -type d -exec rm -rfv '{}' +
-	find . -name "package-lock.json" -type f -exec rm -rfv '{}' +
 	rm -rfv ./pre-install/*.tgz
 	rm -rfv ./extensions/*/*.tgz
 	rm -rfv ./electron/pre-install/*.tgz
-	rm -rfv ./src-tauri/resources
+	git clean -fdX -- src-tauri/resources
 	rm -rfv ./src-tauri/target
 endif

@@ -156,14 +156,42 @@ test('PR CI gate includes release policy and updater contracts', () => {
       - run: node scripts/ci/verify-release-policy.mjs
       - run: node --test scripts/ci/__tests__/release-policy.test.mjs
       - run: node --test scripts/updater/__tests__/updater.test.mjs
+  coverage-check:
+    steps:
+      - run: yarn test:coverage
   pr-ci-gate:
-    needs: [ci-scope, release-safety]
+    needs: [ci-scope, release-safety, coverage-check]
+    steps:
+      - run: require_success "coverage-check" "$COVERAGE_RESULT"
 `
   assert.deepEqual(validateCiWorkflow(workflow), [])
   assert.ok(
     validateCiWorkflow(
-      workflow.replace('needs: [ci-scope, release-safety]', 'needs: []')
+      workflow.replace(
+        'needs: [ci-scope, release-safety, coverage-check]',
+        'needs: []'
+      )
     ).some((failure) => failure.includes('PR CI Gate'))
+  )
+
+  const advisoryCoverage = workflow.replace(
+    '  coverage-check:\n',
+    '  coverage-check:\n    continue-on-error: true\n'
+  )
+  assert.ok(
+    validateCiWorkflow(advisoryCoverage).some((failure) =>
+      failure.includes('must not be advisory')
+    )
+  )
+
+  const unenforcedCoverage = workflow.replace(
+    '      - run: require_success "coverage-check" "$COVERAGE_RESULT"\n',
+    ''
+  )
+  assert.ok(
+    validateCiWorkflow(unenforcedCoverage).some((failure) =>
+      failure.includes('must enforce coverage-check')
+    )
   )
 
   const unsafeScope = workflow.replace(

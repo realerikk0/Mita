@@ -10,6 +10,10 @@ const packageJson = JSON.parse(
   fs.readFileSync(path.join(repoRoot, 'package.json'), 'utf8')
 )
 const makefile = fs.readFileSync(path.join(repoRoot, 'Makefile'), 'utf8')
+const extensionInstaller = fs.readFileSync(
+  path.join(repoRoot, 'scripts', 'install-extensions.mjs'),
+  'utf8'
+)
 const desktopReleaseWorkflow = fs.readFileSync(
   path.join(repoRoot, '.github/workflows/desktop-release.yml'),
   'utf8'
@@ -86,7 +90,7 @@ test('asset copy regression test runs from Makefile test target', () => {
   )
 })
 
-test('extension builds pack a clean current core and install from an immutable lock', () => {
+test('extension builds pack a clean current core and preserve immutable dependency installation', () => {
   assert.match(
     packageJson.scripts['build:core'],
     /yarn prebuild && yarn build && yarn pack/
@@ -94,8 +98,17 @@ test('extension builds pack a clean current core and install from an immutable l
   assert.match(packageJson.scripts['build:extensions'], /yarn build:core/)
   assert.match(
     packageJson.scripts['build:extensions'],
-    /cd extensions && yarn install --immutable/
+    /yarn install:extensions/
   )
+  assert.equal(
+    packageJson.scripts['install:extensions'],
+    'node ./scripts/install-extensions.mjs'
+  )
+  assert.equal(packageJson.devDependencies['cross-spawn'], '^7.0.6')
+  assert.match(extensionInstaller, /\['install', '--mode=update-lockfile'\]/)
+  assert.match(extensionInstaller, /\['install', '--immutable'\]/)
+  assert.match(extensionInstaller, /validateCoreLockTransition/)
+  assert.match(extensionInstaller, /finally\s*{\s*restoreLock\(\)/)
   assert.match(
     packageJson.scripts['build:tauri:plugin:api'],
     /cd src-tauri\/plugins && yarn install --immutable/
@@ -109,4 +122,14 @@ test('extension builds pack a clean current core and install from an immutable l
     desktopReleaseWorkflow,
     /(?:YARN_ENABLE_IMMUTABLE_INSTALLS|enableImmutableInstalls)[^\n]*false/
   )
+})
+
+test('clean removes generated Tauri resources without deleting tracked resources', () => {
+  assert.match(makefile, /git clean -fdX -- src-tauri\/resources/)
+  assert.match(makefile, /git clean -fdx -- .*node_modules/)
+  assert.doesNotMatch(
+    makefile,
+    /Remove-Item -Recurse -Force \.\/src-tauri\/resources/
+  )
+  assert.doesNotMatch(makefile, /rm -rfv? \.\/src-tauri\/resources/)
 })

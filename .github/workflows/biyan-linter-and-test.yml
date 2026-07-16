@@ -466,7 +466,6 @@ jobs:
     if: github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository && needs.ci-scope.outputs.full_ci == 'true'
     runs-on: ubuntu-latest
     needs: [ci-scope, base_branch_cov, base_branch_rust_cov]
-    continue-on-error: true
     permissions:
       contents: read
       issues: write
@@ -604,10 +603,9 @@ jobs:
             require_success "test-on-macos" "$MACOS_RESULT"
             require_success "test-on-ubuntu" "$UBUNTU_RESULT"
             require_success "test-on-windows-pr" "$WINDOWS_PR_RESULT"
+            require_success "coverage-check" "$COVERAGE_RESULT"
           else
             echo "full_ci=false; full platform jobs are not required for this PR."
           fi
-
-          echo "coverage-check result: ${COVERAGE_RESULT:-missing}"
 
           exit "$failed"

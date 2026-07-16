@@ -169,6 +169,7 @@ export function validateCiWorkflow(source) {
   const failures = []
   const ciScope = jobBlock(source, 'ci-scope')
   const releaseSafety = jobBlock(source, 'release-safety')
+  const coverageCheck = jobBlock(source, 'coverage-check')
   const prGate = jobBlock(source, 'pr-ci-gate')
 
   if (!ciScope) {
@@ -200,9 +201,25 @@ export function validateCiWorkflow(source) {
   if (
     !prGate ||
     !jobNeeds(prGate, 'ci-scope') ||
-    !jobNeeds(prGate, 'release-safety')
+    !jobNeeds(prGate, 'release-safety') ||
+    !jobNeeds(prGate, 'coverage-check')
   ) {
-    failures.push('PR CI Gate must require ci-scope and release-safety results')
+    failures.push(
+      'PR CI Gate must require ci-scope, release-safety, and coverage-check results'
+    )
+  }
+
+  if (!coverageCheck) {
+    failures.push('Biyan CI is missing the coverage-check job')
+  } else if (/^    continue-on-error:\s*true\s*$/m.test(coverageCheck)) {
+    failures.push('coverage-check must not be advisory at the job level')
+  }
+
+  if (
+    prGate &&
+    !prGate.includes('require_success "coverage-check" "$COVERAGE_RESULT"')
+  ) {
+    failures.push('PR CI Gate must enforce coverage-check for full CI')
   }
 
   return failures
