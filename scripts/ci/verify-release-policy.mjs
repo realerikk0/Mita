@@ -7,6 +7,7 @@ import {
   validateBundledLegalResources,
   validateCandidateWorkflow,
   validateCiWorkflow,
+  validateDocsArchiveConfig,
   validateFlatpakMetadata,
   validateReleaseIdentity,
 } from './release-policy-contracts.mjs'
@@ -129,6 +130,9 @@ for (const message of validateCandidateWorkflow(desktopRelease)) fail(message)
 
 const biyanCi = read('.github/workflows/biyan-linter-and-test.yml')
 for (const message of validateCiWorkflow(biyanCi)) fail(message)
+
+const docsTsconfig = JSON.parse(read('docs/tsconfig.json'))
+for (const message of validateDocsArchiveConfig(docsTsconfig)) fail(message)
 
 const flatpakManifest = read('flatpak/uk.jingxing.Mita.yml')
 const flatpakMetainfo = read('flatpak/uk.jingxing.Mita.metainfo.xml')

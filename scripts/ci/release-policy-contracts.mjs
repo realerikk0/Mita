@@ -86,6 +86,19 @@ export function validateBundledLegalResources(platformConfigs) {
   return failures
 }
 
+export function validateDocsArchiveConfig(tsconfig) {
+  const failures = []
+  if (
+    !Array.isArray(tsconfig?.exclude) ||
+    !tsconfig.exclude.includes('unpublished-upstream-history')
+  ) {
+    failures.push(
+      'docs tsconfig must exclude unpublished-upstream-history from production typechecking'
+    )
+  }
+  return failures
+}
+
 export function validateCandidateWorkflow(source) {
   const failures = []
   const preflight = jobBlock(source, 'preflight')
@@ -154,8 +167,21 @@ export function validateCandidateWorkflow(source) {
 
 export function validateCiWorkflow(source) {
   const failures = []
+  const ciScope = jobBlock(source, 'ci-scope')
   const releaseSafety = jobBlock(source, 'release-safety')
   const prGate = jobBlock(source, 'pr-ci-gate')
+
+  if (!ciScope) {
+    failures.push('Biyan CI is missing the ci-scope job')
+  } else if (
+    /printf[^\n]*\|\s*grep[^\n]*(?:-[A-Za-z]*q[A-Za-z]*|--quiet)/.test(
+      ciScope
+    )
+  ) {
+    failures.push(
+      'Biyan CI scope detection must not use a short-circuiting printf | grep -q pipeline under pipefail'
+    )
+  }
 
   if (!releaseSafety) {
     failures.push('Biyan CI is missing the release-safety job')
@@ -171,8 +197,12 @@ export function validateCiWorkflow(source) {
     }
   }
 
-  if (!prGate || !jobNeeds(prGate, 'release-safety')) {
-    failures.push('PR CI Gate must require the release-safety result')
+  if (
+    !prGate ||
+    !jobNeeds(prGate, 'ci-scope') ||
+    !jobNeeds(prGate, 'release-safety')
+  ) {
+    failures.push('PR CI Gate must require ci-scope and release-safety results')
   }
 
   return failures

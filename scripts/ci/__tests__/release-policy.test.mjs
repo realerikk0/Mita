@@ -6,6 +6,7 @@ import {
   validateBundledLegalResources,
   validateCandidateWorkflow,
   validateCiWorkflow,
+  validateDocsArchiveConfig,
   validateFlatpakMetadata,
   validateReleaseIdentity,
 } from '../release-policy-contracts.mjs'
@@ -147,19 +148,47 @@ test('candidate workflow gates every platform build on exact-tag tests', () => {
 
 test('PR CI gate includes release policy and updater contracts', () => {
   const workflow = `jobs:
+  ci-scope:
+    steps:
+      - run: grep -E '^src-tauri/' <<< "$changed_files" >/dev/null
   release-safety:
     steps:
       - run: node scripts/ci/verify-release-policy.mjs
       - run: node --test scripts/ci/__tests__/release-policy.test.mjs
       - run: node --test scripts/updater/__tests__/updater.test.mjs
   pr-ci-gate:
-    needs: [release-safety]
+    needs: [ci-scope, release-safety]
 `
   assert.deepEqual(validateCiWorkflow(workflow), [])
   assert.ok(
     validateCiWorkflow(
-      workflow.replace('needs: [release-safety]', 'needs: []')
+      workflow.replace('needs: [ci-scope, release-safety]', 'needs: []')
     ).some((failure) => failure.includes('PR CI Gate'))
+  )
+
+  const unsafeScope = workflow.replace(
+    `grep -E '^src-tauri/' <<< "$changed_files" >/dev/null`,
+    `printf '%s\\n' "$changed_files" | grep -Eq '^src-tauri/'`
+  )
+  assert.ok(
+    validateCiWorkflow(unsafeScope).some((failure) =>
+      failure.includes('printf | grep -q')
+    )
+  )
+})
+
+test('docs archive is excluded from production typechecking', () => {
+  const tsconfig = JSON.parse(fs.readFileSync('docs/tsconfig.json', 'utf8'))
+  assert.deepEqual(validateDocsArchiveConfig(tsconfig), [])
+
+  const withoutArchiveExclude = structuredClone(tsconfig)
+  withoutArchiveExclude.exclude = withoutArchiveExclude.exclude.filter(
+    (entry) => entry !== 'unpublished-upstream-history'
+  )
+  assert.ok(
+    validateDocsArchiveConfig(withoutArchiveExclude).some((failure) =>
+      failure.includes('unpublished-upstream-history')
+    )
   )
 })
 

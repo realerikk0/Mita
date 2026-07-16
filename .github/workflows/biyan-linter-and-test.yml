@@ -78,7 +78,7 @@ jobs:
             echo 'EOF'
           } >> "$GITHUB_OUTPUT"
 
-          if printf '%s\n' "$changed_files" | grep -Eq '^(\.github/workflows/|Makefile|package\.json|yarn\.lock|core/|extensions/|scripts/|src-tauri/)'; then
+          if grep -E '^(\.github/workflows/|Makefile|package\.json|yarn\.lock|core/|extensions/|scripts/|src-tauri/)' <<< "$changed_files" >/dev/null; then
             echo "full_ci=true" >> "$GITHUB_OUTPUT"
           else
             echo "full_ci=false" >> "$GITHUB_OUTPUT"
@@ -87,7 +87,7 @@ jobs:
           # run_checks=false only when EVERY changed file is docs/markdown, so a
           # docs-only PR skips lint/test/build yet the Fast PR check still
           # reports success and satisfies the gate. Any non-doc file flips it on.
-          if printf '%s\n' "$changed_files" | grep -qvE '^(docs/|.*\.mdx?$|LICENSE$|\.gitignore$)'; then
+          if grep -vE '^(docs/|.*\.mdx?$|LICENSE$|\.gitignore$)' <<< "$changed_files" >/dev/null; then
             echo "run_checks=true" >> "$GITHUB_OUTPUT"
           else
             echo "run_checks=false" >> "$GITHUB_OUTPUT"
