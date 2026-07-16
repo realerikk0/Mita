@@ -5,7 +5,7 @@ import { useProjectDialog } from '@/hooks/useProjectDialog'
 import { useRouter } from '@tanstack/react-router'
 import { route } from '@/constants/routes'
 import { PlatformShortcuts, ShortcutAction } from '@/lib/shortcuts'
-import { startNewChat, startNewMitaTeams } from '@/lib/new-chat'
+import { startNewChat, startNewBiyanTeams } from '@/lib/new-chat'
 
 export function KeyboardShortcutsProvider() {
   const { open, setLeftPanel } = useLeftPanel()
@@ -17,7 +17,7 @@ export function KeyboardShortcutsProvider() {
   const sidebarShortcut = PlatformShortcuts[ShortcutAction.TOGGLE_SIDEBAR]
   const newChatShortcut = PlatformShortcuts[ShortcutAction.NEW_CHAT]
   const newImageShortcut = PlatformShortcuts[ShortcutAction.NEW_IMAGE]
-  const newMitaTeamsShortcut = PlatformShortcuts[ShortcutAction.NEW_MITA_TEAMS]
+  const newBiyanTeamsShortcut = PlatformShortcuts[ShortcutAction.NEW_BIYAN_TEAMS]
   const newProjectShortcut = PlatformShortcuts[ShortcutAction.NEW_PROJECT]
   const settingsShortcut = PlatformShortcuts[ShortcutAction.GO_TO_SETTINGS]
   const searchShortcut = PlatformShortcuts[ShortcutAction.SEARCH]
@@ -48,9 +48,9 @@ export function KeyboardShortcutsProvider() {
 
   // New Biyan Teams
   useKeyboardShortcut({
-    ...newMitaTeamsShortcut,
+    ...newBiyanTeamsShortcut,
     callback: () => {
-      void startNewMitaTeams(router.navigate)
+      void startNewBiyanTeams(router.navigate)
     },
   })
 

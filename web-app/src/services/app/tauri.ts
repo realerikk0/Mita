@@ -3,7 +3,7 @@
  */
 
 import { invoke } from '@tauri-apps/api/core'
-import { AppConfiguration } from '@janhq/core'
+import { AppConfiguration } from '@biyan/core'
 import type {
   FactoryResetOptions,
   LogEntry,
@@ -22,18 +22,10 @@ export class TauriAppService extends DefaultAppService {
    * directories, config files, and `settings.json` based on the keep flags.
    * No frontend snapshot/restore is needed — the file store is preserved or
    * wiped on disk by the Rust side.
-   */
+  */
   async factoryReset(options?: FactoryResetOptions): Promise<void> {
-    const { EngineManager } = await import('@janhq/core')
-    for (const [, engine] of EngineManager.instance().engines) {
-      const activeModels = await engine.getLoadedModels()
-      if (activeModels) {
-        await Promise.all(activeModels.map((model: string) => engine.unload(model)))
-      }
-    }
-
     const keepAppData = options?.keepAppData ?? false
-    const keepModelsAndConfigs = options?.keepModelsAndConfigs ?? false
+    const keepConfigurations = options?.keepConfigurations ?? false
 
     if (!keepAppData) {
       try {
@@ -43,10 +35,10 @@ export class TauriAppService extends DefaultAppService {
       }
     }
 
-    if (!keepAppData && !keepModelsAndConfigs) {
+    if (!keepAppData && !keepConfigurations) {
       await invoke('factory_reset')
     } else {
-      await invoke('factory_reset', { keepAppData, keepModelsAndConfigs })
+      await invoke('factory_reset', { keepAppData, keepConfigurations })
     }
   }
 
@@ -75,7 +67,7 @@ export class TauriAppService extends DefaultAppService {
     return await invoke<string>('get_user_logs_directory')
   }
 
-  async getMitaDataFolder(): Promise<string | undefined> {
+  async getBiyanDataFolder(): Promise<string | undefined> {
     try {
       const appConfiguration: AppConfiguration | undefined =
         await window.core?.api?.getAppConfigurations()
@@ -87,7 +79,7 @@ export class TauriAppService extends DefaultAppService {
     }
   }
 
-  async relocateMitaDataFolder(path: string): Promise<void> {
+  async relocateBiyanDataFolder(path: string): Promise<void> {
     await window.core?.api?.changeAppDataFolder({ newDataFolder: path })
   }
 

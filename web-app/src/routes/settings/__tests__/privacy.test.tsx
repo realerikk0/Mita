@@ -37,7 +37,7 @@ vi.mock('@/hooks/useAnalytic', () => ({
 }))
 
 vi.mock('@/lib/analytics', () => ({
-  setMitaAnalyticsConsent: vi.fn(),
+  setBiyanAnalyticsConsent: vi.fn(),
 }))
 
 vi.mock('@/i18n/react-i18next-compat', () => ({

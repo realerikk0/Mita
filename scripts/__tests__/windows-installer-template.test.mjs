@@ -106,12 +106,16 @@ test('Windows NSIS installer leaves legacy install directory deletion to runtime
 })
 
 test('Windows stable build template publishes Biyan installer artifacts', () => {
-  assert.match(windowsBuildWorkflow, /s\/mita_productname\/Biyan\/g/)
-  assert.match(windowsBuildWorkflow, /s\/mita_mainbinaryname\/Biyan\/g/)
+  assert.match(windowsBuildWorkflow, /s\/biyan_productname\/Biyan\/g/)
+  assert.match(windowsBuildWorkflow, /s\/biyan_mainbinaryname\/Biyan\/g/)
   assert.match(windowsBuildWorkflow, /FILE_NAME=Biyan_\$\{\{ inputs\.new_version \}\}_x64-setup\.exe/)
   assert.match(windowsBuildWorkflow, /WIN_SIG=\$\(cat Biyan_\$\{\{ inputs\.new_version \}\}_x64-setup\.exe\.sig\)/)
   assert.match(windowsBuildWorkflow, /MSI_FILE="Biyan_\$\{\{ inputs\.new_version \}\}_x64_en-US\.msi"/)
   assert.doesNotMatch(windowsBuildWorkflow, /FILE_NAME=Mita_\$\{\{ inputs\.new_version \}\}_x64-setup\.exe/)
+})
+
+test('Windows NSIS installer rejects normal application downgrades', () => {
+  assert.match(template, /!define ALLOWDOWNGRADES "false"/)
 })
 
 test('Windows NSIS installer template tests run from Makefile test target', () => {
@@ -125,7 +129,9 @@ test('Windows NSIS installer template tests run from Makefile test target', () =
 test('Windows startup self-heal marks migration only after success', () => {
   const spawnIndex = libSource.indexOf('tauri::async_runtime::spawn_blocking')
   const runIndex = libSource.indexOf('core::windows_migration::run_biyan_windows_migration()')
-  const markerIndex = libSource.indexOf('store.set(WINDOWS_BIYAN_MIGRATED_KEY')
+  const markerIndex = libSource.search(
+    /store\s*\.set\(\s*WINDOWS_BIYAN_MIGRATED_KEY/,
+  )
 
   assert.notEqual(spawnIndex, -1)
   assert.notEqual(runIndex, -1)

@@ -4,9 +4,28 @@ interface GlobalErrorProps {
   error: Error | unknown
 }
 
+export const sanitizeErrorText = (value: unknown): string => {
+  const text = value instanceof Error ? value.message : String(value)
+  return text
+    .replace(/\bBearer\s+[A-Za-z0-9._~+/=-]+/gi, 'Bearer [redacted]')
+    .replace(
+      /\b(api[_-]?key|token|authorization|secret|password)\b\s*[:=]\s*[^\s,;]+/gi,
+      '$1=[redacted]'
+    )
+    .replace(/(?:[A-Za-z]:\\|\\\\)[^\r\n"']+/g, '[local path]')
+    .replace(/\/(?:Users|home|private|tmp|var|Volumes)\/[^\r\n:"']+/g, '[local path]')
+    .slice(0, 1200)
+}
+
 export default function GlobalError({ error }: GlobalErrorProps) {
-  console.error('Error in root route:', error)
+  console.error('Root route failed', {
+    name: error instanceof Error ? error.name : 'UnknownError',
+  })
   const [showFull, setShowFull] = useState(false)
+  const safeMessage = sanitizeErrorText(error)
+  const safeStack = sanitizeErrorText(
+    error instanceof Error ? error.stack || error.message : error
+  )
 
   return (
     <div className="flex h-screen w-full items-center justify-center overflow-auto bg-red-50 p-5">
@@ -46,14 +65,12 @@ export default function GlobalError({ error }: GlobalErrorProps) {
           >
             refresh this page
           </button>{' '}
-          or <br /> feel free to{' '}
+          or <br />{' '}
           <a
-            rel="noopener noreferrer"
             className="text-accent! hover:underline"
-            href="https://discord.gg/FTk2MvZwJH"
-            target="_blank"
+            href="mailto:help@biyan.ai"
           >
-            contact us
+            send email to help@biyan.ai
           </a>{' '}
           if the problem persists.
         </p>
@@ -62,17 +79,11 @@ export default function GlobalError({ error }: GlobalErrorProps) {
           role="alert"
         >
           <strong className="font-bold">Error: </strong>
-          <span className="block sm:inline">
-            {error instanceof Error ? error.message : String(error)}
-          </span>
+          <span className="block sm:inline">{safeMessage}</span>
           <div className="mt-2 h-full w-full">
             <pre className="mt-2 whitespace-pre-wrap break-all rounded bg-red-200 p-4 text-left text-sm text-red-600 max-h-[250px] overflow-y-auto">
               <code>
-                {error instanceof Error
-                  ? showFull
-                    ? error.stack
-                    : error.stack?.slice(0, 200)
-                  : String(error)}
+                {showFull ? safeStack : safeStack.slice(0, 200)}
               </code>
             </pre>
             <button

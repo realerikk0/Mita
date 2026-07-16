@@ -26,7 +26,7 @@
   "newChat": "New Chat",
   "newImage": "New Image",
   "newMedia": "New Media",
-  "newMitaTeams": "New Biyan Teams",
+  "newBiyanTeams": "New Biyan Teams",
   "imageGeneration": {
     "today": "Today",
     "emptyState": "Generated images will appear here.",
@@ -288,11 +288,10 @@
   "pinToTop": "Pin to top",
   "unpin": "Unpin",
   "recents": "Recents",
-  "hub": "Hub",
   "helpSupport": "Help & Support",
-  "helpUsImproveMita": "Help Us Improve Biyan",
-  "helpUsImproveMitaDescription": "We collect anonymous data to understand feature usage. Your chats and personal information are never tracked. You can change this anytime in Settings > Privacy.",
-  "helpUsImproveMitaQuestion": "Would you like to help us improve Biyan?",
+  "helpUsImproveBiyan": "Help Us Improve Biyan",
+  "helpUsImproveBiyanDescription": "We collect anonymous data to understand feature usage. Your chats and personal information are never tracked. You can change this anytime in Settings > Privacy.",
+  "helpUsImproveBiyanQuestion": "Would you like to help us improve Biyan?",
   "unstarAll": "Unstar All",
   "unstar": "Unstar",
   "deleteAll": "Delete All",
@@ -348,12 +347,7 @@
   "noResultsFound": "No results found",
   "noThreadsYet": "No threads yet",
   "noThreadsYetDesc": "Start a new conversation to see your thread history here.",
-  "downloads": "Downloads",
-  "downloading": "Downloading",
   "uploadingAttachments": "Uploading attachments…",
-  "cancelDownload": "Cancel download",
-  "downloadCancelled": "Download Cancelled",
-  "downloadComplete": "Download Complete",
   "thinking": "Thinking...",
   "thought": "Thought",
   "callingTool": "Calling tool",
@@ -372,7 +366,7 @@
   "noModels": "No models found",
   "customAvatar": "Custom avatar",
   "editAssistant": "Edit Assistant",
-  "mita": "Biyan",
+  "biyan": "Biyan",
   "metadata": "Metadata",
   "regenerate": "Regenerate",
   "threadImage": "Thread image",
@@ -401,7 +395,7 @@
   "apiKeyRequired": "API Key is required",
   "enterTrustedHosts": "Enter trusted hosts",
   "placeholder": {
-    "mitaTeamsChatInput": "Describe a goal for your team to take on…",
+    "biyanTeamsChatInput": "Describe a goal for your team to take on…",
     "chatInput": "Ask me anything..."
   },
   "confirm": "Confirm",
@@ -531,15 +525,6 @@
     "titleFallback": "Something went wrong",
     "details": "Details"
   },
-  "missingDependenciesDialog": {
-    "title": "Missing System Libraries",
-    "description": "The {{backend}} was installed but some required system libraries could not be found. It may fall back to CPU or not run correctly.",
-    "installLabel": "To fix this, install the following:",
-    "download": "Download",
-    "additionalLibraries": "Additional missing libraries:",
-    "missingLibraries": "Missing libraries:",
-    "showRawLibraries": "Show {{count}} missing library names"
-  },
   "projects": {
     "title": "Projects",
     "new": "New Projects",
@@ -608,12 +593,6 @@
     "noProjectsFound": "No projects found",
     "tryDifferentSearch": "Try a different search term"
   },
-  "attachmentsIngestion": {
-    "title": "Choose how to ingest attachments",
-    "description": "Choose whether to include these files directly in the chat or index them as embeddings instead.",
-    "inline": "Inject into chat",
-    "embeddings": "Use embeddings"
-  },
   "chatInputActions": {
     "addImages": "Add Images",
     "addDocumentsOrFiles": "Add documents or files",
@@ -621,7 +600,6 @@
     "useAssistant": "Use Assistant"
   },
   "attachmentInjectedIndicator": "Injected into chat",
-  "attachmentEmbeddedIndicator": "Embedded for RAG",
   "viewInjectedContent": "View injected content",
   "injectedContentTitle": "Injected file content",
   "toast": {
@@ -665,30 +643,14 @@
       "title": "Download Complete",
       "description": "{{item}} has been downloaded"
     },
-    "downloadCancelled": {
-      "title": "Download Cancelled",
-      "description": "The download process was cancelled"
-    },
     "downloadFailed": {
       "title": "Download Failed",
       "description": "{{item}} download failed"
     },
-    "modelValidationStarted": {
-      "title": "Validating Model",
-      "description": "Downloaded model \"{{modelId}}\" successfully. Verifying integrity..."
-    },
-    "modelValidationFailed": {
-      "title": "Model Validation Failed",
-      "description": "The downloaded model \"{{modelId}}\" failed integrity verification and was removed. The file may be corrupted or tampered with."
-    },
     "modelNoVision": {
       "title": "Model Doesn't Support Images",
       "description": "Choose a vision-capable model to attach images.",
-      "action": "Open Hub"
-    },
-    "downloadAndVerificationComplete": {
-      "title": "Download Complete",
-      "description": "Model \"{{item}}\" downloaded and verified successfully"
+      "action": "Open Provider Settings"
     },
     "projectCreated": {
       "title": "Project Created",

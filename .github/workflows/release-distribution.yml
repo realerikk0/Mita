@@ -134,7 +134,7 @@ jobs:
           )
           for name in "${required[@]}"; do
             if [ -z "${!name:-}" ]; then
-              echo "$name is required for publishing the Mita download manifest" >&2
+              echo "$name is required for publishing the Biyan download manifest" >&2
               exit 1
             fi
           done
@@ -153,9 +153,9 @@ jobs:
           ALIYUN_OSS_ENDPOINT: ${{ vars.ALIYUN_OSS_ENDPOINT || 'oss-cn-hangzhou.aliyuncs.com' }}
           ALIYUN_CDN_DOMAIN: ${{ vars.ALIYUN_CDN_DOMAIN || 'static.mitapp.cn' }}
           UPDATES_CDN_BASE_URL: ${{ vars.UPDATES_CDN_BASE_URL || 'https://static.mitapp.cn' }}
-          MITA_DOWNLOAD_MANIFEST_KEY: ${{ vars.MITA_DOWNLOAD_MANIFEST_KEY || 'mita/download/latest.json' }}
-          MITA_DOWNLOAD_PAGE_KEY: ${{ vars.MITA_DOWNLOAD_PAGE_KEY || 'mita/download' }}
-          MITA_DOWNLOAD_VERSION_ROOT: ${{ vars.MITA_DOWNLOAD_VERSION_ROOT || 'mita/download/releases' }}
+          BIYAN_DOWNLOAD_MANIFEST_KEY: ${{ vars.BIYAN_DOWNLOAD_MANIFEST_KEY || 'biyan/download/latest.json' }}
+          BIYAN_DOWNLOAD_PAGE_KEY: ${{ vars.BIYAN_DOWNLOAD_PAGE_KEY || 'biyan/download' }}
+          BIYAN_DOWNLOAD_VERSION_ROOT: ${{ vars.BIYAN_DOWNLOAD_VERSION_ROOT || 'biyan/download/releases' }}
         run: |
           set -euo pipefail
 
@@ -165,7 +165,7 @@ jobs:
           )
           for name in "${required[@]}"; do
             if [ -z "${!name:-}" ]; then
-              echo "$name is required for publishing the Mita download manifest" >&2
+              echo "$name is required for publishing the Biyan download manifest" >&2
               exit 1
             fi
           done
@@ -173,9 +173,9 @@ jobs:
           endpoint="${ALIYUN_OSS_ENDPOINT#https://}"
           endpoint="${endpoint#http://}"
           endpoint="https://${endpoint}"
-          manifest_key="${MITA_DOWNLOAD_MANIFEST_KEY#/}"
-          page_key="${MITA_DOWNLOAD_PAGE_KEY#/}"
-          version_root="${MITA_DOWNLOAD_VERSION_ROOT%/}/${{ steps.release.outputs.tag }}"
+          manifest_key="${BIYAN_DOWNLOAD_MANIFEST_KEY#/}"
+          page_key="${BIYAN_DOWNLOAD_PAGE_KEY#/}"
+          version_root="${BIYAN_DOWNLOAD_VERSION_ROOT%/}/${{ steps.release.outputs.tag }}"
           cdn_base="${UPDATES_CDN_BASE_URL%/}"
           manifest_cache="public, max-age=60, must-revalidate"
           page_cache="public, max-age=60, must-revalidate"
@@ -203,31 +203,31 @@ jobs:
 
           node scripts/release-distribution/build-download-manifest.mjs \
             --release-json dist/release-assets.json \
-            --manifest-output dist/mita-download/latest.json \
-            --page-output dist/mita-download/index.html \
+            --manifest-output dist/biyan-download/latest.json \
+            --page-output dist/biyan-download/index.html \
             --cdn-base-url "$cdn_base" \
             --download-version-root "$version_root" \
             --download-page-url "${cdn_base}/${page_key}"
 
-          aliyun --profile release oss cp dist/mita-download/latest.json "oss://${ALIYUN_OSS_BUCKET}/${manifest_key}" \
+          aliyun --profile release oss cp dist/biyan-download/latest.json "oss://${ALIYUN_OSS_BUCKET}/${manifest_key}" \
             --endpoint "$endpoint" \
             --meta "Cache-Control:${manifest_cache}#Content-Type:application/json" \
             --force
-          aliyun --profile release oss cp dist/mita-download/index.html "oss://${ALIYUN_OSS_BUCKET}/${page_key}" \
+          aliyun --profile release oss cp dist/biyan-download/index.html "oss://${ALIYUN_OSS_BUCKET}/${page_key}" \
             --endpoint "$endpoint" \
             --meta "Cache-Control:${page_cache}#Content-Type:text/html; charset=utf-8" \
             --force
-          aliyun --profile release oss cp dist/mita-download/latest.json "oss://${ALIYUN_OSS_BUCKET}/${version_root}/download.json" \
+          aliyun --profile release oss cp dist/biyan-download/latest.json "oss://${ALIYUN_OSS_BUCKET}/${version_root}/download.json" \
             --endpoint "$endpoint" \
             --meta "Cache-Control:${immutable_cache}#Content-Type:application/json" \
             --force
-          aliyun --profile release oss cp dist/mita-download/index.html "oss://${ALIYUN_OSS_BUCKET}/${version_root}/index.html" \
+          aliyun --profile release oss cp dist/biyan-download/index.html "oss://${ALIYUN_OSS_BUCKET}/${version_root}/index.html" \
             --endpoint "$endpoint" \
             --meta "Cache-Control:${immutable_cache}#Content-Type:text/html; charset=utf-8" \
             --force
 
-          echo "Published Mita download manifest: ${cdn_base}/${manifest_key}"
-          echo "Published Mita download page: ${cdn_base}/${page_key}"
+          echo "Published Biyan download manifest: ${cdn_base}/${manifest_key}"
+          echo "Published Biyan download page: ${cdn_base}/${page_key}"
 
           aliyun --profile release cdn RefreshObjectCaches \
             --ObjectPath "$(printf '%s\n%s' "${cdn_base}/${manifest_key}" "${cdn_base}/${page_key}")" \
@@ -252,7 +252,7 @@ jobs:
           DRY_RUN: ${{ steps.release.outputs.dry_run }}
           RELEASE_ASSETS_JSON: dist/release-assets.json
           UPDATES_CDN_BASE_URL: ${{ vars.UPDATES_CDN_BASE_URL || 'https://static.mitapp.cn' }}
-          MITA_DOWNLOAD_PAGE_KEY: ${{ vars.MITA_DOWNLOAD_PAGE_KEY || 'mita/download' }}
+          BIYAN_DOWNLOAD_PAGE_KEY: ${{ vars.BIYAN_DOWNLOAD_PAGE_KEY || 'biyan/download' }}
           FEISHU_RELEASE_CHAT_ID: ${{ secrets.FEISHU_RELEASE_CHAT_ID || vars.FEISHU_RELEASE_CHAT_ID }}
           FEISHU_RELEASE_WEBHOOK: ${{ secrets.FEISHU_RELEASE_WEBHOOK }}
           FEISHU_RELEASE_SECRET: ${{ secrets.FEISHU_RELEASE_SECRET }}
@@ -264,7 +264,7 @@ jobs:
             --release-json "$RELEASE_ASSETS_JSON"
             --poster-json dist/release-poster.json
             --poster-path dist/release-poster.png
-            --download-page-url "${UPDATES_CDN_BASE_URL%/}/${MITA_DOWNLOAD_PAGE_KEY#/}"
+            --download-page-url "${UPDATES_CDN_BASE_URL%/}/${BIYAN_DOWNLOAD_PAGE_KEY#/}"
             --output dist/feishu-card.json
           )
           if [ "$DRY_RUN" = "true" ]; then
@@ -283,4 +283,4 @@ jobs:
             dist/release-assets.json
             dist/feishu-card.json
             dist/release-poster.*
-            dist/mita-download/*
+            dist/biyan-download/*

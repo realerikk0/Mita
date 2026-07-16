@@ -14,12 +14,10 @@ const h = vi.hoisted(() => {
   const mockStop = vi.fn()
   const mockAddToolOutput = vi.fn()
   const mockSetChatMessages = vi.fn()
-  const mockUpdateRag = vi.fn()
   const mockSetContinueFromContent = vi.fn()
-  const mockRagCallTool = vi.fn()
   const mockMcpCallTool = vi.fn()
-  const mockRunMitaTeamsRuntime = vi.fn()
-  const mockRunMitaTeamsPrivateRoleChat = vi.fn()
+  const mockRunBiyanTeamsRuntime = vi.fn()
+  const mockRunBiyanTeamsPrivateRoleChat = vi.fn()
   const mockRouterNavigate = vi.fn()
   const mockNotifyProviderBalanceMayHaveChanged = vi.fn()
   const openExternalUrl = vi.fn()
@@ -59,7 +57,6 @@ const h = vi.hoisted(() => {
   useMessagesMock.getState = () => messagesState
 
   const appStateState = {
-    ragToolNames: new Set<string>(),
     mcpToolNames: new Set<string>(),
   }
   const useAppStateMock: any = (selector: any) => selector(appStateState)
@@ -107,7 +104,7 @@ const h = vi.hoisted(() => {
   const useChatAttachmentsMock: any = (selector: any) => selector(attachmentsState)
   useChatAttachmentsMock.getState = () => attachmentsState
 
-  const useAttachmentsState: any = { enabled: true, parseMode: 'auto' }
+  const useAttachmentsState: any = { enabled: true }
   const useAttachmentsMock: any = (selector: any) => selector(useAttachmentsState)
   useAttachmentsMock.getState = () => useAttachmentsState
 
@@ -153,12 +150,10 @@ const h = vi.hoisted(() => {
     mockStop,
     mockAddToolOutput,
     mockSetChatMessages,
-    mockUpdateRag,
     mockSetContinueFromContent,
-    mockRagCallTool,
     mockMcpCallTool,
-    mockRunMitaTeamsRuntime,
-    mockRunMitaTeamsPrivateRoleChat,
+    mockRunBiyanTeamsRuntime,
+    mockRunBiyanTeamsPrivateRoleChat,
     mockRouterNavigate,
     mockNotifyProviderBalanceMayHaveChanged,
     openExternalUrl,
@@ -272,8 +267,8 @@ vi.mock('@/containers/MessageItem', () => ({
   ),
 }))
 
-vi.mock('@/containers/MitaTeamsWorkspace', () => ({
-  MitaTeamsWorkspace: ({
+vi.mock('@/containers/BiyanTeamsWorkspace', () => ({
+  BiyanTeamsWorkspace: ({
     config,
     inputArea,
     isRuntimeBusy,
@@ -282,7 +277,7 @@ vi.mock('@/containers/MitaTeamsWorkspace', () => ({
     onPlanApprove,
     onPlanRevise,
   }: any) => (
-    <div data-testid="mita-teams-workspace">
+    <div data-testid="biyan-teams-workspace">
       {messageItems}
       {inputArea}
       {config.runtime.planDraft && (
@@ -323,10 +318,6 @@ vi.mock('@/components/ai-elements/conversation', () => ({
   Conversation: ({ children }: any) => <div>{children}</div>,
   ConversationContent: ({ children }: any) => <div>{children}</div>,
   ConversationScrollButton: () => <div data-testid="scroll-btn" />,
-}))
-
-vi.mock('@/components/PromptProgress', () => ({
-  PromptProgress: () => <div data-testid="prompt-progress" />,
 }))
 
 vi.mock('@/components/ui/button', () => ({
@@ -413,10 +404,10 @@ vi.mock('@/types/attachment', () => ({
   createImageAttachment: (x: any) => ({ type: 'image', ...x }),
 }))
 
-vi.mock('@/lib/mita-teams-runtime', () => ({
-  runMitaTeamsRuntime: (options: any) => h.mockRunMitaTeamsRuntime(options),
-  runMitaTeamsPrivateRoleChat: (options: any) =>
-    h.mockRunMitaTeamsPrivateRoleChat(options),
+vi.mock('@/lib/biyan-teams-runtime', () => ({
+  runBiyanTeamsRuntime: (options: any) => h.mockRunBiyanTeamsRuntime(options),
+  runBiyanTeamsPrivateRoleChat: (options: any) =>
+    h.mockRunBiyanTeamsPrivateRoleChat(options),
 }))
 
 vi.mock('ai', () => ({
@@ -440,7 +431,6 @@ vi.mock('@/hooks/use-chat', () => ({
       setMessages: h.mockSetChatMessages,
       stop: h.mockStop,
       addToolOutput: h.mockAddToolOutput,
-      updateRagToolsAvailability: h.mockUpdateRag,
       setContinueFromContent: h.mockSetContinueFromContent,
     }
   },
@@ -449,9 +439,7 @@ vi.mock('@/hooks/use-chat', () => ({
 vi.mock('@/hooks/useThreads', () => ({ useThreads: h.useThreadsMock }))
 vi.mock('@/hooks/useServiceHub', () => ({
   useServiceHub: () => ({
-    rag: () => ({ callTool: h.mockRagCallTool }),
     mcp: () => ({ callTool: h.mockMcpCallTool }),
-    models: () => ({ stopModel: vi.fn().mockResolvedValue(undefined) }),
     messages: () => ({
       fetchMessages: vi.fn((threadId: string) =>
         Promise.resolve(h.messagesState.getMessages(threadId))
@@ -527,12 +515,10 @@ vi.mock('@/hooks/useAutoScroll', () => ({
   }),
 }))
 
-vi.mock('@janhq/core', () => ({
+vi.mock('@biyan/core', () => ({
   MessageStatus: { Ready: 'ready' },
   ChatCompletionRole: { Assistant: 'assistant', User: 'user' },
   ContentType: { Text: 'text' },
-  ExtensionTypeEnum: { VectorDB: 'vectorDB' },
-  VectorDBExtension: class {},
 }))
 
 vi.mock('@/constants/chat', () => ({
@@ -553,8 +539,8 @@ import {
   isWithinMcpToolFollowUpLimit,
 } from '../$threadId'
 import { useAutoRunStore } from '@/stores/auto-run-store'
-import { DEFAULT_MITA_AUTO_RUN } from '@/types/mita-agent'
-import { createDefaultMitaTeamsConfig } from '@/types/mita-teams'
+import { DEFAULT_BIYAN_AUTO_RUN } from '@/types/biyan-agent'
+import { createDefaultBiyanTeamsConfig } from '@/types/biyan-teams'
 import { generateThreadTitle } from '@/lib/thread-title-summarizer'
 import { processAttachmentsForSend } from '@/lib/attachmentProcessing'
 
@@ -595,7 +581,6 @@ describe('ThreadDetail route', () => {
     h.messagesState.updateMessage = vi.fn()
     h.messagesState.deleteMessage = vi.fn()
     h.messagesState.setMessages = vi.fn()
-    h.appStateState.ragToolNames = new Set()
     h.appStateState.mcpToolNames = new Set()
     h.mcpServersState.settings = {
       computerAgentEnabled: false,
@@ -603,9 +588,6 @@ describe('ThreadDetail route', () => {
       computerAgentApprovalPolicy: 'alwaysAsk',
       computerAgentSandboxAccess: 'readWrite',
     }
-    h.mockRagCallTool.mockResolvedValue({
-      content: [{ type: 'text', text: 'rag result' }],
-    })
     h.mockMcpCallTool.mockResolvedValue({
       content: [{ type: 'text', text: 'mcp result' }],
     })
@@ -617,7 +599,7 @@ describe('ThreadDetail route', () => {
     h.messageQueueState.clearQueue = vi.fn()
     h.agentModeState.agentThreads = {}
     h.openExternalUrl.mockResolvedValue(undefined)
-    h.mockRunMitaTeamsPrivateRoleChat.mockReset()
+    h.mockRunBiyanTeamsPrivateRoleChat.mockReset()
     h.useChatArgs.length = 0
     useAutoRunStore.setState({ runs: {} })
     sessionStorage.clear()
@@ -684,7 +666,7 @@ describe('ThreadDetail route', () => {
       'rendered:You are Biyan'
     )
     expect(h.useChatArgs.at(-1)?.systemMessage).toContain(
-      'Never say that you are Jan'
+      'Never adopt an upstream model or retired product identity'
     )
     expect(h.useChatArgs.at(-1)?.systemMessage).toContain(
       'your agent identity is Biyan'
@@ -730,7 +712,7 @@ describe('ThreadDetail route', () => {
       'rendered:You are Biyan'
     )
     expect(h.useChatArgs.at(-1)?.systemMessage).toContain(
-      'Never say that you are Jan'
+      'Never adopt an upstream model or retired product identity'
     )
     expect(h.useChatArgs.at(-1)?.systemMessage).toContain(
       'your agent identity is Biyan'
@@ -917,29 +899,6 @@ describe('ThreadDetail route', () => {
     expect(h.mockSetChatMessages).toHaveBeenCalled()
   })
 
-  it('shows PromptProgress while status is submitted', () => {
-    h.chatState.status = 'submitted'
-    renderComponent()
-    expect(screen.getByTestId('prompt-progress')).toBeInTheDocument()
-  })
-
-  it('does not inject normal chat PromptProgress into Biyan Teams while submitted', () => {
-    const baseConfig = createDefaultMitaTeamsConfig({
-      provider: 'openai',
-      id: 'gpt-x',
-    })
-    h.chatState.status = 'submitted'
-    h.threadsState.threads['thread-1'] = {
-      ...h.threadsState.threads['thread-1'],
-      metadata: { mitaTeams: baseConfig },
-    }
-
-    renderComponent()
-
-    expect(screen.getByTestId('mita-teams-workspace')).toBeInTheDocument()
-    expect(screen.queryByTestId('prompt-progress')).not.toBeInTheDocument()
-  })
-
   it('falls back to ready after onFinish when the SDK status remains streaming', async () => {
     h.chatState.status = 'streaming'
     renderComponent()
@@ -1059,7 +1018,7 @@ describe('ThreadDetail route', () => {
       'thread-1',
       expect.objectContaining({
         metadata: expect.objectContaining({
-          mitaAutoRun: expect.objectContaining({
+          biyanAutoRun: expect.objectContaining({
             status: 'running',
             enabled: true,
             maxRounds: 3,
@@ -1071,12 +1030,12 @@ describe('ThreadDetail route', () => {
   })
 
   it('answers a pending Biyan Teams choice only once on rapid duplicate clicks', async () => {
-    const baseConfig = createDefaultMitaTeamsConfig({
+    const baseConfig = createDefaultBiyanTeamsConfig({
       provider: 'openai',
       id: 'gpt-x',
     })
     const now = '2026-05-29T00:00:00.000Z'
-    const mitaTeams = {
+    const biyanTeams = {
       ...baseConfig,
       runtime: {
         ...baseConfig.runtime,
@@ -1094,9 +1053,9 @@ describe('ThreadDetail route', () => {
     }
     h.threadsState.threads['thread-1'] = {
       ...h.threadsState.threads['thread-1'],
-      metadata: { mitaTeams },
+      metadata: { biyanTeams },
     }
-    h.mockRunMitaTeamsRuntime.mockImplementation(async ({ config }: any) => ({
+    h.mockRunBiyanTeamsRuntime.mockImplementation(async ({ config }: any) => ({
       config,
       status: 'waiting-for-user',
     }))
@@ -1112,15 +1071,15 @@ describe('ThreadDetail route', () => {
     })
 
     expect(h.messagesState.addMessage).toHaveBeenCalledTimes(1)
-    expect(h.mockRunMitaTeamsRuntime).toHaveBeenCalledTimes(1)
+    expect(h.mockRunBiyanTeamsRuntime).toHaveBeenCalledTimes(1)
   })
 
   it('approves a Biyan Teams plan once without adding a visible synthetic approval message', async () => {
-    const baseConfig = createDefaultMitaTeamsConfig({
+    const baseConfig = createDefaultBiyanTeamsConfig({
       provider: 'openai',
       id: 'gpt-x',
     })
-    const mitaTeams = {
+    const biyanTeams = {
       ...baseConfig,
       runtime: {
         ...baseConfig.runtime,
@@ -1149,9 +1108,9 @@ describe('ThreadDetail route', () => {
     }
     h.threadsState.threads['thread-1'] = {
       ...h.threadsState.threads['thread-1'],
-      metadata: { mitaTeams },
+      metadata: { biyanTeams },
     }
-    h.mockRunMitaTeamsRuntime.mockImplementation(async ({ config }: any) => ({
+    h.mockRunBiyanTeamsRuntime.mockImplementation(async ({ config }: any) => ({
       config,
       status: 'completed',
       finalResponse: 'Approved work started.',
@@ -1166,8 +1125,8 @@ describe('ThreadDetail route', () => {
       await Promise.resolve()
     })
 
-    expect(h.mockRunMitaTeamsRuntime).toHaveBeenCalledTimes(1)
-    expect(h.mockRunMitaTeamsRuntime).toHaveBeenCalledWith(
+    expect(h.mockRunBiyanTeamsRuntime).toHaveBeenCalledTimes(1)
+    expect(h.mockRunBiyanTeamsRuntime).toHaveBeenCalledWith(
       expect.objectContaining({
         config: expect.objectContaining({
           runtime: expect.objectContaining({
@@ -1184,7 +1143,7 @@ describe('ThreadDetail route', () => {
       expect.objectContaining({
         role: 'user',
         metadata: expect.objectContaining({
-          mitaTeams: expect.objectContaining({
+          biyanTeams: expect.objectContaining({
             action: 'approve_plan',
           }),
         }),
@@ -1193,11 +1152,11 @@ describe('ThreadDetail route', () => {
   })
 
   it('asks whether to keep dirty role edits before applying a plan revision', async () => {
-    const baseConfig = createDefaultMitaTeamsConfig({
+    const baseConfig = createDefaultBiyanTeamsConfig({
       provider: 'openai',
       id: 'gpt-x',
     })
-    const mitaTeams = {
+    const biyanTeams = {
       ...baseConfig,
       runtime: {
         ...baseConfig.runtime,
@@ -1232,7 +1191,7 @@ describe('ThreadDetail route', () => {
     }
     h.threadsState.threads['thread-1'] = {
       ...h.threadsState.threads['thread-1'],
-      metadata: { mitaTeams },
+      metadata: { biyanTeams },
     }
 
     renderComponent()
@@ -1242,12 +1201,12 @@ describe('ThreadDetail route', () => {
       await Promise.resolve()
     })
 
-    expect(h.mockRunMitaTeamsRuntime).not.toHaveBeenCalled()
+    expect(h.mockRunBiyanTeamsRuntime).not.toHaveBeenCalled()
     expect(h.threadsState.updateThread).toHaveBeenCalledWith(
       'thread-1',
       expect.objectContaining({
         metadata: expect.objectContaining({
-          mitaTeams: expect.objectContaining({
+          biyanTeams: expect.objectContaining({
             runtime: expect.objectContaining({
               phase: 'awaiting_role_edit_confirmation',
               pendingPlanRevision: 'Add a reviewer before execution.',
@@ -1262,11 +1221,11 @@ describe('ThreadDetail route', () => {
   })
 
   it('resolves keep-role-edits choices before resuming plan revision', async () => {
-    const baseConfig = createDefaultMitaTeamsConfig({
+    const baseConfig = createDefaultBiyanTeamsConfig({
       provider: 'openai',
       id: 'gpt-x',
     })
-    const mitaTeams = {
+    const biyanTeams = {
       ...baseConfig,
       roles: [
         {
@@ -1299,9 +1258,9 @@ describe('ThreadDetail route', () => {
     }
     h.threadsState.threads['thread-1'] = {
       ...h.threadsState.threads['thread-1'],
-      metadata: { mitaTeams },
+      metadata: { biyanTeams },
     }
-    h.mockRunMitaTeamsRuntime.mockImplementation(async ({ config }: any) => ({
+    h.mockRunBiyanTeamsRuntime.mockImplementation(async ({ config }: any) => ({
       config,
       status: 'waiting-for-user',
     }))
@@ -1314,7 +1273,7 @@ describe('ThreadDetail route', () => {
       await Promise.resolve()
     })
 
-    expect(h.mockRunMitaTeamsRuntime).toHaveBeenCalledWith(
+    expect(h.mockRunBiyanTeamsRuntime).toHaveBeenCalledWith(
       expect.objectContaining({
         config: expect.objectContaining({
           roles: expect.arrayContaining([
@@ -1335,16 +1294,16 @@ describe('ThreadDetail route', () => {
   })
 
   it('updates the thread title after a completed Biyan Teams round', async () => {
-    const baseConfig = createDefaultMitaTeamsConfig({
+    const baseConfig = createDefaultBiyanTeamsConfig({
       provider: 'openai',
       id: 'gpt-x',
     })
     h.threadsState.threads['thread-1'] = {
       ...h.threadsState.threads['thread-1'],
       title: 'Biyan Teams',
-      metadata: { mitaTeams: baseConfig },
+      metadata: { biyanTeams: baseConfig },
     }
-    h.mockRunMitaTeamsRuntime.mockImplementation(async ({ config }: any) => ({
+    h.mockRunBiyanTeamsRuntime.mockImplementation(async ({ config }: any) => ({
       config,
       status: 'completed',
       finalResponse: '给 API 中转站写一句面向开发者的 slogan。',
@@ -1368,7 +1327,7 @@ describe('ThreadDetail route', () => {
       expect(h.threadsState.updateThread).toHaveBeenCalledWith('thread-1', {
         title: 'Short title',
         metadata: expect.objectContaining({
-          mitaTeams: expect.any(Object),
+          biyanTeams: expect.any(Object),
           titleSummarized: true,
         }),
       })
@@ -1376,20 +1335,20 @@ describe('ThreadDetail route', () => {
   })
 
   it('routes role chat input to private Biyan Teams role history', async () => {
-    const baseConfig = createDefaultMitaTeamsConfig({
+    const baseConfig = createDefaultBiyanTeamsConfig({
       provider: 'openai',
       id: 'gpt-x',
     })
-    const mitaTeams = {
+    const biyanTeams = {
       ...baseConfig,
       workspaceView: 'role-chat' as const,
       activeRoleId: 'orchestrator',
     }
     h.threadsState.threads['thread-1'] = {
       ...h.threadsState.threads['thread-1'],
-      metadata: { mitaTeams },
+      metadata: { biyanTeams },
     }
-    h.mockRunMitaTeamsPrivateRoleChat.mockImplementation(
+    h.mockRunBiyanTeamsPrivateRoleChat.mockImplementation(
       async ({ config }: any) => ({
         config,
         status: 'completed',
@@ -1404,21 +1363,21 @@ describe('ThreadDetail route', () => {
       await Promise.resolve()
     })
 
-    expect(h.mockRunMitaTeamsPrivateRoleChat).toHaveBeenCalledWith(
+    expect(h.mockRunBiyanTeamsPrivateRoleChat).toHaveBeenCalledWith(
       expect.objectContaining({
         config: expect.objectContaining({ workspaceView: 'role-chat' }),
         roleId: 'orchestrator',
         userText: 'hello world',
       })
     )
-    expect(h.mockRunMitaTeamsRuntime).not.toHaveBeenCalled()
+    expect(h.mockRunBiyanTeamsRuntime).not.toHaveBeenCalled()
     expect(h.mockSendMessage).not.toHaveBeenCalled()
     expect(h.messagesState.addMessage).not.toHaveBeenCalled()
   })
 
   it('pauses a running auto-run and persists the paused state', () => {
     useAutoRunStore.getState().setRun('thread-1', {
-      ...DEFAULT_MITA_AUTO_RUN,
+      ...DEFAULT_BIYAN_AUTO_RUN,
       status: 'running',
       enabled: true,
       maxRounds: 3,
@@ -1434,7 +1393,7 @@ describe('ThreadDetail route', () => {
       'thread-1',
       expect.objectContaining({
         metadata: expect.objectContaining({
-          mitaAutoRun: expect.objectContaining({
+          biyanAutoRun: expect.objectContaining({
             status: 'paused',
             enabled: true,
           }),
@@ -1445,7 +1404,7 @@ describe('ThreadDetail route', () => {
 
   it('resumes a paused auto-run and persists the running state', () => {
     useAutoRunStore.getState().setRun('thread-1', {
-      ...DEFAULT_MITA_AUTO_RUN,
+      ...DEFAULT_BIYAN_AUTO_RUN,
       status: 'paused',
       enabled: true,
       maxRounds: 3,
@@ -1461,7 +1420,7 @@ describe('ThreadDetail route', () => {
       'thread-1',
       expect.objectContaining({
         metadata: expect.objectContaining({
-          mitaAutoRun: expect.objectContaining({
+          biyanAutoRun: expect.objectContaining({
             status: 'running',
             enabled: true,
           }),
@@ -1472,7 +1431,7 @@ describe('ThreadDetail route', () => {
 
   it('stops a running auto-run and persists the stopped state', () => {
     useAutoRunStore.getState().setRun('thread-1', {
-      ...DEFAULT_MITA_AUTO_RUN,
+      ...DEFAULT_BIYAN_AUTO_RUN,
       status: 'running',
       enabled: true,
       maxRounds: 3,
@@ -1488,7 +1447,7 @@ describe('ThreadDetail route', () => {
       'thread-1',
       expect.objectContaining({
         metadata: expect.objectContaining({
-          mitaAutoRun: expect.objectContaining({
+          biyanAutoRun: expect.objectContaining({
             status: 'stopped',
             enabled: false,
           }),
@@ -1564,13 +1523,4 @@ describe('ThreadDetail route', () => {
     expect(h.messageQueueState.clearQueue).toHaveBeenCalledWith('thread-1')
   })
 
-  it('updates RAG tool availability based on thread/model capabilities', async () => {
-    renderComponent()
-    await waitFor(() => {
-      expect(h.mockUpdateRag).toHaveBeenCalled()
-    })
-    const args = h.mockUpdateRag.mock.calls[0]
-    expect(args[1]).toBe(true) // modelSupportsTools
-    expect(args[2]).toBe(true) // ragFeatureAvailable
-  })
 })

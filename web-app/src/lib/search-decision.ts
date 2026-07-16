@@ -177,7 +177,7 @@ export function decideChatSearch(options: {
   })
 }
 
-export function decideMitaTeamsRoleSearch(options: {
+export function decideBiyanTeamsRoleSearch(options: {
   mode?: SearchMode
   scenarioId?: string
   roleText: string

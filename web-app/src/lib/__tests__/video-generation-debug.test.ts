@@ -5,7 +5,7 @@ import {
   videoDebugLog,
 } from '../video-generation-debug'
 
-const DEBUG_STORAGE_KEY = 'mita.videoGeneration.debug'
+const DEBUG_STORAGE_KEY = 'biyan.videoGeneration.debug'
 
 describe('video generation debug logging', () => {
   beforeEach(() => {

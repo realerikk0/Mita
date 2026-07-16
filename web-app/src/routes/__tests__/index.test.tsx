@@ -21,7 +21,7 @@ const h = vi.hoisted(() => ({
           descriptionVariants: ['第一句', '第二句'],
         },
       },
-      en: {
+      'en': {
         chat: {
           description: 'What would you like me to do?',
         },
@@ -53,9 +53,9 @@ vi.mock('@/i18n/react-i18next-compat', () => ({
 }))
 
 vi.mock('@/hooks/useNewChatGreeting', async () => {
-  const actual = await vi.importActual<typeof import('@/hooks/useNewChatGreeting')>(
-    '@/hooks/useNewChatGreeting'
-  )
+  const actual = await vi.importActual<
+    typeof import('@/hooks/useNewChatGreeting')
+  >('@/hooks/useNewChatGreeting')
   return {
     ...actual,
     useNewChatGreeting: (selector: any) =>
@@ -87,12 +87,19 @@ vi.mock('@/containers/ChatInput', () => ({
 }))
 
 vi.mock('@/containers/HeaderPage', () => ({
-  default: ({ children }: any) => <div data-testid="header-page">{children}</div>,
+  default: ({ children }: any) => (
+    <div data-testid="header-page">{children}</div>
+  ),
 }))
 
 vi.mock('@/containers/DropdownModelProvider', () => ({
-  default: ({ model }: any) => (
-    <div data-testid="dropdown">{model ? model.id : 'none'}</div>
+  default: ({ model, restrictToVisibleProviders }: any) => (
+    <div
+      data-testid="dropdown"
+      data-restricted={String(restrictToVisibleProviders)}
+    >
+      {model ? model.id : 'none'}
+    </div>
   ),
 }))
 
@@ -139,7 +146,7 @@ describe('Index route', () => {
             descriptionVariants: ['第一句', '第二句'],
           },
         },
-        en: {
+        'en': {
           chat: {
             description: 'What would you like me to do?',
           },
@@ -201,26 +208,28 @@ describe('Index route', () => {
 
     renderComponent()
 
-    expect(screen.getByText('What would you like me to do?')).toBeInTheDocument()
+    expect(
+      screen.getByText('What would you like me to do?')
+    ).toBeInTheDocument()
   })
 
-  it('renders chat UI when llamacpp provider has models', () => {
+  it('does not treat a local-only provider as valid for a new chat', () => {
     h.providers = [{ provider: 'llamacpp', models: [{ id: 'x' }] }]
     h.providerHasRemoteApiKeys.mockReturnValue(false)
     renderComponent()
-    expect(screen.getByTestId('chat-input')).toBeInTheDocument()
+    expect(screen.getByTestId('setup-screen')).toBeInTheDocument()
   })
 
-  it('renders chat UI when the legacy local provider has models', () => {
+  it('does not treat the legacy local provider as valid for a new chat', () => {
     h.providers = [{ provider: 'jan', models: [{ id: 'j' }] }]
     renderComponent()
-    expect(screen.getByTestId('chat-input')).toBeInTheDocument()
+    expect(screen.getByTestId('setup-screen')).toBeInTheDocument()
   })
 
-  it('renders chat UI for custom provider with models, no api key required', () => {
+  it('does not treat a custom provider as valid for a new chat', () => {
     h.providers = [{ provider: 'custom-xyz', models: [{ id: 'c' }] }]
     renderComponent()
-    expect(screen.getByTestId('chat-input')).toBeInTheDocument()
+    expect(screen.getByTestId('setup-screen')).toBeInTheDocument()
   })
 
   it('renders SetupScreen for custom provider with no models', () => {
@@ -235,8 +244,15 @@ describe('Index route', () => {
     h.search = { threadModel: { id: 'gpt-x', provider: 'openai' } }
     renderComponent()
     expect(screen.getByTestId('dropdown')).toHaveTextContent('gpt-x')
+    expect(screen.getByTestId('dropdown')).toHaveAttribute(
+      'data-restricted',
+      'true'
+    )
     expect(screen.getByTestId('chat-input')).toHaveTextContent('gpt-x')
-    expect(screen.getByTestId('chat-input')).toHaveAttribute('data-initial', 'true')
+    expect(screen.getByTestId('chat-input')).toHaveAttribute(
+      'data-initial',
+      'true'
+    )
   })
 
   it('calls setCurrentThreadId(undefined) and useTools on mount', () => {

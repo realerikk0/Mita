@@ -26,8 +26,8 @@ test('thinking content Windows verifier writes a complete evidence package', () 
   assert.match(script, /RedirectStandardError \$WebStderrLog/)
   assert.match(script, /RedirectStandardOutput \$TauriStdoutLog/)
   assert.match(script, /RedirectStandardError \$TauriStderrLog/)
-  assert.match(script, /yarn workspace @janhq\/core build/)
-  assert.match(script, /@janhq\/core build failed/)
+  assert.match(script, /yarn workspace @biyan\/core build/)
+  assert.match(script, /@biyan\/core build failed/)
   assert.match(script, /function Stop-RepoPortOwner/)
   assert.match(script, /Get-NetTCPConnection -LocalPort \$Port -State Listen/)
   assert.match(script, /Port \$Port is already in use by unrelated process/)
@@ -63,7 +63,7 @@ test('thinking content Windows verifier foregrounds the Tauri window before capt
   assert.match(script, /Add-Type[\s\S]*SetForegroundWindow/)
   assert.match(script, /function Wait-ForTauriWindow/)
   assert.match(script, /Biyan/)
-  assert.match(script, /Mita/)
+  assert.doesNotMatch(script, /Mita/)
   assert.match(
     script,
     /Wait-ForTauriWindow -TimeoutSeconds \$TauriWarmupSeconds -TauriProcess \$tauriProcess/,

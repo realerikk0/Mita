@@ -1,17 +1,12 @@
 import { SystemInformation } from '../types'
 
 /**
- * Gets Mita's data folder path.
+ * Gets Biyan's data folder path.
  *
- * @returns {Promise<string>} A Promise that resolves with Mita's data folder path.
+ * @returns {Promise<string>} A Promise that resolves with Biyan's data folder path.
  */
-const getMitaDataFolderPath = (): Promise<string> =>
-  globalThis.core.api?.getMitaDataFolderPath?.() ??
-  globalThis.core.api?.getSilenceDataFolderPath?.() ??
-  globalThis.core.api?.getJanDataFolderPath?.()
-
-const getSilenceDataFolderPath = getMitaDataFolderPath
-const getJanDataFolderPath = getMitaDataFolderPath
+const getBiyanDataFolderPath = (): Promise<string> =>
+  globalThis.core.api?.getBiyanDataFolderPath?.()
 
 /**
  * Opens the file explorer at a specific path.
@@ -107,9 +102,7 @@ export type RegisterExtensionPoint = (
  * Functions exports
  */
 export {
-  getMitaDataFolderPath,
-  getSilenceDataFolderPath,
-  getJanDataFolderPath,
+  getBiyanDataFolderPath,
   openFileExplorer,
   getResourcePath,
   joinPath,

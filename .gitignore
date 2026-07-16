@@ -41,7 +41,7 @@ archive/
 # auto qa
 autoqa/trajectories
 autoqa/recordings
-autoqa/__pycache__
+**/__pycache__/
 
 # Astro / Starlight specific
 website/dist/
@@ -63,9 +63,6 @@ web-app/.tanstack/
 **/pnpm-debug.log*
 
 ## Swift Package Manager (Foundation Models server)
-src-tauri/plugins/tauri-plugin-foundation-models/swift-server/.build/
-src-tauri/plugins/tauri-plugin-foundation-models/swift-server/.swiftpm/
-src-tauri/plugins/tauri-plugin-foundation-models/swift-server/Package.resolved
 
 ## cargo
 target
@@ -75,16 +72,13 @@ src-tauri/resources/
 !src-tauri/resources/LICENSE
 !src-tauri/resources/bin/
 src-tauri/resources/bin/*
-!src-tauri/resources/bin/mita-web-research-mcp.mjs
-!src-tauri/resources/embedding-models/
-src-tauri/resources/embedding-models/*
-!src-tauri/resources/embedding-models/.gitkeep
-!src-tauri/resources/embedding-models/sentence-transformer-mini/
-!src-tauri/resources/embedding-models/sentence-transformer-mini/model.gguf
+!src-tauri/resources/bin/biyan-web-research-mcp.mjs
 !src-tauri/resources/computer-agent-runner/
 src-tauri/resources/computer-agent-runner/*
 !src-tauri/resources/computer-agent-runner/.gitkeep
 !src-tauri/resources/ms-playwright/
+src-tauri/resources/.ms-playwright-staging-*
+src-tauri/resources/ms-playwright.previous-*
 src-tauri/resources/ms-playwright/*
 !src-tauri/resources/ms-playwright/.gitkeep
 !src-tauri/resources/node_modules/

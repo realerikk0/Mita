@@ -118,7 +118,6 @@ describe('CustomChatTransport', () => {
       computerAgentEnabled: true,
     }
     h.serviceHub = {
-      rag: () => ({ getTools: vi.fn().mockResolvedValue([]) }),
       mcp: () => ({
         getTools: vi.fn().mockResolvedValue([]),
         getToolsForServers: vi.fn().mockResolvedValue([]),
@@ -130,20 +129,20 @@ describe('CustomChatTransport', () => {
         name: 'computer_agent_create_directory',
         description: 'Create a directory',
         inputSchema: { type: 'object' },
-        server: 'mita-computer-agent',
+        server: 'biyan-computer-agent',
       },
     ])
     const routedTransport = new CustomChatTransport('You are helpful', 'thread-1')
     routedTransport.setLastUserMessage('create a folder')
 
-    await routedTransport.updateRagToolsAvailability(false, true, false)
+    await routedTransport.refreshTools()
 
     expect(h.getRelevantTools).toHaveBeenCalledWith(
       'create a folder',
       expect.any(Object),
       [],
       expect.objectContaining({
-        pinnedServerNames: ['mita-computer-agent'],
+        pinnedServerNames: ['biyan-computer-agent'],
       })
     )
     expect(routedTransport.getTools()).toHaveProperty(
@@ -159,14 +158,13 @@ describe('CustomChatTransport', () => {
       computerAgentEnabled: true,
     }
     h.serviceHub = {
-      rag: () => ({ getTools: vi.fn().mockResolvedValue([]) }),
       mcp: () => ({
         getTools: vi.fn().mockResolvedValue([
           {
             name: 'computer_agent_create_directory',
             description: 'Create a directory',
             inputSchema: { type: 'object' },
-            server: 'mita-computer-agent',
+            server: 'biyan-computer-agent',
           },
         ]),
         getToolsForServers: vi.fn().mockResolvedValue([]),
@@ -175,7 +173,7 @@ describe('CustomChatTransport', () => {
     }
     const routedTransport = new CustomChatTransport('You are helpful', 'thread-1')
 
-    await routedTransport.updateRagToolsAvailability(false, true, false)
+    await routedTransport.refreshTools()
 
     expect(routedTransport.getTools()).toHaveProperty(
       'computer_agent_create_directory'
@@ -192,7 +190,6 @@ describe('CustomChatTransport', () => {
       computerAgentEnabled: true,
     }
     h.serviceHub = {
-      rag: () => ({ getTools: vi.fn().mockResolvedValue([]) }),
       mcp: () => ({
         getTools: vi.fn().mockResolvedValue([]),
         getToolsForServers: vi.fn().mockResolvedValue([]),
@@ -202,9 +199,9 @@ describe('CustomChatTransport', () => {
     h.getRelevantTools.mockResolvedValue([])
 
     const routedTransport = new CustomChatTransport('You are helpful', 'thread-1')
-    await routedTransport.updateRagToolsAvailability(false, true, false)
+    await routedTransport.refreshTools()
 
-    expect(h.invalidateCache).toHaveBeenCalledWith('mita-computer-agent')
+    expect(h.invalidateCache).toHaveBeenCalledWith('biyan-computer-agent')
   })
 
   it('reconnectToStream returns null', async () => {

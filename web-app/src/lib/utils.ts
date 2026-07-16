@@ -3,7 +3,6 @@ import { twMerge } from 'tailwind-merge'
 import type { Node, Position } from 'unist'
 import type { Code, Paragraph, Parent, Text } from 'mdast'
 import { visit } from 'unist-util-visit'
-import { ExtensionManager } from './extension'
 import path from 'path'
 import type { VFile } from 'vfile'
 
@@ -120,14 +119,6 @@ export function getModelLogoProvider(
 
 export function getProviderLogo(provider: string) {
   switch (provider) {
-    case 'jan':
-      return '/images/model-provider/jan.png'
-    case 'llamacpp':
-      return '/images/model-provider/llamacpp.svg'
-    case 'mlx':
-      return '/images/model-provider/mlx.png'
-    case 'foundation-models':
-      return '/images/model-provider/apple-intelligence.svg'
     case 'anthropic':
       return '/images/model-provider/anthropic.svg'
     case 'huggingface':
@@ -159,14 +150,6 @@ export function getProviderLogo(provider: string) {
 
 export const getProviderTitle = (provider: string) => {
   switch (provider) {
-    case 'jan':
-      return 'Biyan'
-    case 'llamacpp':
-      return 'Llama.cpp'
-    case 'mlx':
-      return 'MLX'
-    case 'foundation-models':
-      return 'Apple Intelligence'
     case 'openai':
       return 'OpenAI'
     case 'openrouter':
@@ -226,11 +209,6 @@ export function getReadableLanguageName(language: string): string {
     languageMap[language] ||
     language.charAt(0).toUpperCase() + language.slice(1)
   )
-}
-
-export const isLocalProvider = (provider: string) => {
-  const extension = ExtensionManager.getInstance().getEngine(provider)
-  return extension && 'load' in extension
 }
 
 export const toGigabytes = (

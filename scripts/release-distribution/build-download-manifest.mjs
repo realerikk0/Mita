@@ -207,8 +207,8 @@ export function writeDownloadPage(page, outputFile) {
 async function main() {
   const args = parseArgs(process.argv.slice(2))
   const releaseJson = args['release-json']
-  const manifestOutput = args['manifest-output'] ?? 'dist/mita-download-manifest.json'
-  const pageOutput = args['page-output'] ?? 'dist/mita-download.html'
+  const manifestOutput = args['manifest-output'] ?? 'dist/biyan-download-manifest.json'
+  const pageOutput = args['page-output'] ?? 'dist/biyan-download.html'
   const cdnBaseUrl = args['cdn-base-url']
   const downloadVersionRoot = args['download-version-root']
   const downloadPageUrl = args['download-page-url']

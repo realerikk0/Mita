@@ -111,11 +111,10 @@
   "openclawAgent": "OpenClaw एजेंट",
   "favorites": "पसंदीदा",
   "recents": "हाल के",
-  "hub": "हब",
   "helpSupport": "सहायता और समर्थन",
-  "helpUsImproveMita": "Biyan को बेहतर बनाने में हमारी मदद करें",
-  "helpUsImproveMitaDescription": "हम फीचर उपयोग को समझने के लिए अनाम डेटा एकत्र करते हैं। आपकी चैट और निजी जानकारी कभी ट्रैक नहीं की जाती। आप इसे कभी भी सेटिंग्स > गोपनीयता में बदल सकते हैं।",
-  "helpUsImproveMitaQuestion": "क्या आप Biyan को बेहतर बनाने में हमारी मदद करना चाहेंगे?",
+  "helpUsImproveBiyan": "Biyan को बेहतर बनाने में हमारी मदद करें",
+  "helpUsImproveBiyanDescription": "हम फीचर उपयोग को समझने के लिए अनाम डेटा एकत्र करते हैं। आपकी चैट और निजी जानकारी कभी ट्रैक नहीं की जाती। आप इसे कभी भी सेटिंग्स > गोपनीयता में बदल सकते हैं।",
+  "helpUsImproveBiyanQuestion": "क्या आप Biyan को बेहतर बनाने में हमारी मदद करना चाहेंगे?",
   "unstarAll": "सभी स्टार हटाएं",
   "unstar": "स्टार हटाएं",
   "deleteAll": "सभी हटाएं",
@@ -170,12 +169,7 @@
   "noResultsFound": "कोई परिणाम नहीं मिला",
   "noThreadsYet": "अभी तक कोई थ्रेड नहीं",
   "noThreadsYetDesc": "अपना थ्रेड इतिहास यहाँ देखने के लिए एक नई बातचीत शुरू करें।",
-  "downloads": "डाउनलोड",
-  "downloading": "डाउनलोड हो रहा है",
   "uploadingAttachments": "संलग्नक अपलोड किए जा रहे हैं…",
-  "cancelDownload": "डाउनलोड रद्द करें",
-  "downloadCancelled": "डाउनलोड रद्द किया गया",
-  "downloadComplete": "डाउनलोड पूरा हुआ",
   "thinking": "सोच रहा है...",
   "thought": "विचार",
   "callingTool": "टूल को कॉल किया जा रहा है",
@@ -194,7 +188,7 @@
   "noModels": "कोई मॉडल नहीं मिला",
   "customAvatar": "कस्टम अवतार",
   "editAssistant": "सहायक संपादित करें",
-  "mita": "Biyan",
+  "biyan": "Biyan",
   "metadata": "मेटाडेटा",
   "regenerate": "पुनः उत्पन्न करें",
   "threadImage": "थ्रेड की छवि",
@@ -416,14 +410,7 @@
     "noProjectsFound": "कोई प्रोजेक्ट नहीं मिला",
     "tryDifferentSearch": "कोई अलग खोज शब्द आज़माएं"
   },
-  "attachmentsIngestion": {
-    "title": "संलग्नकों को कैसे प्रोसेस करना है चुनें",
-    "description": "चुनें कि इन फ़ाइलों को सीधे चैट में शामिल करना है या उन्हें एम्बेडिंग्स के रूप में इंडेक्स करना है।",
-    "inline": "चैट में शामिल करें",
-    "embeddings": "एम्बेडिंग्स का उपयोग करें"
-  },
   "attachmentInjectedIndicator": "चैट में शामिल किया गया",
-  "attachmentEmbeddedIndicator": "RAG के लिए एम्बेड किया गया",
   "viewInjectedContent": "इंजेक्ट किया गया कंटेंट देखें",
   "injectedContentTitle": "इंजेक्ट की गई फ़ाइल का कंटेंट",
   "errorDialog": {
@@ -471,30 +458,14 @@
       "title": "डाउनलोड पूरा",
       "description": "{{item}} डाउनलोड हो गया है"
     },
-    "downloadCancelled": {
-      "title": "डाउनलोड रद्द",
-      "description": "डाउनलोड प्रक्रिया रद्द कर दी गई"
-    },
     "downloadFailed": {
       "title": "डाउनलोड त्रुटि",
       "description": "{{item}} का डाउनलोड विफल हुआ"
     },
-    "modelValidationStarted": {
-      "title": "मॉडल सत्यापित हो रहा है",
-      "description": "मॉडल \"{{modelId}}\" सफलतापूर्वक डाउनलोड हुआ। सत्यापन किया जा रहा है..."
-    },
-    "modelValidationFailed": {
-      "title": "मॉडल सत्यापन विफल",
-      "description": "डाउनलोड किया गया मॉडल \"{{modelId}}\" सत्यापन में असफल रहा और हटा दिया गया। फ़ाइल भ्रष्ट या छेड़छाड़ की गई हो सकती है।"
-    },
     "modelNoVision": {
       "title": "मॉडल छवियों का समर्थन नहीं करता",
       "description": "छवियां संलग्न करने के लिए विज़न-सक्षम मॉडल चुनें।",
-      "action": "हब खोलें"
-    },
-    "downloadAndVerificationComplete": {
-      "title": "डाउनलोड पूरा",
-      "description": "मॉडल \"{{item}}\" सफलतापूर्वक डाउनलोड और सत्यापित किया गया"
+      "action": "प्रोवाइडर सेटिंग्स खोलें"
     },
     "projectCreated": {
       "title": "प्रोजेक्ट बनाया गया",

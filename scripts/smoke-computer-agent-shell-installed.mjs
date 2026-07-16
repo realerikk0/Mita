@@ -8,9 +8,9 @@ import { chromium } from 'playwright'
 const __dirname = dirname(fileURLToPath(import.meta.url))
 const repoRoot = resolve(__dirname, '..')
 
-const PROVIDER_NAME = 'mita-smoke-compatible'
+const PROVIDER_NAME = 'biyan-smoke-compatible'
 const MODEL_ID = 'gpt-4o'
-const SMOKE_MARKER = 'MITA_SHELL_SMOKE'
+const SMOKE_MARKER = 'BIYAN_SHELL_SMOKE'
 const SMOKE_FILE = 'allowed-root-smoke.txt'
 const SMOKE_COMMAND = `echo ${SMOKE_MARKER}>${SMOKE_FILE} && type ${SMOKE_FILE}`
 
@@ -81,7 +81,6 @@ function parseArgs(argv) {
         options.dryRun = true
         break
       case '--allow-running-biyan':
-      case '--allow-running-mita':
         options.allowRunningBiyan = true
         break
       case '--timeout-ms':
@@ -195,14 +194,14 @@ function ensureWindows() {
 function ensureNoRunningBiyan(options) {
   if (options.allowRunningBiyan) return
   const processes = powershellJson(`
-    @(Get-Process -Name Biyan,Mita -ErrorAction SilentlyContinue |
+    @(Get-Process -Name Biyan -ErrorAction SilentlyContinue |
       Select-Object -ExpandProperty Id) |
       ConvertTo-Json
   `)
   const ids = Array.isArray(processes) ? processes : processes ? [processes] : []
   if (ids.length > 0) {
     fail(
-      `Biyan.exe or legacy Mita.exe is already running (${ids.join(', ')}). Close it first or pass --allow-running-biyan.`
+      `Biyan.exe is already running (${ids.join(', ')}). Close it first or pass --allow-running-biyan.`
     )
   }
 }
@@ -388,9 +387,7 @@ function findInstalledBiyanFromRegistry() {
   const installDirs = powershellJson(`
     $paths = @(
       'HKCU:\\Software\\Jingxing\\Biyan',
-      'HKLM:\\Software\\Jingxing\\Biyan',
-      'HKCU:\\Software\\Jingxing\\Mita',
-      'HKLM:\\Software\\Jingxing\\Mita'
+      'HKLM:\\Software\\Jingxing\\Biyan'
     )
     $dirs = @()
     foreach ($path in $paths) {
@@ -406,7 +403,7 @@ function findInstalledBiyanFromRegistry() {
 
   const dirs = Array.isArray(installDirs) ? installDirs : installDirs ? [installDirs] : []
   return dirs
-    .flatMap((dir) => [join(dir, 'Biyan.exe'), join(dir, 'Mita.exe')])
+    .map((dir) => join(dir, 'Biyan.exe'))
     .find((candidate) => existsSync(candidate))
 }
 
@@ -420,11 +417,10 @@ function installNsis(installer, installDir) {
   run(installer, ['/S', `/D=${installDir}`], { cwd: dirname(installer) })
 
   const appPath = join(installDir, 'Biyan.exe')
-  const legacyAppPath = join(installDir, 'Mita.exe')
-  if (!existsSync(appPath) && !existsSync(legacyAppPath)) {
+  if (!existsSync(appPath)) {
     fail(`Installer completed but Biyan.exe was not found at ${appPath}`)
   }
-  return existsSync(appPath) ? appPath : legacyAppPath
+  return appPath
 }
 
 function installMsi(installer, installDir, scope, tempRoot) {
@@ -484,8 +480,8 @@ function uninstallMsi(installer, tempRoot) {
 function runnerCandidatesForApp(appPath) {
   const appDir = dirname(appPath)
   return [
-    join(appDir, 'resources', 'computer-agent-runner', 'mita-computer-agent-runner.exe'),
-    join(appDir, 'mita-computer-agent-runner.exe'),
+    join(appDir, 'resources', 'computer-agent-runner', 'biyan-computer-agent-runner.exe'),
+    join(appDir, 'biyan-computer-agent-runner.exe'),
   ]
 }
 
@@ -509,7 +505,7 @@ function snapshotAppConfig() {
   const appData = process.env.APPDATA
   if (!appData) fail('APPDATA is not set')
 
-  const appSupport = join(appData, 'Mita')
+  const appSupport = join(appData, 'Biyan')
   const settingsPath = join(appSupport, 'settings.json')
   return {
     appSupport,
@@ -519,7 +515,7 @@ function snapshotAppConfig() {
   }
 }
 
-function configureIsolatedMitaData(snapshot, dataDir, allowedRoot) {
+function configureIsolatedBiyanData(snapshot, dataDir, allowedRoot) {
   mkdirSync(snapshot.appSupport, { recursive: true })
   mkdirSync(dataDir, { recursive: true })
   mkdirSync(allowedRoot, { recursive: true })
@@ -608,7 +604,7 @@ async function createMockOpenAiServer(allowedRoot) {
       if (req.method === 'GET' && url.pathname === '/v1/models') {
         sendJson(res, {
           object: 'list',
-          data: [{ id: MODEL_ID, object: 'model', created: 0, owned_by: 'mita-smoke' }],
+          data: [{ id: MODEL_ID, object: 'model', created: 0, owned_by: 'biyan-smoke' }],
         })
         return
       }
@@ -687,7 +683,7 @@ function sendSse(res, chunks) {
 
 function baseChunk() {
   return {
-    id: 'chatcmpl-mita-computer-agent-smoke',
+    id: 'chatcmpl-biyan-computer-agent-smoke',
     object: 'chat.completion.chunk',
     created: Math.floor(Date.now() / 1000),
     model: MODEL_ID,
@@ -716,7 +712,7 @@ function sendToolCallStream(res, allowedRoot) {
             tool_calls: [
               {
                 index: 0,
-                id: 'call_mita_computer_agent_smoke',
+                id: 'call_biyan_computer_agent_smoke',
                 type: 'function',
                 function: { name: 'computer_agent_run_shell', arguments: '' },
               },
@@ -866,7 +862,7 @@ async function configureBrowserStorage(page, mockBaseUrl) {
 
   const smokeProvider = {
     active: true,
-    api_key: 'mita-smoke-key',
+    api_key: 'biyan-smoke-key',
     base_url: mockBaseUrl,
     provider: PROVIDER_NAME,
     settings: [],
@@ -917,8 +913,8 @@ async function getFirstPage(browser) {
         seenUrls.add(page.url())
         const canUseStorage = await page.evaluate(() => {
           try {
-            localStorage.setItem('__mita_smoke_probe', '1')
-            localStorage.removeItem('__mita_smoke_probe')
+            localStorage.setItem('__biyan_smoke_probe', '1')
+            localStorage.removeItem('__biyan_smoke_probe')
             return true
           } catch {
             return false
@@ -1056,7 +1052,7 @@ async function main() {
     }
 
     verifyRunner(appPath)
-    configureIsolatedMitaData(appConfigSnapshot, dataDir, allowedRoot)
+    configureIsolatedBiyanData(appConfigSnapshot, dataDir, allowedRoot)
 
     if (options.dryRun) {
       log('Dry run completed after installer, runner, and isolated data configuration checks.')

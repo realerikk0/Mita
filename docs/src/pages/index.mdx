@@ -1,41 +1,21 @@
 ---
-title: "Jan - Open-Source ChatGPT Replacement"
-description: "Jan is an open-source alternative to ChatGPT. Run open-source AI models locally or connect to cloud models like GPT, Claude and others."
-keywords:
-  [
-    Jan,
-    Customizable Intelligence, LLM,
-    local AI,
-    privacy focus,
-    free and open source,
-    private and offline,
-    conversational AI,
-    no-subscription fee,
-    large language models,
-    architecture,
-  ]
+title: Biyan Documentation
+description: Learn how to connect cloud model providers, work with files, use MCP tools, and migrate safely to Biyan.
+keywords: [Biyan, 彼岩, cloud AI, model providers, MCP]
 ---
 
-import Home from "@/components/Home"
+# Biyan Documentation
 
-export const getStaticProps = async() => {
-  const resReleaseLatest = await fetch('https://api.github.com/repos/janhq/jan/releases/latest')  
-  const resRelease = await fetch('https://api.github.com/repos/janhq/jan/releases?per_page=500')  
-  const resRepo = await fetch('https://api.github.com/repos/janhq/jan')
-  const repo = await resRepo.json()
-  const latestRelease = await resReleaseLatest.json()
-  const release = await resRelease.json()
+Biyan (彼岩) is a desktop AI client for cloud and OpenAI-compatible model providers. Conversations and settings stay in the Biyan data folder; prompts, attachments, and tool results included in a request are processed by the provider you select.
 
-  return {
-    props: {
-      ssg: {
-        stars: repo.stargazers_count || 2000,
-        lastRelease: latestRelease,
-        release: release,
-        lastVersion: latestRelease.tag_name || 'v.0.0.1'
-      },
-    },
-  }
-}
+## Start here
 
-<Home />
+- [Install and configure Biyan](/docs/desktop/quickstart)
+- [Connect a cloud provider](/docs/desktop/remote-models/openai)
+- [Send images and documents](/docs/desktop/file-upload)
+- [Migrate data from an earlier release](/docs/desktop/data-folder)
+- [Configure MCP tools](/docs/desktop/mcp)
+
+Biyan does not download or run local language models. Local model engines, the model Hub, RAG, embeddings, and vector databases are not part of the supported product.
+
+For help, email [help@biyan.ai](mailto:help@biyan.ai).

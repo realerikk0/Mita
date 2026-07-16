@@ -4,7 +4,6 @@ import * as Events from './events'
 import * as FileSystem from './fs'
 import * as Extension from './extension'
 import * as Extensions from './extensions'
-import * as Models from './models'
 
 describe('Module Tests', () => {
   it('should export Core module', () => {
@@ -25,9 +24,5 @@ describe('Module Tests', () => {
 
   it('should export all base extensions', () => {
     expect(Extensions).toBeDefined()
-  })
-
-  it('should export all base tools', () => {
-    expect(Models).toBeDefined()
   })
 })

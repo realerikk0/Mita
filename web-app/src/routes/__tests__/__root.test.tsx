@@ -6,11 +6,11 @@ import React from 'react'
 
 const h = vi.hoisted(() => ({
   productAnalyticPrompt: false,
-  showMitaModelPrompt: false,
   leftPanelOpen: true,
   sidebarWidth: 260,
   setLeftPanel: vi.fn(),
   setLeftPanelWidth: vi.fn(),
+  currentLanguage: 'en',
 }))
 
 // Tanstack router — avoid real router internals.
@@ -71,17 +71,11 @@ vi.mock('@/i18n/TranslationContext', () => ({
 vi.mock('@/containers/dialogs/AppUpdater', () => ({
   default: () => <div data-testid="app-updater" />,
 }))
-vi.mock('@/containers/dialogs/BackendUpdater', () => ({
-  default: () => <div data-testid="backend-updater" />,
-}))
 vi.mock('@/containers/dialogs/ToolApproval', () => ({
   default: () => <div data-testid="tool-approval" />,
 }))
 vi.mock('@/containers/dialogs/OutOfContextDialog', () => ({
   default: () => <div data-testid="oocp" />,
-}))
-vi.mock('@/containers/dialogs/AttachmentIngestionDialog', () => ({
-  default: () => <div data-testid="attach-ingest" />,
 }))
 vi.mock('@/containers/dialogs/ErrorDialog', () => ({
   default: () => <div data-testid="error-dialog" />,
@@ -89,11 +83,10 @@ vi.mock('@/containers/dialogs/ErrorDialog', () => ({
 vi.mock('@/containers/analytics/PromptAnalytic', () => ({
   PromptAnalytic: () => <div data-testid="prompt-analytic" />,
 }))
-vi.mock('@/containers/PromptMitaModel', () => ({
-  PromptMitaModel: () => <div data-testid="prompt-mita" />,
-}))
 vi.mock('@/containers/GlobalError', () => ({
-  default: ({ error }: any) => <div data-testid="global-error">{error?.message}</div>,
+  default: ({ error }: any) => (
+    <div data-testid="global-error">{error?.message}</div>
+  ),
 }))
 
 // Components
@@ -116,11 +109,6 @@ vi.mock('@/components/ui/sidebar', () => ({
 vi.mock('@/hooks/useAnalytic', () => ({
   useAnalytic: () => ({ productAnalyticPrompt: h.productAnalyticPrompt }),
 }))
-vi.mock('@/hooks/useMitaModelPrompt', () => ({
-  useMitaModelPrompt: () => ({
-    showMitaModelPrompt: h.showMitaModelPrompt,
-  }),
-}))
 vi.mock('@/hooks/useLeftPanel', () => ({
   useLeftPanel: () => ({
     open: h.leftPanelOpen,
@@ -128,6 +116,12 @@ vi.mock('@/hooks/useLeftPanel', () => ({
     width: h.sidebarWidth,
     setLeftPanelWidth: h.setLeftPanelWidth,
   }),
+}))
+
+vi.mock('@/hooks/useGeneralSetting', () => ({
+  useGeneralSetting: (
+    selector: (state: { currentLanguage: string }) => unknown
+  ) => selector({ currentLanguage: h.currentLanguage }),
 }))
 
 vi.mock('@/constants/routes', () => ({
@@ -139,7 +133,10 @@ vi.mock('@/constants/routes', () => ({
 }))
 
 vi.mock('../-preview-route-guard', () => ({
-  previewRoutePaths: new Set(['/loading-ribbon-demo', '/thinking-content-demo']),
+  previewRoutePaths: new Set([
+    '/loading-ribbon-demo',
+    '/thinking-content-demo',
+  ]),
 }))
 
 import { Route } from '../__root'
@@ -153,7 +150,7 @@ describe('__root route', () => {
   beforeEach(() => {
     vi.clearAllMocks()
     h.productAnalyticPrompt = false
-    h.showMitaModelPrompt = false
+    h.currentLanguage = 'en'
     // reset document state
     document.body.className = ''
     const loader = document.getElementById('initial-loader')
@@ -177,14 +174,24 @@ describe('__root route', () => {
     expect(screen.getByTestId('sidebar-provider')).toBeInTheDocument()
   })
 
+  it('uses the Chinese app name for the main window in Simplified Chinese', () => {
+    h.currentLanguage = 'zh-CN'
+    renderComponent()
+    expect(document.title).toBe('彼岩')
+  })
+
+  it('keeps the default app name for other languages', () => {
+    h.currentLanguage = 'en'
+    renderComponent()
+    expect(document.title).toBe('Biyan')
+  })
+
   it('renders all persistent dialogs', () => {
     renderComponent()
     expect(screen.getByTestId('tool-approval')).toBeInTheDocument()
-    expect(screen.getByTestId('attach-ingest')).toBeInTheDocument()
     expect(screen.getByTestId('error-dialog')).toBeInTheDocument()
     expect(screen.getByTestId('oocp')).toBeInTheDocument()
     expect(screen.getByTestId('app-updater')).toBeInTheDocument()
-    expect(screen.getByTestId('backend-updater')).toBeInTheDocument()
   })
 
   it('renders PromptAnalytic when productAnalyticPrompt is true', () => {
@@ -197,12 +204,6 @@ describe('__root route', () => {
     h.productAnalyticPrompt = false
     renderComponent()
     expect(screen.queryByTestId('prompt-analytic')).not.toBeInTheDocument()
-  })
-
-  it('does not render the Mita local model prompt', () => {
-    h.showMitaModelPrompt = true
-    renderComponent()
-    expect(screen.queryByTestId('prompt-mita')).not.toBeInTheDocument()
   })
 
   it('uses LogsLayout on /logs path (no sidebar)', () => {
@@ -276,7 +277,9 @@ describe('__root route', () => {
   })
 
   it('errorComponent renders GlobalError with provided error', () => {
-    const ErrComp = (Route as any).errorComponent as React.ComponentType<{ error: Error }>
+    const ErrComp = (Route as any).errorComponent as React.ComponentType<{
+      error: Error
+    }>
     render(<ErrComp error={new Error('broken')} />)
     expect(screen.getByTestId('global-error')).toHaveTextContent('broken')
   })

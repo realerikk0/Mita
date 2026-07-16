@@ -3,6 +3,10 @@
  */
 
 import { WebviewWindow } from '@tauri-apps/api/webviewWindow'
+import {
+  legacyStorage,
+  readCanonicalStorageValue,
+} from '@/legacy_migrations/storage'
 import type { WindowConfig, WebviewWindowInstance } from './types'
 import { DefaultWindowService } from './default'
 
@@ -12,8 +16,10 @@ export class TauriWindowService extends DefaultWindowService {
   ): Promise<WebviewWindowInstance> {
     try {
       // Get current theme from localStorage
-      const storedTheme =
-        localStorage.getItem('theme') ?? localStorage.getItem('jan-theme')
+      const storedTheme = readCanonicalStorageValue(
+        'theme',
+        legacyStorage.theme
+      )
       let theme: 'light' | 'dark' | undefined = undefined
 
       if (storedTheme) {

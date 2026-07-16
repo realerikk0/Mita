@@ -16,15 +16,8 @@ import { useToolAvailable } from '@/hooks/useToolAvailable'
 import { ModelFactory } from './model-factory'
 import { useModelProvider } from '@/hooks/useModelProvider'
 import { useAssistant } from '@/hooks/useAssistant'
-import { useThreads } from '@/hooks/useThreads'
-import { useAttachments } from '@/hooks/useAttachments'
 import { useMCPServers } from '@/hooks/useMCPServers'
-import { ExtensionManager } from '@/lib/extension'
-import {
-  ExtensionTypeEnum,
-  VectorDBExtension,
-  type MCPTool,
-} from '@janhq/core'
+import { type MCPTool } from '@biyan/core'
 import {
   trimMessages,
   compactMessages,
@@ -45,12 +38,12 @@ import {
   streamJingxingNativeWebSearch,
   streamJingxingResponsesChat,
 } from '@/lib/jingxing-responses-web-search'
-import { getToolAwareSystemMessage } from '@/lib/mita-prompt'
+import { getToolAwareSystemMessage } from '@/lib/biyan-prompt'
 import {
   encodeProviderQuotaError,
   providerQuotaErrorFromUnknown,
 } from '@/lib/provider-quota-error'
-import { trackMitaEvent } from '@/lib/analytics'
+import { trackBiyanEvent } from '@/lib/analytics'
 import { normalizeModelCapabilitiesForProvider } from '@/lib/models'
 import {
   blockSearchDecision,
@@ -60,7 +53,7 @@ import {
 } from '@/lib/search-decision'
 import { modelRequiresResponsesEndpoint } from '@/lib/provider-models'
 
-const COMPUTER_AGENT_SERVER_NAME = 'mita-computer-agent'
+const COMPUTER_AGENT_SERVER_NAME = 'biyan-computer-agent'
 
 export type TokenUsageCallback = (
   usage: LanguageModelUsage,
@@ -78,11 +71,6 @@ export type OnToolCallCallback = (params: {
   toolCall: { toolCallId: string; toolName: string; input: unknown }
 }) => void
 export type ServiceHub = {
-  rag(): {
-    getTools(): Promise<
-      Array<{ name: string; description: string; inputSchema: unknown }>
-    >
-  }
   mcp(): {
     getTools(): Promise<MCPTool[]>
     /** TauriMCPService only */
@@ -215,9 +203,6 @@ export class CustomChatTransport implements ChatTransport<UIMessage> {
   private routerModelKey = ''
   private tools: Record<string, Tool> = {}
   private onTokenUsage?: TokenUsageCallback
-  private hasDocuments = false
-  private modelSupportsTools = false
-  private ragFeatureAvailable = false
   private systemMessage?: string
   private serviceHub: ServiceHub | null
   private threadId?: string
@@ -229,20 +214,19 @@ export class CustomChatTransport implements ChatTransport<UIMessage> {
     this.systemMessage = systemMessage
     this.threadId = threadId
     this.serviceHub = useServiceStore.getState().serviceHub
-    // Tools will be loaded when updateRagToolsAvailability is called with model capabilities
   }
 
   private currentModelSupportsTools(): boolean {
     const { selectedModel, selectedProvider } = useModelProvider.getState()
     if (!selectedModel) {
-      return this.modelSupportsTools
+      return false
     }
 
     const capabilities =
       normalizeModelCapabilitiesForProvider(selectedProvider || '', selectedModel) ??
       selectedModel.capabilities
 
-    return capabilities?.includes('tools') ?? this.modelSupportsTools
+    return capabilities?.includes('tools') ?? false
   }
 
   setLastUserMessage(message: string): void {
@@ -258,27 +242,8 @@ export class CustomChatTransport implements ChatTransport<UIMessage> {
   }
 
   /**
-   * Update RAG tools availability based on thread metadata and model capabilities
-   * @param hasDocuments - Whether the thread has documents attached
-   * @param modelSupportsTools - Whether the current model supports tool calling
-   * @param ragFeatureAvailable - Whether RAG features are available on the platform
-   */
-  async updateRagToolsAvailability(
-    hasDocuments: boolean,
-    modelSupportsTools: boolean,
-    ragFeatureAvailable: boolean
-  ) {
-    this.hasDocuments = hasDocuments
-    this.modelSupportsTools = modelSupportsTools
-    this.ragFeatureAvailable = ragFeatureAvailable
-
-    // Update tools based on current state
-    await this.refreshTools()
-  }
-
-  /**
    * Refresh tools based on current state
-   * Reloads both RAG and MCP tools and merges them
+   * Reloads remote MCP tools.
    * Filters out disabled tools based on thread settings
    * @private
    */
@@ -306,61 +271,6 @@ export class CustomChatTransport implements ChatTransport<UIMessage> {
 
     // Only load tools if model supports them
     if (modelSupportsTools) {
-      let hasDocuments = this.hasDocuments
-      let ragFeatureAvailable = this.ragFeatureAvailable
-
-      if (!hasDocuments && this.threadId) {
-        const thread = useThreads.getState().threads[this.threadId]
-        const hasThreadDocuments = Boolean(thread?.metadata?.hasDocuments)
-
-        const projectId = thread?.metadata?.project?.id
-        if (projectId) {
-          try {
-            const ext = ExtensionManager.getInstance().get<VectorDBExtension>(
-              ExtensionTypeEnum.VectorDB
-            )
-            if (ext?.listAttachmentsForProject) {
-              const projectFiles = await ext.listAttachmentsForProject(projectId)
-              hasDocuments = hasThreadDocuments || projectFiles.length > 0
-            }
-          } catch (error) {
-            console.warn('Failed to check project files:', error)
-            hasDocuments = hasThreadDocuments
-          }
-        } else {
-          hasDocuments = hasThreadDocuments
-        }
-      }
-
-      if (!ragFeatureAvailable) {
-        ragFeatureAvailable = Boolean(useAttachments.getState().enabled)
-      }
-
-      // Load RAG tools if documents are available
-      if (hasDocuments && ragFeatureAvailable) {
-        try {
-          const ragTools = await this.serviceHub.rag().getTools()
-          if (Array.isArray(ragTools) && ragTools.length > 0) {
-            // Convert RAG tools to AI SDK format, filtering out disabled tools
-            ragTools.forEach((tool) => {
-              // RAG tools use MCPTool interface with server field
-              const serverName =
-                (tool as { server?: string }).server || 'unknown'
-              if (!isToolDisabled(serverName, tool.name)) {
-                toolsRecord[tool.name] = {
-                  description: tool.description,
-                  inputSchema: jsonSchema(
-                    normalizeToolInputSchema(tool.inputSchema as Record<string, unknown>)
-                  ),
-                } as Tool
-              }
-            })
-          }
-        } catch (error) {
-          console.warn('Failed to load RAG tools:', error)
-        }
-      }
-
       // Load MCP tools — route through the orchestrator when available so only
       // relevant servers are queried instead of all of them.
       try {
@@ -394,7 +304,7 @@ export class CustomChatTransport implements ChatTransport<UIMessage> {
               routerModel,
               abortSignal,
               onRoutingTelemetry: (info) => {
-                trackMitaEvent('mcp_routing_completed', {
+                trackBiyanEvent('mcp_routing_completed', {
                   connected_server_count: info.connectedServerCount,
                   fallback_reason: info.fallbackReason,
                   llm_accepted: info.llmAccepted,
@@ -415,7 +325,6 @@ export class CustomChatTransport implements ChatTransport<UIMessage> {
         }
 
         if (Array.isArray(mcpTools) && mcpTools.length > 0) {
-          // MCP tools added after RAG tools, so they take precedence on name conflicts
           mcpTools.forEach((tool) => {
             const serverName = tool.server || 'unknown'
             if (isBrowserMCPServerName(serverName) && !useWebSearch.getState().enabled) {
@@ -728,7 +637,7 @@ export class CustomChatTransport implements ChatTransport<UIMessage> {
       sourceCount: 0,
     })
 
-    trackMitaEvent('assistant_response_started', {
+    trackBiyanEvent('assistant_response_started', {
       provider_id: providerId,
       model_id: modelId,
       model_capabilities: selectedModel?.capabilities ?? [],
@@ -778,7 +687,7 @@ export class CustomChatTransport implements ChatTransport<UIMessage> {
 
     // Prompt caching (Anthropic only): pass the (now byte-stable) system prompt
     // as a cached system message so its tokens are written once and re-read on
-    // subsequent turns. A no-op for other providers / local models, which keep
+    // subsequent turns. Other remote providers keep
     // the plain `system` string. cacheControl is ignored by openai-compatible.
     const isAnthropic = effectiveProviderName === 'anthropic'
     const cachedSystemMessage: ModelMessage | null =
@@ -815,7 +724,7 @@ export class CustomChatTransport implements ChatTransport<UIMessage> {
       // step-boundary record of usage / tool calls / finish reason that the
       // loop previously lacked. Cross-round aggregation happens in the route.
       onStepFinish: (step) => {
-        trackMitaEvent('assistant_step_completed', {
+        trackBiyanEvent('assistant_step_completed', {
           provider_id: providerId,
           model_id: modelId,
           finish_reason: step.finishReason,
@@ -826,19 +735,11 @@ export class CustomChatTransport implements ChatTransport<UIMessage> {
       },
     })
 
-    let tokensPerSecond = 0
-
     const uiStream = result.toUIMessageStream({
       messageMetadata: ({ part }) => {
         // Track stream start time on start
         if (part.type === 'start' && !streamStartTime) {
           streamStartTime = Date.now()
-        }
-
-        if (part.type === 'finish-step') {
-          tokensPerSecond =
-            (part.providerMetadata?.providerMetadata
-              ?.tokensPerSecond as number) || 0
         }
 
         // Add usage and token speed to metadata on finish
@@ -852,20 +753,15 @@ export class CustomChatTransport implements ChatTransport<UIMessage> {
           const durationMs = streamStartTime ? Date.now() - streamStartTime : 0
           const durationSec = durationMs / 1000
 
-          // Use provider's outputTokens, or llama.cpp completionTokens, or fall back to text delta count
           const outputTokens = usage?.outputTokens ?? 0
           const inputTokens = usage?.inputTokens
 
-          // Use llama.cpp's tokens per second if available, otherwise calculate from duration
-          let tokenSpeed: number
-          if (durationSec > 0 && outputTokens > 0) {
-            tokenSpeed =
-              tokensPerSecond > 0 ? tokensPerSecond : outputTokens / durationSec
-          } else {
-            tokenSpeed = 0
-          }
+          const tokenSpeed =
+            durationSec > 0 && outputTokens > 0
+              ? outputTokens / durationSec
+              : 0
 
-          trackMitaEvent('assistant_response_completed', {
+          trackBiyanEvent('assistant_response_completed', {
             provider_id: providerId,
             model_id: modelId,
             finish_reason: finishPart.finishReason,
@@ -876,7 +772,7 @@ export class CustomChatTransport implements ChatTransport<UIMessage> {
             duration_ms: durationMs,
             token_speed: Math.round(tokenSpeed * 10) / 10,
           })
-          trackMitaEvent('token_usage_recorded', {
+          trackBiyanEvent('token_usage_recorded', {
             provider_id: providerId,
             model_id: modelId,
             input_tokens: inputTokens,
@@ -893,7 +789,7 @@ export class CustomChatTransport implements ChatTransport<UIMessage> {
               .getState()
               .recordSample(modelId, calibrationInputChars, inputTokens)
           }
-          trackMitaEvent('stream_latency_recorded', {
+          trackBiyanEvent('stream_latency_recorded', {
             provider_id: providerId,
             model_id: modelId,
             duration_ms: durationMs,
@@ -919,21 +815,21 @@ export class CustomChatTransport implements ChatTransport<UIMessage> {
       },
       onError: (error) => {
         const quotaError = providerQuotaErrorFromUnknown(error)
-        trackMitaEvent('assistant_response_failed', {
+        trackBiyanEvent('assistant_response_failed', {
           provider_id: providerId,
           model_id: modelId,
           error_kind: quotaError ? 'quota' : 'stream',
           has_tools: streamTextToolsEnabled,
         })
         if (quotaError) {
-          trackMitaEvent('quota_error_shown', {
+          trackBiyanEvent('quota_error_shown', {
             provider_id: providerId,
             model_id: modelId,
           })
           return encodeProviderQuotaError(quotaError)
         }
 
-        trackMitaEvent('network_error_shown', {
+        trackBiyanEvent('network_error_shown', {
           provider_id: providerId,
           model_id: modelId,
         })

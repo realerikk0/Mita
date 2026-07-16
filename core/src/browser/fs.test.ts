@@ -15,7 +15,6 @@ describe('fs module', () => {
         unlinkSync: vi.fn(),
         appendFileSync: vi.fn(),
         copyFile: vi.fn(),
-        getGgufFiles: vi.fn(),
         fileStat: vi.fn(),
       },
     }
@@ -83,12 +82,6 @@ describe('fs module', () => {
     expect(globalThis.core.api.copyFile).toHaveBeenCalledWith({
       args: [src, dest],
     })
-  })
-
-  it('should call getGgufFiles with correct arguments', async () => {
-    const paths = ['path/to/file1', 'path/to/file2']
-    await fs.getGgufFiles(paths)
-    expect(globalThis.core.api.getGgufFiles).toHaveBeenCalledWith(paths)
   })
 
   it('should call fileStat with correct arguments', async () => {

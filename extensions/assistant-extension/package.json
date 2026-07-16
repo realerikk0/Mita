@@ -1,6 +1,7 @@
 {
-  "name": "@janhq/assistant-extension",
-  "productName": "Mita Assistant",
+  "name": "@biyan/assistant-extension",
+  "private": true,
+  "productName": "Biyan Assistant",
   "version": "1.0.2",
   "description": "Powers the default AI assistant that works with all your installed models.",
   "main": "dist/index.js",
@@ -19,7 +20,7 @@
     "typescript": "5.9.2"
   },
   "dependencies": {
-    "@janhq/core": "../../core/package.tgz",
+    "@biyan/core": "../../core/package.tgz",
     "ts-loader": "^9.5.0"
   },
   "files": [
@@ -28,7 +29,7 @@
     "README.md"
   ],
   "bundleDependencies": [
-    "@janhq/core"
+    "@biyan/core"
   ],
   "installConfig": {
     "hoistingLimits": "workspaces"

@@ -10,7 +10,8 @@ const tar = require('tar')
 const rootDir = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..')
 const preInstallDir = path.join(rootDir, 'pre-install')
 const bareTauriPluginImport =
-  /\b(?:import|export)\b[^;\n]*['"]@janhq\/tauri-plugin-[^'"]+['"]|import\(\s*['"]@janhq\/tauri-plugin-/g
+  /\b(?:import|export)\b[^;\n]*['"]@biyan\/tauri-plugin-[^'"]+['"]|import\(\s*['"]@biyan\/tauri-plugin-/g
+const retiredJanImport = /['"]@janhq\//g
 
 async function getExtensionPackages() {
   const entries = await readdir(preInstallDir, { withFileTypes: true })
@@ -21,7 +22,7 @@ async function getExtensionPackages() {
 }
 
 async function extractExtensionEntry(packagePath) {
-  const tempDir = await mkdtemp(path.join(os.tmpdir(), 'mita-extension-smoke-'))
+  const tempDir = await mkdtemp(path.join(os.tmpdir(), 'biyan-extension-smoke-'))
   try {
     await tar.x({
       file: packagePath,
@@ -44,7 +45,10 @@ if (!packages.length) {
 const failures = []
 for (const packagePath of packages) {
   const code = await extractExtensionEntry(packagePath)
-  const matches = [...code.matchAll(bareTauriPluginImport)].map((match) => match[0])
+  const matches = [
+    ...[...code.matchAll(bareTauriPluginImport)].map((match) => match[0]),
+    ...[...code.matchAll(retiredJanImport)].map((match) => match[0]),
+  ]
   if (matches.length) {
     failures.push({ packagePath, matches })
   }
@@ -62,5 +66,5 @@ if (failures.length) {
 }
 
 console.log(
-  `[preinstall-smoke] ${packages.length} extension packages have no bare @janhq/tauri-plugin-* imports`
+  `[preinstall-smoke] ${packages.length} extension packages contain no retired @janhq/* or bare @biyan/tauri-plugin-* imports`
 )

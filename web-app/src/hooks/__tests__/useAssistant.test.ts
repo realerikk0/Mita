@@ -89,7 +89,7 @@ describe('useAssistant', () => {
     })
 
     expect(result.current.assistants).toHaveLength(1)
-    expect(result.current.assistants[0].id).toBe('mita')
+    expect(result.current.assistants[0].id).toBe('biyan')
   })
 
   it('should set current assistant', () => {
@@ -151,11 +151,11 @@ describe('useAssistant', () => {
   it('should maintain assistant structure', () => {
     const { result } = renderHook(() => useAssistant())
 
-    expect(result.current.currentAssistant.id).toBe('mita')
+    expect(result.current.currentAssistant.id).toBe('biyan')
     expect(result.current.currentAssistant.name).toBe('Biyan')
     expect(result.current.currentAssistant.avatar).toBe('👋')
     expect(result.current.currentAssistant.instructions).toContain(
-      'Never say that you are Jan'
+      'Never adopt an upstream model or retired product identity'
     )
     expect(result.current.currentAssistant.instructions).toContain(
       'your agent identity is Biyan'
@@ -186,7 +186,7 @@ describe('useAssistant', () => {
     expect(result.current.assistants[0].description).toContain('Biyan')
     expect(result.current.assistants[0].instructions).toContain('You are Biyan')
     expect(result.current.assistants[0].instructions).toContain(
-      'Never say that you are Jan'
+      'Never adopt an upstream model or retired product identity'
     )
     expect(result.current.assistants[0].instructions).toContain(
       'your agent identity is Biyan'

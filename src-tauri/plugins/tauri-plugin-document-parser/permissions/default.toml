@@ -1,0 +1,5 @@
+[default]
+description = "Default permissions for the document parser plugin"
+permissions = [
+  "allow-parse-document",
+]

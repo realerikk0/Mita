@@ -19,7 +19,6 @@ import { DefaultMessagesService } from './messages/default'
 import { DefaultMCPService } from './mcp/default'
 import { DefaultThreadsService } from './threads/default'
 import { DefaultProvidersService } from './providers/default'
-import { DefaultModelsService } from './models/default'
 import { DefaultAssistantsService } from './assistants/default'
 import { DefaultDialogService } from './dialog/default'
 import { DefaultOpenerService } from './opener/default'
@@ -28,10 +27,6 @@ import { DefaultPathService } from './path/default'
 import { DefaultCoreService } from './core/default'
 import { DefaultDeepLinkService } from './deeplink/default'
 import { DefaultProjectsService } from './projects/default'
-import { DefaultRAGService } from './rag/default'
-import type { RAGService } from './rag/types'
-import { DefaultUploadsService } from './uploads/default'
-import type { UploadsService } from './uploads/types'
 import { DefaultImageGenerationService } from './image-generation/default'
 import type { ImageGenerationService } from './image-generation/types'
 import { DefaultVideoGenerationService } from './video-generation/default'
@@ -50,7 +45,6 @@ import type { MessagesService } from './messages/types'
 import type { MCPService } from './mcp/types'
 import type { ThreadsService } from './threads/types'
 import type { ProvidersService } from './providers/types'
-import type { ModelsService } from './models/types'
 import type { AssistantsService } from './assistants/types'
 import type { DialogService } from './dialog/types'
 import type { OpenerService } from './opener/types'
@@ -72,7 +66,6 @@ export interface ServiceHub {
   mcp(): MCPService
   threads(): ThreadsService
   providers(): ProvidersService
-  models(): ModelsService
   assistants(): AssistantsService
   dialog(): DialogService
   opener(): OpenerService
@@ -81,8 +74,6 @@ export interface ServiceHub {
   core(): CoreService
   deeplink(): DeepLinkService
   projects(): ProjectsService
-  rag(): RAGService
-  uploads(): UploadsService
   imageGeneration(): ImageGenerationService
   videoGeneration(): VideoGenerationService
   storyboardGeneration(): StoryboardGenerationService
@@ -99,7 +90,6 @@ class PlatformServiceHub implements ServiceHub {
   private mcpService: MCPService = new DefaultMCPService()
   private threadsService: ThreadsService = new DefaultThreadsService()
   private providersService: ProvidersService = new DefaultProvidersService()
-  private modelsService: ModelsService = new DefaultModelsService()
   private assistantsService: AssistantsService = new DefaultAssistantsService()
   private dialogService: DialogService = new DefaultDialogService()
   private openerService: OpenerService = new DefaultOpenerService()
@@ -108,8 +98,6 @@ class PlatformServiceHub implements ServiceHub {
   private coreService: CoreService = new DefaultCoreService()
   private deepLinkService: DeepLinkService = new DefaultDeepLinkService()
   private projectsService: ProjectsService = new DefaultProjectsService()
-  private ragService: RAGService = new DefaultRAGService()
-  private uploadsService: UploadsService = new DefaultUploadsService()
   private imageGenerationService: ImageGenerationService =
     new DefaultImageGenerationService()
   private videoGenerationService: VideoGenerationService =
@@ -147,6 +135,7 @@ class PlatformServiceHub implements ServiceHub {
           appModule,
           mcpModule,
           providersModule,
+          assistantsModule,
           dialogModule,
           openerModule,
           updaterModule,
@@ -164,6 +153,7 @@ class PlatformServiceHub implements ServiceHub {
           import('./app/tauri'),
           import('./mcp/tauri'),
           import('./providers/tauri'),
+          import('./assistants/tauri'),
           import('./dialog/tauri'),
           import('./opener/tauri'),
           import('./updater/tauri'),
@@ -182,6 +172,7 @@ class PlatformServiceHub implements ServiceHub {
         this.appService = new appModule.TauriAppService()
         this.mcpService = new mcpModule.TauriMCPService()
         this.providersService = new providersModule.TauriProvidersService()
+        this.assistantsService = new assistantsModule.TauriAssistantsService()
         this.dialogService = new dialogModule.TauriDialogService()
         this.openerService = new openerModule.TauriOpenerService()
         this.updaterService = new updaterModule.TauriUpdaterService()
@@ -202,6 +193,7 @@ class PlatformServiceHub implements ServiceHub {
           appModule,
           mcpModule,
           providersModule,
+          assistantsModule,
           dialogModule,
           openerModule,
           pathModule,
@@ -214,6 +206,7 @@ class PlatformServiceHub implements ServiceHub {
           import('./app/tauri'),
           import('./mcp/tauri'),
           import('./providers/tauri'),
+          import('./assistants/tauri'),
           import('./dialog/tauri'),
           import('./opener/tauri'),
           import('./path/tauri'),
@@ -227,6 +220,7 @@ class PlatformServiceHub implements ServiceHub {
         this.appService = new appModule.TauriAppService()
         this.mcpService = new mcpModule.TauriMCPService()
         this.providersService = new providersModule.TauriProvidersService()
+        this.assistantsService = new assistantsModule.TauriAssistantsService()
         this.dialogService = new dialogModule.TauriDialogService()
         this.openerService = new openerModule.TauriOpenerService()
         this.pathService = new pathModule.TauriPathService()
@@ -315,11 +309,6 @@ class PlatformServiceHub implements ServiceHub {
     return this.providersService
   }
 
-  models(): ModelsService {
-    this.ensureInitialized()
-    return this.modelsService
-  }
-
   assistants(): AssistantsService {
     this.ensureInitialized()
     return this.assistantsService
@@ -358,16 +347,6 @@ class PlatformServiceHub implements ServiceHub {
   projects(): ProjectsService {
     this.ensureInitialized()
     return this.projectsService
-  }
-
-  rag(): RAGService {
-    this.ensureInitialized()
-    return this.ragService
-  }
-
-  uploads(): UploadsService {
-    this.ensureInitialized()
-    return this.uploadsService
   }
 
   imageGeneration(): ImageGenerationService {

@@ -1,10 +1,9 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import { Extension, ExtensionManager } from '../extension'
-import { ExtensionTypeEnum } from '@janhq/core'
+import { ExtensionTypeEnum } from '@biyan/core'
 
 // Mock dependencies
-vi.mock('@janhq/core', () => ({
-  AIEngine: class MockAIEngine {},
+vi.mock('@biyan/core', () => ({
   BaseExtension: class MockBaseExtension {
     type() { return 'base' }
     onLoad() { return Promise.resolve() }
@@ -61,17 +60,6 @@ describe('ExtensionManager - coverage', () => {
       expect(manager.getByName('my-ext')).toBe(ext)
     })
 
-    it('registers AI engine when extension has provider', () => {
-      const ext = {
-        type: () => 'model',
-        provider: 'openai',
-        onLoad: vi.fn(),
-        onUnload: vi.fn(),
-      } as any
-      manager.register('engine-ext', ext)
-      expect(manager.getEngine('openai')).toBe(ext)
-    })
-
     it('get by type returns matching extension', () => {
       const ext = { type: () => 'assistant', onLoad: vi.fn(), onUnload: vi.fn() } as any
       manager.register('asst', ext)
@@ -80,10 +68,6 @@ describe('ExtensionManager - coverage', () => {
 
     it('get by type returns undefined when no match', () => {
       expect(manager.get(ExtensionTypeEnum.SystemMonitor)).toBeUndefined()
-    })
-
-    it('getEngine returns undefined for unknown engine', () => {
-      expect(manager.getEngine('nonexistent')).toBeUndefined()
     })
 
     it('getAll returns all registered extensions', () => {
@@ -139,12 +123,16 @@ describe('ExtensionManager - coverage', () => {
   describe('getActive', () => {
     it('returns extensions from service hub', async () => {
       mockGetActiveExtensions.mockResolvedValue([
-        { url: 'http://ext', name: 'test', active: true },
+        {
+          url: 'http://ext',
+          name: '@biyan/assistant-extension',
+          active: true,
+        },
       ])
       const result = await manager.getActive()
       expect(result).toHaveLength(1)
       expect(result[0]).toBeInstanceOf(Extension)
-      expect(result[0].name).toBe('test')
+      expect(result[0].name).toBe('@biyan/assistant-extension')
     })
 
     it('returns empty array when no manifests', async () => {
@@ -157,9 +145,17 @@ describe('ExtensionManager - coverage', () => {
   describe('activateExtension', () => {
     it('registers pre-loaded extension instance directly', async () => {
       const instance = { type: () => 'a', onLoad: vi.fn(), onUnload: vi.fn() } as any
-      const ext = new Extension('http://ext', 'preloaded', undefined, true, undefined, undefined, instance)
+      const ext = new Extension(
+        'http://ext',
+        '@biyan/assistant-extension',
+        undefined,
+        true,
+        undefined,
+        undefined,
+        instance
+      )
       await manager.activateExtension(ext)
-      expect(manager.getByName('preloaded')).toBe(instance)
+      expect(manager.getByName('@biyan/assistant-extension')).toBe(instance)
     })
 
     it('imports and registers Tauri extensions', async () => {
@@ -173,7 +169,10 @@ describe('ExtensionManager - coverage', () => {
       vi.doMock('asset://http://ext.js', () => ({ default: MockClass }), { virtual: true })
       mockConvertFileSrc.mockReturnValue('asset://http://ext.js')
 
-      const ext = new Extension('http://ext.js', 'tauri-ext')
+      const ext = new Extension(
+        'http://ext.js',
+        '@biyan/download-extension'
+      )
       await manager.activateExtension(ext)
       expect(MockClass).toHaveBeenCalled()
     })
@@ -183,10 +182,15 @@ describe('ExtensionManager - coverage', () => {
     it('activates all active extensions', async () => {
       const instance = { type: () => 'a', onLoad: vi.fn(), onUnload: vi.fn() } as any
       mockGetActiveExtensions.mockResolvedValue([
-        { url: 'http://ext', name: 'test', active: true, extensionInstance: instance },
+        {
+          url: 'http://ext',
+          name: '@biyan/assistant-extension',
+          active: true,
+          extensionInstance: instance,
+        },
       ])
       await manager.registerActive()
-      expect(manager.getByName('test')).toBe(instance)
+      expect(manager.getByName('@biyan/assistant-extension')).toBe(instance)
     })
 
     it('continues activating extensions when one extension import fails', async () => {
@@ -196,10 +200,14 @@ describe('ExtensionManager - coverage', () => {
         onUnload: vi.fn(),
       } as any
       mockGetActiveExtensions.mockResolvedValue([
-        { url: 'http://bad-ext.js', name: 'bad', active: true },
+        {
+          url: 'http://bad-ext.js',
+          name: '@biyan/download-extension',
+          active: true,
+        },
         {
           url: 'http://good-ext.js',
-          name: 'good',
+          name: '@biyan/assistant-extension',
           active: true,
           extensionInstance: instance,
         },
@@ -208,9 +216,9 @@ describe('ExtensionManager - coverage', () => {
 
       await expect(manager.registerActive()).resolves.toBeUndefined()
 
-      expect(manager.getByName('good')).toBe(instance)
+      expect(manager.getByName('@biyan/assistant-extension')).toBe(instance)
       expect(consoleErrorSpy).toHaveBeenCalledWith(
-        "Failed to activate extension 'bad'",
+        "Failed to activate extension '@biyan/download-extension'",
         expect.any(Error)
       )
     })
@@ -220,9 +228,11 @@ describe('ExtensionManager - coverage', () => {
     it('returns undefined when window is undefined', async () => {
       // Can't truly test this in jsdom, but we can test the normal path
       mockInstallExtension.mockResolvedValue([
-        { url: 'http://new', name: 'new-ext' },
+        { url: 'http://new', name: '@biyan/conversational-extension' },
       ])
-      const result = await manager.install([{ url: 'http://new', name: 'new-ext' }])
+      const result = await manager.install([
+        { url: 'http://new', name: '@biyan/conversational-extension' },
+      ])
       expect(result).toBeDefined()
     })
   })

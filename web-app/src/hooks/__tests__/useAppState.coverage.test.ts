@@ -8,9 +8,7 @@ describe('useAppState - coverage', () => {
     act(() => {
       useAppState.setState({
         streamingContent: undefined,
-        loadingModel: false,
         tools: [],
-        ragToolNames: new Set<string>(),
         mcpToolNames: new Set<string>(),
         serverStatus: 'stopped',
         abortControllers: {},
@@ -18,8 +16,6 @@ describe('useAppState - coverage', () => {
         showOutOfContextDialog: false,
         cancelToolCall: undefined,
         errorMessage: undefined,
-        promptProgress: undefined,
-        activeModels: [],
       })
     })
   })
@@ -45,16 +41,6 @@ describe('useAppState - coverage', () => {
       result.current.updateStreamingContent({ id: 'msg-1', content: 'Hi', role: 'user', thread_id: 't1' } as any)
     })
     expect(result.current.streamingContent?.created_at).toBeGreaterThan(0)
-  })
-
-  it('should update rag tool names', () => {
-    const { result } = renderHook(() => useAppState())
-
-    act(() => {
-      result.current.updateRagToolNames(['rag1', 'rag2'])
-    })
-
-    expect(result.current.ragToolNames).toEqual(new Set(['rag1', 'rag2']))
   })
 
   it('should update mcp tool names', () => {
@@ -150,29 +136,6 @@ describe('useAppState - coverage', () => {
       result.current.setErrorMessage(undefined)
     })
     expect(result.current.errorMessage).toBeUndefined()
-  })
-
-  it('should update prompt progress', () => {
-    const { result } = renderHook(() => useAppState())
-
-    act(() => {
-      result.current.updatePromptProgress({ cache: 10, processed: 50, time_ms: 200, total: 100 })
-    })
-    expect(result.current.promptProgress).toEqual({ cache: 10, processed: 50, time_ms: 200, total: 100 })
-
-    act(() => {
-      result.current.updatePromptProgress(undefined)
-    })
-    expect(result.current.promptProgress).toBeUndefined()
-  })
-
-  it('should set active models', () => {
-    const { result } = renderHook(() => useAppState())
-
-    act(() => {
-      result.current.setActiveModels(['model-a', 'model-b'])
-    })
-    expect(result.current.activeModels).toEqual(['model-a', 'model-b'])
   })
 
   it('should update token speed with default increment', () => {

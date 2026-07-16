@@ -80,8 +80,8 @@ export default defineConfig(({ mode }) => {
     resolve: {
       alias: {
         '@': path.resolve(__dirname, './src'),
-        '@janhq/core': path.resolve(__dirname, '../core/dist/index.js'),
-        '@janhq/conversational-extension': path.resolve(__dirname, '../extensions/conversational-extension/src/index.ts'),
+        '@biyan/core': path.resolve(__dirname, '../core/dist/index.js'),
+        '@biyan/conversational-extension': path.resolve(__dirname, '../extensions/conversational-extension/src/index.ts'),
       },
     },
     define: {

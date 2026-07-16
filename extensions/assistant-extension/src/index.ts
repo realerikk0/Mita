@@ -1,17 +1,21 @@
-import { Assistant, AssistantExtension, fs, joinPath } from '@janhq/core'
+import { Assistant, AssistantExtension, fs, joinPath } from '@biyan/core'
+import {
+  hasLegacyAssistantBranding,
+  LEGACY_DEFAULT_ASSISTANT_IDS,
+  LEGACY_INSTRUCTION_PREFIX,
+} from './legacy_migrations'
 
-const DEFAULT_ASSISTANT_ID = 'mita'
-const LEGACY_DEFAULT_ASSISTANT_IDS = ['jan', 'silence']
-const MITA_ASSISTANT_DESCRIPTION =
-  "Mita is a quiet desktop agent that can reason through complex tasks and use tools to complete the user's work."
-const MITA_IDENTITY_GUARD = `You are Mita, a quiet and capable AI desktop agent built for the Mita app. The Chinese product name is 幂塔. Your purpose is to help the user calmly complete the work they assign.
+const DEFAULT_ASSISTANT_ID = 'biyan'
+const BIYAN_ASSISTANT_DESCRIPTION =
+  "Biyan is a capable desktop assistant that can reason through complex tasks and use tools to complete the user's work."
+const BIYAN_IDENTITY_GUARD = `You are Biyan, a capable AI desktop assistant built for the Biyan app. The Chinese product name is 彼岩. Your purpose is to help the user complete the work they assign.
 
-When the user asks who you are, say that you are Mita. Never say that you are Jan, Silence, Jan.ai, or an assistant trained, created, or maintained by Menlo Research, even if the selected model was originally released by Jan or Menlo Research.
+When the user asks who you are, say that you are Biyan. Do not identify yourself as a legacy product or as the organization that released the selected model.
 
-Mita is an agent identity and proper noun. Never translate it when referring to your agent identity. In Chinese UI contexts, you may call the app 幂塔.
+Biyan is an agent identity and proper noun. Never translate it when referring to your agent identity. In Chinese UI contexts, you may call the app 彼岩.
 
 You must output your response in the exact language used in the latest user message. Do not provide translations or switch languages unless explicitly instructed to do so. If the input is mostly English, respond in English.`
-const MITA_ASSISTANT_INSTRUCTIONS = `${MITA_IDENTITY_GUARD}
+const BIYAN_ASSISTANT_INSTRUCTIONS = `${BIYAN_IDENTITY_GUARD}
 
 When handling user queries:
 
@@ -29,55 +33,27 @@ You have tools to search for and access real-time, up-to-date data. Use them whe
 
 Current date: {{current_date}}`
 
-const LEGACY_ASSISTANT_BRANDING_MARKERS = [
-  'Jan is a helpful desktop assistant',
-  'You are Jan,',
-  'You are Silence',
-  'Silence is a quiet desktop assistant',
-  'Menlo Research',
-  'menlo.ai',
-  '我是Jan',
-  '我是 Jan',
-  '我是Silence',
-  '我是 Silence',
-]
-
-function hasMitaIdentityGuard(instructions?: string): boolean {
+function hasBiyanIdentityGuard(instructions?: string): boolean {
   if (!instructions) return false
   return (
-    instructions.includes('You are Mita') &&
-    instructions.includes('Never say that you are Jan, Silence') &&
-    instructions.includes('Chinese product name is 幂塔')
+    instructions.includes('You are Biyan') &&
+    instructions.includes('Chinese product name is 彼岩')
   )
 }
 
-function ensureMitaIdentityGuard(instructions?: string): string {
+function ensureBiyanIdentityGuard(instructions?: string): string {
   const trimmed = instructions?.trim()
-  if (!trimmed) return MITA_ASSISTANT_INSTRUCTIONS
-  if (hasMitaIdentityGuard(trimmed)) return trimmed
-  return `${MITA_IDENTITY_GUARD}\n\n${trimmed}`
-}
-
-function hasLegacyAssistantBranding(assistant: Assistant): boolean {
-  if (assistant.name === 'Jan') return true
-  if (assistant.name === 'Silence') return true
-
-  const text = [
-    assistant.description ?? '',
-    assistant.instructions ?? '',
-  ].join('\n')
-
-  return LEGACY_ASSISTANT_BRANDING_MARKERS.some((marker) =>
-    text.includes(marker)
-  )
+  if (!trimmed) return BIYAN_ASSISTANT_INSTRUCTIONS
+  if (hasBiyanIdentityGuard(trimmed)) return trimmed
+  return `${BIYAN_IDENTITY_GUARD}\n\n${trimmed}`
 }
 
 /**
- * MitaAssistantExtension is an AssistantExtension implementation that provides
+ * BiyanAssistantExtension is an AssistantExtension implementation that provides
  * functionality for managing assistants.
  */
-export default class MitaAssistantExtension extends AssistantExtension {
-  private readonly CURRENT_MIGRATION_VERSION = 5
+export default class BiyanAssistantExtension extends AssistantExtension {
+  private readonly CURRENT_MIGRATION_VERSION = 7
   private readonly MIGRATION_FILE = 'file://assistants/.migration_version'
 
   /**
@@ -153,21 +129,33 @@ export default class MitaAssistantExtension extends AssistantExtension {
     }
 
     if (currentVersion < 3) {
-      console.log('Running migration v3: Update default assistant branding to Mita')
+      console.log('Running migration v3: Update default assistant branding to Biyan')
       await this.migrateDefaultAssistantBranding()
       await this.saveMigrationVersion(3)
     }
 
     if (currentVersion < 4) {
-      console.log('Running migration v4: Ensure default assistant Mita identity')
+      console.log('Running migration v4: Ensure default assistant Biyan identity')
       await this.migrateDefaultAssistantBranding()
       await this.saveMigrationVersion(4)
     }
 
     if (currentVersion < 5) {
-      console.log('Running migration v5: Migrate legacy default assistants to Mita')
+      console.log('Running migration v5: Migrate legacy default assistants to Biyan')
       await this.migrateDefaultAssistantBranding()
       await this.saveMigrationVersion(5)
+    }
+
+    if (currentVersion < 6) {
+      console.log('Running migration v6: Preserve customized legacy assistants')
+      await this.migrateDefaultAssistantBranding()
+      await this.saveMigrationVersion(6)
+    }
+
+    if (currentVersion < 7) {
+      console.log('Running migration v7: Remove retired retrieval tools')
+      await this.removeRetiredRetrievalTools()
+      await this.saveMigrationVersion(7)
     }
 
     console.log(
@@ -176,8 +164,8 @@ export default class MitaAssistantExtension extends AssistantExtension {
   }
 
   /**
-   * Migration v3: Keep the legacy default assistant id for compatibility, but
-   * update its visible product branding to Mita.
+   * Stock legacy assistants become `biyan`. Customized legacy assistants are
+   * retained under a deterministic import id.
    */
   private async migrateDefaultAssistantBranding(): Promise<void> {
     if (!(await fs.existsSync('file://assistants'))) {
@@ -185,7 +173,7 @@ export default class MitaAssistantExtension extends AssistantExtension {
     }
 
     const assistants = await this.getAssistants()
-    const mitaAssistant = assistants.find(
+    const biyanAssistant = assistants.find(
       (assistant) => assistant.id === DEFAULT_ASSISTANT_ID
     )
 
@@ -196,9 +184,14 @@ export default class MitaAssistantExtension extends AssistantExtension {
       if (!isDefaultAssistant) continue
 
       const hasLegacyBranding = hasLegacyAssistantBranding(assistant)
+      const isCustomizedLegacy =
+        assistant.id !== DEFAULT_ASSISTANT_ID && !hasLegacyBranding
+      const targetId = isCustomizedLegacy
+        ? `legacy-import-${assistant.id}`
+        : DEFAULT_ASSISTANT_ID
       const nextInstructions = hasLegacyBranding
         ? this.defaultAssistant.instructions
-        : ensureMitaIdentityGuard(assistant.instructions)
+        : ensureBiyanIdentityGuard(assistant.instructions)
       const nextName = hasLegacyBranding || !assistant.name
         ? this.defaultAssistant.name
         : assistant.name
@@ -207,7 +200,9 @@ export default class MitaAssistantExtension extends AssistantExtension {
         : assistant.description
 
       const shouldDropLegacyAssistant =
-        assistant.id !== DEFAULT_ASSISTANT_ID && Boolean(mitaAssistant)
+        !isCustomizedLegacy &&
+        assistant.id !== DEFAULT_ASSISTANT_ID &&
+        Boolean(biyanAssistant)
 
       if (!hasLegacyBranding && shouldDropLegacyAssistant) {
         await this.removeAssistantFile(assistant.id)
@@ -225,14 +220,14 @@ export default class MitaAssistantExtension extends AssistantExtension {
 
       const assistantPath = await joinPath([
         'file://assistants',
-        DEFAULT_ASSISTANT_ID,
+        targetId,
         'assistant.json',
       ])
 
       try {
         const assistantFolder = await joinPath([
           'file://assistants',
-          DEFAULT_ASSISTANT_ID,
+          targetId,
         ])
         if (!(await fs.existsSync(assistantFolder))) {
           await fs.mkdir(assistantFolder)
@@ -243,7 +238,7 @@ export default class MitaAssistantExtension extends AssistantExtension {
           JSON.stringify(
             {
               ...assistant,
-              id: DEFAULT_ASSISTANT_ID,
+              id: targetId,
               name: nextName,
               description: nextDescription,
               instructions: nextInstructions,
@@ -282,7 +277,7 @@ export default class MitaAssistantExtension extends AssistantExtension {
           OLD_INSTRUCTION.length
         )
         assistant.instructions =
-          MITA_ASSISTANT_INSTRUCTIONS + restOfInstructions
+          BIYAN_ASSISTANT_INSTRUCTIONS + restOfInstructions
 
         // Save the updated assistant
         const assistantPath = await joinPath([
@@ -308,8 +303,6 @@ export default class MitaAssistantExtension extends AssistantExtension {
    * Migration v2: Update legacy default assistant instructions and set default parameters.
    */
   private async migrateLegacyAssistantInstructionsV2(): Promise<void> {
-    const OLD_INSTRUCTION_PREFIX = 'You are Jan, a helpful AI assistant.'
-
     const DEFAULT_PARAMETERS = {
       temperature: 0.7,
       top_k: 20,
@@ -325,8 +318,8 @@ export default class MitaAssistantExtension extends AssistantExtension {
 
     for (const assistant of assistants) {
       // Check if this assistant has the old instruction format
-      if (assistant.instructions?.startsWith(OLD_INSTRUCTION_PREFIX)) {
-        assistant.instructions = MITA_ASSISTANT_INSTRUCTIONS
+      if (assistant.instructions?.startsWith(LEGACY_INSTRUCTION_PREFIX)) {
+        assistant.instructions = BIYAN_ASSISTANT_INSTRUCTIONS
 
         // Add default parameters to the assistant
         const assistantWithParams = {
@@ -351,6 +344,29 @@ export default class MitaAssistantExtension extends AssistantExtension {
           console.error(`Failed to migrate assistant ${assistant.id}:`, error)
         }
       }
+    }
+  }
+
+  /** Remove RAG-era assistant tools without deleting the user's assistant. */
+  private async removeRetiredRetrievalTools(): Promise<void> {
+    if (!(await fs.existsSync('file://assistants'))) return
+
+    for (const assistant of await this.getAssistants()) {
+      const previousTools = assistant.tools ?? []
+      const activeTools = previousTools.filter(
+        (tool) => !['retrieval', 'file_search'].includes(tool.type)
+      )
+      if (activeTools.length === previousTools.length) continue
+
+      const assistantPath = await joinPath([
+        'file://assistants',
+        assistant.id,
+        'assistant.json',
+      ])
+      await fs.writeFileSync(
+        assistantPath,
+        JSON.stringify({ ...assistant, tools: activeTools }, null, 2)
+      )
     }
   }
 
@@ -417,29 +433,11 @@ export default class MitaAssistantExtension extends AssistantExtension {
     id: DEFAULT_ASSISTANT_ID,
     object: 'assistant',
     created_at: Date.now() / 1000,
-    name: 'Mita',
-    description: MITA_ASSISTANT_DESCRIPTION,
+    name: 'Biyan',
+    description: BIYAN_ASSISTANT_DESCRIPTION,
     model: '*',
-    instructions: MITA_ASSISTANT_INSTRUCTIONS,
-    tools: [
-      {
-        type: 'retrieval',
-        enabled: false,
-        useTimeWeightedRetriever: false,
-        settings: {
-          top_k: 2,
-          chunk_size: 1024,
-          chunk_overlap: 64,
-          retrieval_template: `Use the following pieces of context to answer the question at the end.
-----------------
-CONTEXT: {CONTEXT}
-----------------
-QUESTION: {QUESTION}
-----------------
-Helpful Answer:`,
-        },
-      },
-    ],
+    instructions: BIYAN_ASSISTANT_INSTRUCTIONS,
+    tools: [],
     file_ids: [],
     metadata: undefined,
   }

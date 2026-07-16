@@ -4,9 +4,7 @@ import { getServiceHub } from '@/hooks/useServiceHub'
 import { Fzf } from 'fzf'
 import { TEMPORARY_CHAT_ID } from '@/constants/chat'
 import { useAgentMode } from '@/hooks/useAgentMode'
-import { ExtensionManager } from '@/lib/extension'
-import { ExtensionTypeEnum, VectorDBExtension } from '@janhq/core'
-import { DEFAULT_MITA_AGENTS } from '@/types/mita-agent'
+import { DEFAULT_BIYAN_AGENTS } from '@/types/biyan-agent'
 
 type ThreadState = {
   threads: Record<string, Thread>
@@ -39,23 +37,6 @@ type ThreadState = {
   searchIndex: Fzf<Thread[]> | null
 }
 
-// Helper function to clean up vector DB collection for a thread
-const cleanupVectorDB = async (threadId: string) => {
-  try {
-    const vec = ExtensionManager.getInstance().get<VectorDBExtension>(
-      ExtensionTypeEnum.VectorDB
-    )
-    if (vec?.deleteCollection) {
-      await vec.deleteCollection(`attachments_${threadId}`)
-    }
-  } catch (e) {
-    console.warn(
-      `[Threads] Failed to delete vector DB collection for thread ${threadId}:`,
-      e
-    )
-  }
-}
-
 const isPinnedThread = (thread: Thread) =>
   typeof thread.metadata?.pinned_at === 'number' &&
   thread.metadata.pinned_at > 0
@@ -71,25 +52,10 @@ export const useThreads = create<ThreadState>()((set, get) => ({
   setThreads: (threads) => {
     const threadMap = threads.reduce(
       (acc: Record<string, Thread>, thread) => {
-        acc[thread.id] = {
-          ...thread,
-          model: thread.model
-            ? {
-                provider:
-                  thread.model?.provider?.replace('llama.cpp', 'llamacpp') ??
-                  'llamacpp',
-                // Cortex migration: take first two parts of the ID (the last is file name which is not needed)
-                id:
-                  thread.model?.provider === 'llama.cpp' ||
-                  thread.model?.provider === 'llamacpp'
-                    ? thread.model?.id
-                        ?.split(':')
-                        .slice(0, 2)
-                        .join(getServiceHub().path().sep())
-                    : thread.model?.id,
-              }
-            : undefined,
-        }
+        // Historical local provider/model metadata is retained verbatim so old
+        // conversations remain truthful and readable. Continuing those chats
+        // requires an explicit remote-model selection elsewhere in the UI.
+        acc[thread.id] = thread
         return acc
       },
       {} as Record<string, Thread>
@@ -202,8 +168,6 @@ export const useThreads = create<ThreadState>()((set, get) => ({
 
       // Clean up agent mode state
       useAgentMode.getState().removeThread(threadId)
-      // Clean up vector DB collection
-      cleanupVectorDB(threadId)
       getServiceHub().threads().deleteThread(threadId)
 
       return {
@@ -233,9 +197,9 @@ export const useThreads = create<ThreadState>()((set, get) => ({
         (threadId) => !shouldKeepThreadOnBulkDelete(state.threads[threadId])
       )
 
-      // Delete threads and clean up their vector DB collections
+      // Delete threads. Retained legacy index data is user-owned and is not removed
+      // implicitly; the explicit cleanup flow handles it separately.
       threadsToDeleteIds.forEach((threadId) => {
-        cleanupVectorDB(threadId)
         getServiceHub().threads().deleteThread(threadId)
       })
 
@@ -265,10 +229,9 @@ export const useThreads = create<ThreadState>()((set, get) => ({
     set((state) => {
       const allThreadIds = Object.keys(state.threads)
 
-      // Delete all threads and clean up their vector DB collections
+      // Delete all conversations without touching retained legacy index data.
       allThreadIds.forEach((threadId) => {
         useAgentMode.getState().removeThread(threadId)
-        cleanupVectorDB(threadId)
         getServiceHub().threads().deleteThread(threadId)
       })
 
@@ -291,9 +254,8 @@ export const useThreads = create<ThreadState>()((set, get) => ({
           state.threads[threadId].metadata?.project?.id === projectId
       )
 
-      // Delete threads and clean up their vector DB collections
+      // Delete project conversations without touching retained legacy data.
       threadsToDeleteIds.forEach((threadId) => {
-        cleanupVectorDB(threadId)
         getServiceHub().threads().deleteThread(threadId)
       })
 
@@ -359,18 +321,18 @@ export const useThreads = create<ThreadState>()((set, get) => ({
       updated: Date.now() / 1000,
       assistants: assistant ? [assistant] : [],
       metadata: {
-        mitaAgents: DEFAULT_MITA_AGENTS,
+        biyanAgents: DEFAULT_BIYAN_AGENTS,
       },
       ...(projectMetadata &&
         !isTemporary && {
           metadata: {
-            mitaAgents: DEFAULT_MITA_AGENTS,
+            biyanAgents: DEFAULT_BIYAN_AGENTS,
             project: projectMetadata,
           },
         }),
       ...(isTemporary && {
         metadata: {
-          mitaAgents: DEFAULT_MITA_AGENTS,
+          biyanAgents: DEFAULT_BIYAN_AGENTS,
           isTemporary: true,
           ...(projectMetadata && { project: projectMetadata }),
         },

@@ -1,8 +1,6 @@
 use super::models::{DownloadEvent, DownloadItem, ProgressTracker, ProxyConfig};
-use crate::core::app::commands::get_mita_data_folder_path;
-use crate::core::filesystem::helpers::resolve_path_within_mita_data_folder;
-use crate::core::updater::hmac_client::SignedRequestHeaders;
-use crate::core::updater::session::get_session_id;
+use crate::core::app::commands::get_biyan_data_folder_path;
+use crate::core::filesystem::helpers::resolve_path_within_biyan_data_folder;
 use futures_util::StreamExt;
 use reqwest::header::{HeaderMap, HeaderName, HeaderValue};
 use std::collections::HashMap;
@@ -14,79 +12,14 @@ use tokio::io::AsyncWriteExt;
 use tokio_util::sync::CancellationToken;
 use url::Url;
 
-// ===== CONSTANTS =====
-
-/// Model mirror prefix for HuggingFace downloads
-/// - Stable builds: https://apps.jan.ai/
-/// - Nightly builds: https://apps-nightly.jan.ai/
-const MODEL_MIRROR_PREFIX_STABLE: &str = "https://apps.jan.ai/";
-const MODEL_MIRROR_PREFIX_NIGHTLY: &str = "https://apps-nightly.jan.ai/";
-
-/// Domains that should use mirror download with fallback
-const MIRROR_DOMAINS: &[&str] = &["huggingface.co"];
-
-/// Check if this is a nightly build based on package name
-fn is_nightly_build() -> bool {
-    let pkg_name = env!("CARGO_PKG_NAME");
-    pkg_name.to_lowercase().contains("nightly")
-}
-
-/// Get the appropriate mirror prefix based on build type
-fn get_mirror_prefix() -> &'static str {
-    if is_nightly_build() {
-        MODEL_MIRROR_PREFIX_NIGHTLY
-    } else {
-        MODEL_MIRROR_PREFIX_STABLE
-    }
-}
-
-/// Secret key for HMAC request authentication
-/// - In CI: Set MITA_SIGNING_KEY environment variable at build time
-/// - In local dev: Falls back to a test key
-const SECRET_KEY: &str = match option_env!("MITA_SIGNING_KEY") {
-    Some(key) => key,
-    None => match option_env!("JAN_SIGNING_KEY") {
-        Some(key) => key,
-        None => "local-dev-test-key-not-for-production",
-    },
-};
-
 // ===== UTILITY FUNCTIONS =====
 
 pub fn err_to_string<E: std::fmt::Display>(e: E) -> String {
     format!("Error: {e}")
 }
 
-/// Converts a URL to the configured model mirror URL if applicable
-/// e.g., https://huggingface.co/... -> https://apps.jan.ai/huggingface.co/...
-/// or for nightly: https://huggingface.co/... -> https://apps-nightly.jan.ai/huggingface.co/...
-pub fn convert_to_mirror_url(url: &str) -> Option<String> {
-    let parsed = Url::parse(url).ok()?;
-    let host = parsed.host_str()?;
-
-    // Check if the domain should use mirror
-    if MIRROR_DOMAINS
-        .iter()
-        .any(|domain| host == *domain || host.ends_with(&format!(".{}", domain)))
-    {
-        // Remove the scheme (https://) and prepend mirror prefix
-        let url_without_scheme = url
-            .strip_prefix("https://")
-            .or_else(|| url.strip_prefix("http://"))?;
-        Some(format!("{}{}", get_mirror_prefix(), url_without_scheme))
-    } else {
-        None
-    }
-}
-
-/// Get session identifier for request signing
-fn get_download_nonce_seed() -> String {
-    get_session_id()
-}
-
-/// Get current app version from Cargo.toml
-fn get_app_version() -> &'static str {
-    env!("CARGO_PKG_VERSION")
+pub(crate) fn is_retired_download_url(url: &Url) -> bool {
+    crate::core::legacy_migrations::is_retired_download_url(url)
 }
 
 // ===== VALIDATION FUNCTIONS =====
@@ -95,9 +28,7 @@ fn get_app_version() -> &'static str {
 async fn validate_downloaded_file(
     item: &DownloadItem,
     save_path: &Path,
-    app: &tauri::AppHandle<impl Runtime>,
     cancel_token: &CancellationToken,
-    emit_event: bool,
 ) -> Result<(), String> {
     // Skip validation if no verification data is provided
     if item.sha256.is_none() && item.size.is_none() {
@@ -106,32 +37,6 @@ async fn validate_downloaded_file(
             item.url
         );
         return Ok(());
-    }
-
-    // Use model_id from item if available, otherwise extract from save path
-    // Path structure: llamacpp/models/{modelId}/model.gguf or llamacpp/models/{modelId}/mmproj.gguf
-    let model_id = item
-        .model_id
-        .as_ref()
-        .map(|s| s.as_str())
-        .unwrap_or_else(|| {
-            save_path
-                .parent() // get parent directory (modelId folder)
-                .and_then(|p| p.file_name())
-                .and_then(|n| n.to_str())
-                .unwrap_or("unknown")
-        });
-
-    if emit_event {
-        app.emit(
-            "onModelValidationStarted",
-            serde_json::json!({
-                "modelId": model_id,
-                "downloadType": "Model",
-            }),
-        )
-        .unwrap();
-        log::info!("Starting validation for model: {model_id}");
     }
 
     // Validate size if provided (fast check first)
@@ -181,7 +86,7 @@ async fn validate_downloaded_file(
     if let Some(expected_sha256) = &item.sha256 {
         log::info!("Starting Hash verification for {}", item.url);
 
-        match jan_utils::crypto::compute_file_sha256_with_cancellation(save_path, cancel_token)
+        match biyan_utils::crypto::compute_file_sha256_with_cancellation(save_path, cancel_token)
             .await
         {
             Ok(computed_sha256) => {
@@ -308,7 +213,16 @@ pub fn _get_client_for_item(
 ) -> Result<reqwest::Client, String> {
     let mut client_builder = reqwest::Client::builder()
         .http2_keep_alive_timeout(Duration::from_secs(15))
-        .default_headers(header_map.clone());
+        .default_headers(header_map.clone())
+        .redirect(reqwest::redirect::Policy::custom(|attempt| {
+            if is_retired_download_url(attempt.url()) {
+                attempt.error("LOCAL_RUNTIME_REMOVED: blocked retired download destination")
+            } else if attempt.previous().len() >= 10 {
+                attempt.error("too many redirects")
+            } else {
+                attempt.follow()
+            }
+        }));
 
     // Add proxy configuration if provided
     if let Some(proxy_config) = &item.proxy {
@@ -425,14 +339,14 @@ pub async fn _download_files_internal(
     let progress_tracker = ProgressTracker::new(items, file_sizes.clone());
 
     // save file under Biyan data folder
-    let mita_data_folder = get_mita_data_folder_path(app.clone());
+    let biyan_data_folder = get_biyan_data_folder_path(app.clone());
 
     // Collect download tasks for parallel execution
     let mut download_tasks = Vec::new();
 
     for (index, item) in items.iter().enumerate() {
         let (canonical_data, save_path) =
-            resolve_path_within_mita_data_folder(&mita_data_folder, &item.save_path)?;
+            resolve_path_within_biyan_data_folder(&biyan_data_folder, &item.save_path)?;
 
         // Spawn download task for each file
         let item_clone = item.clone();
@@ -469,53 +383,15 @@ pub async fn _download_files_internal(
             Ok(downloaded_path) => {
                 // Spawn validation task in parallel
                 let item_clone = item.clone();
-                let app_clone = app.clone();
                 let path_clone = downloaded_path.clone();
                 let cancel_token_clone = cancel_token.clone();
                 let validation_task = tokio::spawn(async move {
-                    validate_downloaded_file(
-                        &item_clone,
-                        &path_clone,
-                        &app_clone,
-                        &cancel_token_clone,
-                        false,
-                    )
-                    .await
+                    validate_downloaded_file(&item_clone, &path_clone, &cancel_token_clone).await
                 });
                 validation_tasks.push((validation_task, downloaded_path, item.clone()));
             }
             Err(e) => return Err(e),
         }
-    }
-
-    let model_id = items
-        .iter()
-        .find_map(|item| item.model_id.as_ref())
-        .map(|s| s.as_str())
-        .or_else(|| {
-            items.first().and_then(|item| {
-                std::path::Path::new(&item.save_path)
-                    .parent()
-                    .and_then(|p| p.file_name())
-                    .and_then(|n| n.to_str())
-            })
-        })
-        .unwrap_or("unknown");
-
-    if !validation_tasks.is_empty()
-        && items
-            .iter()
-            .any(|item| item.sha256.is_some() || item.size.is_some())
-    {
-        app.emit(
-            "onModelValidationStarted",
-            serde_json::json!({
-                "modelId": model_id,
-                "downloadType": "Model",
-            }),
-        )
-        .unwrap();
-        log::info!("Starting validation for model: {model_id}");
     }
 
     // Wait for all validations to complete
@@ -628,21 +504,18 @@ async fn download_single_file(
                 (resp, item.url.clone())
             }
             Err(e) => {
-                // fallback to normal download with proxy support
+                // Fall back to a fresh request against the original URL.
                 log::warn!("Failed to resume download: {e}");
                 should_resume = false;
                 _get_maybe_resume_with_fallback(&client, &item.url, 0).await?
             }
         }
     } else {
-        // Use mirror fallback for new downloads
+        // Downloads always use the URL selected by the configured provider.
         _get_maybe_resume_with_fallback(&client, &item.url, 0).await?
     };
 
-    // Log which URL is being used for download
-    if actual_url != item.url {
-        log::info!("Downloading via Biyan mirror: {}", actual_url);
-    }
+    debug_assert_eq!(actual_url, item.url);
 
     // If HEAD gave us no size, refine the running total from the GET response
     // so the UI can progress past "Initializing" and show a real percentage.
@@ -739,79 +612,16 @@ async fn download_single_file(
 
 // ===== HTTP CLIENT HELPER FUNCTIONS =====
 
-/// Attempts to download from mirror URL first, falls back to original URL if mirror fails
-/// When using mirror URL, adds HMAC headers for request authentication
+/// Download directly from the original URL. Biyan does not rewrite Hugging Face
+/// URLs through a product-controlled mirror.
 pub async fn _get_maybe_resume_with_fallback(
     client: &reqwest::Client,
     url: &str,
     start_bytes: u64,
 ) -> Result<(reqwest::Response, String), String> {
-    // Try mirror URL first if applicable
-    if let Some(mirror_url) = convert_to_mirror_url(url) {
-        log::info!("Attempting download from Biyan mirror: {}", mirror_url);
-        match _get_maybe_resume_with_hmac(client, &mirror_url, start_bytes).await {
-            Ok(resp) => {
-                log::info!("Successfully connected to Biyan mirror");
-                return Ok((resp, mirror_url));
-            }
-            Err(e) => {
-                log::warn!(
-                    "Biyan mirror download failed: {}. Falling back to original URL...",
-                    e
-                );
-            }
-        }
-    }
-
-    // Fallback to original URL (no HMAC headers needed)
     log::info!("Downloading from original URL: {}", url);
     let resp = _get_maybe_resume_internal(client, url, start_bytes).await?;
     Ok((resp, url.to_string()))
-}
-
-/// Download from URL with HMAC headers for Biyan mirror authentication
-async fn _get_maybe_resume_with_hmac(
-    client: &reqwest::Client,
-    url: &str,
-    start_bytes: u64,
-) -> Result<reqwest::Response, String> {
-    // Generate HMAC headers for request authentication
-    let nonce_seed = get_download_nonce_seed();
-    let app_version = get_app_version();
-    let signed_headers = SignedRequestHeaders::new(SECRET_KEY, &nonce_seed, app_version);
-
-    let mut request = if start_bytes > 0 {
-        client
-            .get(url)
-            .header("Range", format!("bytes={start_bytes}-"))
-    } else {
-        client.get(url)
-    };
-
-    // Add HMAC headers
-    for (key, value) in signed_headers.to_header_pairs() {
-        request = request.header(key, value);
-    }
-
-    let resp = request.send().await.map_err(err_to_string)?;
-
-    if start_bytes > 0 {
-        if resp.status() != reqwest::StatusCode::PARTIAL_CONTENT {
-            return Err(format!(
-                "Failed to resume download: HTTP status {}, {}",
-                resp.status(),
-                resp.text().await.unwrap_or_default()
-            ));
-        }
-    } else if !resp.status().is_success() {
-        return Err(format!(
-            "Failed to download: HTTP status {}, {}",
-            resp.status(),
-            resp.text().await.unwrap_or_default()
-        ));
-    }
-
-    Ok(resp)
 }
 
 /// Internal function to attempt download from a single URL (without HMAC)

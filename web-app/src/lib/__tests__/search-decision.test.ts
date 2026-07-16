@@ -3,7 +3,7 @@ import { describe, expect, it } from 'vitest'
 import {
   blockSearchDecision,
   decideChatSearch,
-  decideMitaTeamsRoleSearch,
+  decideBiyanTeamsRoleSearch,
 } from '../search-decision'
 
 describe('search decision', () => {
@@ -71,7 +71,7 @@ describe('search decision', () => {
   })
 
   it('uses high depth for Biyan Teams market research role calls', () => {
-    const decision = decideMitaTeamsRoleSearch({
+    const decision = decideBiyanTeamsRoleSearch({
       scenarioId: 'market_research',
       roleText: 'Market Analyst investment research',
       instruction: '研究 $MRVL 投资价值',

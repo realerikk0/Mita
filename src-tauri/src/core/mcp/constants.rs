@@ -1,63 +1,23 @@
-use serde_json::{json, Map, Value};
+use serde_json::{json, Value};
 
-pub const MITA_WEB_RESEARCH_MCP_NAME: &str = "Biyan Web Research";
-pub const LEGACY_MITA_WEB_RESEARCH_MCP_NAME: &str = "Mita Web Research";
-pub const LEGACY_SILENCE_WEB_RESEARCH_MCP_NAME: &str = "Silence Web Research";
-pub const LEGACY_SILENCE_BROWSER_MCP_NAME: &str = "Silence Browser MCP";
-pub const LEGACY_JAN_BROWSER_MCP_NAME: &str = "Jan Browser MCP";
+pub const BIYAN_WEB_RESEARCH_MCP_NAME: &str = "Biyan Web Research";
 
 pub fn is_browser_mcp_name(name: &str) -> bool {
-    matches!(
-        name,
-        MITA_WEB_RESEARCH_MCP_NAME
-            | LEGACY_MITA_WEB_RESEARCH_MCP_NAME
-            | LEGACY_SILENCE_WEB_RESEARCH_MCP_NAME
-            | LEGACY_SILENCE_BROWSER_MCP_NAME
-            | LEGACY_JAN_BROWSER_MCP_NAME
-    )
+    name == BIYAN_WEB_RESEARCH_MCP_NAME
 }
 
 pub fn default_web_research_mcp_config() -> Value {
     json!({
-        "command": "mita-web-research",
+        "command": "biyan-web-research",
         "args": [],
         "env": {
-            "MITA_WEB_RESEARCH_HEADLESS": "true"
+            "BIYAN_WEB_RESEARCH_HEADLESS": "true"
         },
         "active": false,
         "official": true,
         "capabilities": ["web", "search", "browser"],
         "description": "Biyan built-in web research tools using a private browser profile."
     })
-}
-
-pub fn normalize_browser_mcp_server_key(mcp_servers: &mut Map<String, Value>) -> bool {
-    let has_web_research = mcp_servers.contains_key(MITA_WEB_RESEARCH_MCP_NAME);
-    let legacy_mita_web_research_config = mcp_servers.remove(LEGACY_MITA_WEB_RESEARCH_MCP_NAME);
-    let legacy_silence_web_research_config =
-        mcp_servers.remove(LEGACY_SILENCE_WEB_RESEARCH_MCP_NAME);
-    let legacy_silence_browser_config = mcp_servers.remove(LEGACY_SILENCE_BROWSER_MCP_NAME);
-    let legacy_jan_config = mcp_servers.remove(LEGACY_JAN_BROWSER_MCP_NAME);
-    let legacy_config = legacy_mita_web_research_config
-        .or(legacy_silence_web_research_config)
-        .or(legacy_silence_browser_config)
-        .or(legacy_jan_config);
-
-    if has_web_research {
-        return legacy_config.is_some();
-    }
-
-    let old_active = legacy_config
-        .as_ref()
-        .and_then(|config| config.get("active"))
-        .and_then(Value::as_bool)
-        .unwrap_or(false);
-    let mut browser_config = default_web_research_mcp_config();
-    if let Some(config) = browser_config.as_object_mut() {
-        config.insert("active".to_string(), json!(old_active));
-    }
-    mcp_servers.insert(MITA_WEB_RESEARCH_MCP_NAME.to_string(), browser_config);
-    true
 }
 
 // Default MCP runtime settings
@@ -70,10 +30,10 @@ pub const DEFAULT_MCP_MAX_RECONNECT_ATTEMPTS: u32 = 3;
 pub const DEFAULT_MCP_CONFIG: &str = r#"{
   "mcpServers": {
     "Biyan Web Research": {
-      "command": "mita-web-research",
+      "command": "biyan-web-research",
       "args": [],
       "env": {
-        "MITA_WEB_RESEARCH_HEADLESS": "true"
+        "BIYAN_WEB_RESEARCH_HEADLESS": "true"
       },
       "active": false,
       "official": true,

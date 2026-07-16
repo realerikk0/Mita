@@ -95,6 +95,12 @@ const useThreadManagementStore = create<ThreadManagementState>()((set, get) => (
   },
 }))
 
+export const hydrateProjectFoldersAfterAssistantMigration = (
+  folders: ThreadFolder[]
+) => {
+  useThreadManagementStore.setState({ folders })
+}
+
 export const useThreadManagement = () => {
   const store = useThreadManagementStore()
 

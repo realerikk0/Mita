@@ -1,0 +1,66 @@
+name: Deploy Biyan Updater Router
+
+on:
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: "Validate bundle only"
+        required: true
+        default: true
+        type: boolean
+      confirmation:
+        description: "For a real deploy type DEPLOY"
+        required: false
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: biyan-updater-router-deploy
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    environment: updater-production
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+
+      - name: Test routing contract
+        run: node --test scripts/updater/__tests__/updater.test.mjs
+
+      - name: Render deployment config
+        env:
+          R2_BUCKET: ${{ secrets.CLOUDFLARE_R2_BUCKET }}
+        run: |
+          set -euo pipefail
+          [ -n "$R2_BUCKET" ]
+          sed -e "s/__UPDATER_BUCKET__/$R2_BUCKET/" \
+            scripts/updater/wrangler.toml > /tmp/wrangler.toml
+          npx --yes wrangler@4 deploy --dry-run --config /tmp/wrangler.toml
+
+      - name: Deploy Worker and signing secret
+        if: inputs.dry_run != true
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_R2_ACCOUNT_ID }}
+          BIYAN_SIGNING_KEY: ${{ secrets.BIYAN_SIGNING_KEY }}
+          ROLLOUT_SALT: ${{ secrets.BIYAN_UPDATER_ROLLOUT_SALT }}
+          CONFIRMATION: ${{ inputs.confirmation }}
+        run: |
+          set -euo pipefail
+          test "$CONFIRMATION" = "DEPLOY"
+          [ -n "$BIYAN_SIGNING_KEY" ] && [ -n "$ROLLOUT_SALT" ]
+          # A first deploy has no secrets yet and therefore fails closed with
+          # 401/503. Existing Worker secrets are retained during redeploys.
+          npx --yes wrangler@4 deploy --config /tmp/wrangler.toml
+          printf '%s' "$BIYAN_SIGNING_KEY" \
+            | npx --yes wrangler@4 secret put BIYAN_SIGNING_KEY --config /tmp/wrangler.toml
+          printf '%s' "$ROLLOUT_SALT" \
+            | npx --yes wrangler@4 secret put ROLLOUT_SALT --config /tmp/wrangler.toml
+          npx --yes wrangler@4 deploy --config /tmp/wrangler.toml

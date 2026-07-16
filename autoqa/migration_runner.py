@@ -1,0 +1,553 @@
+#!/usr/bin/env python3
+"""Fail-closed desktop migration matrix runner for dedicated AutoQA machines.
+
+The snapshot bundle is intentionally external to the repository. Its manifest
+pins every installer and snapshot by SHA-256 and marks the data as sanitized.
+The runner restores a clean snapshot, installs every version in the scenario,
+and requires each installed application to stay alive for a startup probe.
+"""
+
+from __future__ import annotations
+
+import argparse
+import hashlib
+import json
+import os
+import shutil
+import stat
+import subprocess
+import sys
+import tarfile
+import tempfile
+import time
+import zipfile
+from dataclasses import dataclass
+from pathlib import Path
+from typing import Dict, Iterable, List, Mapping, Sequence, Tuple
+
+
+PHASES: Tuple[str, ...] = ("current", "a", "b", "c")
+SNAPSHOTS: Tuple[str, ...] = ("current", "a", "b", "fresh")
+
+
+@dataclass(frozen=True)
+class MigrationCase:
+    name: str
+    snapshot: str
+    install_sequence: Tuple[str, ...]
+    expected_phase: str
+
+
+@dataclass(frozen=True)
+class SnapshotSpec:
+    name: str
+    archive: Path
+    sha256: str
+    restore_to: Path
+
+
+@dataclass(frozen=True)
+class ValidatedInputs:
+    installers: Mapping[str, Path]
+    snapshots: Mapping[str, SnapshotSpec]
+    expectations: Mapping[str, Tuple[Path, ...]]
+
+
+def migration_matrix() -> Tuple[MigrationCase, ...]:
+    return (
+        MigrationCase("current-to-a", "current", ("current", "a"), "a"),
+        MigrationCase("a-to-b", "a", ("a", "b"), "b"),
+        MigrationCase("current-to-a-to-b-to-c", "current", ("current", "a", "b", "c"), "c"),
+        MigrationCase("current-to-b", "current", ("current", "b"), "b"),
+        MigrationCase("current-to-c", "current", ("current", "c"), "c"),
+        MigrationCase("a-to-c", "a", ("a", "c"), "c"),
+        MigrationCase("b-to-c", "b", ("b", "c"), "c"),
+        MigrationCase("fresh-c", "fresh", ("c",), "c"),
+    )
+
+
+def _sha256(path: Path) -> str:
+    digest = hashlib.sha256()
+    with path.open("rb") as stream:
+        for chunk in iter(lambda: stream.read(1024 * 1024), b""):
+            digest.update(chunk)
+    return digest.hexdigest()
+
+
+def _expand_path(value: str) -> Path:
+    expanded = value
+    for name, replacement in os.environ.items():
+        expanded = expanded.replace(f"%{name}%", replacement)
+    expanded = os.path.expandvars(os.path.expanduser(expanded))
+    return Path(expanded).resolve()
+
+
+def _require_safe_restore_root(path: Path) -> None:
+    allowed_roots = {
+        Path.home().resolve(),
+        *(
+            Path(value).resolve()
+            for value in (os.environ.get("APPDATA"), os.environ.get("LOCALAPPDATA"))
+            if value
+        ),
+    }
+    if not any(path == root or root in path.parents for root in allowed_roots):
+        raise ValueError(f"snapshot restore path is outside the AutoQA user profile: {path}")
+    if path in allowed_roots:
+        raise ValueError(f"snapshot restore path may not be an entire profile root: {path}")
+
+
+def _require_file(path: Path, label: str) -> None:
+    if not path.is_file() or path.stat().st_size == 0:
+        raise FileNotFoundError(f"missing or empty {label}: {path}")
+
+
+def _require_digest(path: Path, expected: str, label: str) -> None:
+    if len(expected) != 64 or any(char not in "0123456789abcdefABCDEF" for char in expected):
+        raise ValueError(f"invalid SHA-256 for {label}")
+    actual = _sha256(path)
+    if actual != expected.lower():
+        raise ValueError(f"SHA-256 mismatch for {label}: expected {expected}, got {actual}")
+
+
+def validate_inputs(
+    installer_paths: Mapping[str, Path], manifest_path: Path, platform: str
+) -> ValidatedInputs:
+    _require_file(manifest_path, "snapshot manifest")
+    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    if manifest.get("schema") != 1:
+        raise ValueError("snapshot manifest schema must be 1")
+    if manifest.get("sanitized") is not True:
+        raise ValueError("snapshot manifest must explicitly declare sanitized=true")
+    if manifest.get("platform") != platform:
+        raise ValueError(
+            f"snapshot platform mismatch: expected {platform}, got {manifest.get('platform')}"
+        )
+
+    installer_manifest = manifest.get("installers")
+    if not isinstance(installer_manifest, dict):
+        raise ValueError("snapshot manifest is missing installer digests")
+    validated_installers: Dict[str, Path] = {}
+    for phase in PHASES:
+        if phase not in installer_paths:
+            raise FileNotFoundError(f"missing installer argument for phase {phase}")
+        path = Path(installer_paths[phase]).resolve()
+        _require_file(path, f"{phase} installer")
+        entry = installer_manifest.get(phase)
+        if not isinstance(entry, dict):
+            raise ValueError(f"snapshot manifest is missing {phase} installer metadata")
+        _require_digest(path, str(entry.get("sha256", "")), f"{phase} installer")
+        validated_installers[phase] = path
+
+    snapshot_manifest = manifest.get("snapshots")
+    if not isinstance(snapshot_manifest, dict):
+        raise ValueError("snapshot manifest is missing snapshots")
+    snapshots: Dict[str, SnapshotSpec] = {}
+    for name in SNAPSHOTS:
+        entry = snapshot_manifest.get(name)
+        if not isinstance(entry, dict):
+            raise FileNotFoundError(f"snapshot manifest is missing required snapshot: {name}")
+        archive_value = entry.get("archive")
+        restore_value = entry.get("restore_to")
+        if not isinstance(archive_value, str) or not archive_value:
+            raise FileNotFoundError(f"snapshot {name} has no archive")
+        if not isinstance(restore_value, str) or not restore_value:
+            raise ValueError(f"snapshot {name} has no restore_to path")
+        manifest_root = manifest_path.parent.resolve()
+        archive = (manifest_root / archive_value).resolve()
+        if manifest_root != archive and manifest_root not in archive.parents:
+            raise ValueError(f"snapshot {name} archive escapes the signed bundle: {archive_value}")
+        _require_file(archive, f"{name} sanitized snapshot")
+        _require_digest(archive, str(entry.get("sha256", "")), f"{name} sanitized snapshot")
+        restore_to = _expand_path(restore_value)
+        _require_safe_restore_root(restore_to)
+        snapshots[name] = SnapshotSpec(name, archive, str(entry["sha256"]), restore_to)
+
+    expectation_manifest = manifest.get("expectations")
+    if not isinstance(expectation_manifest, dict):
+        raise ValueError("snapshot manifest is missing post-migration expectations")
+    expectations: Dict[str, Tuple[Path, ...]] = {}
+    for phase in ("a", "b", "c"):
+        values = expectation_manifest.get(phase)
+        if not isinstance(values, list) or not values or not all(isinstance(item, str) for item in values):
+            raise ValueError(f"snapshot manifest must define non-empty expectations.{phase}")
+        expanded = tuple(_expand_path(item) for item in values)
+        for path in expanded:
+            _require_safe_restore_root(path)
+        expectations[phase] = expanded
+
+    # This also guards future edits to the matrix from silently introducing an
+    # unvalidated installer or snapshot key.
+    for case in migration_matrix():
+        if case.snapshot not in snapshots:
+            raise FileNotFoundError(f"missing snapshot for scenario {case.name}: {case.snapshot}")
+        for phase in case.install_sequence:
+            if phase not in validated_installers:
+                raise FileNotFoundError(f"missing installer for scenario {case.name}: {phase}")
+
+    return ValidatedInputs(validated_installers, snapshots, expectations)
+
+
+def _safe_extract(archive: Path, destination: Path) -> None:
+    destination.mkdir(parents=True, exist_ok=True)
+    destination_root = destination.resolve()
+
+    def ensure_safe(names: Iterable[str]) -> None:
+        for name in names:
+            candidate = (destination_root / name).resolve()
+            if destination_root != candidate and destination_root not in candidate.parents:
+                raise ValueError(f"snapshot archive contains an unsafe path: {name}")
+
+    if zipfile.is_zipfile(archive):
+        with zipfile.ZipFile(archive) as bundle:
+            members = bundle.infolist()
+            ensure_safe(member.filename for member in members)
+            for member in members:
+                mode = member.external_attr >> 16
+                if stat.S_IFMT(mode) == stat.S_IFLNK:
+                    raise ValueError(
+                        f"snapshot archive may not contain symbolic links: {member.filename}"
+                    )
+            bundle.extractall(destination_root)
+        return
+    if tarfile.is_tarfile(archive):
+        with tarfile.open(archive) as bundle:
+            members = bundle.getmembers()
+            ensure_safe(member.name for member in members)
+            for member in members:
+                if not (member.isdir() or member.isfile()):
+                    raise ValueError(
+                        f"snapshot archive may contain only files and directories: {member.name}"
+                    )
+            bundle.extractall(destination_root)
+        return
+    raise ValueError(f"unsupported snapshot archive format: {archive}")
+
+
+class PlatformExecutor:
+    def __init__(self, platform: str, startup_seconds: int) -> None:
+        self.platform = platform
+        self.startup_seconds = startup_seconds
+        self.last_executable: Path | None = None
+
+    def cleanup_installation(self) -> None:
+        if self.platform == "windows":
+            subprocess.run(
+                [
+                    "powershell",
+                    "-NoProfile",
+                    "-Command",
+                    "Get-Process Biyan,Mita,Silence,Jan -ErrorAction SilentlyContinue | "
+                    "Stop-Process -Force -ErrorAction SilentlyContinue",
+                ],
+                check=False,
+            )
+            local = Path(os.environ.get("LOCALAPPDATA", Path.home() / "AppData/Local"))
+            for name in ("Biyan", "Biyan-nightly", "Mita", "Silence", "Jan"):
+                shutil.rmtree(local / "Programs" / name, ignore_errors=True)
+        elif self.platform == "macos":
+            subprocess.run(["pkill", "-f", "Biyan|Mita|Silence|Jan"], check=False)
+            for name in ("Biyan", "Biyan-nightly", "Mita", "Silence", "Jan"):
+                shutil.rmtree(Path("/Applications") / f"{name}.app", ignore_errors=True)
+        else:
+            subprocess.run(["pkill", "-f", "Biyan|Mita|Silence|Jan"], check=False)
+            subprocess.run(
+                [
+                    "sudo",
+                    "dpkg",
+                    "--purge",
+                    "biyan",
+                    "biyan-nightly",
+                    "mita",
+                    "silence",
+                    "jan",
+                ],
+                check=False,
+                timeout=300,
+            )
+        self.last_executable = None
+
+    def install(self, installer: Path, phase: str, case_dir: Path) -> Path:
+        if self.platform == "windows":
+            subprocess.run([str(installer), "/S"], check=True, timeout=300)
+            local = Path(os.environ.get("LOCALAPPDATA", Path.home() / "AppData/Local"))
+            candidates = [
+                local / "Programs" / product / f"{product}.exe"
+                for product in ("Biyan", "Mita", "Silence", "Jan")
+            ]
+        elif self.platform == "macos":
+            mount = case_dir / f"mount-{phase}"
+            mount.mkdir(parents=True, exist_ok=True)
+            subprocess.run(
+                ["hdiutil", "attach", str(installer), "-mountpoint", str(mount), "-nobrowse"],
+                check=True,
+                timeout=120,
+            )
+            try:
+                apps = sorted(mount.glob("*.app"))
+                if len(apps) != 1:
+                    raise RuntimeError(f"expected one app in {installer}, found {len(apps)}")
+                target = Path("/Applications") / apps[0].name
+                shutil.rmtree(target, ignore_errors=True)
+                shutil.copytree(apps[0], target, symlinks=True)
+            finally:
+                subprocess.run(["hdiutil", "detach", str(mount)], check=False, timeout=120)
+            candidates = sorted((target / "Contents" / "MacOS").iterdir())
+        else:
+            if installer.name.lower().endswith(".appimage"):
+                executable = case_dir / installer.name
+                shutil.copy2(installer, executable)
+                executable.chmod(0o755)
+                candidates = [executable]
+            elif installer.name.lower().endswith(".deb"):
+                subprocess.run(
+                    ["sudo", "dpkg", "--force-downgrade", "-i", str(installer)],
+                    check=False,
+                    timeout=300,
+                )
+                subprocess.run(["sudo", "apt-get", "install", "-f", "-y"], check=True, timeout=300)
+                candidates = [
+                    prefix / name
+                    for prefix in (Path("/usr/bin"), Path("/usr/local/bin"))
+                    for name in (
+                        "Biyan",
+                        "biyan",
+                        "Mita",
+                        "mita",
+                        "Silence",
+                        "silence",
+                        "Jan",
+                        "jan",
+                    )
+                ]
+            else:
+                raise ValueError(f"unsupported Linux installer: {installer}")
+
+        executable = next((path for path in candidates if path.is_file() and os.access(path, os.X_OK)), None)
+        if executable is None:
+            raise FileNotFoundError(f"installed executable not found after {phase}: {installer}")
+        if phase != "current" and "biyan" not in executable.name.lower():
+            raise RuntimeError(f"phase {phase} did not install a Biyan executable: {executable}")
+        self.last_executable = executable
+        return executable
+
+    def startup_probe(self, executable: Path, scenario: str, phase: str) -> None:
+        env = os.environ.copy()
+        env.update(
+            {
+                "BIYAN_AUTOQA_MIGRATION_SCENARIO": scenario,
+                "BIYAN_AUTOQA_MIGRATION_PHASE": phase,
+            }
+        )
+        command: List[str] = [str(executable)]
+        if self.platform == "linux" and not env.get("DISPLAY") and shutil.which("xvfb-run"):
+            command = ["xvfb-run", "-a", *command]
+        process = subprocess.Popen(command, env=env)
+        try:
+            time.sleep(self.startup_seconds)
+            exit_code = process.poll()
+            if exit_code is not None:
+                raise RuntimeError(
+                    f"startup probe exited early for {scenario}/{phase} with code {exit_code}"
+                )
+        finally:
+            if process.poll() is None:
+                process.terminate()
+                try:
+                    process.wait(timeout=20)
+                except subprocess.TimeoutExpired:
+                    process.kill()
+                    process.wait(timeout=10)
+
+
+def _restore_snapshot(spec: SnapshotSpec) -> None:
+    shutil.rmtree(spec.restore_to, ignore_errors=True)
+    _safe_extract(spec.archive, spec.restore_to)
+
+
+def _clear_snapshot_roots(snapshots: Mapping[str, SnapshotSpec]) -> None:
+    for restore_to in {snapshot.restore_to for snapshot in snapshots.values()}:
+        shutil.rmtree(restore_to, ignore_errors=True)
+
+
+def _assert_phase_expectations(
+    expectations: Mapping[str, Tuple[Path, ...]], scenario: str, phase: str
+) -> None:
+    expected = expectations.get(phase)
+    if expected is None:
+        return
+    missing = [str(path) for path in expected if not path.exists()]
+    if missing:
+        raise FileNotFoundError(
+            f"post-migration expectations failed for {scenario}/{phase}: {', '.join(missing)}"
+        )
+
+
+def _migration_state_path(platform: str) -> Path:
+    if platform == "windows":
+        base = Path(os.environ.get("APPDATA", Path.home() / "AppData/Roaming"))
+    elif platform == "macos":
+        base = Path.home() / "Library/Application Support"
+    else:
+        base = Path(os.environ.get("XDG_DATA_HOME", Path.home() / ".local/share"))
+    return base / "Biyan/migration-state.json"
+
+
+def _assert_migration_state(state_path: Path, scenario: str, phase: str) -> None:
+    if phase == "current":
+        return
+    if not state_path.is_file():
+        raise FileNotFoundError(
+            f"migration state is missing for {scenario}/{phase}: {state_path}"
+        )
+    state = json.loads(state_path.read_text(encoding="utf-8"))
+    expected_schema = {"a": 1, "b": 2, "c": 3}[phase]
+    if state.get("data_schema") != expected_schema:
+        raise RuntimeError(
+            f"migration schema mismatch for {scenario}/{phase}: "
+            f"expected {expected_schema}, got {state.get('data_schema')}"
+        )
+    required_steps = [
+        "layout_v1",
+        "assistant_ids_v1",
+        "mcp_names_v1",
+        "extensions_manifest_v1",
+    ]
+    if expected_schema >= 2:
+        required_steps.append("remote_only_v2")
+    if expected_schema >= 3:
+        required_steps.append("cleanup_v3")
+    incomplete = [
+        step
+        for step in required_steps
+        if state.get("steps", {}).get(step, {}).get("status") != "completed"
+    ]
+    if incomplete:
+        raise RuntimeError(
+            f"migration steps incomplete for {scenario}/{phase}: {', '.join(incomplete)}"
+        )
+
+
+def run_matrix(
+    validated: ValidatedInputs,
+    platform: str,
+    work_dir: Path,
+    startup_seconds: int,
+) -> List[dict]:
+    executor = PlatformExecutor(platform, startup_seconds)
+    results: List[dict] = []
+    try:
+        for case in migration_matrix():
+            case_dir = work_dir / case.name
+            shutil.rmtree(case_dir, ignore_errors=True)
+            case_dir.mkdir(parents=True, exist_ok=True)
+            executor.cleanup_installation()
+            _clear_snapshot_roots(validated.snapshots)
+            _restore_snapshot(validated.snapshots[case.snapshot])
+            started = time.time()
+            for phase in case.install_sequence:
+                executable = executor.install(validated.installers[phase], phase, case_dir)
+                executor.startup_probe(executable, case.name, phase)
+                _assert_phase_expectations(validated.expectations, case.name, phase)
+                _assert_migration_state(
+                    _migration_state_path(platform), case.name, phase
+                )
+            results.append(
+                {
+                    "scenario": case.name,
+                    "snapshot": case.snapshot,
+                    "installSequence": list(case.install_sequence),
+                    "expectedPhase": case.expected_phase,
+                    "status": "passed",
+                    "durationSeconds": round(time.time() - started, 3),
+                }
+            )
+    finally:
+        executor.cleanup_installation()
+        _clear_snapshot_roots(validated.snapshots)
+    return results
+
+
+def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
+    parser = argparse.ArgumentParser(description="Run the fail-closed Biyan migration matrix")
+    parser.add_argument("--platform", choices=("windows", "linux", "macos"), required=True)
+    for phase in PHASES:
+        parser.add_argument(f"--{phase}-installer", required=True)
+    parser.add_argument("--snapshot-manifest", required=True)
+    parser.add_argument("--report", required=True)
+    parser.add_argument("--work-dir", default="")
+    parser.add_argument("--startup-seconds", type=int, default=10)
+    parser.add_argument("--validate-only", action="store_true")
+    parser.add_argument(
+        "--allow-destructive-autoqa",
+        choices=("AUTOQA",),
+        help="Required for execution because snapshots replace data in a dedicated AutoQA profile",
+    )
+    return parser.parse_args(argv)
+
+
+def main(argv: Sequence[str] | None = None) -> int:
+    args = parse_args(argv)
+    if args.startup_seconds <= 0:
+        print("--startup-seconds must be greater than zero", file=sys.stderr)
+        return 2
+    installers = {
+        phase: Path(getattr(args, f"{phase}_installer"))
+        for phase in PHASES
+    }
+    report_path = Path(args.report).resolve()
+    report_path.parent.mkdir(parents=True, exist_ok=True)
+    try:
+        validated = validate_inputs(
+            installers, Path(args.snapshot_manifest).resolve(), args.platform
+        )
+        if args.validate_only:
+            results = [
+                {
+                    "scenario": case.name,
+                    "snapshot": case.snapshot,
+                    "installSequence": list(case.install_sequence),
+                    "expectedPhase": case.expected_phase,
+                    "status": "validated",
+                }
+                for case in migration_matrix()
+            ]
+        else:
+            if args.allow_destructive_autoqa != "AUTOQA":
+                raise PermissionError("execution requires --allow-destructive-autoqa AUTOQA")
+            work_dir = (
+                Path(args.work_dir).resolve()
+                if args.work_dir
+                else Path(tempfile.mkdtemp(prefix="biyan-migration-autoqa-"))
+            )
+            work_dir.mkdir(parents=True, exist_ok=True)
+            results = run_matrix(validated, args.platform, work_dir, args.startup_seconds)
+        report = {
+            "schema": 1,
+            "platform": args.platform,
+            "status": "passed",
+            "matrix": results,
+        }
+        report_path.write_text(json.dumps(report, indent=2) + "\n", encoding="utf-8")
+        print(f"Migration matrix passed: {len(results)} scenarios")
+        return 0
+    except Exception as error:  # fail-closed report for CI evidence
+        report_path.write_text(
+            json.dumps(
+                {
+                    "schema": 1,
+                    "platform": args.platform,
+                    "status": "failed",
+                    "error": str(error),
+                },
+                indent=2,
+            )
+            + "\n",
+            encoding="utf-8",
+        )
+        print(str(error), file=sys.stderr)
+        return 1
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

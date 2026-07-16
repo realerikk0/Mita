@@ -1,7 +1,7 @@
 use super::commands::*;
-use super::helpers::resolve_path_within_mita_data_folder;
-use crate::core::app::commands::get_mita_data_folder_path;
-use jan_utils::normalize_path;
+use super::helpers::resolve_path_within_biyan_data_folder;
+use crate::core::app::commands::get_biyan_data_folder_path;
+use biyan_utils::normalize_path;
 use std::fs::{self, File};
 use std::io::Write;
 use std::path::{Path, PathBuf};
@@ -11,11 +11,11 @@ use tauri::test::mock_app;
 fn test_rm() {
     let app = mock_app();
     let path = "test_rm_dir";
-    fs::create_dir_all(get_mita_data_folder_path(app.handle().clone()).join(path)).unwrap();
+    fs::create_dir_all(get_biyan_data_folder_path(app.handle().clone()).join(path)).unwrap();
     let args = vec![format!("file://{path}").to_string()];
     let result = rm(app.handle().clone(), args);
     assert!(result.is_ok());
-    assert!(!get_mita_data_folder_path(app.handle().clone())
+    assert!(!get_biyan_data_folder_path(app.handle().clone())
         .join(path)
         .exists());
 }
@@ -27,16 +27,16 @@ fn test_mkdir() {
     let args = vec![format!("file://{path}").to_string()];
     let result = mkdir(app.handle().clone(), args);
     assert!(result.is_ok());
-    assert!(get_mita_data_folder_path(app.handle().clone())
+    assert!(get_biyan_data_folder_path(app.handle().clone())
         .join(path)
         .exists());
-    let _ = fs::remove_dir_all(get_mita_data_folder_path(app.handle().clone()).join(path));
+    let _ = fs::remove_dir_all(get_biyan_data_folder_path(app.handle().clone()).join(path));
 }
 
 #[test]
 fn test_copy_file_copies_file_to_selected_destination() {
     let app = mock_app();
-    let data_dir = get_mita_data_folder_path(app.handle().clone());
+    let data_dir = get_biyan_data_folder_path(app.handle().clone());
     fs::create_dir_all(&data_dir).unwrap();
     let source_path = data_dir.join("test_copy_file_source.txt");
     fs::write(&source_path, "storyboard image bytes").unwrap();
@@ -84,7 +84,7 @@ fn test_join_path() {
     let result = join_path(app.handle().clone(), args).unwrap();
     assert_eq!(
         result,
-        get_mita_data_folder_path(app.handle().clone())
+        get_biyan_data_folder_path(app.handle().clone())
             .join(format!("test_dir{}test_file", std::path::MAIN_SEPARATOR))
             .to_string_lossy()
             .to_string()
@@ -95,7 +95,7 @@ fn test_join_path() {
 fn test_exists_sync() {
     let app = mock_app();
     let path = "file://test_exists_sync_file";
-    let dir_path = get_mita_data_folder_path(app.handle().clone());
+    let dir_path = get_biyan_data_folder_path(app.handle().clone());
     fs::create_dir_all(&dir_path).unwrap();
     let file_path = dir_path.join("test_exists_sync_file");
     File::create(&file_path).unwrap();
@@ -109,7 +109,7 @@ fn test_exists_sync() {
 fn test_read_file_sync() {
     let app = mock_app();
     let path = "file://test_read_file_sync_file";
-    let dir_path = get_mita_data_folder_path(app.handle().clone());
+    let dir_path = get_biyan_data_folder_path(app.handle().clone());
     fs::create_dir_all(&dir_path).unwrap();
     let file_path = dir_path.join("test_read_file_sync_file");
     let mut file = File::create(&file_path).unwrap();
@@ -123,7 +123,7 @@ fn test_read_file_sync() {
 #[test]
 fn test_readdir_sync() {
     let app = mock_app();
-    let dir_path = get_mita_data_folder_path(app.handle().clone()).join("test_readdir_sync_dir");
+    let dir_path = get_biyan_data_folder_path(app.handle().clone()).join("test_readdir_sync_dir");
     fs::create_dir_all(&dir_path).unwrap();
     File::create(dir_path.join("file1.txt")).unwrap();
     File::create(dir_path.join("file2.txt")).unwrap();
@@ -157,7 +157,7 @@ fn test_resolve_jan_scoped_path_allows_canonicalized_home_symlink_target() {
     symlink(&canonical_root, &configured_root).unwrap();
 
     let candidate = canonical_root.join("llamacpp/backends/v1/backend.tar.gz");
-    let (_, resolved_path) = resolve_path_within_mita_data_folder(
+    let (_, resolved_path) = resolve_path_within_biyan_data_folder(
         &configured_root,
         candidate.to_string_lossy().as_ref(),
     )
@@ -174,11 +174,11 @@ fn test_resolve_jan_scoped_path_allows_canonicalized_home_symlink_target() {
 
 #[test]
 fn test_resolve_jan_scoped_path_accepts_relative_path_inside_root() {
-    let mita_data_folder = unique_test_dir("relative");
-    fs::create_dir_all(&mita_data_folder).unwrap();
+    let biyan_data_folder = unique_test_dir("relative");
+    fs::create_dir_all(&biyan_data_folder).unwrap();
 
-    let (resolved_root, resolved_path) = resolve_path_within_mita_data_folder(
-        &mita_data_folder,
+    let (resolved_root, resolved_path) = resolve_path_within_biyan_data_folder(
+        &biyan_data_folder,
         "llamacpp/backends/v1/backend.tar.gz",
     )
     .unwrap();
@@ -186,41 +186,41 @@ fn test_resolve_jan_scoped_path_accepts_relative_path_inside_root() {
     assert!(resolved_path.starts_with(&resolved_root));
     assert_eq!(
         normalize_test_path(&resolved_root),
-        normalize_test_path(&mita_data_folder.canonicalize().unwrap())
+        normalize_test_path(&biyan_data_folder.canonicalize().unwrap())
     );
     assert_eq!(
         resolved_path.file_name().and_then(|name| name.to_str()),
         Some("backend.tar.gz")
     );
 
-    let _ = fs::remove_dir_all(&mita_data_folder);
+    let _ = fs::remove_dir_all(&biyan_data_folder);
 }
 
 #[test]
 fn test_resolve_jan_scoped_path_rejects_escape_outside_data_folder() {
-    let mita_data_folder = unique_test_dir("escape");
-    fs::create_dir_all(&mita_data_folder).unwrap();
+    let biyan_data_folder = unique_test_dir("escape");
+    fs::create_dir_all(&biyan_data_folder).unwrap();
 
-    let result = resolve_path_within_mita_data_folder(&mita_data_folder, "../outside.txt");
+    let result = resolve_path_within_biyan_data_folder(&biyan_data_folder, "../outside.txt");
     assert!(result.is_err());
 
-    let _ = fs::remove_dir_all(&mita_data_folder);
+    let _ = fs::remove_dir_all(&biyan_data_folder);
 }
 
 #[test]
 fn test_resolve_jan_scoped_path_rejects_absolute_path_outside_root() {
-    let mita_data_folder = unique_test_dir("absolute-inside");
+    let biyan_data_folder = unique_test_dir("absolute-inside");
     let outside_path = unique_test_dir("absolute-outside").join("file.txt");
-    fs::create_dir_all(&mita_data_folder).unwrap();
+    fs::create_dir_all(&biyan_data_folder).unwrap();
     fs::create_dir_all(outside_path.parent().unwrap()).unwrap();
 
-    let result = resolve_path_within_mita_data_folder(
-        &mita_data_folder,
+    let result = resolve_path_within_biyan_data_folder(
+        &biyan_data_folder,
         outside_path.to_string_lossy().as_ref(),
     );
     assert!(result.is_err());
 
-    let _ = fs::remove_dir_all(&mita_data_folder);
+    let _ = fs::remove_dir_all(&biyan_data_folder);
     let _ = fs::remove_dir_all(outside_path.parent().unwrap());
 }
 

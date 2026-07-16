@@ -16,10 +16,10 @@ describe('NavMain', () => {
 
   it('shows a shortcut for New Biyan Teams', () => {
     const items = getNavMainItems(vi.fn(), vi.fn(), vi.fn(), vi.fn(), vi.fn())
-    const newMitaTeamsItem = items.find(
-      (item) => item.title === 'common:newMitaTeams'
+    const newBiyanTeamsItem = items.find(
+      (item) => item.title === 'common:newBiyanTeams'
     )
 
-    expect(newMitaTeamsItem?.shortcut).toBeTruthy()
+    expect(newBiyanTeamsItem?.shortcut).toBeTruthy()
   })
 })

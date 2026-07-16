@@ -1,402 +1,542 @@
-// scripts/download.js
-import https from 'https'
-import fs, { copyFile, mkdirSync } from 'fs'
-import os from 'os'
-import path from 'path'
-import unzipper from 'unzipper'
+import { execFile } from 'node:child_process'
+import { createHash, randomUUID } from 'node:crypto'
+import { createReadStream, createWriteStream, promises as fs } from 'node:fs'
+import https from 'node:https'
+import os from 'node:os'
+import path from 'node:path'
+import { pipeline } from 'node:stream/promises'
+import { promisify } from 'node:util'
+import { fileURLToPath } from 'node:url'
 import tar from 'tar'
-import { copySync } from 'cpx'
+import unzipper from 'unzipper'
 
-function download(url, dest) {
-  return new Promise((resolve, reject) => {
-    console.log(`Downloading ${url} to ${dest}`)
-    const file = fs.createWriteStream(dest)
-    https
-      .get(url, (response) => {
-        console.log(`Response status code: ${response.statusCode}`)
-        if (
-          response.statusCode >= 300 &&
-          response.statusCode < 400 &&
-          response.headers.location
-        ) {
-          // Handle redirect
-          const redirectURL = response.headers.location
-          console.log(`Redirecting to ${redirectURL}`)
-          download(redirectURL, dest).then(resolve, reject) // Recursive call
-          return
-        } else if (response.statusCode !== 200) {
-          reject(`Failed to get '${url}' (${response.statusCode})`)
-          return
-        }
-        response.pipe(file)
-        file.on('finish', () => {
-          file.close(resolve)
-        })
-      })
-      .on('error', (err) => {
-        fs.unlink(dest, () => reject(err.message))
-      })
-  })
-}
+const execFileAsync = promisify(execFile)
+const scriptDir = path.dirname(fileURLToPath(import.meta.url))
+const defaultProjectRoot = path.resolve(scriptDir, '..')
+const defaultManifestPath = path.join(scriptDir, 'runtime-assets.json')
+const supportedAssetKeys = [
+  'darwin-arm64',
+  'darwin-x64',
+  'linux-arm64',
+  'linux-x64',
+  'win32-x64',
+]
+const archiveCacheTasks = new Map()
+const retryableNetworkErrorCodes = new Set([
+  'EAI_AGAIN',
+  'ECONNREFUSED',
+  'ECONNRESET',
+  'EHOSTUNREACH',
+  'ENETDOWN',
+  'ENETUNREACH',
+  'EPIPE',
+  'ETIMEDOUT',
+  'ERR_STREAM_PREMATURE_CLOSE',
+])
 
-async function decompress(filePath, targetDir) {
-  console.log(`Decompressing ${filePath} to ${targetDir}`)
-  if (filePath.endsWith('.zip')) {
-    await fs
-      .createReadStream(filePath)
-      .pipe(unzipper.Extract({ path: targetDir }))
-      .promise()
-  } else if (filePath.endsWith('.tar.gz')) {
-    await tar.x({
-      file: filePath,
-      cwd: targetDir,
-    })
-  } else {
-    throw new Error(`Unsupported archive format: ${filePath}`)
+function requireObject(value, label) {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) {
+    throw new Error(`${label} must be an object`)
   }
 }
 
-async function getJson(url, headers = {}) {
-  return new Promise((resolve, reject) => {
-    const opts = new URL(url)
-    opts.headers = {
-      'User-Agent': 'jan-app',
-      'Accept': 'application/vnd.github+json',
-      ...headers,
+export function validateRuntimeManifest(manifest) {
+  requireObject(manifest, 'runtime asset manifest')
+  if (manifest.schemaVersion !== 1) {
+    throw new Error(
+      `Unsupported runtime asset manifest schema: ${manifest.schemaVersion}`
+    )
+  }
+  requireObject(manifest.tools, 'runtime asset manifest tools')
+
+  for (const toolName of ['bun', 'uv']) {
+    const tool = manifest.tools[toolName]
+    requireObject(tool, `${toolName} manifest`)
+    if (!/^\d+\.\d+\.\d+$/.test(tool.version)) {
+      throw new Error(`${toolName} version must be an exact semantic version`)
     }
-    https
-      .get(opts, (res) => {
-        if (res.statusCode && res.statusCode >= 300 && res.statusCode < 400 && res.headers.location) {
-          return getJson(res.headers.location, headers).then(resolve, reject)
-        }
-        if (res.statusCode !== 200) {
-          reject(new Error(`GET ${url} failed with status ${res.statusCode}`))
-          return
-        }
-        let data = ''
-        res.on('data', (chunk) => (data += chunk))
-        res.on('end', () => {
-          try {
-            resolve(JSON.parse(data))
-          } catch (e) {
-            reject(e)
-          }
-        })
-      })
-      .on('error', reject)
-  })
-}
+    if (!/^[\w.-]+\/[\w.-]+$/.test(tool.repository)) {
+      throw new Error(`${toolName} repository is invalid`)
+    }
+    if (!tool.releaseTag || /latest/i.test(tool.releaseTag)) {
+      throw new Error(`${toolName} release tag must be pinned`)
+    }
+    if (!tool.releaseTag.includes(tool.version)) {
+      throw new Error(
+        `${toolName} release tag must include version ${tool.version}`
+      )
+    }
+    requireObject(tool.assets, `${toolName} assets`)
 
-function matchSqliteVecAsset(assets, platform, arch) {
-  const osHints =
-    platform === 'darwin'
-      ? ['darwin', 'macos', 'apple-darwin']
-      : platform === 'win32'
-        ? ['windows', 'win', 'msvc']
-        : ['linux']
+    for (const assetKey of supportedAssetKeys) {
+      const asset = tool.assets[assetKey]
+      requireObject(asset, `${toolName} ${assetKey} asset`)
+      if (!asset.archive || path.basename(asset.archive) !== asset.archive) {
+        throw new Error(`${toolName} ${assetKey} archive name is invalid`)
+      }
+      if (!['zip', 'tar.gz'].includes(asset.format)) {
+        throw new Error(`${toolName} ${assetKey} archive format is unsupported`)
+      }
+      if (!asset.binaryPath || path.isAbsolute(asset.binaryPath)) {
+        throw new Error(`${toolName} ${assetKey} binary path is invalid`)
+      }
+      if (asset.binaryPath.split(/[\\/]/).some((segment) => segment === '..')) {
+        throw new Error(
+          `${toolName} ${assetKey} binary path escapes its archive`
+        )
+      }
+      if (!asset.target) {
+        throw new Error(`${toolName} ${assetKey} target is required`)
+      }
+      if (!/^[a-f0-9]{64}$/.test(asset.sha256)) {
+        throw new Error(`${toolName} ${assetKey} SHA-256 is invalid`)
+      }
+      if (/\/latest(?:\/|$)/i.test(asset.url)) {
+        throw new Error(
+          `${toolName} ${assetKey} must not use a latest-release URL`
+        )
+      }
 
-  const archHints = arch === 'arm64' ? ['arm64', 'aarch64'] : ['x86_64', 'x64', 'amd64']
-  const extHints = ['zip', 'tar.gz']
-
-  const lc = (s) => s.toLowerCase()
-  const candidates = assets
-    .filter((a) => a && a.browser_download_url && a.name)
-    .map((a) => ({ name: lc(a.name), url: a.browser_download_url }))
-
-  // Prefer exact OS + arch matches
-  let matches = candidates.filter((c) => osHints.some((o) => c.name.includes(o)) && archHints.some((h) => c.name.includes(h)) && extHints.some((e) => c.name.endsWith(e)))
-  if (matches.length) return matches[0].url
-  // Fallback: OS only
-  matches = candidates.filter((c) => osHints.some((o) => c.name.includes(o)) && extHints.some((e) => c.name.endsWith(e)))
-  if (matches.length) return matches[0].url
-  // Last resort: any asset with shared library extension inside is unknown here, so pick any zip/tar.gz
-  matches = candidates.filter((c) => extHints.some((e) => c.name.endsWith(e)))
-  return matches.length ? matches[0].url : null
-}
-
-async function fetchLatestSqliteVecUrl(platform, arch) {
-  try {
-    const rel = await getJson('https://api.github.com/repos/asg017/sqlite-vec/releases/latest')
-    const url = matchSqliteVecAsset(rel.assets || [], platform, arch)
-    return url
-  } catch (e) {
-    console.log('Failed to query sqlite-vec latest release:', e.message)
-    return null
+      const expectedUrl = `https://github.com/${tool.repository}/releases/download/${tool.releaseTag}/${asset.archive}`
+      if (asset.url !== expectedUrl) {
+        throw new Error(
+          `${toolName} ${assetKey} URL must match the pinned official release`
+        )
+      }
+      if (assetKey.startsWith('darwin-') && !asset.lipoArch) {
+        throw new Error(`${toolName} ${assetKey} lipo architecture is required`)
+      }
+    }
   }
+
+  return manifest
 }
 
-function getPlatformArch() {
-  const platform = os.platform() // 'darwin', 'linux', 'win32'
-  const arch = os.arch() // 'x64', 'arm64', etc.
+export async function loadRuntimeManifest(manifestPath = defaultManifestPath) {
+  const contents = await fs.readFile(manifestPath, 'utf8')
+  return validateRuntimeManifest(JSON.parse(contents))
+}
 
-  let bunPlatform, uvPlatform
+function normalizeHostArch(platform, arch) {
+  if (platform === 'win32') {
+    // Preserve the previous Windows behavior until native arm64 sidecars are shipped.
+    return 'x64'
+  }
+  if (arch === 'x64' || arch === 'arm64') {
+    return arch
+  }
+  throw new Error(`Unsupported architecture for ${platform}: ${arch}`)
+}
 
-  if (platform === 'darwin') {
-    bunPlatform = arch === 'arm64' ? 'darwin-aarch64' : 'darwin-x64'
-    uvPlatform =
-      arch === 'arm64' ? 'aarch64-apple-darwin' : 'x86_64-apple-darwin'
-  } else if (platform === 'linux') {
-    bunPlatform = arch === 'arm64' ? 'linux-aarch64' : 'linux-x64'
-    uvPlatform =
-      arch === 'arm64'
-        ? 'aarch64-unknown-linux-gnu'
-        : 'x86_64-unknown-linux-gnu'
-  } else if (platform === 'win32') {
-    bunPlatform = 'windows-x64' // Bun has limited Windows support
-    uvPlatform = 'x86_64-pc-windows-msvc'
-  } else {
+export function buildRuntimePlan(manifest, platform, arch) {
+  validateRuntimeManifest(manifest)
+  if (!['darwin', 'linux', 'win32'].includes(platform)) {
     throw new Error(`Unsupported platform: ${platform}`)
   }
 
-  return { bunPlatform, uvPlatform }
+  const assetKeys =
+    platform === 'darwin'
+      ? ['darwin-arm64', 'darwin-x64']
+      : [`${platform}-${normalizeHostArch(platform, arch)}`]
+
+  return {
+    platform,
+    arch,
+    tools: Object.entries(manifest.tools).map(([name, tool]) => {
+      const extension = platform === 'win32' ? '.exe' : ''
+      return {
+        name,
+        version: tool.version,
+        defaultOutputName: `${name}${extension}`,
+        universalOutputName:
+          platform === 'darwin' ? `${name}-universal-apple-darwin` : null,
+        assets: assetKeys.map((assetKey) => {
+          const asset = tool.assets[assetKey]
+          return {
+            ...asset,
+            key: assetKey,
+            outputName: `${name}-${asset.target}${extension}`,
+          }
+        }),
+      }
+    }),
+  }
 }
 
-async function main() {
+export async function sha256File(filePath) {
+  const hash = createHash('sha256')
+  await pipeline(createReadStream(filePath), hash)
+  return hash.digest('hex')
+}
+
+export async function assertFileSha256(filePath, expectedSha256) {
+  const actualSha256 = await sha256File(filePath)
+  if (actualSha256 !== expectedSha256) {
+    throw new Error(
+      `SHA-256 mismatch for ${filePath}: expected ${expectedSha256}, got ${actualSha256}`
+    )
+  }
+}
+
+export async function downloadUrlToFile(
+  url,
+  destination,
+  { httpsGet = https.get, maxRedirects = 5 } = {}
+) {
+  async function request(currentUrl, redirectsRemaining) {
+    await new Promise((resolve, reject) => {
+      const requestHandle = httpsGet(currentUrl, (response) => {
+        const statusCode = response.statusCode ?? 0
+        const location = response.headers?.location
+
+        if (statusCode >= 300 && statusCode < 400 && location) {
+          response.resume()
+          if (redirectsRemaining === 0) {
+            reject(new Error(`Too many redirects while downloading ${url}`))
+            return
+          }
+          let redirectUrl
+          try {
+            redirectUrl = new URL(location, currentUrl).toString()
+          } catch (error) {
+            reject(
+              new Error(`Invalid redirect URL while downloading ${url}`, {
+                cause: error,
+              })
+            )
+            return
+          }
+          request(redirectUrl, redirectsRemaining - 1).then(resolve, reject)
+          return
+        }
+
+        if (statusCode !== 200) {
+          response.resume()
+          const error = new Error(
+            `Failed to download ${currentUrl} (HTTP ${statusCode})`
+          )
+          error.statusCode = statusCode
+          reject(error)
+          return
+        }
+
+        pipeline(
+          response,
+          createWriteStream(destination, { flags: 'wx' })
+        ).then(resolve, reject)
+      })
+      requestHandle.on('error', reject)
+    })
+  }
+
+  await request(url, maxRedirects)
+}
+
+function isRetryableDownloadError(error) {
+  if (retryableNetworkErrorCodes.has(error?.code)) return true
+  const statusCode = Number(error?.statusCode)
+  return (
+    statusCode === 408 ||
+    statusCode === 425 ||
+    statusCode === 429 ||
+    (statusCode >= 500 && statusCode <= 599)
+  )
+}
+
+async function downloadWithRetry(
+  asset,
+  partialPath,
+  { downloadFile, maxDownloadAttempts, retryDelay, removePartial = fs.rm }
+) {
+  for (let attempt = 1; attempt <= maxDownloadAttempts; attempt += 1) {
+    try {
+      await downloadFile(asset.url, partialPath)
+      return
+    } catch (error) {
+      await removePartial(partialPath, { force: true })
+      if (attempt === maxDownloadAttempts || !isRetryableDownloadError(error)) {
+        throw error
+      }
+      const delayMs = 500 * 2 ** (attempt - 1)
+      console.warn(
+        `Transient download failure for ${asset.archive} (attempt ${attempt}/${maxDownloadAttempts}): ${error.message}. Retrying in ${delayMs}ms.`
+      )
+      await retryDelay(delayMs)
+    }
+  }
+}
+
+async function populateCachedArchive(
+  asset,
+  cacheDir,
+  {
+    downloadFile = downloadUrlToFile,
+    maxDownloadAttempts = 3,
+    retryDelay = (delayMs) =>
+      new Promise((resolvePromise) => setTimeout(resolvePromise, delayMs)),
+    uniqueId = randomUUID,
+  } = {}
+) {
+  const cachePath = path.join(cacheDir, asset.archive)
+
+  try {
+    await fs.access(cachePath)
+    await assertFileSha256(cachePath, asset.sha256)
+    return cachePath
+  } catch (error) {
+    if (error.code !== 'ENOENT') {
+      throw error
+    }
+  }
+
+  const partialPath = `${cachePath}.${process.pid}.${uniqueId()}.part`
+  try {
+    console.log(`Downloading ${asset.url}`)
+    await downloadWithRetry(asset, partialPath, {
+      downloadFile,
+      maxDownloadAttempts,
+      retryDelay,
+    })
+    await assertFileSha256(partialPath, asset.sha256)
+    try {
+      await fs.rename(partialPath, cachePath)
+    } catch (error) {
+      if (!['EEXIST', 'EPERM', 'EACCES'].includes(error.code)) {
+        throw error
+      }
+      // Another process may have won the same atomic cache write on Windows.
+      // Accept it only after verifying it is byte-for-byte the pinned asset.
+      await assertFileSha256(cachePath, asset.sha256)
+    }
+    await assertFileSha256(cachePath, asset.sha256)
+    return cachePath
+  } finally {
+    await fs.rm(partialPath, { force: true })
+  }
+}
+
+export async function ensureCachedArchive(
+  asset,
+  cacheDir,
+  {
+    downloadFile = downloadUrlToFile,
+    maxDownloadAttempts = 3,
+    retryDelay,
+    uniqueId = randomUUID,
+  } = {}
+) {
+  await fs.mkdir(cacheDir, { recursive: true })
+  const cachePath = path.resolve(cacheDir, asset.archive)
+  const cacheTaskKey = `${cachePath}\0${asset.sha256}`
+  let cacheTask = archiveCacheTasks.get(cacheTaskKey)
+  if (!cacheTask) {
+    cacheTask = populateCachedArchive(asset, cacheDir, {
+      downloadFile,
+      maxDownloadAttempts,
+      retryDelay,
+      uniqueId,
+    })
+    archiveCacheTasks.set(cacheTaskKey, cacheTask)
+  }
+
+  try {
+    return await cacheTask
+  } finally {
+    if (archiveCacheTasks.get(cacheTaskKey) === cacheTask) {
+      archiveCacheTasks.delete(cacheTaskKey)
+    }
+  }
+}
+
+export async function extractArchive(archivePath, targetDir, format) {
+  await fs.rm(targetDir, { recursive: true, force: true })
+  await fs.mkdir(targetDir, { recursive: true })
+
+  if (format === 'zip') {
+    await createReadStream(archivePath)
+      .pipe(unzipper.Extract({ path: targetDir }))
+      .promise()
+    return
+  }
+  if (format === 'tar.gz') {
+    await tar.x({ file: archivePath, cwd: targetDir })
+    return
+  }
+  throw new Error(`Unsupported archive format: ${format}`)
+}
+
+async function replaceFileAtomically(sourcePath, destinationPath) {
+  try {
+    await fs.rename(sourcePath, destinationPath)
+  } catch (error) {
+    if (!['EEXIST', 'EPERM'].includes(error.code)) {
+      throw error
+    }
+    await fs.rm(destinationPath, { force: true })
+    await fs.rename(sourcePath, destinationPath)
+  }
+}
+
+export async function installExecutable(
+  sourcePath,
+  destinationPath,
+  { uniqueId = randomUUID } = {}
+) {
+  const sourceStat = await fs.stat(sourcePath)
+  if (!sourceStat.isFile()) {
+    throw new Error(`Runtime binary is not a file: ${sourcePath}`)
+  }
+
+  await fs.mkdir(path.dirname(destinationPath), { recursive: true })
+  const temporaryPath = `${destinationPath}.${process.pid}.${uniqueId()}.tmp`
+  try {
+    await fs.copyFile(sourcePath, temporaryPath)
+    await fs.chmod(temporaryPath, 0o755)
+    await replaceFileAtomically(temporaryPath, destinationPath)
+  } finally {
+    await fs.rm(temporaryPath, { force: true })
+  }
+}
+
+async function runCommand(command, args) {
+  return execFileAsync(command, args, { encoding: 'utf8' })
+}
+
+function parseLipoArchitectures(stdout) {
+  return new Set(stdout.trim().split(/\s+/).filter(Boolean))
+}
+
+export async function assertDarwinArchitectures(
+  binaryPath,
+  expectedArchitectures,
+  { execute = runCommand } = {}
+) {
+  const { stdout } = await execute('lipo', ['-archs', binaryPath])
+  const actual = parseLipoArchitectures(stdout)
+  const expected = new Set(expectedArchitectures)
+  if (
+    actual.size !== expected.size ||
+    [...expected].some((architecture) => !actual.has(architecture))
+  ) {
+    throw new Error(
+      `Unexpected architectures for ${binaryPath}: expected ${[
+        ...expected,
+      ].join(', ')}, got ${[...actual].join(', ') || '(none)'}`
+    )
+  }
+}
+
+export async function mergeDarwinUniversal(
+  thinBinaryPaths,
+  destinationPath,
+  { execute = runCommand, uniqueId = randomUUID } = {}
+) {
+  const temporaryPath = `${destinationPath}.${process.pid}.${uniqueId()}.tmp`
+  try {
+    await execute('lipo', [
+      '-create',
+      ...thinBinaryPaths,
+      '-output',
+      temporaryPath,
+    ])
+    await fs.chmod(temporaryPath, 0o755)
+    await assertDarwinArchitectures(temporaryPath, ['arm64', 'x86_64'], {
+      execute,
+    })
+    await replaceFileAtomically(temporaryPath, destinationPath)
+  } finally {
+    await fs.rm(temporaryPath, { force: true })
+  }
+}
+
+export async function provisionRuntimeAssets(
+  plan,
+  {
+    projectRoot = defaultProjectRoot,
+    cacheRoot = path.join(projectRoot, 'scripts/dist/runtime-cache'),
+    extractionRoot = path.join(projectRoot, 'scripts/dist/runtime-extract'),
+    binDir = path.join(projectRoot, 'src-tauri/resources/bin'),
+    ensureArchive = ensureCachedArchive,
+    downloadFile = downloadUrlToFile,
+    extract = extractArchive,
+    install = installExecutable,
+    assertArchitectures = assertDarwinArchitectures,
+    mergeUniversal = mergeDarwinUniversal,
+    remove = fs.rm,
+    uniqueId = randomUUID,
+  } = {}
+) {
+  await fs.mkdir(binDir, { recursive: true })
+  await fs.mkdir(extractionRoot, { recursive: true })
+
+  for (const tool of plan.tools) {
+    const thinBinaryPaths = []
+    for (const asset of tool.assets) {
+      const cacheDir = path.join(cacheRoot, tool.name, tool.version)
+      const archivePath = await ensureArchive(asset, cacheDir, {
+        downloadFile,
+        uniqueId,
+      })
+      const extractionDir = path.join(
+        extractionRoot,
+        `${tool.name}-${asset.key}-${uniqueId()}`
+      )
+
+      try {
+        await extract(archivePath, extractionDir, asset.format)
+        const extractedBinaryPath = path.join(extractionDir, asset.binaryPath)
+        const installedBinaryPath = path.join(binDir, asset.outputName)
+        await install(extractedBinaryPath, installedBinaryPath, { uniqueId })
+        if (plan.platform === 'darwin') {
+          await assertArchitectures(installedBinaryPath, [asset.lipoArch])
+        }
+        thinBinaryPaths.push(installedBinaryPath)
+      } finally {
+        await remove(extractionDir, { recursive: true, force: true })
+      }
+    }
+
+    const defaultOutputPath = path.join(binDir, tool.defaultOutputName)
+    if (plan.platform === 'darwin') {
+      const universalOutputPath = path.join(binDir, tool.universalOutputName)
+      await mergeUniversal(thinBinaryPaths, universalOutputPath)
+      await assertArchitectures(universalOutputPath, ['arm64', 'x86_64'])
+      await install(universalOutputPath, defaultOutputPath, { uniqueId })
+      await assertArchitectures(defaultOutputPath, ['arm64', 'x86_64'])
+    } else {
+      await install(thinBinaryPaths[0], defaultOutputPath, { uniqueId })
+    }
+  }
+}
+
+export async function main({
+  platform = os.platform(),
+  arch = os.arch(),
+  projectRoot = defaultProjectRoot,
+  manifestPath = defaultManifestPath,
+} = {}) {
   if (process.env.SKIP_BINARIES) {
     console.log('Skipping binaries download.')
-    process.exit(0)
-  }
-  console.log('Starting main function')
-  const platform = os.platform()
-  const { bunPlatform, uvPlatform } = getPlatformArch()
-  console.log(`bunPlatform: ${bunPlatform}, uvPlatform: ${uvPlatform}`)
-
-  const binDir = 'src-tauri/resources/bin'
-  const tempBinDir = 'scripts/dist'
-  const bunPath = `${tempBinDir}/bun-${bunPlatform}.zip`
-  let uvPath = `${tempBinDir}/uv-${uvPlatform}.tar.gz`
-  if (platform === 'win32') {
-    uvPath = `${tempBinDir}/uv-${uvPlatform}.zip`
-  }
-  try {
-    mkdirSync('scripts/dist')
-  } catch (err) {
-    // Expect EEXIST error if the directory already exists
+    return
   }
 
-  // Adjust these URLs based on latest releases
-  const bunUrl = `https://github.com/oven-sh/bun/releases/latest/download/bun-${bunPlatform}.zip`
-
-  let uvUrl = `https://github.com/astral-sh/uv/releases/latest/download/uv-${uvPlatform}.tar.gz`
-  if (platform === 'win32') {
-    uvUrl = `https://github.com/astral-sh/uv/releases/latest/download/uv-${uvPlatform}.zip`
-  }
-
-  console.log(`Downloading Bun for ${bunPlatform}...`)
-  const bunSaveDir = path.join(tempBinDir, `bun-${bunPlatform}.zip`)
-  if (!fs.existsSync(bunSaveDir)) {
-    await download(bunUrl, bunSaveDir)
-    await decompress(bunPath, tempBinDir)
-  }
-  try {
-    copySync(
-      path.join(tempBinDir, `bun-${bunPlatform}`, 'bun'),
-      path.join(binDir)
-    )
-    fs.chmod(path.join(binDir, 'bun'), 0o755, (err) => {
-      if (err) {
-        console.log('Add execution permission failed!', err)
-      }
-    })
-    if (platform === 'darwin') {
-      copyFile(
-        path.join(binDir, 'bun'),
-        path.join(binDir, 'bun-x86_64-apple-darwin'),
-        (err) => {
-          if (err) {
-            console.log('Error Found:', err)
-          }
-        }
-      )
-      copyFile(
-        path.join(binDir, 'bun'),
-        path.join(binDir, 'bun-aarch64-apple-darwin'),
-        (err) => {
-          if (err) {
-            console.log('Error Found:', err)
-          }
-        }
-      )
-      copyFile(
-        path.join(binDir, 'bun'),
-        path.join(binDir, 'bun-universal-apple-darwin'),
-        (err) => {
-          if (err) {
-            console.log('Error Found:', err)
-          }
-        }
-      )
-    } else if (platform === 'linux') {
-      copyFile(
-        path.join(binDir, 'bun'),
-        path.join(binDir, 'bun-x86_64-unknown-linux-gnu'),
-        (err) => {
-          if (err) {
-            console.log('Error Found:', err)
-          }
-        }
-      )
-    }
-  } catch (err) {
-    // Expect EEXIST error
-  }
-  try {
-    copySync(
-      path.join(tempBinDir, `bun-${bunPlatform}`, 'bun.exe'),
-      path.join(binDir)
-    )
-    if (platform === 'win32') {
-      copyFile(
-        path.join(binDir, 'bun.exe'),
-        path.join(binDir, 'bun-x86_64-pc-windows-msvc.exe'),
-        (err) => {
-          if (err) {
-            console.log('Error Found:', err)
-          }
-        }
-      )
-    }
-  } catch (err) {
-    // Expect EEXIST error
-  }
-  console.log('Bun downloaded.')
-
-  console.log(`Downloading UV for ${uvPlatform}...`)
-  const uvExt = platform === 'win32' ? `zip` : `tar.gz`
-  const uvSaveDir = path.join(tempBinDir, `uv-${uvPlatform}.${uvExt}`)
-  if (!fs.existsSync(uvSaveDir)) {
-    await download(uvUrl, uvSaveDir)
-    await decompress(uvPath, tempBinDir)
-  }
-  try {
-    copySync(path.join(tempBinDir, `uv-${uvPlatform}`, 'uv'), path.join(binDir))
-    fs.chmod(path.join(binDir, 'uv'), 0o755, (err) => {
-      if (err) {
-        console.log('Add execution permission failed!', err)
-      }
-    })
-    if (platform === 'darwin') {
-      copyFile(
-        path.join(binDir, 'uv'),
-        path.join(binDir, 'uv-x86_64-apple-darwin'),
-        (err) => {
-          if (err) {
-            console.log('Error Found:', err)
-          }
-        }
-      )
-      copyFile(
-        path.join(binDir, 'uv'),
-        path.join(binDir, 'uv-aarch64-apple-darwin'),
-        (err) => {
-          if (err) {
-            console.log('Error Found:', err)
-          }
-        }
-      )
-      copyFile(
-        path.join(binDir, 'uv'),
-        path.join(binDir, 'uv-universal-apple-darwin'),
-        (err) => {
-          if (err) {
-            console.log('Error Found:', err)
-          }
-        }
-      )
-    } else if (platform === 'linux') {
-      copyFile(
-        path.join(binDir, 'uv'),
-        path.join(binDir, 'uv-x86_64-unknown-linux-gnu'),
-        (err) => {
-          if (err) {
-            console.log('Error Found:', err)
-          }
-        }
-      )
-    }
-  } catch (err) {
-    // Expect EEXIST error
-  }
-  try {
-    copySync(path.join(tempBinDir, 'uv.exe'), path.join(binDir))
-    if (platform === 'win32') {
-      copyFile(
-        path.join(binDir, 'uv.exe'),
-        path.join(binDir, 'uv-x86_64-pc-windows-msvc.exe'),
-        (err) => {
-          if (err) {
-            console.log('Error Found:', err)
-          }
-        }
-      )
-    }
-  } catch (err) {
-    // Expect EEXIST error
-  }
-  console.log('UV downloaded.')
-
-  // ----- sqlite-vec (optional, ANN acceleration) -----
-  try {
-    const binDir = 'src-tauri/resources/bin'
-    const platform = os.platform()
-    const ext = platform === 'darwin' ? 'dylib' : platform === 'win32' ? 'dll' : 'so'
-    const targetLibPath = path.join(binDir, `sqlite-vec.${ext}`)
-
-    if (fs.existsSync(targetLibPath)) {
-      console.log(`sqlite-vec already present at ${targetLibPath}`)
-    } else {
-      let sqlvecUrl = await fetchLatestSqliteVecUrl(platform, os.arch())
-      // Allow override via env if needed
-      if ((process.env.SQLVEC_URL || process.env.JAN_SQLITE_VEC_URL) && !sqlvecUrl) {
-        sqlvecUrl = process.env.SQLVEC_URL || process.env.JAN_SQLITE_VEC_URL
-      }
-      if (!sqlvecUrl) {
-        console.log('Could not determine sqlite-vec download URL; skipping (linear fallback will be used).')
-      } else {
-        console.log(`Downloading sqlite-vec from ${sqlvecUrl}...`)
-        const sqlvecArchive = path.join(tempBinDir, `sqlite-vec-download`)
-        const guessedExt = sqlvecUrl.endsWith('.zip') ? '.zip' : sqlvecUrl.endsWith('.tar.gz') ? '.tar.gz' : ''
-        const archivePath = sqlvecArchive + guessedExt
-        await download(sqlvecUrl, archivePath)
-        if (!guessedExt) {
-          console.log('Unknown archive type for sqlite-vec; expecting .zip or .tar.gz')
-        } else {
-          await decompress(archivePath, tempBinDir)
-          // Try to find a shared library in the extracted files
-          const candidates = []
-          function walk(dir) {
-            for (const entry of fs.readdirSync(dir)) {
-              const full = path.join(dir, entry)
-              const stat = fs.statSync(full)
-              if (stat.isDirectory()) walk(full)
-              else if (full.endsWith(`.${ext}`)) candidates.push(full)
-            }
-          }
-          walk(tempBinDir)
-          if (candidates.length === 0) {
-            console.log('No sqlite-vec shared library found in archive; skipping copy.')
-          } else {
-            // Pick the first match and copy/rename to sqlite-vec.<ext>
-            const libSrc = candidates[0]
-            // Ensure we copy the FILE, not a directory (fs-extra copySync can copy dirs)
-            if (fs.statSync(libSrc).isFile()) {
-              fs.copyFileSync(libSrc, targetLibPath)
-              console.log(`sqlite-vec installed at ${targetLibPath}`)
-            } else {
-              console.log(`Found non-file at ${libSrc}; skipping.`)
-            }
-          }
-        }
-      }
-    }
-  } catch (err) {
-    console.log('sqlite-vec download step failed (non-fatal):', err)
-  }
-
-  console.log('Downloads completed.')
+  const manifest = await loadRuntimeManifest(manifestPath)
+  const plan = buildRuntimePlan(manifest, platform, arch)
+  console.log(
+    `Preparing pinned runtime assets for ${platform}/${arch}: ${plan.tools
+      .map((tool) => `${tool.name}@${tool.version}`)
+      .join(', ')}`
+  )
+  await provisionRuntimeAssets(plan, { projectRoot })
+  console.log('Runtime assets are ready.')
 }
 
-main().catch((err) => {
-  console.error('Error:', err)
-  process.exit(1)
-})
+if (
+  process.argv[1] &&
+  path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)
+) {
+  main().catch((error) => {
+    console.error('Runtime asset preparation failed:', error)
+    process.exitCode = 1
+  })
+}

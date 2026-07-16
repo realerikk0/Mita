@@ -1,0 +1,1 @@
+pub const MAX_DOCUMENT_FILE_SIZE: u64 = 20 * 1024 * 1024;

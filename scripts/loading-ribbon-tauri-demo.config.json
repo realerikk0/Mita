@@ -7,8 +7,7 @@
     "externalBin": [],
     "resources": {
       "resources/LICENSE": "resources/LICENSE",
-      "resources/bin/mita-web-research-mcp.mjs": "resources/bin/mita-web-research-mcp.mjs",
-      "resources/embedding-models": "resources/embedding-models",
+      "resources/bin/biyan-web-research-mcp.mjs": "resources/bin/biyan-web-research-mcp.mjs",
       "resources/ms-playwright": "resources/ms-playwright"
     }
   }

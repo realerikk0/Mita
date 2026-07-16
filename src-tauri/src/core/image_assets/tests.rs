@@ -3,7 +3,7 @@ use super::commands::{
     update_image_asset_project,
 };
 use super::models::{ImageAssetProject, ImportImageAssetRequest, SaveImageAssetRequest};
-use crate::core::app::commands::get_mita_data_folder_path;
+use crate::core::app::commands::get_biyan_data_folder_path;
 use std::fs;
 use tauri::test::mock_app;
 
@@ -46,7 +46,7 @@ fn saves_lists_and_deletes_image_asset_under_data_folder() {
     let _ = delete_image_asset(app.handle().clone(), id.to_string());
 
     let record = save_image_asset(app.handle().clone(), test_asset(id)).unwrap();
-    let data_folder = get_mita_data_folder_path(app.handle().clone());
+    let data_folder = get_biyan_data_folder_path(app.handle().clone());
 
     assert!(record
         .path
@@ -112,14 +112,20 @@ fn updates_image_asset_project_metadata() {
     };
     let updated =
         update_image_asset_project(app.handle().clone(), id.to_string(), Some(project)).unwrap();
-    assert_eq!(updated.project.as_ref().map(|project| project.id.as_str()), Some("project-1"));
+    assert_eq!(
+        updated.project.as_ref().map(|project| project.id.as_str()),
+        Some("project-1")
+    );
 
     let assets = list_image_assets(app.handle().clone()).unwrap();
     let listed = assets
         .iter()
         .find(|asset| asset.id == id)
         .expect("saved asset is listed");
-    assert_eq!(listed.project.as_ref().map(|project| project.name.as_str()), Some("Client Work"));
+    assert_eq!(
+        listed.project.as_ref().map(|project| project.name.as_str()),
+        Some("Client Work")
+    );
 
     let cleared = update_image_asset_project(app.handle().clone(), id.to_string(), None).unwrap();
     assert!(cleared.project.is_none());
@@ -157,7 +163,7 @@ fn imports_reference_asset_under_data_folder() {
         test_import_asset(id, source_path.to_string_lossy().to_string()),
     )
     .unwrap();
-    let data_folder = get_mita_data_folder_path(app.handle().clone());
+    let data_folder = get_biyan_data_folder_path(app.handle().clone());
 
     assert!(record
         .path

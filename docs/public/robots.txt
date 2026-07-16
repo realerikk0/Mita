@@ -1,9 +1,5 @@
-# *
 User-agent: *
 Allow: /
 
-# Host
-Host: https://jan.ai/
-
-# Sitemaps
-Sitemap: https://jan.ai/sitemap.xml
+Host: https://docs.biyan.ai/
+Sitemap: https://docs.biyan.ai/sitemap.xml

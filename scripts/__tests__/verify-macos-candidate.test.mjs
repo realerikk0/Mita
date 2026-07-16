@@ -1,0 +1,272 @@
+import assert from 'node:assert/strict'
+import fs from 'node:fs'
+import os from 'node:os'
+import path from 'node:path'
+import test from 'node:test'
+
+import {
+  EXPECTED_PREINSTALL_PACKAGES,
+  parseMacOSCandidateArgs,
+  verifyMacOSCandidate,
+} from '../verify-macos-candidate.mjs'
+
+const repoRoot = path.resolve(import.meta.dirname, '../..')
+const packageJson = JSON.parse(
+  fs.readFileSync(path.join(repoRoot, 'package.json'), 'utf8')
+)
+const makefile = fs.readFileSync(path.join(repoRoot, 'Makefile'), 'utf8')
+const version = '0.6.636'
+
+function writeFile(file, content = '') {
+  fs.mkdirSync(path.dirname(file), { recursive: true })
+  fs.writeFileSync(file, content)
+}
+
+function writeMachO(file) {
+  writeFile(file, Buffer.from([0xcf, 0xfa, 0xed, 0xfe, 0, 0, 0, 0]))
+}
+
+function createFixture(t) {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'biyan-macos-candidate-'))
+  t.after(() => fs.rmSync(root, { force: true, recursive: true }))
+
+  const sourceRoot = path.join(root, 'repo')
+  const appPath = path.join(root, 'Biyan.app')
+  const dmgPath = path.join(root, `Biyan_${version}_universal.dmg`)
+  const resources = path.join(appPath, 'Contents', 'Resources', 'resources')
+  writeFile(path.join(sourceRoot, 'LICENSE'), Buffer.from('license\0bytes'))
+  writeFile(path.join(sourceRoot, 'NOTICE'), Buffer.from('notice\nbytes'))
+  writeFile(path.join(resources, 'LICENSE'), Buffer.from('license\0bytes'))
+  writeFile(path.join(resources, 'NOTICE'), Buffer.from('notice\nbytes'))
+  for (const archive of EXPECTED_PREINSTALL_PACKAGES) {
+    writeFile(path.join(resources, 'pre-install', archive), archive)
+  }
+  writeFile(path.join(appPath, 'Contents', 'Info.plist'), 'fixture plist')
+  writeMachO(path.join(appPath, 'Contents', 'MacOS', 'Biyan'))
+  writeMachO(path.join(resources, 'native', 'addon.node'))
+  writeMachO(
+    path.join(
+      resources,
+      'ms-playwright',
+      'chromium_headless_shell-1217',
+      'chrome-headless-shell-mac-arm64',
+      'chrome-headless-shell'
+    )
+  )
+  writeMachO(
+    path.join(
+      resources,
+      'ms-playwright',
+      'chromium_headless_shell-1217',
+      'chrome-headless-shell-mac-x64',
+      'chrome-headless-shell'
+    )
+  )
+  writeMachO(path.join(resources, 'ms-playwright', 'ffmpeg-1011', 'ffmpeg-mac'))
+  writeFile(
+    path.join(resources, 'opaque.bin'),
+    Buffer.from('Mita and llamacpp-extension strings are not path payloads')
+  )
+  writeFile(path.join(resources, 'drag-helper.js'), 'export default true')
+  writeFile(dmgPath, 'fixture dmg')
+
+  return { appPath, dmgPath, resources, sourceRoot }
+}
+
+function createRunner(appPath, overrides = {}) {
+  const calls = []
+  const plist = {
+    CFBundleDisplayName: 'Biyan',
+    CFBundleExecutable: 'Biyan',
+    CFBundleIdentifier: 'uk.jingxing.mita',
+    CFBundleName: 'Biyan',
+    CFBundleShortVersionString: version,
+    CFBundleVersion: version,
+    LSMinimumSystemVersion: '12.0',
+    ...overrides.plist,
+  }
+  const runCommand = (command, args) => {
+    calls.push([command, args])
+    if (command === 'plutil') return JSON.stringify(plist)
+    if (command === 'lipo') {
+      const relative = path.relative(appPath, args.at(-1))
+      if (overrides.architectures?.[relative]) {
+        return overrides.architectures[relative].join(' ')
+      }
+      if (relative.includes('chrome-headless-shell-mac-arm64')) return 'arm64'
+      if (relative.includes('chrome-headless-shell-mac-x64')) return 'x86_64'
+      return 'x86_64 arm64'
+    }
+    if (command === 'codesign' && args.includes('--display')) {
+      return [
+        'Authority=Developer ID Application: LILYN DYNAMICS (7NZP53ZJ4D)',
+        'TeamIdentifier=7NZP53ZJ4D',
+      ].join('\n')
+    }
+    return ''
+  }
+  return { calls, runCommand }
+}
+
+function verifyFixture(fixture, runner) {
+  return verifyMacOSCandidate(
+    {
+      appPath: fixture.appPath,
+      dmgPath: fixture.dmgPath,
+      repoRoot: fixture.sourceRoot,
+      version,
+    },
+    { runCommand: runner.runCommand }
+  )
+}
+
+test('verifies a signed universal app and DMG using injectable macOS commands', (t) => {
+  const fixture = createFixture(t)
+  const runner = createRunner(fixture.appPath)
+  const result = verifyFixture(fixture, runner)
+
+  assert.equal(result.machOCount, 5)
+  assert.deepEqual(result.preinstallPackages, EXPECTED_PREINSTALL_PACKAGES)
+  assert.ok(
+    runner.calls.some(
+      ([command, args]) =>
+        command === 'codesign' &&
+        args.join(' ') ===
+          `--verify --deep --strict --verbose=2 ${fixture.appPath}`
+    )
+  )
+  assert.ok(
+    runner.calls.some(
+      ([command, args]) =>
+        command === 'codesign' &&
+        args.join(' ') === `--display --verbose=4 ${fixture.appPath}`
+    )
+  )
+  assert.ok(
+    runner.calls.some(
+      ([command, args]) =>
+        command === 'hdiutil' && args.join(' ') === `verify ${fixture.dmgPath}`
+    )
+  )
+})
+
+test('rejects legal-file drift and unexpected pre-install packages', (t) => {
+  const legalFixture = createFixture(t)
+  fs.appendFileSync(path.join(legalFixture.resources, 'NOTICE'), 'drift')
+  assert.throws(
+    () => verifyFixture(legalFixture, createRunner(legalFixture.appPath)),
+    /NOTICE does not byte-match/
+  )
+
+  const packageFixture = createFixture(t)
+  writeFile(
+    path.join(packageFixture.resources, 'pre-install', 'unexpected.tgz'),
+    'unexpected'
+  )
+  assert.throws(
+    () => verifyFixture(packageFixture, createRunner(packageFixture.appPath)),
+    /pre-install packages differ/
+  )
+})
+
+test('rejects retired payload paths without scanning arbitrary binary contents', (t) => {
+  const runtimeFixture = createFixture(t)
+  writeFile(
+    path.join(runtimeFixture.resources, 'native', 'llamacpp-extension.dylib'),
+    'not a Mach-O'
+  )
+  assert.throws(
+    () => verifyFixture(runtimeFixture, createRunner(runtimeFixture.appPath)),
+    /Retired local runtime/
+  )
+
+  const productFixture = createFixture(t)
+  writeFile(path.join(productFixture.resources, 'Mita-helper.js'), 'retired')
+  assert.throws(
+    () => verifyFixture(productFixture, createRunner(productFixture.appPath)),
+    /Retired product name/
+  )
+})
+
+test('rejects wrong Info.plist identity and thin unknown Mach-O files', (t) => {
+  const identityFixture = createFixture(t)
+  assert.throws(
+    () =>
+      verifyFixture(
+        identityFixture,
+        createRunner(identityFixture.appPath, {
+          plist: { CFBundleIdentifier: 'com.example.wrong' },
+        })
+      ),
+    /CFBundleIdentifier/
+  )
+
+  const architectureFixture = createFixture(t)
+  const mainExecutable = path.join('Contents', 'MacOS', 'Biyan')
+  assert.throws(
+    () =>
+      verifyFixture(
+        architectureFixture,
+        createRunner(architectureFixture.appPath, {
+          architectures: { [mainExecutable]: ['arm64'] },
+        })
+      ),
+    /expected \[arm64, x86_64\]/
+  )
+})
+
+test('rejects an app signed by the wrong Developer ID team', (t) => {
+  const fixture = createFixture(t)
+  const runner = createRunner(fixture.appPath)
+  const originalRunCommand = runner.runCommand
+  runner.runCommand = (command, args) => {
+    const result = originalRunCommand(command, args)
+    if (command === 'codesign' && args.includes('--display')) {
+      return 'Authority=Apple Development: Example\nTeamIdentifier=WRONGTEAM'
+    }
+    return result
+  }
+
+  assert.throws(
+    () => verifyFixture(fixture, runner),
+    /not signed by Developer ID/
+  )
+})
+
+test('CLI arguments and build wiring require explicit candidate paths', () => {
+  assert.deepEqual(
+    parseMacOSCandidateArgs([
+      '--app',
+      '/tmp/Biyan.app',
+      '--dmg',
+      `/tmp/Biyan_${version}_universal.dmg`,
+      '--version',
+      version,
+    ]),
+    {
+      app: '/tmp/Biyan.app',
+      dmg: `/tmp/Biyan_${version}_universal.dmg`,
+      version,
+    }
+  )
+  assert.throws(
+    () => parseMacOSCandidateArgs(['--app', '/tmp/Biyan.app']),
+    /Missing required argument/
+  )
+  assert.equal(
+    packageJson.scripts['verify:macos-candidate'],
+    'node ./scripts/verify-macos-candidate.mjs'
+  )
+  assert.match(
+    makefile,
+    /node --test \.\/scripts\/__tests__\/verify-macos-candidate\.test\.mjs/
+  )
+  assert.match(
+    makefile,
+    /verify-macos-candidate:[\s\S]*?yarn verify:macos-candidate --app "\$\(APP\)" --dmg "\$\(DMG\)" --version "\$\(VERSION\)"/
+  )
+  const makeTestBody = makefile.match(
+    /^test:[\s\S]*?(?=^# Build Biyan CLI)/m
+  )?.[0]
+  assert.doesNotMatch(makeTestBody, /yarn verify:macos-candidate/)
+})

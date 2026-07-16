@@ -1,0 +1,78 @@
+name: Biyan Updater Health Gate
+
+on:
+  repository_dispatch:
+    types: [biyan-updater-health]
+  workflow_dispatch:
+    inputs:
+      expected_current:
+        description: "Logical current version used for policy CAS"
+        required: true
+        type: string
+      evidence_url:
+        description: "HTTPS rollout-health.json URL"
+        required: true
+        type: string
+      evidence_sha256:
+        description: "SHA-256 of rollout-health.json"
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: biyan-stable-updater-promotion
+  cancel-in-progress: false
+
+jobs:
+  evaluate:
+    runs-on: ubuntu-latest
+    environment: updater-production
+    env:
+      AWS_ACCESS_KEY_ID: ${{ secrets.CLOUDFLARE_R2_ACCESS_KEY_ID }}
+      AWS_SECRET_ACCESS_KEY: ${{ secrets.CLOUDFLARE_R2_SECRET_ACCESS_KEY }}
+      AWS_DEFAULT_REGION: auto
+      R2_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_R2_ACCOUNT_ID }}
+      R2_BUCKET: ${{ secrets.CLOUDFLARE_R2_BUCKET }}
+      POLICY_KEY: biyan/updater/stable/policy.json
+      EXPECTED_CURRENT: ${{ github.event.client_payload.expected_current || inputs.expected_current }}
+      EVIDENCE_URL: ${{ github.event.client_payload.evidence_url || inputs.evidence_url }}
+      EVIDENCE_SHA256: ${{ github.event.client_payload.evidence_sha256 || inputs.evidence_sha256 }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Evaluate fail-closed health thresholds
+        run: |
+          set -euo pipefail
+          [[ "$EVIDENCE_URL" = https://* ]]
+          mkdir -p dist
+          curl --proto '=https' --tlsv1.2 -fsSL --retry 5 "$EVIDENCE_URL" -o dist/health.json
+          node scripts/updater/evaluate-rollout-health.mjs \
+            dist/health.json "$EVIDENCE_SHA256" dist/decision.json
+
+      - name: Pause dynamic updates when a threshold is breached
+        run: |
+          set -euo pipefail
+          if [ "$(jq -r .pause dist/decision.json)" != "true" ]; then
+            echo "Health gate is clear; automatic resume is intentionally forbidden."
+            exit 0
+          fi
+          endpoint="https://${R2_ACCOUNT_ID}.r2.cloudflarestorage.com"
+          aws s3 cp "s3://${R2_BUCKET}/${POLICY_KEY}" dist/policy-before.json --endpoint-url "$endpoint"
+          node scripts/updater/set-policy-state.mjs \
+            dist/policy-before.json dist/policy-after.json "$EXPECTED_CURRENT" paused
+          aws s3 cp "s3://${R2_BUCKET}/${POLICY_KEY}" dist/policy-cas.json --endpoint-url "$endpoint"
+          cmp dist/policy-before.json dist/policy-cas.json
+          snapshot="biyan/updater/backups/$(date -u +%Y%m%dT%H%M%SZ)-health-${GITHUB_RUN_ID}.json"
+          aws s3 cp dist/policy-before.json "s3://${R2_BUCKET}/${snapshot}" \
+            --endpoint-url "$endpoint" --content-type application/json
+          aws s3 cp dist/policy-after.json "s3://${R2_BUCKET}/${POLICY_KEY}" \
+            --endpoint-url "$endpoint" --content-type application/json --cache-control no-store
+
+      - name: Upload health decision
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: updater-health-${{ github.run_id }}
+          path: dist/*.json

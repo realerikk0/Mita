@@ -1,77 +1,35 @@
 ---
-title: QuickStart
-description: Get started with Jan and start chatting with AI in minutes.
-keywords:
-  [
-    Jan,
-    local AI,
-    LLM,
-    chat,
-    threads,
-    models,
-    download,
-    installation,
-    conversations,
-  ]
+title: Quickstart
+description: Install Biyan and connect a cloud model provider.
+keywords: [Biyan, cloud AI, provider, API key]
 ---
 
 import { Callout, Steps } from 'nextra/components'
-import { Link } from 'nextra-theme-docs'
-import { DocCard, DocCards } from '@/components/DocCard'
-import { FolderOpen, Bot, Cpu, Plug, Brain } from 'lucide-react'
 
-# QuickStart
-
-Get up and running with Jan in minutes. This guide will help you install Jan, download a model, and start chatting immediately.
+# Quickstart
 
 <Steps>
 
-### Install Jan
+### Install Biyan
 
-1. <Link href="https://jan.ai/download" target="_blank" rel="noopener noreferrer">Download Jan</Link>
-2. Install the app ([Mac](/docs/desktop/install/mac), [Windows](/docs/desktop/install/windows), [Linux](/docs/desktop/install/linux))
-3. Launch Jan
+Get a signed installer from the [Biyan website](https://biyan.ai/) and follow the guide for [macOS](/docs/desktop/install/mac), [Windows](/docs/desktop/install/windows), or [Linux](/docs/desktop/install/linux).
 
-### Getting Ready
+### Add a model provider
 
-Jan automatically downloads its default foundation model on first launch. Once the download completes, you're ready to chat — no setup required.
+Open **Settings → Model Providers**, choose a provider, and enter the credentials issued by that provider. For a compatible custom service, use the OpenAI-compatible provider and set its base URL.
 
-![Getting Ready](./_assets/getting-ready.png)
+### Select a model
 
-### Start Chatting
+Create a chat, open the model selector, and choose a model from the configured provider. Biyan does not select a paid remote model automatically.
 
-Type your message and start chatting. Jan is ready to go.
+### Send a message
 
-![Start Chatting](./_assets/start-chatting.png)
-
-Try asking:
-- "Explain quantum computing in simple terms"
-- "Help me write a Python function to sort a list"
-- "What are the pros and cons of electric vehicles?"
-
-<Callout type="tip">
-Jan enables access to current web information by default. You can ask it to search about latest news. Thanks to [Exa](https://exa.ai) for enabling free tier access.
-</Callout>
+Type a message or attach a supported image/document. Attachment behavior depends on the selected provider's capabilities; review [Images and Documents](/docs/desktop/file-upload) first.
 
 </Steps>
 
-## App Features
+<Callout type="warning">
+  Biyan is cloud/remote-only. It does not download a default model or start a local inference engine.
+</Callout>
 
-Jan is more than a chat interface. Organize your work with Projects, build custom Assistants, run autonomous Agents, and connect external tools via MCP.
-
-<DocCards>
-  <DocCard title="Projects" href="/docs/desktop/projects" icon={<FolderOpen size={20} />}>Organize conversations with shared instructions and files.</DocCard>
-  <DocCard title="Assistants" href="/docs/desktop/assistants" icon={<Bot size={20} />}>Set up a personal AI assistant tailored to how you work.</DocCard>
-  <DocCard title="Agents" href="/docs/desktop/agents" icon={<Cpu size={20} />}>Autonomous AI that reads files, manages calendars, and takes actions.</DocCard>
-  <DocCard title="Connectors (MCP)" href="/docs/desktop/mcp-examples" icon={<Plug size={20} />}>Extend your AI with web search, code execution, databases, and more.</DocCard>
-</DocCards>
-
-## Models
-
-Beyond the default model, Jan comes with a range of foundation models for different tasks — from image understanding and reasoning to coding.
-
-<DocCards>
-  <DocCard title="Jan-Code-4B" href="/docs/desktop/jan-models/jan-code-4b" icon={<Brain size={20} />}>Optimized for code generation and reasoning tasks.</DocCard>
-  <DocCard title="Jan-v3-4B" href="/docs/desktop/jan-models/jan-v3-4b-base-instruct" icon={<Brain size={20} />}>General purpose instruction-following model.</DocCard>
-  <DocCard title="Jan-v2-VL" href="/docs/desktop/jan-models/jan-v2-vl-med" icon={<Brain size={20} />}>Vision-language model with strong reasoning capability for image understanding.</DocCard>
-</DocCards>
+Next: configure [MCP tools](/docs/desktop/mcp), create an [Assistant](/docs/desktop/assistants), or organize work in [Projects](/docs/desktop/projects).

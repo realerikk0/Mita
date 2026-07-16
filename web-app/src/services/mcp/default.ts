@@ -2,7 +2,7 @@
  * Default MCP Service - Generic implementation with minimal returns
  */
 
-import { MCPTool, MCPToolCallResult } from '@janhq/core'
+import { MCPTool, MCPToolCallResult } from '@biyan/core'
 import type { MCPServerConfig } from '@/hooks/useMCPServers'
 import type { MCPService, MCPConfig, ServerSummary, ToolCallWithCancellationResult } from './types'
 
@@ -76,7 +76,7 @@ export class DefaultMCPService implements MCPService {
     // No-op - not implemented in default service
   }
 
-  async checkMitaWebResearchConnected(): Promise<boolean> {
+  async checkBiyanWebResearchConnected(): Promise<boolean> {
     return false
   }
 }

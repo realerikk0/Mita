@@ -68,10 +68,8 @@ describe('GlobalError Component', () => {
     const error = new Error('Test error')
     render(<GlobalError error={error} />)
 
-    const contactLink = screen.getByText('contact us')
-    expect(contactLink).toHaveAttribute('href', 'https://discord.gg/FTk2MvZwJH')
-    expect(contactLink).toHaveAttribute('target', '_blank')
-    expect(contactLink).toHaveAttribute('rel', 'noopener noreferrer')
+    const contactLink = screen.getByText('send email to help@biyan.ai')
+    expect(contactLink).toHaveAttribute('href', 'mailto:help@biyan.ai')
   })
 
   it('should log error to console', () => {
@@ -80,8 +78,21 @@ describe('GlobalError Component', () => {
 
     render(<GlobalError error={error} />)
 
-    expect(consoleSpy).toHaveBeenCalledWith('Error in root route:', error)
+    expect(consoleSpy).toHaveBeenCalledWith('Root route failed', {
+      name: 'Error',
+    })
     consoleSpy.mockRestore()
+  })
+
+  it('redacts credentials and local paths from the report UI', () => {
+    const error = new Error(
+      'token=super-secret at /Users/alice/private/config.json with Bearer abc.def'
+    )
+    render(<GlobalError error={error} />)
+
+    expect(screen.queryByText(/super-secret/)).toBeNull()
+    expect(screen.queryByText(/\/Users\/alice/)).toBeNull()
+    expect(screen.getAllByText(/\[redacted\]|\[local path\]/).length).toBeGreaterThan(0)
   })
 
   it('should render proper error structure with styling', () => {

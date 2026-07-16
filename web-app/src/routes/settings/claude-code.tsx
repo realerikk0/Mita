@@ -9,16 +9,10 @@ import { useLocalApiServer } from '@/hooks/useLocalApiServer'
 import { useClaudeCodeModel } from '@/hooks/useClaudeCodeModel'
 import { useAppState } from '@/hooks/useAppState'
 import { useModelProvider } from '@/hooks/useModelProvider'
-import { useServiceHub } from '@/hooks/useServiceHub'
 import AddEditCustomCliDialog from '@/containers/dialogs/AddEditCustomCliDialog'
 import { cn } from '@/lib/utils'
-import { useState, useMemo, useRef, useEffect } from 'react'
-import { useDownloadStore } from '@/hooks/useDownloadStore'
-import { useGeneralSetting } from '@/hooks/useGeneralSetting'
-import type { CatalogModel } from '@/services/models/types'
-import { RECOMMENDED_CODE_HF_REPO } from '@/constants/models'
+import { useState, useMemo, useRef } from 'react'
 import { toast } from 'sonner'
-import { getModelToStart } from '@/utils/getModelToStart'
 import { invoke } from '@tauri-apps/api/core'
 import {
   Popover,
@@ -28,7 +22,12 @@ import {
 import { IconChevronDown, IconPlus, IconX } from '@tabler/icons-react'
 import ProvidersAvatar from '@/containers/ProvidersAvatar'
 import Capabilities from '@/containers/Capabilities'
-import { getModelDisplayName, isLocalProvider } from '@/lib/utils'
+import { getModelDisplayName } from '@/lib/utils'
+import { providerHasRemoteApiKeys } from '@/lib/provider-api-keys'
+import {
+  isRemoteProviderEndpoint,
+  RETIRED_LOCAL_PROVIDER_IDS,
+} from '@/lib/configured-model-providers'
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 export const Route = createFileRoute(route.settings.claude_code as any)({
@@ -37,7 +36,6 @@ export const Route = createFileRoute(route.settings.claude_code as any)({
 
 function ClaudeCodeIntegration() {
   const { t } = useTranslation()
-  const serviceHub = useServiceHub()
   const {
     corsEnabled,
     verboseLogs,
@@ -48,13 +46,10 @@ function ClaudeCodeIntegration() {
     apiKey,
     trustedHosts,
     proxyTimeout,
-    setLastServerModels,
   } = useLocalApiServer()
 
   const { serverStatus, setServerStatus } = useAppState()
-  const { providers, selectedModel, selectedProvider, getProviderByName } =
-    useModelProvider()
-  const setActiveModels = useAppState((state) => state.setActiveModels)
+  const { providers } = useModelProvider()
 
   const {
     models: helperModels,
@@ -65,8 +60,6 @@ function ClaudeCodeIntegration() {
   } = useClaudeCodeModel()
 
   const [isCustomCliDialogOpen, setIsCustomCliDialogOpen] = useState(false)
-  const [isModelLoading, setIsModelLoading] = useState(false)
-
   const handleLaunchClaudeCode = async () => {
     const apiUrl = `http://${serverHost}:${serverPort}`
     const modelBig = helperModels.big
@@ -75,67 +68,6 @@ function ClaudeCodeIntegration() {
     const customEnvVars = helperModels.envVars
 
     const startServer = async (): Promise<void> => {
-      const helperModelsToStart = [
-        { id: helperModels.big, role: 'Big' },
-        { id: helperModels.medium, role: 'Medium' },
-        { id: helperModels.small, role: 'Small' },
-      ]
-        .filter((m) => m.id)
-        .map((m) => m.id as string)
-
-      const loadedModels = (await serviceHub.models().getActiveModels()) || []
-      const modelsToStart = helperModelsToStart.filter(
-        (m) => !loadedModels.includes(m)
-      )
-
-      if (modelsToStart.length > 0) {
-        setIsModelLoading(true)
-        for (const modelId of modelsToStart) {
-          const providerWithModel = providers.find((p) =>
-            p.models.some((m) => m.id === modelId)
-          )
-
-          if (providerWithModel) {
-            await serviceHub
-              .models()
-              .startModel(providerWithModel, modelId, true)
-              .then(() => {
-                console.log(`Model ${modelId} started successfully`)
-              })
-          }
-        }
-        setIsModelLoading(false)
-        await serviceHub
-          .models()
-          .getActiveModels()
-          .then((models) => setActiveModels(models || []))
-        await new Promise((resolve) => setTimeout(resolve, 500))
-      } else if (loadedModels.length > 0) {
-        console.log(`Using already loaded models: ${loadedModels.join(', ')}`)
-      } else if (helperModelsToStart.length === 0) {
-        const modelToStart = getModelToStart({
-          selectedModel,
-          selectedProvider,
-          getProviderByName,
-        })
-
-        if (modelToStart) {
-          setIsModelLoading(true)
-          await serviceHub
-            .models()
-            .startModel(modelToStart.provider, modelToStart.model, true)
-            .then(() => {
-              console.log(`Model ${modelToStart.model} started successfully`)
-              setIsModelLoading(false)
-              serviceHub
-                .models()
-                .getActiveModels()
-                .then((models) => setActiveModels(models || []))
-              return new Promise((resolve) => setTimeout(resolve, 500))
-            })
-        }
-      }
-
       let actualPort: number | undefined
       try {
         actualPort = await window.core?.api?.startServer({
@@ -158,16 +90,6 @@ function ClaudeCodeIntegration() {
         setServerPort(actualPort)
       }
       setServerStatus('running')
-
-      // Persist whichever models are actually running so next startup can restore them
-      const activeModels = await serviceHub.models().getActiveModels().catch(() => [] as string[])
-      if (activeModels.length > 0) {
-        const serverModels = activeModels.flatMap((id) => {
-          const p = providers.find((p) => p?.models?.some((m) => m.id === id))
-          return p ? [{ model: id, provider: p.provider }] : []
-        })
-        if (serverModels.length > 0) setLastServerModels(serverModels)
-      }
     }
 
     try {
@@ -279,14 +201,6 @@ function ClaudeCodeIntegration() {
                     placeholder="Select Small Model"
                   />
                 }
-                descriptionOutside={
-                  <CodeModelRecommendation
-                    selectedModel={helperModels.small}
-                    onSelect={(modelId: string) =>
-                      setHelperModel('small', modelId)
-                    }
-                  />
-                }
               />
 
               <div className="flex mt-2 justify-between gap-2 border-t pt-4">
@@ -317,9 +231,8 @@ function ClaudeCodeIntegration() {
                   <Button
                     size="sm"
                     onClick={handleLaunchClaudeCode}
-                    disabled={isModelLoading}
                   >
-                    {isModelLoading ? 'Loading models...' : 'Save & Enable'}
+                    Save & Enable
                   </Button>
                 </div>
               </div>
@@ -374,21 +287,19 @@ function HelperModelSelector({
 
   const availableModels = useMemo(() => {
     return providers
-      .filter((p) => p.active)
+      .filter(
+        (provider) =>
+          provider.active &&
+          !RETIRED_LOCAL_PROVIDER_IDS.has(provider.provider.toLowerCase()) &&
+          isRemoteProviderEndpoint(provider) &&
+          providerHasRemoteApiKeys(provider)
+      )
       .flatMap((p) =>
         p.models.map((m) => ({
           ...m,
           providerName: p.provider,
-          isLocal: isLocalProvider(p.provider),
-          hasApiKey: !!p.api_key?.length,
         }))
       )
-      .filter((m) => {
-        if (m.isLocal) {
-          return m.id
-        }
-        return m.hasApiKey
-      })
   }, [providers])
 
   const filteredModels = useMemo(() => {
@@ -443,14 +354,9 @@ function HelperModelSelector({
             {selectedModel && currentModel ? (
               <>
                 <span
-                  className={cn(
-                    'text-[10px] px-1.5 py-0.5 rounded-full shrink-0',
-                    currentModel.isLocal
-                      ? 'bg-emerald-500/10 text-emerald-600'
-                      : 'bg-blue-500/10 text-blue-600'
-                  )}
+                  className="text-[10px] px-1.5 py-0.5 rounded-full shrink-0 bg-blue-500/10 text-blue-600"
                 >
-                  {currentModel.isLocal ? 'Local' : 'Remote'}
+                  Remote
                 </span>
                 <span>{formatModelWithSize(currentModel)}</span>
               </>
@@ -554,146 +460,5 @@ function HelperModelSelector({
         </div>
       </PopoverContent>
     </Popover>
-  )
-}
-
-function CodeModelRecommendation({
-  selectedModel,
-  onSelect,
-}: {
-  selectedModel: string | null
-  onSelect: (modelId: string) => void
-}) {
-  const serviceHub = useServiceHub()
-  const { downloads, localDownloadingModels, addLocalDownloadingModel } =
-    useDownloadStore()
-  const { getProviderByName } = useModelProvider()
-  const huggingfaceToken = useGeneralSetting((state) => state.huggingfaceToken)
-  const [codeModelCatalog, setCodeModelCatalog] = useState<CatalogModel | null>(
-    null
-  )
-
-  useEffect(() => {
-    serviceHub
-      .models()
-      .fetchHuggingFaceRepo(RECOMMENDED_CODE_HF_REPO, huggingfaceToken)
-      .then((repo) => {
-        if (repo)
-          setCodeModelCatalog(
-            serviceHub.models().convertHfRepoToCatalogModel(repo)
-          )
-      })
-      .catch(() => {})
-  }, [serviceHub, huggingfaceToken])
-
-  const defaultVariant = useMemo(() => {
-    if (!codeModelCatalog) return null
-    return (
-      codeModelCatalog.quants?.find((q) =>
-        q.model_id.toLowerCase().includes('q4_k_m')
-      ) ??
-      codeModelCatalog.quants?.[0] ??
-      null
-    )
-  }, [codeModelCatalog])
-
-  const llamaProvider = getProviderByName('llamacpp')
-
-  const isDownloaded = useMemo(() => {
-    if (!defaultVariant) return false
-    return !!llamaProvider?.models.some(
-      (m: { id: string }) => m.id === defaultVariant.model_id
-    )
-  }, [defaultVariant, llamaProvider])
-
-  const isDownloading = useMemo(() => {
-    if (!defaultVariant) return false
-    return (
-      localDownloadingModels.has(defaultVariant.model_id) ||
-      defaultVariant.model_id in downloads
-    )
-  }, [defaultVariant, localDownloadingModels, downloads])
-
-  const downloadProgress = useMemo(() => {
-    if (!defaultVariant) return { current: 0, total: 0 }
-    const d = downloads[defaultVariant.model_id]
-    return { current: d?.current ?? 0, total: d?.total ?? 0 }
-  }, [defaultVariant, downloads])
-
-  const handleDownload = () => {
-    if (!defaultVariant) return
-    addLocalDownloadingModel(defaultVariant.model_id)
-    serviceHub
-      .models()
-      .pullModelWithMetadata(
-        defaultVariant.model_id,
-        defaultVariant.path,
-        undefined,
-        huggingfaceToken,
-        true
-      )
-  }
-
-  const formatBytes = (bytes: number) => {
-    if (!bytes) return '0'
-    return (bytes / (1024 * 1024 * 1024)).toFixed(1)
-  }
-
-  if (selectedModel === defaultVariant?.model_id) return null
-
-  return (
-    <div className="p-2.5 rounded-lg min-h-[54px] border border-primary/20 bg-primary/5 flex items-center justify-between gap-3">
-      <div className="flex flex-col gap-0.5">
-        <span className="text-xs font-medium text-foreground">
-          Use the recommended coding model
-        </span>
-      </div>
-      <div className="shrink-0">
-        {isDownloaded ? (
-          <Button
-            size="sm"
-            variant="outline"
-            onClick={() => onSelect(defaultVariant!.model_id)}
-          >
-            Apply
-          </Button>
-        ) : isDownloading ? (
-          <div className="flex items-center gap-1.5 text-xs text-muted-foreground">
-            <svg
-              className="size-3 animate-spin"
-              viewBox="0 0 24 24"
-              fill="none"
-            >
-              <circle
-                className="opacity-25"
-                cx="12"
-                cy="12"
-                r="10"
-                stroke="currentColor"
-                strokeWidth="4"
-              />
-              <path
-                className="opacity-75"
-                fill="currentColor"
-                d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"
-              />
-            </svg>
-            <span>
-              {formatBytes(downloadProgress.current)} /{' '}
-              {formatBytes(downloadProgress.total)}GB
-            </span>
-          </div>
-        ) : (
-          <Button
-            size="sm"
-            variant="outline"
-            onClick={handleDownload}
-            disabled={!defaultVariant}
-          >
-            Setup
-          </Button>
-        )}
-      </div>
-    </div>
   )
 }

@@ -9,7 +9,7 @@ enforce the same minimum safety boundary as the Linux and macOS runners.
 The Windows runner must enforce all of these properties before Biyan exposes
 `computer_agent_run_shell` to normal users:
 
-- The command runs in a separate `mita-computer-agent-runner.exe` process.
+- The command runs in a separate `biyan-computer-agent-runner.exe` process.
 - The Tauri app remains the broker for settings, approvals, path validation,
   and output collection.
 - The shell writes only inside the current thread workspace and configured
@@ -54,11 +54,11 @@ Status: complete.
 
 Current implementation:
 
-- `mita-computer-agent-runner.exe` validates the runner request and refuses direct
+- `biyan-computer-agent-runner.exe` validates the runner request and refuses direct
   execution unless the desktop app supplies its internal broker marker.
 - The Biyan app exposes `computer_agent_run_shell` when the runner binary is
   discoverable and the user has enabled Computer Agent shell in settings. The app
-  injects `MITA_COMPUTER_AGENT_RUNNER_EXECUTE=1` only into the runner child
+  injects `BIYAN_COMPUTER_AGENT_RUNNER_EXECUTE=1` only into the runner child
   process after approval.
 - The prototype creates a per-command AppContainer profile.
 - It grants the AppContainer SID temporary modify access to the thread
@@ -92,7 +92,7 @@ Status: complete.
 Implemented and verified:
 
 - The Windows runner is built as part of the Windows Tauri build and packaged
-  under `resources/computer-agent-runner/mita-computer-agent-runner.exe`.
+  under `resources/computer-agent-runner/biyan-computer-agent-runner.exe`.
 - Runner discovery covers development, sidecar, and packaged resource paths.
 - Installed app smoke testing covers both NSIS and MSI package layouts and
   confirms the full chat path:
@@ -136,7 +136,7 @@ Validation run on 2026-05-16:
   passed with 15 tests and 17 Windows runner tests ignored.
 - `cargo test --manifest-path src-tauri/Cargo.toml computer --lib -- --ignored --nocapture --test-threads=1`
   passed the 17 Windows runner tests.
-- `cargo build --manifest-path src-tauri/Cargo.toml --bin mita-computer-agent-runner --features computer-agent-runner`
+- `cargo build --manifest-path src-tauri/Cargo.toml --bin biyan-computer-agent-runner --features computer-agent-runner`
   passed.
 - `yarn prepare:computer-agent-runner:release` produced the packaged runner resource.
 - `yarn tauri build --bundles msi` produced
@@ -213,9 +213,9 @@ Validation run on 2026-05-16:
 - `cargo test --manifest-path src-tauri/Cargo.toml computer_agent --lib -- --ignored --nocapture --test-threads=1`
   passed all 19 Windows runner tests, including allowed-root write and timeout
   ACL cleanup.
-- `yarn workspace @janhq/web-app build` passed.
+- `yarn workspace @biyan/web-app build` passed.
 - `yarn build:tauri:win32` produced fresh NSIS and MSI bundles with the v2
-  runner packaged at `resources/computer-agent-runner/mita-computer-agent-runner.exe`.
+  runner packaged at `resources/computer-agent-runner/biyan-computer-agent-runner.exe`.
 - `yarn smoke:computer-agent-shell:win32 --nsis` passed against the installed
   app and wrote `allowed-root-smoke.txt` inside the configured temporary
   allowed root.

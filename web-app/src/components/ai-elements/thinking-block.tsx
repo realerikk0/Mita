@@ -159,7 +159,7 @@ export const ThinkingMarkdown = memo(
     ...props
   }: ThinkingMarkdownProps) => (
     <div className={cn('thinking-markdown', className)} {...props}>
-      <Streamdown animate={animate} animationDuration={320}>
+      <Streamdown animated={animate ? { duration: 320 } : false}>
         {children}
       </Streamdown>
     </div>

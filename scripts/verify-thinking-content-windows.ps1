@@ -3,7 +3,7 @@ param(
   [int]$ServerTimeoutSeconds = 180,
   [int]$TauriWarmupSeconds = 600,
   [int]$TauriSettleSeconds = 8,
-  [string[]]$TauriProcessNames = @("Biyan", "Mita")
+  [string[]]$TauriProcessNames = @("Biyan")
 )
 
 $ErrorActionPreference = "Stop"
@@ -81,7 +81,7 @@ function Test-IsRepoVerificationProcess {
 
   return (
     $CommandLine.Contains($RepoRoot) -or
-    $CommandLine.Contains("Mita-thinking-content-test") -or
+    $CommandLine.Contains("Biyan-thinking-content-test") -or
     $CommandLine.Contains("verify-thinking-content") -or
     $CommandLine.Contains("dev:web") -or
     $CommandLine.Contains("thinking-content-demo") -or
@@ -305,9 +305,9 @@ try {
   Import-VisualStudioDevEnvironment
 
   Write-Host "Preparing core workspace build for Vite aliases..."
-  yarn workspace @janhq/core build
+  yarn workspace @biyan/core build
   if ($LASTEXITCODE -ne 0) {
-    throw "yarn workspace @janhq/core build failed with exit code $LASTEXITCODE"
+    throw "yarn workspace @biyan/core build failed with exit code $LASTEXITCODE"
   }
 
   Stop-RepoPortOwner -Port 1420

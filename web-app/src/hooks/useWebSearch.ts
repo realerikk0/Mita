@@ -1,6 +1,10 @@
 import { create } from 'zustand'
 import { persist, createJSONStorage } from 'zustand/middleware'
 import { localStorageKey } from '@/constants/localStorage'
+import {
+  createLegacyFallbackStateStorage,
+  legacyStorage,
+} from '@/legacy_migrations/storage'
 import type { SearchMode } from '@/lib/search-decision'
 
 type WebSearchState = {
@@ -36,7 +40,9 @@ export const useWebSearch = create<WebSearchState>()(
     }),
     {
       name: localStorageKey.webSearch,
-      storage: createJSONStorage(() => localStorage),
+      storage: createJSONStorage(() =>
+        createLegacyFallbackStateStorage(legacyStorage.webSearch)
+      ),
     }
   )
 )

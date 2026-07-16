@@ -121,7 +121,7 @@ describe('parseProviderConnection', () => {
 
   it('parses direct provider import deep links', () => {
     const result = parseProviderConnectionDeepLink(
-      'mita://provider/import?provider=jingxing&apiKey=sk-imported&baseUrl=https%3A%2F%2Fapi.example.com%2Fv1%2F&defaultModel=gpt-5.1'
+      'biyan://provider/import?provider=jingxing&apiKey=sk-imported&baseUrl=https%3A%2F%2Fapi.example.com%2Fv1%2F&defaultModel=gpt-5.1'
     )
 
     expect(result).toMatchObject({
@@ -133,14 +133,22 @@ describe('parseProviderConnection', () => {
     })
   })
 
+  it('accepts the retired provider-import scheme at ingress only', () => {
+    expect(
+      parseProviderConnectionDeepLink(
+        'mita://provider/import?provider=jingxing&apiKey=sk-legacy&baseUrl=https%3A%2F%2Fapi.example.com%2Fv1'
+      )
+    ).toMatchObject({ provider: 'jingxing', apiKey: 'sk-legacy' })
+  })
+
   it('ignores non-provider import deep links', () => {
-    expect(parseProviderConnectionDeepLink('mita://host/action/owner/repo')).toBeNull()
+    expect(parseProviderConnectionDeepLink('biyan://host/action/owner/repo')).toBeNull()
   })
 
   it('rejects invalid direct provider import deep links', () => {
     expect(() =>
       parseProviderConnectionDeepLink(
-        'mita://provider/import?provider=jingxing&baseUrl=https%3A%2F%2Fapi.example.com%2Fv1'
+        'biyan://provider/import?provider=jingxing&baseUrl=https%3A%2F%2Fapi.example.com%2Fv1'
       )
     ).toThrow('缺少 API Key')
   })

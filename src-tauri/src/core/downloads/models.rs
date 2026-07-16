@@ -19,13 +19,13 @@ pub struct ProxyConfig {
 }
 
 #[derive(serde::Deserialize, Clone, Debug)]
+#[serde(deny_unknown_fields)]
 pub struct DownloadItem {
     pub url: String,
     pub save_path: String,
     pub proxy: Option<ProxyConfig>,
     pub sha256: Option<String>,
     pub size: Option<u64>,
-    pub model_id: Option<String>,
 }
 
 #[derive(serde::Serialize, Clone, Debug)]

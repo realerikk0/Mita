@@ -13,27 +13,19 @@ import { ApiPrefixInput } from '@/containers/ApiPrefixInput'
 import { TrustedHostsInput } from '@/containers/TrustedHostsInput'
 import { useLocalApiServer } from '@/hooks/useLocalApiServer'
 import { useAppState } from '@/hooks/useAppState'
-import { useModelProvider } from '@/hooks/useModelProvider'
 import { useServiceHub } from '@/hooks/useServiceHub'
 import { IconSettings2 } from '@tabler/icons-react'
 import { cn } from '@/lib/utils'
 import { ApiKeyInput } from '@/containers/ApiKeyInput'
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useState } from 'react'
 import { toast } from 'sonner'
 import { LogViewer } from '@/components/LogViewer'
-import { ensureModelForServer } from '@/utils/ensureModelForServer'
 
 import {
   Popover,
   PopoverTrigger,
   PopoverContent,
 } from '@/components/ui/popover'
-import {
-  DropdownMenu,
-  DropdownMenuContent,
-  DropdownMenuItem,
-  DropdownMenuTrigger,
-} from '@/components/ui/dropdown-menu'
 import {
   Collapsible,
   CollapsibleTrigger,
@@ -45,7 +37,6 @@ import {
   IconExternalLink,
   IconLoader2,
 } from '@tabler/icons-react'
-import { ChevronsUpDown } from 'lucide-react'
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 export const Route = createFileRoute(route.settings.local_api_server as any)({
@@ -60,8 +51,6 @@ function LocalAPIServerContent() {
     setCorsEnabled,
     verboseLogs,
     setVerboseLogs,
-    enableOnStartup,
-    setEnableOnStartup,
     serverHost,
     serverPort,
     setServerPort,
@@ -71,23 +60,10 @@ function LocalAPIServerContent() {
     proxyTimeout,
     enableServerToolExecution,
     setEnableServerToolExecution,
-    setLastServerModels,
-    defaultModelLocalApiServer,
-    setDefaultModelLocalApiServer,
   } = useLocalApiServer()
-
-  const providers = useModelProvider((state) => state.providers)
-  const localModelIds = useMemo(
-    () =>
-      providers
-        .filter((p) => p.provider === 'llamacpp')
-        .flatMap((p) => p.models.map((m) => m.id)),
-    [providers]
-  )
 
   const { serverStatus, setServerStatus } = useAppState()
   const [showApiKeyError, setShowApiKeyError] = useState(false)
-  const setActiveModels = useAppState((state) => state.setActiveModels)
 
   useEffect(() => {
     const checkServerStatus = async () => {
@@ -109,8 +85,6 @@ function LocalAPIServerContent() {
     return () => window.removeEventListener('focus', handleFocus)
   }, [serviceHub, setServerStatus])
 
-  const [isModelLoading, setIsModelLoading] = useState(false)
-
   const toggleAPIServer = async () => {
     // Validate API key before starting server
     if (serverStatus === 'stopped') {
@@ -127,38 +101,8 @@ function LocalAPIServerContent() {
       setShowApiKeyError(false)
 
       setServerStatus('pending')
-
-      ensureModelForServer({
-        modelsService: serviceHub.models(),
-        modelOverride: defaultModelLocalApiServer,
-        onLoadStart: () => setIsModelLoading(true),
-        onLoadEnd: () => setIsModelLoading(false),
-      })
-        .then(async (result) => {
-          if (result.status === 'no_model_available') {
-            throw new Error('No model available to load')
-          }
-
-          // Remember loaded models for next startup
-          const activeModels = await serviceHub.models().getActiveModels()
-          if (activeModels && activeModels.length > 0) {
-            const allProviders = useModelProvider.getState().providers
-            const serverModels = activeModels.flatMap((id: string) => {
-              const p = allProviders.find((p) =>
-                p?.models?.some((m: { id: string }) => m.id === id)
-              )
-              return p ? [{ model: id, provider: p.provider }] : []
-            })
-            if (serverModels.length > 0) setLastServerModels(serverModels)
-          }
-
-          // Refresh active models in app state
-          const models = await serviceHub.models().getActiveModels()
-          setActiveModels(models || [])
-        })
-        .then(() => {
-          // Then start the server
-          return window.core?.api?.startServer({
+      window.core?.api
+        ?.startServer({
             host: serverHost,
             port: serverPort,
             prefix: apiPrefix,
@@ -169,7 +113,6 @@ function LocalAPIServerContent() {
             proxyTimeout: proxyTimeout,
             enableServerToolExecution,
           })
-        })
         .then((actualPort: number) => {
           // Store the actual port that was assigned (important for mobile with port 0)
           if (actualPort && actualPort !== serverPort) {
@@ -178,9 +121,8 @@ function LocalAPIServerContent() {
           setServerStatus('running')
         })
         .catch((error: unknown) => {
-          console.error('Error starting server or model:', error)
+          console.error('Error starting remote provider gateway:', error)
           setServerStatus('stopped')
-          setIsModelLoading(false) // Reset loading state on error
           toast.dismiss()
 
           // Extract error message from various error formats
@@ -195,17 +137,6 @@ function LocalAPIServerContent() {
               description: `Port ${serverPort} is already in use. Please try a different port.`,
             })
           }
-          // Model-related errors
-          else if (errorMsg.includes('Invalid or inaccessible model path')) {
-            toast.error('Invalid or inaccessible model path', {
-              description: errorMsg,
-            })
-          } else if (errorMsg.includes('model')) {
-            toast.error('Failed to start model', {
-              description: errorMsg,
-            })
-          }
-          // Generic server errors
           else {
             toast.error('Failed to start server', {
               description: errorMsg,
@@ -227,13 +158,11 @@ function LocalAPIServerContent() {
   }
 
   const getButtonContent = () => {
-    if (isModelLoading || serverStatus === 'pending') {
+    if (serverStatus === 'pending') {
       return (
         <>
           <IconLoader2 size={14} className="animate-spin" />
-          {isModelLoading
-            ? t('settings:localApiServer.loadingModel')
-            : t('settings:localApiServer.startingServer')}
+          {t('settings:localApiServer.startingServer')}
         </>
       )
     }
@@ -434,7 +363,7 @@ function LocalAPIServerContent() {
                         onClick={toggleAPIServer}
                         variant={isServerRunning ? 'destructive' : 'default'}
                         size="sm"
-                        disabled={serverStatus === 'pending' || isModelLoading}
+                        disabled={serverStatus === 'pending'}
                       >
                         {getButtonContent()}
                       </Button>
@@ -443,59 +372,8 @@ function LocalAPIServerContent() {
                 }
               >
                 <CardItem
-                  title={t('settings:localApiServer.runOnStartup')}
-                  description={t('settings:localApiServer.runOnStartupDesc')}
-                  actions={
-                    <Switch
-                      checked={enableOnStartup}
-                      onCheckedChange={(checked) => {
-                        setEnableOnStartup(checked)
-                      }}
-                    />
-                  }
-                />
-                <CardItem
-                  title={t('settings:localApiServer.defaultModel')}
-                  description={t('settings:localApiServer.defaultModelDesc')}
-                  actions={
-                    <DropdownMenu>
-                      <DropdownMenuTrigger asChild>
-                        <Button
-                          variant="outline"
-                          size="sm"
-                          className="w-40 justify-between"
-                        >
-                          <span className="truncate">
-                            {defaultModelLocalApiServer?.model ??
-                              t(
-                                'settings:localApiServer.defaultModelPlaceholder'
-                              )}
-                          </span>
-                          <ChevronsUpDown className="size-4 shrink-0 text-muted-foreground ml-2" />
-                        </Button>
-                      </DropdownMenuTrigger>
-                      <DropdownMenuContent align="end" className="w-64 max-h-60 overflow-y-auto">
-                        {localModelIds.map((modelId) => (
-                          <DropdownMenuItem
-                            key={modelId}
-                            className={cn(
-                              'cursor-pointer my-0.5',
-                              defaultModelLocalApiServer?.model === modelId &&
-                                'bg-secondary-foreground/8'
-                            )}
-                            onClick={() =>
-                              setDefaultModelLocalApiServer({
-                                model: modelId,
-                                provider: 'llamacpp',
-                              })
-                            }
-                          >
-                            <span className="truncate">{modelId}</span>
-                          </DropdownMenuItem>
-                        ))}
-                      </DropdownMenuContent>
-                    </DropdownMenu>
-                  }
+                  title="Remote provider gateway"
+                  description="This API server proxies only providers configured above. Removed local-model routes return LOCAL_RUNTIME_REMOVED and never start a backend."
                 />
               </Card>
 

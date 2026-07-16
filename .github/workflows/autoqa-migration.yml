@@ -1,330 +1,389 @@
-name: AutoQA Migration (Manual)
+name: AutoQA Migration Matrix
 
 on:
   workflow_dispatch:
     inputs:
-      old_windows_installer:
-        description: 'Windows OLD installer URL or path (.exe)'
+      windows_bundle_url:
+        description: 'HTTPS ZIP: manifest, current/A/B/C EXEs, sanitized snapshots'
         required: true
         type: string
-      new_windows_installer:
-        description: 'Windows NEW installer URL or path (.exe)'
+      windows_bundle_sha256:
+        description: 'SHA-256 of the Windows migration ZIP'
         required: true
         type: string
-      old_ubuntu_installer:
-        description: 'Ubuntu OLD installer URL or path (.deb)'
-        required: false
+      linux_bundle_url:
+        description: 'HTTPS ZIP: manifest, current/A/B/C DEB/AppImages, snapshots'
+        required: true
         type: string
-        default: ''
-      new_ubuntu_installer:
-        description: 'Ubuntu NEW installer URL or path (.deb)'
-        required: false
+      linux_bundle_sha256:
+        description: 'SHA-256 of the Linux migration ZIP'
+        required: true
         type: string
-        default: ''
-      old_macos_installer:
-        description: 'macOS OLD installer URL or path (.dmg)'
-        required: false
+      macos_bundle_url:
+        description: 'HTTPS ZIP: manifest, current/A/B/C DMGs, sanitized snapshots'
+        required: true
         type: string
-        default: ''
-      new_macos_installer:
-        description: 'macOS NEW installer URL or path (.dmg)'
-        required: false
+      macos_bundle_sha256:
+        description: 'SHA-256 of the macOS migration ZIP'
+        required: true
         type: string
-        default: ''
-      migration_test_case:
-        description: 'Specific migration test case key (leave empty to run all)'
-        required: false
-        type: string
-        default: ''
-      max_turns:
-        description: 'Maximum turns per test phase'
-        required: false
+      startup_seconds:
+        description: 'Seconds each installed application must remain alive'
+        required: true
         type: number
-        default: 65
+        default: 10
+
+permissions:
+  contents: read
+
+concurrency:
+  group: autoqa-migration-matrix
+  cancel-in-progress: false
 
 jobs:
-  migration-windows:
-    runs-on: windows-11-nvidia-gpu
-    timeout-minutes: 60
+  runner-contract:
+    name: Validate migration runner contract
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
 
-      - name: Setup Python 3.13
-        uses: actions/setup-python@v4
+      - name: Setup Python
+        uses: actions/setup-python@v5
         with:
           python-version: '3.13'
 
-      - name: Clean existing Mita installations
-        shell: powershell
-        run: |
-          .\autoqa\scripts\windows_cleanup.ps1 -IsNightly $false
+      - name: Run fail-closed matrix unit tests
+        run: python -m unittest autoqa.tests.test_migration_runner -v
 
-      - name: Download OLD and NEW installers
-        shell: powershell
-        run: |
-          # Download OLD installer using existing script
-          .\autoqa\scripts\windows_download.ps1 `
-            -WorkflowInputUrl "${{ inputs.old_windows_installer }}" `
-            -WorkflowInputIsNightly "false" `
-            -RepoVariableUrl "" `
-            -RepoVariableIsNightly "" `
-            -DefaultUrl "" `
-            -DefaultIsNightly ""
+  migration-windows:
+    name: Windows current to A to B to C
+    needs: runner-contract
+    runs-on: windows-11-nvidia-gpu
+    environment: biyan-migration-autoqa
+    timeout-minutes: 240
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
 
-          $oldSrc = Join-Path $env:TEMP 'mita-installer.exe'
-          $oldOut = Join-Path $env:TEMP 'mita-old.exe'
-          Copy-Item -Path $oldSrc -Destination $oldOut -Force
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
 
-          # Download NEW installer using existing script
-          .\autoqa\scripts\windows_download.ps1 `
-            -WorkflowInputUrl "${{ inputs.new_windows_installer }}" `
-            -WorkflowInputIsNightly "false" `
-            -RepoVariableUrl "" `
-            -RepoVariableIsNightly "" `
-            -DefaultUrl "" `
-            -DefaultIsNightly ""
-
-          $newSrc = Join-Path $env:TEMP 'mita-installer.exe'
-          $newOut = Join-Path $env:TEMP 'mita-new.exe'
-          Copy-Item -Path $newSrc -Destination $newOut -Force
-
-          Write-Host "OLD installer: $oldOut"
-          Write-Host "NEW installer: $newOut"
-          echo "OLD_VERSION=$oldOut" | Out-File -FilePath $env:GITHUB_ENV -Append
-          echo "NEW_VERSION=$newOut" | Out-File -FilePath $env:GITHUB_ENV -Append
-
-      - name: Install Python dependencies
-        working-directory: autoqa
-        run: |
-          python -m pip install --upgrade pip
-          pip install -r requirements.txt
-
-      - name: Run migration tests (Windows)
-        working-directory: autoqa
+      - name: Download and verify complete Windows bundle
         shell: powershell
         env:
-          RP_TOKEN: ${{ secrets.RP_TOKEN }}
-          ENABLE_REPORTPORTAL: 'true'
-          RP_ENDPOINT: 'https://reportportal.menlo.ai'
-          RP_PROJECT: 'default_personal'
+          BUNDLE_URL: ${{ inputs.windows_bundle_url }}
+          BUNDLE_SHA256: ${{ inputs.windows_bundle_sha256 }}
         run: |
-          $case = "${{ inputs.migration_test_case }}"
-          $caseArg = ""
-          if ($case -and $case.Trim() -ne "") { $caseArg = "--migration-test-case `"$case`"" }
-          python main.py --enable-migration-test --old-version "$env:OLD_VERSION" --new-version "$env:NEW_VERSION" --max-turns ${{ inputs.max_turns }} $caseArg
+          $ErrorActionPreference = 'Stop'
+          $uri = [Uri]$env:BUNDLE_URL
+          if ($uri.Scheme -ne 'https') {
+            throw 'Windows migration bundle URL must use HTTPS'
+          }
+          if ($env:BUNDLE_SHA256 -notmatch '^[0-9a-fA-F]{64}$') {
+            throw 'Windows migration bundle SHA-256 is invalid'
+          }
 
-      - name: Upload screen recordings
+          $root = Join-Path $env:RUNNER_TEMP 'biyan-migration-windows'
+          $archive = Join-Path $env:RUNNER_TEMP 'biyan-migration-windows.zip'
+          Remove-Item -Path $root -Recurse -Force -ErrorAction SilentlyContinue
+          Remove-Item -Path $archive -Force -ErrorAction SilentlyContinue
+          New-Item -ItemType Directory -Path $root -Force | Out-Null
+
+          Invoke-WebRequest -Uri $uri.AbsoluteUri -OutFile $archive
+          $actual = (Get-FileHash -Path $archive -Algorithm SHA256).Hash.ToLowerInvariant()
+          $expected = $env:BUNDLE_SHA256.ToLowerInvariant()
+          if ($actual -ne $expected) {
+            throw "Windows migration bundle SHA-256 mismatch: expected $expected, got $actual"
+          }
+          Expand-Archive -Path $archive -DestinationPath $root -Force
+
+          $manifest = Join-Path $root 'manifest.json'
+          if (-not (Test-Path -Path $manifest -PathType Leaf)) {
+            throw 'Windows migration bundle is missing manifest.json'
+          }
+          $paths = @{}
+          foreach ($phase in @('current', 'a', 'b', 'c')) {
+            $installer = Join-Path $root "installers/$phase.exe"
+            if (-not (Test-Path -Path $installer -PathType Leaf)) {
+              throw "Windows migration bundle is missing installers/$phase.exe"
+            }
+            $paths[$phase] = $installer
+          }
+
+          "MIGRATION_MANIFEST=$manifest" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+          "CURRENT_INSTALLER=$($paths['current'])" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+          "A_INSTALLER=$($paths['a'])" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+          "B_INSTALLER=$($paths['b'])" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+          "C_INSTALLER=$($paths['c'])" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+
+      - name: Run all six Windows migration paths
+        shell: powershell
+        env:
+          STARTUP_SECONDS: ${{ inputs.startup_seconds }}
+        run: |
+          New-Item -ItemType Directory -Path autoqa/migration-results -Force | Out-Null
+          python autoqa/migration_runner.py `
+            --platform windows `
+            --current-installer "$env:CURRENT_INSTALLER" `
+            --a-installer "$env:A_INSTALLER" `
+            --b-installer "$env:B_INSTALLER" `
+            --c-installer "$env:C_INSTALLER" `
+            --snapshot-manifest "$env:MIGRATION_MANIFEST" `
+            --report autoqa/migration-results/windows.json `
+            --work-dir "$env:RUNNER_TEMP/biyan-migration-windows-work" `
+            --startup-seconds "$env:STARTUP_SECONDS" `
+            --allow-destructive-autoqa AUTOQA
+
+      - name: Upload Windows migration evidence
         if: always()
         uses: actions/upload-artifact@v4
-        continue-on-error: true
         with:
-          name: migration-recordings-${{ github.run_number }}-windows
-          path: autoqa/recordings/
+          name: migration-windows-${{ github.run_id }}-${{ github.run_attempt }}
+          path: |
+            autoqa/migration-results/windows.json
+            ${{ runner.temp }}/biyan-migration-windows/manifest.json
+          if-no-files-found: error
+          retention-days: 30
 
-      - name: Upload trajectories
-        if: always()
-        uses: actions/upload-artifact@v4
-        continue-on-error: true
-        with:
-          name: migration-trajectories-${{ github.run_number }}-windows
-          path: autoqa/trajectories/
-
-      - name: Cleanup after tests
+      - name: Remove Windows migration staging
         if: always()
         shell: powershell
         run: |
-          .\autoqa\scripts\windows_post_cleanup.ps1 -IsNightly $false
+          Remove-Item -Path "$env:RUNNER_TEMP/biyan-migration-windows" -Recurse -Force -ErrorAction SilentlyContinue
+          Remove-Item -Path "$env:RUNNER_TEMP/biyan-migration-windows-work" -Recurse -Force -ErrorAction SilentlyContinue
+          Remove-Item -Path "$env:RUNNER_TEMP/biyan-migration-windows.zip" -Force -ErrorAction SilentlyContinue
 
-  migration-ubuntu:
-    if: inputs.old_ubuntu_installer != '' && inputs.new_ubuntu_installer != ''
+  migration-linux:
+    name: Linux current to A to B to C
+    needs: runner-contract
     runs-on: ubuntu-22-04-nvidia-gpu
-    timeout-minutes: 60
+    environment: biyan-migration-autoqa
+    timeout-minutes: 240
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
 
-      - name: Setup Python 3.13
-        uses: actions/setup-python@v4
+      - name: Setup Python
+        uses: actions/setup-python@v5
         with:
           python-version: '3.13'
 
-      - name: Install system dependencies
+      - name: Download and verify complete Linux bundle
+        shell: bash
+        env:
+          BUNDLE_URL: ${{ inputs.linux_bundle_url }}
+          BUNDLE_SHA256: ${{ inputs.linux_bundle_sha256 }}
         run: |
-          sudo apt-get update
-          sudo apt-get install -y \
-            x11-utils \
-            python3-tk \
-            python3-dev \
-            wmctrl \
-            xdotool \
-            libnss3-dev \
-            libgconf-2-4 \
-            libxss1 \
-            libasound2 \
-            libxtst6 \
-            libgtk-3-0 \
-            libgbm-dev \
-            libxshmfence1 \
-            libxrandr2 \
-            libpangocairo-1.0-0 \
-            libatk1.0-0 \
-            libcairo-gobject2 \
-            libgdk-pixbuf2.0-0 \
-            gnome-screenshot \
-            xvfb
+          set -euo pipefail
+          case "$BUNDLE_URL" in
+            https://*) ;;
+            *) echo 'Linux migration bundle URL must use HTTPS' >&2; exit 1 ;;
+          esac
+          if ! [[ "$BUNDLE_SHA256" =~ ^[0-9a-fA-F]{64}$ ]]; then
+            echo 'Linux migration bundle SHA-256 is invalid' >&2
+            exit 1
+          fi
+          command -v curl >/dev/null
+          command -v unzip >/dev/null
 
-      - name: Setup script permissions
+          root="$RUNNER_TEMP/biyan-migration-linux"
+          archive="$RUNNER_TEMP/biyan-migration-linux.zip"
+          rm -rf "$root" "$RUNNER_TEMP/biyan-migration-linux-work" "$archive"
+          mkdir -p "$root"
+          curl --fail --location --retry 3 --proto '=https' --tlsv1.2 \
+            --output "$archive" "$BUNDLE_URL"
+          actual="$(sha256sum "$archive" | awk '{print $1}')"
+          expected="$(printf '%s' "$BUNDLE_SHA256" | tr '[:upper:]' '[:lower:]')"
+          if [[ "$actual" != "$expected" ]]; then
+            echo "Linux migration bundle SHA-256 mismatch: expected $expected, got $actual" >&2
+            exit 1
+          fi
+          unzip -q "$archive" -d "$root"
+          manifest="$root/manifest.json"
+          if [[ ! -f "$manifest" ]]; then
+            echo 'Linux migration bundle is missing manifest.json' >&2
+            exit 1
+          fi
+
+          resolve_installer() {
+            local phase="$1"
+            local candidate
+            local -a matches=()
+            for candidate in \
+              "$root/installers/$phase.deb" \
+              "$root/installers/$phase.AppImage" \
+              "$root/installers/$phase.appimage"; do
+              if [[ -f "$candidate" ]]; then
+                matches+=("$candidate")
+              fi
+            done
+            if [[ "${#matches[@]}" -ne 1 ]]; then
+              echo "Linux bundle must contain exactly one installer for phase $phase" >&2
+              exit 1
+            fi
+            if [[ "${matches[0],,}" == *.appimage ]]; then
+              chmod +x "${matches[0]}"
+            fi
+            printf '%s' "${matches[0]}"
+          }
+
+          current="$(resolve_installer current)"
+          a="$(resolve_installer a)"
+          b="$(resolve_installer b)"
+          c="$(resolve_installer c)"
+          {
+            echo "MIGRATION_MANIFEST=$manifest"
+            echo "CURRENT_INSTALLER=$current"
+            echo "A_INSTALLER=$a"
+            echo "B_INSTALLER=$b"
+            echo "C_INSTALLER=$c"
+          } >> "$GITHUB_ENV"
+
+      - name: Run all six Linux migration paths
+        shell: bash
+        env:
+          STARTUP_SECONDS: ${{ inputs.startup_seconds }}
         run: |
-          chmod +x autoqa/scripts/setup_permissions.sh || true
-          ./autoqa/scripts/setup_permissions.sh || true
+          set -euo pipefail
+          mkdir -p autoqa/migration-results
+          python autoqa/migration_runner.py \
+            --platform linux \
+            --current-installer "$CURRENT_INSTALLER" \
+            --a-installer "$A_INSTALLER" \
+            --b-installer "$B_INSTALLER" \
+            --c-installer "$C_INSTALLER" \
+            --snapshot-manifest "$MIGRATION_MANIFEST" \
+            --report autoqa/migration-results/linux.json \
+            --work-dir "$RUNNER_TEMP/biyan-migration-linux-work" \
+            --startup-seconds "$STARTUP_SECONDS" \
+            --allow-destructive-autoqa AUTOQA
 
-      - name: Clean existing Mita installations
-        run: |
-          ./autoqa/scripts/ubuntu_cleanup.sh
-
-      - name: Download OLD and NEW installers
-        run: |
-          set -e
-          # Download OLD installer using existing script
-          ./autoqa/scripts/ubuntu_download.sh \
-            "${{ inputs.old_ubuntu_installer }}" \
-            "false" \
-            "" \
-            "" \
-            "" \
-            ""
-          cp /tmp/mita-installer.deb /tmp/mita-old.deb
-
-          # Download NEW installer using existing script
-          ./autoqa/scripts/ubuntu_download.sh \
-            "${{ inputs.new_ubuntu_installer }}" \
-            "false" \
-            "" \
-            "" \
-            "" \
-            ""
-          cp /tmp/mita-installer.deb /tmp/mita-new.deb
-
-          echo "OLD_VERSION=/tmp/mita-old.deb" >> $GITHUB_ENV
-          echo "NEW_VERSION=/tmp/mita-new.deb" >> $GITHUB_ENV
-
-      - name: Install Python dependencies
-        working-directory: autoqa
-        run: |
-          python -m pip install --upgrade pip
-          pip install -r requirements.txt
-
-      - name: Run migration tests (Ubuntu)
-        working-directory: autoqa
-        run: |
-          case="${{ inputs.migration_test_case }}"
-          caseArg=""
-          if [ -n "${case}" ]; then caseArg="--migration-test-case \"${case}\""; fi
-          xvfb-run -a python main.py --enable-migration-test --old-version "${OLD_VERSION}" --new-version "${NEW_VERSION}" --max-turns ${{ inputs.max_turns }} ${caseArg}
-
-      - name: Upload screen recordings
+      - name: Upload Linux migration evidence
         if: always()
         uses: actions/upload-artifact@v4
-        continue-on-error: true
         with:
-          name: migration-recordings-${{ github.run_number }}-ubuntu
-          path: autoqa/recordings/
+          name: migration-linux-${{ github.run_id }}-${{ github.run_attempt }}
+          path: |
+            autoqa/migration-results/linux.json
+            ${{ runner.temp }}/biyan-migration-linux/manifest.json
+          if-no-files-found: error
+          retention-days: 30
 
-      - name: Upload trajectories
+      - name: Remove Linux migration staging
         if: always()
-        uses: actions/upload-artifact@v4
-        continue-on-error: true
-        with:
-          name: migration-trajectories-${{ github.run_number }}-ubuntu
-          path: autoqa/trajectories/
-
-      - name: Cleanup after tests
-        if: always()
+        shell: bash
         run: |
-          ./autoqa/scripts/ubuntu_post_cleanup.sh "false"
+          rm -rf \
+            "$RUNNER_TEMP/biyan-migration-linux" \
+            "$RUNNER_TEMP/biyan-migration-linux-work" \
+            "$RUNNER_TEMP/biyan-migration-linux.zip"
 
   migration-macos:
-    if: inputs.old_macos_installer != '' && inputs.new_macos_installer != ''
+    name: macOS current to A to B to C
+    needs: runner-contract
     runs-on: macos-selfhosted-15-arm64-cua
-    timeout-minutes: 60
+    environment: biyan-migration-autoqa
+    timeout-minutes: 240
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
 
-      - name: Setup Python 3.13
-        uses: actions/setup-python@v4
+      - name: Setup Python
+        uses: actions/setup-python@v5
         with:
           python-version: '3.13'
 
-      - name: Setup script permissions
+      - name: Download and verify complete macOS bundle
+        shell: bash
+        env:
+          BUNDLE_URL: ${{ inputs.macos_bundle_url }}
+          BUNDLE_SHA256: ${{ inputs.macos_bundle_sha256 }}
         run: |
-          chmod +x autoqa/scripts/setup_permissions.sh || true
-          ./autoqa/scripts/setup_permissions.sh || true
+          set -euo pipefail
+          case "$BUNDLE_URL" in
+            https://*) ;;
+            *) echo 'macOS migration bundle URL must use HTTPS' >&2; exit 1 ;;
+          esac
+          if ! [[ "$BUNDLE_SHA256" =~ ^[0-9a-fA-F]{64}$ ]]; then
+            echo 'macOS migration bundle SHA-256 is invalid' >&2
+            exit 1
+          fi
+          command -v curl >/dev/null
+          command -v unzip >/dev/null
 
-      - name: Clean existing Mita installations
+          root="$RUNNER_TEMP/biyan-migration-macos"
+          archive="$RUNNER_TEMP/biyan-migration-macos.zip"
+          rm -rf "$root" "$RUNNER_TEMP/biyan-migration-macos-work" "$archive"
+          mkdir -p "$root"
+          curl --fail --location --retry 3 --proto '=https' --tlsv1.2 \
+            --output "$archive" "$BUNDLE_URL"
+          actual="$(shasum -a 256 "$archive" | awk '{print $1}')"
+          expected="$(printf '%s' "$BUNDLE_SHA256" | tr '[:upper:]' '[:lower:]')"
+          if [[ "$actual" != "$expected" ]]; then
+            echo "macOS migration bundle SHA-256 mismatch: expected $expected, got $actual" >&2
+            exit 1
+          fi
+          unzip -q "$archive" -d "$root"
+          manifest="$root/manifest.json"
+          if [[ ! -f "$manifest" ]]; then
+            echo 'macOS migration bundle is missing manifest.json' >&2
+            exit 1
+          fi
+
+          for phase in current a b c; do
+            installer="$root/installers/$phase.dmg"
+            if [[ ! -f "$installer" ]]; then
+              echo "macOS migration bundle is missing installers/$phase.dmg" >&2
+              exit 1
+            fi
+          done
+          {
+            echo "MIGRATION_MANIFEST=$manifest"
+            echo "CURRENT_INSTALLER=$root/installers/current.dmg"
+            echo "A_INSTALLER=$root/installers/a.dmg"
+            echo "B_INSTALLER=$root/installers/b.dmg"
+            echo "C_INSTALLER=$root/installers/c.dmg"
+          } >> "$GITHUB_ENV"
+
+      - name: Run all six macOS migration paths
+        shell: bash
+        env:
+          STARTUP_SECONDS: ${{ inputs.startup_seconds }}
         run: |
-          ./autoqa/scripts/macos_cleanup.sh
+          set -euo pipefail
+          mkdir -p autoqa/migration-results
+          python autoqa/migration_runner.py \
+            --platform macos \
+            --current-installer "$CURRENT_INSTALLER" \
+            --a-installer "$A_INSTALLER" \
+            --b-installer "$B_INSTALLER" \
+            --c-installer "$C_INSTALLER" \
+            --snapshot-manifest "$MIGRATION_MANIFEST" \
+            --report autoqa/migration-results/macos.json \
+            --work-dir "$RUNNER_TEMP/biyan-migration-macos-work" \
+            --startup-seconds "$STARTUP_SECONDS" \
+            --allow-destructive-autoqa AUTOQA
 
-      - name: Download OLD and NEW installers
-        run: |
-          set -e
-          # Download OLD installer using existing script
-          ./autoqa/scripts/macos_download.sh \
-            "${{ inputs.old_macos_installer }}" \
-            "false" \
-            "" \
-            "" \
-            "" \
-            ""
-          cp /tmp/mita-installer.dmg /tmp/mita-old.dmg
-
-          # Download NEW installer using existing script
-          ./autoqa/scripts/macos_download.sh \
-            "${{ inputs.new_macos_installer }}" \
-            "false" \
-            "" \
-            "" \
-            "" \
-            ""
-          cp /tmp/mita-installer.dmg /tmp/mita-new.dmg
-
-          echo "OLD_VERSION=/tmp/mita-old.dmg" >> $GITHUB_ENV
-          echo "NEW_VERSION=/tmp/mita-new.dmg" >> $GITHUB_ENV
-
-      - name: Install Python dependencies
-        working-directory: autoqa
-        run: |
-          python -m pip install --upgrade pip
-          pip install -r requirements.txt
-
-      - name: Run migration tests (macOS)
-        working-directory: autoqa
-        run: |
-          case="${{ inputs.migration_test_case }}"
-          caseArg=""
-          if [ -n "${case}" ]; then caseArg="--migration-test-case \"${case}\""; fi
-          python main.py --enable-migration-test --old-version "${OLD_VERSION}" --new-version "${NEW_VERSION}" --max-turns ${{ inputs.max_turns }} ${caseArg}
-
-      - name: Upload screen recordings
+      - name: Upload macOS migration evidence
         if: always()
         uses: actions/upload-artifact@v4
-        continue-on-error: true
         with:
-          name: migration-recordings-${{ github.run_number }}-macos
-          path: autoqa/recordings/
+          name: migration-macos-${{ github.run_id }}-${{ github.run_attempt }}
+          path: |
+            autoqa/migration-results/macos.json
+            ${{ runner.temp }}/biyan-migration-macos/manifest.json
+          if-no-files-found: error
+          retention-days: 30
 
-      - name: Upload trajectories
+      - name: Remove macOS migration staging
         if: always()
-        uses: actions/upload-artifact@v4
-        continue-on-error: true
-        with:
-          name: migration-trajectories-${{ github.run_number }}-macos
-          path: autoqa/trajectories/
-
-      - name: Cleanup after tests
-        if: always()
+        shell: bash
         run: |
-          ./autoqa/scripts/macos_post_cleanup.sh
-
-
+          rm -rf \
+            "$RUNNER_TEMP/biyan-migration-macos" \
+            "$RUNNER_TEMP/biyan-migration-macos-work" \
+            "$RUNNER_TEMP/biyan-migration-macos.zip"

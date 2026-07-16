@@ -1,14 +1,14 @@
 {
   "openapi": "3.0.0",
   "info": {
-    "title": "Jan API Server Endpoints",
-    "description": "Jan API server provides a REST API interface for seamless interaction with large language models (LLMs) for third party apps. Compatible with the OpenAI API spec, it enables straightforward API access of models available in Jan.",
+    "title": "Biyan API Server Endpoints",
+    "description": "Biyan exposes an OpenAI-compatible REST API for models from user-configured remote providers. Local model runtimes are not available.",
     "version": "1.0"
   },
   "servers": [
     {
       "url": "http://localhost:1337/v1",
-      "description": "Jan API server"
+      "description": "Biyan API server"
     }
   ],
   "tags": [
@@ -24,13 +24,13 @@
   "paths": {
     "/models": {
       "get": {
-        "summary": "List loaded models",
-        "description": "Returns information about the loaded model(s). The list always contains a single element describing the current model. See the OpenAI *Models* API documentation for details.",
+        "summary": "List configured remote models",
+        "description": "Returns models exposed by configured remote providers.",
         "operationId": "listModels",
         "tags": ["Models"],
         "responses": {
           "200": {
-            "description": "A list containing a single model object",
+            "description": "A list of configured remote model objects",
             "content": {
               "application/json": {
                 "schema": {
@@ -56,7 +56,7 @@
                 "$ref": "#/components/schemas/CreateChatCompletionDto"
               },
               "example": {
-                "model": "janhq/Jan-v3-4b-base-instruct-Q4_K_XL",
+                "model": "openai/gpt-4.1-mini",
                 "messages": [
                   {"role": "user", "content": "Hello!"}
                 ]
@@ -74,6 +74,9 @@
                 }
               }
             }
+          },
+          "410": {
+            "description": "LOCAL_RUNTIME_REMOVED: the model is not owned by a configured remote provider"
           }
         }
       }
@@ -92,7 +95,7 @@
                 "$ref": "#/components/schemas/CreateMessageDto"
               },
               "example": {
-                "model": "janhq/Jan-v3-4b-base-instruct-Q4_K_XL",
+                "model": "anthropic/claude-sonnet-4",
                 "messages": [
                   {"role": "user", "content": "Hello!"}
                 ]
@@ -110,6 +113,9 @@
                 }
               }
             }
+          },
+          "410": {
+            "description": "LOCAL_RUNTIME_REMOVED: the model is not owned by a configured remote provider"
           }
         }
       }
@@ -129,7 +135,7 @@
                 "properties": {
                   "assistant_id": { "type": "string", "description": "Optional assistant id to load system prompt/model hint from" },
                   "project_id": { "type": "string", "nullable": true, "description": "Reserved for future parity; MCP-only execution currently" },
-                  "model": { "type": "string", "description": "Optional model override. If omitted, uses assistant's model hint or the first running local model." },
+                  "model": { "type": "string", "description": "Optional remote model override. If omitted, the assistant must contain a configured remote model hint." },
                   "messages": {
                     "type": "array",
                     "items": {

@@ -104,11 +104,10 @@
   "chats": "Trò chuyện",
   "favorites": "Yêu thích",
   "recents": "Gần đây",
-  "hub": "Hub",
   "helpSupport": "Trợ giúp & Hỗ trợ",
-  "helpUsImproveMita": "Giúp chúng tôi cải thiện Biyan",
-  "helpUsImproveMitaDescription": "Chúng tôi thu thập dữ liệu ẩn danh để hiểu cách sử dụng tính năng. Cuộc trò chuyện và thông tin cá nhân của bạn không bao giờ bị theo dõi. Bạn có thể thay đổi điều này bất cứ lúc nào trong Cài đặt > Quyền riêng tư.",
-  "helpUsImproveMitaQuestion": "Bạn có muốn giúp chúng tôi cải thiện Biyan không?",
+  "helpUsImproveBiyan": "Giúp chúng tôi cải thiện Biyan",
+  "helpUsImproveBiyanDescription": "Chúng tôi thu thập dữ liệu ẩn danh để hiểu cách sử dụng tính năng. Cuộc trò chuyện và thông tin cá nhân của bạn không bao giờ bị theo dõi. Bạn có thể thay đổi điều này bất cứ lúc nào trong Cài đặt > Quyền riêng tư.",
+  "helpUsImproveBiyanQuestion": "Bạn có muốn giúp chúng tôi cải thiện Biyan không?",
   "unstarAll": "Bỏ gắn dấu sao tất cả",
   "unstar": "Bỏ gắn dấu sao",
   "deleteAll": "Xóa tất cả",
@@ -158,12 +157,7 @@
   "noResultsFound": "Không tìm thấy kết quả nào",
   "noThreadsYet": "Chưa có chủ đề nào",
   "noThreadsYetDesc": "Bắt đầu một cuộc trò chuyện mới để xem lịch sử chủ đề của bạn ở đây.",
-  "downloads": "Tải xuống",
-  "downloading": "Đang tải xuống",
   "uploadingAttachments": "Đang tải lên tệp đính kèm…",
-  "cancelDownload": "Hủy tải xuống",
-  "downloadCancelled": "Đã hủy tải xuống",
-  "downloadComplete": "Tải xuống hoàn tất",
   "thinking": "Đang suy nghĩ...",
   "thought": "Suy nghĩ",
   "callingTool": "Đang gọi công cụ",
@@ -187,7 +181,7 @@
   "generateAiResponse": "Tạo phản hồi AI",
   "customAvatar": "Ảnh đại diện tùy chỉnh",
   "editAssistant": "Chỉnh sửa Trợ lý",
-  "mita": "Biyan",
+  "biyan": "Biyan",
   "metadata": "Siêu dữ liệu",
   "regenerate": "Tái tạo",
   "threadImage": "Hình ảnh chủ đề",
@@ -432,30 +426,14 @@
       "title": "Tải xuống hoàn tất",
       "description": "{{item}} đã được tải xuống"
     },
-    "downloadCancelled": {
-      "title": "Đã hủy tải xuống",
-      "description": "Quá trình tải xuống đã bị hủy"
-    },
     "downloadFailed": {
       "title": "Tải xuống thất bại",
       "description": "Tải xuống {{item}} thất bại"
     },
-    "modelValidationStarted": {
-      "title": "Đang xác thực mô hình",
-      "description": "Đã tải xuống mô hình \"{{modelId}}\" thành công. Đang xác minh tính toàn vẹn..."
-    },
-    "modelValidationFailed": {
-      "title": "Xác thực mô hình thất bại",
-      "description": "Mô hình đã tải xuống \"{{modelId}}\" không vượt qua kiểm tra tính toàn vẹn và đã bị xóa. Tệp có thể bị hỏng hoặc bị giả mạo."
-    },
     "modelNoVision": {
       "title": "Mô hình không hỗ trợ hình ảnh",
       "description": "Chọn mô hình có khả năng thị giác để đính kèm hình ảnh.",
-      "action": "Mở Hub"
-    },
-    "downloadAndVerificationComplete": {
-      "title": "Tải xuống hoàn tất",
-      "description": "Mô hình \"{{item}}\" đã được tải xuống và xác minh thành công"
+      "action": "Mở cài đặt nhà cung cấp"
     },
     "projectCreated": {
       "title": "Dự án đã được tạo",

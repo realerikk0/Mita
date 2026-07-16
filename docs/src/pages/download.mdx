@@ -1,34 +1,13 @@
 ---
-title: Download
-description: Jan is a ChatGPT-alternative that runs on your own computer, with a local API server.
-keywords:
-  [
-    Jan,
-    Customizable Intelligence, LLM,
-    local AI,
-    privacy focus,
-    free and open source,
-    private and offline,
-    conversational AI,
-    no-subscription fee,
-    large language models,
-    architecture,
-  ]
+title: Get Biyan
+description: Install the Biyan desktop AI client.
+keywords: [Biyan, 彼岩, desktop AI]
 ---
 
-import Download from "@/components/Download"
+# Get Biyan
 
-export const getStaticProps = async() => {
-  const resRelease = await fetch('https://api.github.com/repos/janhq/jan/releases/latest')  
-  const release = await resRelease.json()
+Use the [Biyan website](https://biyan.ai/) for current signed desktop installers and release information.
 
-  return {
-    props: {
-      ssg: {
-        lastRelease: release,
-      },
-    },
-  }
-}
+Existing users should update through the in-app updater. The supported release train migrates users through A, B, and C; a later installer also contains all earlier migration steps for users who have been offline.
 
-<Download />
+Before installing, review the [data migration guide](/docs/desktop/data-folder). Biyan never silently deletes old application data, downloaded local models, or retired RAG/vector files.

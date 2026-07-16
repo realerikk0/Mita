@@ -1,6 +1,5 @@
-use rand::{rngs::StdRng, Rng, SeedableRng};
 use reqwest::header::{HeaderMap, HeaderName, HeaderValue};
-use std::collections::{HashMap, HashSet};
+use std::collections::HashMap;
 use url::Url;
 
 #[derive(serde::Deserialize, Clone, Debug)]
@@ -12,33 +11,9 @@ pub struct ProxyConfig {
     pub ignore_ssl: Option<bool>,      // Ignore SSL certificate verification
 }
 
-/// Check if a port is available for binding
+/// Check if a localhost port is available for binding.
 pub fn is_port_available(port: u16) -> bool {
     std::net::TcpListener::bind(("127.0.0.1", port)).is_ok()
-}
-
-/// Generate a random port that's not in the used_ports set and is available
-pub fn generate_random_port(used_ports: &HashSet<u16>) -> Result<u16, String> {
-    const MAX_ATTEMPTS: u32 = 20000;
-    let mut attempts = 0;
-    let mut rng = StdRng::from_entropy();
-
-    while attempts < MAX_ATTEMPTS {
-        let port = rng.gen_range(3000..4000);
-
-        if used_ports.contains(&port) {
-            attempts += 1;
-            continue;
-        }
-
-        if is_port_available(port) {
-            return Ok(port);
-        }
-
-        attempts += 1;
-    }
-
-    Err("Failed to find an available port for the model to load".into())
 }
 
 /// Validates proxy configuration including URL format, scheme, authentication, and no_proxy entries
@@ -420,7 +395,8 @@ pub fn is_orphaned_mcp_process(process_info: &ProcessUsingPort) -> bool {
 
     let is_js_runtime =
         name_lower.contains("node") || name_lower.contains("npx") || name_lower.contains("bun");
-    let is_mita_mcp_server = cmd_str.contains("mita-web-research")
+    let is_biyan_or_legacy_mcp_server = cmd_str.contains("biyan-web-research")
+        || cmd_str.contains("mita-web-research")
         || cmd_str.contains("silence-web-research")
         || cmd_str.contains("search-mcp-server")
         || (cmd_str.contains("mita") && cmd_str.contains("mcp"))
@@ -429,5 +405,5 @@ pub fn is_orphaned_mcp_process(process_info: &ProcessUsingPort) -> bool {
         || cmd_str.contains("node")
         || cmd_str.contains("bun");
 
-    is_js_runtime && is_mita_mcp_server
+    is_js_runtime && is_biyan_or_legacy_mcp_server
 }

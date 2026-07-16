@@ -24,13 +24,6 @@ vi.mock('@/constants/models', () => ({
   },
 }))
 
-vi.mock('@janhq/core', () => ({
-  EngineManager: {
-    instance: vi.fn(),
-  },
-  SettingComponentProps: {},
-}))
-
 vi.mock('@/types/models', () => ({
   ModelCapabilities: {
     TOOLS: 'tools',
@@ -51,12 +44,6 @@ vi.mock('@/lib/predefined', () => ({
   },
 }))
 
-vi.mock('@/lib/extension', () => ({
-  ExtensionManager: {
-    getInstance: vi.fn(),
-  },
-}))
-
 vi.mock('@/lib/models', () => ({
   getModelCapabilities: vi.fn().mockReturnValue([]),
 }))
@@ -66,8 +53,6 @@ vi.mock('@/lib/provider-api-keys', () => ({
 }))
 
 import { fetch as fetchTauri } from '@tauri-apps/plugin-http'
-import { EngineManager } from '@janhq/core'
-import { ExtensionManager } from '@/lib/extension'
 import { providerRemoteApiKeyChain } from '@/lib/provider-api-keys'
 import { getModelCapabilities } from '@/lib/models'
 import { ProviderQuotaError } from '@/lib/provider-quota-error'
@@ -77,7 +62,9 @@ describe('TauriProvidersService', () => {
   let svc: TauriProvidersService
 
   beforeEach(() => {
-    vi.clearAllMocks()
+    vi.mocked(fetchTauri).mockReset()
+    vi.mocked(providerRemoteApiKeyChain).mockReset().mockReturnValue([])
+    vi.mocked(getModelCapabilities).mockReset().mockReturnValue([])
     svc = new TauriProvidersService()
   })
 
@@ -89,10 +76,6 @@ describe('TauriProvidersService', () => {
 
   describe('getProviders', () => {
     it('passes each builtin provider base URL into capability inference', async () => {
-      vi.mocked(EngineManager.instance).mockReturnValue({
-        engines: new Map(),
-      } as any)
-
       await svc.getProviders()
 
       expect(getModelCapabilities).toHaveBeenCalledWith(
@@ -107,91 +90,20 @@ describe('TauriProvidersService', () => {
       )
     })
 
-    it('returns builtin + runtime providers on success', async () => {
-      const mockEngine = {
-        list: vi.fn().mockResolvedValue([
-          { id: 'local-model', name: 'Local', description: 'desc' },
-        ]),
-        getSettings: vi.fn().mockResolvedValue([]),
-        isToolSupported: vi.fn().mockResolvedValue(false),
-        inferenceUrl: 'http://localhost:1337/chat/completions',
-      }
-      vi.mocked(EngineManager.instance).mockReturnValue({
-        engines: new Map([['llama.cpp', mockEngine]]),
-      } as any)
-
+    it('returns built-in remote providers only', async () => {
       const result = await svc.getProviders()
-      expect(result.length).toBeGreaterThan(0)
-      // Runtime provider first, then builtins
-      const llama = result.find((p: any) => p.provider === 'llama.cpp')
-      expect(llama).toBeDefined()
-      expect(llama!.models).toHaveLength(1)
+      expect(result.map((provider) => provider.provider)).toEqual(['openai'])
     })
 
-    it('skips hidden providers (foundation-models)', async () => {
-      const hiddenEngine = { list: vi.fn(), getSettings: vi.fn() }
-      vi.mocked(EngineManager.instance).mockReturnValue({
-        engines: new Map([['foundation-models', hiddenEngine]]),
-      } as any)
-
+    it('applies inferred capabilities to built-in models', async () => {
+      vi.mocked(getModelCapabilities).mockReturnValue(['tools'] as any)
       const result = await svc.getProviders()
-      expect(hiddenEngine.list).not.toHaveBeenCalled()
-      // Only builtins
-      expect(result.every((p: any) => p.provider !== 'foundation-models')).toBe(true)
-    })
-
-    it('adds TOOLS capability when isToolSupported returns true', async () => {
-      const mockEngine = {
-        list: vi.fn().mockResolvedValue([{ id: 'm1', name: 'M1', description: '' }]),
-        getSettings: vi.fn().mockResolvedValue([]),
-        isToolSupported: vi.fn().mockResolvedValue(true),
-        inferenceUrl: 'http://localhost:1337/chat/completions',
-      }
-      vi.mocked(EngineManager.instance).mockReturnValue({
-        engines: new Map([['test-engine', mockEngine]]),
-      } as any)
-
-      const result = await svc.getProviders()
-      const provider = result.find((p: any) => p.provider === 'test-engine')
-      expect(provider!.models[0].capabilities).toContain('tools')
-    })
-
-    it('adds EMBEDDINGS capability for embedding models', async () => {
-      const mockEngine = {
-        list: vi.fn().mockResolvedValue([{ id: 'emb', name: 'Emb', description: '', embedding: true }]),
-        getSettings: vi.fn().mockResolvedValue([]),
-        isToolSupported: vi.fn().mockResolvedValue(false),
-        inferenceUrl: 'http://localhost:1337/chat/completions',
-      }
-      vi.mocked(EngineManager.instance).mockReturnValue({
-        engines: new Map([['emb-engine', mockEngine]]),
-      } as any)
-
-      const result = await svc.getProviders()
-      const provider = result.find((p: any) => p.provider === 'emb-engine')
-      expect(provider!.models[0].capabilities).toContain('embeddings')
-    })
-
-    it('warns but continues when isToolSupported throws', async () => {
-      const mockEngine = {
-        list: vi.fn().mockResolvedValue([{ id: 'm1', name: 'M1', description: '' }]),
-        getSettings: vi.fn().mockResolvedValue([]),
-        isToolSupported: vi.fn().mockRejectedValue(new Error('fail')),
-        inferenceUrl: 'http://localhost:1337/chat/completions',
-      }
-      vi.mocked(EngineManager.instance).mockReturnValue({
-        engines: new Map([['test-engine', mockEngine]]),
-      } as any)
-
-      const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {})
-      const result = await svc.getProviders()
-      expect(result.find((p: any) => p.provider === 'test-engine')).toBeDefined()
-      expect(warnSpy).toHaveBeenCalled()
-      warnSpy.mockRestore()
+      expect(result[0]?.models.every((model) => model.capabilities?.includes('tools')))
+        .toBe(true)
     })
 
     it('returns empty array on top-level error', async () => {
-      vi.mocked(EngineManager.instance).mockImplementation(() => {
+      vi.mocked(getModelCapabilities).mockImplementation(() => {
         throw new Error('boom')
       })
       const errSpy = vi.spyOn(console, 'error').mockImplementation(() => {})
@@ -200,24 +112,6 @@ describe('TauriProvidersService', () => {
       errSpy.mockRestore()
     })
 
-    it('maps engine settings correctly', async () => {
-      const mockEngine = {
-        list: vi.fn().mockResolvedValue([]),
-        getSettings: vi.fn().mockResolvedValue([
-          { key: 'api_key', title: 'API Key', description: 'Key', controllerType: 'input', controllerProps: {} },
-        ]),
-        inferenceUrl: 'http://localhost:1337/chat/completions',
-      }
-      vi.mocked(EngineManager.instance).mockReturnValue({
-        engines: new Map([['test', mockEngine]]),
-      } as any)
-
-      const result = await svc.getProviders()
-      const provider = result.find((p: any) => p.provider === 'test')
-      expect(provider!.settings).toEqual([
-        { key: 'api_key', title: 'API Key', description: 'Key', controller_type: 'input', controller_props: {} },
-      ])
-    })
   })
 
   describe('fetchModelsFromProvider', () => {
@@ -227,9 +121,12 @@ describe('TauriProvidersService', () => {
       active: false,
     } as any
 
-    it('throws if no base_url', async () => {
+    it('rejects providers without a remote base URL', async () => {
       await expect(svc.fetchModelsFromProvider({ ...baseProvider, base_url: '' }))
-        .rejects.toThrow('Provider must have base_url configured')
+        .rejects.toMatchObject({
+          message: 'Provider must use a non-local HTTP(S) endpoint',
+          code: 'LOCAL_RUNTIME_REMOVED',
+        })
     })
 
     it('returns model ids from data.data format', async () => {
@@ -419,21 +316,14 @@ describe('TauriProvidersService', () => {
       errSpy.mockRestore()
     })
 
-    it('adds Origin header for localhost URLs', async () => {
+    it('rejects localhost model endpoints without making a request', async () => {
       const localProvider = { ...baseProvider, base_url: 'http://localhost:1234' }
-      vi.mocked(fetchTauri).mockResolvedValueOnce({
-        ok: true,
-        status: 200,
-        json: vi.fn().mockResolvedValue({ data: [] }),
-      } as any)
-
-      await svc.fetchModelsFromProvider(localProvider)
-      expect(fetchTauri).toHaveBeenCalledWith(
-        'http://localhost:1234/models',
-        expect.objectContaining({
-          headers: expect.objectContaining({ Origin: 'tauri://localhost' }),
+      await expect(svc.fetchModelsFromProvider(localProvider)).rejects.toMatchObject(
+        {
+          message: 'Provider must use a non-local HTTP(S) endpoint',
+          code: 'LOCAL_RUNTIME_REMOVED',
         })
-      )
+      expect(fetchTauri).not.toHaveBeenCalled()
     })
 
     it('adds auth headers when api key is available', async () => {
@@ -1623,52 +1513,8 @@ describe('TauriProvidersService', () => {
   })
 
   describe('updateSettings', () => {
-    it('delegates to engine updateSettings', async () => {
-      const mockUpdate = vi.fn()
-      vi.mocked(ExtensionManager.getInstance).mockReturnValue({
-        getEngine: vi.fn().mockReturnValue({ updateSettings: mockUpdate }),
-      } as any)
-
-      await svc.updateSettings('test', [
-        { key: 'k', controller_type: 'input', controller_props: { value: 'v' } } as any,
-      ])
-
-      expect(mockUpdate).toHaveBeenCalledWith([
-        expect.objectContaining({
-          key: 'k',
-          controllerType: 'input',
-          controllerProps: { value: 'v' },
-        }),
-      ])
-    })
-
-    it('defaults value to empty string when undefined', async () => {
-      const mockUpdate = vi.fn()
-      vi.mocked(ExtensionManager.getInstance).mockReturnValue({
-        getEngine: vi.fn().mockReturnValue({ updateSettings: mockUpdate }),
-      } as any)
-
-      await svc.updateSettings('test', [
-        { key: 'k', controller_type: 'input', controller_props: {} } as any,
-      ])
-
-      expect(mockUpdate).toHaveBeenCalledWith([
-        expect.objectContaining({
-          controllerProps: { value: '' },
-        }),
-      ])
-    })
-
-    it('rethrows on error', async () => {
-      vi.mocked(ExtensionManager.getInstance).mockReturnValue({
-        getEngine: vi.fn().mockReturnValue({
-          updateSettings: vi.fn().mockRejectedValue(new Error('fail')),
-        }),
-      } as any)
-
-      const errSpy = vi.spyOn(console, 'error').mockImplementation(() => {})
-      await expect(svc.updateSettings('test', [])).rejects.toThrow('fail')
-      errSpy.mockRestore()
+    it('is a no-op because the remote provider store persists settings', async () => {
+      await expect(svc.updateSettings('openai', [])).resolves.toBeUndefined()
     })
   })
 })

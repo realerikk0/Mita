@@ -25,12 +25,13 @@ use tokio::{
 };
 
 use crate::core::{
-    app::commands::get_mita_data_folder_path,
-    mcp::constants::{is_browser_mcp_name, normalize_browser_mcp_server_key},
+    app::commands::get_biyan_data_folder_path,
+    legacy_migrations::normalize_browser_mcp_server_key,
+    mcp::constants::is_browser_mcp_name,
     mcp::models::{McpServerConfig, McpSettings},
     state::{AppState, RunningServiceEnum, SharedMcpServers},
 };
-use jan_utils::{can_override_npx, can_override_uvx};
+use biyan_utils::{can_override_npx, can_override_uvx};
 
 #[derive(Debug, Clone, Copy)]
 pub enum ShutdownContext {
@@ -70,7 +71,7 @@ pub async fn run_mcp_commands<R: Runtime>(
     app: &AppHandle<R>,
     servers_state: SharedMcpServers,
 ) -> Result<(), String> {
-    let app_path = get_mita_data_folder_path(app.clone());
+    let app_path = get_biyan_data_folder_path(app.clone());
     let config_path = app_path.join("mcp_config.json");
     let app_path_str = app_path.to_str().unwrap().to_string();
     log::trace!(
@@ -442,7 +443,7 @@ async fn schedule_mcp_start_task<R: Runtime>(
     name: String,
     config: Value,
 ) -> Result<(), String> {
-    let app_path = get_mita_data_folder_path(app.clone());
+    let app_path = get_biyan_data_folder_path(app.clone());
     let exe_path = env::current_exe().expect("Failed to get current exe path");
     let exe_parent_path = exe_path
         .parent()
@@ -588,7 +589,7 @@ async fn schedule_mcp_start_task<R: Runtime>(
             if let Some(port_str) = config_params.envs.get("BRIDGE_PORT") {
                 if let Some(port_str) = port_str.as_str() {
                     if let Ok(port) = port_str.parse::<u16>() {
-                        if !jan_utils::network::is_port_available(port) {
+                        if !biyan_utils::network::is_port_available(port) {
                             log::warn!("Port {} occupied, attempting cleanup", port);
                             match kill_orphaned_mcp_process_with_app(&app, port).await {
                                 Ok(true) => {
@@ -614,20 +615,20 @@ async fn schedule_mcp_start_task<R: Runtime>(
         } else {
             bin_path.join("bun")
         };
-        if config_params.command.clone() == "mita-web-research" {
+        if config_params.command == "biyan-web-research" {
             let bun_path = resolve_bun_path(&bin_path);
             let script_path = resolve_web_research_script_path(&app)?;
             cmd = Command::new(bun_path);
             cmd.arg(script_path);
             cmd.env(
-                "MITA_WEB_RESEARCH_PROFILE_DIR",
+                "BIYAN_WEB_RESEARCH_PROFILE_DIR",
                 app_path.join("web-research-profile"),
             );
             if let Some(browsers_path) = resolve_playwright_browsers_path(&app) {
                 cmd.env("PLAYWRIGHT_BROWSERS_PATH", browsers_path);
             }
             if let Some(module_path) = resolve_playwright_module_path(&app) {
-                cmd.env("MITA_WEB_RESEARCH_PLAYWRIGHT_MODULE", module_path);
+                cmd.env("BIYAN_WEB_RESEARCH_PLAYWRIGHT_MODULE", module_path);
             }
         }
         if config_params.command.clone() == "npx"
@@ -889,7 +890,7 @@ fn resolve_web_research_script_path<R: Runtime>(app: &AppHandle<R>) -> Result<Pa
         let bundled = resource_dir
             .join("resources")
             .join("bin")
-            .join("mita-web-research-mcp.mjs");
+            .join("biyan-web-research-mcp.mjs");
         if bundled.exists() {
             return Ok(bundled);
         }
@@ -898,7 +899,7 @@ fn resolve_web_research_script_path<R: Runtime>(app: &AppHandle<R>) -> Result<Pa
     let dev_path = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
         .join("resources")
         .join("bin")
-        .join("mita-web-research-mcp.mjs");
+        .join("biyan-web-research-mcp.mjs");
     if dev_path.exists() {
         return Ok(dev_path);
     }
@@ -1054,8 +1055,8 @@ pub async fn kill_orphaned_mcp_process_with_app<R: Runtime>(
         }
 
         // Process from lock file is alive - verify it's still the MCP process
-        if let Some(process_info) = jan_utils::network::get_process_info_by_pid(lock.pid) {
-            if jan_utils::network::is_orphaned_mcp_process(&process_info) {
+        if let Some(process_info) = biyan_utils::network::get_process_info_by_pid(lock.pid) {
+            if biyan_utils::network::is_orphaned_mcp_process(&process_info) {
                 log::info!(
                     "Lock file PID {} verified as MCP process, attempting kill",
                     lock.pid
@@ -1067,7 +1068,7 @@ pub async fn kill_orphaned_mcp_process_with_app<R: Runtime>(
 
                 tokio::time::sleep(tokio::time::Duration::from_millis(500)).await;
 
-                if jan_utils::network::is_port_available(port) {
+                if biyan_utils::network::is_port_available(port) {
                     log::info!("Cleaned up orphaned process via lock file");
                     return Ok(true);
                 }
@@ -1091,7 +1092,7 @@ pub async fn kill_orphaned_mcp_process_with_app<R: Runtime>(
     }
 
     // Fallback: Use lsof/netstat to find process on port
-    let process_info = match jan_utils::network::find_process_using_port(port) {
+    let process_info = match biyan_utils::network::find_process_using_port(port) {
         Some(info) => info,
         None => return Ok(false),
     };
@@ -1104,7 +1105,7 @@ pub async fn kill_orphaned_mcp_process_with_app<R: Runtime>(
         process_info.cmd
     );
 
-    if !jan_utils::network::is_orphaned_mcp_process(&process_info) {
+    if !biyan_utils::network::is_orphaned_mcp_process(&process_info) {
         log::warn!(
             "Port {} occupied by non-Biyan process '{}' (PID {})",
             port,
@@ -1122,7 +1123,7 @@ pub async fn kill_orphaned_mcp_process_with_app<R: Runtime>(
 
     tokio::time::sleep(tokio::time::Duration::from_millis(500)).await;
 
-    if jan_utils::network::is_port_available(port) {
+    if biyan_utils::network::is_port_available(port) {
         log::info!("Cleaned up orphaned process on port {}", port);
         Ok(true)
     } else {
@@ -1375,7 +1376,7 @@ pub fn set_mcp_server_active_in_config<R: Runtime>(
     server_name: &str,
     active: bool,
 ) -> Result<bool, String> {
-    let config_path = get_mita_data_folder_path(app.clone()).join("mcp_config.json");
+    let config_path = get_biyan_data_folder_path(app.clone()).join("mcp_config.json");
     set_mcp_server_active_in_config_with_path(&config_path, server_name, active)
 }
 
@@ -1427,7 +1428,7 @@ pub fn add_server_config_with_path<R: Runtime>(
     config_filename: Option<&str>,
 ) -> Result<(), String> {
     let config_filename = config_filename.unwrap_or("mcp_config.json");
-    let config_path = get_mita_data_folder_path(app_handle).join(config_filename);
+    let config_path = get_biyan_data_folder_path(app_handle).join(config_filename);
 
     let mut config: Value = serde_json::from_str(
         &std::fs::read_to_string(&config_path)
@@ -1444,10 +1445,11 @@ pub fn add_server_config_with_path<R: Runtime>(
         .ok_or("mcpServers is not an object")?
         .insert(server_key, server_value);
 
-    std::fs::write(
+    crate::core::legacy_migrations::atomic_write(
         &config_path,
         serde_json::to_string_pretty(&config)
-            .map_err(|e| format!("Failed to serialize config: {e}"))?,
+            .map_err(|e| format!("Failed to serialize config: {e}"))?
+            .as_bytes(),
     )
     .map_err(|e| format!("Failed to write config file: {e}"))?;
 

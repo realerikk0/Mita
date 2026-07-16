@@ -23,12 +23,9 @@ export const localStorageKey = {
   favoriteModels: 'favorite-models',
   setupCompleted: 'setup-completed',
   threadManagement: 'thread-management',
-  modelSupportCache: 'mita_model_support_cache',
   recentSearches: 'recent-searches',
-  mitaModelPromptDismissed: 'mita-model-prompt-dismissed',
   agentMode: 'agent-mode',
-  latestMitaModel: 'latest-mita-model',
-  webSearch: 'mita-web-search',
+  webSearch: 'biyan-web-search',
   tokenCalibration: 'token-calibration',
 }
 

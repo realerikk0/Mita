@@ -58,7 +58,6 @@ export enum AppEvent {
   onAppUpdateDownloadUpdate = 'onAppUpdateDownloadUpdate',
   onAppUpdateDownloadError = 'onAppUpdateDownloadError',
   onAppUpdateDownloadSuccess = 'onAppUpdateDownloadSuccess',
-  onModelImported = 'onModelImported',
 
   onUserSubmitQuickAsk = 'onUserSubmitQuickAsk',
   onSelectedText = 'onSelectedText',
@@ -67,17 +66,6 @@ export enum AppEvent {
   onMainViewStateChange = 'onMainViewStateChange',
 
   onBackendVerificationFailed = 'onBackendVerificationFailed',
-}
-
-export enum DownloadEvent {
-  onFileDownloadUpdate = 'onFileDownloadUpdate',
-  onFileDownloadError = 'onFileDownloadError',
-  onFileDownloadSuccess = 'onFileDownloadSuccess',
-  onFileDownloadStopped = 'onFileDownloadStopped',
-  onFileDownloadStarted = 'onFileDownloadStarted',
-  onModelValidationStarted = 'onModelValidationStarted',
-  onModelValidationFailed = 'onModelValidationFailed',
-  onFileDownloadAndVerificationSuccess = 'onFileDownloadAndVerificationSuccess',
 }
 export enum ExtensionRoute {
   baseExtensions = 'baseExtensions',
@@ -100,14 +88,11 @@ export enum FileSystemRoute {
 }
 export enum FileManagerRoute {
   copyFile = 'copyFile',
-  getMitaDataFolderPath = 'getMitaDataFolderPath',
-  getSilenceDataFolderPath = 'getSilenceDataFolderPath',
-  getJanDataFolderPath = 'getJanDataFolderPath',
+  getBiyanDataFolderPath = 'getBiyanDataFolderPath',
   getResourcePath = 'getResourcePath',
   getUserHomePath = 'getUserHomePath',
   fileStat = 'fileStat',
   writeBlob = 'writeBlob',
-  getGgufFiles = 'getGgufFiles',
 }
 
 export type ApiFunction = (...args: any[]) => any
@@ -122,10 +107,6 @@ export type AppRouteFunctions = {
 
 export type AppEventFunctions = {
   [K in AppEvent]: ApiFunction
-}
-
-export type DownloadEventFunctions = {
-  [K in DownloadEvent]: ApiFunction
 }
 
 export type ExtensionRouteFunctions = {
@@ -143,7 +124,6 @@ export type FileManagerRouteFunctions = {
 export type APIFunctions = NativeRouteFunctions &
   AppRouteFunctions &
   AppEventFunctions &
-  DownloadEventFunctions &
   ExtensionRouteFunctions &
   FileSystemRouteFunctions &
   FileManagerRoute
@@ -158,7 +138,6 @@ export const CoreRoutes = [
 ]
 
 export const APIRoutes = [...CoreRoutes, ...Object.values(NativeRoute)]
-export const APIEvents = [...Object.values(AppEvent), ...Object.values(DownloadEvent)]
 export type PayloadType = {
   messages: ChatCompletionMessage[]
   model: string

@@ -1,18 +1,13 @@
-import { Model, SettingComponentProps } from '../types'
-import { ModelManager } from './models'
+import { SettingComponentProps } from '../types'
 
 export enum ExtensionTypeEnum {
   Assistant = 'assistant',
   Conversational = 'conversational',
   Inference = 'inference',
-  Model = 'model',
   SystemMonitoring = 'systemMonitoring',
   MCP = 'mcp',
   HuggingFace = 'huggingFace',
-  Engine = 'engine',
   Hardware = 'hardware',
-  RAG = 'rag',
-  VectorDB = 'vectorDB',
 }
 
 export interface ExtensionType {
@@ -94,16 +89,6 @@ export abstract class BaseExtension implements ExtensionType {
    */
   compatibility(): Compatibility | undefined {
     return undefined
-  }
-
-  /**
-   * Registers models - it persists in-memory shared ModelManager instance's data map.
-   * @param models
-   */
-  async registerModels(models: Model[]): Promise<void> {
-    for (const model of models) {
-      ModelManager.instance().register(model)
-    }
   }
 
   /**

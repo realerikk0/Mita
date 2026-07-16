@@ -1,17 +1,15 @@
 prompt = """
-You are going to test the Jan application by downloading and chatting with a model (bitcpm4).
+You are testing the remote-only Biyan desktop application.
 
 Step-by-step instructions:
-1. Given the Jan application is already opened.
-2. In the **bottom-left corner**, click the **Hub** menu item.
-3. Scroll through the model list or use the search bar to find **qwen3-0.6B**.
-4. Click **Use** on the qwen3-0.6B model.
-5. Wait for the model to finish downloading and become ready.
-6. Once redirected to the chat screen, type any message into the input box (e.g. `Hello World`).
-7. Press **Enter** to send the message.
-8. Wait for the model’s response.
+1. Confirm the Biyan application is already open.
+2. Open Providers and select the CI-provisioned OpenAI-compatible test provider.
+3. Explicitly select its test model. Do not use or download a local model.
+4. Start a new chat and send exactly: `Say exactly: remote chat works`.
+5. Wait for the remote model response.
+6. Verify no local runtime, model download, Hub, or embedding process was started.
 
-If the model responds correctly, return: {"result": True}, otherwise return: {"result": False}.
+Return {"result": True} only when the exact response is shown and the remote-only checks pass; otherwise return {"result": False}.
 
-In all your responses, use only plain ASCII characters. Do NOT use Unicode symbols
+In all your responses, use only plain ASCII characters. Do NOT use Unicode symbols.
 """

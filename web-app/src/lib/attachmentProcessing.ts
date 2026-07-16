@@ -1,6 +1,6 @@
-import { ServiceHub } from '@/services'
+import { invoke } from '@tauri-apps/api/core'
 import { Attachment } from '@/types/attachment'
-import { toast } from 'sonner'
+import { MAX_DOCUMENT_FILE_SIZE_MB } from '@/hooks/useAttachments'
 
 type AttachmentProcessingStatus = 'processing' | 'done' | 'error' | 'clear_all'
 
@@ -11,292 +11,162 @@ export type AttachmentIngestProgress = {
 
 type AttachmentProcessingOptions = {
   attachments: Attachment[]
-  threadId: string
-  projectId?: string
-  serviceHub: ServiceHub
-  selectedProvider?: string
-  contextThreshold?: number
-  estimateTokens?: (text: string) => Promise<number | undefined>
-  parsePreference: 'auto' | 'inline' | 'embeddings' | 'prompt'
-  autoFallbackMode?: 'inline' | 'embeddings'
-  perFileChoices?: Map<string, 'inline' | 'embeddings'>
+  modelCapabilities?: readonly string[]
+  contextAvailableTokens?: number
+  estimateTokens?: (text: string) => number | Promise<number | undefined> | undefined
   updateAttachmentProcessing?: (
     name: string,
     status: AttachmentProcessingStatus,
     updatedAttachment?: Partial<Attachment>
   ) => void
-  /** Fired when attachment ingestion advances (multi-file uploads). */
   onIngestProgress?: (state: AttachmentIngestProgress) => void
 }
 
 export type AttachmentProcessingResult = {
   processedAttachments: Attachment[]
-  hasEmbeddedDocuments: boolean
 }
 
-const formatAttachmentError = (err: unknown): string => {
-  if (!err) return 'Unknown error'
-  if (err instanceof Error) return err.message || err.toString()
-  if (typeof err === 'string') return err
-  if (Array.isArray(err)) {
-    const parts = err.map((e) => formatAttachmentError(e)).filter(Boolean)
-    return parts.length
-      ? Array.from(new Set(parts)).join('; ')
-      : 'Unknown error'
+const NATIVE_FILE_CAPABILITIES = new Set([
+  'file_input',
+  'file-input',
+  'files',
+  'documents',
+  'native_files',
+  'native-files',
+])
+
+export const supportsNativeFileInput = (
+  capabilities?: readonly string[]
+): boolean =>
+  capabilities?.some((capability) =>
+    NATIVE_FILE_CAPABILITIES.has(capability.trim().toLowerCase())
+  ) ?? false
+
+const parseDocument = async (path: string, fileType?: string): Promise<string> => {
+  const text = await invoke<string>('plugin:document-parser|parse_document', {
+    filePath: path,
+    fileType: fileType || 'txt',
+  })
+  if (!text.trim()) {
+    throw new Error('The document parser returned no text')
   }
-  if (typeof err === 'object') {
-    const obj = err as Record<string, unknown>
-    const candidates = [obj.message, obj.reason, obj.detail]
-    for (const val of candidates) {
-      if (typeof val === 'string' && val.trim().length > 0) {
-        return val
-      }
-    }
-    const nestedSources = [obj.error, obj.cause]
-    for (const nested of nestedSources) {
-      if (nested && typeof nested === 'object') {
-        const nestedMsg = formatAttachmentError(nested)
-        if (nestedMsg && nestedMsg !== 'Unknown error') {
-          return nestedMsg
-        }
-      } else if (typeof nested === 'string' && nested.trim().length > 0) {
-        return nested
-      }
-    }
-    if (typeof obj.code === 'string' && obj.code.trim().length > 0) {
-      return obj.code
-    }
-    try {
-      return JSON.stringify(obj)
-    } catch {
-      return String(err)
-    }
-  }
-  return String(err)
+  return text
 }
 
+const assertFileSize = (attachment: Attachment) => {
+  const limit = MAX_DOCUMENT_FILE_SIZE_MB * 1024 * 1024
+  if (typeof attachment.size === 'number' && attachment.size > limit) {
+    throw new Error(
+      `${attachment.name} exceeds the ${MAX_DOCUMENT_FILE_SIZE_MB} MB document limit`
+    )
+  }
+}
+
+/**
+ * Prepares files without indexing, truncation, or summarization.
+ * Native provider input is preferred when both the model and attachment can
+ * support it; otherwise the neutral parser's complete output is injected.
+ */
 export const processAttachmentsForSend = async (
   options: AttachmentProcessingOptions
 ): Promise<AttachmentProcessingResult> => {
   const {
     attachments,
-    threadId,
-    projectId,
-    serviceHub,
-    contextThreshold,
+    modelCapabilities,
+    contextAvailableTokens,
     estimateTokens,
-    parsePreference,
-    autoFallbackMode,
-    perFileChoices,
     updateAttachmentProcessing,
     onIngestProgress,
   } = options
 
   const processedAttachments: Attachment[] = []
-  let hasEmbeddedDocuments = false
+  const nativeFilesSupported = supportsNativeFileInput(modelCapabilities)
+  let completed = 0
+  let documentTokens = 0
 
-  const imagesToProcess = attachments.filter(
-    (img) => img.type === 'image' && !(img.processed && img.id)
-  )
-  const documentsToProcess = attachments.filter(
-    (doc) =>
-      doc.type === 'document' &&
-      !(doc.processed && (doc.id || doc.injectionMode === 'inline'))
-  )
-  const ingestTotal = imagesToProcess.length + documentsToProcess.length
-  let ingestCompleted = 0
-  const bumpIngest = () => {
-    if (!onIngestProgress || ingestTotal <= 0) return
-    ingestCompleted += 1
-    onIngestProgress({
-      completed: Math.min(ingestCompleted, ingestTotal),
-      total: ingestTotal,
-    })
-  }
-  if (onIngestProgress && ingestTotal > 0) {
-    onIngestProgress({ completed: 0, total: ingestTotal })
-  }
-  const effectiveContextThreshold =
-    typeof contextThreshold === 'number' &&
-    Number.isFinite(contextThreshold) &&
-    contextThreshold > 0
-      ? contextThreshold
-      : undefined
-  const notifyUpdate = (
-    ...args: Parameters<
-      NonNullable<AttachmentProcessingOptions['updateAttachmentProcessing']>
-    >
-  ) => updateAttachmentProcessing?.(...args)
-
-  // Images: ingest before sending
-  const images = attachments.filter((a) => a.type === 'image')
-  if (images.length > 0) {
-    for (const img of images) {
-      try {
-        if (img.processed && img.id) {
-          processedAttachments.push(img)
-          continue
-        }
-
-        notifyUpdate(img.name, 'processing')
-
-        const res = await serviceHub.uploads().ingestImage(threadId, img)
-        processedAttachments.push({
-          ...img,
-          id: res.id,
-          processed: true,
-          processing: false,
-        })
-        notifyUpdate(img.name, 'done', {
-          id: res.id,
-          processed: true,
-          processing: false,
-        })
-        bumpIngest()
-      } catch (err) {
-        console.error(`Failed to ingest image ${img.name}:`, err)
-        notifyUpdate(img.name, 'error')
-        const desc = formatAttachmentError(err)
-        toast.error('Failed to ingest image attachment', { description: desc })
-        throw err instanceof Error ? err : new Error(desc)
-      }
-    }
+  if (attachments.length > 0) {
+    onIngestProgress?.({ completed: 0, total: attachments.length })
   }
 
-  const documents = attachments.filter((a) => a.type === 'document')
-  for (const doc of documents) {
+  for (const attachment of attachments) {
     try {
-      if (doc.processed && (doc.id || doc.injectionMode === 'inline')) {
-        hasEmbeddedDocuments =
-          hasEmbeddedDocuments || doc.injectionMode !== 'inline'
-        processedAttachments.push(doc)
-        continue
-      }
+      updateAttachmentProcessing?.(attachment.name, 'processing')
 
-      notifyUpdate(doc.name, 'processing')
-
-      const targetPreference = doc.parseMode ?? parsePreference
-      let targetMode: 'inline' | 'embeddings' =
-        targetPreference === 'inline' ? 'inline' : 'embeddings'
-      let parsedContent: string | undefined
-
-      // Project files always use embeddings, never inline
-      if (projectId) {
-        targetMode = 'embeddings'
-      }
-
-      const canInline = !projectId && targetPreference !== 'embeddings' && !!doc.path
-
-      if (canInline) {
-        try {
-          parsedContent = await serviceHub
-            .rag()
-            .parseDocument?.(doc.path!, doc.fileType)
-        } catch (err) {
-          console.warn(`Failed to parse ${doc.name} for inline use`, err)
+      if (attachment.type === 'image') {
+        const processed = {
+          ...attachment,
+          id: attachment.id ?? attachment.contentHash ?? attachment.name,
+          processing: false,
+          processed: true,
         }
-      }
+        processedAttachments.push(processed)
+        updateAttachmentProcessing?.(attachment.name, 'done', processed)
+      } else {
+        assertFileSize(attachment)
 
-      if (targetPreference === 'auto') {
-        // Check if user made a per-file choice for this document
-        const userChoice = perFileChoices?.get(doc.path || '')
-        // Project files always use embeddings
-        const effectiveMode = projectId ? 'embeddings' : (userChoice ?? autoFallbackMode ?? 'embeddings')
-        targetMode = effectiveMode
-
-        // Only do auto-detection if no user choice was made and not project file
-        if (!projectId && !userChoice && parsedContent && estimateTokens) {
-          const estimatedTokens = await estimateTokens(parsedContent)
-          const tokenCount =
-            typeof estimatedTokens === 'number' &&
-            Number.isFinite(estimatedTokens) &&
-            estimatedTokens > 0
-              ? estimatedTokens
+        if (
+          nativeFilesSupported &&
+          attachment.nativeDataUrl &&
+          attachment.nativeMediaType
+        ) {
+          const processed: Attachment = {
+            ...attachment,
+            processing: false,
+            processed: true,
+            injectionMode: 'native',
+          }
+          processedAttachments.push(processed)
+          updateAttachmentProcessing?.(attachment.name, 'done', processed)
+        } else {
+          const completeText = attachment.inlineContent
+            ? attachment.inlineContent
+            : attachment.path
+              ? await parseDocument(attachment.path, attachment.fileType)
               : undefined
-          if (!effectiveContextThreshold) {
-            console.debug(
-              `Attachment ${doc.name}: no context threshold available; defaulting to ${targetMode}`
-            )
-          } else if (typeof tokenCount === 'number') {
-            targetMode =
-              tokenCount <= effectiveContextThreshold ? 'inline' : 'embeddings'
-          } else {
-            console.debug(
-              `Attachment ${doc.name}: token estimate unavailable or non-positive; defaulting to ${targetMode}`
+          if (!completeText) {
+            throw new Error(
+              `${attachment.name} cannot be parsed because its local path is unavailable`
             )
           }
-        } else if (!projectId && !userChoice && !parsedContent) {
-          console.debug(
-            `Attachment ${doc.name}: parsed content unavailable for token estimation; defaulting to ${targetMode}`
-          )
-        } else if (!projectId && !userChoice) {
-          console.debug(
-            `Attachment ${doc.name}: token estimator unavailable; defaulting to ${targetMode}`
-          )
+          const estimated = estimateTokens
+            ? await estimateTokens(completeText)
+            : Math.ceil(completeText.length / 3.5)
+          if (typeof estimated === 'number' && Number.isFinite(estimated)) {
+            documentTokens += Math.max(0, estimated)
+          }
+
+          if (
+            typeof contextAvailableTokens === 'number' &&
+            contextAvailableTokens >= 0 &&
+            documentTokens > contextAvailableTokens
+          ) {
+            throw new Error(
+              `The complete document text needs about ${documentTokens.toLocaleString()} tokens, but only ${Math.max(0, Math.floor(contextAvailableTokens)).toLocaleString()} tokens remain. Choose a model with a larger context window or remove files; Biyan will not truncate or summarize them.`
+            )
+          }
+
+          const processed: Attachment = {
+            ...attachment,
+            processing: false,
+            processed: true,
+            inlineContent: completeText,
+            injectionMode: 'inline',
+          }
+          processedAttachments.push(processed)
+          updateAttachmentProcessing?.(attachment.name, 'done', processed)
         }
-      } else if (targetPreference === 'prompt') {
-        // Check if user made a per-file choice for this document
-        const userChoice = perFileChoices?.get(doc.path || '')
-        // Project files always use embeddings
-        targetMode = projectId ? 'embeddings' : (userChoice ?? autoFallbackMode ?? 'embeddings')
       }
 
-      if (targetMode === 'inline' && parsedContent) {
-        processedAttachments.push({
-          ...doc,
-          processing: false,
-          processed: true,
-          inlineContent: parsedContent,
-          injectionMode: 'inline',
-        })
-
-        notifyUpdate(doc.name, 'done', {
-          processing: false,
-          processed: true,
-          inlineContent: parsedContent,
-          injectionMode: 'inline',
-        })
-        bumpIngest()
-        continue
-      }
-
-      // Default: ingest as embeddings.
-      // Also reached when targetMode is 'inline' but parsedContent is absent
-      // (i.e. parsing failed above) — intentional: embeddings is the safe fallback.
-      notifyUpdate(doc.name, 'processing')
-
-      const res = projectId
-        ? await serviceHub.uploads().ingestFileAttachmentForProject(projectId, doc)
-        : await serviceHub.uploads().ingestFileAttachment(threadId, doc)
-
-      processedAttachments.push({
-        ...doc,
-        id: res.id,
-        size: res.size ?? doc.size,
-        chunkCount: res.chunkCount ?? doc.chunkCount,
+      completed += 1
+      onIngestProgress?.({ completed, total: attachments.length })
+    } catch (error) {
+      updateAttachmentProcessing?.(attachment.name, 'error', {
         processing: false,
-        processed: true,
-        injectionMode: 'embeddings',
+        error: error instanceof Error ? error.message : String(error),
       })
-      hasEmbeddedDocuments = true
-
-      notifyUpdate(doc.name, 'done', {
-        id: res.id,
-        size: res.size ?? doc.size,
-        chunkCount: res.chunkCount ?? doc.chunkCount,
-        processing: false,
-        processed: true,
-        injectionMode: 'embeddings',
-      })
-      bumpIngest()
-    } catch (err) {
-      console.error(`Failed to ingest ${doc.name}:`, err)
-      notifyUpdate(doc.name, 'error')
-      const desc = formatAttachmentError(err)
-      toast.error('Failed to index attachments', { description: desc })
-      throw err instanceof Error ? err : new Error(desc)
+      throw error
     }
   }
 
-  return { processedAttachments, hasEmbeddedDocuments }
+  return { processedAttachments }
 }

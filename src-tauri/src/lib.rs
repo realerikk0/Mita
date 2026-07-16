@@ -1,15 +1,15 @@
 pub mod core;
 
 #[cfg(not(feature = "cli"))]
+use biyan_utils::generate_app_token;
+#[cfg(not(feature = "cli"))]
 use core::{
-    app::commands::get_mita_data_folder_path,
+    app::commands::get_biyan_data_folder_path,
     downloads::models::DownloadManagerState,
     mcp::models::McpSettings,
     setup::{self, setup_mcp},
     state::AppState,
 };
-#[cfg(not(feature = "cli"))]
-use jan_utils::generate_app_token;
 #[cfg(not(feature = "cli"))]
 use std::{collections::HashMap, sync::Arc};
 #[cfg(not(feature = "cli"))]
@@ -21,6 +21,41 @@ use tokio::sync::Mutex;
 
 #[cfg(all(not(feature = "cli"), windows))]
 const WINDOWS_BIYAN_MIGRATED_KEY: &str = "windows_biyan_migrated";
+#[cfg(all(not(feature = "cli"), windows))]
+const WINDOWS_BIYAN_HEALTHY_STARTS_KEY: &str = "windows_biyan_healthy_starts";
+
+#[cfg(not(feature = "cli"))]
+fn navigate_main_window<R: tauri::Runtime>(
+    app: &tauri::App<R>,
+    destination: &str,
+) -> Result<(), String> {
+    let window = app
+        .get_webview_window("main")
+        .ok_or_else(|| "main_window_missing".to_string())?;
+    let destination = serde_json::to_string(destination)
+        .map_err(|error| format!("serialize_window_destination:{error}"))?;
+    window
+        .eval(format!("window.location.replace({destination})"))
+        .map_err(|error| format!("navigate_main_window:{error}"))?;
+    window
+        .show()
+        .map_err(|error| format!("show_main_window:{error}"))
+}
+
+#[cfg(not(feature = "cli"))]
+fn show_migration_recovery<R: tauri::Runtime>(app: &tauri::App<R>, error: &str) {
+    let code = error
+        .split(':')
+        .next()
+        .unwrap_or("migration_failed")
+        .chars()
+        .filter(|value| value.is_ascii_alphanumeric() || *value == '_' || *value == '-')
+        .collect::<String>();
+    let destination = format!("/migration-recovery.html?error={code}");
+    if let Err(navigation_error) = navigate_main_window(app, &destination) {
+        eprintln!("Failed to open Biyan migration recovery page: {navigation_error}");
+    }
+}
 
 #[cfg(not(feature = "cli"))]
 macro_rules! invoke_commands_with_extras {
@@ -61,21 +96,24 @@ macro_rules! invoke_commands_with_extras {
         core::app::commands::get_app_configurations,
         core::app::commands::get_user_home_path,
         core::app::commands::update_app_configuration,
-        core::app::commands::get_mita_data_folder_path,
-        core::app::commands::get_silence_data_folder_path,
-        core::app::commands::get_jan_data_folder_path,
+        core::app::commands::get_biyan_data_folder_path,
         core::app::commands::get_configuration_file_path,
         core::app::commands::default_data_folder_path,
         core::app::commands::change_app_data_folder,
         core::app::commands::app_token,
+        // Explicit, integrity-gated cleanup of user-owned retired local data
+        core::legacy_migrations::inspect_legacy_local_data,
+        core::legacy_migrations::cleanup_legacy_local_data,
+        core::legacy_migrations::list_retained_legacy_migration_sources,
+        core::legacy_migrations::get_committed_assistant_id_map,
         // Extension commands
-        core::extensions::commands::get_mita_extensions_path,
-        core::extensions::commands::get_jan_extensions_path,
+        core::extensions::commands::get_biyan_extensions_path,
         core::extensions::commands::install_extensions,
         core::extensions::commands::get_active_extensions,
         // System commands
         core::system::commands::relaunch,
         core::system::commands::open_app_directory,
+        core::system::commands::open_legacy_migration_source,
         core::system::commands::open_file_explorer,
         core::system::commands::factory_reset,
         core::system::commands::read_logs,
@@ -83,11 +121,10 @@ macro_rules! invoke_commands_with_extras {
         core::user_logs::read_user_logs,
         core::user_logs::clear_user_logs,
         core::user_logs::get_user_logs_directory,
-        core::system::commands::is_library_available,
         core::system::commands::launch_claude_code_with_config,
-        core::system::commands::check_mita_cli_installed,
-        core::system::commands::install_mita_cli,
-        core::system::commands::uninstall_mita_cli,
+        core::system::commands::check_biyan_cli_installed,
+        core::system::commands::install_biyan_cli,
+        core::system::commands::uninstall_biyan_cli,
         core::system::commands::clear_claude_code_env,
         // Server commands
         core::server::commands::start_server,
@@ -110,10 +147,7 @@ macro_rules! invoke_commands_with_extras {
         core::mcp::commands::get_mcp_configs,
         core::mcp::commands::activate_mcp_server,
         core::mcp::commands::deactivate_mcp_server,
-        core::mcp::commands::check_mita_web_research_connected,
-        core::mcp::commands::check_mita_browser_extension_connected,
-        core::mcp::commands::check_silence_browser_extension_connected,
-        core::mcp::commands::check_jan_browser_extension_connected,
+        core::mcp::commands::check_biyan_web_research_connected,
         // Threads
         core::threads::commands::list_threads,
         core::threads::commands::create_thread,
@@ -157,23 +191,11 @@ pub fn run() {
         .plugin(tauri_plugin_http::init())
         .plugin(tauri_plugin_store::Builder::new().build())
         .plugin(tauri_plugin_shell::init())
-        .plugin(tauri_plugin_llamacpp::init())
-        .plugin(tauri_plugin_vector_db::init())
-        .plugin(tauri_plugin_rag::init());
+        .plugin(tauri_plugin_document_parser::init());
 
     #[cfg(feature = "deep-link")]
     {
         app_builder = app_builder.plugin(tauri_plugin_deep_link::init());
-    }
-
-    #[cfg(feature = "mlx")]
-    {
-        app_builder = app_builder.plugin(tauri_plugin_mlx::init());
-    }
-
-    #[cfg(feature = "foundation-models")]
-    {
-        app_builder = app_builder.plugin(tauri_plugin_foundation_models::init());
     }
 
     #[cfg(not(any(target_os = "android", target_os = "ios")))]
@@ -185,8 +207,8 @@ pub fn run() {
     #[cfg(not(any(target_os = "android", target_os = "ios")))]
     let app_builder = app_builder.invoke_handler(invoke_commands_with_extras![
         // Custom updater commands (desktop only)
-        core::updater::commands::check_for_app_updates,
-        core::updater::commands::is_update_available,
+        core::updater::commands::get_app_update_request_headers,
+        core::updater::commands::record_pending_update_manifest,
     ]);
 
     // Mobile: no updater commands
@@ -213,19 +235,61 @@ pub fn run() {
             mcp_reconnect_notify: Arc::new(tokio::sync::Notify::new()),
         })
         .setup(|app| {
+            let migration_report =
+                match core::legacy_migrations::run_startup_migrations(app.handle()) {
+                    Ok(report) => report,
+                    Err(error) => {
+                        eprintln!("Biyan data migration could not complete safely: {error}");
+                        // Keep the legacy source untouched and do not continue into the normal
+                        // data providers, which could otherwise mask the failure with an empty
+                        // profile. The recovery page only exposes retry, logs and the read-only
+                        // legacy source directory.
+                        show_migration_recovery(app, &error);
+                        return Ok(());
+                    }
+                };
+            log::info!(
+                "Biyan migration target schema {} selected (schema {} committed before component reconcile); {} legacy source(s) retained",
+                migration_report.target_data_schema,
+                migration_report.completed_data_schema,
+                migration_report.retained_legacy_sources.len()
+            );
+
+            // Mobile storage is part of the migration transaction. Do not expose the normal
+            // application window until the legacy SQLite backup has passed quick_check and the
+            // canonical database is ready.
+            #[cfg(any(target_os = "android", target_os = "ios"))]
+            if let Err(error) = tauri::async_runtime::block_on(
+                crate::core::threads::db::init_database(app.handle()),
+            ) {
+                log::error!("Failed to initialize migrated mobile database: {error}");
+                show_migration_recovery(app, &error);
+                return Ok(());
+            }
+
+            #[cfg(not(any(target_os = "android", target_os = "ios")))]
+            if let Err(error) = core::legacy_migrations::mark_component_migration(
+                &migration_report.canonical_config_dir,
+                "mobile_db_v1",
+                1,
+            ) {
+                show_migration_recovery(app, &error);
+                return Ok(());
+            }
+
             let user_log_dir = core::user_logs::resolve_user_logs_directory(app.handle())
                 .unwrap_or_else(|err| {
                     eprintln!(
                         "Failed to resolve platform logs directory, falling back to data folder logs: {err}"
                     );
-                    get_mita_data_folder_path(app.handle().clone()).join("logs")
+                    get_biyan_data_folder_path(app.handle().clone()).join("logs")
                 });
             if let Err(err) = core::user_logs::prune_user_log_files(&user_log_dir) {
                 eprintln!("Failed to prune Biyan local logs during startup: {err}");
             }
             let app_version = app.config().version.clone().unwrap_or_default();
             let platform = std::env::consts::OS.to_string();
-            app.handle().plugin(
+            if let Err(error) = app.handle().plugin(
                 tauri_plugin_log::Builder::default()
                     .level(log::LevelFilter::Debug)
                     .targets([
@@ -240,67 +304,191 @@ pub fn run() {
                         )),
                     ])
                     .build(),
-            )?;
+            ) {
+                let error = format!("log_plugin_init:{error}");
+                eprintln!("Failed to initialize Biyan logging: {error}");
+                show_migration_recovery(app, &error);
+                return Ok(());
+            }
             #[cfg(not(any(target_os = "ios", target_os = "android")))]
-            app.handle()
-                .plugin(tauri_plugin_updater::Builder::new().build())?;
+            if let Err(error) = app
+                .handle()
+                .plugin(tauri_plugin_updater::Builder::new().build())
+            {
+                let error = format!("updater_plugin_init:{error}");
+                log::error!("Failed to initialize the Biyan updater: {error}");
+                show_migration_recovery(app, &error);
+                return Ok(());
+            }
 
             // Start migration
-            let mut store_path = get_mita_data_folder_path(app.handle().clone());
+            let mut store_path = get_biyan_data_folder_path(app.handle().clone());
             store_path.push("store.json");
-            let store = app
-                .handle()
-                .store(store_path)
-                .expect("Store not initialized");
+            let store = match app.handle().store(store_path) {
+                Ok(store) => store,
+                Err(error) => {
+                    let error = format!("store_open:{error}");
+                    log::error!("Failed to open the Biyan application store: {error}");
+                    show_migration_recovery(app, &error);
+                    return Ok(());
+                }
+            };
             let stored_version = store
                 .get("version")
                 .and_then(|v| v.as_str().map(String::from))
                 .unwrap_or_default();
             let app_version = app.config().version.clone().unwrap_or_default();
 
-            #[cfg(windows)]
-            {
-                let windows_biyan_migrated = store
-                    .get(WINDOWS_BIYAN_MIGRATED_KEY)
-                    .and_then(|value| value.as_bool())
-                    .unwrap_or(false);
-                if !windows_biyan_migrated {
-                    let store = store.clone();
-                    tauri::async_runtime::spawn_blocking(move || {
-                        match core::windows_migration::run_biyan_windows_migration() {
-                            Ok(()) => {
-                                store.set(WINDOWS_BIYAN_MIGRATED_KEY, serde_json::json!(true));
-                                if let Err(error) = store.save() {
-                                    log::warn!(
-                                        "Failed to persist Biyan Windows migration marker: {error}"
-                                    );
-                                }
-                            }
-                            Err(error) => {
-                                log::warn!(
-                                    "Failed to complete Biyan Windows migration self-heal: {error}"
-                                );
-                            }
-                        }
-                    });
-                }
-            }
-
-            // Migrate extensions
-            if let Err(e) =
+            // Reconcile cumulative components in the fixed startup order:
+            // layout -> mobile DB -> extensions -> CLI -> assistants -> MCP.
+            if let Err(error) =
                 setup::install_extensions(app.handle().clone(), stored_version != app_version)
             {
-                log::error!("Failed to install extensions: {e}");
+                log::error!("Failed to install extensions: {error}");
+                show_migration_recovery(app, &error);
+                return Ok(());
             }
 
-            // Migrate MCP servers
-            if let Err(e) = setup::migrate_mcp_servers(app.handle().clone(), store.clone()) {
-                log::error!("Failed to migrate MCP servers: {e}");
+            if let Err(error) = core::legacy_migrations::mark_component_migration_running(
+                &migration_report.canonical_config_dir,
+                "cli_v1",
+                1,
+            ) {
+                show_migration_recovery(app, &error);
+                return Ok(());
+            }
+            let cli_result: Result<(), String> = {
+                #[cfg(desktop)]
+                {
+                    setup::setup_biyan_cli(
+                        app.handle().clone(),
+                        stored_version != app_version,
+                    )
+                }
+                #[cfg(not(desktop))]
+                {
+                    Ok(())
+                }
+            };
+            if let Err(error) = cli_result {
+                let _ = core::legacy_migrations::mark_component_migration_failed(
+                    &migration_report.canonical_config_dir,
+                    "cli_v1",
+                    1,
+                    &error,
+                );
+                show_migration_recovery(app, &error);
+                return Ok(());
+            }
+            if let Err(error) = core::legacy_migrations::mark_component_migration(
+                &migration_report.canonical_config_dir,
+                "cli_v1",
+                1,
+            ) {
+                show_migration_recovery(app, &error);
+                return Ok(());
+            }
+
+            if let Err(error) = core::legacy_migrations::complete_assistant_migration(
+                &migration_report.canonical_config_dir,
+                &migration_report.canonical_data_dir,
+            ) {
+                show_migration_recovery(app, &error);
+                return Ok(());
+            }
+
+            #[cfg(any(target_os = "android", target_os = "ios"))]
+            if let Err(error) = tauri::async_runtime::block_on(
+                crate::core::threads::db::reconcile_mobile_assistant_references(app.handle()),
+            ) {
+                show_migration_recovery(app, &error);
+                return Ok(());
+            }
+            #[cfg(not(any(target_os = "android", target_os = "ios")))]
+            if let Err(error) = core::legacy_migrations::mark_component_migration(
+                &migration_report.canonical_config_dir,
+                "assistant_db_refs_v1",
+                1,
+            ) {
+                show_migration_recovery(app, &error);
+                return Ok(());
+            }
+
+            if let Err(error) = setup::migrate_mcp_servers(app.handle().clone(), store.clone()) {
+                log::error!("Failed to migrate MCP servers: {error}");
+                show_migration_recovery(app, &error);
+                return Ok(());
+            }
+
+            if let Err(error) = core::legacy_migrations::finalize_remote_only_migration(
+                &migration_report.canonical_config_dir,
+                migration_report.target_data_schema,
+            ) {
+                show_migration_recovery(app, &error);
+                return Ok(());
+            }
+
+            if migration_report.target_data_schema
+                >= core::legacy_migrations::TARGET_DATA_SCHEMA
+            {
+                if let Err(error) = core::legacy_migrations::mark_component_migration(
+                    &migration_report.canonical_config_dir,
+                    "cleanup_v3",
+                    core::legacy_migrations::TARGET_DATA_SCHEMA,
+                ) {
+                    show_migration_recovery(app, &error);
+                    return Ok(());
+                }
+
+                #[cfg(windows)]
+                {
+                    let healthy_starts = store
+                        .get(WINDOWS_BIYAN_HEALTHY_STARTS_KEY)
+                        .and_then(|value| value.as_u64())
+                        .unwrap_or(0)
+                        .saturating_add(1);
+                    store.set(
+                        WINDOWS_BIYAN_HEALTHY_STARTS_KEY,
+                        serde_json::json!(healthy_starts),
+                    );
+                    let windows_biyan_migrated = store
+                        .get(WINDOWS_BIYAN_MIGRATED_KEY)
+                        .and_then(|value| value.as_bool())
+                        .unwrap_or(false);
+                    // Never remove the managed legacy installation until the canonical data,
+                    // extensions and MCP configuration have survived two successful starts.
+                    if healthy_starts >= 2 && !windows_biyan_migrated {
+                        let store = store.clone();
+                        tauri::async_runtime::spawn_blocking(move || {
+                            match core::windows_migration::run_biyan_windows_migration() {
+                                Ok(()) => {
+                                    store.set(
+                                        WINDOWS_BIYAN_MIGRATED_KEY,
+                                        serde_json::json!(true),
+                                    );
+                                    if let Err(error) = store.save() {
+                                        log::warn!(
+                                            "Failed to persist Biyan Windows migration marker: {error}"
+                                        );
+                                    }
+                                }
+                                Err(error) => log::warn!(
+                                    "Failed to complete Biyan Windows migration self-heal: {error}"
+                                ),
+                            }
+                        });
+                    }
+                }
             }
 
             // Store the new app version
             store.set("version", serde_json::json!(app_version));
-            store.save().expect("Failed to save store");
+            if let Err(error) = store.save() {
+                let error = format!("store_save:{error}");
+                log::error!("Failed to save the Biyan application store: {error}");
+                show_migration_recovery(app, &error);
+                return Ok(());
+            }
             // Migration completed
 
             #[cfg(feature = "desktop")]
@@ -316,25 +504,26 @@ pub fn run() {
                     #[cfg(debug_assertions)]
                     log::warn!("Failed to register deep links during dev startup: {error}");
                     #[cfg(not(debug_assertions))]
-                    return Err(error.into());
+                    {
+                        let error = format!("deep_link_registration:{error}");
+                        log::error!("Failed to register Biyan deep links: {error}");
+                        show_migration_recovery(app, &error);
+                        return Ok(());
+                    }
                 }
             }
 
-            // Initialize SQLite database for mobile platforms
-            #[cfg(any(target_os = "android", target_os = "ios"))]
-            {
-                let app_handle = app.handle().clone();
-                tauri::async_runtime::spawn(async move {
-                    if let Err(e) = crate::core::threads::db::init_database(&app_handle).await {
-                        log::error!("Failed to initialize mobile database: {}", e);
-                    }
-                });
-            }
-
             setup_mcp(app);
-            #[cfg(desktop)]
-            setup::setup_mita_cli(app.handle().clone(), stored_version != app_version);
-            setup::setup_theme_listener(app)?;
+            if let Err(error) = setup::setup_theme_listener(app) {
+                let error = format!("theme_listener_init:{error}");
+                log::error!("Failed to initialize the Biyan theme listener: {error}");
+                show_migration_recovery(app, &error);
+                return Ok(());
+            }
+            if let Err(error) = navigate_main_window(app, "/") {
+                show_migration_recovery(app, &error);
+                return Ok(());
+            }
             Ok(())
         })
         .build(tauri::generate_context!())
@@ -370,8 +559,6 @@ pub fn run() {
             tokio::task::block_in_place(|| {
                 tauri::async_runtime::block_on(async {
                     use crate::core::mcp::helpers::background_cleanup_mcp_servers;
-                    use tauri_plugin_llamacpp::cleanup_llama_processes;
-
                     let state = app_handle.state::<AppState>();
 
                     // Increase timeout to 10 seconds and log if it times out
@@ -381,29 +568,6 @@ pub fn run() {
                     {
                         Ok(_) => log::info!("MCP cleanup completed successfully"),
                         Err(_) => log::warn!("MCP cleanup timed out after 10 seconds"),
-                    }
-
-                    if let Err(e) = cleanup_llama_processes(app_handle.clone()).await {
-                        log::warn!("Failed to cleanup llama processes: {}", e);
-                    } else {
-                        log::info!("Llama processes cleaned up successfully");
-                    }
-
-                    #[cfg(feature = "mlx")]
-                    {
-                        use tauri_plugin_mlx::cleanup_mlx_processes;
-                        if let Err(e) = cleanup_mlx_processes(app_handle.clone()).await {
-                            log::warn!("Failed to cleanup MLX processes: {}", e);
-                        } else {
-                            log::info!("MLX processes cleaned up successfully");
-                        }
-                    }
-
-                    #[cfg(feature = "foundation-models")]
-                    {
-                        use tauri_plugin_foundation_models::cleanup_processes;
-                        cleanup_processes(&app_handle).await;
-                        log::info!("Foundation Models state cleaned up successfully");
                     }
 
                     log::info!("App cleanup completed");

@@ -18,25 +18,35 @@ import { IconSettings, IconX } from '@tabler/icons-react'
 import { useNavigate } from '@tanstack/react-router'
 import { route } from '@/constants/routes'
 import { useThreads } from '@/hooks/useThreads'
-import { ModelSetting } from '@/containers/ModelSetting'
 import ProvidersAvatar from '@/containers/ProvidersAvatar'
-import { ModelSupportStatus } from '@/containers/ModelSupportStatus'
 import { Fzf } from 'fzf'
 import { localStorageKey } from '@/constants/localStorage'
 import { useTranslation } from '@/i18n/react-i18next-compat'
 import { useFavoriteModel } from '@/hooks/useFavoriteModel'
 import { predefinedProviders } from '@/constants/providers'
 import { providerHasRemoteApiKeys } from '@/lib/provider-api-keys'
-import { useServiceHub } from '@/hooks/useServiceHub'
 import { getLastUsedModel } from '@/utils/getModelToStart'
 import { ChevronsUpDown } from 'lucide-react'
-import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip'
+import {
+  Tooltip,
+  TooltipContent,
+  TooltipTrigger,
+} from '@/components/ui/tooltip'
 import { isModelChatSelectable } from '@/lib/provider-models'
 import { getChatModelFamilySortRank } from '@/lib/chat-model-sort'
+import {
+  getVisibleModelProviders,
+  isVisibleModelProvider,
+} from '@/constants/visible-model-providers'
+import {
+  isRemoteProviderEndpoint,
+  RETIRED_LOCAL_PROVIDER_IDS,
+} from '@/lib/configured-model-providers'
 
 type DropdownModelProviderProps = {
   model?: ThreadModel
   useLastUsedModel?: boolean
+  restrictToVisibleProviders?: boolean
 }
 
 interface SearchableModel {
@@ -72,22 +82,31 @@ const setLastUsedModel = (provider: string, model: string) => {
 const DropdownModelProvider = memo(function DropdownModelProvider({
   model,
   useLastUsedModel = false,
+  restrictToVisibleProviders = false,
 }: DropdownModelProviderProps) {
   const {
     providers,
-    getProviderByName,
     selectModelProvider,
-    getModelBy,
     selectedProvider,
     selectedModel,
-    updateProvider,
   } = useModelProvider()
   const [displayModel, setDisplayModel] = useState<string>('')
   const { updateCurrentThreadModel } = useThreads()
   const navigate = useNavigate()
   const { t } = useTranslation()
   const { favoriteModels } = useFavoriteModel()
-  const serviceHub = useServiceHub()
+  const displayedProviders = useMemo(
+    () => {
+      const remoteProviders = providers.filter(
+        (provider) =>
+          !RETIRED_LOCAL_PROVIDER_IDS.has(provider.provider.toLowerCase())
+      )
+      return restrictToVisibleProviders
+        ? getVisibleModelProviders(remoteProviders)
+        : remoteProviders
+    },
+    [providers, restrictToVisibleProviders]
+  )
 
   // Search state
   const [open, setOpen] = useState(false)
@@ -97,116 +116,44 @@ const DropdownModelProvider = memo(function DropdownModelProvider({
   // Helper function to check if a model exists in providers
   const checkModelExists = useCallback(
     (providerName: string, modelId: string) => {
-      const provider = providers.find(
+      const provider = displayedProviders.find(
         (p) => p.provider === providerName && p.active
       )
       return provider?.models.find(
         (m) => m.id === modelId && isModelChatSelectable(m)
       )
     },
-    [providers]
-  )
-
-  // Helper function to get context size from model settings
-  const getContextSize = useCallback((): number => {
-    if (!selectedModel?.settings?.ctx_len?.controller_props?.value) {
-      return 8192 // Default context size
-    }
-    return selectedModel.settings.ctx_len.controller_props.value as number
-  }, [selectedModel?.settings?.ctx_len?.controller_props?.value])
-
-  // Function to check if a llamacpp model has vision capabilities and update model capabilities
-  const checkAndUpdateModelVisionCapability = useCallback(
-    async (modelId: string) => {
-      try {
-        const hasVision = await serviceHub.models().checkMmprojExists(modelId)
-        if (hasVision) {
-          // Update the model capabilities to include 'vision'
-          const provider = getProviderByName('llamacpp')
-          if (provider) {
-            const modelIndex = provider.models.findIndex(
-              (m) => m.id === modelId
-            )
-            if (modelIndex !== -1) {
-              const model = provider.models[modelIndex]
-              const capabilities = model.capabilities || []
-
-              // Add 'vision' capability if not already present AND if user hasn't manually configured capabilities
-              // Check if model has a custom capabilities config flag
-
-              const hasUserConfiguredCapabilities =
-                (model as any)._userConfiguredCapabilities === true
-
-              if (
-                !capabilities.includes('vision') &&
-                !hasUserConfiguredCapabilities
-              ) {
-                const updatedModels = [...provider.models]
-                updatedModels[modelIndex] = {
-                  ...model,
-                  capabilities: [...capabilities, 'vision'],
-                  // Mark this as auto-detected, not user-configured
-                  _autoDetectedVision: true,
-                } as any
-
-                updateProvider('llamacpp', { models: updatedModels })
-              }
-            }
-          }
-        }
-      } catch (error) {
-        console.debug('Error checking mmproj for model:', modelId, error)
-      }
-    },
-    [getProviderByName, updateProvider, serviceHub]
+    [displayedProviders]
   )
 
   // Initialize model provider - avoid race conditions with manual selections
   useEffect(() => {
-    const initializeModel = async () => {
+    const initializeModel = () => {
       // Auto select model when existing thread is passed
       if (model) {
         selectModelProvider(model?.provider as string, model?.id as string)
         if (!checkModelExists(model.provider, model.id)) {
           selectModelProvider('', '')
         }
-        // Check mmproj existence for llamacpp models
-        if (model?.provider === 'llamacpp') {
-          await serviceHub
-            .models()
-            .checkMmprojExistsAndUpdateOffloadMMprojSetting(
-              model.id as string,
-              updateProvider,
-              getProviderByName
-            )
-          // Also check vision capability
-          await checkAndUpdateModelVisionCapability(model.id as string)
-        }
       } else if (useLastUsedModel) {
         // Try to use last used model only when explicitly requested (for new chat)
         const lastUsed = getLastUsedModel()
         if (lastUsed && checkModelExists(lastUsed.provider, lastUsed.model)) {
           selectModelProvider(lastUsed.provider, lastUsed.model)
-          if (lastUsed.provider === 'llamacpp') {
-            await serviceHub
-              .models()
-              .checkMmprojExistsAndUpdateOffloadMMprojSetting(
-                lastUsed.model,
-                updateProvider,
-                getProviderByName
-              )
-            // Also check vision capability
-            await checkAndUpdateModelVisionCapability(lastUsed.model)
-          }
         } else {
-          // Fallback: auto-select first llamacpp model if available
-          const llamacppProvider = providers.find(
-            (p) => p.provider === 'llamacpp' && p.active && p.models.length > 0
+          const firstRemoteProvider = displayedProviders.find(
+            (provider) =>
+              provider.active &&
+              provider.models.some((candidate) =>
+                isModelChatSelectable(candidate)
+              )
           )
-          if (llamacppProvider && llamacppProvider.models.length > 0) {
-            const firstModel = llamacppProvider.models[0]
-            selectModelProvider('llamacpp', firstModel.id)
-            setLastUsedModel('llamacpp', firstModel.id)
+          const firstModel = firstRemoteProvider?.models.find((candidate) =>
+            isModelChatSelectable(candidate)
+          )
+          if (firstRemoteProvider && firstModel) {
+            selectModelProvider(firstRemoteProvider.provider, firstModel.id)
+            setLastUsedModel(firstRemoteProvider.provider, firstModel.id)
           } else {
             selectModelProvider('', '')
           }
@@ -220,42 +167,33 @@ const DropdownModelProvider = memo(function DropdownModelProvider({
     model,
     selectModelProvider,
     updateCurrentThreadModel,
-    providers,
+    displayedProviders,
     checkModelExists,
-    updateProvider,
-    getProviderByName,
-    checkAndUpdateModelVisionCapability,
-
     // selectedModel and selectedProvider intentionally excluded to prevent race conditions
   ])
 
+  useEffect(() => {
+    if (
+      restrictToVisibleProviders &&
+      selectedProvider &&
+      !isVisibleModelProvider(selectedProvider)
+    ) {
+      selectModelProvider('', '')
+    }
+  }, [restrictToVisibleProviders, selectedProvider, selectModelProvider])
+
   // Update display model when selection changes
   useEffect(() => {
-    if (selectedProvider && selectedModel) {
+    if (
+      selectedProvider &&
+      selectedModel &&
+      (!restrictToVisibleProviders || isVisibleModelProvider(selectedProvider))
+    ) {
       setDisplayModel(getModelDisplayName(selectedModel))
     } else {
       setDisplayModel(t('common:selectAModel'))
     }
-  }, [selectedProvider, selectedModel, t])
-
-  // Check vision capabilities for all llamacpp models
-  useEffect(() => {
-    const checkAllLlamacppModelsForVision = async () => {
-      const llamacppProvider = providers.find(
-        (p) => p.provider === 'llamacpp' && p.active
-      )
-      if (llamacppProvider) {
-        const checkPromises = llamacppProvider.models.map((model) =>
-          checkAndUpdateModelVisionCapability(model.id)
-        )
-        await Promise.allSettled(checkPromises)
-      }
-    }
-
-    if (open) {
-      checkAllLlamacppModelsForVision()
-    }
-  }, [open, providers, checkAndUpdateModelVisionCapability])
+  }, [restrictToVisibleProviders, selectedProvider, selectedModel, t])
 
   // Reset search value when dropdown closes
   const onOpenChange = useCallback((open: boolean) => {
@@ -280,22 +218,20 @@ const DropdownModelProvider = memo(function DropdownModelProvider({
   const searchableItems = useMemo(() => {
     const items: SearchableModel[] = []
 
-    providers.forEach((provider) => {
+    displayedProviders.forEach((provider) => {
       if (!provider.active) return
-      if (provider.provider === 'foundation-models') return
-
+      if (!isRemoteProviderEndpoint(provider)) return
       provider.models.forEach((modelItem) => {
         // Skip embedding models - they can't be used for chat
         if (!isModelChatSelectable(modelItem)) return
 
-        // Skip models that require API key but don't have one (except llamacpp)
+        // Skip predefined remote providers until credentials are configured.
         // For custom providers, allow if they have at least one model loaded
         const isPredefined = predefinedProviders.some((e) =>
           e.provider.includes(provider.provider)
         )
         if (
           provider &&
-          provider.provider !== 'llamacpp' &&
           !providerHasRemoteApiKeys(provider) &&
           (isPredefined || provider.models.length === 0)
         )
@@ -319,7 +255,7 @@ const DropdownModelProvider = memo(function DropdownModelProvider({
     })
 
     return items.sort(compareSearchableModelsByFamily)
-  }, [providers])
+  }, [displayedProviders])
 
   // Create Fzf instance for fuzzy search
   const fzfInstance = useMemo(() => {
@@ -360,18 +296,15 @@ const DropdownModelProvider = memo(function DropdownModelProvider({
   const groupedItems = useMemo(() => {
     const groups: Record<string, SearchableModel[]> = {}
 
-    if (!searchValue) {
+    if (!searchValue || restrictToVisibleProviders) {
       // When not searching, show all active providers (even without models)
-      // Sort: local first, then providers with API keys or custom with models, then others, alphabetically
-      const activeProviders = providers
-        .filter((p) => p.active && p.provider !== 'foundation-models')
-        .sort((a, b) => {
-          const aIsLocal = a.provider === 'llamacpp' || a.provider === 'mlx'
-          const bIsLocal = b.provider === 'llamacpp' || b.provider === 'mlx'
-          // Local (llamacpp) first
-          if (aIsLocal && !bIsLocal) return -1
-          if (!aIsLocal && bIsLocal) return 1
+      // Sort configured remote providers first, then the remaining providers.
+      const activeProviders = displayedProviders.filter(
+        (p) => p.active
+      )
 
+      if (!restrictToVisibleProviders) {
+        activeProviders.sort((a, b) => {
           // Custom providers without API key but with models should be treated like "have API key"
           const aIsPredefined = predefinedProviders.some((e) =>
             e.provider.includes(a.provider)
@@ -397,6 +330,7 @@ const DropdownModelProvider = memo(function DropdownModelProvider({
           // Sort remaining by provider name
           return a.provider.localeCompare(b.provider)
         })
+      }
 
       activeProviders.forEach((provider) => {
         groups[provider.provider] = []
@@ -421,8 +355,20 @@ const DropdownModelProvider = memo(function DropdownModelProvider({
       models.sort(compareSearchableModelsByFamily)
     })
 
+    if (searchValue && restrictToVisibleProviders) {
+      Object.keys(groups).forEach((providerKey) => {
+        if (groups[providerKey].length === 0) delete groups[providerKey]
+      })
+    }
+
     return groups
-  }, [filteredItems, providers, searchValue, favoriteModels])
+  }, [
+    displayedProviders,
+    favoriteModels,
+    filteredItems,
+    restrictToVisibleProviders,
+    searchValue,
+  ])
 
   const handleSelect = useCallback(
     async (searchableModel: SearchableModel) => {
@@ -446,106 +392,51 @@ const DropdownModelProvider = memo(function DropdownModelProvider({
         searchableModel.model.id
       )
 
-
-      // Check mmproj existence for llamacpp models (async, don't block UI)
-      if (searchableModel.provider.provider === 'llamacpp') {
-        serviceHub
-          .models()
-          .checkMmprojExistsAndUpdateOffloadMMprojSetting(
-            searchableModel.model.id,
-            updateProvider,
-            getProviderByName
-          )
-          .catch((error) => {
-            console.debug(
-              'Error checking mmproj for model:',
-              searchableModel.model.id,
-              error
-            )
-          })
-
-        // Also check vision capability (async, don't block UI)
-        checkAndUpdateModelVisionCapability(searchableModel.model.id).catch(
-          (error) => {
-            console.debug(
-              'Error checking vision capability for model:',
-              searchableModel.model.id,
-              error
-            )
-          }
-        )
-      }
     },
-    [
-      selectModelProvider,
-      updateCurrentThreadModel,
-      updateProvider,
-      getProviderByName,
-      checkAndUpdateModelVisionCapability,
-      serviceHub,
-    ]
+    [selectModelProvider, updateCurrentThreadModel]
   )
 
-  const currentModel = selectedModel?.id
-    ? getModelBy(selectedModel?.id)
-    : undefined
+  const provider = displayedProviders.find(
+    (candidate) => candidate.provider === selectedProvider
+  )
 
-  const provider = getProviderByName(selectedProvider)
-
-  if (!providers.length) return null
+  if (!displayedProviders.length) return null
 
   const selectedModelLogoProvider =
     provider && selectedModel?.id
       ? { provider: getModelLogoProvider(selectedModel.id, provider.provider) }
       : provider
 
-
   return (
     <Popover open={open} onOpenChange={onOpenChange}>
-        <PopoverTrigger asChild>
-          <div className="border relative z-20 px-4 py-1.5 flex items-center gap-1.5 rounded-full">
-            <button
-              type="button"
-              className="font-medium cursor-pointer flex items-center gap-1.5 relative z-20 min-w-0"
-            >
-              {selectedModelLogoProvider && (
-                <div className="shrink-0">
-                  <ProvidersAvatar provider={selectedModelLogoProvider} />
-                </div>
-              )}
-              <Tooltip>
-                <TooltipTrigger asChild>
-                  <span
-                    className={cn(
-                      'text-foreground truncate leading-normal',
-                      !selectedModel?.id && 'text-muted-foreground'
-                    )}
-                  >
-                    {displayModel}
-                  </span>
-                </TooltipTrigger>
-                <TooltipContent>{displayModel}</TooltipContent>
-              </Tooltip>
-              <ChevronsUpDown className="size-4 shrink-0 text-muted-foreground" />
-            </button>
-          {currentModel?.settings &&
-            provider &&
-            provider.provider === 'llamacpp' && (
-              <div onClick={(e) => e.stopPropagation()}>
-                <ModelSetting
-                  model={currentModel as Model}
-                  provider={provider}
-                />
+      <PopoverTrigger asChild>
+        <div className="border relative z-20 px-4 py-1.5 flex items-center gap-1.5 rounded-full">
+          <button
+            type="button"
+            className="font-medium cursor-pointer flex items-center gap-1.5 relative z-20 min-w-0"
+          >
+            {selectedModelLogoProvider && (
+              <div className="shrink-0">
+                <ProvidersAvatar provider={selectedModelLogoProvider} />
               </div>
             )}
-          <ModelSupportStatus
-            modelId={selectedModel?.id}
-            provider={selectedProvider}
-            contextSize={getContextSize()}
-            className="ml-0.5 shrink-0"
-          />
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <span
+                  className={cn(
+                    'text-foreground truncate leading-normal',
+                    !selectedModel?.id && 'text-muted-foreground'
+                  )}
+                >
+                  {displayModel}
+                </span>
+              </TooltipTrigger>
+              <TooltipContent>{displayModel}</TooltipContent>
+            </Tooltip>
+            <ChevronsUpDown className="size-4 shrink-0 text-muted-foreground" />
+          </button>
         </div>
-        </PopoverTrigger>
+      </PopoverTrigger>
 
       <PopoverContent
         className={cn(
@@ -659,7 +550,7 @@ const DropdownModelProvider = memo(function DropdownModelProvider({
 
                 {/* Regular provider sections */}
                 {Object.entries(groupedItems).map(([providerKey, models]) => {
-                  const providerInfo = providers.find(
+                  const providerInfo = displayedProviders.find(
                     (p) => p.provider === providerKey
                   )
 

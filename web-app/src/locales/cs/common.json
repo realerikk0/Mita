@@ -104,11 +104,10 @@
   "chats": "Chaty",
   "favorites": "Oblíbené",
   "recents": "Nedávné",
-  "hub": "Centrum",
   "helpSupport": "Nápověda a podpora",
-  "helpUsImproveMita": "Pomozte nám vylepšit Biyan",
-  "helpUsImproveMitaDescription": "Shromažďujeme anonymní data, abychom porozuměli používání funkcí. Vaše chaty ani osobní údaje nikdy nesledujeme. Toto můžete kdykoli změnit v Nastavení > Soukromí.",
-  "helpUsImproveMitaQuestion": "Chcete nám pomoci vylepšit Biyan?",
+  "helpUsImproveBiyan": "Pomozte nám vylepšit Biyan",
+  "helpUsImproveBiyanDescription": "Shromažďujeme anonymní data, abychom porozuměli používání funkcí. Vaše chaty ani osobní údaje nikdy nesledujeme. Toto můžete kdykoli změnit v Nastavení > Soukromí.",
+  "helpUsImproveBiyanQuestion": "Chcete nám pomoci vylepšit Biyan?",
   "unstarAll": "Odebrat vše z oblíbených",
   "unstar": "Odebrat z oblíbených",
   "deleteAll": "Smazat vše",
@@ -158,12 +157,7 @@
   "noResultsFound": "Nebyly nalezeny žádné výsledky",
   "noThreadsYet": "Zatím žádná vlákna",
   "noThreadsYetDesc": "Začněte novou konverzaci a uvidíte zde historii vláken.",
-  "downloads": "Stahování",
-  "downloading": "Stahování",
   "uploadingAttachments": "Nahrávání příloh…",
-  "cancelDownload": "Zrušit stahování",
-  "downloadCancelled": "Stahování zrušeno",
-  "downloadComplete": "Stahování dokončeno",
   "thinking": "Přemýšlím...",
   "thought": "Myšlenka",
   "callingTool": "Volání nástroje",
@@ -182,7 +176,7 @@
   "noModels": "Nebyly nalezeny žádné modely",
   "customAvatar": "Vlastní avatar",
   "editAssistant": "Upravit asistenta",
-  "mita": "Biyan",
+  "biyan": "Biyan",
   "metadata": "Metadata",
   "regenerate": "Regenerovat",
   "threadImage": "Obrázek vlákna",
@@ -432,30 +426,14 @@
       "title": "Stahování dokončeno",
       "description": "{{item}} byl stažen"
     },
-    "downloadCancelled": {
-      "title": "Stahování zrušeno",
-      "description": "Proces stahování byl zrušen"
-    },
     "downloadFailed": {
       "title": "Stahování selhalo",
       "description": "Stahování {{item}} selhalo"
     },
-    "modelValidationStarted": {
-      "title": "Ověřování modelu",
-      "description": "Model \"{{modelId}}\" byl úspěšně stažen. Ověřování integrity..."
-    },
-    "modelValidationFailed": {
-      "title": "Ověření modelu selhalo",
-      "description": "Stažený model \"{{modelId}}\" selhal při ověření integrity a byl odstraněn. Soubor může být poškozen nebo zmanipulován."
-    },
     "modelNoVision": {
       "title": "Model nepodporuje obrázky",
       "description": "Chcete-li přiložit obrázky, vyberte model s podporou vidění.",
-      "action": "Otevřít Centrum"
-    },
-    "downloadAndVerificationComplete": {
-      "title": "Stahování dokončeno",
-      "description": "Model \"{{item}}\" byl úspěšně stažen a ověřen"
+      "action": "Otevřít nastavení poskytovatelů"
     },
     "projectCreated": {
       "title": "Projekt vytvořen",

@@ -23,8 +23,8 @@ type UseProviderBalanceState = {
 const BALANCE_CACHE_DURATION = 60 * 1000
 const BALANCE_STORAGE_MAX_AGE = 24 * 60 * 60 * 1000
 const BALANCE_STORAGE_MAX_ENTRIES = 20
-const PROVIDER_BALANCE_REFRESH_EVENT = 'mita-provider-balance-refresh'
-const BALANCE_STORAGE_PREFIX = 'mita-provider-balance-cache:'
+const PROVIDER_BALANCE_REFRESH_EVENT = 'biyan-provider-balance-refresh'
+const BALANCE_STORAGE_PREFIX = 'biyan-provider-balance-cache:'
 const balanceCache = new Map<string, ProviderBalanceCacheEntry>()
 const balanceRequests = new Map<string, Promise<ProviderBalanceStatus>>()
 

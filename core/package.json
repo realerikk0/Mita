@@ -1,12 +1,13 @@
 {
-  "name": "@janhq/core",
+  "name": "@biyan/core",
+  "private": true,
   "version": "0.1.10",
-  "description": "Core library for the Jan AI application framework",
+  "description": "Core library for the Biyan desktop client",
   "keywords": [
-    "jan",
+    "biyan",
     "core"
   ],
-  "homepage": "https://jan.ai",
+  "homepage": "https://biyan.ai",
   "license": "AGPL-3.0",
   "main": "dist/index.js",
   "typings": "dist/types/index.d.ts",
@@ -14,7 +15,6 @@
     "dist",
     "types"
   ],
-  "author": "Jan <service@jan.ai>",
   "scripts": {
     "lint": "tslint --project tsconfig.json -t codeFrame 'src/**/*.ts' 'test/**/*.ts'",
     "test": "vitest run",

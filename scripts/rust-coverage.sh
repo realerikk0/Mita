@@ -8,7 +8,7 @@ bash ./scripts/prepare-tauri-test-resources.sh
 cargo llvm-cov clean --workspace --manifest-path src-tauri/Cargo.toml
 cargo llvm-cov --no-report --manifest-path src-tauri/Cargo.toml --no-default-features --features test-tauri -- --test-threads=1
 cargo llvm-cov --no-report --manifest-path src-tauri/plugins/tauri-plugin-hardware/Cargo.toml
-cargo llvm-cov --no-report --manifest-path src-tauri/plugins/tauri-plugin-llamacpp/Cargo.toml
+cargo llvm-cov --no-report --manifest-path src-tauri/plugins/tauri-plugin-document-parser/Cargo.toml
 cargo llvm-cov --no-report --manifest-path src-tauri/utils/Cargo.toml
 
 # Tauri copies resource stubs into the coverage target directory. They are not

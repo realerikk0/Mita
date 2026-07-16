@@ -104,11 +104,10 @@
   "chats": "Czaty",
   "favorites": "Ulubione",
   "recents": "Ostatnie",
-  "hub": "Centrum Modeli",
   "helpSupport": "Pomoc i Obsługa",
-  "helpUsImproveMita": "Pomóż nam ulepszyć Biyan",
-  "helpUsImproveMitaDescription": "Zbieramy anonimowe dane, aby zrozumieć użycie funkcji. Twoje czaty i dane osobowe nigdy nie są śledzone. Możesz to zmienić w dowolnym momencie w Ustawienia > Prywatność.",
-  "helpUsImproveMitaQuestion": "Czy chcesz pomóc nam ulepszać Biyan?",
+  "helpUsImproveBiyan": "Pomóż nam ulepszyć Biyan",
+  "helpUsImproveBiyanDescription": "Zbieramy anonimowe dane, aby zrozumieć użycie funkcji. Twoje czaty i dane osobowe nigdy nie są śledzone. Możesz to zmienić w dowolnym momencie w Ustawienia > Prywatność.",
+  "helpUsImproveBiyanQuestion": "Czy chcesz pomóc nam ulepszać Biyan?",
   "unstarAll": "Usuń Wszystkim Gwiazdkę",
   "unstar": "Usuń Gwiazdkę",
   "deleteAll": "Usuń Wszystko",
@@ -158,12 +157,7 @@
   "noResultsFound": "Brak wyników",
   "noThreadsYet": "Brak wątków",
   "noThreadsYetDesc": "Rozpocznij nową rozmowę aby zobaczyć tutaj historię wątków.",
-  "downloads": "Pobrane",
-  "downloading": "Pobieranie",
   "uploadingAttachments": "Przesyłanie załączników…",
-  "cancelDownload": "Anuluj Pobieranie",
-  "downloadCancelled": "Pobieranie anulowane",
-  "downloadComplete": "Pobieranie zakończone",
   "thinking": "Myślenie…",
   "thought": "Myśl",
   "callingTool": "Używanie narzędzia",
@@ -180,7 +174,7 @@
   "noModelsFoundFor": "Brak modeli dla \"{{searchValue}}\"",
   "customAvatar": "Własny awatar",
   "editAssistant": "Edytuj Asystenta",
-  "mita": "Biyan",
+  "biyan": "Biyan",
   "metadata": "Metadane",
   "regenerate": "Odtwórz",
   "threadImage": "Obraz wątku",
@@ -426,30 +420,14 @@
       "title": "Ukończono Pobieranie",
       "description": "Model {{modelId}} został pobrany."
     },
-    "downloadCancelled": {
-      "title": "Anulowano Pobieranie",
-      "description": "Pobieranie zostało anulowane."
-    },
     "downloadFailed": {
       "title": "Błąd Pobierania",
       "description": "Błąd pobierania {{item}}"
     },
-    "modelValidationStarted": {
-      "title": "Weryfikacja Modelu",
-      "description": "Pomyślnie pobrano model \"{{modelId}}\". Weryfikowanie integralności..."
-    },
-    "modelValidationFailed": {
-      "title": "Błąd Weryfikacji Modelu",
-      "description": "Pobrany model \"{{modelId}}\" nie przeszedł weryfikacji integralności i został usunięty. Plik może być uszkodzony lub zmodyfikowany."
-    },
     "modelNoVision": {
       "title": "Model nie obsługuje obrazów",
       "description": "Wybierz model z obsługą wizji, aby dołączać obrazy.",
-      "action": "Otwórz Centrum"
-    },
-    "downloadAndVerificationComplete": {
-      "title": "Pobieranie Ukończone",
-      "description": "Model \"{{item}}\" został pobrany i pomyślnie zweryfikowany"
+      "action": "Otwórz ustawienia dostawców"
     },
     "projectCreated": {
       "title": "Projekt Utworzony",

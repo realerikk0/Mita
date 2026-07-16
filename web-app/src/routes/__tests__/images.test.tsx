@@ -56,8 +56,8 @@ const h = vi.hoisted(() => ({
   search: {} as Record<string, unknown>,
 }))
 
-vi.mock('@janhq/core', async (importOriginal) => {
-  const actual = await importOriginal<typeof import('@janhq/core')>()
+vi.mock('@biyan/core', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('@biyan/core')>()
   return {
     ...actual,
     fs: {

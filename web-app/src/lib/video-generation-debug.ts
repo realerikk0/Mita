@@ -1,11 +1,19 @@
-const VIDEO_DEBUG_STORAGE_KEY = 'mita.videoGeneration.debug'
-const VIDEO_DEBUG_PREFIX = '[mita-video-debug]'
+import {
+  legacyStorage,
+  readCanonicalStorageValue,
+} from '@/legacy_migrations/storage'
+
+const VIDEO_DEBUG_STORAGE_KEY = 'biyan.videoGeneration.debug'
+const VIDEO_DEBUG_PREFIX = '[biyan-video-debug]'
 
 type PlainObject = Record<string, unknown>
 
 export function isVideoGenerationDebugEnabled() {
   try {
-    const value = globalThis.localStorage?.getItem(VIDEO_DEBUG_STORAGE_KEY)
+    const value = readCanonicalStorageValue(
+      VIDEO_DEBUG_STORAGE_KEY,
+      legacyStorage.videoGenerationDebug
+    )
     return isEnabledFlag(value)
   } catch {
     return false

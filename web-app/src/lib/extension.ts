@@ -1,6 +1,15 @@
-import { AIEngine, BaseExtension, ExtensionTypeEnum } from '@janhq/core'
+import { BaseExtension, ExtensionTypeEnum } from '@biyan/core'
 
 import { getServiceHub } from '@/hooks/useServiceHub'
+
+const ALLOWED_BUNDLED_EXTENSION_IDS = new Set([
+  '@biyan/assistant-extension',
+  '@biyan/conversational-extension',
+  '@biyan/download-extension',
+])
+
+export const isAllowedBundledExtension = (name: string): boolean =>
+  ALLOWED_BUNDLED_EXTENSION_IDS.has(name)
 
 /**
  * Extension manifest object.
@@ -64,9 +73,6 @@ export class ExtensionManager {
   // Registered extensions
   private extensions = new Map<string, BaseExtension>()
 
-  // Registered inference engines
-  private engines = new Map<string, AIEngine>()
-
   /**
    * Registers an extension.
    * @param extension - The extension to register.
@@ -75,13 +81,6 @@ export class ExtensionManager {
     // Register for naming use
     this.extensions.set(name, extension)
 
-    // Register AI Engines
-    if ('provider' in extension && typeof extension.provider === 'string') {
-      this.engines.set(
-        extension.provider as unknown as string,
-        extension as unknown as AIEngine
-      )
-    }
   }
 
   /**
@@ -109,15 +108,6 @@ export class ExtensionManager {
    */
   getAll(): BaseExtension[] {
     return Array.from(this.extensions.values())
-  }
-
-  /**
-   * Retrieves a extension by its type.
-   * @param engine - The engine name to retrieve.
-   * @returns The extension, if found.
-   */
-  getEngine<T extends AIEngine>(engine: string): T | undefined {
-    return this.engines.get(engine) as T | undefined
   }
 
   /**
@@ -165,17 +155,22 @@ export class ExtensionManager {
     const manifests = await getServiceHub().core().getActiveExtensions()
     if (!manifests || !Array.isArray(manifests)) return []
 
-    const extensions: Extension[] = manifests.map((manifest: ExtensionManifest) => {
-      return new Extension(
-        manifest.url,
-        manifest.name,
-        manifest.productName,
-        manifest.active,
-        manifest.description,
-        manifest.version,
-        manifest.extensionInstance // Pass the extension instance if available
+    const extensions: Extension[] = manifests
+      .filter(
+        (manifest: ExtensionManifest) =>
+          manifest.active !== false && isAllowedBundledExtension(manifest.name)
       )
-    })
+      .map((manifest: ExtensionManifest) => {
+        return new Extension(
+          manifest.url,
+          manifest.name,
+          manifest.productName,
+          manifest.active,
+          manifest.description,
+          manifest.version,
+          manifest.extensionInstance // Pass the extension instance if available
+        )
+      })
     
     return extensions
   }
@@ -186,6 +181,9 @@ export class ExtensionManager {
    * @returns {void}
    */
   async activateExtension(extension: Extension) {
+    if (!isAllowedBundledExtension(extension.name) || extension.active === false) {
+      throw new Error(`Extension '${extension.name}' is not allowed by Biyan`)
+    }
     // Check if extension already has a pre-loaded instance (web extensions)
     if (extension.extensionInstance) {
       this.register(extension.name, extension.extensionInstance)
@@ -249,7 +247,13 @@ export class ExtensionManager {
     if (typeof window === 'undefined') {
       return
     }
-    const res = await getServiceHub().core().installExtension(extensions)
+    const allowedExtensions = extensions.filter((extension) =>
+      isAllowedBundledExtension(extension.name)
+    )
+    if (allowedExtensions.length !== extensions.length) {
+      throw new Error('One or more extension IDs are not allowed by Biyan')
+    }
+    const res = await getServiceHub().core().installExtension(allowedExtensions)
     if (!Array.isArray(res)) return []
 
     const results = await Promise.allSettled(

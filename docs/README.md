@@ -1,70 +1,56 @@
-# Website & Docs
+# Biyan Documentation
 
-This website is built using [Nextra](https://nextra.site/), a modern static website generator.
+The documentation site is built with [Nextra](https://nextra.site/) and exported as static files for Cloudflare Pages at [docs.biyan.ai](https://docs.biyan.ai/).
 
-### Information Architecture
+## Published information architecture
 
-We try to **keep routes consistent** to maintain SEO.
+- `/docs/desktop/`: Biyan Desktop guides.
+- `/docs/desktop/remote-models/`: cloud Provider setup.
+- `/docs/desktop/file-upload`: image and document behavior.
+- `/docs/desktop/data-folder`: cumulative current → A → B → C migration.
+- `/docs/desktop/mcp`: MCP setup and safety.
+- `/docs/desktop/api-server`: remote-only local API gateway.
 
-- **`/guides/`**: Guides on how to use the Jan application. For end users who are directly using Jan.
+Upstream Jan changelog, posts, handbook pages, retired local-runtime documentation, and unapproved legal pages remain in source control for history but are excluded from navigation, static export, robots, and sitemap generation. Do not link to them from published pages.
 
-- **`/developer/`**: Developer docs on how to extend Jan. These pages are about what people can build with our software.
+The `postbuild` sitemap step also runs `scripts/prune-unpublished-output.cjs`. It removes generated HTML/data/chunks and archived images that Next compiles while discovering source pages, then filters the client build manifest. This step is mandatory before publishing `out`.
 
-- **`/api-reference/`**: Reference documentation for the Jan API server, written in Swagger/OpenAPI format.
+## Local development
 
-- **`/changelog/`**: A list of changes made to the Jan application with each release.
-
-- **`/blog/`**: A blog for the Jan application.
-
-## How to Contribute
-
-Refer to the [Contributing Guide](https://github.com/janhq/jan/blob/main/CONTRIBUTING.md) for more comprehensive information on how to contribute to the Jan project.
-
-### Pre-requisites and Installation
-
-- [Node.js](https://nodejs.org/en/) (version 20.0.0 or higher)
-- [yarn](https://yarnpkg.com/) (version 1.22.0 or higher)
-
-#### Installation
+Requirements: Node.js 20 or later and Yarn 1.22 for this documentation workspace.
 
 ```bash
-cd jan/docs
-yarn install
+cd docs
+yarn install --frozen-lockfile
 yarn dev
 ```
 
-This command starts a local development server and opens up a browser window. Most changes are reflected live without having to restart the server.
-
-#### Build
+Production check:
 
 ```bash
+cd docs
 yarn build
 ```
 
-This command generates static content into the `build` directory and can be served using any static contents hosting service.
+The static site is written to `docs/out`.
 
-### Deployment
+## Cloudflare Pages
 
-Using SSH:
+The repository includes `wrangler.toml` with `pages_build_output_dir = "./out"`.
+
+- Project root: `docs`
+- Build command: `yarn install --frozen-lockfile && yarn build`
+- Build output: `out`
+- Custom domain: `docs.biyan.ai`
+
+Preview locally or deploy after authenticating Wrangler:
 
 ```bash
-USE_SSH=true yarn deploy
+cd docs
+npx wrangler pages dev out
+npx wrangler pages deploy out --project-name biyan-docs
 ```
 
-Not using SSH:
+Do not publish Privacy or Terms pages until the legal entity and final policy text are approved.
 
-```bash
-GIT_USER=<Your GitHub username> yarn deploy
-```
-
-If you are using GitHub pages for hosting, this command is a convenient way to build the website and push to the `gh-pages` branch.
-
-### Preview URL, Pre-release and Publishing Documentation
-
-- When a pull request is created, the preview URL will be automatically commented on the pull request.
-
-- The documentation will then be published to [https://jan.ai/](https://jan.ai/) when the pull request is merged to `main`.
-
-### Mita Release Distribution
-
-Mita desktop release and distribution operations are documented in [`release-distribution.md`](./release-distribution.md).
+For documentation support, email [help@biyan.ai](mailto:help@biyan.ai).

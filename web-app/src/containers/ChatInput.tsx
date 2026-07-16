@@ -31,7 +31,6 @@ import {
   IconPhoto,
   IconAtom,
   IconTool,
-  IconCodeCircle2,
   IconPlayerStopFilled,
   IconX,
   IconPaperclip,
@@ -43,6 +42,7 @@ import { useMessageQueue } from '@/stores/message-queue-store'
 import { QueuedMessageChip } from '@/containers/QueuedMessageBubble'
 import { BotIcon } from 'lucide-react'
 import { useTranslation } from '@/i18n/react-i18next-compat'
+import { readBiyanTeamsMetadata } from '@/types/biyan-teams'
 import { useGeneralSetting } from '@/hooks/useGeneralSetting'
 import { useModelProvider } from '@/hooks/useModelProvider'
 
@@ -62,21 +62,18 @@ import DropdownToolsAvailable from '@/containers/DropdownToolsAvailable'
 import { AvatarEmoji } from '@/containers/AvatarEmoji'
 import { useServiceHub } from '@/hooks/useServiceHub'
 import { useTools } from '@/hooks/useTools'
-import { TokenCounter } from '@/components/TokenCounter'
-import { useMessages } from '@/hooks/useMessages'
 import { useShallow } from 'zustand/react/shallow'
 import { McpExtensionToolLoader } from './McpExtensionToolLoader'
 import {
   ExtensionTypeEnum,
   MCPExtension,
   fs,
-  VectorDBExtension,
-} from '@janhq/core'
+} from '@biyan/core'
 import { ExtensionManager } from '@/lib/extension'
 import { useAttachments } from '@/hooks/useAttachments'
 import { toast } from 'sonner'
 import { isPlatformTauri } from '@/lib/platform/utils'
-import { useAttachmentIngestionPrompt } from '@/hooks/useAttachmentIngestionPrompt'
+import { supportsNativeFileInput } from '@/lib/attachmentProcessing'
 import {
   NEW_THREAD_ATTACHMENT_KEY,
   useChatAttachments,
@@ -111,9 +108,10 @@ type ChatInputProps = {
 }
 
 type DocumentFileInput = {
-  path: string
+  path?: string
   name?: string
   size?: number
+  file?: File
 }
 
 type DroppedFileWithPath = File & {
@@ -122,6 +120,14 @@ type DroppedFileWithPath = File & {
 
 const droppedFileKey = (file: File) =>
   `${file.name}:${file.size}`
+
+const fileToDataUrl = (file: File): Promise<string> =>
+  new Promise((resolve, reject) => {
+    const reader = new FileReader()
+    reader.onload = () => resolve(String(reader.result ?? ''))
+    reader.onerror = () => reject(reader.error ?? new Error('Failed to read file'))
+    reader.readAsDataURL(file)
+  })
 
 const ChatInput = memo(function ChatInput({
   className,
@@ -158,18 +164,18 @@ const ChatInput = memo(function ChatInput({
   const addToHistory = usePrompt((state) => state.addToHistory)
   const navigateHistory = usePrompt((state) => state.navigateHistory)
   const currentThread = useThreads((state) => state.getCurrentThread())
-  const isMitaTeamsThread =
-    (currentThread?.metadata?.mitaTeams as { enabled?: boolean } | undefined)
-      ?.enabled === true
+  const isBiyanTeamsThread =
+    (
+      readBiyanTeamsMetadata(currentThread?.metadata) as
+        | { enabled?: boolean }
+        | undefined
+    )?.enabled === true
   const updateCurrentThreadAssistant = useThreads(
     (state) => state.updateCurrentThreadAssistant
   )
   const { t } = useTranslation()
   const spellCheckChatInput = useGeneralSetting(
     (state) => state.spellCheckChatInput
-  )
-  const tokenCounterCompact = useGeneralSetting(
-    (state) => state.tokenCounterCompact
   )
   useTools()
   const router = useRouter()
@@ -195,15 +201,7 @@ const ChatInput = memo(function ChatInput({
     toggleAgentMode(agentModeKey)
   }, [agentModeKey, toggleAgentMode])
 
-  // Get current thread messages for token counting
-  const threadMessages = useMessages(
-    useShallow((state) =>
-      currentThreadId ? state.messages[currentThreadId] : []
-    )
-  )
-
   const maxRows = 10
-  const ATTACHMENT_AUTO_INLINE_FALLBACK_BYTES = 512 * 1024
 
   useEffect(() => {
     const nextRows = (prompt.match(/\n/g) || []).length + 1
@@ -218,12 +216,8 @@ const ChatInput = memo(function ChatInput({
     'tools' | 'assistants' | false
   >(false)
   const [isDragOver, setIsDragOver] = useState(false)
-  const [hasMmproj, setHasMmproj] = useState(false)
-  const activeModels = useAppState(useShallow((state) => state.activeModels))
+  const [supportsVision, setSupportsVision] = useState(false)
   const wasPointerDown = useRef(false)
-
-  // Check if selected model is currently loaded/active
-  const isModelActive = selectedModel?.id ? activeModels.includes(selectedModel.id) : false
   const [selectedAssistantId, setSelectedAssistantId] = useState<
     string | undefined
   >(loading ? undefined : currentAssistant?.id || '')
@@ -242,30 +236,9 @@ const ChatInput = memo(function ChatInput({
 
   const assistantCount = assistants?.length || 0
 
-  // Tool schemas sent to the model are not part of ThreadMessage[]; add them here only.
-  // Do not include system instructions — they are already present in messages and counted by useTokensCount.
-  const tokenCounterAdditionalContext = useMemo(() => {
-    const toolsText = tools
-      .map((tool) => {
-        const schema = (() => {
-          try {
-            return JSON.stringify(tool.inputSchema ?? {})
-          } catch {
-            return '{}'
-          }
-        })()
-        return `Tool ${tool.server}::${tool.name}\nDescription: ${tool.description}\nSchema: ${schema}`
-      })
-      .join('\n\n')
-
-    if (!toolsText) return ''
-    return `Available tools:\n${toolsText}`
-  }, [tools])
-
   // No auto-selection: let the user explicitly pick an assistant
 
   const attachmentsEnabled = useAttachments((s) => s.enabled)
-  const parsePreference = useAttachments((s) => s.parseMode)
   const maxFileSizeMB = useAttachments((s) => s.maxFileSizeMB)
 
   // Derived: any document currently processing (ingestion in progress)
@@ -292,15 +265,8 @@ const ChatInput = memo(function ChatInput({
   const ingestingAny = attachments.some((a) => a.processing)
   const modelSupportsTools =
     selectedModel?.capabilities?.includes('tools') === true
-  const canAttachDocumentFiles = !projectId || modelSupportsTools
-  const canDropFiles = hasMmproj || attachmentsEnabled
-  const documentParseMode =
-    !projectId && !modelSupportsTools ? 'inline' : parsePreference
-
-  const [, setFileIngestProgress] = useState<{
-    completed: number
-    total: number
-  } | null>(null)
+  const canAttachDocumentFiles = true
+  const canDropFiles = supportsVision || attachmentsEnabled
 
   // Queued messages for this thread (shown as chips in the input area)
   const queuedMessages = useMessageQueue(
@@ -327,26 +293,12 @@ const ChatInput = memo(function ChatInput({
     }
   }, [currentThreadId, transferAttachments])
 
-  // Check for mmproj existence or vision capability when model changes
+  // Follow the selected remote model's declared vision capability.
   useEffect(() => {
-    const checkMmprojSupport = async () => {
-      if (selectedModel && selectedModel?.id) {
-        try {
-          // Only check mmproj for llamacpp provider
-          if (selectedModel?.capabilities?.includes('vision')) {
-            setHasMmproj(true)
-          } else {
-            setHasMmproj(false)
-          }
-        } catch (error) {
-          console.error('Error checking mmproj:', error)
-          setHasMmproj(false)
-        }
-      }
-    }
-
-    checkMmprojSupport()
-  }, [selectedModel, selectedModel?.capabilities, selectedProvider, serviceHub])
+    setSupportsVision(
+      Boolean(selectedModel?.id && selectedModel.capabilities?.includes('vision'))
+    )
+  }, [selectedModel?.id, selectedModel?.capabilities])
 
   // Check if there are active MCP servers
   const hasActiveMCPServers =
@@ -600,81 +552,25 @@ const ChatInput = memo(function ChatInput({
 
   const fileInputRef = useRef<HTMLInputElement>(null)
 
-  const processNewDocumentAttachments = useCallback(
-    async (docs: Attachment[]) => {
-      if (!docs.length) return
-
-      // Only collect the user's inline-vs-embeddings preference via the
-      // dialog.  Actual ingestion is always deferred to send time
-      // (processAttachmentsForSend inside processAndSendMessage).
-      const docsNeedingPrompt = docs.filter((doc) => {
-        if (doc.processed || doc.injectionMode) return false
-        const preference = doc.parseMode ?? parsePreference
-        return preference === 'prompt' || preference === 'auto'
-      })
-
-      if (docsNeedingPrompt.length > 0) {
-        const choices = new Map<string, 'inline' | 'embeddings'>()
-        for (let i = 0; i < docsNeedingPrompt.length; i++) {
-          const doc = docsNeedingPrompt[i]
-          const choice = await useAttachmentIngestionPrompt
-            .getState()
-            .showPrompt(
-              doc,
-              ATTACHMENT_AUTO_INLINE_FALLBACK_BYTES,
-              i,
-              docsNeedingPrompt.length
-            )
-
-          if (!choice) {
-            // User cancelled — remove all pending docs
-            setAttachmentsForThread(attachmentsKey, (prev) =>
-              prev.filter(
-                (att) =>
-                  !docsNeedingPrompt.some(
-                    (d) => d.path && att.path && d.path === att.path
-                  )
-              )
-            )
-            return
-          }
-
-          if (doc.path) {
-            choices.set(doc.path, choice)
-          }
-        }
-
-        // Persist each document's chosen mode so processAttachmentsForSend
-        // can pick it up at send time.
-        if (choices.size > 0) {
-          setAttachmentsForThread(attachmentsKey, (prev) =>
-            prev.map((att) => {
-              const mode = att.path ? choices.get(att.path) : undefined
-              return mode ? { ...att, parseMode: mode } : att
-            })
-          )
-        }
-      }
-    },
-    [
-      ATTACHMENT_AUTO_INLINE_FALLBACK_BYTES,
-      attachmentsKey,
-      parsePreference,
-      setAttachmentsForThread,
-    ]
-  )
-
   const attachDocumentFiles = useCallback(
     async (files: DocumentFileInput[]) => {
       if (!files.length) return
 
       const preparedAttachments: Attachment[] = []
+      const supportsNativeFiles = supportsNativeFileInput(
+        selectedModel?.capabilities
+      )
+      const maxFileSizeBytes = maxFileSizeMB * 1024 * 1024
+
       for (const file of files) {
-        const name = file.name ?? file.path.split(/[\\/]/).pop() ?? file.path
+        const name =
+          file.name ??
+          file.path?.split(/[\\/]/).pop() ??
+          'document'
         const fileType = name.split('.').pop()?.toLowerCase()
         let size: number | undefined =
-          typeof file.size === 'number' ? file.size : undefined
-        if (size === undefined) {
+          typeof file.size === 'number' ? file.size : file.file?.size
+        if (size === undefined && file.path) {
           try {
             const stat = await fs.fileStat(file.path)
             size = stat?.size ? Number(stat.size) : undefined
@@ -683,49 +579,85 @@ const ChatInput = memo(function ChatInput({
           }
         }
 
+        if (typeof size === 'number' && size > maxFileSizeBytes) {
+          toast.error('File too large', {
+            description: `${name} exceeds the ${maxFileSizeMB}MB limit`,
+          })
+          continue
+        }
+
+        let nativeFile = file.file
+        if (supportsNativeFiles && !nativeFile && file.path) {
+          try {
+            const response = await fetch(
+              serviceHub.core().convertFileSrc(file.path)
+            )
+            if (!response.ok) {
+              throw new Error(`Unable to read file (${response.status})`)
+            }
+            const blob = await response.blob()
+            if (blob.size > maxFileSizeBytes) {
+              throw new Error(`${name} exceeds the ${maxFileSizeMB}MB limit`)
+            }
+            nativeFile = new File([blob], name, {
+              type: blob.type || getFileTypeFromExtension(name),
+            })
+          } catch (error) {
+            console.warn(`Native file input unavailable for ${name}`, error)
+          }
+        }
+
+        const nativeDataUrl =
+          supportsNativeFiles && nativeFile
+            ? await fileToDataUrl(nativeFile)
+            : undefined
+        const nativeMediaType = nativeFile
+          ? nativeFile.type || getFileTypeFromExtension(name)
+          : undefined
+        const textOnlyBrowserFile =
+          !file.path &&
+          nativeFile &&
+          (nativeFile.type.startsWith('text/') ||
+            [
+              'txt', 'md', 'csv', 'json', 'jsonc', 'yaml', 'yml', 'toml',
+              'xml', 'html', 'htm', 'js', 'ts', 'tsx', 'jsx', 'py', 'rs',
+              'go', 'java', 'kt', 'swift', 'c', 'cpp', 'h', 'hpp', 'sql',
+              'sh', 'zsh', 'css', 'scss', 'log', 'diff', 'patch',
+            ].includes(fileType ?? ''))
+        let inlineContent: string | undefined
+        if (!supportsNativeFiles && textOnlyBrowserFile && nativeFile) {
+          inlineContent = await nativeFile.text()
+        }
+
         preparedAttachments.push(
           createDocumentAttachment({
             name,
             path: file.path,
             fileType,
             size,
-            parseMode: documentParseMode,
+            nativeDataUrl,
+            nativeMediaType,
+            inlineContent,
           })
         )
-      }
-
-      const maxFileSizeBytes =
-        typeof maxFileSizeMB === 'number' && maxFileSizeMB > 0
-          ? maxFileSizeMB * 1024 * 1024
-          : undefined
-
-      if (maxFileSizeBytes !== undefined) {
-        const hasOversized = preparedAttachments.some(
-          (att) => typeof att.size === 'number' && att.size > maxFileSizeBytes
-        )
-        if (hasOversized) {
-          toast.error('File too large', {
-            description: `One or more files exceed the ${maxFileSizeMB}MB limit`,
-          })
-          return
-        }
       }
 
       let duplicates: string[] = []
       let newDocAttachments: Attachment[] = []
 
       setAttachmentsForThread(attachmentsKey, (currentAttachments) => {
-        const existingPaths = new Set(
+        const existingKeys = new Set(
           currentAttachments
-            .filter((a) => a.type === 'document' && a.path)
-            .map((a) => a.path)
+            .filter((a) => a.type === 'document')
+            .map((a) => a.path ?? `${a.name}:${a.size ?? 0}`)
         )
 
         duplicates = []
         newDocAttachments = []
 
         for (const att of preparedAttachments) {
-          if (existingPaths.has(att.path)) {
+          const key = att.path ?? `${att.name}:${att.size ?? 0}`
+          if (existingKeys.has(key)) {
             duplicates.push(att.name)
             continue
           }
@@ -743,15 +675,12 @@ const ChatInput = memo(function ChatInput({
         })
       }
 
-      if (newDocAttachments.length > 0) {
-        await processNewDocumentAttachments(newDocAttachments)
-      }
     },
     [
       attachmentsKey,
-      documentParseMode,
       maxFileSizeMB,
-      processNewDocumentAttachments,
+      selectedModel?.capabilities,
+      serviceHub,
       setAttachmentsForThread,
     ]
   )
@@ -760,12 +689,6 @@ const ChatInput = memo(function ChatInput({
     try {
       if (!attachmentsEnabled) {
         toast.info('Attachments are disabled in Settings')
-        return
-      }
-      if (!canAttachDocumentFiles) {
-        toast.info(
-          'Select a tool-capable model to attach documents to a project'
-        )
         return
       }
       const selection = await serviceHub.dialog().open({
@@ -930,32 +853,6 @@ const ChatInput = memo(function ChatInput({
   }
 
   const handleRemoveAttachment = async (indexToRemove: number) => {
-    const attachmentToRemove = attachments[indexToRemove]
-
-    // If attachment was ingested (has an ID), delete it from the backend
-    if (attachmentToRemove?.id && currentThreadId) {
-      try {
-        if (attachmentToRemove.type === 'document') {
-          const vectorDBExtension = ExtensionManager.getInstance().get(
-            ExtensionTypeEnum.VectorDB
-          ) as VectorDBExtension | undefined
-
-          if (vectorDBExtension?.deleteFile) {
-            await vectorDBExtension.deleteFile(
-              currentThreadId,
-              attachmentToRemove.id
-            )
-          }
-        }
-      } catch (error) {
-        console.error('Failed to delete attachment from backend:', error)
-        toast.error('Failed to remove attachment', {
-          description: error instanceof Error ? error.message : String(error),
-        })
-        return
-      }
-    }
-
     setAttachmentsForThread(attachmentsKey, (prev) =>
       prev.filter((_, index) => index !== indexToRemove)
     )
@@ -1130,66 +1027,6 @@ const ChatInput = memo(function ChatInput({
       newFiles.length > 0 ? [...prev, ...newFiles] : prev
     )
 
-    if (currentThreadId && newFiles.length > 0) {
-      const ingestTotal = newFiles.length
-      void (async () => {
-        setFileIngestProgress({ completed: 0, total: ingestTotal })
-        try {
-          for (let i = 0; i < newFiles.length; i++) {
-            const img = newFiles[i]
-            const matchImg = (a: Attachment) =>
-              a.type === 'image' &&
-              (img.contentHash
-                ? a.contentHash === img.contentHash
-                : a.name === img.name)
-
-            try {
-              setAttachmentsForThread(attachmentsKey, (prev) =>
-                prev.map((a) => (matchImg(a) ? { ...a, processing: true } : a))
-              )
-
-              const result = await serviceHub
-                .uploads()
-                .ingestImage(currentThreadId, img)
-
-              if (result?.id) {
-                setAttachmentsForThread(attachmentsKey, (prev) =>
-                  prev.map((a) =>
-                    matchImg(a)
-                      ? {
-                          ...a,
-                          processing: false,
-                          processed: true,
-                          id: result.id,
-                        }
-                      : a
-                  )
-                )
-              } else {
-                throw new Error('No ID returned from image ingestion')
-              }
-            } catch (error) {
-              console.error('Failed to ingest image:', error)
-              setAttachmentsForThread(attachmentsKey, (prev) =>
-                prev.filter((a) => !matchImg(a))
-              )
-              toast.error(`Failed to ingest ${img.name}`, {
-                description:
-                  error instanceof Error ? error.message : String(error),
-              })
-            } finally {
-              setFileIngestProgress({
-                completed: i + 1,
-                total: ingestTotal,
-              })
-            }
-          }
-        } finally {
-          setFileIngestProgress(null)
-        }
-      })()
-    }
-
     // Display validation errors
     if (duplicates.length > 0) {
       toast.warning('Some images already attached', {
@@ -1219,7 +1056,7 @@ const ChatInput = memo(function ChatInput({
     } else {
       setMessage('')
     }
-  }, [attachmentsKey, currentThreadId, setAttachmentsForThread, serviceHub, setFileIngestProgress])
+  }, [attachmentsKey, setAttachmentsForThread])
 
   const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const files = e.target.files
@@ -1313,13 +1150,17 @@ const ChatInput = memo(function ChatInput({
       description: t('common:toast.modelNoVision.description'),
       action: {
         label: t('common:toast.modelNoVision.action'),
-        onClick: () => router.navigate({ to: route.hub.index }),
+        onClick: () =>
+          router.navigate({
+            to: route.settings.providers,
+            params: { providerName: selectedProvider || 'jingxing' },
+          }),
       },
     })
-  }, [t, router])
+  }, [t, router, selectedProvider])
 
   const handleImagePickerClick = async () => {
-    if (hasMmproj) {
+    if (supportsVision) {
       await openImagePicker()
       return
     }
@@ -1378,7 +1219,7 @@ const ChatInput = memo(function ChatInput({
 
       void (async () => {
         if (imageFiles.length > 0) {
-          if (hasMmproj) {
+          if (supportsVision) {
             await processImageFiles(imageFiles)
           } else {
             notifyModelLacksVision()
@@ -1390,33 +1231,16 @@ const ChatInput = memo(function ChatInput({
             toast.info('Attachments are disabled in Settings')
             return
           }
-          if (!canAttachDocumentFiles) {
-            toast.info(
-              'Select a tool-capable model to attach documents to a project'
-            )
-            return
-          }
-
-          const missingPathFiles: string[] = []
           const documentInputs: DocumentFileInput[] = []
           for (const file of documentFiles) {
             const path =
               getDroppedDocumentPath(file) ??
               droppedItemPaths.get(droppedFileKey(file))
-            if (!path) {
-              missingPathFiles.push(file.name)
-              continue
-            }
             documentInputs.push({
               path,
               name: file.name,
               size: file.size,
-            })
-          }
-
-          if (missingPathFiles.length > 0) {
-            toast.info('Use the document picker for these files', {
-              description: `Biyan needs local file paths for ${missingPathFiles.join(', ')}.`,
+              file,
             })
           }
 
@@ -1435,8 +1259,8 @@ const ChatInput = memo(function ChatInput({
       item.type.startsWith('image/')
     )
 
-    // Only process images if model supports mmproj
-    if (hasMmproj) {
+    // Only process images when the selected provider declares vision support.
+    if (supportsVision) {
       let hasProcessedImage = false
 
       // Try clipboardData.items first (traditional method)
@@ -1725,8 +1549,8 @@ const ChatInput = memo(function ChatInput({
               }}
               onPaste={handlePaste}
               placeholder={
-                isMitaTeamsThread
-                  ? t('common:placeholder.mitaTeamsChatInput')
+                isBiyanTeamsThread
+                  ? t('common:placeholder.biyanTeamsChatInput')
                   : t('common:placeholder.chatInput')
               }
               autoFocus
@@ -1773,7 +1597,7 @@ const ChatInput = memo(function ChatInput({
                         onChange={handleFileChange}
                       />
                     </DropdownMenuItem>
-                    {/* RAG document attachments - desktop-only via dialog; shown when feature enabled */}
+                    {/* Remote-native or fully parsed document attachments. */}
                     <DropdownMenuItem
                       onClick={handleAttachDocsIngest}
                       disabled={!canAttachDocumentFiles}
@@ -1791,7 +1615,7 @@ const ChatInput = memo(function ChatInput({
                       )}
                       <span>
                         {ingestingDocs
-                          ? t('common:chatInputActions.indexingDocuments')
+                          ? 'Processing files…'
                           : t('common:chatInputActions.addDocumentsOrFiles')}
                       </span>
                     </DropdownMenuItem>
@@ -1881,30 +1705,6 @@ const ChatInput = memo(function ChatInput({
                     </DropdownMenuContent>
                   </DropdownMenu>
                 )}
-                {/* {model?.provider === 'llamacpp' && loadingModel ? (
-                  <ModelLoader />
-                ) : (
-                  <DropdownModelProvider
-                    model={model}
-                    useLastUsedModel={initialMessage}
-                  />
-                )} */}
-                {!effectiveAgentMode &&
-                  selectedModel?.capabilities?.includes('embeddings') && (
-                    <Tooltip>
-                      <TooltipTrigger asChild>
-                        <Button variant="ghost" size="icon-xs">
-                          <IconCodeCircle2
-                            size={18}
-                            className="text-muted-foreground"
-                          />
-                        </Button>
-                      </TooltipTrigger>
-                      <TooltipContent>
-                        <p>{t('embeddings')}</p>
-                      </TooltipContent>
-                    </Tooltip>
-                  )}
 
                 {!effectiveAgentMode &&
                   modelSupportsTools &&
@@ -2058,29 +1858,6 @@ const ChatInput = memo(function ChatInput({
             </div>
 
             <div className="flex items-center gap-2">
-              {selectedProvider === 'llamacpp' &&
-                tokenCounterCompact &&
-                !effectiveAgentMode &&
-                !initialMessage &&
-                (threadMessages?.length > 0 || prompt.trim().length > 0) && (
-                  <div className="flex-1 flex justify-center">
-                    <TokenCounter
-                      messages={threadMessages || []}
-                      compact={true}
-                      additionalContextText={tokenCounterAdditionalContext}
-                      uploadedFiles={attachments
-                        .filter((a) => a.type === 'image' && a.dataUrl)
-                        .map((a) => ({
-                          name: a.name,
-                          type: a.mimeType || getFileTypeFromExtension(a.name),
-                          size: a.size || 0,
-                          base64: a.base64 || '',
-                          dataUrl: a.dataUrl!,
-                        }))}
-                    />
-                  </div>
-                )}
-
               {isStreaming ? (
                 <Tooltip>
                   <TooltipTrigger asChild>
@@ -2140,28 +1917,6 @@ const ChatInput = memo(function ChatInput({
         </div>
       )}
 
-      {selectedProvider === 'llamacpp' &&
-        isModelActive &&
-        !effectiveAgentMode &&
-        !tokenCounterCompact &&
-        !initialMessage &&
-        (threadMessages?.length > 0 || prompt.trim().length > 0) && (
-          <div className="flex-1 w-full flex justify-start px-2">
-            <TokenCounter
-              messages={threadMessages || []}
-              additionalContextText={tokenCounterAdditionalContext}
-              uploadedFiles={attachments
-                .filter((a) => a.type === 'image' && a.dataUrl)
-                .map((a) => ({
-                  name: a.name,
-                  type: a.mimeType || getFileTypeFromExtension(a.name),
-                  size: a.size || 0,
-                  base64: a.base64 || '',
-                  dataUrl: a.dataUrl!,
-                }))}
-            />
-          </div>
-        )}
     </div>
   )
 })

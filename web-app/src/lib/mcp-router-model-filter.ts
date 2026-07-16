@@ -1,4 +1,8 @@
-import { isLocalProvider } from '@/lib/utils'
+import { providerHasRemoteApiKeys } from '@/lib/provider-api-keys'
+import {
+  isRemoteProviderEndpoint,
+  RETIRED_LOCAL_PROVIDER_IDS,
+} from '@/lib/configured-model-providers'
 
 /**
  * Models that are a poor fit for cheap structured routing (short generateObject calls).
@@ -56,12 +60,13 @@ export function isLikelyLightweightRouterModel(model: Model): boolean {
   return false
 }
 
-/** Shown in the router picker: lightweight heuristic + local or API-keyed remote. */
+/** Shown in the router picker: lightweight, configured remote models only. */
 export function isRouterModelSelectable(
   provider: ModelProvider,
   model: Model
 ): boolean {
   if (!isLikelyLightweightRouterModel(model)) return false
-  if (isLocalProvider(provider.provider)) return true
-  return !!provider.api_key?.length
+  if (RETIRED_LOCAL_PROVIDER_IDS.has(provider.provider.toLowerCase())) return false
+  if (!isRemoteProviderEndpoint(provider)) return false
+  return providerHasRemoteApiKeys(provider)
 }

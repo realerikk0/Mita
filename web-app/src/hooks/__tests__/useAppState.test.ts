@@ -10,7 +10,6 @@ describe('useAppState', () => {
     act(() => {
       useAppState.setState({
         streamingContent: undefined,
-        loadingModel: false,
         tools: [],
         serverStatus: 'stopped',
         abortControllers: {},
@@ -25,7 +24,6 @@ describe('useAppState', () => {
     const { result } = renderHook(() => useAppState())
 
     expect(result.current.streamingContent).toBeUndefined()
-    expect(result.current.loadingModel).toBe(false)
     expect(result.current.tools).toEqual([])
     expect(result.current.serverStatus).toBe('stopped')
     expect(result.current.abortControllers).toEqual({})
@@ -48,22 +46,6 @@ describe('useAppState', () => {
       ...content,
       created_at: expect.any(Number),
     })
-  })
-
-  it('should update loading model state', () => {
-    const { result } = renderHook(() => useAppState())
-
-    act(() => {
-      result.current.updateLoadingModel(true)
-    })
-
-    expect(result.current.loadingModel).toBe(true)
-
-    act(() => {
-      result.current.updateLoadingModel(false)
-    })
-
-    expect(result.current.loadingModel).toBe(false)
   })
 
   it('should update tools', () => {

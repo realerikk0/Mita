@@ -2,6 +2,7 @@
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
 <dict>
+  <!-- Stable compatibility identity for in-place upgrades and existing app data. -->
   <key>CFBundleIdentifier</key>
   <string>uk.jingxing.mita</string>
   <key>CFBundleURLTypes</key>
@@ -12,8 +13,8 @@
       <key>CFBundleURLSchemes</key>
       <array>
         <string>biyan</string>
+        <!-- Existing Jingxing provider-import links still use mita://. -->
         <string>mita</string>
-        <string>silence</string>
       </array>
     </dict>
   </array>

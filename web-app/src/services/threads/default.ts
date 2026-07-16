@@ -3,12 +3,12 @@
  */
 
 import { ExtensionManager } from '@/lib/extension'
-import { ConversationalExtension, ExtensionTypeEnum } from '@janhq/core'
+import { ConversationalExtension, ExtensionTypeEnum } from '@biyan/core'
 import type { ThreadsService } from './types'
 import { TEMPORARY_CHAT_ID } from '@/constants/chat'
 
 function toModelPayload(model?: Thread['model']) {
-  return { id: model?.id ?? '*', engine: model?.provider ?? 'llamacpp' }
+  return { id: model?.id ?? '*', engine: model?.provider ?? '' }
 }
 
 function fromModelResponse(
@@ -16,7 +16,7 @@ function fromModelResponse(
   fallback?: Thread['model']
 ): Thread['model'] | undefined {
   if (assistantModel) {
-    return { id: assistantModel.id, provider: assistantModel.engine ?? 'llamacpp' }
+    return { id: assistantModel.id, provider: assistantModel.engine ?? '' }
   }
   return fallback
 }
@@ -133,7 +133,7 @@ export class DefaultThreadsService implements ThreadsService {
           name: e.name,
           instructions: e.instructions,
         })) ?? [
-          { model: toModelPayload(thread.model), id: 'mita', name: 'Biyan' },
+          { model: toModelPayload(thread.model), id: 'biyan', name: 'Biyan' },
         ],
         metadata: {
           ...thread.metadata,

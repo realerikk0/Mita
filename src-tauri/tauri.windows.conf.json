@@ -3,6 +3,7 @@
     "windows": [
       {
         "label": "main",
+        "url": "migration-recovery.html?boot=1",
         "title": "Biyan",
         "width": 1200,
         "minWidth": 1024,
@@ -32,10 +33,10 @@
     "targets": ["nsis", "msi"],
     "resources": [
       "resources/LICENSE",
-      "resources/bin/mita-cli.exe",
+      "resources/NOTICE",
+      "resources/bin/biyan-cli.exe",
       "resources/computer-agent-runner/**/*",
-      "resources/bin/mita-web-research-mcp.mjs",
-      "resources/embedding-models/**/*",
+      "resources/bin/biyan-web-research-mcp.mjs",
       "resources/pre-install/**/*",
       "resources/ms-playwright/**/*",
       "resources/node_modules/playwright/**/*",

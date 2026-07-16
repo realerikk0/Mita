@@ -1,8 +1,6 @@
-use tauri::{AppHandle, Manager, Runtime, State};
-use tauri_plugin_llamacpp::state::LlamacppState;
-use tauri_plugin_mlx::state::MlxState;
+use tauri::{AppHandle, Runtime, State};
 
-use crate::core::app::commands::get_mita_data_folder_path;
+use crate::core::app::commands::get_biyan_data_folder_path;
 use crate::core::server::proxy;
 use crate::core::state::AppState;
 
@@ -33,16 +31,9 @@ pub async fn start_server<R: Runtime>(
         enable_server_tool_execution,
     } = config;
     let server_handle = state.server_handle.clone();
-    let llama_state: State<LlamacppState> = app_handle.state();
-    let sessions = llama_state.llama_server_process.clone();
-
-    let mlx_state: State<MlxState> = app_handle.state();
-    let mlx_sessions = mlx_state.mlx_server_process.clone();
 
     let actual_port = proxy::start_server(
         server_handle,
-        sessions,
-        mlx_sessions,
         host,
         port,
         prefix,
@@ -52,7 +43,7 @@ pub async fn start_server<R: Runtime>(
         state.provider_configs.clone(),
         state.mcp_servers.clone(),
         state.mcp_settings.clone(),
-        get_mita_data_folder_path(app_handle.clone())
+        get_biyan_data_folder_path(app_handle.clone())
             .to_string_lossy()
             .into_owned(),
         enable_server_tool_execution.unwrap_or(false),

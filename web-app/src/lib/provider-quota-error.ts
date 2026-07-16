@@ -20,7 +20,7 @@ type ProviderErrorJson = {
 }
 
 const QUOTA_ERROR_CODE = 'pre_consume_token_quota_failed'
-const ENCODED_PROVIDER_QUOTA_PREFIX = '__MITA_PROVIDER_QUOTA_ERROR__:'
+const ENCODED_PROVIDER_QUOTA_PREFIX = '__BIYAN_PROVIDER_QUOTA_ERROR__:'
 
 function asRecord(value: unknown): Record<string, unknown> | undefined {
   return value && typeof value === 'object'

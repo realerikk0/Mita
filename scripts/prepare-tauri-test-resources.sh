@@ -24,14 +24,13 @@ ensure_executable() {
 }
 
 ensure_file "$RESOURCE_DIR/LICENSE"
-ensure_executable "$BIN_DIR/mita-cli"
-ensure_executable "$BIN_DIR/mita-cli.exe"
-ensure_executable "$BIN_DIR/jan-cli"
-ensure_executable "$BIN_DIR/mita-web-research-mcp.mjs"
+ensure_file "$RESOURCE_DIR/NOTICE"
+ensure_executable "$BIN_DIR/biyan-cli"
+ensure_executable "$BIN_DIR/biyan-cli.exe"
+ensure_executable "$BIN_DIR/biyan-web-research-mcp.mjs"
 
 for path in \
   "$RESOURCE_DIR/pre-install/.gitkeep" \
-  "$RESOURCE_DIR/embedding-models/.gitkeep" \
   "$RESOURCE_DIR/ms-playwright/.gitkeep" \
   "$RESOURCE_DIR/node_modules/playwright/.gitkeep" \
   "$RESOURCE_DIR/node_modules/playwright-core/.gitkeep" \

@@ -8,7 +8,8 @@
     "start": "npx serve@latest out",
     "lint": "next lint",
     "create:blogpost": "plop create-blogpost",
-    "postbuild": "next-sitemap"
+    "postbuild": "next-sitemap && yarn verify:archive",
+    "verify:archive": "node scripts/verify-unpublished-archive.cjs"
   },
   "dependencies": {
     "@code-hike/mdx": "^0.9.0",

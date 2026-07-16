@@ -43,12 +43,12 @@ export class DefaultAppService implements AppService {
     return undefined
   }
 
-  async getMitaDataFolder(): Promise<string | undefined> {
+  async getBiyanDataFolder(): Promise<string | undefined> {
     return undefined
   }
 
-  async relocateMitaDataFolder(path: string): Promise<void> {
-    console.log('relocateMitaDataFolder called with path:', path)
+  async relocateBiyanDataFolder(path: string): Promise<void> {
+    console.log('relocateBiyanDataFolder called with path:', path)
     // No-op - not implemented in default service
   }
 

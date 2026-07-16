@@ -72,7 +72,7 @@ function ComputerAgentSettings() {
 
   useEffect(() => {
     const loadWorkspaceRoot = async () => {
-      const dataFolder = await serviceHub.app().getMitaDataFolder()
+      const dataFolder = await serviceHub.app().getBiyanDataFolder()
       if (!dataFolder) return
       setWorkspaceRoot(await serviceHub.path().join(dataFolder, 'agent-workspaces'))
     }

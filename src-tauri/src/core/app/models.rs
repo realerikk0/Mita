@@ -28,11 +28,11 @@ mod tests {
     #[test]
     fn serializes_round_trip_via_json() {
         let config = AppConfiguration {
-            data_folder: "/tmp/jan".to_string(),
+            data_folder: "/tmp/biyan".to_string(),
         };
         let json = serde_json::to_string(&config).expect("serialize");
         assert!(json.contains("\"data_folder\""));
-        assert!(json.contains("/tmp/jan"));
+        assert!(json.contains("/tmp/biyan"));
 
         let parsed: AppConfiguration = serde_json::from_str(&json).expect("deserialize");
         assert_eq!(parsed.data_folder, config.data_folder);
@@ -40,9 +40,9 @@ mod tests {
 
     #[test]
     fn deserializes_from_known_payload() {
-        let json = r#"{"data_folder":"/var/lib/jan"}"#;
+        let json = r#"{"data_folder":"/var/lib/biyan"}"#;
         let parsed: AppConfiguration = serde_json::from_str(json).unwrap();
-        assert_eq!(parsed.data_folder, "/var/lib/jan");
+        assert_eq!(parsed.data_folder, "/var/lib/biyan");
     }
 
     #[test]

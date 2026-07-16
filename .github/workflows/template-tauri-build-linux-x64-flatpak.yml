@@ -40,8 +40,8 @@ on:
         required: false
       TAURI_SIGNING_PRIVATE_KEY_PASSWORD:
         required: false
-      MITA_SIGNING_KEY:
-        required: false
+      BIYAN_SIGNING_KEY:
+        required: true
 jobs:
   build-linux-x64:
     runs-on: ubuntu-22.04
@@ -105,19 +105,9 @@ jobs:
           echo "---------./src-tauri/plugins/tauri-plugin-hardware/package.json---------"
           cat ./src-tauri/plugins/tauri-plugin-hardware/package.json
 
-          jq --arg version "${{ inputs.new_version }}" '.version = $version' ./src-tauri/plugins/tauri-plugin-llamacpp/package.json > /tmp/package.json
-          mv /tmp/package.json ./src-tauri/plugins/tauri-plugin-llamacpp/package.json
-
-          echo "---------./src-tauri/plugins/tauri-plugin-llamacpp/package.json---------"
-          cat ./src-tauri/plugins/tauri-plugin-llamacpp/package.json
-
           ctoml ./src-tauri/plugins/tauri-plugin-hardware/Cargo.toml package.version "${{ inputs.new_version }}"
           echo "---------./src-tauri/plugins/tauri-plugin-hardware/Cargo.toml---------"
           cat ./src-tauri/plugins/tauri-plugin-hardware/Cargo.toml
-
-          ctoml ./src-tauri/plugins/tauri-plugin-llamacpp/Cargo.toml package.version "${{ inputs.new_version }}"
-          echo "---------./src-tauri/plugins/tauri-plugin-llamacpp/Cargo.toml---------"
-          cat ./src-tauri/plugins/tauri-plugin-llamacpp/Cargo.toml
 
           ctoml ./src-tauri/Cargo.toml package.version "${{ inputs.new_version }}"
           echo "---------./src-tauri/Cargo.toml---------"
@@ -129,11 +119,7 @@ jobs:
 
           # Change app name for beta and nightly builds
           if [ "${{ inputs.channel }}" != "stable" ]; then
-            if [[ "${{ inputs.channel }}" == "nightly" ]]; then
-              jq '.plugins.updater.endpoints = ["https://updates.mita.so/mita/update-check", "https://updates.mita.so/mita/${{ inputs.channel }}/latest.json"]' ./src-tauri/tauri.conf.json > /tmp/tauri.conf.json
-            else
-              jq '.plugins.updater.endpoints = ["https://updates.mita.so/mita/${{ inputs.channel }}/latest.json"]' ./src-tauri/tauri.conf.json > /tmp/tauri.conf.json
-            fi
+            jq '.plugins.updater.endpoints = ["https://updates.mita.so/biyan/${{ inputs.channel }}/latest.json"]' ./src-tauri/tauri.conf.json > /tmp/tauri.conf.json
             mv /tmp/tauri.conf.json ./src-tauri/tauri.conf.json
 
             chmod +x .github/scripts/rename-tauri-app.sh
@@ -147,9 +133,6 @@ jobs:
             echo "------------------"
             cat ./src-tauri/Cargo.toml
 
-            chmod +x .github/scripts/rename-workspace.sh
-            .github/scripts/rename-workspace.sh ./package.json ${{ inputs.channel }}
-            cat ./package.json
           fi
 
       - name: Config Yarn
@@ -171,7 +154,7 @@ jobs:
           TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
           TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
           AUTO_UPDATER_DISABLED: ${{ inputs.disable_updater && 'true' || 'false' }}
-          MITA_SIGNING_KEY: ${{ secrets.MITA_SIGNING_KEY }}
+          BIYAN_SIGNING_KEY: ${{ secrets.BIYAN_SIGNING_KEY }}
           TAURI_TRAY: libappindicator3
       # Publish app
 
@@ -180,7 +163,7 @@ jobs:
         if: inputs.public_provider != 'github'
         uses: actions/upload-artifact@v4
         with:
-          name: mita-linux-amd64-flatpak-${{ inputs.new_version }}-deb
+          name: biyan-linux-amd64-flatpak-${{ inputs.new_version }}-deb
           path: ./src-tauri/target/release/bundle/deb/*.deb
 
       ## Set output filename for linux
@@ -188,8 +171,8 @@ jobs:
         id: packageinfo
         run: |
           cd ./src-tauri/target/release/bundle
-          DEB_FILE_NAME=Mita_${{ inputs.new_version }}_amd64.deb
-          DEB_SIG=$(cat deb/Mita_${{ inputs.new_version }}_amd64.deb.sig)
+          DEB_FILE_NAME=Biyan_${{ inputs.new_version }}_amd64.deb
+          DEB_SIG=$(cat deb/Biyan_${{ inputs.new_version }}_amd64.deb.sig)
 
           echo "DEB_SIG=$DEB_SIG" >> $GITHUB_OUTPUT
           echo "DEB_FILE_NAME=$DEB_FILE_NAME" >> $GITHUB_OUTPUT

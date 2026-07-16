@@ -30,15 +30,13 @@ describe('injectFilesIntoPrompt', () => {
         name: 'doc.pdf',
         type: 'application/pdf',
         size: 1024,
-        chunkCount: 5,
-        injectionMode: 'embeddings',
+        injectionMode: 'native',
       },
     ]
     const result = injectFilesIntoPrompt('hello', files)
     expect(result).toContain('type: application/pdf')
     expect(result).toContain('size: 1024')
-    expect(result).toContain('chunks: 5')
-    expect(result).toContain('mode: embeddings')
+    expect(result).toContain('mode: native')
   })
 
   it('handles multiple files', () => {
@@ -61,7 +59,7 @@ describe('extractFilesFromPrompt', () => {
 
   it('extracts files from injected prompt', () => {
     const prompt = injectFilesIntoPrompt('hello', [
-      { id: 'f1', name: 'doc.pdf', type: 'pdf', size: 100, chunkCount: 3, injectionMode: 'inline' },
+      { id: 'f1', name: 'doc.pdf', type: 'pdf', size: 100, injectionMode: 'inline' },
     ])
     const result = extractFilesFromPrompt(prompt)
     expect(result.cleanPrompt).toBe('hello')
@@ -70,7 +68,6 @@ describe('extractFilesFromPrompt', () => {
     expect(result.files[0].name).toBe('doc.pdf')
     expect(result.files[0].type).toBe('pdf')
     expect(result.files[0].size).toBe(100)
-    expect(result.files[0].chunkCount).toBe(3)
     expect(result.files[0].injectionMode).toBe('inline')
   })
 
@@ -88,12 +85,11 @@ describe('extractFilesFromPrompt', () => {
     expect(result.files[0].name).toBe('ok')
   })
 
-  it('handles embeddings injectionMode', () => {
-    const prompt = injectFilesIntoPrompt('test', [
-      { id: 'f1', name: 'a.txt', injectionMode: 'embeddings' },
-    ])
+  it('normalizes historical embeddings metadata to inline text', () => {
+    const prompt =
+      'test\n\n[ATTACHED_FILES]\n- file_id: f1, name: a.txt, mode: embeddings\n[/ATTACHED_FILES]'
     const result = extractFilesFromPrompt(prompt)
-    expect(result.files[0].injectionMode).toBe('embeddings')
+    expect(result.files[0].injectionMode).toBe('inline')
   })
 
   it('ignores invalid injectionMode', () => {

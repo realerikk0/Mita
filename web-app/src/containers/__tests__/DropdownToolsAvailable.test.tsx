@@ -74,13 +74,13 @@ vi.mock('@/components/ui/dropdrawer', () => ({
 
 const computerAgentTools = [
   {
-    server: 'mita-computer-agent',
+    server: 'biyan-computer-agent',
     name: 'computer_agent_read_text_file',
     description: 'Read a UTF-8 text file',
     inputSchema: {},
   },
   {
-    server: 'mita-computer-agent',
+    server: 'biyan-computer-agent',
     name: 'computer_agent_create_directory',
     description: 'Create a directory',
     inputSchema: {},

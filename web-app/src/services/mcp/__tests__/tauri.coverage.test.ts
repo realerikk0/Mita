@@ -119,14 +119,14 @@ describe('TauriMCPService – coverage', () => {
     })
   })
 
-  describe('checkMitaWebResearchConnected', () => {
-    it('invokes check_mita_web_research_connected', async () => {
+  describe('checkBiyanWebResearchConnected', () => {
+    it('invokes check_biyan_web_research_connected', async () => {
       const { invoke } = await import('@tauri-apps/api/core')
       vi.mocked(invoke).mockResolvedValue(true)
 
-      const result = await svc.checkMitaWebResearchConnected()
+      const result = await svc.checkBiyanWebResearchConnected()
 
-      expect(invoke).toHaveBeenCalledWith('check_mita_web_research_connected')
+      expect(invoke).toHaveBeenCalledWith('check_biyan_web_research_connected')
       expect(result).toBe(true)
     })
   })

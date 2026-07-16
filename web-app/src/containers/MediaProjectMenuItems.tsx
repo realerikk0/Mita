@@ -58,7 +58,7 @@ export function MediaProjectMenuItems({
               .updateVideoAssetProject(asset.id, project)
 
       onAssetUpdated(updated)
-      window.dispatchEvent(new Event('mita-media-history-updated'))
+      window.dispatchEvent(new Event('biyan-media-history-updated'))
       toast.success(
         project
           ? t('common:toast.threadAssignedToProject.description', {

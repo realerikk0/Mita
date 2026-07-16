@@ -28,7 +28,6 @@ import {
   SettingsIcon,
   type SettingsIconHandle,
 } from '@/components/animated-icon/settings'
-import { BlocksIcon, type BlocksIconHandle } from '../animated-icon/blocks'
 import {
   BotIcon,
   type BotIconHandle,
@@ -39,7 +38,7 @@ import { useThreadManagement } from '@/hooks/useThreadManagement'
 import { useSearchDialog } from '@/hooks/useSearchDialog'
 import { useProjectDialog } from '@/hooks/useProjectDialog'
 import { PlatformShortcuts, ShortcutAction } from '@/lib/shortcuts'
-import { startNewAgentChat, startNewChat, startNewMitaTeams } from '@/lib/new-chat'
+import { startNewAgentChat, startNewChat, startNewBiyanTeams } from '@/lib/new-chat'
 import { useModelProvider } from '@/hooks/useModelProvider'
 import { useProviderBalance } from '@/hooks/useProviderBalance'
 import { getProviderBalanceBadgeLabel } from '@/lib/provider-balance-display'
@@ -50,7 +49,6 @@ type AnimatedIconHandle =
   | FolderPlusIconHandle
   | MessageCircleIconHandle
   | SettingsIconHandle
-  | BlocksIconHandle
   | BotIconHandle
 
 type NavMainItem = {
@@ -72,7 +70,7 @@ export const getNavMainItems = (
   onNewProject: () => void,
   onSearch: () => void,
   onNewChat: () => void,
-  onMitaTeams: () => void,
+  onBiyanTeams: () => void,
   onAgentChat: () => void
 ): NavMainItem[] => [
   {
@@ -102,15 +100,15 @@ export const getNavMainItems = (
     ),
   },
   {
-    title: 'common:newMitaTeams',
+    title: 'common:newBiyanTeams',
     icon: UsersRound,
-    onClick: onMitaTeams,
+    onClick: onBiyanTeams,
     shortcut: (
       <KbdGroup className="ml-auto scale-90 gap-0">
         <Kbd className="bg-transparent size-3">
           <PlatformMetaKey />
         </Kbd>
-        <Kbd className="bg-transparent size-3 uppercase">{PlatformShortcuts[ShortcutAction.NEW_MITA_TEAMS].key}</Kbd>
+        <Kbd className="bg-transparent size-3 uppercase">{PlatformShortcuts[ShortcutAction.NEW_BIYAN_TEAMS].key}</Kbd>
       </KbdGroup>
     ),
   },
@@ -152,11 +150,6 @@ export const getNavMainItems = (
         <Kbd className="bg-transparent size-3 uppercase">{PlatformShortcuts[ShortcutAction.SEARCH].key} </Kbd>
       </KbdGroup>
     ),
-  },
-  {
-    title: 'common:hub',
-    url: route.hub.index,
-    animatedIcon: BlocksIcon,
   },
   {
     title: 'common:settings',
@@ -229,7 +222,7 @@ export function NavMain() {
     () => setSearchOpen(true),
     () => startNewChat(navigate),
     () => {
-      void startNewMitaTeams(navigate)
+      void startNewBiyanTeams(navigate)
     },
     () => startNewAgentChat(navigate)
   )
@@ -237,13 +230,7 @@ export function NavMain() {
       ...item,
       isActive: item.url ? pathname.startsWith(item.url) : item.isActive,
     }))
-    .filter(
-      (item) =>
-        ![
-          'common:newAgentChat',
-          'common:hub',
-        ].includes(item.title)
-    )
+    .filter((item) => item.title !== 'common:newAgentChat')
 
   const handleCreateProject = async (name: string, assistantId?: string) => {
     const newProject = await addFolder(name, assistantId)

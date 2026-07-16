@@ -1,10 +1,43 @@
 import { predefinedProviders } from '@/constants/providers'
 import { isModelChatSelectable } from '@/lib/provider-models'
 import { providerHasRemoteApiKeys } from '@/lib/provider-api-keys'
+export { RETIRED_LOCAL_PROVIDER_IDS } from '@/legacy_migrations/retired-providers'
+import { RETIRED_LOCAL_PROVIDER_IDS } from '@/legacy_migrations/retired-providers'
 
-export function isConfiguredModelProvider(provider: ModelProvider): boolean {
+export type RemoteModelProvider = ModelProvider & { base_url: string }
+
+const LOOPBACK_HOSTS = new Set([
+  'localhost',
+  '127.0.0.1',
+  '0.0.0.0',
+  '::1',
+  '[::1]',
+])
+
+export function isRemoteProviderEndpoint(
+  provider: ModelProvider
+): provider is RemoteModelProvider {
+  if (RETIRED_LOCAL_PROVIDER_IDS.has(provider.provider.toLowerCase())) {
+    return false
+  }
+  const baseUrl = provider.base_url?.trim()
+  if (!baseUrl) return false
+  try {
+    const url = new URL(baseUrl)
+    return (
+      (url.protocol === 'https:' || url.protocol === 'http:') &&
+      !LOOPBACK_HOSTS.has(url.hostname.toLowerCase())
+    )
+  } catch {
+    return false
+  }
+}
+
+export function isConfiguredModelProvider(
+  provider: ModelProvider
+): provider is RemoteModelProvider {
   if (!provider.active) return false
-  if (provider.provider === 'foundation-models') return false
+  if (!isRemoteProviderEndpoint(provider)) return false
 
   const selectableModels = provider.models.filter(isModelChatSelectable)
   if (selectableModels.length === 0) return false
@@ -15,10 +48,7 @@ export function isConfiguredModelProvider(provider: ModelProvider): boolean {
   if (!isPredefinedProvider) return true
 
   return (
-    providerHasRemoteApiKeys(provider) ||
-    provider.provider === 'llamacpp' ||
-    provider.provider === 'jan' ||
-    provider.provider === 'mlx'
+    providerHasRemoteApiKeys(provider)
   )
 }
 

@@ -1,19 +1,26 @@
 #!/usr/bin/env node
 import { execFileSync } from 'node:child_process'
+import { existsSync, readdirSync, statSync } from 'node:fs'
+import { extname, join, relative } from 'node:path'
 import {
-  existsSync,
-  readdirSync,
-  statSync,
-} from 'node:fs'
-import { basename, extname, join, relative } from 'node:path'
+  assertMacOSArchitectures,
+  isMachOFile,
+} from './macos-architecture-policy.mjs'
 
-const EXPECTED_IDENTITY = 'Developer ID Application: LILYN DYNAMICS (7NZP53ZJ4D)'
+const EXPECTED_IDENTITY =
+  'Developer ID Application: LILYN DYNAMICS (7NZP53ZJ4D)'
 const root = process.cwd()
 const resourcesRoot = join(root, 'src-tauri', 'resources')
-const universalTargetRoot = join(root, 'src-tauri', 'target', 'universal-apple-darwin', 'release')
+const universalTargetRoot = join(
+  root,
+  'src-tauri',
+  'target',
+  'universal-apple-darwin',
+  'release'
+)
 const extraMachOPaths = [
-  join(universalTargetRoot, 'mita-cli'),
-  join(universalTargetRoot, 'mita-computer-agent-runner'),
+  join(universalTargetRoot, 'biyan-cli'),
+  join(universalTargetRoot, 'biyan-computer-agent-runner'),
 ]
 const entitlements = join(root, 'src-tauri', 'Entitlements.plist')
 const dryRun = process.argv.includes('--dry-run')
@@ -32,7 +39,9 @@ if (identity !== EXPECTED_IDENTITY) {
 }
 
 if (!existsSync(resourcesRoot)) {
-  console.log(`No resources directory found at ${resourcesRoot}; nothing to sign.`)
+  console.log(
+    `No resources directory found at ${resourcesRoot}; nothing to sign.`
+  )
   process.exit(0)
 }
 
@@ -51,7 +60,12 @@ function run(command, args, options = {}) {
 function assertIdentityAvailable() {
   if (dryRun) return
 
-  const identities = run('security', ['find-identity', '-v', '-p', 'codesigning'])
+  const identities = run('security', [
+    'find-identity',
+    '-v',
+    '-p',
+    'codesigning',
+  ])
   if (!identities.includes(`"${identity}"`)) {
     console.error(`Developer ID identity not found in keychain: ${identity}`)
     process.exit(1)
@@ -94,33 +108,8 @@ function isExecutable(stat) {
   return (stat.mode & 0o111) !== 0
 }
 
-function isLikelyBinaryCandidate(filePath) {
-  const name = basename(filePath)
-  const ext = extname(filePath)
-  const stat = statSync(filePath)
-
-  return (
-    isExecutable(stat) ||
-    ext === '.dylib' ||
-    ext === '.node' ||
-    [
-      'bun',
-      'uv',
-      'mita-cli',
-      'mlx-server',
-      'mita-computer-agent-runner',
-      'chrome-headless-shell',
-      'ffmpeg-mac',
-    ].includes(name)
-  )
-}
-
 function fileDescription(filePath) {
   return run('file', ['-b', filePath]).trim()
-}
-
-function isMachO(filePath) {
-  return fileDescription(filePath).includes('Mach-O')
 }
 
 function shouldUseEntitlements(filePath) {
@@ -138,13 +127,22 @@ function isSignableCodeDirectory(directory) {
   return (
     existsSync(join(directory, 'Contents', 'Info.plist')) ||
     existsSync(join(directory, 'Resources', 'Info.plist')) ||
-    existsSync(join(directory, 'Versions', 'Current', 'Resources', 'Info.plist'))
+    existsSync(
+      join(directory, 'Versions', 'Current', 'Resources', 'Info.plist')
+    )
   )
 }
 
 function signPath(filePath, { entitle = false, deep = false } = {}) {
   const label = relative(root, filePath)
-  const args = ['--force', '--options', 'runtime', '--timestamp', '--sign', identity]
+  const args = [
+    '--force',
+    '--options',
+    'runtime',
+    '--timestamp',
+    '--sign',
+    identity,
+  ]
 
   if (entitle) {
     args.push('--entitlements', entitlements)
@@ -157,7 +155,9 @@ function signPath(filePath, { entitle = false, deep = false } = {}) {
   args.push(filePath)
 
   if (dryRun) {
-    console.log(`[dry-run] codesign ${args.map((arg) => JSON.stringify(arg)).join(' ')}`)
+    console.log(
+      `[dry-run] codesign ${args.map((arg) => JSON.stringify(arg)).join(' ')}`
+    )
     return
   }
 
@@ -171,15 +171,13 @@ function signPath(filePath, { entitle = false, deep = false } = {}) {
 assertIdentityAvailable()
 
 const machOFiles = walkFiles(resourcesRoot)
-  .filter(isLikelyBinaryCandidate)
-  .filter(isMachO)
+  .filter(isMachOFile)
   .sort((a, b) => a.localeCompare(b))
 
 for (const filePath of extraMachOPaths) {
   if (
     existsSync(filePath) &&
-    isLikelyBinaryCandidate(filePath) &&
-    isMachO(filePath) &&
+    isMachOFile(filePath) &&
     !machOFiles.includes(filePath)
   ) {
     machOFiles.push(filePath)
@@ -188,9 +186,22 @@ for (const filePath of extraMachOPaths) {
 
 machOFiles.sort((a, b) => a.localeCompare(b))
 
-const codeDirectories = walkCodeDirectories(resourcesRoot).sort(
-  (a, b) => b.length - a.length,
-).filter(isSignableCodeDirectory)
+for (const filePath of machOFiles) {
+  const architectures = run('lipo', ['-archs', filePath])
+    .trim()
+    .split(/\s+/)
+    .filter(Boolean)
+  try {
+    assertMacOSArchitectures(relative(resourcesRoot, filePath), architectures)
+  } catch (error) {
+    console.error(`macOS architecture gate failed: ${error.message}`)
+    process.exit(1)
+  }
+}
+
+const codeDirectories = walkCodeDirectories(resourcesRoot)
+  .sort((a, b) => b.length - a.length)
+  .filter(isSignableCodeDirectory)
 
 if (machOFiles.length === 0 && !dryRun) {
   console.error(`No Mach-O files found under ${resourcesRoot}`)
@@ -206,5 +217,5 @@ for (const directory of codeDirectories) {
 }
 
 console.log(
-  `macOS binary signing complete: ${machOFiles.length} Mach-O file(s), ${codeDirectories.length} code director${codeDirectories.length === 1 ? 'y' : 'ies'}.`,
+  `macOS binary signing complete: ${machOFiles.length} Mach-O file(s), ${codeDirectories.length} code director${codeDirectories.length === 1 ? 'y' : 'ies'}.`
 )

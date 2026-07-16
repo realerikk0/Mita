@@ -2,8 +2,7 @@ use serde_json::json;
 
 use crate::core::mcp::models::{McpSettings, ServerSummary, ToolWithServer};
 
-pub const COMPUTER_AGENT_SERVER_NAME: &str = "mita-computer-agent";
-pub const LEGACY_COMPUTER_SERVER_NAME: &str = "mita-computer";
+pub const COMPUTER_AGENT_SERVER_NAME: &str = "biyan-computer-agent";
 pub const CREATE_TEXT_FILE: &str = "computer_agent_create_text_file";
 pub const LIST_DIRECTORY: &str = "computer_agent_list_directory";
 pub const READ_TEXT_FILE: &str = "computer_agent_read_text_file";

@@ -96,7 +96,7 @@ vi.mock('@/hooks/useProjectDialog', () => ({
 vi.mock('@/lib/new-chat', () => ({
   startNewAgentChat: vi.fn(),
   startNewChat: vi.fn(),
-  startNewMitaTeams: vi.fn(),
+  startNewBiyanTeams: vi.fn(),
 }))
 vi.mock('@/hooks/useModelProvider', () => ({
   useModelProvider: () => ({

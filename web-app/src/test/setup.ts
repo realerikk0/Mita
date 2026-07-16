@@ -26,8 +26,6 @@ const mockServiceHub = {
   hardware: () => ({
     getHardwareInfo: vi.fn().mockResolvedValue(null),
     getSystemUsage: vi.fn().mockResolvedValue(null),
-    getLlamacppDevices: vi.fn().mockResolvedValue([]), // cspell: disable-line
-    setActiveGpus: vi.fn().mockResolvedValue(undefined),
     refreshHardwareInfo: vi.fn().mockResolvedValue(undefined),
     // Legacy methods for backward compatibility
     getGpuInfo: vi.fn().mockResolvedValue([]),
@@ -38,8 +36,8 @@ const mockServiceHub = {
     getAppSettings: vi.fn().mockResolvedValue({}),
     updateAppSettings: vi.fn().mockResolvedValue(undefined),
     getSystemInfo: vi.fn().mockResolvedValue({}),
-    relocateMitaDataFolder: vi.fn().mockResolvedValue(undefined),
-    getMitaDataFolder: vi.fn().mockResolvedValue('/mock/mita/data'),
+    relocateBiyanDataFolder: vi.fn().mockResolvedValue(undefined),
+    getBiyanDataFolder: vi.fn().mockResolvedValue('/mock/biyan/data'),
   }),
   analytic: () => ({
     track: vi.fn(),
@@ -99,18 +97,6 @@ const mockServiceHub = {
     saveVideoAsset: vi.fn().mockResolvedValue(null),
     listVideoAssets: vi.fn().mockResolvedValue([]),
     deleteVideoAsset: vi.fn().mockResolvedValue(undefined),
-  }),
-  models: () => ({
-    getModels: vi.fn().mockResolvedValue([]),
-    getModel: vi.fn().mockResolvedValue(null),
-    createModel: vi.fn().mockResolvedValue({ id: 'test-model' }),
-    deleteModel: vi.fn().mockResolvedValue(undefined),
-    updateModel: vi.fn().mockResolvedValue(undefined),
-    startModel: vi.fn().mockResolvedValue(undefined),
-    getActiveModels: vi.fn().mockResolvedValue([]),
-    isModelSupported: vi.fn().mockResolvedValue('GREEN'),
-    checkMmprojExists: vi.fn().mockResolvedValue(true), // cspell: disable-line
-    stopAllModels: vi.fn().mockResolvedValue(undefined),
   }),
   assistants: () => ({
     getAssistants: vi.fn().mockResolvedValue([]),
@@ -180,18 +166,16 @@ Object.defineProperty(window, 'matchMedia', {
   })),
 })
 
-// Mock globalThis.core.api for @janhq/core functions // cspell: disable-line
+// Mock globalThis.core.api for @biyan/core functions
 ;(globalThis as Record<string, unknown>).core = {
   api: {
-    getMitaDataFolderPath: vi.fn().mockResolvedValue('/mock/mita/data'),
-    getSilenceDataFolderPath: vi.fn().mockResolvedValue('/mock/mita/data'),
-    getJanDataFolderPath: vi.fn().mockResolvedValue('/mock/mita/data'),
+    getBiyanDataFolderPath: vi.fn().mockResolvedValue('/mock/biyan/data'),
     openFileExplorer: vi.fn().mockResolvedValue(undefined),
     joinPath: vi.fn((...paths: string[]) => paths.join('/')),
   }
 }
 
-// Mock globalThis.fs for @janhq/core fs functions // cspell: disable-line
+// Mock globalThis.fs for @biyan/core fs functions
 ;(globalThis as Record<string, unknown>).fs = {
   existsSync: vi.fn().mockResolvedValue(false),
   readFile: vi.fn().mockResolvedValue(''),

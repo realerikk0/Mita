@@ -71,19 +71,10 @@ const copyFile: (src: string, dest: string) => Promise<void> = (src, dest) =>
   globalThis.core.api?.copyFile({ args: [src, dest] })
 
 /**
- * Gets the list of gguf files in a directory
- *
- * @param path - The paths to the file.
- * @returns {Promise<{any}>} - A promise that resolves with the list of gguf and non-gguf files
- */
-const getGgufFiles: (paths: string[]) => Promise<any> = (paths) =>
-  globalThis.core.api?.getGgufFiles(paths)
-
-/**
  * Gets the file's stats.
  *
  * @param path - The path to the file.
- * @param outsideMitaDataFolder - Whether the file is outside the Mita data folder.
+ * @param outsideBiyanDataFolder - Whether the file is outside the Biyan data folder.
  * @returns {Promise<FileStat>} - A promise that resolves with the file's stats.
  */
 const fileStat: (path: string) => Promise<FileStat | undefined> = (path) =>
@@ -104,5 +95,4 @@ export const fs = {
   copyFile,
   fileStat,
   writeBlob,
-  getGgufFiles,
 }

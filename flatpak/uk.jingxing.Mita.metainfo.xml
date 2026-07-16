@@ -1,97 +1,51 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <component type="desktop-application">
+  <!--
+    Compatibility boundary: the published Flatpak app ID, desktop ID, icon ID,
+    and metainfo filename stay uk.jingxing.Mita so existing installations keep
+    receiving updates. All product-facing names and runtime entry points use Biyan.
+  -->
   <id>uk.jingxing.Mita</id>
   <metadata_license>FSFAP</metadata_license>
   <project_license>Apache-2.0</project_license>
   <developer_name>Jingxing</developer_name>
 
-  <name>Mita</name>
+  <name>Biyan</name>
   <icon type="stock">uk.jingxing.Mita</icon>
 
-  <summary>Private offline AI assistant</summary>
-  <summary xml:lang="pl">Prywatny asystent SI działający bez dostępu do sieci</summary>
+  <summary>Desktop AI client for cloud and OpenAI-compatible providers</summary>
 
   <categories>
     <category>Utility</category>
     <category>Education</category>
     <category>Chat</category>
-    <category>Dictionary</category>
   </categories>
 
   <description>
     <p>
-      Mita is an open source alternative to ChatGPT that runs 100% offline on your computer.
-    </p>
-    <p xml:lang="pl">
-      Mita to otwartoźródłowa alternatywa dla ChatGPT, która działa w 100% bez dostępu do sieci na Twoim komputerze.
+      Biyan is a desktop AI client for configured cloud and OpenAI-compatible
+      providers. It requires network access and provider credentials and does
+      not bundle or run local AI models.
     </p>
 
     <p>Features</p>
     <ul>
-      <li>Local AI models: Run LLMs such as Llama, Gemma, Qwen and others on your device</li>
-      <li xml:lang="pl">Lokalne modele SI: Uruchamiaj duże modele językowe, takie jak Llama, Gemma i Qwen, na swoim urządzeniu.</li>
-
-      <li>Optional cloud access: Connect to services like OpenAI, Anthropic, Gemini and Groq when internet-based models are required</li>
-      <li xml:lang="pl">Opcjonalny dostęp do chmury: Łącz się z usługami, takimi jak OpenAI, Anthropic, Gemini i Groq, gdy wymagane są modele dostępne przez Internet.</li>
-
-      <li>Custom assistants: Create tailored assistants for writing, coding, summarizing and more</li>
-      <li xml:lang="pl">Własne asystenty: Twórz asystenty wyspecjalizowane do pisania, kodowania, podsumowywania itd.</li>
-
-      <li>OpenAI-compatible API: Includes a local API server at localhost:1337 for tools expecting the OpenAI format</li>
-      <li xml:lang="pl">Interfejs API kompatybilny z OpenAI: Mita posiada lokalny serwer API, dostępny pod adresem localhost:1337, dla narzędzi zgodnych z formatem OpenAI.</li>
-
-      <li>MCP support: Integrates the Model Context Protocol for enhanced workflows and tooling</li>
-      <li xml:lang="pl">Obsługa MCP: Mita obsługuje Model Context Protocol dla lepszego przepływu pracy i obsługi narzędzi.</li>
-
-      <li>Privacy-aware design: Mita works offline by default. Cloud access is optional and user-controlled</li>
-      <li xml:lang="pl">Projekt uwzględniający prywatność: Mita domyślnie działa w trybie bez dostępu do sieci. Dostęp do chmury jest opcjonalny i pozostaje pod kontrolą użytkownika.</li>
+      <li>Connect to configured cloud and OpenAI-compatible providers</li>
+      <li>Create tailored assistants for writing, coding, summarizing, and more</li>
+      <li>Use Model Context Protocol integrations for tools and workflows</li>
+      <li>Keep provider choice and credentials under user control</li>
     </ul>
 
     <p>
-      Mita is actively maintained by Jingxing.  
-      Feedback, bug reports and feature requests are welcomed through GitHub.
-    </p>
-    <p xml:lang="pl">
-      Aplikacja Mita jest aktywnie utrzymywana przez Jingxing.
-      Informacje zwrotne, zgłoszenia błędów i prośby o nowe funkcje są mile widziane za pośrednictwem platformy GitHub.
+      Biyan is actively maintained by Jingxing. Feedback, bug reports, and
+      feature requests are welcome through GitHub.
     </p>
   </description>
 
   <launchable type="desktop-id">uk.jingxing.Mita.desktop</launchable>
-  <screenshots>
-  <screenshot>
-    <image>https://updates.jingxing.uk/mita/flatpak/mita_screenshot_1.png</image>
-    <caption>Blank Mita page with 0 threads</caption>
-    <caption xml:lang="pl">Pusta strona Mita bez żadnych wątków</caption>
-  </screenshot>
-  <screenshot type="default">
-    <image>https://updates.jingxing.uk/mita/flatpak/mita_screenshot_2.png</image>
-    <caption>Mita using a search MCP to gather information</caption>
-    <caption xml:lang="pl">Aplikacja Mita używająca wyszukiwania MCP celem zgromadzenia informacji</caption>
-  </screenshot>
-  <screenshot>
-    <image>https://updates.jingxing.uk/mita/flatpak/mita_screenshot_3.png</image>
-    <caption>Assistant creation screen</caption>
-    <caption xml:lang="pl">Ekran tworzenia asystenta</caption>
-  </screenshot>
-  <screenshot>
-    <image>https://updates.jingxing.uk/mita/flatpak/mita_screenshot_4.png</image>
-    <caption>Mita Hub</caption>
-    <caption xml:lang="pl">Centrum modeli Mita</caption>
-  </screenshot>
-  <screenshot>
-    <image>https://updates.jingxing.uk/mita/flatpak/mita_screenshot_5.png</image>
-    <caption>Llama.cpp screen showcasing the models</caption>
-    <caption xml:lang="pl">Ekran Llama.cpp z listą modeli</caption>
-  </screenshot>
-  <screenshot>
-    <image>https://updates.jingxing.uk/mita/flatpak/mita_screenshot_6.png</image>
-    <caption>MCP Settings</caption>
-    <caption xml:lang="pl">Ustawienia MCP</caption>
-  </screenshot>
-</screenshots>
 
   <url type="homepage">https://jingxing.uk/</url>
+  <!-- The repository slug is retained until the existing project is renamed. -->
   <url type="bugtracker">https://github.com/realerikk0/Mita/issues</url>
   <url type="vcs-browser">https://github.com/realerikk0/Mita</url>
 
@@ -100,45 +54,8 @@
   <keywords>
     <keyword>chatbot</keyword>
     <keyword>ai assistant</keyword>
-    <keyword>offline ai</keyword>
+    <keyword>cloud ai</keyword>
+    <keyword>OpenAI-compatible</keyword>
+    <keyword>MCP</keyword>
   </keywords>
-
-  <releases>
-    <release version="0.7.9" date="2026-03-23">
-      <description>
-        <p>Smarter context management, fixed CLI on Windows, and safer data location handling</p>
-      </description>
-    </release>
-    <release version="0.7.8" date="2026-03-11">
-      <description>
-        <p>OpenClaw integration, a new Mita CLI, and automatic context management for uninterrupted conversations</p>
-      </description>
-    </release>
-    <release version="0.7.7" date="2026-02-11">
-      <description>
-        <p>Native MLX support for Apple silicon, app-wide UI refresh, file uploads in Projects, and improved API server capabilities</p>
-      </description>
-    </release>
-    <release version="0.7.6" date="2026-01-27">
-    <description>
-      <p>Unified interface seamlessly integrated with the groundbreaking Mita V3 model, delivering an unparalleled AI experience</p>
-    </description>
-  </release>
-    <release version="0.7.5" date="2025-12-08">
-      <description>
-        <p>Fixed Windows model import failure when base names differed</p>
-      </description>
-    </release>
-    <release version="0.7.4" date="2025-12-05">
-      <description>
-        <p>Streamlined Onboarding and Enhanced File Attachments</p>
-      </description>
-    </release>
-    <release version="0.7.3" date="2025-11-13">
-      <description>
-        <p>Enhanced Browser Control and Smarter Interactions</p>
-        <p xml:lang="pl">Ulepszona kontrola przeglądarki i bardziej inteligentne interakcje</p>
-      </description>
-    </release>
-  </releases>
 </component>

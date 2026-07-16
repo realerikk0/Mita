@@ -16,7 +16,7 @@ export interface LogEntry {
 
 export interface FactoryResetOptions {
   keepAppData: boolean
-  keepModelsAndConfigs: boolean
+  keepConfigurations: boolean
 }
 
 export interface ReadLogsOptions {
@@ -39,8 +39,8 @@ export interface AppService {
   writeLog(payload: UserLogPayload): Promise<void>
   clearLogs(): Promise<void>
   getLogsDirectory(): Promise<string | undefined>
-  getMitaDataFolder(): Promise<string | undefined>
-  relocateMitaDataFolder(path: string): Promise<void>
+  getBiyanDataFolder(): Promise<string | undefined>
+  relocateBiyanDataFolder(path: string): Promise<void>
   getServerStatus(): Promise<boolean>
   readYaml<T = unknown>(path: string): Promise<T>
 }

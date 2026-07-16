@@ -1,8 +1,9 @@
 use flate2::read::GzDecoder;
 use std::{
+    collections::BTreeMap,
     fs::{self, File},
     io::Read,
-    path::PathBuf,
+    path::{Component, Path, PathBuf},
     sync::Arc,
 };
 use tar::Archive;
@@ -15,160 +16,272 @@ use tauri::{
 };
 use tauri_plugin_store::Store;
 
-use crate::core::app::commands::get_mita_data_folder_path;
+use crate::core::app::{commands::get_biyan_data_folder_path, constants::APP_NAME};
+use crate::core::legacy_migrations::{
+    mark_component_migration, mark_component_migration_failed, mark_component_migration_running,
+};
 use crate::core::mcp::constants::{
-    default_web_research_mcp_config, DEFAULT_MCP_CONFIG, MITA_WEB_RESEARCH_MCP_NAME,
+    default_web_research_mcp_config, BIYAN_WEB_RESEARCH_MCP_NAME, DEFAULT_MCP_CONFIG,
 };
 use crate::core::mcp::helpers::add_server_config;
 
 use super::{
-    extensions::commands::get_mita_extensions_path, mcp::helpers::run_mcp_commands,
+    extensions::commands::get_biyan_extensions_path, mcp::helpers::run_mcp_commands,
     state::AppState,
 };
 
-pub fn install_extensions<R: Runtime>(app: tauri::AppHandle<R>, force: bool) -> Result<(), String> {
+const EXTENSIONS_MIGRATION_STEP: &str = "extensions_manifest_v1";
+const TARGET_EXTENSIONS_SCHEMA: u32 = 1;
+const ALLOWED_BUNDLED_EXTENSION_IDS: &[&str] = &[
+    "@biyan/assistant-extension",
+    "@biyan/conversational-extension",
+    "@biyan/download-extension",
+];
+
+pub fn is_allowed_bundled_extension_id(id: &str) -> bool {
+    ALLOWED_BUNDLED_EXTENSION_IDS.contains(&id)
+}
+
+pub fn install_extensions<R: Runtime>(
+    app: tauri::AppHandle<R>,
+    _force: bool,
+) -> Result<(), String> {
     // Skip extension installation on mobile platforms
     // Mobile uses pre-bundled extensions loaded via MobileCoreService in the frontend
     #[cfg(any(target_os = "android", target_os = "ios"))]
     {
-        return Ok(());
+        let config_dir = app
+            .path()
+            .data_dir()
+            .map_err(|e| format!("resolve_extension_state_dir:{e}"))?
+            .join(APP_NAME);
+        // Mobile extensions are compiled into the application rather than
+        // installed from archives. Treat that verified build contract as the
+        // platform-specific completion of the same migration step.
+        mark_component_migration_running(
+            &config_dir,
+            EXTENSIONS_MIGRATION_STEP,
+            TARGET_EXTENSIONS_SCHEMA,
+        )?;
+        return mark_component_migration(
+            &config_dir,
+            EXTENSIONS_MIGRATION_STEP,
+            TARGET_EXTENSIONS_SCHEMA,
+        );
     }
 
-    let extensions_path = get_mita_extensions_path(app.clone());
+    #[cfg(not(any(target_os = "android", target_os = "ios")))]
+    {
+        let config_dir = app
+            .path()
+            .data_dir()
+            .map_err(|e| format!("resolve_extension_state_dir:{e}"))?
+            .join(APP_NAME);
+        mark_component_migration_running(
+            &config_dir,
+            EXTENSIONS_MIGRATION_STEP,
+            TARGET_EXTENSIONS_SCHEMA,
+        )?;
+
+        let result = install_extensions_atomically(app);
+        match result {
+            Ok(()) => mark_component_migration(
+                &config_dir,
+                EXTENSIONS_MIGRATION_STEP,
+                TARGET_EXTENSIONS_SCHEMA,
+            ),
+            Err(error) => {
+                if let Err(marker_error) = mark_component_migration_failed(
+                    &config_dir,
+                    EXTENSIONS_MIGRATION_STEP,
+                    TARGET_EXTENSIONS_SCHEMA,
+                    &error,
+                ) {
+                    log::error!("Failed to persist extension migration failure: {marker_error}");
+                }
+                Err(error)
+            }
+        }
+    }
+}
+
+#[cfg(not(any(target_os = "android", target_os = "ios")))]
+fn install_extensions_atomically<R: Runtime>(app: tauri::AppHandle<R>) -> Result<(), String> {
+    let extensions_path = get_biyan_extensions_path(app.clone());
     let pre_install_path = app
         .path()
         .resource_dir()
-        .unwrap()
+        .map_err(|e| format!("resolve_extension_resources:{e}"))?
         .join("resources")
         .join("pre-install");
 
+    let parent = extensions_path
+        .parent()
+        .ok_or_else(|| "extensions_path_missing_parent".to_string())?;
+    fs::create_dir_all(parent).map_err(|e| format!("create_extensions_parent:{e}"))?;
+    let staging = parent.join(format!("extensions.staging-{}", std::process::id()));
+    let backup = parent.join(format!("extensions.backup-{}", std::process::id()));
+    if staging.exists() {
+        fs::remove_dir_all(&staging).map_err(|e| format!("clean_extension_staging:{e}"))?;
+    }
+    if backup.exists() {
+        fs::remove_dir_all(&backup).map_err(|e| format!("clean_extension_backup:{e}"))?;
+    }
+    fs::create_dir_all(&staging).map_err(|e| format!("create_extension_staging:{e}"))?;
+
+    let mut extensions = BTreeMap::<String, serde_json::Value>::new();
+
     if !pre_install_path.exists() {
-        let extensions_json_path = extensions_path.join("extensions.json");
-        if extensions_path.exists() {
-            log::warn!(
-                "No bundled extensions found at {pre_install_path:?}; keeping existing extensions."
-            );
-            return Ok(());
-        }
-
-        log::warn!(
-            "No bundled extensions found at {pre_install_path:?}; creating empty extensions list."
-        );
-        fs::create_dir_all(&extensions_path).map_err(|e| e.to_string())?;
-        fs::write(&extensions_json_path, "[]").map_err(|e| e.to_string())?;
-        return Ok(());
-    }
-
-    let mut clean_up = force;
-
-    // Check IS_CLEAN environment variable to optionally skip extension install
-    if std::env::var("IS_CLEAN").is_ok() {
-        clean_up = true;
-    }
-    log::info!("Installing extensions. Clean up: {clean_up}");
-    if !clean_up && extensions_path.exists() {
-        return Ok(());
-    }
-
-    // Attempt to remove extensions folder
-    if extensions_path.exists() {
-        fs::remove_dir_all(&extensions_path).unwrap_or_else(|_| {
-            log::info!("Failed to remove existing extensions folder, it may not exist.");
-        });
-    }
-
-    // Attempt to create it again
-    if !extensions_path.exists() {
-        fs::create_dir_all(&extensions_path).map_err(|e| e.to_string())?;
-    }
-
-    let extensions_json_path = extensions_path.join("extensions.json");
-    let mut extensions_list = if extensions_json_path.exists() {
-        let existing_data =
-            fs::read_to_string(&extensions_json_path).unwrap_or_else(|_| "[]".to_string());
-        serde_json::from_str::<Vec<serde_json::Value>>(&existing_data).unwrap_or_else(|_| vec![])
+        return Err("preinstall_extensions_missing".to_string());
     } else {
-        vec![]
-    };
+        for entry in fs::read_dir(&pre_install_path).map_err(|e| e.to_string())? {
+            let entry = entry.map_err(|e| e.to_string())?;
+            let path = entry.path();
 
-    for entry in fs::read_dir(&pre_install_path).map_err(|e| e.to_string())? {
-        let entry = entry.map_err(|e| e.to_string())?;
-        let path = entry.path();
+            if path.extension().is_some_and(|ext| ext == "tgz") {
+                let tar_gz = File::open(&path).map_err(|e| e.to_string())?;
+                let gz_decoder = GzDecoder::new(tar_gz);
+                let mut archive = Archive::new(gz_decoder);
 
-        if path.extension().is_some_and(|ext| ext == "tgz") {
-            let tar_gz = File::open(&path).map_err(|e| e.to_string())?;
-            let gz_decoder = GzDecoder::new(tar_gz);
-            let mut archive = Archive::new(gz_decoder);
+                let mut extension_name = None;
+                let mut extension_manifest = None;
+                extract_extension_manifest(&mut archive)
+                    .map_err(|e| e.to_string())
+                    .and_then(|manifest| match manifest {
+                        Some(manifest) => {
+                            extension_name = manifest["name"].as_str().map(|s| s.to_string());
+                            extension_manifest = Some(manifest);
+                            Ok(())
+                        }
+                        None => Err("Manifest is None".to_string()),
+                    })?;
 
-            let mut extension_name = None;
-            let mut extension_manifest = None;
-            extract_extension_manifest(&mut archive)
-                .map_err(|e| e.to_string())
-                .and_then(|manifest| match manifest {
-                    Some(manifest) => {
-                        extension_name = manifest["name"].as_str().map(|s| s.to_string());
-                        extension_manifest = Some(manifest);
-                        Ok(())
-                    }
-                    None => Err("Manifest is None".to_string()),
-                })?;
-
-            let extension_name = extension_name.ok_or("package.json not found in archive")?;
-            let extension_dir = extensions_path.join(extension_name.clone());
-            fs::create_dir_all(&extension_dir).map_err(|e| e.to_string())?;
-
-            let tar_gz = File::open(&path).map_err(|e| e.to_string())?;
-            let gz_decoder = GzDecoder::new(tar_gz);
-            let mut archive = Archive::new(gz_decoder);
-            for entry in archive.entries().map_err(|e| e.to_string())? {
-                let mut entry = entry.map_err(|e| e.to_string())?;
-                let file_path = entry.path().map_err(|e| e.to_string())?;
-                let components: Vec<_> = file_path.components().collect();
-                if components.len() > 1 {
-                    let relative_path: PathBuf = components[1..].iter().collect();
-                    let target_path = extension_dir.join(relative_path);
-                    if let Some(parent) = target_path.parent() {
-                        fs::create_dir_all(parent).map_err(|e| e.to_string())?;
-                    }
-                    let _result = entry.unpack(&target_path).map_err(|e| e.to_string())?;
+                let extension_name = extension_name.ok_or("package.json not found in archive")?;
+                if !is_allowed_bundled_extension_id(&extension_name) {
+                    return Err(format!("extension_id_not_allowed:{extension_name}"));
                 }
+                let extension_dir = staging.join(extension_name.clone());
+                fs::create_dir_all(&extension_dir).map_err(|e| e.to_string())?;
+
+                let tar_gz = File::open(&path).map_err(|e| e.to_string())?;
+                let gz_decoder = GzDecoder::new(tar_gz);
+                let mut archive = Archive::new(gz_decoder);
+                for entry in archive.entries().map_err(|e| e.to_string())? {
+                    let mut entry = entry.map_err(|e| e.to_string())?;
+                    let entry_type = entry.header().entry_type();
+                    if !(entry_type.is_file() || entry_type.is_dir()) {
+                        return Err("extension_archive_unsupported_entry".to_string());
+                    }
+                    let file_path = entry.path().map_err(|e| e.to_string())?;
+                    let components: Vec<_> = file_path.components().collect();
+                    if !components.is_empty() {
+                        let start = usize::from(matches!(
+                            components.first(),
+                            Some(Component::Normal(root)) if *root == std::ffi::OsStr::new("package")
+                        ));
+                        if start == components.len() {
+                            continue;
+                        }
+                        let relative_path: PathBuf = components[start..].iter().collect();
+                        if relative_path.components().any(|component| {
+                            !matches!(component, Component::Normal(_) | Component::CurDir)
+                        }) {
+                            return Err("extension_archive_unsafe_path".to_string());
+                        }
+                        let target_path = extension_dir.join(relative_path);
+                        if let Some(parent) = target_path.parent() {
+                            fs::create_dir_all(parent).map_err(|e| e.to_string())?;
+                        }
+                        let _result = entry.unpack(&target_path).map_err(|e| e.to_string())?;
+                    }
+                }
+
+                let staged_manifest_path = extension_dir.join("package.json");
+                let staged_manifest: serde_json::Value = serde_json::from_slice(
+                    &fs::read(&staged_manifest_path)
+                        .map_err(|e| format!("extension_manifest_missing:{extension_name}:{e}"))?,
+                )
+                .map_err(|e| format!("extension_manifest_invalid:{extension_name}:{e}"))?;
+                if extension_manifest.as_ref() != Some(&staged_manifest) {
+                    return Err(format!("extension_manifest_changed:{extension_name}"));
+                }
+
+                let main_entry = extension_manifest
+                    .as_ref()
+                    .and_then(|manifest| manifest["main"].as_str())
+                    .unwrap_or("index.js");
+                let main_path = Path::new(main_entry);
+                if main_path.is_absolute()
+                    || main_path.components().any(|component| {
+                        !matches!(component, Component::Normal(_) | Component::CurDir)
+                    })
+                {
+                    return Err(format!("extension_main_unsafe:{extension_name}"));
+                }
+                let staged_main = extension_dir.join(main_entry);
+                if !staged_main.is_file() {
+                    return Err(format!(
+                        "extension_main_missing:{extension_name}:{main_entry}"
+                    ));
+                }
+                let url = extensions_path
+                    .join(&extension_name)
+                    .join(main_entry)
+                    .to_string_lossy()
+                    .to_string();
+
+                let new_extension = serde_json::json!({
+                    "url": url,
+                    "name": extension_name.clone(),
+                    "origin": extensions_path.join(&extension_name).to_string_lossy(),
+                    "active": true,
+                    "description": extension_manifest
+                        .as_ref()
+                        .and_then(|manifest| manifest["description"].as_str())
+                        .unwrap_or(""),
+                    "version": extension_manifest
+                        .as_ref()
+                        .and_then(|manifest| manifest["version"].as_str())
+                        .unwrap_or(""),
+                    "productName": extension_manifest
+                        .as_ref()
+                        .and_then(|manifest| manifest["productName"].as_str())
+                        .unwrap_or(""),
+                });
+
+                extensions.insert(extension_name.clone(), new_extension);
+
+                log::info!("Installed extension to {extension_dir:?}");
             }
-
-            let main_entry = extension_manifest
-                .as_ref()
-                .and_then(|manifest| manifest["main"].as_str())
-                .unwrap_or("index.js");
-            let url = extension_dir.join(main_entry).to_string_lossy().to_string();
-
-            let new_extension = serde_json::json!({
-                "url": url,
-                "name": extension_name.clone(),
-                "origin": extension_dir.to_string_lossy(),
-                "active": true,
-                "description": extension_manifest
-                    .as_ref()
-                    .and_then(|manifest| manifest["description"].as_str())
-                    .unwrap_or(""),
-                "version": extension_manifest
-                    .as_ref()
-                    .and_then(|manifest| manifest["version"].as_str())
-                    .unwrap_or(""),
-                "productName": extension_manifest
-                    .as_ref()
-                    .and_then(|manifest| manifest["productName"].as_str())
-                    .unwrap_or(""),
-            });
-
-            extensions_list.push(new_extension);
-
-            log::info!("Installed extension to {extension_dir:?}");
         }
     }
+
+    for required_id in ALLOWED_BUNDLED_EXTENSION_IDS {
+        if !extensions.contains_key(*required_id) {
+            return Err(format!("required_extension_missing:{required_id}"));
+        }
+    }
+
+    let extensions_list: Vec<_> = extensions.into_values().collect();
+    let extensions_json_path = staging.join("extensions.json");
     fs::write(
         &extensions_json_path,
-        serde_json::to_string_pretty(&extensions_list).map_err(|e| e.to_string())?,
+        serde_json::to_vec_pretty(&extensions_list).map_err(|e| e.to_string())?,
     )
-    .map_err(|e| e.to_string())?;
+    .map_err(|e| format!("write_extension_registry:{e}"))?;
+
+    if extensions_path.exists() {
+        fs::rename(&extensions_path, &backup).map_err(|e| format!("backup_extensions:{e}"))?;
+    }
+    if let Err(error) = fs::rename(&staging, &extensions_path) {
+        if backup.exists() {
+            let _ = fs::rename(&backup, &extensions_path);
+        }
+        return Err(format!("commit_extensions:{error}"));
+    }
+    if backup.exists() {
+        fs::remove_dir_all(&backup).map_err(|e| format!("remove_extension_backup:{e}"))?;
+    }
 
     Ok(())
 }
@@ -178,64 +291,72 @@ pub fn migrate_mcp_servers(
     app_handle: tauri::AppHandle,
     store: Arc<Store<Wry>>,
 ) -> Result<(), String> {
-    let mcp_version = store
-        .get("mcp_version")
-        .and_then(|v| v.as_i64())
-        .unwrap_or(0);
-    if mcp_version < 1 {
-        log::info!("Migrating MCP schema version 1");
-        let result = add_server_config(
-            app_handle.clone(),
-            "exa".to_string(),
-            serde_json::json!({
+    const MCP_MIGRATION_STEP: &str = "mcp_names_v1";
+    let config_dir = app_handle
+        .path()
+        .data_dir()
+        .map_err(|error| format!("resolve_mcp_migration_state:{error}"))?
+        .join(APP_NAME);
+    mark_component_migration_running(&config_dir, MCP_MIGRATION_STEP, 1)?;
+
+    let result: Result<(), String> = (|| -> Result<(), String> {
+        let mcp_version = store
+            .get("mcp_version")
+            .and_then(|v| v.as_i64())
+            .unwrap_or(0);
+        if mcp_version < 1 {
+            log::info!("Migrating MCP schema version 1");
+            add_server_config(
+                app_handle.clone(),
+                "exa".to_string(),
+                serde_json::json!({
                   "command": "npx",
                   "args": ["-y", "exa-mcp-server"],
                   "env": { "EXA_API_KEY": "YOUR_EXA_API_KEY_HERE" },
                   "active": false
-            }),
-        );
-        if let Err(e) = result {
-            log::error!("Failed to add server config: {e}");
+                }),
+            )?;
+        }
+        if mcp_version < 2 {
+            log::info!("Migrating MCP schema version 2: Adding Biyan Web Research");
+            add_server_config(
+                app_handle.clone(),
+                BIYAN_WEB_RESEARCH_MCP_NAME.to_string(),
+                default_web_research_mcp_config(),
+            )?;
+        }
+        if mcp_version < 3 {
+            log::info!("Migrating MCP schema version 3: Updating Exa to streamable HTTP");
+            migrate_exa_to_http(app_handle.clone())?;
+        }
+        if mcp_version < 4 {
+            log::info!("Migrating MCP schema version 4: Disabling bundled Exa MCP by default");
+            disable_exa_mcp_by_default(app_handle.clone())?;
+        }
+        if mcp_version < 5 {
+            log::info!(
+                "Migrating MCP schema version 5: Replacing Browser MCP with Biyan Web Research"
+            );
+            migrate_browser_mcp_to_web_research(app_handle.clone())?;
+        }
+        store.set("mcp_version", 5);
+        store
+            .save()
+            .map_err(|error| format!("Failed to persist MCP migration marker: {error}"))?;
+        Ok(())
+    })();
+
+    match result {
+        Ok(()) => mark_component_migration(&config_dir, MCP_MIGRATION_STEP, 1),
+        Err(error) => {
+            let _ = mark_component_migration_failed(&config_dir, MCP_MIGRATION_STEP, 1, &error);
+            Err(error)
         }
     }
-    if mcp_version < 2 {
-        log::info!("Migrating MCP schema version 2: Adding Biyan Web Research");
-        let result = add_server_config(
-            app_handle.clone(),
-            MITA_WEB_RESEARCH_MCP_NAME.to_string(),
-            default_web_research_mcp_config(),
-        );
-        if let Err(e) = result {
-            log::error!("Failed to add Biyan Web Research server config: {e}");
-        }
-    }
-    if mcp_version < 3 {
-        log::info!("Migrating MCP schema version 3: Updating Exa to streamable HTTP");
-        if let Err(e) = migrate_exa_to_http(app_handle.clone()) {
-            log::error!("Failed to migrate Exa to HTTP: {e}");
-        }
-    }
-    if mcp_version < 4 {
-        log::info!("Migrating MCP schema version 4: Disabling bundled Exa MCP by default");
-        if let Err(e) = disable_exa_mcp_by_default(app_handle.clone()) {
-            log::error!("Failed to disable bundled Exa MCP: {e}");
-        }
-    }
-    if mcp_version < 5 {
-        log::info!(
-            "Migrating MCP schema version 5: Replacing Browser MCP with Biyan Web Research"
-        );
-        if let Err(e) = migrate_browser_mcp_to_web_research(app_handle.clone()) {
-            log::error!("Failed to migrate Browser MCP to Biyan Web Research: {e}");
-        }
-    }
-    store.set("mcp_version", 5);
-    store.save().expect("Failed to save store");
-    Ok(())
 }
 
 fn migrate_browser_mcp_to_web_research(app_handle: tauri::AppHandle) -> Result<(), String> {
-    let config_path = get_mita_data_folder_path(app_handle).join("mcp_config.json");
+    let config_path = get_biyan_data_folder_path(app_handle).join("mcp_config.json");
     if !config_path.exists() {
         return Ok(());
     }
@@ -246,13 +367,14 @@ fn migrate_browser_mcp_to_web_research(app_handle: tauri::AppHandle) -> Result<(
         .map_err(|e| format!("Failed to parse MCP config: {e}"))?;
 
     if let Some(servers) = config.get_mut("mcpServers").and_then(|s| s.as_object_mut()) {
-        crate::core::mcp::constants::normalize_browser_mcp_server_key(servers);
+        crate::core::legacy_migrations::normalize_browser_mcp_server_key(servers);
     }
 
-    fs::write(
+    crate::core::legacy_migrations::atomic_write(
         &config_path,
         serde_json::to_string_pretty(&config)
-            .map_err(|e| format!("Failed to serialize MCP config: {e}"))?,
+            .map_err(|e| format!("Failed to serialize MCP config: {e}"))?
+            .as_bytes(),
     )
     .map_err(|e| format!("Failed to write MCP config: {e}"))?;
 
@@ -260,7 +382,7 @@ fn migrate_browser_mcp_to_web_research(app_handle: tauri::AppHandle) -> Result<(
 }
 
 fn disable_exa_mcp_by_default(app_handle: tauri::AppHandle) -> Result<(), String> {
-    let config_path = get_mita_data_folder_path(app_handle).join("mcp_config.json");
+    let config_path = get_biyan_data_folder_path(app_handle).join("mcp_config.json");
     if !config_path.exists() {
         return Ok(());
     }
@@ -278,10 +400,11 @@ fn disable_exa_mcp_by_default(app_handle: tauri::AppHandle) -> Result<(), String
         exa.insert("active".to_string(), serde_json::json!(false));
     }
 
-    fs::write(
+    crate::core::legacy_migrations::atomic_write(
         &config_path,
         serde_json::to_string_pretty(&config)
-            .map_err(|e| format!("Failed to serialize MCP config: {e}"))?,
+            .map_err(|e| format!("Failed to serialize MCP config: {e}"))?
+            .as_bytes(),
     )
     .map_err(|e| format!("Failed to write MCP config: {e}"))?;
 
@@ -289,7 +412,7 @@ fn disable_exa_mcp_by_default(app_handle: tauri::AppHandle) -> Result<(), String
 }
 
 fn migrate_exa_to_http(app_handle: tauri::AppHandle) -> Result<(), String> {
-    let config_path = get_mita_data_folder_path(app_handle).join("mcp_config.json");
+    let config_path = get_biyan_data_folder_path(app_handle).join("mcp_config.json");
 
     let config_str =
         fs::read_to_string(&config_path).map_err(|e| format!("Failed to read MCP config: {e}"))?;
@@ -311,10 +434,11 @@ fn migrate_exa_to_http(app_handle: tauri::AppHandle) -> Result<(), String> {
         );
     }
 
-    fs::write(
+    crate::core::legacy_migrations::atomic_write(
         &config_path,
         serde_json::to_string_pretty(&config)
-            .map_err(|e| format!("Failed to serialize MCP config: {e}"))?,
+            .map_err(|e| format!("Failed to serialize MCP config: {e}"))?
+            .as_bytes(),
     )
     .map_err(|e| format!("Failed to write MCP config: {e}"))?;
 
@@ -324,76 +448,46 @@ fn migrate_exa_to_http(app_handle: tauri::AppHandle) -> Result<(), String> {
 pub fn extract_extension_manifest<R: Read>(
     archive: &mut Archive<R>,
 ) -> Result<Option<serde_json::Value>, String> {
-    let entry = archive
-        .entries()
-        .map_err(|e| e.to_string())?
-        .filter_map(|e| e.ok()) // Ignore errors in individual entries
-        .find(|entry| {
-            if let Ok(file_path) = entry.path() {
-                let path_str = file_path.to_string_lossy();
-                path_str == "package/package.json" || path_str == "package.json"
-            } else {
-                false
-            }
-        });
-
-    if let Some(mut entry) = entry {
+    for entry in archive.entries().map_err(|e| e.to_string())? {
+        let mut entry = entry.map_err(|e| format!("extension_archive_entry:{e}"))?;
+        let file_path = entry
+            .path()
+            .map_err(|e| format!("extension_archive_path:{e}"))?;
+        let path_str = file_path.to_string_lossy();
+        if path_str != "package/package.json" && path_str != "package.json" {
+            continue;
+        }
+        if entry
+            .header()
+            .size()
+            .map_err(|e| format!("extension_manifest_size:{e}"))?
+            > 1024 * 1024
+        {
+            return Err("extension_manifest_too_large".to_string());
+        }
         let mut content = String::new();
         entry
             .read_to_string(&mut content)
-            .map_err(|e| e.to_string())?;
-
+            .map_err(|e| format!("read_extension_manifest:{e}"))?;
         let package_json: serde_json::Value =
-            serde_json::from_str(&content).map_err(|e| e.to_string())?;
+            serde_json::from_str(&content).map_err(|e| format!("parse_extension_manifest:{e}"))?;
         return Ok(Some(package_json));
     }
 
     Ok(None)
 }
 
-/// Install/update the bundled `mita` CLI binary.
-///
-/// - `version_changed`: pass `true` whenever the app version has changed (i.e. after an update).
-///   When `true` the binary is always overwritten so the CLI stays in sync with the new app.
-///   When `false` only installs if the binary is not yet present on PATH.
-///
-/// Runs in a background task — never blocks startup.
-/// Errors are logged as warnings and never prevent the app from starting.
-pub fn setup_mita_cli<R: Runtime>(app_handle: tauri::AppHandle<R>, version_changed: bool) {
-    tauri::async_runtime::spawn(async move {
-        // On a normal launch where the version hasn't changed, skip reinstall if already on PATH.
-        if !version_changed {
-            let which_cmd = if cfg!(windows) { "where" } else { "which" };
-            let mut cmd = std::process::Command::new(which_cmd);
-            cmd.arg("mita");
-            #[cfg(windows)]
-            {
-                use std::os::windows::process::CommandExt;
-                cmd.creation_flags(0x08000000); // CREATE_NO_WINDOW
-            }
-            if cmd.output().map(|o| o.status.success()).unwrap_or(false) {
-                log::debug!("mita CLI already on PATH — skipping reinstall");
-                return;
-            }
-        }
-
-        match crate::core::system::commands::install_mita_cli_sync(&app_handle) {
-            Ok(status) => {
-                log::info!(
-                    "mita CLI {} to {}",
-                    if version_changed {
-                        "updated"
-                    } else {
-                        "installed"
-                    },
-                    status.path.as_deref().unwrap_or("<unknown>")
-                );
-            }
-            Err(e) => {
-                log::warn!("mita CLI auto-install skipped: {e}");
-            }
-        }
-    });
+/// Install/update the bundled `biyan` CLI before API and MCP startup.
+pub fn setup_biyan_cli<R: Runtime>(
+    app_handle: tauri::AppHandle<R>,
+    _version_changed: bool,
+) -> Result<(), String> {
+    let status = crate::core::system::commands::install_biyan_cli_sync(&app_handle)?;
+    log::info!(
+        "biyan CLI reconciled by schema and digest at {}",
+        status.path.as_deref().unwrap_or("<unknown>")
+    );
+    Ok(())
 }
 
 pub fn setup_mcp<R: Runtime>(app: &App<R>) {
@@ -404,10 +498,13 @@ pub fn setup_mcp<R: Runtime>(app: &App<R>) {
         use crate::core::mcp::lockfile::cleanup_all_stale_locks;
 
         // Create default mcp_config.json if it doesn't exist
-        let config_path = get_mita_data_folder_path(app_handle.clone()).join("mcp_config.json");
+        let config_path = get_biyan_data_folder_path(app_handle.clone()).join("mcp_config.json");
         if !config_path.exists() {
             log::info!("mcp_config.json not found, creating default config");
-            if let Err(e) = fs::write(&config_path, DEFAULT_MCP_CONFIG) {
+            if let Err(e) = crate::core::legacy_migrations::atomic_write(
+                &config_path,
+                DEFAULT_MCP_CONFIG.as_bytes(),
+            ) {
                 log::error!("Failed to create default MCP config: {e}");
             }
         }

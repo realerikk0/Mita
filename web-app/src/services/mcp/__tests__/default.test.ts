@@ -108,9 +108,9 @@ describe('DefaultMCPService', () => {
     })
   })
 
-  describe('checkMitaWebResearchConnected', () => {
+  describe('checkBiyanWebResearchConnected', () => {
     it('returns false', async () => {
-      const result = await svc.checkMitaWebResearchConnected()
+      const result = await svc.checkBiyanWebResearchConnected()
       expect(result).toBe(false)
     })
   })

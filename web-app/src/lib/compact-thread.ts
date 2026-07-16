@@ -3,8 +3,9 @@ import {
   ContentType,
   MessageStatus,
   type ThreadMessage,
-} from '@janhq/core'
+} from '@biyan/core'
 import { generateId, generateText, type LanguageModel } from 'ai'
+import { readLegacyCompactMetadata } from '@/legacy_migrations/compact-metadata'
 import {
   DEFAULT_CHARS_PER_TOKEN,
   buildCompactPrompt,
@@ -13,18 +14,18 @@ import {
   selectMessagesForCompaction,
 } from './context-manager'
 
-export const MITA_COMPACT_METADATA_VERSION = 1
+export const BIYAN_COMPACT_METADATA_VERSION = 1
 export const DEFAULT_AUTO_COMPACT_THRESHOLD = 0.85
 export const DEFAULT_COMPACT_RECENT_MESSAGE_COUNT = 4
 export const DEFAULT_COMPACT_RECENT_TOKEN_LIMIT = 20_000
 
-export type MitaCompactTrigger = 'manual' | 'auto'
+export type BiyanCompactTrigger = 'manual' | 'auto'
 
-export type MitaCompactMetadata =
+export type BiyanCompactMetadata =
   | {
       kind: 'summary'
       compactId: string
-      trigger: MitaCompactTrigger
+      trigger: BiyanCompactTrigger
       createdAt: number
       version: number
       instructions?: string
@@ -34,7 +35,7 @@ export type MitaCompactMetadata =
   | {
       kind: 'archived'
       compactId: string
-      trigger: MitaCompactTrigger
+      trigger: BiyanCompactTrigger
       createdAt: number
       version: number
       summaryMessageId: string
@@ -48,7 +49,7 @@ export interface CompactThreadMessagesOptions {
   threadId: string
   messages: ThreadMessage[]
   model: LanguageModel
-  trigger: MitaCompactTrigger
+  trigger: BiyanCompactTrigger
   customInstructions?: string
   keepRecentMessages?: number
   maxRecentTokens?: number
@@ -92,24 +93,25 @@ export function parseCompactCommand(input: string):
   }
 }
 
-export function getMitaCompactMetadata(host: MetadataHost): MitaCompactMetadata | undefined {
+export function getBiyanCompactMetadata(host: MetadataHost): BiyanCompactMetadata | undefined {
   const hostMetadata =
     host.metadata && typeof host.metadata === 'object'
       ? (host.metadata as Record<string, unknown>)
       : undefined
-  const metadata = hostMetadata?.mitaCompact
+  const metadata =
+    hostMetadata?.biyanCompact ?? readLegacyCompactMetadata(hostMetadata)
   if (!metadata || typeof metadata !== 'object') return undefined
   const kind = (metadata as { kind?: unknown }).kind
   if (kind !== 'summary' && kind !== 'archived') return undefined
-  return metadata as MitaCompactMetadata
+  return metadata as BiyanCompactMetadata
 }
 
 export function isArchivedCompactMessage(host: MetadataHost): boolean {
-  return getMitaCompactMetadata(host)?.kind === 'archived'
+  return getBiyanCompactMetadata(host)?.kind === 'archived'
 }
 
 export function isCompactSummaryMessage(host: MetadataHost): boolean {
-  return getMitaCompactMetadata(host)?.kind === 'summary'
+  return getBiyanCompactMetadata(host)?.kind === 'summary'
 }
 
 export function getVisibleThreadMessages(messages: ThreadMessage[]): ThreadMessage[] {
@@ -164,12 +166,12 @@ function truncateText(text: string, maxChars: number): string {
 }
 
 function formatMessageForCompaction(message: ThreadMessage): string {
-  const metadata = getMitaCompactMetadata(message)
+  const metadata = getBiyanCompactMetadata(message)
   const header = [
     `id=${message.id}`,
     `role=${message.role}`,
     message.created_at ? `created_at=${new Date(message.created_at).toISOString()}` : undefined,
-    metadata ? `mitaCompact=${metadata.kind}` : undefined,
+    metadata ? `biyanCompact=${metadata.kind}` : undefined,
   ]
     .filter(Boolean)
     .join(' ')
@@ -341,18 +343,18 @@ export async function compactThreadMessages({
     created_at: summaryCreatedAt,
     completed_at: summaryCreatedAt,
     metadata: {
-      mitaCompact: {
+      biyanCompact: {
         kind: 'summary',
         compactId,
         trigger,
         createdAt,
-        version: MITA_COMPACT_METADATA_VERSION,
+        version: BIYAN_COMPACT_METADATA_VERSION,
         ...(customInstructions?.trim()
           ? { instructions: customInstructions.trim() }
           : {}),
         sourceMessageIds,
         sourceMessageCount: sourceMessageIds.length,
-      } satisfies MitaCompactMetadata,
+      } satisfies BiyanCompactMetadata,
     },
     type: 'text',
   }
@@ -362,14 +364,14 @@ export async function compactThreadMessages({
     ...message,
     metadata: {
       ...(message.metadata ?? {}),
-      mitaCompact: {
+      biyanCompact: {
         kind: 'archived',
         compactId,
         trigger,
         createdAt,
-        version: MITA_COMPACT_METADATA_VERSION,
+        version: BIYAN_COMPACT_METADATA_VERSION,
         summaryMessageId,
-      } satisfies MitaCompactMetadata,
+      } satisfies BiyanCompactMetadata,
     },
   }))
   const archivedById = new Map(archivedMessages.map((message) => [message.id, message]))

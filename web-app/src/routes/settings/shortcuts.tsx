@@ -92,9 +92,9 @@ function Shortcuts() {
                 actions={<ShortcutLabel action={ShortcutAction.NEW_CHAT} />}
               />
               <CardItem
-                title={t('settings:shortcuts.newMitaTeams')}
-                description={t('settings:shortcuts.newMitaTeamsDesc')}
-                actions={<ShortcutLabel action={ShortcutAction.NEW_MITA_TEAMS} />}
+                title={t('settings:shortcuts.newBiyanTeams')}
+                description={t('settings:shortcuts.newBiyanTeamsDesc')}
+                actions={<ShortcutLabel action={ShortcutAction.NEW_BIYAN_TEAMS} />}
               />
               <CardItem
                 title={t('settings:shortcuts.newProject')}

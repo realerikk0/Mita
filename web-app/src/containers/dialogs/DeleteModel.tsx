@@ -10,7 +10,6 @@ import {
   DialogTrigger,
 } from '@/components/ui/dialog'
 import { useModelProvider } from '@/hooks/useModelProvider'
-import { useServiceHub } from '@/hooks/useServiceHub'
 
 import { IconTrash } from '@tabler/icons-react'
 
@@ -30,42 +29,24 @@ export const DialogDeleteModel = ({
 }: DialogDeleteModelProps) => {
   const { t } = useTranslation()
   const [selectedModelId, setSelectedModelId] = useState<string>('')
-  const { setProviders, deleteModel: deleteModelCache } = useModelProvider()
+  const { updateProvider } = useModelProvider()
   const { removeFavorite } = useFavoriteModel()
-  const serviceHub = useServiceHub()
 
-  const removeModel = async () => {
+  const removeModel = () => {
     // Remove model from favorites if it exists
     removeFavorite(selectedModelId)
-
-    deleteModelCache(selectedModelId)
-    serviceHub
-      .models()
-      .deleteModel(selectedModelId, provider.provider)
-      .then(() => {
-        serviceHub
-          .providers()
-          .getProviders()
-          .then((providers) => {
-            // Filter out the deleted model from all providers
-            const filteredProviders = providers.map((provider) => ({
-              ...provider,
-              models: provider.models.filter(
-                (model) => model.id !== selectedModelId
-              ),
-            }))
-            setProviders(filteredProviders)
-          })
-        toast.success(
-          t('providers:deleteModel.title', { modelId: selectedModel?.id }),
-          {
-            id: `delete-model-${selectedModel?.id}`,
-            description: t('providers:deleteModel.success', {
-              modelId: selectedModel?.id,
-            }),
-          }
-        )
-      })
+    updateProvider(provider.provider, {
+      models: provider.models.filter((model) => model.id !== selectedModelId),
+    })
+    toast.success(
+      t('providers:deleteModel.title', { modelId: selectedModel?.id }),
+      {
+        id: `delete-model-${selectedModel?.id}`,
+        description: t('providers:deleteModel.success', {
+          modelId: selectedModel?.id,
+        }),
+      }
+    )
   }
 
   // Initialize with the provided model ID or the first model if available

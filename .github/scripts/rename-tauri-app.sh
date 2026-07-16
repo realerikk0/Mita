@@ -24,8 +24,8 @@ fi
 
 # Use jq to transform the content
 jq --arg channel "$CHANNEL" --arg updater "$UPDATER" '
-    .productName = "Mita-\($channel)" |
-    .identifier = "mita-\($channel).ai.app"
+    .productName = "Biyan-\($channel)" |
+    .identifier = "biyan-\($channel).ai.app"
 ' "$INPUT_JSON_FILE" > ./tauri.conf.json.tmp
 
 cat ./tauri.conf.json.tmp
@@ -38,26 +38,13 @@ INFO_PLIST_PATH="./src-tauri/Info.plist"
 if [ -f "$INFO_PLIST_PATH" ]; then
     echo "Updating Info.plist..."
     
-    # Replace the stable bundle id with the channel-specific bundle id
-    sed -i '' "s|jan\.ai\.app|mita-${CHANNEL}.ai.app|g" "$INFO_PLIST_PATH"
+    # Replace the stable compatibility bundle id with the channel-specific id.
+    sed -i '' "s|uk\.jingxing\.mita|biyan-${CHANNEL}.ai.app|g" "$INFO_PLIST_PATH"
     
-    # Replace <string>jan</string> with <string>mita-{channel}</string>
-    sed -i '' "s|<string>jan</string>|<string>mita-${CHANNEL}</string>|g" "$INFO_PLIST_PATH"
+    # Replace only the canonical stable scheme; compatibility schemes remain.
+    sed -i '' "s|<string>biyan</string>|<string>biyan-${CHANNEL}</string>|g" "$INFO_PLIST_PATH"
 
     echo "Info.plist updated"
 
     cat ./src-tauri/Info.plist
 fi
-# Update the layout file
-# LAYOUT_FILE_PATH="web/app/layout.tsx"
-
-# if [ ! -f "$LAYOUT_FILE_PATH" ]; then
-#     echo "File does not exist: $LAYOUT_FILE_PATH"
-#     exit 1
-# fi
-
-# Perform the replacements
-# sed -i -e "s#Mita#Mita-$CHANNEL#g" "$LAYOUT_FILE_PATH"
-
-# Notify completion
-# echo "File has been updated: $LAYOUT_FILE_PATH"

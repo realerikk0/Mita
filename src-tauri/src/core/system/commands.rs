@@ -1,25 +1,22 @@
+use sha2::{Digest, Sha256};
 use std::fs;
+use std::io::Read;
 use std::path::{Path, PathBuf};
 use tauri::{AppHandle, Manager, Runtime, State};
-use tauri_plugin_llamacpp::cleanup_llama_processes;
 
 use crate::core::app::commands::{
-    default_data_folder_path, get_mita_data_folder_path, update_app_configuration,
+    default_data_folder_path, get_biyan_data_folder_path, update_app_configuration,
 };
 use crate::core::app::constants::{
-    MITA_DATA_DIRS_COMMON, MITA_DATA_DIRS_CONVERSATIONS, MITA_DATA_DIRS_MODELS,
-    MITA_DATA_FILES_CONFIGS, MITA_DATA_FILES_SETTINGS,
+    BIYAN_DATA_DIRS_COMMON, BIYAN_DATA_DIRS_CONVERSATIONS, BIYAN_DATA_FILES_CONFIGS,
+    BIYAN_DATA_FILES_SETTINGS,
 };
 use crate::core::app::models::AppConfiguration;
 use crate::core::mcp::helpers::{stop_mcp_servers_with_context, ShutdownContext};
 use crate::core::state::AppState;
 
-const MITA_LOCAL_API_MARKER: &str = "# Mita Local API Server - Claude Code Config";
-const MITA_LOCAL_API_MARKER_PREFIX: &str = "# Mita Local API Server";
-const LEGACY_SILENCE_LOCAL_API_MARKER: &str = "# Silence Local API Server - Claude Code Config";
-const LEGACY_SILENCE_LOCAL_API_MARKER_PREFIX: &str = "# Silence Local API Server";
-const LEGACY_JAN_LOCAL_API_MARKER: &str = "# Jan Local API Server - Claude Code Config";
-const LEGACY_JAN_LOCAL_API_MARKER_PREFIX: &str = "# Jan Local API Server";
+const BIYAN_LOCAL_API_MARKER: &str = "# Biyan API Server - Claude Code Config";
+const BIYAN_LOCAL_API_MARKER_PREFIX: &str = "# Biyan API Server";
 #[cfg(any(windows, test))]
 const BIYAN_PROGRAM_DIR_NAME: &str = "Biyan";
 
@@ -51,19 +48,19 @@ fn remove_file(data_folder: &std::path::Path, name: &str) {
 /// Delete conversations and user data (threads, assistants).
 fn delete_conversations(data_folder: &std::path::Path) {
     log::info!("Deleting conversations (threads, assistants)");
-    for dir in MITA_DATA_DIRS_CONVERSATIONS {
+    for dir in BIYAN_DATA_DIRS_CONVERSATIONS {
         remove_dir(data_folder, dir);
     }
 }
 
-/// Delete downloaded models, engine binaries, and configuration files
-/// (engine settings, MCP config, etc.).
-fn delete_models_and_configs(data_folder: &std::path::Path) {
-    log::info!("Deleting models, engines, and configurations");
-    for dir in MITA_DATA_DIRS_MODELS {
-        remove_dir(data_folder, dir);
-    }
-    for file in MITA_DATA_FILES_CONFIGS {
+/// Delete current Biyan configuration files.
+///
+/// Retired local-model/RAG data is deliberately excluded. It is user-owned and
+/// may only be removed through the inspected, token-confirmed legacy cleanup
+/// flow in `legacy_migrations`.
+fn delete_configurations(data_folder: &std::path::Path) {
+    log::info!("Deleting Biyan configurations");
+    for file in BIYAN_DATA_FILES_CONFIGS {
         remove_file(data_folder, file);
     }
 }
@@ -71,16 +68,16 @@ fn delete_models_and_configs(data_folder: &std::path::Path) {
 /// Delete extensions, logs, caches — always cleaned during any reset.
 fn delete_common_data(data_folder: &std::path::Path) {
     log::info!("Deleting common data (extensions, logs, caches)");
-    for dir in MITA_DATA_DIRS_COMMON {
+    for dir in BIYAN_DATA_DIRS_COMMON {
         remove_dir(data_folder, dir);
     }
 }
 
-/// Delete cross-category settings (store.json) — only during a full wipe
+/// Delete cross-category settings (`settings.json`) — only during a full wipe
 /// when the user is not keeping any data.
 fn delete_settings(data_folder: &std::path::Path) {
-    log::info!("Deleting cross-category settings (store.json)");
-    for file in MITA_DATA_FILES_SETTINGS {
+    log::info!("Deleting cross-category settings (settings.json)");
+    for file in BIYAN_DATA_FILES_SETTINGS {
         remove_file(data_folder, file);
     }
 }
@@ -105,12 +102,9 @@ fn detect_shell_env_file(home_dir: &str, is_macos: bool) -> (&'static str, Strin
 }
 
 fn should_remove_claude_code_env_line(line: &str) -> bool {
-    line.starts_with(MITA_LOCAL_API_MARKER)
-        || line.starts_with(MITA_LOCAL_API_MARKER_PREFIX)
-        || line.starts_with(LEGACY_SILENCE_LOCAL_API_MARKER)
-        || line.starts_with(LEGACY_SILENCE_LOCAL_API_MARKER_PREFIX)
-        || line.starts_with(LEGACY_JAN_LOCAL_API_MARKER)
-        || line.starts_with(LEGACY_JAN_LOCAL_API_MARKER_PREFIX)
+    line.starts_with(BIYAN_LOCAL_API_MARKER)
+        || line.starts_with(BIYAN_LOCAL_API_MARKER_PREFIX)
+        || crate::core::legacy_migrations::is_legacy_local_api_marker(line)
         || line.starts_with("export ANTHROPIC_")
 }
 
@@ -129,7 +123,7 @@ fn write_env_to_shell(env_file_path: &str, env_vars: &[(String, String)]) -> Res
 
     let new_content = format!(
         "{}\n{}\n{}\n",
-        MITA_LOCAL_API_MARKER, new_entries, MITA_LOCAL_API_MARKER
+        BIYAN_LOCAL_API_MARKER, new_entries, BIYAN_LOCAL_API_MARKER
     );
 
     let final_content = cleaned.join("\n") + &new_content;
@@ -142,10 +136,10 @@ pub fn factory_reset<R: Runtime>(
     app_handle: tauri::AppHandle<R>,
     state: State<'_, AppState>,
     keep_app_data: Option<bool>,
-    keep_models_and_configs: Option<bool>,
+    keep_configurations: Option<bool>,
 ) {
     let keep_app_data = keep_app_data.unwrap_or(false);
-    let keep_models_and_configs = keep_models_and_configs.unwrap_or(false);
+    let keep_configurations = keep_configurations.unwrap_or(false);
 
     #[cfg(not(any(target_os = "ios", target_os = "android")))]
     {
@@ -156,12 +150,12 @@ pub fn factory_reset<R: Runtime>(
             });
         }
     }
-    let data_folder = get_mita_data_folder_path(app_handle.clone());
+    let data_folder = get_biyan_data_folder_path(app_handle.clone());
     let user_logs_dir = crate::core::user_logs::resolve_user_logs_directory(&app_handle).ok();
     log::info!(
-        "Factory reset (keep_app_data={}, keep_models_and_configs={}), data folder: {:?}",
+        "Factory reset (keep_app_data={}, keep_configurations={}), data folder: {:?}",
         keep_app_data,
-        keep_models_and_configs,
+        keep_configurations,
         data_folder
     );
 
@@ -178,8 +172,6 @@ pub fn factory_reset<R: Runtime>(
         if let Err(e) = cleanup_own_locks(&app_handle) {
             log::warn!("Failed to cleanup lock files: {}", e);
         }
-        let _ = cleanup_llama_processes(app_handle.clone()).await;
-
         if data_folder.exists() {
             if !is_safe_to_delete(&data_folder) {
                 log::error!(
@@ -197,13 +189,14 @@ pub fn factory_reset<R: Runtime>(
                 delete_conversations(&data_folder);
             }
 
-            // Delete models and configs unless user chose to keep them
-            if !keep_models_and_configs {
-                delete_models_and_configs(&data_folder);
+            // Delete current configurations unless the user chose to keep them.
+            // Retired local-runtime data is never part of factory reset.
+            if !keep_configurations {
+                delete_configurations(&data_folder);
             }
 
             // store.json spans all categories; only wipe it when nothing is kept
-            if !keep_app_data && !keep_models_and_configs {
+            if !keep_app_data && !keep_configurations {
                 delete_settings(&data_folder);
             }
         }
@@ -219,7 +212,7 @@ pub fn factory_reset<R: Runtime>(
         }
 
         // Reset app configuration to defaults unless user chose to keep configs
-        if !keep_models_and_configs {
+        if !keep_configurations {
             let mut default_config = AppConfiguration::default();
             default_config.data_folder = default_data_folder_path(app_handle.clone());
             let _ = update_app_configuration(app_handle.clone(), default_config);
@@ -241,6 +234,18 @@ pub fn open_app_directory<R: Runtime>(app: AppHandle<R>) -> Result<(), String> {
         .app_data_dir()
         .map_err(|err| format!("Failed to resolve app directory: {err}"))?;
     open_path_in_file_manager(&app_path)
+}
+
+/// Opens the deterministic primary legacy source without modifying it. The
+/// complete ordered list is exposed separately on the migration recovery page;
+/// normal runtime code always resolves the canonical Biyan directory.
+#[tauri::command]
+pub fn open_legacy_migration_source<R: Runtime>(app: AppHandle<R>) -> Result<(), String> {
+    crate::core::legacy_migrations::recovery_legacy_sources_for_app(&app)?
+        .into_iter()
+        .next()
+        .ok_or_else(|| "No legacy data source was found".to_string())
+        .and_then(|path| open_path_in_file_manager(&path))
 }
 
 #[tauri::command]
@@ -300,18 +305,6 @@ pub async fn read_logs<R: Runtime>(app: AppHandle<R>) -> Result<String, String> 
     crate::core::user_logs::read_user_logs(app, None)
 }
 
-// check if a system library is available
-#[tauri::command]
-pub fn is_library_available(library: &str) -> bool {
-    match unsafe { libloading::Library::new(library) } {
-        Ok(_) => true,
-        Err(e) => {
-            log::info!("Library {library} is not available: {e}");
-            false
-        }
-    }
-}
-
 #[tauri::command]
 pub fn launch_claude_code_with_config(
     api_url: String,
@@ -332,7 +325,7 @@ pub fn launch_claude_code_with_config(
 
     env_vars.push((
         "ANTHROPIC_AUTH_TOKEN".to_string(),
-        api_key.unwrap_or_else(|| "mita".to_string()),
+        api_key.unwrap_or_else(|| "biyan".to_string()),
     ));
 
     if let Some(model) = big_model {
@@ -401,13 +394,12 @@ pub fn launch_claude_code_with_config(
                     .map(|(k, v)| format!("export {}='{}'\n", k, v))
                     .collect();
 
-                let new_block = format!("{}\n{}", MITA_LOCAL_API_MARKER, env_content);
+                let new_block = format!("{}\n{}", BIYAN_LOCAL_API_MARKER, env_content);
 
-                let final_content =
-                    cleaned.join("\n") + "\n" + &new_block + MITA_LOCAL_API_MARKER;
+                let final_content = cleaned.join("\n") + "\n" + &new_block + BIYAN_LOCAL_API_MARKER;
 
                 // Write to a temp file first, then use osascript to move it
-                let temp_script_path = format!("{}/.mita_env_update.sh", home_dir);
+                let temp_script_path = format!("{}/.biyan_env_update.sh", home_dir);
                 std::fs::write(&temp_script_path, &final_content).map_err(|e| e.to_string())?;
 
                 // Use admin privileges to move the temp file
@@ -448,9 +440,9 @@ pub fn launch_claude_code_with_config(
                 return Ok(());
             }
             Err(_) => {
-                let mita_config_dir = format!("{}/.config/mita", home_dir);
+                let biyan_config_dir = format!("{}/.config/biyan", home_dir);
                 let ext = if shell_name == "bash" { "bash" } else { "zsh" };
-                let env_file = format!("{}/claude-code-env.{}", mita_config_dir, ext);
+                let env_file = format!("{}/claude-code-env.{}", biyan_config_dir, ext);
                 return Err(format!("NEED_PERMISSION:{}", env_file));
             }
         }
@@ -480,12 +472,325 @@ pub struct CliInstallStatus {
     pub path: Option<String>,
 }
 
-/// Check if the `mita` CLI binary is accessible on PATH.
+const CLI_INSTALL_SCHEMA: u32 = 1;
+// Exact SHA-256 fingerprints of product-managed 0.6.633 CLI binaries extracted from the
+// immutable Windows and macOS artifacts referenced by the official 0.6.633 updater manifest.
+// Do not add a locally built fingerprint here unless its provenance can be reproduced from a
+// published artifact; an unknown hash must be preserved and reported.
+const LEGACY_MANAGED_CLI_SHA256: &[&str] = &[
+    "2c67c5fe538fad95c812b4b0525a311b2bd02d762889706b4fd50c7bb0a38719",
+    "ca39d2f67b3bb2ea0851c8253805b09a3379051d164b111d3c2201133d60e4ae",
+];
+
+fn cli_install_marker(destination: &Path) -> PathBuf {
+    let name = destination
+        .file_name()
+        .and_then(|value| value.to_str())
+        .unwrap_or("biyan");
+    destination.with_file_name(format!("{name}.install.json"))
+}
+
+fn sha256_file(path: &Path) -> Result<String, String> {
+    let mut file = std::fs::File::open(path)
+        .map_err(|error| format!("Failed to open {} for hashing: {error}", path.display()))?;
+    let mut digest = Sha256::new();
+    let mut buffer = [0u8; 64 * 1024];
+    loop {
+        let read = file
+            .read(&mut buffer)
+            .map_err(|error| format!("Failed to hash {}: {error}", path.display()))?;
+        if read == 0 {
+            break;
+        }
+        digest.update(&buffer[..read]);
+    }
+    Ok(format!("{:x}", digest.finalize()))
+}
+
+fn clear_cli_staging_file(staging: &Path) -> Result<(), String> {
+    #[cfg(windows)]
+    match std::fs::symlink_metadata(staging) {
+        Ok(metadata) if metadata.file_type().is_file() && metadata.permissions().readonly() => {
+            let mut writable = metadata.permissions();
+            writable.set_readonly(false);
+            std::fs::set_permissions(staging, writable).map_err(|error| {
+                format!(
+                    "Failed to make stale Biyan CLI staging file removable {}: {error}",
+                    staging.display()
+                )
+            })?;
+        }
+        Ok(_) => {}
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(()),
+        Err(error) => {
+            return Err(format!(
+                "Failed to inspect stale Biyan CLI staging file {}: {error}",
+                staging.display()
+            ))
+        }
+    }
+
+    match std::fs::remove_file(staging) {
+        Ok(()) => Ok(()),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(()),
+        Err(error) => Err(format!(
+            "Failed to clear stale Biyan CLI staging file {}: {error}",
+            staging.display()
+        )),
+    }
+}
+
+fn replace_managed_cli_atomically(staging: &Path, destination: &Path) -> Result<(), String> {
+    #[cfg(windows)]
+    {
+        let original_permissions = match std::fs::symlink_metadata(destination) {
+            Ok(metadata) if metadata.file_type().is_file() => Some(metadata.permissions()),
+            Ok(_) => None,
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => None,
+            Err(error) => return Err(format!("inspect_cli_destination:{error}")),
+        };
+        let restore_permissions = original_permissions
+            .as_ref()
+            .filter(|permissions| permissions.readonly())
+            .cloned();
+        if let Some(original) = &restore_permissions {
+            let mut writable = original.clone();
+            writable.set_readonly(false);
+            std::fs::set_permissions(destination, writable)
+                .map_err(|error| format!("prepare_cli_destination:{error}"))?;
+        }
+
+        return match crate::core::legacy_migrations::atomic_replace(staging, destination) {
+            Ok(()) => Ok(()),
+            Err(replace_error) => {
+                if let Some(original) = restore_permissions {
+                    if let Err(restore_error) = std::fs::set_permissions(destination, original) {
+                        return Err(format!(
+                            "{replace_error}; restore_cli_destination_permissions:{restore_error}"
+                        ));
+                    }
+                }
+                Err(replace_error)
+            }
+        };
+    }
+
+    #[cfg(not(windows))]
+    crate::core::legacy_migrations::atomic_replace(staging, destination)
+}
+
+fn reconcile_cli_binary(source: &Path, destination: &Path) -> Result<(), String> {
+    let expected_digest = sha256_file(source)?;
+    let marker = cli_install_marker(destination);
+    let marker_matches = std::fs::read_to_string(&marker)
+        .ok()
+        .and_then(|raw| serde_json::from_str::<serde_json::Value>(&raw).ok())
+        .is_some_and(|value| {
+            value.get("schema").and_then(serde_json::Value::as_u64)
+                == Some(CLI_INSTALL_SCHEMA as u64)
+                && value.get("sha256").and_then(serde_json::Value::as_str)
+                    == Some(expected_digest.as_str())
+        });
+    if marker_matches
+        && destination.is_file()
+        && sha256_file(destination).ok().as_deref() == Some(expected_digest.as_str())
+    {
+        return Ok(());
+    }
+
+    let parent = destination
+        .parent()
+        .ok_or_else(|| "Biyan CLI destination has no parent directory".to_string())?;
+    std::fs::create_dir_all(parent).map_err(|error| {
+        format!(
+            "Failed to create Biyan CLI directory {}: {error}",
+            parent.display()
+        )
+    })?;
+    let staging = parent.join(format!(".biyan.installing-{}", std::process::id()));
+    clear_cli_staging_file(&staging)?;
+    std::fs::copy(source, &staging).map_err(|error| {
+        format!(
+            "Failed to stage Biyan CLI at {}: {error}",
+            staging.display()
+        )
+    })?;
+
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        std::fs::set_permissions(&staging, std::fs::Permissions::from_mode(0o755))
+            .map_err(|error| format!("Failed to set Biyan CLI permissions: {error}"))?;
+    }
+    #[cfg(windows)]
+    {
+        let mut permissions = std::fs::metadata(&staging)
+            .map_err(|error| format!("Failed to read staged Biyan CLI permissions: {error}"))?
+            .permissions();
+        if permissions.readonly() {
+            permissions.set_readonly(false);
+            std::fs::set_permissions(&staging, permissions)
+                .map_err(|error| format!("Failed to make staged Biyan CLI updatable: {error}"))?;
+        }
+    }
+    std::fs::OpenOptions::new()
+        .read(true)
+        .write(true)
+        .open(&staging)
+        .and_then(|file| file.sync_all())
+        .map_err(|error| format!("Failed to sync staged Biyan CLI: {error}"))?;
+    if sha256_file(&staging)? != expected_digest {
+        let _ = std::fs::remove_file(&staging);
+        return Err("Biyan CLI staging digest mismatch".to_string());
+    }
+
+    replace_managed_cli_atomically(&staging, destination)
+        .map_err(|error| format!("CLI_LOCKED: failed to commit Biyan CLI atomically: {error}"))?;
+
+    let marker_json = serde_json::json!({
+        "schema": CLI_INSTALL_SCHEMA,
+        "sha256": expected_digest,
+    });
+    let marker_bytes = serde_json::to_vec_pretty(&marker_json)
+        .map_err(|error| format!("Failed to serialize Biyan CLI marker: {error}"))?;
+    crate::core::legacy_migrations::atomic_write(&marker, &marker_bytes)
+        .map_err(|error| format!("Failed to commit Biyan CLI marker: {error}"))?;
+    Ok(())
+}
+
+fn managed_cli_marker_matches_binary(destination: &Path) -> bool {
+    let marker = cli_install_marker(destination);
+    let managed_digest = std::fs::read_to_string(marker)
+        .ok()
+        .and_then(|raw| serde_json::from_str::<serde_json::Value>(&raw).ok())
+        .and_then(|value| {
+            (value.get("schema").and_then(serde_json::Value::as_u64)
+                == Some(CLI_INSTALL_SCHEMA as u64))
+            .then(|| {
+                value
+                    .get("sha256")
+                    .and_then(serde_json::Value::as_str)
+                    .map(str::to_owned)
+            })
+            .flatten()
+        });
+    managed_digest
+        .as_deref()
+        .is_some_and(|digest| sha256_file(destination).ok().as_deref() == Some(digest))
+}
+
+fn reconcile_managed_legacy_cli_shim_with_hashes(
+    source: &Path,
+    destination: &Path,
+    known_legacy_hashes: &[&str],
+) -> Result<bool, String> {
+    if !destination.exists() {
+        reconcile_cli_binary(source, destination)?;
+        return Ok(true);
+    }
+
+    let already_managed = managed_cli_marker_matches_binary(destination);
+    let source_digest = sha256_file(source)?;
+    let current_digest = sha256_file(destination).ok();
+    let known_legacy = current_digest
+        .as_deref()
+        .is_some_and(|digest| known_legacy_hashes.contains(&digest));
+    let staged_without_marker = current_digest.as_deref() == Some(source_digest.as_str());
+    if !(already_managed || known_legacy || staged_without_marker) {
+        log::warn!(
+            "An unrecognized predecessor CLI exists at {}; preserving it without writing a managed-install marker",
+            destination.display()
+        );
+        return Ok(false);
+    }
+
+    if known_legacy && !already_managed {
+        log::info!(
+            "Taking over verified product-managed 0.6.633 CLI at {}",
+            destination.display()
+        );
+    } else if staged_without_marker && !already_managed {
+        log::info!(
+            "Recovering interrupted managed CLI marker commit at {}",
+            destination.display()
+        );
+    }
+    reconcile_cli_binary(source, destination)?;
+    Ok(true)
+}
+
+fn reconcile_legacy_cli_locations(
+    source: &Path,
+    primary: &Path,
+    locations: &[PathBuf],
+    keep_shim: bool,
+) -> Result<(), String> {
+    reconcile_legacy_cli_locations_with_hashes(
+        source,
+        primary,
+        locations,
+        keep_shim,
+        LEGACY_MANAGED_CLI_SHA256,
+    )
+}
+
+fn reconcile_legacy_cli_locations_with_hashes(
+    source: &Path,
+    primary: &Path,
+    locations: &[PathBuf],
+    keep_shim: bool,
+    known_legacy_hashes: &[&str],
+) -> Result<(), String> {
+    let mut visited = Vec::<PathBuf>::new();
+    for destination in locations {
+        if visited.contains(destination) {
+            continue;
+        }
+        visited.push(destination.clone());
+
+        let create_primary = keep_shim && destination == primary;
+        if destination.exists() || create_primary {
+            let managed = reconcile_managed_legacy_cli_shim_with_hashes(
+                source,
+                destination,
+                known_legacy_hashes,
+            )?;
+            if !keep_shim && managed {
+                remove_managed_legacy_cli_shim(destination)?;
+            }
+        } else if !keep_shim {
+            // Clear an orphaned marker from an interrupted A/B uninstall without creating a C shim.
+            remove_managed_legacy_cli_shim(destination)?;
+        }
+    }
+    Ok(())
+}
+
+fn remove_managed_legacy_cli_shim(destination: &Path) -> Result<(), String> {
+    let marker = cli_install_marker(destination);
+    if !destination.exists() {
+        let _ = std::fs::remove_file(marker);
+        return Ok(());
+    }
+    if !managed_cli_marker_matches_binary(destination) {
+        log::warn!(
+            "A user-owned predecessor CLI exists at {}; C will not remove it",
+            destination.display()
+        );
+        return Ok(());
+    }
+    std::fs::remove_file(destination)
+        .map_err(|error| format!("Failed to remove managed predecessor CLI: {error}"))?;
+    std::fs::remove_file(marker)
+        .map_err(|error| format!("Failed to remove managed predecessor CLI marker: {error}"))
+}
+
+/// Check if the `biyan` CLI binary is accessible on PATH.
 #[tauri::command]
-pub async fn check_mita_cli_installed() -> CliInstallStatus {
+pub async fn check_biyan_cli_installed() -> CliInstallStatus {
     let which_cmd = if cfg!(windows) { "where" } else { "which" };
     let mut cmd = std::process::Command::new(which_cmd);
-    cmd.arg("mita");
+    cmd.arg("biyan");
 
     #[cfg(windows)]
     {
@@ -528,39 +833,47 @@ pub async fn check_mita_cli_installed() -> CliInstallStatus {
 }
 
 /// Core install logic — synchronous, no Tauri command overhead.
-pub fn install_mita_cli_sync<R: Runtime>(
+pub fn install_biyan_cli_sync<R: Runtime>(
     app_handle: &AppHandle<R>,
 ) -> Result<CliInstallStatus, String> {
     let bin_name = if cfg!(windows) {
-        "mita-cli.exe"
+        "biyan-cli.exe"
     } else {
-        "mita-cli"
+        "biyan-cli"
     };
-    let dest_bin_name = if cfg!(windows) {
-        "mita.exe"
-    } else {
-        "mita"
-    };
+    let dest_bin_name = if cfg!(windows) { "biyan.exe" } else { "biyan" };
     let resource_bin_dir = app_handle
         .path()
         .resource_dir()
         .map_err(|e| e.to_string())?
         .join("resources/bin");
     let bundled = resource_bin_dir.join(bin_name);
+    #[cfg(windows)]
     let dest = resource_bin_dir.join(dest_bin_name);
 
-    if !bundled.exists() && !dest.exists() {
+    if !bundled.exists() {
         return Err("Biyan CLI binary not bundled with this version of Biyan.".to_string());
     }
 
     #[cfg(windows)]
     {
-        if bundled.exists() {
-            if let Err(e) = std::fs::rename(&bundled, &dest) {
-                log::warn!("Could not rename mita-cli.exe to mita.exe: {}", e);
-            }
+        reconcile_cli_binary(&bundled, &dest)?;
+        let legacy_shim =
+            resource_bin_dir.join(crate::core::legacy_migrations::legacy_cli_shim_file_name());
+        let mut legacy_locations = vec![legacy_shim.clone()];
+        if let Some(local_app_data) = std::env::var_os("LOCALAPPDATA") {
+            legacy_locations.extend(legacy_windows_cli_candidates_from_local_app_data(
+                local_app_data,
+            ));
         }
-        add_to_path_windows(&resource_bin_dir)?;
+        let keep_legacy_shim = crate::core::legacy_migrations::compiled_target_data_schema() <= 2;
+        reconcile_legacy_cli_locations(
+            &bundled,
+            &legacy_shim,
+            &legacy_locations,
+            keep_legacy_shim,
+        )?;
+        add_to_path_windows(&resource_bin_dir, !keep_legacy_shim)?;
         return Ok(CliInstallStatus {
             installed: true,
             path: Some(dest.to_string_lossy().into_owned()),
@@ -569,16 +882,36 @@ pub fn install_mita_cli_sync<R: Runtime>(
 
     #[cfg(unix)]
     {
-        let install_dir = mita_cli_install_dir()?;
+        let install_dir = biyan_cli_install_dir()?;
         std::fs::create_dir_all(&install_dir).map_err(|e| e.to_string())?;
         let dest = install_dir.join(dest_bin_name);
 
-        std::fs::copy(&bundled, &dest)
-            .map_err(|e| format!("Failed to copy mita to {}: {}", dest.display(), e))?;
+        reconcile_cli_binary(&bundled, &dest)?;
+        let legacy_shim =
+            install_dir.join(crate::core::legacy_migrations::legacy_cli_shim_file_name());
+        let home = std::env::var("HOME")
+            .map(PathBuf::from)
+            .map_err(|_| "Cannot determine home directory".to_string())?;
+        let mut legacy_locations = vec![legacy_shim.clone()];
+        legacy_locations.extend(legacy_unix_cli_candidates(
+            &home,
+            Path::new("/usr/local/bin"),
+        ));
+        reconcile_legacy_cli_locations(
+            &bundled,
+            &legacy_shim,
+            &legacy_locations,
+            crate::core::legacy_migrations::compiled_target_data_schema() <= 2,
+        )?;
 
-        use std::os::unix::fs::PermissionsExt;
-        std::fs::set_permissions(&dest, std::fs::Permissions::from_mode(0o755))
-            .map_err(|e| e.to_string())?;
+        if legacy_locations
+            .iter()
+            .filter(|candidate| candidate.exists())
+            .count()
+            > 1
+        {
+            log::info!("Reconciled predecessor CLI copies across multiple Unix PATH locations");
+        }
 
         Ok(CliInstallStatus {
             installed: true,
@@ -587,41 +920,62 @@ pub fn install_mita_cli_sync<R: Runtime>(
     }
 }
 
-/// Copy the bundled `mita` binary to the system PATH (Tauri command wrapper).
+/// Copy the bundled `biyan` binary to the system PATH (Tauri command wrapper).
 #[tauri::command]
-pub async fn install_mita_cli<R: Runtime>(
+pub async fn install_biyan_cli<R: Runtime>(
     app_handle: AppHandle<R>,
 ) -> Result<CliInstallStatus, String> {
-    install_mita_cli_sync(&app_handle)
+    install_biyan_cli_sync(&app_handle)
 }
 
-/// Remove the installed `mita` CLI binary.
+/// Remove the installed `biyan` CLI binary.
 #[tauri::command]
-pub fn uninstall_mita_cli() -> Result<(), String> {
+pub fn uninstall_biyan_cli() -> Result<(), String> {
     #[cfg(windows)]
     {
-        let bin_dir = mita_cli_bin_dir_windows()?;
+        let bin_dir = biyan_cli_bin_dir_windows()?;
+        let mut legacy_locations =
+            vec![bin_dir.join(crate::core::legacy_migrations::legacy_cli_shim_file_name())];
+        if let Some(local_app_data) = std::env::var_os("LOCALAPPDATA") {
+            legacy_locations.extend(legacy_windows_cli_candidates_from_local_app_data(
+                local_app_data,
+            ));
+        }
+        legacy_locations.sort();
+        legacy_locations.dedup();
+        for legacy_shim in legacy_locations {
+            remove_managed_legacy_cli_shim(&legacy_shim)?;
+        }
         remove_from_path_windows(&bin_dir)?;
         return Ok(());
     }
 
     #[cfg(unix)]
     {
-        let dest = mita_cli_install_dir()?.join("mita");
+        let dest = biyan_cli_install_dir()?.join("biyan");
         if dest.exists() {
             std::fs::remove_file(&dest).map_err(|e| {
-                format!(
-                    "Failed to remove Biyan CLI from {}: {}",
-                    dest.display(),
-                    e
-                )
+                format!("Failed to remove Biyan CLI from {}: {}", dest.display(), e)
             })?;
+        }
+        let home = std::env::var("HOME")
+            .map(PathBuf::from)
+            .map_err(|_| "Cannot determine home directory".to_string())?;
+        let mut legacy_locations = legacy_unix_cli_candidates(&home, Path::new("/usr/local/bin"));
+        legacy_locations.push(
+            biyan_cli_install_dir()?
+                .join(crate::core::legacy_migrations::legacy_cli_shim_file_name()),
+        );
+        legacy_locations.sort();
+        legacy_locations.dedup();
+        for legacy_shim in legacy_locations {
+            remove_managed_legacy_cli_shim(&legacy_shim)?;
         }
         Ok(())
     }
 }
 
-/// Build the cleaned shell-file content with all Mita CC env vars stripped out.
+/// Build the cleaned shell-file content with all Biyan CC env vars stripped out.
 fn build_cleaned_env_content(env_file_path: &str) -> String {
     let existing_content = std::fs::read_to_string(env_file_path).unwrap_or_default();
     let cleaned: Vec<&str> = existing_content
@@ -632,7 +986,7 @@ fn build_cleaned_env_content(env_file_path: &str) -> String {
     cleaned.join("\n").trim_end().to_string() + "\n"
 }
 
-/// Clear all Mita-written Claude Code environment variables from the shell config.
+/// Clear all Biyan-written Claude Code environment variables from the shell config.
 /// Uses the same write-probe + osascript-fallback logic as `launch_claude_code_with_config`.
 #[tauri::command]
 pub fn clear_claude_code_env() -> Result<(), String> {
@@ -658,7 +1012,7 @@ pub fn clear_claude_code_env() -> Result<(), String> {
             }
             Err(_) => {
                 // Write cleaned content to a temp file, then use osascript to move it
-                let temp_path = format!("{}/.mita_env_clear.sh", home_dir);
+                let temp_path = format!("{}/.biyan_env_clear.sh", home_dir);
                 std::fs::write(&temp_path, &cleaned).map_err(|e| e.to_string())?;
 
                 let script = format!(
@@ -720,12 +1074,12 @@ pub fn clear_claude_code_env() -> Result<(), String> {
     }
 }
 
-/// Determine the best writable directory for the Mita CLI install (Unix only).
+/// Determine the best writable directory for the Biyan CLI install (Unix only).
 #[cfg(unix)]
-fn mita_cli_install_dir() -> Result<PathBuf, String> {
+fn biyan_cli_install_dir() -> Result<PathBuf, String> {
     let usr_local_bin = PathBuf::from("/usr/local/bin");
     if usr_local_bin.exists() {
-        let probe = usr_local_bin.join(".mita_write_probe");
+        let probe = usr_local_bin.join(".biyan_write_probe");
         if std::fs::write(&probe, b"").is_ok() {
             let _ = std::fs::remove_file(&probe);
             return Ok(usr_local_bin);
@@ -735,16 +1089,23 @@ fn mita_cli_install_dir() -> Result<PathBuf, String> {
     Ok(PathBuf::from(home).join(".local").join("bin"))
 }
 
+fn legacy_unix_cli_candidates(home: &Path, usr_local_bin: &Path) -> Vec<PathBuf> {
+    vec![
+        usr_local_bin.join("mita"),
+        home.join(".local").join("bin").join("mita"),
+    ]
+}
+
 /// Return the directory containing the bundled CLI binary on Windows.
 #[cfg(windows)]
-fn mita_cli_bin_dir_windows() -> Result<PathBuf, String> {
+fn biyan_cli_bin_dir_windows() -> Result<PathBuf, String> {
     let local_app_data =
         std::env::var("LOCALAPPDATA").map_err(|_| "Cannot determine LOCALAPPDATA".to_string())?;
-    Ok(mita_cli_bin_dir_from_local_app_data(local_app_data))
+    Ok(biyan_cli_bin_dir_from_local_app_data(local_app_data))
 }
 
 #[cfg(any(windows, test))]
-fn mita_cli_bin_dir_from_local_app_data(local_app_data: impl AsRef<Path>) -> PathBuf {
+fn biyan_cli_bin_dir_from_local_app_data(local_app_data: impl AsRef<Path>) -> PathBuf {
     local_app_data
         .as_ref()
         .join("Programs")
@@ -753,9 +1114,69 @@ fn mita_cli_bin_dir_from_local_app_data(local_app_data: impl AsRef<Path>) -> Pat
         .join("bin")
 }
 
+#[cfg(any(windows, test))]
+fn legacy_windows_cli_candidates_from_local_app_data(
+    local_app_data: impl AsRef<Path>,
+) -> Vec<PathBuf> {
+    let programs = local_app_data.as_ref().join("Programs");
+    let mut candidates = Vec::new();
+    for product in [BIYAN_PROGRAM_DIR_NAME, "Mita"] {
+        let install_dir = programs.join(product);
+        let resource_bin = install_dir.join("resources").join("bin");
+        candidates.push(resource_bin.join("mita.exe"));
+        candidates.push(resource_bin.join("mita-cli.exe"));
+        candidates.push(install_dir.join("mita-cli.exe"));
+    }
+    candidates
+}
+
+#[cfg(any(windows, test))]
+fn windows_path_identity(path: &str) -> String {
+    path.trim()
+        .trim_matches('"')
+        .replace('/', "\\")
+        .trim_end_matches('\\')
+        .to_ascii_lowercase()
+}
+
+#[cfg(any(windows, test))]
+fn windows_user_path_with_biyan_first(
+    existing: &str,
+    install_dir: &Path,
+    remove_predecessor_entries: bool,
+) -> String {
+    let install_dir_str = install_dir.to_string_lossy().to_string();
+    let install_identity = windows_path_identity(&install_dir_str);
+    let mut blocked = vec![install_identity.clone()];
+    if let Some(biyan_install_dir) = install_identity.strip_suffix("\\resources\\bin") {
+        blocked.push(biyan_install_dir.to_string());
+        if remove_predecessor_entries {
+            if let Some((programs_dir, _)) = biyan_install_dir.rsplit_once('\\') {
+                let legacy_install_dir = format!(r"{programs_dir}\mita");
+                blocked.push(legacy_install_dir.clone());
+                blocked.push(format!(r"{legacy_install_dir}\resources\bin"));
+            }
+        }
+    }
+
+    let mut new_parts = vec![install_dir_str];
+    new_parts.extend(
+        existing
+            .split(';')
+            .map(str::trim)
+            .filter(|part| !part.is_empty())
+            .filter(|part| !blocked.contains(&windows_path_identity(part)))
+            .map(str::to_owned),
+    );
+    new_parts.join(";")
+}
+
 /// Add a directory to the Windows user PATH.
 #[cfg(windows)]
-fn add_to_path_windows(install_dir: &PathBuf) -> Result<(), String> {
+fn add_to_path_windows(
+    install_dir: &PathBuf,
+    remove_predecessor_entries: bool,
+) -> Result<(), String> {
     use std::process::Command;
 
     let install_dir_str = install_dir.to_string_lossy().to_string();
@@ -779,35 +1200,16 @@ fn add_to_path_windows(install_dir: &PathBuf) -> Result<(), String> {
         .trim()
         .to_string();
 
-    // Remove stale old-style PATH entry (..\\Programs\\Jan without \\resources\\bin)
-    // left by previous versions that placed jan.exe next to the GUI binary.
-    let legacy_jan_dir = install_dir
-        .parent()
-        .and_then(|p| p.parent())
-        .map(|p| p.to_string_lossy().to_string());
-
-    let parts: Vec<&str> = existing_user_path
-        .split(';')
-        .filter(|p| !p.is_empty())
-        .filter(|p| {
-            if let Some(ref old) = legacy_jan_dir {
-                !p.eq_ignore_ascii_case(old)
-            } else {
-                true
-            }
-        })
-        .collect();
-
-    if parts
-        .iter()
-        .any(|p| p.eq_ignore_ascii_case(&install_dir_str))
-    {
+    // Put Biyan first even if it was already present later in PATH. A/B retain predecessor PATH
+    // entries after the verified retired shim; C removes those managed entries after shim cleanup.
+    let new_path = windows_user_path_with_biyan_first(
+        &existing_user_path,
+        install_dir,
+        remove_predecessor_entries,
+    );
+    if new_path == existing_user_path {
         return Ok(());
     }
-
-    let mut new_parts = vec![install_dir_str.as_str()];
-    new_parts.extend(parts);
-    let new_path = new_parts.join(";");
 
     let mut cmd_write = Command::new("powershell");
     cmd_write.args([
@@ -909,15 +1311,19 @@ fn remove_from_path_windows(dir: &PathBuf) -> Result<(), String> {
 mod tests {
     use super::*;
     use crate::core::app::constants::*;
+    use crate::core::legacy_migrations::LEGACY_LOCAL_DATA_DIRS;
     use std::fs;
     use tempfile::tempdir;
 
     fn create_all_data(dir: &std::path::Path) {
-        for subdir in MITA_DATA_SUBDIRS {
+        for subdir in BIYAN_DATA_SUBDIRS
+            .iter()
+            .chain(LEGACY_LOCAL_DATA_DIRS.iter())
+        {
             fs::create_dir_all(dir.join(subdir)).unwrap();
             fs::write(dir.join(subdir).join("dummy.txt"), "data").unwrap();
         }
-        for file in MITA_DATA_FILES {
+        for file in BIYAN_DATA_FILES {
             fs::write(dir.join(file), "data").unwrap();
         }
     }
@@ -930,15 +1336,29 @@ mod tests {
         names.iter().all(|n| dir.join(n).exists())
     }
 
+    fn make_test_file_readonly(path: &Path) {
+        let mut permissions = fs::metadata(path).unwrap().permissions();
+        permissions.set_readonly(true);
+        fs::set_permissions(path, permissions).unwrap();
+    }
+
+    #[cfg(windows)]
+    fn make_test_file_writable(path: &Path) {
+        let mut permissions = fs::metadata(path).unwrap().permissions();
+        permissions.set_readonly(false);
+        fs::set_permissions(path, permissions).unwrap();
+    }
+
     #[test]
-    fn test_write_env_to_shell_uses_mita_marker_and_cleans_legacy() {
+    fn test_write_env_to_shell_uses_biyan_marker_and_cleans_legacy() {
         let tmp = tempdir().unwrap();
         let env_file = tmp.path().join("env");
+        let legacy_marker = crate::core::legacy_migrations::legacy_local_api_marker_fixture();
         fs::write(
             &env_file,
             format!(
                 "KEEP_ME=1\n{}\nexport ANTHROPIC_AUTH_TOKEN='old'\n{}\n",
-                LEGACY_JAN_LOCAL_API_MARKER, MITA_LOCAL_API_MARKER
+                legacy_marker, BIYAN_LOCAL_API_MARKER
             ),
         )
         .unwrap();
@@ -951,29 +1371,30 @@ mod tests {
 
         let content = fs::read_to_string(&env_file).unwrap();
         assert!(content.contains("KEEP_ME=1"));
-        assert!(content.contains(MITA_LOCAL_API_MARKER));
+        assert!(content.contains(BIYAN_LOCAL_API_MARKER));
         assert!(content.contains("export ANTHROPIC_AUTH_TOKEN='new'"));
-        assert!(!content.contains(LEGACY_JAN_LOCAL_API_MARKER));
+        assert!(!content.contains(legacy_marker));
         assert!(!content.contains("export ANTHROPIC_AUTH_TOKEN='old'"));
     }
 
     #[test]
-    fn test_build_cleaned_env_content_removes_mita_and_legacy_markers() {
+    fn test_build_cleaned_env_content_removes_biyan_and_legacy_markers() {
         let tmp = tempdir().unwrap();
         let env_file = tmp.path().join("env");
+        let legacy_marker = crate::core::legacy_migrations::legacy_local_api_marker_fixture();
         fs::write(
             &env_file,
             format!(
                 "KEEP_ME=1\n{}\n{}\nexport ANTHROPIC_BASE_URL='old'\n",
-                MITA_LOCAL_API_MARKER, LEGACY_JAN_LOCAL_API_MARKER
+                BIYAN_LOCAL_API_MARKER, legacy_marker
             ),
         )
         .unwrap();
 
         let content = build_cleaned_env_content(env_file.to_str().unwrap());
         assert!(content.contains("KEEP_ME=1"));
-        assert!(!content.contains(MITA_LOCAL_API_MARKER));
-        assert!(!content.contains(LEGACY_JAN_LOCAL_API_MARKER));
+        assert!(!content.contains(BIYAN_LOCAL_API_MARKER));
+        assert!(!content.contains(legacy_marker));
         assert!(!content.contains("export ANTHROPIC_BASE_URL"));
     }
 
@@ -985,25 +1406,25 @@ mod tests {
 
         delete_conversations(d);
 
-        assert!(!exists_any(d, MITA_DATA_DIRS_CONVERSATIONS));
-        assert!(exists_all(d, MITA_DATA_DIRS_MODELS));
-        assert!(exists_all(d, MITA_DATA_DIRS_COMMON));
+        assert!(!exists_any(d, BIYAN_DATA_DIRS_CONVERSATIONS));
+        assert!(exists_all(d, LEGACY_LOCAL_DATA_DIRS));
+        assert!(exists_all(d, BIYAN_DATA_DIRS_COMMON));
         assert!(d.join("settings.json").exists());
         assert!(d.join("mcp_config.json").exists());
     }
 
     #[test]
-    fn test_delete_models_and_configs_only_removes_model_dirs_and_config_files() {
+    fn test_delete_configurations_preserves_retired_local_data() {
         let tmp = tempdir().unwrap();
         let d = tmp.path();
         create_all_data(d);
 
-        delete_models_and_configs(d);
+        delete_configurations(d);
 
-        assert!(!exists_any(d, MITA_DATA_DIRS_MODELS));
-        assert!(!exists_any(d, MITA_DATA_FILES_CONFIGS));
-        assert!(exists_all(d, MITA_DATA_DIRS_CONVERSATIONS));
-        assert!(exists_all(d, MITA_DATA_DIRS_COMMON));
+        assert!(exists_all(d, LEGACY_LOCAL_DATA_DIRS));
+        assert!(!exists_any(d, BIYAN_DATA_FILES_CONFIGS));
+        assert!(exists_all(d, BIYAN_DATA_DIRS_CONVERSATIONS));
+        assert!(exists_all(d, BIYAN_DATA_DIRS_COMMON));
         assert!(d.join("settings.json").exists());
     }
 
@@ -1015,9 +1436,9 @@ mod tests {
 
         delete_common_data(d);
 
-        assert!(!exists_any(d, MITA_DATA_DIRS_COMMON));
-        assert!(exists_all(d, MITA_DATA_DIRS_CONVERSATIONS));
-        assert!(exists_all(d, MITA_DATA_DIRS_MODELS));
+        assert!(!exists_any(d, BIYAN_DATA_DIRS_COMMON));
+        assert!(exists_all(d, BIYAN_DATA_DIRS_CONVERSATIONS));
+        assert!(exists_all(d, LEGACY_LOCAL_DATA_DIRS));
         assert!(d.join("settings.json").exists());
         assert!(d.join("mcp_config.json").exists());
     }
@@ -1031,32 +1452,32 @@ mod tests {
         delete_settings(d);
 
         assert!(!d.join("settings.json").exists());
-        assert!(exists_all(d, MITA_DATA_DIRS_CONVERSATIONS));
-        assert!(exists_all(d, MITA_DATA_DIRS_MODELS));
-        assert!(exists_all(d, MITA_DATA_DIRS_COMMON));
+        assert!(exists_all(d, BIYAN_DATA_DIRS_CONVERSATIONS));
+        assert!(exists_all(d, LEGACY_LOCAL_DATA_DIRS));
+        assert!(exists_all(d, BIYAN_DATA_DIRS_COMMON));
         assert!(d.join("mcp_config.json").exists());
     }
 
     #[test]
     fn test_settings_json_survives_when_keeping_any_category() {
-        // Simulate: keep_app_data=true, keep_models_and_configs=false
+        // Simulate: keep_app_data=true, keep_configurations=false
         let tmp = tempdir().unwrap();
         let d = tmp.path();
         create_all_data(d);
 
         delete_common_data(d);
-        delete_models_and_configs(d);
+        delete_configurations(d);
         // settings.json should NOT be deleted because keep_app_data=true
         assert!(d.join("settings.json").exists());
 
-        // Simulate: keep_app_data=false, keep_models_and_configs=true
+        // Simulate: keep_app_data=false, keep_configurations=true
         let tmp2 = tempdir().unwrap();
         let d2 = tmp2.path();
         create_all_data(d2);
 
         delete_common_data(d2);
         delete_conversations(d2);
-        // settings.json should NOT be deleted because keep_models_and_configs=true
+        // settings.json should NOT be deleted because keep_configurations=true
         assert!(d2.join("settings.json").exists());
     }
 
@@ -1068,12 +1489,13 @@ mod tests {
 
         delete_common_data(d);
         delete_conversations(d);
-        delete_models_and_configs(d);
+        delete_configurations(d);
         delete_settings(d);
 
         assert!(!d.join("settings.json").exists());
-        assert!(!exists_any(d, MITA_DATA_SUBDIRS));
-        assert!(!exists_any(d, MITA_DATA_FILES));
+        assert!(!exists_any(d, BIYAN_DATA_SUBDIRS));
+        assert!(!exists_any(d, BIYAN_DATA_FILES));
+        assert!(exists_all(d, LEGACY_LOCAL_DATA_DIRS));
     }
 
     #[test]
@@ -1082,7 +1504,7 @@ mod tests {
         let d = tmp.path();
         // Nothing created — should not panic
         delete_conversations(d);
-        delete_models_and_configs(d);
+        delete_configurations(d);
         delete_common_data(d);
         delete_settings(d);
     }
@@ -1091,11 +1513,9 @@ mod tests {
     fn test_is_safe_to_delete() {
         assert!(!is_safe_to_delete(std::path::Path::new("/")));
         assert!(!is_safe_to_delete(std::path::Path::new("/home")));
+        assert!(is_safe_to_delete(std::path::Path::new("/home/user/biyan")));
         assert!(is_safe_to_delete(std::path::Path::new(
-            "/home/user/mita"
-        )));
-        assert!(is_safe_to_delete(std::path::Path::new(
-            "/home/user/.local/share/mita"
+            "/home/user/.local/share/biyan"
         )));
     }
 
@@ -1128,9 +1548,9 @@ mod tests {
     }
 
     #[test]
-    fn test_windows_mita_cli_bin_dir_uses_biyan_install_dir() {
+    fn test_windows_biyan_cli_bin_dir_uses_biyan_install_dir() {
         let local_app_data = PathBuf::from(r"C:\Users\Owner\AppData\Local");
-        let bin_dir = mita_cli_bin_dir_from_local_app_data(&local_app_data);
+        let bin_dir = biyan_cli_bin_dir_from_local_app_data(&local_app_data);
 
         assert_eq!(
             bin_dir,
@@ -1140,5 +1560,228 @@ mod tests {
                 .join("resources")
                 .join("bin")
         );
+    }
+
+    #[test]
+    fn managed_legacy_cli_shim_is_removed_but_user_owned_binary_is_preserved() {
+        let tmp = tempdir().unwrap();
+        let source = tmp.path().join("biyan-source");
+        let managed = tmp.path().join("managed-predecessor");
+        fs::write(&source, b"remote-only-cli").unwrap();
+        reconcile_managed_legacy_cli_shim_with_hashes(&source, &managed, &[]).unwrap();
+        assert!(managed.is_file());
+        assert!(cli_install_marker(&managed).is_file());
+        remove_managed_legacy_cli_shim(&managed).unwrap();
+        assert!(!managed.exists());
+        assert!(!cli_install_marker(&managed).exists());
+
+        let user_owned = tmp.path().join("user-owned-predecessor");
+        fs::write(&user_owned, b"user-owned").unwrap();
+        reconcile_managed_legacy_cli_shim_with_hashes(&source, &user_owned, &[]).unwrap();
+        assert_eq!(fs::read(&user_owned).unwrap(), b"user-owned");
+        remove_managed_legacy_cli_shim(&user_owned).unwrap();
+        assert_eq!(fs::read(&user_owned).unwrap(), b"user-owned");
+    }
+
+    #[test]
+    fn verified_markerless_0633_cli_is_taken_over_but_unknown_or_tampered_cli_is_preserved() {
+        let tmp = tempdir().unwrap();
+        let source = tmp.path().join("biyan-source");
+        let known_legacy = tmp.path().join("known-legacy");
+        fs::write(&source, b"remote-only-cli").unwrap();
+
+        let interrupted_marker = tmp.path().join("interrupted-marker");
+        fs::write(&interrupted_marker, b"remote-only-cli").unwrap();
+        assert!(
+            reconcile_managed_legacy_cli_shim_with_hashes(&source, &interrupted_marker, &[])
+                .unwrap()
+        );
+        assert!(managed_cli_marker_matches_binary(&interrupted_marker));
+
+        fs::write(&known_legacy, b"verified-0.6.633-cli").unwrap();
+        let legacy_digest = sha256_file(&known_legacy).unwrap();
+
+        assert!(reconcile_managed_legacy_cli_shim_with_hashes(
+            &source,
+            &known_legacy,
+            &[legacy_digest.as_str()]
+        )
+        .unwrap());
+        assert_eq!(fs::read(&known_legacy).unwrap(), b"remote-only-cli");
+        assert!(managed_cli_marker_matches_binary(&known_legacy));
+
+        let tampered = tmp.path().join("tampered");
+        reconcile_cli_binary(&source, &tampered).unwrap();
+        fs::write(&tampered, b"user-replaced-content").unwrap();
+        assert!(!reconcile_managed_legacy_cli_shim_with_hashes(
+            &source,
+            &tampered,
+            &[legacy_digest.as_str()]
+        )
+        .unwrap());
+        assert_eq!(fs::read(&tampered).unwrap(), b"user-replaced-content");
+    }
+
+    #[test]
+    fn readonly_cli_sources_and_stale_staging_remain_upgradeable() {
+        let tmp = tempdir().unwrap();
+        let source_v1 = tmp.path().join("biyan-source-v1");
+        let source_v2 = tmp.path().join("biyan-source-v2");
+        let destination = tmp.path().join("biyan-managed");
+        let stale_staging = tmp
+            .path()
+            .join(format!(".biyan.installing-{}", std::process::id()));
+        fs::write(&source_v1, b"remote-only-cli-v1").unwrap();
+        fs::write(&source_v2, b"remote-only-cli-v2").unwrap();
+        fs::write(&stale_staging, b"stale-partial-cli").unwrap();
+        make_test_file_readonly(&source_v1);
+        make_test_file_readonly(&source_v2);
+        make_test_file_readonly(&stale_staging);
+
+        reconcile_cli_binary(&source_v1, &destination).unwrap();
+        assert_eq!(fs::read(&destination).unwrap(), b"remote-only-cli-v1");
+        assert!(managed_cli_marker_matches_binary(&destination));
+        assert!(!stale_staging.exists());
+
+        // Simulate a managed destination produced by an older build which
+        // copied the bundle's read-only attribute onto the installed CLI.
+        make_test_file_readonly(&destination);
+        reconcile_cli_binary(&source_v2, &destination).unwrap();
+        assert_eq!(fs::read(&destination).unwrap(), b"remote-only-cli-v2");
+        assert!(managed_cli_marker_matches_binary(&destination));
+        assert!(!fs::metadata(&destination).unwrap().permissions().readonly());
+
+        let marker: serde_json::Value =
+            serde_json::from_slice(&fs::read(cli_install_marker(&destination)).unwrap()).unwrap();
+        let source_v2_digest = sha256_file(&source_v2).unwrap();
+        assert_eq!(
+            marker.get("sha256").and_then(serde_json::Value::as_str),
+            Some(source_v2_digest.as_str())
+        );
+
+        #[cfg(windows)]
+        for path in [source_v1, source_v2] {
+            make_test_file_writable(&path);
+        }
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn failed_managed_cli_replace_restores_readonly_destination() {
+        let tmp = tempdir().unwrap();
+        let missing_staging = tmp.path().join("missing-staging");
+        let destination = tmp.path().join("managed-cli");
+        fs::write(&destination, b"existing-managed-cli").unwrap();
+        make_test_file_readonly(&destination);
+
+        let error = replace_managed_cli_atomically(&missing_staging, &destination).unwrap_err();
+
+        assert!(error.contains("commit_tmp:"));
+        assert_eq!(fs::read(&destination).unwrap(), b"existing-managed-cli");
+        assert!(fs::metadata(&destination).unwrap().permissions().readonly());
+        make_test_file_writable(&destination);
+    }
+
+    #[test]
+    fn unix_multi_path_legacy_copies_are_taken_over_in_ab_and_removed_in_c() {
+        let tmp = tempdir().unwrap();
+        let home = tmp.path().join("home");
+        let usr_local_bin = tmp.path().join("usr-local-bin");
+        let candidates = legacy_unix_cli_candidates(&home, &usr_local_bin);
+        for candidate in &candidates {
+            fs::create_dir_all(candidate.parent().unwrap()).unwrap();
+            fs::write(candidate, b"verified-0.6.633-cli").unwrap();
+        }
+        let legacy_digest = sha256_file(&candidates[0]).unwrap();
+        let source = tmp.path().join("biyan-source");
+        fs::write(&source, b"remote-only-cli").unwrap();
+
+        reconcile_legacy_cli_locations_with_hashes(
+            &source,
+            &candidates[0],
+            &candidates,
+            true,
+            &[legacy_digest.as_str()],
+        )
+        .unwrap();
+        for candidate in &candidates {
+            assert_eq!(fs::read(candidate).unwrap(), b"remote-only-cli");
+            assert!(managed_cli_marker_matches_binary(candidate));
+        }
+
+        reconcile_legacy_cli_locations_with_hashes(
+            &source,
+            &candidates[0],
+            &candidates,
+            false,
+            &[legacy_digest.as_str()],
+        )
+        .unwrap();
+        for candidate in &candidates {
+            assert!(!candidate.exists());
+            assert!(!cli_install_marker(candidate).exists());
+        }
+    }
+
+    #[test]
+    fn windows_candidate_scan_covers_current_and_predecessor_resource_bins() {
+        let local_app_data = PathBuf::from(r"C:\Users\Owner\AppData\Local");
+        let candidates = legacy_windows_cli_candidates_from_local_app_data(&local_app_data);
+        for product in ["Biyan", "Mita"] {
+            let install = local_app_data.join("Programs").join(product);
+            assert!(candidates.contains(&install.join("resources").join("bin").join("mita.exe")));
+            assert!(
+                candidates.contains(&install.join("resources").join("bin").join("mita-cli.exe"))
+            );
+            assert!(candidates.contains(&install.join("mita-cli.exe")));
+        }
+    }
+
+    #[test]
+    fn windows_path_puts_biyan_first_in_ab_and_removes_predecessor_entries_in_c() {
+        let current = PathBuf::from(r"C:\Users\Owner\AppData\Local\Programs\Biyan\resources\bin");
+        let old_root = r"C:\Users\Owner\AppData\Local\Programs\Mita";
+        let old_bin = r"C:\Users\Owner\AppData\Local\Programs\Mita\resources\bin";
+        let existing = format!(r"{old_bin};C:\Tools;{};{old_root}", current.display());
+
+        let updated_ab = windows_user_path_with_biyan_first(&existing, &current, false);
+        let parts: Vec<_> = updated_ab.split(';').collect();
+        assert_eq!(
+            windows_path_identity(parts[0]),
+            windows_path_identity(&current.to_string_lossy())
+        );
+        assert!(parts.iter().any(|part| *part == r"C:\Tools"));
+        assert!(parts
+            .iter()
+            .any(|part| windows_path_identity(part) == windows_path_identity(old_bin)));
+        assert!(parts
+            .iter()
+            .any(|part| windows_path_identity(part) == windows_path_identity(old_root)));
+        assert_eq!(
+            parts
+                .iter()
+                .filter(|part| {
+                    windows_path_identity(part) == windows_path_identity(&current.to_string_lossy())
+                })
+                .count(),
+            1
+        );
+
+        let updated_c = windows_user_path_with_biyan_first(&existing, &current, true);
+        let c_parts: Vec<_> = updated_c.split(';').collect();
+        assert!(!c_parts
+            .iter()
+            .any(|part| windows_path_identity(part) == windows_path_identity(old_bin)));
+        assert!(!c_parts
+            .iter()
+            .any(|part| windows_path_identity(part) == windows_path_identity(old_root)));
+    }
+
+    #[test]
+    fn production_0633_cli_fingerprints_are_sha256_values() {
+        assert_eq!(LEGACY_MANAGED_CLI_SHA256.len(), 2);
+        assert!(LEGACY_MANAGED_CLI_SHA256.iter().all(|digest| {
+            digest.len() == 64 && digest.bytes().all(|byte| byte.is_ascii_hexdigit())
+        }));
     }
 }

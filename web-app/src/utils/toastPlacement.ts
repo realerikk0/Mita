@@ -19,7 +19,7 @@ export function isNotificationPosition(
   return (NOTIFICATION_POSITIONS as readonly string[]).includes(value)
 }
 
-/** Windows + Tauri: avoid overlap with custom caption controls (see janhq/jan#7878). */
+/** Windows + Tauri: avoid overlap with custom caption controls (see upstream project#7878). */
 export function getDefaultNotificationPosition(): NotificationPosition {
   if (IS_WINDOWS && IS_TAURI) {
     return 'bottom-right'

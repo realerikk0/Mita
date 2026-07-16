@@ -1,4 +1,4 @@
-name: Desktop Release
+name: Desktop Release Candidate
 
 on:
   push:
@@ -7,7 +7,7 @@ on:
   workflow_dispatch:
     inputs:
       version:
-        description: "Release tag to build, for example v0.6.619"
+        description: "Existing release tag to build, for example v0.6.634"
         required: true
         type: string
 
@@ -15,123 +15,159 @@ permissions:
   contents: write
 
 concurrency:
-  group: desktop-release-${{ github.ref }}
+  group: desktop-candidate-${{ github.event.inputs.version || github.ref }}
   cancel-in-progress: false
 
 env:
   NODE_OPTIONS: "--max-old-space-size=4196"
-  YARN_ENABLE_IMMUTABLE_INSTALLS: "false"
+  YARN_ENABLE_IMMUTABLE_INSTALLS: "true"
 
 jobs:
-  preflight-version:
-    name: Check release version
+  preflight:
+    name: Validate immutable release source
     runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.release.outputs.version }}
+      tag: ${{ steps.release.outputs.tag }}
+      published_at: ${{ steps.release.outputs.published_at }}
+      source_commit: ${{ steps.release.outputs.source_commit }}
+      migration_phase: ${{ steps.release.outputs.migration_phase }}
+      data_schema: ${{ steps.release.outputs.data_schema }}
     steps:
-      - name: Checkout
+      - name: Checkout tag
         uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.inputs.version || github.ref }}
+          fetch-depth: 0
 
       - name: Setup Node
         uses: actions/setup-node@v4
         with:
           node-version: "20"
 
-      - name: Derive version
-        id: version
+      - name: Resolve immutable release metadata
+        id: release
         shell: bash
         env:
-          RELEASE_VERSION: ${{ github.event.inputs.version || github.ref_name }}
+          RELEASE_TAG: ${{ github.event.inputs.version || github.ref_name }}
         run: |
-          VERSION="${RELEASE_VERSION#v}"
-          if [ -z "$VERSION" ] || [ "$VERSION" = "$RELEASE_VERSION" ]; then
-            echo "Release tags must start with v, for example v0.6.599" >&2
+          set -euo pipefail
+          if [[ ! "$RELEASE_TAG" =~ ^v[0-9]+\.[0-9]+\.[0-9]+([+-][0-9A-Za-z.-]+)?$ ]]; then
+            echo "Release tag must be an exact semantic version prefixed with v" >&2
             exit 1
           fi
-          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+          version="${RELEASE_TAG#v}"
+          test "$(git tag --points-at HEAD | grep -Fx "$RELEASE_TAG")" = "$RELEASE_TAG"
+          node scripts/release-version.mjs check "$version"
+          jq -e '
+            .schema == 1
+            and (.migrationPhase == "A" or .migrationPhase == "B" or .migrationPhase == "C")
+            and ((.migrationPhase == "A" and .dataSchema == 1)
+              or (.migrationPhase == "B" and .dataSchema == 2)
+              or (.migrationPhase == "C" and .dataSchema == 3))
+          ' biyan-release.json >/dev/null
+          {
+            echo "version=$version"
+            echo "tag=$RELEASE_TAG"
+            echo "published_at=$(git show -s --format=%cI HEAD)"
+            echo "source_commit=$(git rev-parse HEAD)"
+            echo "migration_phase=$(jq -r .migrationPhase biyan-release.json)"
+            echo "data_schema=$(jq -r .dataSchema biyan-release.json)"
+          } >> "$GITHUB_OUTPUT"
 
-      - name: Check source release version
-        shell: bash
-        env:
-          VERSION: ${{ steps.version.outputs.version }}
-        run: node scripts/release-version.mjs check "$VERSION"
+      - name: Verify release safety policy
+        run: node scripts/ci/verify-release-policy.mjs
+
+      - name: Test release policy contracts
+        run: node --test scripts/ci/__tests__/release-policy.test.mjs
+
+  quality-gate:
+    name: Run candidate lint and test suites
+    runs-on: ubuntu-22.04
+    needs: preflight
+    timeout-minutes: 60
+    steps:
+      - name: Checkout tag
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.preflight.outputs.tag }}
+          fetch-depth: 0
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+
+      - name: Configure Yarn
+        run: |
+          corepack enable
+          corepack prepare yarn@4.5.3 --activate
+
+      - name: Install Rust and Tauri system dependencies
+        run: |
+          rustup default stable
+          sudo apt-get update
+          sudo apt-get install -y \
+            libglib2.0-dev libatk1.0-dev libpango1.0-dev libgtk-3-dev \
+            libsoup-3.0-dev libwebkit2gtk-4.1-dev librsvg2-dev libfuse2 \
+            webkit2gtk-driver
+
+      - name: Run lint, TypeScript tests, and Rust tests
+        run: make test
+
+      - name: Test updater candidate, promotion, and routing contracts
+        run: node --test scripts/updater/__tests__/updater.test.mjs
 
   build-macos:
-    name: Build macOS Universal
+    name: Build signed macOS candidate
     runs-on: macos-latest
-    needs: preflight-version
-    environment: release-distribution
+    needs: [preflight, quality-gate]
+    environment: release-build
     timeout-minutes: 180
     steps:
-      - name: Checkout
+      - name: Checkout tag
         uses: actions/checkout@v4
-
-      - name: Derive version
-        id: version
-        shell: bash
-        env:
-          RELEASE_VERSION: ${{ github.event.inputs.version || github.ref_name }}
-        run: |
-          VERSION="${RELEASE_VERSION#v}"
-          if [ -z "$VERSION" ] || [ "$VERSION" = "$RELEASE_VERSION" ]; then
-            echo "Release tags must start with v, for example v0.6.599" >&2
-            exit 1
-          fi
-          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+        with:
+          ref: ${{ needs.preflight.outputs.tag }}
 
       - name: Setup Node
         uses: actions/setup-node@v4
         with:
           node-version: "20"
 
-      - name: Setup Yarn
+      - name: Configure Yarn
         shell: bash
         run: |
           corepack enable
           corepack prepare yarn@4.5.3 --activate
-          yarn --version
-          yarn config set -H enableImmutableInstalls false
 
       - name: Setup Rust targets
         shell: bash
         run: |
           rustup default stable
           rustup target add aarch64-apple-darwin x86_64-apple-darwin
-          rustc --version
-          cargo --version
-
-      - name: Select Xcode
-        shell: bash
-        run: |
-          if [ -d /Applications/Xcode_26.2.app ]; then
-            sudo xcode-select -s /Applications/Xcode_26.2.app/Contents/Developer
-          fi
-          xcodebuild -version
 
       - name: Stamp release version
-        shell: bash
         env:
-          VERSION: ${{ steps.version.outputs.version }}
+          VERSION: ${{ needs.preflight.outputs.version }}
         run: node scripts/release-version.mjs stamp "$VERSION"
 
-      - name: Write notarization API key
+      - name: Require Biyan signing material
         shell: bash
         env:
+          BIYAN_SIGNING_KEY: ${{ secrets.BIYAN_SIGNING_KEY }}
+          BIYAN_DATA_SCHEMA: ${{ needs.preflight.outputs.data_schema }}
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
           NOTARIZE_P8_BASE64: ${{ secrets.NOTARIZE_P8_BASE64 }}
         run: |
           set -euo pipefail
-
-          if [ -z "${NOTARIZE_P8_BASE64:-}" ]; then
-            echo "Missing NOTARIZE_P8_BASE64 secret" >&2
-            exit 1
-          fi
-
-          python3 - <<'PY'
-          import base64
-          import os
-          from pathlib import Path
-
-          key = base64.b64decode(os.environ["NOTARIZE_P8_BASE64"])
-          Path("/tmp/notary-key.p8").write_bytes(key)
-          PY
+          for name in BIYAN_SIGNING_KEY TAURI_SIGNING_PRIVATE_KEY NOTARIZE_P8_BASE64; do
+            if [ -z "${!name:-}" ]; then
+              echo "Missing required production secret: $name" >&2
+              exit 1
+            fi
+          done
+          printf '%s' "$NOTARIZE_P8_BASE64" | base64 --decode > /tmp/notary-key.p8
           chmod 600 /tmp/notary-key.p8
 
       - name: Import Developer ID certificate
@@ -154,10 +190,22 @@ jobs:
           APPLE_API_KEY_PATH: /tmp/notary-key.p8
           TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
           TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
-          MITA_SIGNING_KEY: ${{ secrets.MITA_SIGNING_KEY }}
+          BIYAN_SIGNING_KEY: ${{ secrets.BIYAN_SIGNING_KEY }}
+          BIYAN_DATA_SCHEMA: ${{ needs.preflight.outputs.data_schema }}
         run: make build
 
-      - name: Notarize macOS DMGs
+      - name: Verify macOS candidate
+        shell: bash
+        env:
+          VERSION: ${{ needs.preflight.outputs.version }}
+        run: |
+          set -euo pipefail
+          make verify-macos-candidate \
+            APP="src-tauri/target/universal-apple-darwin/release/bundle/macos/Biyan.app" \
+            DMG="src-tauri/target/universal-apple-darwin/release/bundle/dmg/Biyan_${VERSION}_universal.dmg" \
+            VERSION="$VERSION"
+
+      - name: Notarize and verify DMGs
         shell: bash
         env:
           APPLE_API_ISSUER: ${{ secrets.NOTARY_ISSUER }}
@@ -166,170 +214,76 @@ jobs:
         run: |
           set -euo pipefail
           shopt -s nullglob
-
-          if [ -z "${APPLE_API_ISSUER:-}" ]; then
-            echo "Missing NOTARY_ISSUER secret" >&2
-            exit 1
-          fi
-
-          if [ -z "${APPLE_API_KEY:-}" ]; then
-            echo "Missing NOTARY_KEY_ID secret" >&2
-            exit 1
-          fi
-
-          if [ ! -f "$APPLE_API_KEY_PATH" ]; then
-            echo "Missing notarization API key at $APPLE_API_KEY_PATH" >&2
-            exit 1
-          fi
-
-          dmgs=(src-tauri/target/universal-apple-darwin/release/bundle/dmg/*.dmg)
-          if [ "${#dmgs[@]}" -eq 0 ]; then
-            echo "No macOS DMG found to notarize" >&2
-            exit 1
-          fi
-
+          dmgs=(src-tauri/target/universal-apple-darwin/release/bundle/dmg/Biyan_*.dmg)
+          [ "${#dmgs[@]}" -gt 0 ] || { echo "No Biyan DMG found" >&2; exit 1; }
           for dmg in "${dmgs[@]}"; do
-            echo "Submitting DMG for notarization: $dmg"
             xcrun notarytool submit "$dmg" \
               --key "$APPLE_API_KEY_PATH" \
               --key-id "$APPLE_API_KEY" \
               --issuer "$APPLE_API_ISSUER" \
               --wait
-
-            echo "Stapling notarization ticket to $dmg"
             xcrun stapler staple "$dmg"
             xcrun stapler validate "$dmg"
           done
+          codesign --verify --deep --strict --verbose=2 \
+            src-tauri/target/universal-apple-darwin/release/bundle/macos/Biyan.app
 
-      - name: Verify macOS signing and notarization
-        shell: bash
-        run: |
-          set -euo pipefail
-          shopt -s nullglob
-
-          apps=(src-tauri/target/universal-apple-darwin/release/bundle/macos/*.app)
-          dmgs=(src-tauri/target/universal-apple-darwin/release/bundle/dmg/*.dmg)
-
-          if [ "${#apps[@]}" -eq 0 ]; then
-            echo "No macOS app bundle found to verify" >&2
-            exit 1
-          fi
-
-          if [ "${#dmgs[@]}" -eq 0 ]; then
-            echo "No macOS DMG found to verify" >&2
-            exit 1
-          fi
-
-          for app in "${apps[@]}"; do
-            echo "Verifying code signature for $app"
-            codesign --verify --deep --strict --verbose=2 "$app"
-            echo "Validating notarization ticket for $app"
-            xcrun stapler validate "$app"
-          done
-
-          for dmg in "${dmgs[@]}"; do
-            echo "Validating notarization ticket for $dmg"
-            xcrun stapler validate "$dmg"
-          done
-
-      - name: Verify bundled pre-install extensions
-        shell: bash
-        run: |
-          set -euo pipefail
-
-          app_root="src-tauri/target/universal-apple-darwin/release/bundle/macos"
-          app_found=false
-          required_extensions=(
-            "janhq-rag-extension"
-            "janhq-conversational-extension"
-          )
-
-          while IFS= read -r app; do
-            app_found=true
-            pre_install_dir="$app/Contents/Resources/resources/pre-install"
-            if [ ! -d "$pre_install_dir" ]; then
-              echo "Missing pre-install directory: $pre_install_dir" >&2
-              exit 1
-            fi
-
-            for extension in "${required_extensions[@]}"; do
-              if ! find "$pre_install_dir" -maxdepth 1 -type f -name "${extension}-*.tgz" | grep -q .; then
-                echo "Missing required bundled extension ${extension} in $pre_install_dir" >&2
-                exit 1
-              fi
-            done
-
-            echo "Verified bundled pre-install extensions in $pre_install_dir"
-            find "$pre_install_dir" -maxdepth 1 -type f -name "*.tgz" -print | sort
-          done < <(find "$app_root" -maxdepth 1 -type d -name "*.app" | sort)
-
-          if [ "$app_found" != "true" ]; then
-            echo "No macOS app bundle found under $app_root" >&2
-            exit 1
-          fi
-
-      - name: Upload macOS artifact
+      - name: Upload macOS candidate
         uses: actions/upload-artifact@v4
         with:
-          name: mita-macos-universal-${{ steps.version.outputs.version }}
+          name: biyan-macos-universal-${{ needs.preflight.outputs.version }}
           if-no-files-found: error
           path: |
-            src-tauri/target/universal-apple-darwin/release/bundle/dmg/*.dmg
-            src-tauri/target/universal-apple-darwin/release/bundle/macos/*.app.tar.gz
-            src-tauri/target/universal-apple-darwin/release/bundle/macos/*.app.tar.gz.sig
+            src-tauri/target/universal-apple-darwin/release/bundle/dmg/Biyan_*.dmg
+            src-tauri/target/universal-apple-darwin/release/bundle/macos/Biyan.app.tar.gz
+            src-tauri/target/universal-apple-darwin/release/bundle/macos/Biyan.app.tar.gz.sig
 
-  build-windows-x64:
-    name: Build Windows x64
+  build-windows:
+    name: Build signed Windows candidate
     runs-on: windows-latest
-    needs: preflight-version
-    environment: release-distribution
+    needs: [preflight, quality-gate]
+    environment: release-build
     timeout-minutes: 180
     steps:
-      - name: Checkout
+      - name: Checkout tag
         uses: actions/checkout@v4
-
-      - name: Derive version
-        id: version
-        shell: bash
-        env:
-          RELEASE_VERSION: ${{ github.event.inputs.version || github.ref_name }}
-        run: |
-          VERSION="${RELEASE_VERSION#v}"
-          if [ -z "$VERSION" ] || [ "$VERSION" = "$RELEASE_VERSION" ]; then
-            echo "Release tags must start with v, for example v0.6.599" >&2
-            exit 1
-          fi
-          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+        with:
+          ref: ${{ needs.preflight.outputs.tag }}
 
       - name: Setup Node
         uses: actions/setup-node@v4
         with:
           node-version: "20"
 
-      - name: Setup Yarn
+      - name: Configure Yarn
         shell: bash
         run: |
           corepack enable
           corepack prepare yarn@4.5.3 --activate
-          yarn --version
-          yarn config set -H enableImmutableInstalls false
 
-      - name: Setup Rust
-        shell: bash
+      - name: Setup Rust and GNU make
+        shell: pwsh
         run: |
           rustup default stable
-          rustc --version
-          cargo --version
-
-      - name: Install GNU make
-        shell: pwsh
-        run: choco install make -y --no-progress
+          choco install make -y --no-progress
 
       - name: Stamp release version
         shell: bash
         env:
-          VERSION: ${{ steps.version.outputs.version }}
+          VERSION: ${{ needs.preflight.outputs.version }}
         run: node scripts/release-version.mjs stamp "$VERSION" --windows
+
+      - name: Require Biyan signing material
+        shell: bash
+        env:
+          BIYAN_SIGNING_KEY: ${{ secrets.BIYAN_SIGNING_KEY }}
+          BIYAN_DATA_SCHEMA: ${{ needs.preflight.outputs.data_schema }}
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+        run: |
+          set -euo pipefail
+          for name in BIYAN_SIGNING_KEY TAURI_SIGNING_PRIVATE_KEY; do
+            [ -n "${!name:-}" ] || { echo "Missing required production secret: $name" >&2; exit 1; }
+          done
 
       - name: Build app
         shell: bash
@@ -339,437 +293,196 @@ jobs:
           POSTHOG_HOST: ${{ secrets.POSTHOG_HOST }}
           TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
           TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
-          MITA_SIGNING_KEY: ${{ secrets.MITA_SIGNING_KEY }}
+          BIYAN_SIGNING_KEY: ${{ secrets.BIYAN_SIGNING_KEY }}
+          BIYAN_DATA_SCHEMA: ${{ needs.preflight.outputs.data_schema }}
         run: make build
 
-      - name: Upload Windows artifacts
+      - name: Verify Biyan artifacts
+        shell: bash
+        env:
+          VERSION: ${{ needs.preflight.outputs.version }}
+        run: |
+          set -euo pipefail
+          test -f "src-tauri/target/release/bundle/nsis/Biyan_${VERSION}_x64-setup.exe"
+          test -f "src-tauri/target/release/bundle/nsis/Biyan_${VERSION}_x64-setup.exe.sig"
+          test -f "src-tauri/target/release/bundle/msi/Biyan_${VERSION}_x64_en-US.msi"
+          if find src-tauri/target/release/bundle -type f \
+            | grep -Ei '/[^/]*(llama|mlx|foundation|rag|vector)[^/]*$'; then
+            echo "Retired local runtime payload found in Windows candidate" >&2
+            exit 1
+          fi
+
+      - name: Upload Windows candidate
         uses: actions/upload-artifact@v4
         with:
-          name: mita-windows-x64-${{ steps.version.outputs.version }}
+          name: biyan-windows-x64-${{ needs.preflight.outputs.version }}
           if-no-files-found: error
           path: |
-            src-tauri/target/release/bundle/nsis/*.exe
-            src-tauri/target/release/bundle/nsis/*.exe.sig
-            src-tauri/target/release/bundle/msi/*.msi
+            src-tauri/target/release/bundle/nsis/Biyan_*.exe
+            src-tauri/target/release/bundle/nsis/Biyan_*.exe.sig
+            src-tauri/target/release/bundle/msi/Biyan_*.msi
 
-  sync-aliyun-updater:
-    name: Sync updater to Aliyun CDN
-    runs-on: ubuntu-latest
-    needs:
-      - build-macos
-      - build-windows-x64
-    env:
-      ALIYUN_ACCESS_KEY_ID: ${{ secrets.ALIYUN_ACCESS_KEY_ID }}
-      ALIYUN_ACCESS_KEY_SECRET: ${{ secrets.ALIYUN_ACCESS_KEY_SECRET }}
-      ALIYUN_OSS_BUCKET: ${{ secrets.ALIYUN_OSS_BUCKET || vars.ALIYUN_OSS_BUCKET || 'mita-static' }}
-      ALIYUN_OSS_ENDPOINT: ${{ vars.ALIYUN_OSS_ENDPOINT || 'oss-cn-hangzhou.aliyuncs.com' }}
-      ALIYUN_REGION: ${{ vars.ALIYUN_REGION || 'cn-hangzhou' }}
-      ALIYUN_CDN_DOMAIN: ${{ vars.ALIYUN_CDN_DOMAIN || 'static.mitapp.cn' }}
-      UPDATES_CDN_BASE_URL: ${{ vars.UPDATES_CDN_BASE_URL || 'https://static.mitapp.cn' }}
-      AWS_ACCESS_KEY_ID: ${{ secrets.CLOUDFLARE_R2_ACCESS_KEY_ID }}
-      AWS_SECRET_ACCESS_KEY: ${{ secrets.CLOUDFLARE_R2_SECRET_ACCESS_KEY }}
-      AWS_DEFAULT_REGION: auto
-      CLOUDFLARE_R2_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_R2_ACCOUNT_ID }}
-      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
-      CLOUDFLARE_ZONE_ID: ${{ secrets.CLOUDFLARE_ZONE_ID }}
-      LEGACY_UPDATER_R2_BUCKET: ${{ secrets.CLOUDFLARE_R2_BUCKET }}
-      LEGACY_UPDATER_OBJECT_KEY: ${{ vars.LEGACY_UPDATER_OBJECT_KEY || 'mita/latest.json' }}
-      LEGACY_UPDATER_PUBLIC_URL: ${{ vars.LEGACY_UPDATER_PUBLIC_URL || 'https://updates.mita.so/mita/latest.json' }}
+  build-linux:
+    name: Build signed Linux candidate
+    runs-on: ubuntu-22.04
+    needs: [preflight, quality-gate]
+    environment: release-build
+    timeout-minutes: 180
     steps:
-      - name: Derive version
-        id: version
-        shell: bash
-        env:
-          RELEASE_VERSION: ${{ github.event.inputs.version || github.ref_name }}
+      - name: Checkout tag
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.preflight.outputs.tag }}
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+
+      - name: Configure Yarn
         run: |
-          VERSION="${RELEASE_VERSION#v}"
-          if [ -z "$VERSION" ] || [ "$VERSION" = "$RELEASE_VERSION" ]; then
-            echo "Release tags must start with v, for example v0.6.599" >&2
+          corepack enable
+          corepack prepare yarn@4.5.3 --activate
+
+      - name: Install Tauri system dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            libglib2.0-dev libatk1.0-dev libpango1.0-dev libgtk-3-dev \
+            libsoup-3.0-dev libwebkit2gtk-4.1-dev librsvg2-dev libfuse2 \
+            libappindicator3-dev
+
+      - name: Stamp release version
+        env:
+          VERSION: ${{ needs.preflight.outputs.version }}
+        run: node scripts/release-version.mjs stamp "$VERSION"
+
+      - name: Require Biyan signing material
+        env:
+          BIYAN_SIGNING_KEY: ${{ secrets.BIYAN_SIGNING_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+        run: |
+          set -euo pipefail
+          for name in BIYAN_SIGNING_KEY TAURI_SIGNING_PRIVATE_KEY; do
+            [ -n "${!name:-}" ] || { echo "Missing required production secret: $name" >&2; exit 1; }
+          done
+
+      - name: Build app
+        env:
+          POSTHOG_KEY: ${{ secrets.POSTHOG_KEY }}
+          POSTHOG_HOST: ${{ secrets.POSTHOG_HOST }}
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+          BIYAN_SIGNING_KEY: ${{ secrets.BIYAN_SIGNING_KEY }}
+          BIYAN_DATA_SCHEMA: ${{ needs.preflight.outputs.data_schema }}
+          TAURI_TRAY: libappindicator3
+        run: make build
+
+      - name: Verify Biyan artifacts
+        env:
+          VERSION: ${{ needs.preflight.outputs.version }}
+        run: |
+          set -euo pipefail
+          test -f "src-tauri/target/release/bundle/appimage/Biyan_${VERSION}_amd64.AppImage"
+          test -f "src-tauri/target/release/bundle/appimage/Biyan_${VERSION}_amd64.AppImage.sig"
+          test -f "src-tauri/target/release/bundle/deb/Biyan_${VERSION}_amd64.deb"
+          if find src-tauri/target/release/bundle -type f \
+            | grep -Ei '/[^/]*(llama|mlx|foundation|rag|vector)[^/]*$'; then
+            echo "Retired local runtime payload found in Linux candidate" >&2
             exit 1
           fi
-          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
 
-      - name: Download updater artifacts
+      - name: Upload Linux candidate
+        uses: actions/upload-artifact@v4
+        with:
+          name: biyan-linux-x64-${{ needs.preflight.outputs.version }}
+          if-no-files-found: error
+          path: |
+            src-tauri/target/release/bundle/appimage/Biyan_*.AppImage
+            src-tauri/target/release/bundle/appimage/Biyan_*.AppImage.sig
+            src-tauri/target/release/bundle/deb/Biyan_*.deb
+
+  package-candidate:
+    name: Package immutable updater candidate
+    runs-on: ubuntu-latest
+    needs: [preflight, build-macos, build-windows, build-linux]
+    steps:
+      - name: Checkout release scripts
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.preflight.outputs.tag }}
+
+      - name: Download signed candidates
         uses: actions/download-artifact@v4
         with:
-          path: dist
+          path: dist/builds
 
-      - name: Prepare updater manifest
-        id: manifest
-        shell: bash
+      - name: Build canonical candidate manifest
         env:
-          VERSION: ${{ steps.version.outputs.version }}
+          VERSION: ${{ needs.preflight.outputs.version }}
+          TAG: ${{ needs.preflight.outputs.tag }}
+          PUBLISHED_AT: ${{ needs.preflight.outputs.published_at }}
+          SOURCE_COMMIT: ${{ needs.preflight.outputs.source_commit }}
+          MIGRATION_PHASE: ${{ needs.preflight.outputs.migration_phase }}
+          DATA_SCHEMA: ${{ needs.preflight.outputs.data_schema }}
+          ASSET_BASE_URL: ${{ vars.BIYAN_UPDATER_ASSET_BASE_URL || 'https://static.mitapp.cn' }}
         run: |
-          set -euo pipefail
-          mkdir -p dist/updater
-
-          mac_tar="$(find dist -type f -name 'Biyan.app.tar.gz' -print -quit)"
-          if [ -z "$mac_tar" ]; then
-            echo "Missing macOS updater tarball (*.app.tar.gz)" >&2
-            exit 1
-          fi
-          mac_sig="${mac_tar}.sig"
-          if [ ! -f "$mac_sig" ]; then
-            echo "Missing macOS updater signature: $mac_sig" >&2
-            exit 1
-          fi
-
-          win_exe="$(find dist -type f -name 'Biyan_*_x64-setup.exe' -print -quit)"
-          if [ -z "$win_exe" ]; then
-            echo "Missing Windows updater installer (*_x64-setup.exe)" >&2
-            exit 1
-          fi
-          win_sig="${win_exe}.sig"
-          if [ ! -f "$win_sig" ]; then
-            echo "Missing Windows updater signature: $win_sig" >&2
-            exit 1
-          fi
-
-          cdn_base="${UPDATES_CDN_BASE_URL%/}"
-          version_prefix="mita/stable/v${VERSION}"
-          mac_name="$(basename "$mac_tar")"
-          win_name="$(basename "$win_exe")"
-
-          MAC_SIGNATURE="$(cat "$mac_sig")" \
-          WIN_SIGNATURE="$(cat "$win_sig")" \
-          VERSION="$VERSION" \
-          MAC_URL="${cdn_base}/${version_prefix}/${mac_name}" \
-          WIN_URL="${cdn_base}/${version_prefix}/${win_name}" \
-          node <<'NODE'
-          const fs = require('node:fs')
-
-          const manifest = {
-            version: process.env.VERSION,
-            notes: '',
-            pub_date: new Date().toISOString(),
-            platforms: {
-              'darwin-aarch64': {
-                signature: process.env.MAC_SIGNATURE,
-                url: process.env.MAC_URL,
-              },
-              'darwin-x86_64': {
-                signature: process.env.MAC_SIGNATURE,
-                url: process.env.MAC_URL,
-              },
-              'windows-x86_64': {
-                signature: process.env.WIN_SIGNATURE,
-                url: process.env.WIN_URL,
-              },
-            },
-          }
-
-          fs.writeFileSync('dist/updater/latest.json', `${JSON.stringify(manifest, null, 2)}\n`)
-          NODE
-
-          {
-            echo "version_prefix=$version_prefix"
-            echo "mac_tar=$mac_tar"
-            echo "mac_sig=$mac_sig"
-            echo "mac_name=$mac_name"
-            echo "win_exe=$win_exe"
-            echo "win_sig=$win_sig"
-            echo "win_name=$win_name"
-          } >> "$GITHUB_OUTPUT"
-
-          cat dist/updater/latest.json
-
-      - name: Install Alibaba Cloud CLI
-        shell: bash
-        run: |
-          set -euo pipefail
-          if command -v aliyun >/dev/null 2>&1; then
-            aliyun version
-            exit 0
-          fi
-
-          /bin/bash -c "$(curl -fsSL https://aliyuncli.alicdn.com/install.sh)"
-          aliyun version
-
-      - name: Configure Alibaba Cloud CLI
-        shell: bash
-        run: |
-          set -euo pipefail
-
-          required=(
-            ALIYUN_ACCESS_KEY_ID
-            ALIYUN_ACCESS_KEY_SECRET
-          )
-          for name in "${required[@]}"; do
-            if [ -z "${!name:-}" ]; then
-              echo "$name is required for Aliyun updater sync" >&2
-              exit 1
-            fi
-          done
-
-          aliyun configure set \
-            --profile release \
-            --mode AK \
-            --region "$ALIYUN_REGION" \
-            --access-key-id "$ALIYUN_ACCESS_KEY_ID" \
-            --access-key-secret "$ALIYUN_ACCESS_KEY_SECRET"
-
-      - name: Upload updater files to Aliyun OSS
-        shell: bash
-        env:
-          VERSION_PREFIX: ${{ steps.manifest.outputs.version_prefix }}
-          MAC_TAR: ${{ steps.manifest.outputs.mac_tar }}
-          MAC_SIG: ${{ steps.manifest.outputs.mac_sig }}
-          MAC_NAME: ${{ steps.manifest.outputs.mac_name }}
-          WIN_EXE: ${{ steps.manifest.outputs.win_exe }}
-          WIN_SIG: ${{ steps.manifest.outputs.win_sig }}
-          WIN_NAME: ${{ steps.manifest.outputs.win_name }}
-        run: |
-          set -euo pipefail
-
-          required=(
-            ALIYUN_OSS_BUCKET
-            ALIYUN_OSS_ENDPOINT
-          )
-          for name in "${required[@]}"; do
-            if [ -z "${!name:-}" ]; then
-              echo "$name is required for Aliyun updater sync" >&2
-              exit 1
-            fi
-          done
-
-          endpoint="${ALIYUN_OSS_ENDPOINT#https://}"
-          endpoint="${endpoint#http://}"
-          endpoint="https://${endpoint}"
-          immutable_cache="public, max-age=31536000, immutable"
-          manifest_cache="public, max-age=60, must-revalidate"
-
-          aliyun --profile release oss cp "$MAC_TAR" "oss://${ALIYUN_OSS_BUCKET}/${VERSION_PREFIX}/${MAC_NAME}" \
-            --endpoint "$endpoint" \
-            --meta "Cache-Control:${immutable_cache}#Content-Type:application/gzip" \
-            --force
-          aliyun --profile release oss cp "$MAC_SIG" "oss://${ALIYUN_OSS_BUCKET}/${VERSION_PREFIX}/${MAC_NAME}.sig" \
-            --endpoint "$endpoint" \
-            --meta "Cache-Control:${immutable_cache}#Content-Type:text/plain" \
-            --force
-          aliyun --profile release oss cp "$WIN_EXE" "oss://${ALIYUN_OSS_BUCKET}/${VERSION_PREFIX}/${WIN_NAME}" \
-            --endpoint "$endpoint" \
-            --meta "Cache-Control:${immutable_cache}#Content-Type:application/octet-stream" \
-            --force
-          aliyun --profile release oss cp "$WIN_SIG" "oss://${ALIYUN_OSS_BUCKET}/${VERSION_PREFIX}/${WIN_NAME}.sig" \
-            --endpoint "$endpoint" \
-            --meta "Cache-Control:${immutable_cache}#Content-Type:text/plain" \
-            --force
-          aliyun --profile release oss cp dist/updater/latest.json "oss://${ALIYUN_OSS_BUCKET}/mita/latest.json" \
-            --endpoint "$endpoint" \
-            --meta "Cache-Control:${manifest_cache}#Content-Type:application/json" \
-            --force
-
-      - name: Refresh Aliyun CDN latest manifest
-        shell: bash
-        run: |
-          set -euo pipefail
-
-          latest_url="${UPDATES_CDN_BASE_URL%/}/mita/latest.json"
-          aliyun --profile release cdn RefreshObjectCaches \
-            --ObjectPath "$latest_url" \
-            --ObjectType File
-
-      - name: Verify Aliyun CDN updater URLs
-        shell: bash
-        env:
-          VERSION_PREFIX: ${{ steps.manifest.outputs.version_prefix }}
-          MAC_NAME: ${{ steps.manifest.outputs.mac_name }}
-          WIN_NAME: ${{ steps.manifest.outputs.win_name }}
-        run: |
-          set -euo pipefail
-          cdn_base="${UPDATES_CDN_BASE_URL%/}"
-          urls=(
-            "${cdn_base}/mita/latest.json"
-            "${cdn_base}/${VERSION_PREFIX}/${MAC_NAME}"
-            "${cdn_base}/${VERSION_PREFIX}/${MAC_NAME}.sig"
-            "${cdn_base}/${VERSION_PREFIX}/${WIN_NAME}"
-            "${cdn_base}/${VERSION_PREFIX}/${WIN_NAME}.sig"
+          node scripts/updater/build-candidate.mjs \
+            --version "$VERSION" \
+            --tag "$TAG" \
+            --artifacts-dir dist/builds \
+            --output-dir dist/updater-candidate \
+            --asset-base-url "$ASSET_BASE_URL" \
+            --published-at "$PUBLISHED_AT" \
+            --source-commit "$SOURCE_COMMIT" \
+            --migration-phase "$MIGRATION_PHASE" \
+            --data-schema "$DATA_SCHEMA"
+          node scripts/ci/verify-release-policy.mjs --artifact-root dist/updater-candidate
+          (
+            cd dist/updater-candidate
+            sha256sum Biyan* candidate.json latest.json > SHA256SUMS
           )
 
-          for url in "${urls[@]}"; do
-            echo "Verifying $url"
-            curl -fsSI --retry 5 --retry-delay 5 "$url"
-          done
+      - name: Upload updater candidate
+        uses: actions/upload-artifact@v4
+        with:
+          name: biyan-updater-candidate-${{ needs.preflight.outputs.version }}
+          if-no-files-found: error
+          path: dist/updater-candidate/*
 
-      - name: Sync legacy updater manifest to Cloudflare R2
-        shell: bash
-        env:
-          VERSION: ${{ steps.version.outputs.version }}
-        run: |
-          set -euo pipefail
-
-          required=(
-            AWS_ACCESS_KEY_ID
-            AWS_SECRET_ACCESS_KEY
-            CLOUDFLARE_R2_ACCOUNT_ID
-            LEGACY_UPDATER_R2_BUCKET
-            LEGACY_UPDATER_OBJECT_KEY
-            VERSION
-          )
-          for name in "${required[@]}"; do
-            if [ -z "${!name:-}" ]; then
-              echo "$name is required for legacy updater sync" >&2
-              exit 1
-            fi
-          done
-          aws --version
-
-          node <<'NODE'
-          const fs = require('node:fs')
-
-          const manifest = JSON.parse(fs.readFileSync('dist/updater/latest.json', 'utf8'))
-          const expected = process.env.VERSION
-          if (manifest.version !== expected) {
-            throw new Error(`Expected updater manifest version ${expected}, got ${manifest.version}`)
-          }
-          for (const platform of ['darwin-aarch64', 'darwin-x86_64', 'windows-x86_64']) {
-            const entry = manifest.platforms?.[platform]
-            if (!entry?.url || !entry?.signature) {
-              throw new Error(`Missing updater url/signature for ${platform}`)
-            }
-          }
-          console.log(`Validated updater manifest ${manifest.version}`)
-          NODE
-
-          mkdir -p dist/legacy-updater
-          r2_endpoint="https://${CLOUDFLARE_R2_ACCOUNT_ID}.r2.cloudflarestorage.com"
-          backup="dist/legacy-updater/latest-backup-$(date -u +%Y%m%dT%H%M%SZ).json"
-
-          aws s3 cp "s3://${LEGACY_UPDATER_R2_BUCKET}/${LEGACY_UPDATER_OBJECT_KEY}" "$backup" \
-            --endpoint-url "$r2_endpoint"
-          aws s3 cp dist/updater/latest.json "s3://${LEGACY_UPDATER_R2_BUCKET}/${LEGACY_UPDATER_OBJECT_KEY}" \
-            --endpoint-url "$r2_endpoint" \
-            --content-type "application/json" \
-            --cache-control "public, max-age=60, must-revalidate"
-
-          aws s3 cp "s3://${LEGACY_UPDATER_R2_BUCKET}/${LEGACY_UPDATER_OBJECT_KEY}" dist/legacy-updater/latest-after.json \
-            --endpoint-url "$r2_endpoint"
-          cmp -s dist/updater/latest.json dist/legacy-updater/latest-after.json
-
-      - name: Refresh legacy updater cache
-        shell: bash
-        run: |
-          set -euo pipefail
-
-          required=(
-            CLOUDFLARE_API_TOKEN
-            CLOUDFLARE_ZONE_ID
-            LEGACY_UPDATER_PUBLIC_URL
-          )
-          for name in "${required[@]}"; do
-            if [ -z "${!name:-}" ]; then
-              echo "$name is required for legacy updater cache purge" >&2
-              exit 1
-            fi
-          done
-
-          curl -fsS -X POST "https://api.cloudflare.com/client/v4/zones/${CLOUDFLARE_ZONE_ID}/purge_cache" \
-            -H "Authorization: Bearer ${CLOUDFLARE_API_TOKEN}" \
-            -H "Content-Type: application/json" \
-            --data "{\"files\":[\"${LEGACY_UPDATER_PUBLIC_URL}\"]}" \
-            -o dist/legacy-updater/cache-purge.json
-
-          node <<'NODE'
-          const fs = require('node:fs')
-
-          const response = JSON.parse(fs.readFileSync('dist/legacy-updater/cache-purge.json', 'utf8'))
-          if (!response.success) {
-            throw new Error(`Cloudflare cache purge failed: ${JSON.stringify(response.errors || response)}`)
-          }
-          console.log('Purged legacy updater cache')
-          NODE
-
-      - name: Verify legacy updater URL
-        shell: bash
-        env:
-          VERSION: ${{ steps.version.outputs.version }}
-        run: |
-          set -euo pipefail
-
-          for attempt in $(seq 1 10); do
-            curl -fsSL "$LEGACY_UPDATER_PUBLIC_URL" \
-              -o dist/legacy-updater/public-latest.json
-
-            if node <<'NODE'
-          const fs = require('node:fs')
-
-          const source = fs.readFileSync('dist/updater/latest.json')
-          const publicManifestBytes = fs.readFileSync('dist/legacy-updater/public-latest.json')
-          const publicManifest = JSON.parse(publicManifestBytes.toString('utf8'))
-          const expected = process.env.VERSION
-          if (publicManifest.version !== expected) {
-            throw new Error(`Legacy updater URL has version ${publicManifest.version}, expected ${expected}`)
-          }
-          if (!source.equals(publicManifestBytes)) {
-            throw new Error('Legacy updater URL does not match the Aliyun updater manifest')
-          }
-          console.log(`Verified legacy updater manifest ${publicManifest.version}`)
-          NODE
-            then
-              exit 0
-            fi
-
-            echo "Legacy updater URL is not fresh yet, retrying (${attempt}/10)"
-            sleep 6
-          done
-
-          echo "Legacy updater URL did not match after retries" >&2
-          exit 1
-
-  release:
-    name: Create draft release
+  draft-release:
+    name: Create draft release without promoting stable
     runs-on: ubuntu-latest
-    needs:
-      - build-macos
-      - build-windows-x64
-      - sync-aliyun-updater
+    needs: [preflight, build-macos, build-windows, build-linux, package-candidate]
     steps:
       - name: Checkout
         uses: actions/checkout@v4
         with:
+          ref: ${{ needs.preflight.outputs.tag }}
           fetch-depth: 0
 
-      - name: Derive version
-        id: version
-        shell: bash
-        env:
-          RELEASE_VERSION: ${{ github.event.inputs.version || github.ref_name }}
-        run: |
-          VERSION="${RELEASE_VERSION#v}"
-          if [ -z "$VERSION" ] || [ "$VERSION" = "$RELEASE_VERSION" ]; then
-            echo "Release tags must start with v, for example v0.6.599" >&2
-            exit 1
-          fi
-          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
-          echo "tag=v$VERSION" >> "$GITHUB_OUTPUT"
-
-      - name: Download artifacts
+      - name: Download all candidate artifacts
         uses: actions/download-artifact@v4
         with:
           path: dist
 
-      - name: Show release files
-        shell: bash
-        run: find dist -maxdepth 3 -type f -print | sort
-
       - name: Generate release notes
-        shell: bash
         run: |
           node scripts/release-distribution/build-release-notes.mjs \
-            --tag "${{ steps.version.outputs.tag }}" \
+            --tag "${{ needs.preflight.outputs.tag }}" \
             --output dist/release-notes.md
-          cat dist/release-notes.md
 
-      - name: Create draft release
+      - name: Create draft candidate release
         uses: softprops/action-gh-release@v2
         with:
-          name: Biyan ${{ steps.version.outputs.tag }}
-          tag_name: ${{ steps.version.outputs.tag }}
+          name: Biyan ${{ needs.preflight.outputs.tag }}
+          tag_name: ${{ needs.preflight.outputs.tag }}
           draft: true
           prerelease: false
           body_path: dist/release-notes.md
           fail_on_unmatched_files: true
           files: |
-            dist/**/*.dmg
-            dist/**/*.exe
-            dist/**/*.msi
+            dist/biyan-macos-universal-*/*.dmg
+            dist/biyan-windows-x64-*/*.msi
+            dist/biyan-linux-x64-*/*.deb
+            dist/biyan-updater-candidate-*/*

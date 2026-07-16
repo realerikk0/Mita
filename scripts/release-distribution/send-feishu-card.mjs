@@ -522,7 +522,7 @@ export async function resolvePosterImageKey(options = {}) {
 async function main() {
   const args = parseArgs(process.argv.slice(2))
   const releaseJson = args['release-json']
-  const downloadPageUrl = args['download-page-url'] ?? process.env.MITA_DOWNLOAD_PAGE_URL
+  const downloadPageUrl = args['download-page-url'] ?? process.env.BIYAN_DOWNLOAD_PAGE_URL
   const output = args.output ?? 'dist/feishu-card.json'
   const dryRun = args.dryRun || isTruthy(process.env.DRY_RUN)
   const strictPoster = isTruthy(process.env.RELEASE_POSTER_STRICT)

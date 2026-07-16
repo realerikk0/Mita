@@ -6,22 +6,6 @@ vi.mock('@tauri-apps/api/core', () => ({
   invoke: vi.fn(),
 }))
 
-vi.mock('@janhq/core', () => ({
-  EngineManager: {
-    instance: () => ({
-      engines: new Map([
-        [
-          'engine1',
-          {
-            getLoadedModels: vi.fn().mockResolvedValue(['model1', 'model2']),
-            unload: vi.fn().mockResolvedValue(undefined),
-          },
-        ],
-      ]),
-    }),
-  },
-}))
-
 const mockWindowCore = {
   api: {
     getAppConfigurations: vi.fn(),
@@ -57,7 +41,7 @@ describe('TauriAppService – coverage', () => {
       const { invoke } = await import('@tauri-apps/api/core')
       vi.mocked(invoke).mockResolvedValue(undefined)
 
-      await svc.factoryReset({ keepAppData: false, keepModelsAndConfigs: false })
+      await svc.factoryReset({ keepAppData: false, keepConfigurations: false })
 
       expect(invoke).toHaveBeenCalledWith('factory_reset')
     })
@@ -66,23 +50,23 @@ describe('TauriAppService – coverage', () => {
       const { invoke } = await import('@tauri-apps/api/core')
       vi.mocked(invoke).mockResolvedValue(undefined)
 
-      await svc.factoryReset({ keepAppData: true, keepModelsAndConfigs: false })
+      await svc.factoryReset({ keepAppData: true, keepConfigurations: false })
 
       expect(invoke).toHaveBeenCalledWith('factory_reset', {
         keepAppData: true,
-        keepModelsAndConfigs: false,
+        keepConfigurations: false,
       })
     })
 
-    it('calls factory_reset with params when keepModelsAndConfigs true', async () => {
+    it('calls factory_reset with params when keepConfigurations true', async () => {
       const { invoke } = await import('@tauri-apps/api/core')
       vi.mocked(invoke).mockResolvedValue(undefined)
 
-      await svc.factoryReset({ keepAppData: false, keepModelsAndConfigs: true })
+      await svc.factoryReset({ keepAppData: false, keepConfigurations: true })
 
       expect(invoke).toHaveBeenCalledWith('factory_reset', {
         keepAppData: false,
-        keepModelsAndConfigs: true,
+        keepConfigurations: true,
       })
     })
 
@@ -97,7 +81,7 @@ describe('TauriAppService – coverage', () => {
         })
       )
 
-      await svc.factoryReset({ keepAppData: false, keepModelsAndConfigs: true })
+      await svc.factoryReset({ keepAppData: false, keepConfigurations: true })
 
       expect(localStorage.getItem(localStorageKey.threadManagement)).toBeNull()
     })
@@ -113,32 +97,19 @@ describe('TauriAppService – coverage', () => {
         })
       )
 
-      await svc.factoryReset({ keepAppData: true, keepModelsAndConfigs: false })
+      await svc.factoryReset({ keepAppData: true, keepConfigurations: false })
 
       expect(localStorage.getItem(localStorageKey.threadManagement)).not.toBeNull()
     })
 
-    it('handles engine with no active models', async () => {
-      // Re-mock to return null/empty from getLoadedModels
-      const { invoke } = await import('@tauri-apps/api/core')
-      vi.mocked(invoke).mockResolvedValue(undefined)
-
-      const { EngineManager } = await import('@janhq/core')
-      const engine = (EngineManager as any).instance().engines.get('engine1')
-      engine.getLoadedModels.mockResolvedValueOnce(null)
-
-      await svc.factoryReset()
-
-      expect(engine.unload).not.toHaveBeenCalled()
-    })
   })
 
-  describe('getMitaDataFolder', () => {
+  describe('getBiyanDataFolder', () => {
     it('returns undefined on error', async () => {
       const spy = vi.spyOn(console, 'error').mockImplementation(() => {})
       mockWindowCore.api.getAppConfigurations.mockRejectedValue(new Error('fail'))
 
-      const result = await svc.getMitaDataFolder()
+      const result = await svc.getBiyanDataFolder()
 
       expect(result).toBeUndefined()
       expect(spy).toHaveBeenCalled()
@@ -148,7 +119,7 @@ describe('TauriAppService – coverage', () => {
     it('returns undefined when config has no data_folder', async () => {
       mockWindowCore.api.getAppConfigurations.mockResolvedValue({})
 
-      const result = await svc.getMitaDataFolder()
+      const result = await svc.getBiyanDataFolder()
 
       expect(result).toBeUndefined()
     })

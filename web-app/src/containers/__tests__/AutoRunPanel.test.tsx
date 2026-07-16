@@ -4,7 +4,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 import type { ComponentProps } from 'react'
 import { AutoRunPanel } from '@/containers/AutoRunPanel'
 import { useAutoRunStore } from '@/stores/auto-run-store'
-import { DEFAULT_MITA_AUTO_RUN } from '@/types/mita-agent'
+import { DEFAULT_BIYAN_AUTO_RUN } from '@/types/biyan-agent'
 
 const translations: Record<string, string> = {
   'chat:autoRun.label': '自动对话',
@@ -88,7 +88,7 @@ describe('AutoRunPanel', () => {
 
   it('shows a clear running status and wires pause/stop controls', () => {
     useAutoRunStore.getState().setRun('thread-1', {
-      ...DEFAULT_MITA_AUTO_RUN,
+      ...DEFAULT_BIYAN_AUTO_RUN,
       status: 'running',
       enabled: true,
       maxRounds: 3,
@@ -107,7 +107,7 @@ describe('AutoRunPanel', () => {
 
   it('wires paused resume and stop controls', () => {
     useAutoRunStore.getState().setRun('thread-1', {
-      ...DEFAULT_MITA_AUTO_RUN,
+      ...DEFAULT_BIYAN_AUTO_RUN,
       status: 'paused',
       enabled: true,
       maxRounds: 3,

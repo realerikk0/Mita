@@ -47,19 +47,6 @@ vi.mock('@/hooks/useAgentMode', () => ({
   },
 }))
 
-vi.mock('@janhq/core', () => ({
-  ExtensionTypeEnum: { VectorDB: 'VectorDB' },
-  VectorDBExtension: class {},
-}))
-
-vi.mock('@/lib/extension', () => ({
-  ExtensionManager: {
-    getInstance: () => ({
-      get: () => null,
-    }),
-  },
-}))
-
 vi.mock('@/constants/chat', () => ({
   TEMPORARY_CHAT_ID: 'temporary-chat',
 }))
@@ -126,7 +113,7 @@ describe('useThreads - coverage', () => {
       title: 'My Thread',
       metadata: expect.objectContaining({
         project: { id: 'p1', name: 'Project', updated_at: 1 },
-        mitaAgents: expect.any(Array),
+        biyanAgents: expect.any(Array),
       }),
     }))
   })
@@ -151,7 +138,7 @@ describe('useThreads - coverage', () => {
       metadata: expect.objectContaining({
         isTemporary: true,
         project: { id: 'p1', name: 'Project', updated_at: 1 },
-        mitaAgents: expect.any(Array),
+        biyanAgents: expect.any(Array),
       }),
     }))
   })

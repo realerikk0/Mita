@@ -103,11 +103,10 @@
   "chats": "Conversas",
   "favorites": "Favoritos",
   "recents": "Recentes",
-  "hub": "Hub",
   "helpSupport": "Ajuda e Suporte",
-  "helpUsImproveMita": "Ajude-nos a Melhorar o Biyan",
-  "helpUsImproveMitaDescription": "Coletamos dados anônimos para entender o uso dos recursos. Suas conversas e informações pessoais nunca são rastreadas. Você pode alterar isso a qualquer momento em Configurações > Privacidade.",
-  "helpUsImproveMitaQuestion": "Gostaria de nos ajudar a melhorar o Biyan?",
+  "helpUsImproveBiyan": "Ajude-nos a Melhorar o Biyan",
+  "helpUsImproveBiyanDescription": "Coletamos dados anônimos para entender o uso dos recursos. Suas conversas e informações pessoais nunca são rastreadas. Você pode alterar isso a qualquer momento em Configurações > Privacidade.",
+  "helpUsImproveBiyanQuestion": "Gostaria de nos ajudar a melhorar o Biyan?",
   "unstarAll": "Remover todos os favoritos",
   "unstar": "Remover Favorito",
   "deleteAll": "Apagar Tudo",
@@ -157,12 +156,7 @@
   "noResultsFound": "Nenhum resultado encontrado",
   "noThreadsYet": "Nenhuma conversa ainda",
   "noThreadsYetDesc": "Inicie uma nova conversa para ver seu histórico de conversas aqui.",
-  "downloads": "Downloads",
-  "downloading": "Baixando",
   "uploadingAttachments": "Enviando anexos…",
-  "cancelDownload": "Cancelar download",
-  "downloadCancelled": "Download Cancelado",
-  "downloadComplete": "Download Concluído",
   "thinking": "Pensando...",
   "thought": "Pensamento",
   "callingTool": "Chamando ferramenta",
@@ -180,7 +174,7 @@
   "noModels": "Nenhum modelo encontrado",
   "customAvatar": "Avatar personalizado",
   "editAssistant": "Editar Assistente",
-  "mita": "Biyan",
+  "biyan": "Biyan",
   "metadata": "Metadados",
   "regenerate": "Regenerar",
   "threadImage": "Imagem da conversa",
@@ -429,30 +423,14 @@
       "title": "Download Concluído",
       "description": " {{item}} foi baixado"
     },
-    "downloadCancelled": {
-      "title": "Download Cancelado",
-      "description": "O processo de download foi cancelado"
-    },
     "downloadFailed": {
       "title": "Falha no Download",
       "description": "Falha no download de {{item}}"
     },
-    "modelValidationStarted": {
-      "title": "Validando Modelo",
-      "description": "Modelo \"{{modelId}}\" baixado com sucesso. Verificando integridade..."
-    },
-    "modelValidationFailed": {
-      "title": "Falha na Validação do Modelo",
-      "description": "O modelo baixado \"{{modelId}}\" falhou na verificação de integridade e foi removido. O arquivo pode estar corrompido ou adulterado."
-    },
     "modelNoVision": {
       "title": "O modelo não suporta imagens",
       "description": "Escolha um modelo com capacidade de visão para anexar imagens.",
-      "action": "Abrir Hub"
-    },
-    "downloadAndVerificationComplete": {
-      "title": "Download Concluído",
-      "description": "Modelo \"{{item}}\" baixado e verificado com sucesso"
+      "action": "Abrir configurações de provedores"
     },
     "projectCreated": {
       "title": "Projeto Criado",
@@ -484,7 +462,6 @@
     }
   },
   "attachmentInjectedIndicator": "Injetado no chat",
-  "attachmentEmbeddedIndicator": "Incorporado para RAG",
   "viewInjectedContent": "Ver conteúdo injetado",
   "injectedContentTitle": "Conteúdo de arquivo injetado",
   "providerQuota": {

@@ -12,7 +12,7 @@
   "stop": "रोकें",
   "start": "शुरू करें",
   "noModelFound": "कोई मॉडल नहीं मिला",
-  "noModelFoundDesc": "उपलब्ध मॉडल यहाँ सूचीबद्ध होंगे। यदि आपके पास अभी तक कोई मॉडल नहीं है, तो उन्हें डाउनलोड करने के लिए हब पर जाएँ।",
+  "noModelFoundDesc": "Available models from the configured remote provider will be listed here. Refresh after adding or changing provider credentials.",
   "configuration": "कॉन्फ़िगरेशन",
   "apiEndpoint": "API एंडपॉइंट",
   "testConnection": "कनेक्शन परीक्षण करें",

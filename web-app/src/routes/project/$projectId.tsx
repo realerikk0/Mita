@@ -12,7 +12,6 @@ import ThreadList from '@/containers/ThreadList'
 import { AvatarEmoji } from '@/containers/AvatarEmoji'
 
 import { FolderPenIcon, MessageCircle, MoreHorizontal, PencilIcon, Trash2 } from 'lucide-react'
-import ProjectFiles from '@/containers/ProjectFiles'
 import DropdownModelProvider from '@/containers/DropdownModelProvider'
 import {
   DropdownMenu,
@@ -32,7 +31,7 @@ export const Route = createFileRoute('/project/$projectId')({
 })
 
 function ProjectPageContent() {
-  const { t, i18n } = useTranslation()
+  const { t } = useTranslation()
   const { projectId } = useParams({ from: '/project/$projectId' })
   const { getFolderById, updateFolder } = useThreadManagement()
   const threads = useThreads((state) => state.threads)
@@ -211,9 +210,6 @@ function ProjectPageContent() {
                 <span>{t('common:edit')}</span>
               </Button>
             </div>
-
-            {/* Files Section */}
-            <ProjectFiles projectId={projectId} lng={i18n.language} />
           </div>
         </div>
       </div>

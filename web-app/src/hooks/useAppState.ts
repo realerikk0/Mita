@@ -1,13 +1,6 @@
 import { create } from 'zustand'
-import { ThreadMessage } from '@janhq/core'
+import { ThreadMessage } from '@biyan/core'
 import { MCPTool } from '@/types/completion'
-
-export type PromptProgress = {
-  cache: number
-  processed: number
-  time_ms: number
-  total: number
-}
 
 type AppErrorMessage = {
   message?: string
@@ -17,23 +10,17 @@ type AppErrorMessage = {
 
 type AppState = {
   streamingContent?: ThreadMessage
-  loadingModel?: boolean
   tools: MCPTool[]
-  ragToolNames: Set<string>
   mcpToolNames: Set<string>
   serverStatus: 'running' | 'stopped' | 'pending'
   abortControllers: Record<string, AbortController>
   tokenSpeed?: TokenSpeed
   showOutOfContextDialog?: boolean
   errorMessage?: AppErrorMessage
-  promptProgress?: PromptProgress
-  activeModels: string[]
   cancelToolCall?: () => void
   setServerStatus: (value: 'running' | 'stopped' | 'pending') => void
   updateStreamingContent: (content: ThreadMessage | undefined) => void
-  updateLoadingModel: (loading: boolean) => void
   updateTools: (tools: MCPTool[]) => void
-  updateRagToolNames: (names: string[]) => void
   updateMcpToolNames: (names: string[]) => void
   setAbortController: (threadId: string, controller: AbortController) => void
   updateTokenSpeed: (message: ThreadMessage, increment?: number) => void
@@ -47,23 +34,17 @@ type AppState = {
   setOutOfContextDialog: (show: boolean) => void
   setCancelToolCall: (cancel: (() => void) | undefined) => void
   setErrorMessage: (error: AppErrorMessage | undefined) => void
-  updatePromptProgress: (progress: PromptProgress | undefined) => void
-  setActiveModels: (models: string[]) => void
 }
 
 export const useAppState = create<AppState>()((set) => ({
   streamingContent: undefined,
-  loadingModel: false,
   tools: [],
-  ragToolNames: new Set<string>(),
   mcpToolNames: new Set<string>(),
   serverStatus: 'stopped',
   abortControllers: {},
   tokenSpeed: undefined,
   currentToolCall: undefined,
-  promptProgress: undefined,
   cancelToolCall: undefined,
-  activeModels: [],
   updateStreamingContent: (content: ThreadMessage | undefined) => {
     set(() => ({
       streamingContent: content
@@ -74,14 +55,8 @@ export const useAppState = create<AppState>()((set) => ({
         : undefined,
     }))
   },
-  updateLoadingModel: (loading) => {
-    set({ loadingModel: loading })
-  },
   updateTools: (tools) => {
     set({ tools })
-  },
-  updateRagToolNames: (names) => {
-    set({ ragToolNames: new Set(names) })
   },
   updateMcpToolNames: (names) => {
     set({ mcpToolNames: new Set(names) })
@@ -161,16 +136,6 @@ export const useAppState = create<AppState>()((set) => ({
   setErrorMessage: (error) => {
     set(() => ({
       errorMessage: error,
-    }))
-  },
-  updatePromptProgress: (progress) => {
-    set(() => ({
-      promptProgress: progress,
-    }))
-  },
-  setActiveModels: (models: string[]) => {
-    set(() => ({
-      activeModels: models,
     }))
   },
 }))

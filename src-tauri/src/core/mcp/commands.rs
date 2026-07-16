@@ -5,24 +5,20 @@ use tokio::sync::oneshot;
 use tokio::time::timeout;
 
 use super::{
-    constants::{
-        is_browser_mcp_name, normalize_browser_mcp_server_key, DEFAULT_MCP_CONFIG,
-        LEGACY_JAN_BROWSER_MCP_NAME, LEGACY_MITA_WEB_RESEARCH_MCP_NAME,
-        LEGACY_SILENCE_BROWSER_MCP_NAME, LEGACY_SILENCE_WEB_RESEARCH_MCP_NAME,
-        MITA_WEB_RESEARCH_MCP_NAME,
-    },
+    constants::{is_browser_mcp_name, BIYAN_WEB_RESEARCH_MCP_NAME, DEFAULT_MCP_CONFIG},
     helpers::{restart_active_mcp_servers, start_mcp_server},
 };
 use crate::core::{
-    app::commands::get_mita_data_folder_path,
+    app::commands::get_biyan_data_folder_path,
     computer_agent::{
         handlers::handle_computer_agent_tool,
         shell::shell_status,
         tools::{
             computer_agent_summary, computer_agent_tools, is_computer_agent_tool,
-            COMPUTER_AGENT_SERVER_NAME, LEGACY_COMPUTER_SERVER_NAME,
+            COMPUTER_AGENT_SERVER_NAME,
         },
     },
+    legacy_migrations::normalize_browser_mcp_server_key,
     mcp::models::{McpSettings, ServerSummary},
     state::AppState,
 };
@@ -168,12 +164,7 @@ pub async fn deactivate_mcp_server<R: Runtime>(
     let bridge_port = if is_browser_mcp_name(&name) {
         let active_servers = state.mcp_active_servers.lock().await;
         active_servers
-            .get(&name)
-            .or_else(|| active_servers.get(MITA_WEB_RESEARCH_MCP_NAME))
-            .or_else(|| active_servers.get(LEGACY_MITA_WEB_RESEARCH_MCP_NAME))
-            .or_else(|| active_servers.get(LEGACY_SILENCE_WEB_RESEARCH_MCP_NAME))
-            .or_else(|| active_servers.get(LEGACY_SILENCE_BROWSER_MCP_NAME))
-            .or_else(|| active_servers.get(LEGACY_JAN_BROWSER_MCP_NAME))
+            .get(BIYAN_WEB_RESEARCH_MCP_NAME)
             .and_then(browser_mcp_bridge_port)
     } else {
         None
@@ -184,11 +175,7 @@ pub async fn deactivate_mcp_server<R: Runtime>(
     {
         let mut active_servers = state.mcp_active_servers.lock().await;
         if is_browser_mcp_name(&name) {
-            active_servers.remove(MITA_WEB_RESEARCH_MCP_NAME);
-            active_servers.remove(LEGACY_MITA_WEB_RESEARCH_MCP_NAME);
-            active_servers.remove(LEGACY_SILENCE_WEB_RESEARCH_MCP_NAME);
-            active_servers.remove(LEGACY_SILENCE_BROWSER_MCP_NAME);
-            active_servers.remove(LEGACY_JAN_BROWSER_MCP_NAME);
+            active_servers.remove(BIYAN_WEB_RESEARCH_MCP_NAME);
         } else {
             active_servers.remove(&name);
         }
@@ -198,30 +185,8 @@ pub async fn deactivate_mcp_server<R: Runtime>(
     // Now remove and stop the server
     let servers = state.mcp_servers.clone();
     let mut servers_map = servers.lock().await;
-    let resolved_name = if servers_map.contains_key(&name) {
-        name.clone()
-    } else if is_browser_mcp_name(&name) && servers_map.contains_key(MITA_WEB_RESEARCH_MCP_NAME) {
-        MITA_WEB_RESEARCH_MCP_NAME.to_string()
-    } else if is_browser_mcp_name(&name)
-        && servers_map.contains_key(LEGACY_MITA_WEB_RESEARCH_MCP_NAME)
-    {
-        LEGACY_MITA_WEB_RESEARCH_MCP_NAME.to_string()
-    } else if is_browser_mcp_name(&name)
-        && servers_map.contains_key(LEGACY_SILENCE_WEB_RESEARCH_MCP_NAME)
-    {
-        LEGACY_SILENCE_WEB_RESEARCH_MCP_NAME.to_string()
-    } else if is_browser_mcp_name(&name)
-        && servers_map.contains_key(LEGACY_SILENCE_BROWSER_MCP_NAME)
-    {
-        LEGACY_SILENCE_BROWSER_MCP_NAME.to_string()
-    } else if is_browser_mcp_name(&name) && servers_map.contains_key(LEGACY_JAN_BROWSER_MCP_NAME) {
-        LEGACY_JAN_BROWSER_MCP_NAME.to_string()
-    } else {
-        name.clone()
-    };
-
     let service = servers_map
-        .remove(&resolved_name)
+        .remove(&name)
         .ok_or_else(|| format!("Server {name} not found"))?;
 
     // Release the lock before calling cancel
@@ -240,10 +205,10 @@ pub async fn deactivate_mcp_server<R: Runtime>(
 
     {
         let mut pids = state.mcp_server_pids.lock().await;
-        pids.remove(&resolved_name);
+        pids.remove(&name);
     }
     // Delete lock file if this is Browser MCP and we have a port
-    if is_browser_mcp_name(&resolved_name) {
+    if is_browser_mcp_name(&name) {
         if let Some(port) = bridge_port {
             use crate::core::mcp::lockfile::delete_lock_file;
 
@@ -253,13 +218,13 @@ pub async fn deactivate_mcp_server<R: Runtime>(
         }
     }
 
-    log::info!("Server {resolved_name} stopped successfully and marked as deactivated.");
+    log::info!("Server {name} stopped successfully and marked as deactivated.");
 
     // Emit mcp-update event so frontend can refresh tools list
     if let Err(e) = app.emit(
         "mcp-update",
         serde_json::json!({
-            "server": resolved_name
+            "server": name
         }),
     ) {
         log::error!("Failed to emit mcp-update event: {e}");
@@ -363,8 +328,16 @@ pub async fn get_tools_for_servers<R: Runtime>(
         return Ok(Vec::new());
     }
 
-    let include_computer =
-        filter.remove(COMPUTER_AGENT_SERVER_NAME) || filter.remove(LEGACY_COMPUTER_SERVER_NAME);
+    let include_canonical_computer = filter.remove(COMPUTER_AGENT_SERVER_NAME);
+    let legacy_computer_names = filter
+        .iter()
+        .filter(|name| crate::core::legacy_migrations::is_legacy_computer_server_name(name))
+        .cloned()
+        .collect::<Vec<_>>();
+    for name in &legacy_computer_names {
+        filter.remove(name);
+    }
+    let include_computer = include_canonical_computer || !legacy_computer_names.is_empty();
     let mut tools = if filter.is_empty() {
         Vec::new()
     } else {
@@ -456,7 +429,7 @@ pub async fn call_tool<R: Runtime>(
 ) -> Result<CallToolResult, String> {
     if is_computer_agent_tool(&tool_name) {
         let settings = state.mcp_settings.lock().await.clone();
-        let data_folder = get_mita_data_folder_path(app);
+        let data_folder = get_biyan_data_folder_path(app);
         return handle_computer_agent_tool(data_folder, settings, &tool_name, arguments).await;
     }
 
@@ -620,7 +593,7 @@ fn browser_mcp_bridge_port(config: &Value) -> Option<u16> {
 
 #[tauri::command]
 pub async fn get_mcp_configs<R: Runtime>(app: AppHandle<R>) -> Result<String, String> {
-    let mut path = get_mita_data_folder_path(app.clone());
+    let mut path = get_biyan_data_folder_path(app.clone());
     path.push("mcp_config.json");
 
     // Create default empty config if file doesn't exist
@@ -669,7 +642,7 @@ pub async fn get_mcp_configs<R: Runtime>(app: AppHandle<R>) -> Result<String, St
         .ok_or("mcpServers is not an object")?;
 
     if normalize_browser_mcp_server_key(mcp_servers) {
-        log::info!("Migrated Browser MCP config to '{MITA_WEB_RESEARCH_MCP_NAME}'");
+        log::info!("Migrated Browser MCP config to '{BIYAN_WEB_RESEARCH_MCP_NAME}'");
         mutated = true;
     }
 
@@ -725,14 +698,11 @@ fn get_result_text(result: &rmcp::model::CallToolResult) -> Option<&str> {
 
 /// Check if Biyan Web Research is connected via MCP.
 #[tauri::command]
-pub async fn check_mita_web_research_connected(state: State<'_, AppState>) -> Result<bool, String> {
+pub async fn check_biyan_web_research_connected(
+    state: State<'_, AppState>,
+) -> Result<bool, String> {
     let servers = state.mcp_servers.lock().await;
-    let service = match servers
-        .get(MITA_WEB_RESEARCH_MCP_NAME)
-        .or_else(|| servers.get(LEGACY_SILENCE_WEB_RESEARCH_MCP_NAME))
-        .or_else(|| servers.get(LEGACY_SILENCE_BROWSER_MCP_NAME))
-        .or_else(|| servers.get(LEGACY_JAN_BROWSER_MCP_NAME))
-    {
+    let service = match servers.get(BIYAN_WEB_RESEARCH_MCP_NAME) {
         Some(s) => s,
         None => return Ok(false),
     };
@@ -758,27 +728,6 @@ pub async fn check_mita_web_research_connected(state: State<'_, AppState>) -> Re
 
     // Fallback to browser_snapshot
     try_browser_snapshot_tool(service).await
-}
-
-#[tauri::command]
-pub async fn check_mita_browser_extension_connected(
-    state: State<'_, AppState>,
-) -> Result<bool, String> {
-    check_mita_web_research_connected(state).await
-}
-
-#[tauri::command]
-pub async fn check_silence_browser_extension_connected(
-    state: State<'_, AppState>,
-) -> Result<bool, String> {
-    check_mita_web_research_connected(state).await
-}
-
-#[tauri::command]
-pub async fn check_jan_browser_extension_connected(
-    state: State<'_, AppState>,
-) -> Result<bool, String> {
-    check_mita_web_research_connected(state).await
 }
 
 enum PingResult {
@@ -855,7 +804,7 @@ pub async fn save_mcp_configs<R: Runtime>(
     app: AppHandle<R>,
     configs: String,
 ) -> Result<(), String> {
-    let mut path = get_mita_data_folder_path(app.clone());
+    let mut path = get_biyan_data_folder_path(app.clone());
     path.push("mcp_config.json");
     log::info!("save mcp configs, path: {path:?}");
 
