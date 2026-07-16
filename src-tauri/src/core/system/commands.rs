@@ -507,6 +507,78 @@ fn sha256_file(path: &Path) -> Result<String, String> {
     Ok(format!("{:x}", digest.finalize()))
 }
 
+fn clear_cli_staging_file(staging: &Path) -> Result<(), String> {
+    #[cfg(windows)]
+    match std::fs::symlink_metadata(staging) {
+        Ok(metadata) if metadata.file_type().is_file() && metadata.permissions().readonly() => {
+            let mut writable = metadata.permissions();
+            writable.set_readonly(false);
+            std::fs::set_permissions(staging, writable).map_err(|error| {
+                format!(
+                    "Failed to make stale Biyan CLI staging file removable {}: {error}",
+                    staging.display()
+                )
+            })?;
+        }
+        Ok(_) => {}
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(()),
+        Err(error) => {
+            return Err(format!(
+                "Failed to inspect stale Biyan CLI staging file {}: {error}",
+                staging.display()
+            ))
+        }
+    }
+
+    match std::fs::remove_file(staging) {
+        Ok(()) => Ok(()),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(()),
+        Err(error) => Err(format!(
+            "Failed to clear stale Biyan CLI staging file {}: {error}",
+            staging.display()
+        )),
+    }
+}
+
+fn replace_managed_cli_atomically(staging: &Path, destination: &Path) -> Result<(), String> {
+    #[cfg(windows)]
+    {
+        let original_permissions = match std::fs::symlink_metadata(destination) {
+            Ok(metadata) if metadata.file_type().is_file() => Some(metadata.permissions()),
+            Ok(_) => None,
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => None,
+            Err(error) => return Err(format!("inspect_cli_destination:{error}")),
+        };
+        let restore_permissions = original_permissions
+            .as_ref()
+            .filter(|permissions| permissions.readonly())
+            .cloned();
+        if let Some(original) = &restore_permissions {
+            let mut writable = original.clone();
+            writable.set_readonly(false);
+            std::fs::set_permissions(destination, writable)
+                .map_err(|error| format!("prepare_cli_destination:{error}"))?;
+        }
+
+        return match crate::core::legacy_migrations::atomic_replace(staging, destination) {
+            Ok(()) => Ok(()),
+            Err(replace_error) => {
+                if let Some(original) = restore_permissions {
+                    if let Err(restore_error) = std::fs::set_permissions(destination, original) {
+                        return Err(format!(
+                            "{replace_error}; restore_cli_destination_permissions:{restore_error}"
+                        ));
+                    }
+                }
+                Err(replace_error)
+            }
+        };
+    }
+
+    #[cfg(not(windows))]
+    crate::core::legacy_migrations::atomic_replace(staging, destination)
+}
+
 fn reconcile_cli_binary(source: &Path, destination: &Path) -> Result<(), String> {
     let expected_digest = sha256_file(source)?;
     let marker = cli_install_marker(destination);
@@ -536,7 +608,7 @@ fn reconcile_cli_binary(source: &Path, destination: &Path) -> Result<(), String>
         )
     })?;
     let staging = parent.join(format!(".biyan.installing-{}", std::process::id()));
-    let _ = std::fs::remove_file(&staging);
+    clear_cli_staging_file(&staging)?;
     std::fs::copy(source, &staging).map_err(|error| {
         format!(
             "Failed to stage Biyan CLI at {}: {error}",
@@ -550,7 +622,21 @@ fn reconcile_cli_binary(source: &Path, destination: &Path) -> Result<(), String>
         std::fs::set_permissions(&staging, std::fs::Permissions::from_mode(0o755))
             .map_err(|error| format!("Failed to set Biyan CLI permissions: {error}"))?;
     }
-    std::fs::File::open(&staging)
+    #[cfg(windows)]
+    {
+        let mut permissions = std::fs::metadata(&staging)
+            .map_err(|error| format!("Failed to read staged Biyan CLI permissions: {error}"))?
+            .permissions();
+        if permissions.readonly() {
+            permissions.set_readonly(false);
+            std::fs::set_permissions(&staging, permissions)
+                .map_err(|error| format!("Failed to make staged Biyan CLI updatable: {error}"))?;
+        }
+    }
+    std::fs::OpenOptions::new()
+        .read(true)
+        .write(true)
+        .open(&staging)
         .and_then(|file| file.sync_all())
         .map_err(|error| format!("Failed to sync staged Biyan CLI: {error}"))?;
     if sha256_file(&staging)? != expected_digest {
@@ -558,7 +644,7 @@ fn reconcile_cli_binary(source: &Path, destination: &Path) -> Result<(), String>
         return Err("Biyan CLI staging digest mismatch".to_string());
     }
 
-    crate::core::legacy_migrations::atomic_replace(&staging, destination)
+    replace_managed_cli_atomically(&staging, destination)
         .map_err(|error| format!("CLI_LOCKED: failed to commit Biyan CLI atomically: {error}"))?;
 
     let marker_json = serde_json::json!({
@@ -1250,6 +1336,19 @@ mod tests {
         names.iter().all(|n| dir.join(n).exists())
     }
 
+    fn make_test_file_readonly(path: &Path) {
+        let mut permissions = fs::metadata(path).unwrap().permissions();
+        permissions.set_readonly(true);
+        fs::set_permissions(path, permissions).unwrap();
+    }
+
+    #[cfg(windows)]
+    fn make_test_file_writable(path: &Path) {
+        let mut permissions = fs::metadata(path).unwrap().permissions();
+        permissions.set_readonly(false);
+        fs::set_permissions(path, permissions).unwrap();
+    }
+
     #[test]
     fn test_write_env_to_shell_uses_biyan_marker_and_cleans_legacy() {
         let tmp = tempdir().unwrap();
@@ -1521,6 +1620,66 @@ mod tests {
         )
         .unwrap());
         assert_eq!(fs::read(&tampered).unwrap(), b"user-replaced-content");
+    }
+
+    #[test]
+    fn readonly_cli_sources_and_stale_staging_remain_upgradeable() {
+        let tmp = tempdir().unwrap();
+        let source_v1 = tmp.path().join("biyan-source-v1");
+        let source_v2 = tmp.path().join("biyan-source-v2");
+        let destination = tmp.path().join("biyan-managed");
+        let stale_staging = tmp
+            .path()
+            .join(format!(".biyan.installing-{}", std::process::id()));
+        fs::write(&source_v1, b"remote-only-cli-v1").unwrap();
+        fs::write(&source_v2, b"remote-only-cli-v2").unwrap();
+        fs::write(&stale_staging, b"stale-partial-cli").unwrap();
+        make_test_file_readonly(&source_v1);
+        make_test_file_readonly(&source_v2);
+        make_test_file_readonly(&stale_staging);
+
+        reconcile_cli_binary(&source_v1, &destination).unwrap();
+        assert_eq!(fs::read(&destination).unwrap(), b"remote-only-cli-v1");
+        assert!(managed_cli_marker_matches_binary(&destination));
+        assert!(!stale_staging.exists());
+
+        // Simulate a managed destination produced by an older build which
+        // copied the bundle's read-only attribute onto the installed CLI.
+        make_test_file_readonly(&destination);
+        reconcile_cli_binary(&source_v2, &destination).unwrap();
+        assert_eq!(fs::read(&destination).unwrap(), b"remote-only-cli-v2");
+        assert!(managed_cli_marker_matches_binary(&destination));
+        assert!(!fs::metadata(&destination).unwrap().permissions().readonly());
+
+        let marker: serde_json::Value =
+            serde_json::from_slice(&fs::read(cli_install_marker(&destination)).unwrap()).unwrap();
+        let source_v2_digest = sha256_file(&source_v2).unwrap();
+        assert_eq!(
+            marker.get("sha256").and_then(serde_json::Value::as_str),
+            Some(source_v2_digest.as_str())
+        );
+
+        #[cfg(windows)]
+        for path in [source_v1, source_v2] {
+            make_test_file_writable(&path);
+        }
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn failed_managed_cli_replace_restores_readonly_destination() {
+        let tmp = tempdir().unwrap();
+        let missing_staging = tmp.path().join("missing-staging");
+        let destination = tmp.path().join("managed-cli");
+        fs::write(&destination, b"existing-managed-cli").unwrap();
+        make_test_file_readonly(&destination);
+
+        let error = replace_managed_cli_atomically(&missing_staging, &destination).unwrap_err();
+
+        assert!(error.contains("commit_tmp:"));
+        assert_eq!(fs::read(&destination).unwrap(), b"existing-managed-cli");
+        assert!(fs::metadata(&destination).unwrap().permissions().readonly());
+        make_test_file_writable(&destination);
     }
 
     #[test]

@@ -16,7 +16,7 @@ use std::str::FromStr;
 use std::{
     collections::{BTreeMap, BTreeSet},
     fs::{self, OpenOptions},
-    io::{Read, Write},
+    io::{self, Read, Write},
     path::{Path, PathBuf},
     sync::{Mutex as StdMutex, OnceLock},
     time::{SystemTime, UNIX_EPOCH},
@@ -981,9 +981,7 @@ fn copy_tree(source: &Path, target: &Path) -> Result<(), String> {
             copy_tree(&entry.path(), &destination)?;
         } else if file_type.is_file() {
             fs::copy(entry.path(), &destination).map_err(|e| format!("copy_file:{e}"))?;
-            fs::File::open(&destination)
-                .and_then(|file| file.sync_all())
-                .map_err(|e| format!("sync_copied_file:{e}"))?;
+            sync_copied_file(&destination).map_err(|e| format!("sync_copied_file:{e}"))?;
         } else {
             return Err(format!(
                 "unsupported_user_data_file_type:{}",
@@ -996,6 +994,73 @@ fn copy_tree(source: &Path, target: &Path) -> Result<(), String> {
         .and_then(|directory| directory.sync_all())
         .map_err(|e| format!("sync_copied_directory:{e}"))?;
     Ok(())
+}
+
+#[cfg(not(windows))]
+fn sync_copied_file(path: &Path) -> io::Result<()> {
+    fs::File::open(path)?.sync_all()
+}
+
+/// Flush a file copied by `CopyFileExW` without losing its original Windows
+/// attributes or alternate data streams. `FlushFileBuffers` requires a handle
+/// opened with `GENERIC_WRITE`, even when the copied file is read-only.
+#[cfg(windows)]
+fn sync_copied_file(path: &Path) -> io::Result<()> {
+    let original_permissions = fs::metadata(path)?.permissions();
+    if !original_permissions.readonly() {
+        return OpenOptions::new()
+            .read(true)
+            .write(true)
+            .open(path)?
+            .sync_all();
+    }
+
+    let mut writable_permissions = original_permissions.clone();
+    writable_permissions.set_readonly(false);
+    fs::set_permissions(path, writable_permissions)?;
+
+    let file = match OpenOptions::new().read(true).write(true).open(path) {
+        Ok(file) => file,
+        Err(open_error) => {
+            return match fs::set_permissions(path, original_permissions) {
+                Ok(()) => Err(open_error),
+                Err(restore_error) => Err(io::Error::new(
+                    restore_error.kind(),
+                    format!(
+                        "restore copied file permissions after open error: {restore_error}; open error: {open_error}"
+                    ),
+                )),
+            };
+        }
+    };
+
+    // Restore read-only while the writable handle is still valid, then flush
+    // again so both copied content and restored metadata are durable.
+    let content_sync = file.sync_all();
+    let restore_permissions = file
+        .set_permissions(original_permissions.clone())
+        .or_else(|handle_error| {
+            fs::set_permissions(path, original_permissions).map_err(|path_error| {
+                io::Error::new(
+                    path_error.kind(),
+                    format!(
+                        "restore copied file permissions by handle/path: {handle_error}; {path_error}"
+                    ),
+                )
+            })
+        });
+    if let Err(restore_error) = restore_permissions {
+        let message = match &content_sync {
+            Ok(()) => format!("restore copied file permissions: {restore_error}"),
+            Err(sync_error) => format!(
+                "restore copied file permissions: {restore_error}; prior sync error: {sync_error}"
+            ),
+        };
+        return Err(io::Error::new(restore_error.kind(), message));
+    }
+    let metadata_sync = file.sync_all();
+    content_sync?;
+    metadata_sync
 }
 
 fn hash_file(path: &Path) -> Result<(u64, String), String> {
@@ -1161,9 +1226,7 @@ fn copy_supported_user_data(source: &Path, staging: &Path) -> Result<(), String>
         if from.is_file() {
             let destination = staging.join(name);
             fs::copy(&from, &destination).map_err(|e| format!("copy_user_file:{e}"))?;
-            fs::File::open(&destination)
-                .and_then(|file| file.sync_all())
-                .map_err(|e| format!("sync_copied_file:{e}"))?;
+            sync_copied_file(&destination).map_err(|e| format!("sync_copied_file:{e}"))?;
         }
     }
     let after = supported_user_data_manifest(source)?;
@@ -1425,7 +1488,10 @@ pub async fn prepare_mobile_database(app_data_dir: &Path, db_path: &Path) -> Res
                 "legacy_mobile_db_integrity:{integrity}:required_tables={required_tables}"
             ));
         }
-        fs::File::open(&staging_path)
+        OpenOptions::new()
+            .read(true)
+            .write(true)
+            .open(&staging_path)
             .and_then(|file| file.sync_all())
             .map_err(|error| format!("sync_staging_mobile_db:{error}"))?;
         atomic_replace(&staging_path, db_path)
@@ -3300,6 +3366,19 @@ mod tests {
         fs::write(path, serde_json::to_vec_pretty(value).unwrap()).unwrap();
     }
 
+    fn make_test_file_readonly(path: &Path) {
+        let mut permissions = fs::metadata(path).unwrap().permissions();
+        permissions.set_readonly(true);
+        fs::set_permissions(path, permissions).unwrap();
+    }
+
+    #[cfg(windows)]
+    fn make_test_file_writable(path: &Path) {
+        let mut permissions = fs::metadata(path).unwrap().permissions();
+        permissions.set_readonly(false);
+        fs::set_permissions(path, permissions).unwrap();
+    }
+
     fn prepare_retired_local_data_cleanup() -> (TempDir, PathBuf, PathBuf) {
         let temp = TempDir::new().unwrap();
         let old_data = temp.path().join("Mita/data");
@@ -3435,6 +3514,46 @@ mod tests {
                 "repeat_penalty": 1.12
             }
         })
+    }
+
+    #[test]
+    fn copied_readonly_user_data_is_synced_and_preserves_permissions() {
+        let temp = TempDir::new().unwrap();
+        let source = temp.path().join("source");
+        let staging = temp.path().join("staging");
+        let settings = source.join("settings.json");
+        let workspace_file = source.join("agent-workspaces/thread-1/user-source.txt");
+        write_json(&settings, &json!({"theme":"system"}));
+        fs::create_dir_all(workspace_file.parent().unwrap()).unwrap();
+        fs::write(&workspace_file, b"user-owned workspace data").unwrap();
+        make_test_file_readonly(&settings);
+        make_test_file_readonly(&workspace_file);
+
+        copy_supported_user_data(&source, &staging).unwrap();
+
+        let copied_settings = staging.join("settings.json");
+        let copied_workspace = staging.join("agent-workspaces/thread-1/user-source.txt");
+        assert_eq!(
+            fs::read(&copied_settings).unwrap(),
+            fs::read(&settings).unwrap()
+        );
+        assert_eq!(
+            fs::read(&copied_workspace).unwrap(),
+            fs::read(&workspace_file).unwrap()
+        );
+        assert!(fs::metadata(&copied_settings)
+            .unwrap()
+            .permissions()
+            .readonly());
+        assert!(fs::metadata(&copied_workspace)
+            .unwrap()
+            .permissions()
+            .readonly());
+
+        #[cfg(windows)]
+        for path in [settings, workspace_file, copied_settings, copied_workspace] {
+            make_test_file_writable(&path);
+        }
     }
 
     #[test]
