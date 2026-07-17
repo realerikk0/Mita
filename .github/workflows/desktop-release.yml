@@ -122,7 +122,7 @@ jobs:
     name: Build signed macOS candidate
     runs-on: macos-latest
     needs: [preflight, quality-gate]
-    environment: release-build
+    environment: release-distribution
     timeout-minutes: 180
     steps:
       - name: Checkout tag
@@ -242,7 +242,7 @@ jobs:
     name: Build signed Windows candidate
     runs-on: windows-latest
     needs: [preflight, quality-gate]
-    environment: release-build
+    environment: release-distribution
     timeout-minutes: 180
     steps:
       - name: Checkout tag
@@ -326,7 +326,7 @@ jobs:
     name: Build signed Linux candidate
     runs-on: ubuntu-22.04
     needs: [preflight, quality-gate]
-    environment: release-build
+    environment: release-distribution
     timeout-minutes: 180
     steps:
       - name: Checkout tag

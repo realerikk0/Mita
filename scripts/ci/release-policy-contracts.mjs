@@ -149,6 +149,9 @@ export function validateCandidateWorkflow(source) {
       failures.push(`desktop release is missing ${buildJob}`)
       continue
     }
+    if (!/^    environment:\s*release-distribution\s*$/m.test(block)) {
+      failures.push(`${buildJob} must use the release-distribution environment`)
+    }
     if (!jobNeeds(block, 'preflight') || !jobNeeds(block, 'quality-gate')) {
       failures.push(`${buildJob} must depend on preflight and quality-gate`)
     }
