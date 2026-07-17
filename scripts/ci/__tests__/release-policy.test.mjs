@@ -98,14 +98,17 @@ const candidateWorkflow = `jobs:
       - run: node --test scripts/updater/__tests__/updater.test.mjs
   build-macos:
     needs: [preflight, quality-gate]
+    environment: release-distribution
     steps:
       - run: make verify-macos-candidate APP=Biyan.app DMG=Biyan.dmg VERSION=0.6.636
   build-windows:
     needs:
       - preflight
       - quality-gate
+    environment: release-distribution
   build-linux:
     needs: [preflight, quality-gate]
+    environment: release-distribution
 `
 
 test('candidate workflow gates every platform build on exact-tag tests', () => {
@@ -142,6 +145,16 @@ test('candidate workflow gates every platform build on exact-tag tests', () => {
   assert.ok(
     validateCandidateWorkflow(ungatedWindows).some((failure) =>
       failure.includes('build-windows')
+    )
+  )
+
+  const splitReleaseBuildEnvironment = candidateWorkflow.replace(
+    'environment: release-distribution',
+    'environment: release-build'
+  )
+  assert.ok(
+    validateCandidateWorkflow(splitReleaseBuildEnvironment).some((failure) =>
+      failure.includes('release-distribution environment')
     )
   )
 })
