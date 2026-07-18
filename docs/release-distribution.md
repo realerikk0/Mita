@@ -19,6 +19,14 @@ artifacts; it must not overwrite a stable manifest.
 6. Attach signed candidate metadata to the GitHub release without changing the
    stable updater route.
 
+Candidate builds, reusable formal-build templates, release distribution,
+updater router deployment, upgrade smoke attestation, promotion, health gating,
+and the kill switch all use the single GitHub environment
+`release-distribution`. Every job that consumes `BIYAN_SIGNING_KEY` must obtain
+it from that environment; do not create separate `release-build`,
+`updater-production`, or `updater-smoke-approval` environments or generate a
+second Biyan request-signing key.
+
 The initial A/B/C tag commits are deliberately thin checkpoints over the same
 reviewed remote-only source baseline. Only the release attestation and product
 version files change between them; the candidate workflow compiles the

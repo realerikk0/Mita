@@ -27,7 +27,7 @@ jobs:
   attest:
     name: Verify external real-upgrade evidence
     runs-on: ubuntu-latest
-    environment: updater-smoke-approval
+    environment: release-distribution
     steps:
       - uses: actions/checkout@v4
 
