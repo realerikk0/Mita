@@ -57,7 +57,8 @@ for (const message of validateReleaseIdentity({
 for (const message of validateLinuxReleaseBuild(
   read('Makefile'),
   JSON.parse(read('package.json')),
-  read('scripts/build-cli.mjs')
+  read('scripts/build-cli.mjs'),
+  JSON.parse(read('src-tauri/tauri.linux.conf.json'))
 )) {
   fail(message)
 }
@@ -176,7 +177,9 @@ const releaseEnvironmentWorkflows = {
   },
   '.github/workflows/template-tauri-build-linux-x64-flatpak.yml': {
     jobName: 'build-linux-x64',
-    source: read('.github/workflows/template-tauri-build-linux-x64-flatpak.yml'),
+    source: read(
+      '.github/workflows/template-tauri-build-linux-x64-flatpak.yml'
+    ),
   },
 }
 for (const message of validateReleaseEnvironmentWorkflows(

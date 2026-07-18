@@ -183,8 +183,11 @@ else ifeq ($(DETECTED_OS),Windows)
 	copy /Y src-tauri\target\release\biyan-cli.exe src-tauri\resources\bin\biyan-cli.exe
 else ifeq ($(DETECTED_OS),Linux)
 	cd src-tauri && cargo build --release --features cli --bin biyan-cli
+	$(call MKDIR,'src-tauri/resources/bin')
+	install -m755 src-tauri/target/release/biyan-cli src-tauri/resources/bin/biyan-cli
 	cd src-tauri && cargo build --release --features computer-agent-runner --bin biyan-computer-agent-runner
-	cp src-tauri/target/release/biyan-cli src-tauri/resources/bin/biyan-cli
+	$(call MKDIR,'src-tauri/resources/computer-agent-runner')
+	install -m755 src-tauri/target/release/biyan-computer-agent-runner src-tauri/resources/computer-agent-runner/biyan-computer-agent-runner
 else
 	cd src-tauri && cargo build --release --features cli --bin biyan-cli
 	cp src-tauri/target/release/biyan-cli src-tauri/resources/bin/biyan-cli
