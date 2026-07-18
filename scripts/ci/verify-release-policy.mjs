@@ -9,6 +9,7 @@ import {
   validateCiWorkflow,
   validateDocsArchiveConfig,
   validateFlatpakMetadata,
+  validateLinuxReleaseBuild,
   validateReleaseIdentity,
   validateReleaseEnvironmentWorkflows,
 } from './release-policy-contracts.mjs'
@@ -51,6 +52,13 @@ for (const message of validateReleaseIdentity({
   dataSchema: releaseMetadata.dataSchema,
   cargoLockVersion: cargoLockPackage,
 })) {
+  fail(message)
+}
+for (const message of validateLinuxReleaseBuild(
+  read('Makefile'),
+  JSON.parse(read('package.json')),
+  read('scripts/build-cli.mjs')
+)) {
   fail(message)
 }
 

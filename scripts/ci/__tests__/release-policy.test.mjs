@@ -8,6 +8,7 @@ import {
   validateCiWorkflow,
   validateDocsArchiveConfig,
   validateFlatpakMetadata,
+  validateLinuxReleaseBuild,
   validateReleaseIdentity,
   validateReleaseEnvironmentWorkflows,
 } from '../release-policy-contracts.mjs'
@@ -21,11 +22,14 @@ const platformConfigPaths = [
   'src-tauri/tauri.ios.conf.json',
 ]
 
-test('initial release train locks version, phase, schema, and Cargo.lock together', () => {
+test('bridge release trains lock version, phase, schema, and Cargo.lock together', () => {
   for (const [version, migrationPhase, dataSchema] of [
     ['0.6.634', 'A', 1],
     ['0.6.635', 'B', 2],
     ['0.6.636', 'C', 3],
+    ['0.6.637', 'A', 1],
+    ['0.6.638', 'B', 2],
+    ['0.6.639', 'C', 3],
   ]) {
     assert.deepEqual(
       validateReleaseIdentity({
@@ -40,19 +44,101 @@ test('initial release train locks version, phase, schema, and Cargo.lock togethe
 
   assert.ok(
     validateReleaseIdentity({
-      version: '0.6.634',
-      migrationPhase: 'C',
-      dataSchema: 3,
-      cargoLockVersion: '0.6.634',
+      version: '0.6.637',
+      migrationPhase: 'B',
+      dataSchema: 2,
+      cargoLockVersion: '0.6.637',
     }).some((failure) => failure.includes('must attest A/1'))
   )
   assert.ok(
     validateReleaseIdentity({
-      version: '0.6.636',
+      version: '0.6.639',
       migrationPhase: 'C',
       dataSchema: 3,
-      cargoLockVersion: '0.6.635',
+      cargoLockVersion: '0.6.638',
     }).some((failure) => failure.includes('Cargo.lock version'))
+  )
+})
+
+test('Linux release build prepares every binary required by Tauri bundling', () => {
+  const makefile = fs.readFileSync('Makefile', 'utf8')
+  const packageJson = JSON.parse(fs.readFileSync('package.json', 'utf8'))
+  const buildCliScript = fs.readFileSync('scripts/build-cli.mjs', 'utf8')
+  assert.deepEqual(
+    validateLinuxReleaseBuild(makefile, packageJson, buildCliScript),
+    []
+  )
+
+  const withoutRunner = makefile.replaceAll(
+    'cargo build --release --features computer-agent-runner --bin biyan-computer-agent-runner',
+    'echo skipped-computer-agent-runner'
+  )
+  assert.ok(
+    validateLinuxReleaseBuild(
+      withoutRunner,
+      packageJson,
+      buildCliScript
+    ).some((failure) => failure.includes('must compile the release'))
+  )
+
+  const echoedRunner = makefile.replace(
+    '\tcd src-tauri && cargo build --release --features computer-agent-runner --bin biyan-computer-agent-runner\n',
+    '\techo cd src-tauri && cargo build --release --features computer-agent-runner --bin biyan-computer-agent-runner\n'
+  )
+  assert.ok(
+    validateLinuxReleaseBuild(
+      echoedRunner,
+      packageJson,
+      buildCliScript
+    ).some((failure) => failure.includes('must compile the release'))
+  )
+
+  const commentedRunner = makefile.replace(
+    '\tcd src-tauri && cargo build --release --features computer-agent-runner --bin biyan-computer-agent-runner\n',
+    '\t# cd src-tauri && cargo build --release --features computer-agent-runner --bin biyan-computer-agent-runner\n'
+  )
+  assert.ok(
+    validateLinuxReleaseBuild(
+      commentedRunner,
+      packageJson,
+      buildCliScript
+    ).some((failure) => failure.includes('must compile the release'))
+  )
+
+  const withoutBuildCliDelegate = structuredClone(packageJson)
+  withoutBuildCliDelegate.scripts['build:cli'] = 'echo skipped-all-cli-builds'
+  assert.ok(
+    validateLinuxReleaseBuild(
+      makefile,
+      withoutBuildCliDelegate,
+      buildCliScript
+    ).some((failure) => failure.includes('must delegate the release build'))
+  )
+
+  const withoutMakeDelegate = buildCliScript.replace(
+    "  run('make', [makeTarget])",
+    "  run('echo', ['skipped-make'])"
+  )
+  assert.ok(
+    validateLinuxReleaseBuild(
+      makefile,
+      packageJson,
+      withoutMakeDelegate
+    ).some((failure) => failure.includes('must run the Makefile'))
+  )
+
+  const withoutCliPreparation = structuredClone(packageJson)
+  withoutCliPreparation.scripts['build:tauri:linux'] =
+    withoutCliPreparation.scripts['build:tauri:linux'].replace(
+      'yarn build:cli && ',
+      ''
+    )
+  assert.ok(
+    validateLinuxReleaseBuild(
+      makefile,
+      withoutCliPreparation,
+      buildCliScript
+    ).some((failure) => failure.includes('before yarn tauri build'))
   )
 })
 

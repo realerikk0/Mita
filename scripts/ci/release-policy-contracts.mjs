@@ -47,20 +47,88 @@ export function validateReleaseIdentity({
     )
   }
 
-  const initialTrain = {
+  const bridgeTrain = {
     '0.6.634': { migrationPhase: 'A', dataSchema: 1 },
     '0.6.635': { migrationPhase: 'B', dataSchema: 2 },
     '0.6.636': { migrationPhase: 'C', dataSchema: 3 },
+    '0.6.637': { migrationPhase: 'A', dataSchema: 1 },
+    '0.6.638': { migrationPhase: 'B', dataSchema: 2 },
+    '0.6.639': { migrationPhase: 'C', dataSchema: 3 },
   }[version]
   if (
-    initialTrain &&
-    (migrationPhase !== initialTrain.migrationPhase ||
-      dataSchema !== initialTrain.dataSchema)
+    bridgeTrain &&
+    (migrationPhase !== bridgeTrain.migrationPhase ||
+      dataSchema !== bridgeTrain.dataSchema)
   ) {
     failures.push(
-      `initial release ${version} must attest ${initialTrain.migrationPhase}/${initialTrain.dataSchema}`
+      `bridge release ${version} must attest ${bridgeTrain.migrationPhase}/${bridgeTrain.dataSchema}`
     )
   }
+  return failures
+}
+
+export function validateLinuxReleaseBuild(
+  makefile,
+  packageJson,
+  buildCliScript
+) {
+  const failures = []
+  const buildCli = makefile.match(
+    /^build-cli:\s*$([\s\S]*?)(?=^[A-Za-z0-9_.-]+:\s*(?:.*)?$)/m
+  )?.[1]
+  const linuxBranch = buildCli?.match(
+    /^else ifeq \(\$\(DETECTED_OS\),Linux\)\s*$([\s\S]*?)(?=^else(?:\s|$)|^endif\s*$)/m
+  )?.[1]
+  const runnerCommand =
+    'cargo build --release --features computer-agent-runner --bin biyan-computer-agent-runner'
+  const runnerRecipe = new RegExp(
+    `^\\tcd src-tauri && ${escapeRegExp(runnerCommand)}[ \\t]*$`,
+    'm'
+  )
+
+  if (!linuxBranch || !runnerRecipe.test(linuxBranch)) {
+    failures.push(
+      'Linux build-cli must compile the release biyan-computer-agent-runner before Tauri bundling'
+    )
+  }
+
+  if (
+    packageJson?.scripts?.['build:cli'] !==
+    'node ./scripts/build-cli.mjs --release'
+  ) {
+    failures.push(
+      'build:cli must delegate the release build to scripts/build-cli.mjs'
+    )
+  }
+  if (
+    typeof buildCliScript !== 'string' ||
+    !/^const makeTarget = isDev \? 'build-cli-dev' : 'build-cli'$/m.test(
+      buildCliScript
+    ) ||
+    !/^if \(process\.platform !== 'win32' && !cliOnly\) \{\n  run\('make', \[makeTarget\]\)\n  process\.exit\(0\)\n\}$/m.test(
+      buildCliScript
+    )
+  ) {
+    failures.push(
+      'scripts/build-cli.mjs must run the Makefile build-cli target on Linux'
+    )
+  }
+
+  const linuxScript = packageJson?.scripts?.['build:tauri:linux']
+  const buildCliIndex =
+    typeof linuxScript === 'string' ? linuxScript.indexOf('yarn build:cli') : -1
+  const tauriBuildIndex =
+    typeof linuxScript === 'string' ? linuxScript.indexOf('yarn tauri build') : -1
+  if (
+    buildCliIndex < 0 ||
+    tauriBuildIndex < 0 ||
+    buildCliIndex > tauriBuildIndex
+  ) {
+    failures.push(
+      'build:tauri:linux must run yarn build:cli before yarn tauri build'
+    )
+  }
+
   return failures
 }
 
