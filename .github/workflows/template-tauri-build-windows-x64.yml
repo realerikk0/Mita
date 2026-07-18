@@ -64,6 +64,7 @@ on:
 jobs:
   build-windows-x64:
     runs-on: windows-latest
+    environment: release-distribution
     outputs:
       WIN_SIG: ${{ steps.metadata.outputs.WIN_SIG }}
       FILE_NAME: ${{ steps.metadata.outputs.FILE_NAME }}

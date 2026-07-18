@@ -168,6 +168,23 @@ export function validateCandidateWorkflow(source) {
   return failures
 }
 
+export function validateReleaseEnvironmentWorkflows(workflows) {
+  const failures = []
+  for (const [workflow, { jobName, source }] of Object.entries(workflows)) {
+    const block = jobBlock(source, jobName)
+    if (!block) {
+      failures.push(`${workflow} is missing the ${jobName} job`)
+      continue
+    }
+    if (!/^    environment:\s*release-distribution\s*$/m.test(block)) {
+      failures.push(
+        `${workflow} ${jobName} must use the release-distribution environment`
+      )
+    }
+  }
+  return failures
+}
+
 export function validateCiWorkflow(source) {
   const failures = []
   const ciScope = jobBlock(source, 'ci-scope')

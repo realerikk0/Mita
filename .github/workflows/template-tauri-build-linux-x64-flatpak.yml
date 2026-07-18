@@ -45,6 +45,7 @@ on:
 jobs:
   build-linux-x64:
     runs-on: ubuntu-22.04
+    environment: release-distribution
     permissions:
       contents: write
     steps:

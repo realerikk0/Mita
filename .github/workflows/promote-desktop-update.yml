@@ -59,7 +59,7 @@ jobs:
     name: Verify, snapshot, and promote signed candidate
     runs-on: ubuntu-latest
     timeout-minutes: 45
-    environment: updater-production
+    environment: release-distribution
     env:
       GH_TOKEN: ${{ github.token }}
       AWS_ACCESS_KEY_ID: ${{ secrets.CLOUDFLARE_R2_ACCESS_KEY_ID }}

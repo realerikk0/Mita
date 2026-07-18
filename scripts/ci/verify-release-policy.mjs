@@ -10,6 +10,7 @@ import {
   validateDocsArchiveConfig,
   validateFlatpakMetadata,
   validateReleaseIdentity,
+  validateReleaseEnvironmentWorkflows,
 } from './release-policy-contracts.mjs'
 
 const repoRoot = path.resolve(import.meta.dirname, '../..')
@@ -127,6 +128,54 @@ if (
   )
 }
 for (const message of validateCandidateWorkflow(desktopRelease)) fail(message)
+
+const releaseEnvironmentWorkflows = {
+  '.github/workflows/release-distribution.yml': {
+    jobName: 'distribute',
+    source: read('.github/workflows/release-distribution.yml'),
+  },
+  '.github/workflows/deploy-updater-router.yml': {
+    jobName: 'deploy',
+    source: read('.github/workflows/deploy-updater-router.yml'),
+  },
+  '.github/workflows/biyan-upgrade-smoke.yml': {
+    jobName: 'attest',
+    source: read('.github/workflows/biyan-upgrade-smoke.yml'),
+  },
+  '.github/workflows/promote-desktop-update.yml': {
+    jobName: 'promote',
+    source: read('.github/workflows/promote-desktop-update.yml'),
+  },
+  '.github/workflows/updater-health-gate.yml': {
+    jobName: 'evaluate',
+    source: read('.github/workflows/updater-health-gate.yml'),
+  },
+  '.github/workflows/updater-kill-switch.yml': {
+    jobName: 'update',
+    source: read('.github/workflows/updater-kill-switch.yml'),
+  },
+  '.github/workflows/template-tauri-build-macos.yml': {
+    jobName: 'build-macos',
+    source: read('.github/workflows/template-tauri-build-macos.yml'),
+  },
+  '.github/workflows/template-tauri-build-windows-x64.yml': {
+    jobName: 'build-windows-x64',
+    source: read('.github/workflows/template-tauri-build-windows-x64.yml'),
+  },
+  '.github/workflows/template-tauri-build-linux-x64.yml': {
+    jobName: 'build-linux-x64',
+    source: read('.github/workflows/template-tauri-build-linux-x64.yml'),
+  },
+  '.github/workflows/template-tauri-build-linux-x64-flatpak.yml': {
+    jobName: 'build-linux-x64',
+    source: read('.github/workflows/template-tauri-build-linux-x64-flatpak.yml'),
+  },
+}
+for (const message of validateReleaseEnvironmentWorkflows(
+  releaseEnvironmentWorkflows
+)) {
+  fail(message)
+}
 
 const biyanCi = read('.github/workflows/biyan-linter-and-test.yml')
 for (const message of validateCiWorkflow(biyanCi)) fail(message)

@@ -9,6 +9,7 @@ import {
   validateDocsArchiveConfig,
   validateFlatpakMetadata,
   validateReleaseIdentity,
+  validateReleaseEnvironmentWorkflows,
 } from '../release-policy-contracts.mjs'
 
 const platformConfigPaths = [
@@ -157,6 +158,105 @@ test('candidate workflow gates every platform build on exact-tag tests', () => {
       failure.includes('release-distribution environment')
     )
   )
+})
+
+test('formal build, release, and updater jobs share the release-distribution environment', () => {
+  const workflows = {
+    '.github/workflows/release-distribution.yml': {
+      jobName: 'distribute',
+      source: fs.readFileSync(
+        '.github/workflows/release-distribution.yml',
+        'utf8'
+      ),
+    },
+    '.github/workflows/deploy-updater-router.yml': {
+      jobName: 'deploy',
+      source: fs.readFileSync(
+        '.github/workflows/deploy-updater-router.yml',
+        'utf8'
+      ),
+    },
+    '.github/workflows/biyan-upgrade-smoke.yml': {
+      jobName: 'attest',
+      source: fs.readFileSync(
+        '.github/workflows/biyan-upgrade-smoke.yml',
+        'utf8'
+      ),
+    },
+    '.github/workflows/promote-desktop-update.yml': {
+      jobName: 'promote',
+      source: fs.readFileSync(
+        '.github/workflows/promote-desktop-update.yml',
+        'utf8'
+      ),
+    },
+    '.github/workflows/updater-health-gate.yml': {
+      jobName: 'evaluate',
+      source: fs.readFileSync(
+        '.github/workflows/updater-health-gate.yml',
+        'utf8'
+      ),
+    },
+    '.github/workflows/updater-kill-switch.yml': {
+      jobName: 'update',
+      source: fs.readFileSync(
+        '.github/workflows/updater-kill-switch.yml',
+        'utf8'
+      ),
+    },
+    '.github/workflows/template-tauri-build-macos.yml': {
+      jobName: 'build-macos',
+      source: fs.readFileSync(
+        '.github/workflows/template-tauri-build-macos.yml',
+        'utf8'
+      ),
+    },
+    '.github/workflows/template-tauri-build-windows-x64.yml': {
+      jobName: 'build-windows-x64',
+      source: fs.readFileSync(
+        '.github/workflows/template-tauri-build-windows-x64.yml',
+        'utf8'
+      ),
+    },
+    '.github/workflows/template-tauri-build-linux-x64.yml': {
+      jobName: 'build-linux-x64',
+      source: fs.readFileSync(
+        '.github/workflows/template-tauri-build-linux-x64.yml',
+        'utf8'
+      ),
+    },
+    '.github/workflows/template-tauri-build-linux-x64-flatpak.yml': {
+      jobName: 'build-linux-x64',
+      source: fs.readFileSync(
+        '.github/workflows/template-tauri-build-linux-x64-flatpak.yml',
+        'utf8'
+      ),
+    },
+  }
+  assert.deepEqual(validateReleaseEnvironmentWorkflows(workflows), [])
+
+  for (const invalidEnvironment of [
+    'release-build',
+    'updater-production',
+    'updater-smoke-approval',
+  ]) {
+    for (const workflow of Object.keys(workflows)) {
+      const splitEnvironment = structuredClone(workflows)
+      splitEnvironment[workflow].source = splitEnvironment[
+        workflow
+      ].source.replace(
+        'environment: release-distribution',
+        `environment: ${invalidEnvironment}`
+      )
+      assert.ok(
+        validateReleaseEnvironmentWorkflows(splitEnvironment).some(
+          (failure) =>
+            failure.includes(workflow) &&
+            failure.includes('release-distribution environment')
+        )
+      )
+    }
+  }
 })
 
 test('PR CI gate includes release policy and updater contracts', () => {
