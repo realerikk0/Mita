@@ -47,20 +47,134 @@ export function validateReleaseIdentity({
     )
   }
 
-  const initialTrain = {
+  const bridgeTrain = {
     '0.6.634': { migrationPhase: 'A', dataSchema: 1 },
     '0.6.635': { migrationPhase: 'B', dataSchema: 2 },
     '0.6.636': { migrationPhase: 'C', dataSchema: 3 },
+    '0.6.637': { migrationPhase: 'A', dataSchema: 1 },
+    '0.6.638': { migrationPhase: 'B', dataSchema: 2 },
+    '0.6.639': { migrationPhase: 'C', dataSchema: 3 },
   }[version]
   if (
-    initialTrain &&
-    (migrationPhase !== initialTrain.migrationPhase ||
-      dataSchema !== initialTrain.dataSchema)
+    bridgeTrain &&
+    (migrationPhase !== bridgeTrain.migrationPhase ||
+      dataSchema !== bridgeTrain.dataSchema)
   ) {
     failures.push(
-      `initial release ${version} must attest ${initialTrain.migrationPhase}/${initialTrain.dataSchema}`
+      `bridge release ${version} must attest ${bridgeTrain.migrationPhase}/${bridgeTrain.dataSchema}`
     )
   }
+  return failures
+}
+
+export function validateLinuxReleaseBuild(
+  makefile,
+  packageJson,
+  buildCliScript,
+  linuxTauriConfig
+) {
+  const failures = []
+  const buildCli = makefile.match(
+    /^build-cli:\s*$([\s\S]*?)(?=^[A-Za-z0-9_.-]+:\s*(?:.*)?$)/m
+  )?.[1]
+  const linuxBranch = buildCli?.match(
+    /^else ifeq \(\$\(DETECTED_OS\),Linux\)\s*$([\s\S]*?)(?=^else(?:\s|$)|^endif\s*$)/m
+  )?.[1]
+  const linuxRecipes = linuxBranch?.split('\n') ?? []
+  const recipeIndex = (recipe) => linuxRecipes.indexOf(`\t${recipe}`)
+  const cliBuildIndex = recipeIndex(
+    'cd src-tauri && cargo build --release --features cli --bin biyan-cli'
+  )
+  const cliDirectoryIndex = recipeIndex(
+    "$(call MKDIR,'src-tauri/resources/bin')"
+  )
+  const cliInstallIndex = recipeIndex(
+    'install -m755 src-tauri/target/release/biyan-cli src-tauri/resources/bin/biyan-cli'
+  )
+  const runnerBuildIndex = recipeIndex(
+    'cd src-tauri && cargo build --release --features computer-agent-runner --bin biyan-computer-agent-runner'
+  )
+  const runnerDirectoryIndex = recipeIndex(
+    "$(call MKDIR,'src-tauri/resources/computer-agent-runner')"
+  )
+  const runnerInstallIndex = recipeIndex(
+    'install -m755 src-tauri/target/release/biyan-computer-agent-runner src-tauri/resources/computer-agent-runner/biyan-computer-agent-runner'
+  )
+
+  if (runnerBuildIndex < 0) {
+    failures.push(
+      'Linux build-cli must compile the release biyan-computer-agent-runner before Tauri bundling'
+    )
+  }
+  if (
+    cliBuildIndex < 0 ||
+    cliDirectoryIndex <= cliBuildIndex ||
+    cliInstallIndex <= cliDirectoryIndex ||
+    (runnerBuildIndex >= 0 && cliInstallIndex >= runnerBuildIndex)
+  ) {
+    failures.push(
+      'Linux build-cli must install an executable biyan-cli before compiling the computer-agent runner'
+    )
+  }
+  if (
+    runnerBuildIndex < 0 ||
+    runnerDirectoryIndex <= runnerBuildIndex ||
+    runnerInstallIndex <= runnerDirectoryIndex
+  ) {
+    failures.push(
+      'Linux build-cli must install the executable biyan-computer-agent-runner after compiling it'
+    )
+  }
+
+  const linuxResources = linuxTauriConfig?.bundle?.resources
+  if (
+    !Array.isArray(linuxResources) ||
+    !linuxResources.includes('resources/computer-agent-runner/**/*')
+  ) {
+    failures.push(
+      'Linux bundle must include resources/computer-agent-runner/**/*'
+    )
+  }
+
+  if (
+    packageJson?.scripts?.['build:cli'] !==
+    'node ./scripts/build-cli.mjs --release'
+  ) {
+    failures.push(
+      'build:cli must delegate the release build to scripts/build-cli.mjs'
+    )
+  }
+  if (
+    typeof buildCliScript !== 'string' ||
+    !/^const makeTarget = isDev \? 'build-cli-dev' : 'build-cli'$/m.test(
+      buildCliScript
+    ) ||
+    !/^if \(process\.platform !== 'win32' && !cliOnly\) \{\n  run\('make', \[makeTarget\]\)\n  process\.exit\(0\)\n\}$/m.test(
+      buildCliScript
+    )
+  ) {
+    failures.push(
+      'scripts/build-cli.mjs must run the Makefile build-cli target on Linux'
+    )
+  }
+
+  const linuxScript = packageJson?.scripts?.['build:tauri:linux']
+  const buildCliIndex =
+    typeof linuxScript === 'string' ? linuxScript.indexOf('yarn build:cli') : -1
+  const tauriBuildIndex =
+    typeof linuxScript === 'string'
+      ? linuxScript.indexOf('yarn tauri build')
+      : -1
+  if (
+    buildCliIndex < 0 ||
+    tauriBuildIndex < 0 ||
+    buildCliIndex > tauriBuildIndex
+  ) {
+    failures.push(
+      'build:tauri:linux must run yarn build:cli before yarn tauri build'
+    )
+  }
+
   return failures
 }
 
@@ -195,9 +309,7 @@ export function validateCiWorkflow(source) {
   if (!ciScope) {
     failures.push('Biyan CI is missing the ci-scope job')
   } else if (
-    /printf[^\n]*\|\s*grep[^\n]*(?:-[A-Za-z]*q[A-Za-z]*|--quiet)/.test(
-      ciScope
-    )
+    /printf[^\n]*\|\s*grep[^\n]*(?:-[A-Za-z]*q[A-Za-z]*|--quiet)/.test(ciScope)
   ) {
     failures.push(
       'Biyan CI scope detection must not use a short-circuiting printf | grep -q pipeline under pipefail'
