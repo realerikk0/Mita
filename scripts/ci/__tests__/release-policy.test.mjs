@@ -8,6 +8,7 @@ import {
   validateCiWorkflow,
   validateDocsArchiveConfig,
   validateFlatpakMetadata,
+  validateLinuxReleaseBuild,
   validateReleaseIdentity,
   validateReleaseEnvironmentWorkflows,
 } from '../release-policy-contracts.mjs'
@@ -21,11 +22,14 @@ const platformConfigPaths = [
   'src-tauri/tauri.ios.conf.json',
 ]
 
-test('initial release train locks version, phase, schema, and Cargo.lock together', () => {
+test('bridge release trains lock version, phase, schema, and Cargo.lock together', () => {
   for (const [version, migrationPhase, dataSchema] of [
     ['0.6.634', 'A', 1],
     ['0.6.635', 'B', 2],
     ['0.6.636', 'C', 3],
+    ['0.6.637', 'A', 1],
+    ['0.6.638', 'B', 2],
+    ['0.6.639', 'C', 3],
   ]) {
     assert.deepEqual(
       validateReleaseIdentity({
@@ -40,19 +44,224 @@ test('initial release train locks version, phase, schema, and Cargo.lock togethe
 
   assert.ok(
     validateReleaseIdentity({
-      version: '0.6.634',
-      migrationPhase: 'C',
-      dataSchema: 3,
-      cargoLockVersion: '0.6.634',
+      version: '0.6.637',
+      migrationPhase: 'B',
+      dataSchema: 2,
+      cargoLockVersion: '0.6.637',
     }).some((failure) => failure.includes('must attest A/1'))
   )
   assert.ok(
     validateReleaseIdentity({
-      version: '0.6.636',
+      version: '0.6.639',
       migrationPhase: 'C',
       dataSchema: 3,
-      cargoLockVersion: '0.6.635',
+      cargoLockVersion: '0.6.638',
     }).some((failure) => failure.includes('Cargo.lock version'))
+  )
+})
+
+test('Linux release build prepares every binary required by Tauri bundling', () => {
+  const makefile = fs.readFileSync('Makefile', 'utf8')
+  const packageJson = JSON.parse(fs.readFileSync('package.json', 'utf8'))
+  const buildCliScript = fs.readFileSync('scripts/build-cli.mjs', 'utf8')
+  const linuxTauriConfig = JSON.parse(
+    fs.readFileSync('src-tauri/tauri.linux.conf.json', 'utf8')
+  )
+  assert.deepEqual(
+    validateLinuxReleaseBuild(
+      makefile,
+      packageJson,
+      buildCliScript,
+      linuxTauriConfig
+    ),
+    []
+  )
+
+  const withLineEndings = (source, lineEnding) =>
+    source.replace(/\r\n?/g, '\n').replaceAll('\n', lineEnding)
+  const lfMakefile = withLineEndings(makefile, '\n')
+  const lfBuildCliScript = withLineEndings(buildCliScript, '\n')
+  const crlfMakefile = withLineEndings(lfMakefile, '\r\n')
+  const crlfBuildCliScript = withLineEndings(lfBuildCliScript, '\r\n')
+  assert.deepEqual(
+    validateLinuxReleaseBuild(
+      crlfMakefile,
+      packageJson,
+      crlfBuildCliScript,
+      linuxTauriConfig
+    ),
+    []
+  )
+
+  assert.deepEqual(
+    validateLinuxReleaseBuild(
+      withLineEndings(lfMakefile, '\r'),
+      packageJson,
+      withLineEndings(lfBuildCliScript, '\r'),
+      linuxTauriConfig
+    ),
+    []
+  )
+
+  const crlfWithoutRunner = crlfMakefile.replaceAll(
+    'cargo build --release --features computer-agent-runner --bin biyan-computer-agent-runner',
+    'echo skipped-computer-agent-runner'
+  )
+  assert.ok(
+    validateLinuxReleaseBuild(
+      crlfWithoutRunner,
+      packageJson,
+      crlfBuildCliScript,
+      linuxTauriConfig
+    ).some((failure) => failure.includes('must compile the release'))
+  )
+
+  const crlfWithoutMakeDelegate = crlfBuildCliScript.replace(
+    "  run('make', [makeTarget])",
+    "  run('echo', ['skipped-make'])"
+  )
+  assert.ok(
+    validateLinuxReleaseBuild(
+      crlfMakefile,
+      packageJson,
+      crlfWithoutMakeDelegate,
+      linuxTauriConfig
+    ).some((failure) => failure.includes('must run the Makefile'))
+  )
+
+  const withoutRunner = lfMakefile.replaceAll(
+    'cargo build --release --features computer-agent-runner --bin biyan-computer-agent-runner',
+    'echo skipped-computer-agent-runner'
+  )
+  assert.ok(
+    validateLinuxReleaseBuild(
+      withoutRunner,
+      packageJson,
+      lfBuildCliScript,
+      linuxTauriConfig
+    ).some((failure) => failure.includes('must compile the release'))
+  )
+
+  const echoedRunner = lfMakefile.replace(
+    '\tcd src-tauri && cargo build --release --features computer-agent-runner --bin biyan-computer-agent-runner\n',
+    '\techo cd src-tauri && cargo build --release --features computer-agent-runner --bin biyan-computer-agent-runner\n'
+  )
+  assert.ok(
+    validateLinuxReleaseBuild(
+      echoedRunner,
+      packageJson,
+      lfBuildCliScript,
+      linuxTauriConfig
+    ).some((failure) => failure.includes('must compile the release'))
+  )
+
+  const commentedRunner = lfMakefile.replace(
+    '\tcd src-tauri && cargo build --release --features computer-agent-runner --bin biyan-computer-agent-runner\n',
+    '\t# cd src-tauri && cargo build --release --features computer-agent-runner --bin biyan-computer-agent-runner\n'
+  )
+  assert.ok(
+    validateLinuxReleaseBuild(
+      commentedRunner,
+      packageJson,
+      lfBuildCliScript,
+      linuxTauriConfig
+    ).some((failure) => failure.includes('must compile the release'))
+  )
+
+  const cliInstall =
+    '\tinstall -m755 src-tauri/target/release/biyan-cli src-tauri/resources/bin/biyan-cli\n'
+  const runnerBuild =
+    '\tcd src-tauri && cargo build --release --features computer-agent-runner --bin biyan-computer-agent-runner\n'
+  const cliInstalledTooLate = lfMakefile.replace(
+    `${cliInstall}${runnerBuild}`,
+    `${runnerBuild}${cliInstall}`
+  )
+  assert.ok(
+    validateLinuxReleaseBuild(
+      cliInstalledTooLate,
+      packageJson,
+      lfBuildCliScript,
+      linuxTauriConfig
+    ).some((failure) => failure.includes('before compiling'))
+  )
+
+  const nonExecutableCli = lfMakefile.replace(
+    cliInstall,
+    '\tcp src-tauri/target/release/biyan-cli src-tauri/resources/bin/biyan-cli\n'
+  )
+  assert.ok(
+    validateLinuxReleaseBuild(
+      nonExecutableCli,
+      packageJson,
+      lfBuildCliScript,
+      linuxTauriConfig
+    ).some((failure) => failure.includes('executable biyan-cli'))
+  )
+
+  const nonExecutableRunner = lfMakefile.replace(
+    '\tinstall -m755 src-tauri/target/release/biyan-computer-agent-runner src-tauri/resources/computer-agent-runner/biyan-computer-agent-runner\n',
+    '\tinstall -m644 src-tauri/target/release/biyan-computer-agent-runner src-tauri/resources/computer-agent-runner/biyan-computer-agent-runner\n'
+  )
+  assert.ok(
+    validateLinuxReleaseBuild(
+      nonExecutableRunner,
+      packageJson,
+      lfBuildCliScript,
+      linuxTauriConfig
+    ).some((failure) => failure.includes('install the executable'))
+  )
+
+  const withoutBundledRunner = structuredClone(linuxTauriConfig)
+  withoutBundledRunner.bundle.resources =
+    withoutBundledRunner.bundle.resources.filter(
+      (resource) => resource !== 'resources/computer-agent-runner/**/*'
+    )
+  assert.ok(
+    validateLinuxReleaseBuild(
+      lfMakefile,
+      packageJson,
+      lfBuildCliScript,
+      withoutBundledRunner
+    ).some((failure) => failure.includes('Linux bundle must include'))
+  )
+
+  const withoutBuildCliDelegate = structuredClone(packageJson)
+  withoutBuildCliDelegate.scripts['build:cli'] = 'echo skipped-all-cli-builds'
+  assert.ok(
+    validateLinuxReleaseBuild(
+      lfMakefile,
+      withoutBuildCliDelegate,
+      lfBuildCliScript,
+      linuxTauriConfig
+    ).some((failure) => failure.includes('must delegate the release build'))
+  )
+
+  const withoutMakeDelegate = lfBuildCliScript.replace(
+    "  run('make', [makeTarget])",
+    "  run('echo', ['skipped-make'])"
+  )
+  assert.ok(
+    validateLinuxReleaseBuild(
+      lfMakefile,
+      packageJson,
+      withoutMakeDelegate,
+      linuxTauriConfig
+    ).some((failure) => failure.includes('must run the Makefile'))
+  )
+
+  const withoutCliPreparation = structuredClone(packageJson)
+  withoutCliPreparation.scripts['build:tauri:linux'] =
+    withoutCliPreparation.scripts['build:tauri:linux'].replace(
+      'yarn build:cli && ',
+      ''
+    )
+  assert.ok(
+    validateLinuxReleaseBuild(
+      lfMakefile,
+      withoutCliPreparation,
+      lfBuildCliScript,
+      linuxTauriConfig
+    ).some((failure) => failure.includes('before yarn tauri build'))
   )
 })
 

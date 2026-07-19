@@ -10,9 +10,14 @@ The bridge releases use cumulative forward-only data migrations:
 
 | Release | App version | Data schema | Purpose |
 | --- | --- | --- | --- |
-| A | 0.6.634 | 1 | Establish the migration substrate and activate Biyan storage |
-| B | 0.6.635 | 2 | Remove retired runtime payloads and finish package branding |
-| C | 0.6.636 | 3 | Restrict legacy aliases to isolated ingress and migration code |
+| A | 0.6.637 | 1 | Establish the migration substrate and activate Biyan storage |
+| B | 0.6.638 | 2 | Remove retired runtime payloads and finish package branding |
+| C | 0.6.639 | 3 | Restrict legacy aliases to isolated ingress and migration code |
+
+The superseded `0.6.634` candidate failed before a GitHub Release was created;
+its public tag remains immutable release evidence. Versions `0.6.635` and
+`0.6.636` were never tagged. The supported replacement train starts at
+`0.6.637`.
 
 Every later release carries all earlier migration steps. Sources remain
 read-only, conversion happens in staging, integrity checks run before the
