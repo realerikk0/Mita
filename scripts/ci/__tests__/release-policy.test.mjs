@@ -468,6 +468,22 @@ test('formal build, release, and updater jobs share the release-distribution env
   }
 })
 
+test('Flatpak reusable build keeps caller-compatible read-only contents permission', () => {
+  const source = fs.readFileSync(
+    '.github/workflows/template-tauri-build-linux-x64-flatpak.yml',
+    'utf8'
+  )
+
+  assert.match(
+    source,
+    /^  build-linux-x64:\n(?:[\s\S]*?)^    permissions:\n      contents: read$/m
+  )
+  assert.doesNotMatch(
+    source,
+    /^  build-linux-x64:\n(?:[\s\S]*?)^    permissions:\n      contents: write$/m
+  )
+})
+
 test('PR CI gate includes release policy and updater contracts', () => {
   const workflow = `jobs:
   ci-scope:
