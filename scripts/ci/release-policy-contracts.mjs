@@ -74,7 +74,12 @@ export function validateLinuxReleaseBuild(
   linuxTauriConfig
 ) {
   const failures = []
-  const buildCli = makefile.match(
+  const normalizedMakefile = makefile.replace(/\r\n?/g, '\n')
+  const normalizedBuildCliScript =
+    typeof buildCliScript === 'string'
+      ? buildCliScript.replace(/\r\n?/g, '\n')
+      : buildCliScript
+  const buildCli = normalizedMakefile.match(
     /^build-cli:\s*$([\s\S]*?)(?=^[A-Za-z0-9_.-]+:\s*(?:.*)?$)/m
   )?.[1]
   const linuxBranch = buildCli?.match(
@@ -145,12 +150,12 @@ export function validateLinuxReleaseBuild(
     )
   }
   if (
-    typeof buildCliScript !== 'string' ||
+    typeof normalizedBuildCliScript !== 'string' ||
     !/^const makeTarget = isDev \? 'build-cli-dev' : 'build-cli'$/m.test(
-      buildCliScript
+      normalizedBuildCliScript
     ) ||
     !/^if \(process\.platform !== 'win32' && !cliOnly\) \{\n  run\('make', \[makeTarget\]\)\n  process\.exit\(0\)\n\}$/m.test(
-      buildCliScript
+      normalizedBuildCliScript
     )
   ) {
     failures.push(

@@ -77,7 +77,59 @@ test('Linux release build prepares every binary required by Tauri bundling', () 
     []
   )
 
-  const withoutRunner = makefile.replaceAll(
+  const withLineEndings = (source, lineEnding) =>
+    source.replace(/\r\n?/g, '\n').replaceAll('\n', lineEnding)
+  const lfMakefile = withLineEndings(makefile, '\n')
+  const lfBuildCliScript = withLineEndings(buildCliScript, '\n')
+  const crlfMakefile = withLineEndings(lfMakefile, '\r\n')
+  const crlfBuildCliScript = withLineEndings(lfBuildCliScript, '\r\n')
+  assert.deepEqual(
+    validateLinuxReleaseBuild(
+      crlfMakefile,
+      packageJson,
+      crlfBuildCliScript,
+      linuxTauriConfig
+    ),
+    []
+  )
+
+  assert.deepEqual(
+    validateLinuxReleaseBuild(
+      withLineEndings(lfMakefile, '\r'),
+      packageJson,
+      withLineEndings(lfBuildCliScript, '\r'),
+      linuxTauriConfig
+    ),
+    []
+  )
+
+  const crlfWithoutRunner = crlfMakefile.replaceAll(
+    'cargo build --release --features computer-agent-runner --bin biyan-computer-agent-runner',
+    'echo skipped-computer-agent-runner'
+  )
+  assert.ok(
+    validateLinuxReleaseBuild(
+      crlfWithoutRunner,
+      packageJson,
+      crlfBuildCliScript,
+      linuxTauriConfig
+    ).some((failure) => failure.includes('must compile the release'))
+  )
+
+  const crlfWithoutMakeDelegate = crlfBuildCliScript.replace(
+    "  run('make', [makeTarget])",
+    "  run('echo', ['skipped-make'])"
+  )
+  assert.ok(
+    validateLinuxReleaseBuild(
+      crlfMakefile,
+      packageJson,
+      crlfWithoutMakeDelegate,
+      linuxTauriConfig
+    ).some((failure) => failure.includes('must run the Makefile'))
+  )
+
+  const withoutRunner = lfMakefile.replaceAll(
     'cargo build --release --features computer-agent-runner --bin biyan-computer-agent-runner',
     'echo skipped-computer-agent-runner'
   )
@@ -85,12 +137,12 @@ test('Linux release build prepares every binary required by Tauri bundling', () 
     validateLinuxReleaseBuild(
       withoutRunner,
       packageJson,
-      buildCliScript,
+      lfBuildCliScript,
       linuxTauriConfig
     ).some((failure) => failure.includes('must compile the release'))
   )
 
-  const echoedRunner = makefile.replace(
+  const echoedRunner = lfMakefile.replace(
     '\tcd src-tauri && cargo build --release --features computer-agent-runner --bin biyan-computer-agent-runner\n',
     '\techo cd src-tauri && cargo build --release --features computer-agent-runner --bin biyan-computer-agent-runner\n'
   )
@@ -98,12 +150,12 @@ test('Linux release build prepares every binary required by Tauri bundling', () 
     validateLinuxReleaseBuild(
       echoedRunner,
       packageJson,
-      buildCliScript,
+      lfBuildCliScript,
       linuxTauriConfig
     ).some((failure) => failure.includes('must compile the release'))
   )
 
-  const commentedRunner = makefile.replace(
+  const commentedRunner = lfMakefile.replace(
     '\tcd src-tauri && cargo build --release --features computer-agent-runner --bin biyan-computer-agent-runner\n',
     '\t# cd src-tauri && cargo build --release --features computer-agent-runner --bin biyan-computer-agent-runner\n'
   )
@@ -111,7 +163,7 @@ test('Linux release build prepares every binary required by Tauri bundling', () 
     validateLinuxReleaseBuild(
       commentedRunner,
       packageJson,
-      buildCliScript,
+      lfBuildCliScript,
       linuxTauriConfig
     ).some((failure) => failure.includes('must compile the release'))
   )
@@ -120,7 +172,7 @@ test('Linux release build prepares every binary required by Tauri bundling', () 
     '\tinstall -m755 src-tauri/target/release/biyan-cli src-tauri/resources/bin/biyan-cli\n'
   const runnerBuild =
     '\tcd src-tauri && cargo build --release --features computer-agent-runner --bin biyan-computer-agent-runner\n'
-  const cliInstalledTooLate = makefile.replace(
+  const cliInstalledTooLate = lfMakefile.replace(
     `${cliInstall}${runnerBuild}`,
     `${runnerBuild}${cliInstall}`
   )
@@ -128,12 +180,12 @@ test('Linux release build prepares every binary required by Tauri bundling', () 
     validateLinuxReleaseBuild(
       cliInstalledTooLate,
       packageJson,
-      buildCliScript,
+      lfBuildCliScript,
       linuxTauriConfig
     ).some((failure) => failure.includes('before compiling'))
   )
 
-  const nonExecutableCli = makefile.replace(
+  const nonExecutableCli = lfMakefile.replace(
     cliInstall,
     '\tcp src-tauri/target/release/biyan-cli src-tauri/resources/bin/biyan-cli\n'
   )
@@ -141,12 +193,12 @@ test('Linux release build prepares every binary required by Tauri bundling', () 
     validateLinuxReleaseBuild(
       nonExecutableCli,
       packageJson,
-      buildCliScript,
+      lfBuildCliScript,
       linuxTauriConfig
     ).some((failure) => failure.includes('executable biyan-cli'))
   )
 
-  const nonExecutableRunner = makefile.replace(
+  const nonExecutableRunner = lfMakefile.replace(
     '\tinstall -m755 src-tauri/target/release/biyan-computer-agent-runner src-tauri/resources/computer-agent-runner/biyan-computer-agent-runner\n',
     '\tinstall -m644 src-tauri/target/release/biyan-computer-agent-runner src-tauri/resources/computer-agent-runner/biyan-computer-agent-runner\n'
   )
@@ -154,7 +206,7 @@ test('Linux release build prepares every binary required by Tauri bundling', () 
     validateLinuxReleaseBuild(
       nonExecutableRunner,
       packageJson,
-      buildCliScript,
+      lfBuildCliScript,
       linuxTauriConfig
     ).some((failure) => failure.includes('install the executable'))
   )
@@ -166,9 +218,9 @@ test('Linux release build prepares every binary required by Tauri bundling', () 
     )
   assert.ok(
     validateLinuxReleaseBuild(
-      makefile,
+      lfMakefile,
       packageJson,
-      buildCliScript,
+      lfBuildCliScript,
       withoutBundledRunner
     ).some((failure) => failure.includes('Linux bundle must include'))
   )
@@ -177,20 +229,20 @@ test('Linux release build prepares every binary required by Tauri bundling', () 
   withoutBuildCliDelegate.scripts['build:cli'] = 'echo skipped-all-cli-builds'
   assert.ok(
     validateLinuxReleaseBuild(
-      makefile,
+      lfMakefile,
       withoutBuildCliDelegate,
-      buildCliScript,
+      lfBuildCliScript,
       linuxTauriConfig
     ).some((failure) => failure.includes('must delegate the release build'))
   )
 
-  const withoutMakeDelegate = buildCliScript.replace(
+  const withoutMakeDelegate = lfBuildCliScript.replace(
     "  run('make', [makeTarget])",
     "  run('echo', ['skipped-make'])"
   )
   assert.ok(
     validateLinuxReleaseBuild(
-      makefile,
+      lfMakefile,
       packageJson,
       withoutMakeDelegate,
       linuxTauriConfig
@@ -205,9 +257,9 @@ test('Linux release build prepares every binary required by Tauri bundling', () 
     )
   assert.ok(
     validateLinuxReleaseBuild(
-      makefile,
+      lfMakefile,
       withoutCliPreparation,
-      buildCliScript,
+      lfBuildCliScript,
       linuxTauriConfig
     ).some((failure) => failure.includes('before yarn tauri build'))
   )
