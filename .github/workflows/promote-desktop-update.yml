@@ -4,7 +4,7 @@ on:
   workflow_dispatch:
     inputs:
       tag:
-        description: "Signed candidate tag, for example v0.6.634"
+        description: "Signed candidate tag, for example v0.6.637"
         required: true
         type: string
       phase:

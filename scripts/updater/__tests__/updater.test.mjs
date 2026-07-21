@@ -85,13 +85,13 @@ test('candidate builder emits Biyan-only immutable assets and canonical manifest
   fs.mkdirSync(source)
   fs.writeFileSync(path.join(source, 'Biyan.app.tar.gz'), 'mac')
   fs.writeFileSync(path.join(source, 'Biyan.app.tar.gz.sig'), 'mac-signature')
-  fs.writeFileSync(path.join(source, 'Biyan_0.6.634_x64-setup.exe'), 'windows')
-  fs.writeFileSync(path.join(source, 'Biyan_0.6.634_x64-setup.exe.sig'), 'windows-signature')
-  fs.writeFileSync(path.join(source, 'Biyan_0.6.634_amd64.AppImage'), 'linux')
-  fs.writeFileSync(path.join(source, 'Biyan_0.6.634_amd64.AppImage.sig'), 'linux-signature')
+  fs.writeFileSync(path.join(source, 'Biyan_0.6.637_x64-setup.exe'), 'windows')
+  fs.writeFileSync(path.join(source, 'Biyan_0.6.637_x64-setup.exe.sig'), 'windows-signature')
+  fs.writeFileSync(path.join(source, 'Biyan_0.6.637_amd64.AppImage'), 'linux')
+  fs.writeFileSync(path.join(source, 'Biyan_0.6.637_amd64.AppImage.sig'), 'linux-signature')
 
   const candidate = buildCandidate({
-    version: '0.6.634',
+    version: '0.6.637',
     artifactsDir: source,
     outputDir: output,
     assetBaseUrl: 'https://static.mitapp.cn',
@@ -100,10 +100,10 @@ test('candidate builder emits Biyan-only immutable assets and canonical manifest
     migrationPhase: 'A',
     dataSchema: 1,
   })
-  assert.equal(candidate.manifestKey, 'biyan/updater/releases/v0.6.634/latest.json')
+  assert.equal(candidate.manifestKey, 'biyan/updater/releases/v0.6.637/latest.json')
   assert.equal(candidate.sourceCommit, sourceCommit)
   assert.equal(candidate.dataSchema, 1)
-  assert.match(fs.readFileSync(path.join(output, 'latest.json'), 'utf8'), /Biyan_0\.6\.634/)
+  assert.match(fs.readFileSync(path.join(output, 'latest.json'), 'utf8'), /Biyan_0\.6\.637/)
 })
 
 test('promotion is forward-only, phase-gated, and supports rollout increases', () => {
