@@ -16,6 +16,7 @@ import {
   createLegacyBiyanTeamsMigrationPatch,
   legacyBiyanTeamsMetadataKeyForTests as LEGACY_MITA_TEAMS_METADATA_KEY,
 } from '@/legacy_migrations/biyan-teams-metadata'
+import { runBiyanTeamsRuntime } from '@/lib/biyan-teams-runtime'
 
 describe('biyan teams metadata', () => {
   it('reads the legacy key once and only emits the canonical key', () => {
@@ -283,7 +284,6 @@ describe('biyan teams metadata', () => {
   })
 
   it('does not re-enable an archived role when the coordinator reconfigures the team', async () => {
-    const { runBiyanTeamsRuntime } = await import('@/lib/biyan-teams-runtime')
     const config = normalizeBiyanTeamsConfig(
       {
         enabled: true,
