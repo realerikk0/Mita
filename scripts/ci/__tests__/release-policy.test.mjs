@@ -22,6 +22,10 @@ const platformConfigPaths = [
   'src-tauri/tauri.ios.conf.json',
 ]
 
+const normalizeLineEndings = (source) => source.replace(/\r\n?/g, '\n')
+const withLineEndings = (source, lineEnding) =>
+  normalizeLineEndings(source).replaceAll('\n', lineEnding)
+
 test('bridge release trains lock version, phase, schema, and Cargo.lock together', () => {
   for (const [version, migrationPhase, dataSchema] of [
     ['0.6.634', 'A', 1],
@@ -77,8 +81,6 @@ test('Linux release build prepares every binary required by Tauri bundling', () 
     []
   )
 
-  const withLineEndings = (source, lineEnding) =>
-    source.replace(/\r\n?/g, '\n').replaceAll('\n', lineEnding)
   const lfMakefile = withLineEndings(makefile, '\n')
   const lfBuildCliScript = withLineEndings(buildCliScript, '\n')
   const crlfMakefile = withLineEndings(lfMakefile, '\r\n')
@@ -474,14 +476,19 @@ test('Flatpak reusable build keeps caller-compatible read-only contents permissi
     'utf8'
   )
 
-  assert.match(
-    source,
-    /^  build-linux-x64:\n(?:[\s\S]*?)^    permissions:\n      contents: read$/m
-  )
-  assert.doesNotMatch(
-    source,
-    /^  build-linux-x64:\n(?:[\s\S]*?)^    permissions:\n      contents: write$/m
-  )
+  for (const lineEnding of ['\n', '\r\n', '\r']) {
+    const normalizedSource = normalizeLineEndings(
+      withLineEndings(source, lineEnding)
+    )
+    assert.match(
+      normalizedSource,
+      /^  build-linux-x64:\n(?:[\s\S]*?)^    permissions:\n      contents: read$/m
+    )
+    assert.doesNotMatch(
+      normalizedSource,
+      /^  build-linux-x64:\n(?:[\s\S]*?)^    permissions:\n      contents: write$/m
+    )
+  }
 })
 
 test('PR CI gate includes release policy and updater contracts', () => {
