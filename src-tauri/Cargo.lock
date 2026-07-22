@@ -4,7 +4,7 @@ version = 3
 
 [[package]]
 name = "Biyan"
-version = "0.6.642"
+version = "0.6.640"
 dependencies = [
  "async-trait",
  "base64 0.22.1",
