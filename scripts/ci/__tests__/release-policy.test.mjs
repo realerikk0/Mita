@@ -5,12 +5,16 @@ import test from 'node:test'
 import {
   validateBundledLegalResources,
   validateCandidateWorkflow,
+  validateCiControlOwnership,
   validateCiWorkflow,
   validateDocsArchiveConfig,
   validateFlatpakMetadata,
   validateLinuxReleaseBuild,
+  validateMacOSCandidateVerifier,
+  validateQualificationWorkflow,
   validateReleaseIdentity,
   validateReleaseEnvironmentWorkflows,
+  validateWindowsCandidateVerifier,
 } from '../release-policy-contracts.mjs'
 
 const platformConfigPaths = [
@@ -491,29 +495,133 @@ test('Flatpak reusable build keeps caller-compatible read-only contents permissi
   }
 })
 
-test('PR CI gate includes release policy and updater contracts', () => {
-  const workflow = `jobs:
+test('PR CI uses a trusted impact classifier and gates each affected axis', () => {
+  const workflow = `permissions:
+  contents: read
+jobs:
   ci-scope:
+    outputs:
+      quick: \${{ steps.scope.outputs.quick }}
+      test_linux: \${{ steps.scope.outputs.test_linux }}
+      test_windows: \${{ steps.scope.outputs.test_windows }}
+      test_macos: \${{ steps.scope.outputs.test_macos }}
+      full: \${{ steps.scope.outputs.full }}
+      docs: \${{ steps.scope.outputs.docs }}
+      checkpoint: \${{ steps.scope.outputs.checkpoint }}
+      policy: \${{ steps.scope.outputs.policy }}
+      updater: \${{ steps.scope.outputs.updater }}
+      artifact_replay: \${{ steps.scope.outputs.artifact_replay }}
     steps:
-      - run: grep -E '^src-tauri/' <<< "$changed_files" >/dev/null
+      - id: scope
+        run: |
+          base_sha="\${{ github.event.pull_request.base.sha }}"
+          if ! git show "\${base_sha}:scripts/ci/qualification-impact.mjs" > "$RUNNER_TEMP/qualification-impact.mjs"; then
+            echo "Base classifier unavailable; fail closed to full axes."
+            for flag in quick test_linux test_windows test_macos full; do
+              echo "\${flag}=true" >> "$GITHUB_OUTPUT"
+            done
+          else
+            node "$RUNNER_TEMP/qualification-impact.mjs" classify --repo . --base "$base_sha" --target HEAD --format github-output
+          fi
+      - name: Validate CI scope outputs
+        env:
+          CLASSIFICATION: \${{ steps.scope.outputs.classification }}
+          BLOCKED: \${{ steps.scope.outputs.blocked }}
+          DOCS: \${{ steps.scope.outputs.docs }}
+          CHECKPOINT: \${{ steps.scope.outputs.checkpoint }}
+          FOCUSED: \${{ steps.scope.outputs.focused }}
+          QUICK: \${{ steps.scope.outputs.quick }}
+          POLICY: \${{ steps.scope.outputs.policy }}
+          UPDATER: \${{ steps.scope.outputs.updater }}
+          ARTIFACT_REPLAY: \${{ steps.scope.outputs.artifact_replay }}
+          TEST_MACOS: \${{ steps.scope.outputs.test_macos }}
+          TEST_WINDOWS: \${{ steps.scope.outputs.test_windows }}
+          TEST_LINUX: \${{ steps.scope.outputs.test_linux }}
+          BUILD_MACOS: \${{ steps.scope.outputs.build_macos }}
+          BUILD_WINDOWS: \${{ steps.scope.outputs.build_windows }}
+          BUILD_LINUX: \${{ steps.scope.outputs.build_linux }}
+          FULL: \${{ steps.scope.outputs.full }}
+          PLAN_SHA256: \${{ steps.scope.outputs.plan_sha256 }}
+          CLASSIFICATION_JSON: \${{ steps.scope.outputs.classification_json }}
+        run: |
+          for entry in "docs=$DOCS" "checkpoint=$CHECKPOINT" "focused=$FOCUSED" "quick=$QUICK" "policy=$POLICY" "updater=$UPDATER" "artifact_replay=$ARTIFACT_REPLAY" "test_macos=$TEST_MACOS" "test_windows=$TEST_WINDOWS" "test_linux=$TEST_LINUX" "build_macos=$BUILD_MACOS" "build_windows=$BUILD_WINDOWS" "build_linux=$BUILD_LINUX" "full=$FULL"; do
+            value="\${entry#*=}"
+            if [ "$value" != "true" ] && [ "$value" != "false" ]; then exit 1; fi
+          done
+          if [ "$BLOCKED" != "false" ]; then exit 1; fi
+          if [[ ! "$PLAN_SHA256" =~ ^[0-9a-f]{64}$ ]]; then exit 1; fi
+          node - "$CLASSIFICATION_JSON" "$PLAN_SHA256" "$CLASSIFICATION" <<'NODE'
+          const [raw, planSha256, classification] = process.argv.slice(2)
+          const plan = JSON.parse(raw)
+          if (plan.classification !== classification) throw new Error('identity')
+          if (plan.planSha256 !== undefined && plan.planSha256 !== planSha256) throw new Error('hash')
+          NODE
+  quick-pr-check:
+    needs: ci-scope
+    if: needs.ci-scope.outputs.quick == 'true'
   release-safety:
     steps:
       - run: node scripts/ci/verify-release-policy.mjs
       - run: node --test scripts/ci/__tests__/release-policy.test.mjs
+      - run: node --test scripts/ci/__tests__/qualification-impact.test.mjs
+      - run: node --test scripts/ci/__tests__/verify-qualification-artifacts.test.mjs
       - run: node --test scripts/updater/__tests__/updater.test.mjs
+      - run: node --test scripts/release-distribution/__tests__/release-distribution.test.mjs
+  base_branch_cov:
+    needs: ci-scope
+    if: needs.ci-scope.outputs.full == 'true'
+  base_branch_rust_cov:
+    needs: ci-scope
+    if: needs.ci-scope.outputs.full == 'true'
+  test-on-macos:
+    needs: ci-scope
+    if: needs.ci-scope.outputs.test_macos == 'true'
+  test-on-windows:
+    needs: ci-scope
+    if: needs.ci-scope.outputs.test_windows == 'true'
+  test-on-windows-pr:
+    needs: ci-scope
+    if: needs.ci-scope.outputs.test_windows == 'true'
+  test-on-ubuntu:
+    needs: ci-scope
+    if: needs.ci-scope.outputs.test_linux == 'true'
   coverage-check:
+    needs: [ci-scope, base_branch_cov, base_branch_rust_cov]
+    if: needs.ci-scope.outputs.full == 'true'
     steps:
       - run: yarn test:coverage
   pr-ci-gate:
-    needs: [ci-scope, release-safety, coverage-check]
+    needs: [ci-scope, quick-pr-check, release-safety, test-on-macos, test-on-windows-pr, test-on-ubuntu, coverage-check]
+    env:
+      QUICK: \${{ needs.ci-scope.outputs.quick }}
+      TEST_MACOS: \${{ needs.ci-scope.outputs.test_macos }}
+      TEST_WINDOWS: \${{ needs.ci-scope.outputs.test_windows }}
+      TEST_LINUX: \${{ needs.ci-scope.outputs.test_linux }}
+      FULL: \${{ needs.ci-scope.outputs.full }}
     steps:
-      - run: require_success "coverage-check" "$COVERAGE_RESULT"
+      - run: |
+          if [ "$QUICK" = true ]; then
+            require_success "Fast PR check" "$FAST_RESULT"
+          fi
+          if [ "$TEST_MACOS" = true ]; then
+            require_success "test-on-macos" "$MACOS_RESULT"
+          fi
+          if [ "$TEST_LINUX" = true ]; then
+            require_success "test-on-ubuntu" "$UBUNTU_RESULT"
+          fi
+          if [ "$TEST_WINDOWS" = true ]; then
+            require_success "test-on-windows-pr" "$WINDOWS_PR_RESULT"
+          fi
+          if [ "$FULL" = true ]; then
+            require_success "coverage-check" "$COVERAGE_RESULT"
+          fi
 `
   assert.deepEqual(validateCiWorkflow(workflow), [])
+
   assert.ok(
     validateCiWorkflow(
       workflow.replace(
-        'needs: [ci-scope, release-safety, coverage-check]',
+        'needs: [ci-scope, quick-pr-check, release-safety, test-on-macos, test-on-windows-pr, test-on-ubuntu, coverage-check]',
         'needs: []'
       )
     ).some((failure) => failure.includes('PR CI Gate'))
@@ -530,8 +638,8 @@ test('PR CI gate includes release policy and updater contracts', () => {
   )
 
   const unenforcedCoverage = workflow.replace(
-    '      - run: require_success "coverage-check" "$COVERAGE_RESULT"\n',
-    ''
+    'require_success "coverage-check" "$COVERAGE_RESULT"',
+    'echo require_success "coverage-check" "$COVERAGE_RESULT"'
   )
   assert.ok(
     validateCiWorkflow(unenforcedCoverage).some((failure) =>
@@ -539,15 +647,415 @@ test('PR CI gate includes release policy and updater contracts', () => {
     )
   )
 
-  const unsafeScope = workflow.replace(
-    `grep -E '^src-tauri/' <<< "$changed_files" >/dev/null`,
-    `printf '%s\\n' "$changed_files" | grep -Eq '^src-tauri/'`
+  for (const unsafeScope of [
+    workflow.replace(
+      'git show "\${base_sha}:scripts/ci/qualification-impact.mjs"',
+      'echo git show "\${base_sha}:scripts/ci/qualification-impact.mjs"'
+    ),
+    workflow.replace(
+      'node "$RUNNER_TEMP/qualification-impact.mjs" classify',
+      'echo node "$RUNNER_TEMP/qualification-impact.mjs" classify'
+    ),
+    workflow.replace(
+      'node "$RUNNER_TEMP/qualification-impact.mjs" classify',
+      '# node "$RUNNER_TEMP/qualification-impact.mjs" classify'
+    ),
+    workflow.replace(
+      ':scripts/ci/qualification-impact.mjs',
+      ':scripts/ci/qualification-impact-mutated.mjs'
+    ),
+  ]) {
+    assert.ok(
+      validateCiWorkflow(unsafeScope).some((failure) =>
+        failure.includes('trusted')
+      )
+    )
+  }
+
+  const missingAxis = workflow.replace(
+    '      test_macos: \${{ steps.scope.outputs.test_macos }}\n',
+    ''
   )
   assert.ok(
-    validateCiWorkflow(unsafeScope).some((failure) =>
-      failure.includes('printf | grep -q')
+    validateCiWorkflow(missingAxis).some((failure) =>
+      failure.includes('test_macos impact axis')
     )
   )
+
+  const incompleteFallback = workflow.replace(
+    'for flag in quick test_linux test_windows test_macos full',
+    'for flag in quick test_linux test_windows full'
+  )
+
+  const missingBooleanValidation = workflow.replace(
+    '"test_macos=$TEST_MACOS" ',
+    ''
+  )
+  assert.ok(
+    validateCiWorkflow(missingBooleanValidation).some((failure) =>
+      failure.includes('validate test_macos')
+    )
+  )
+
+  const missingJsonAuthentication = workflow.replace(
+    'const plan = JSON.parse(raw)',
+    'const plan = { classification }'
+  )
+  assert.ok(
+    validateCiWorkflow(missingJsonAuthentication).some((failure) =>
+      failure.includes('classification JSON')
+    )
+  )
+  assert.ok(
+    validateCiWorkflow(incompleteFallback).some((failure) =>
+      failure.includes('fail closed to full axes')
+    )
+  )
+
+  const platformForcedFull = workflow.replace(
+    "if: needs.ci-scope.outputs.test_macos == 'true'",
+    "if: needs.ci-scope.outputs.full == 'true'"
+  )
+  assert.ok(
+    validateCiWorkflow(platformForcedFull).some((failure) =>
+      failure.includes('test-on-macos must be gated')
+    )
+  )
+
+  for (const command of [
+    'node --test scripts/ci/__tests__/qualification-impact.test.mjs',
+    'node --test scripts/ci/__tests__/verify-qualification-artifacts.test.mjs',
+    'node --test scripts/release-distribution/__tests__/release-distribution.test.mjs',
+  ]) {
+    const echoedContract = workflow.replace(command, `echo ${command}`)
+    assert.ok(
+      validateCiWorkflow(echoedContract).some((failure) =>
+        failure.includes(`does not run: ${command}`)
+      )
+    )
+    const commentedContract = workflow.replace(command, `# ${command}`)
+    assert.ok(
+      validateCiWorkflow(commentedContract).some((failure) =>
+        failure.includes(`does not run: ${command}`)
+      )
+    )
+  }
+})
+
+test('PR CI is read-only and CI control paths require owner review', () => {
+  const workflow = fs.readFileSync(
+    '.github/workflows/biyan-linter-and-test.yml',
+    'utf8'
+  )
+  assert.deepEqual(validateCiWorkflow(workflow), [])
+  assert.ok(
+    validateCiWorkflow(
+      workflow.replace('permissions:\n  contents: read', 'permissions:\n  contents: write')
+    ).some((failure) => failure.includes('contents: read only'))
+  )
+  assert.ok(
+    validateCiWorkflow(
+      workflow.replace('persist-credentials: false', 'persist-credentials: true')
+    ).some((failure) => failure.includes('credential persistence'))
+  )
+  assert.ok(
+    validateCiWorkflow(
+      workflow.replace(
+        '    permissions:\n      contents: read',
+        '    permissions:\n      contents: read\n      pull-requests: write'
+      )
+    ).some((failure) => failure.includes('write permissions'))
+  )
+
+  const codeowners = fs.readFileSync('.github/CODEOWNERS', 'utf8')
+  assert.deepEqual(validateCiControlOwnership(codeowners), [])
+  for (const owner of ['@realerikk0', '@twokar']) {
+    assert.ok(
+      validateCiControlOwnership(
+        codeowners.replace(`/.github/ @realerikk0 @twokar`, `/.github/ ${owner}`)
+      ).some(
+        (failure) => failure.includes('/.github/') && !failure.endsWith(owner)
+      )
+    )
+  }
+})
+
+test('protected Windows verifier authenticates native EXE and MSI identity', () => {
+  const verifier = fs.readFileSync(
+    'scripts/ci/verify-windows-candidate.ps1',
+    'utf8'
+  )
+  assert.deepEqual(validateWindowsCandidateVerifier(verifier), [])
+  for (const mutation of [
+    verifier.replaceAll('0x8664', '0x014C'),
+    verifier.replace("'Biyan.exe'", "'Other.exe'"),
+    verifier.replace('OpenDatabase', 'OpenData'),
+    verifier.replace("'ProductVersion'", "'OtherVersion'"),
+    verifier.replace('SummaryInformation(0)', 'SummaryInformation(1)'),
+    verifier.replace('(?i:x64|Intel64)', '(?i:Intel)'),
+  ]) {
+    assert.notDeepEqual(validateWindowsCandidateVerifier(mutation), [])
+  }
+})
+
+test('protected macOS verifier authenticates the mounted DMG app bytes', () => {
+  const verifier = fs.readFileSync('scripts/verify-macos-candidate.mjs', 'utf8')
+  assert.deepEqual(validateMacOSCandidateVerifier(verifier), [])
+  for (const mutation of [
+    verifier.replace("runCommand('hdiutil', ['verify'", "runCommand('echo', ['verify'"),
+    verifier.replace("'attach',", "'inspect',"),
+    verifier.replace('bundleSnapshot(mountedApp)', 'bundleSnapshot(appPath)'),
+    verifier.replace("runCommand('hdiutil', ['detach'", "runCommand('echo', ['detach'"),
+  ]) {
+    assert.notDeepEqual(validateMacOSCandidateVerifier(mutation), [])
+  }
+})
+
+const qualificationWorkflow = `name: Exact SHA qualification
+on:
+  workflow_dispatch:
+    inputs:
+      target_ref:
+        required: true
+      target_sha:
+        required: true
+      base_sha:
+        required: true
+      bootstrap_full:
+        required: true
+permissions:
+  contents: read
+  actions: read
+jobs:
+  preflight:
+    if: github.ref == 'refs/heads/mita-main'
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: \${{ github.sha }}
+          path: harness
+      - uses: actions/checkout@v4
+        with:
+          ref: \${{ inputs.target_sha }}
+          path: target
+      - run: |
+          TARGET="\${{ inputs.target_sha }}"
+          BASE="\${{ inputs.base_sha }}"
+          [[ "$TARGET" =~ ^[0-9a-f]{40}$ ]]
+          [[ "$BASE" =~ ^[0-9a-f]{40}$ ]]
+          test "$(git -C target rev-parse HEAD)" = "$TARGET"
+          git -C harness merge-base --is-ancestor "$BASE" "$TARGET"
+          if [ "\${{ inputs.bootstrap_full }}" = true ]; then
+            bootstrap_full=--force-full
+          fi
+          node harness/scripts/ci/qualification-impact.mjs classify --repo harness --base "$BASE" --target "$TARGET" $bootstrap_full --format github-output
+      - working-directory: harness
+        run: node --test scripts/ci/__tests__/qualification-impact.test.mjs scripts/ci/__tests__/verify-qualification-artifacts.test.mjs
+      - if: steps.classification.outputs.policy == 'true'
+        working-directory: target
+        run: |
+          node scripts/ci/verify-release-policy.mjs
+          node --test scripts/ci/__tests__/release-policy.test.mjs
+      - if: steps.classification.outputs.updater == 'true'
+        working-directory: target
+        run: node --test scripts/updater/__tests__/updater.test.mjs
+      - working-directory: target
+        run: |
+          test_file="scripts/release-distribution/__tests__/release-distribution.test.mjs"
+          node --test "$test_file"
+  docs-build:
+    runs-on: ubuntu-24.04
+    needs: preflight
+  artifact-replay:
+    runs-on: ubuntu-24.04
+    needs: preflight
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: \${{ needs.preflight.outputs.workflow_sha }}
+          path: harness
+      - uses: actions/download-artifact@v4
+        with:
+          repository: \${{ github.repository }}
+          run-id: \${{ needs.preflight.outputs.replay_run_id }}
+          name: qualification-manifest-\${{ needs.preflight.outputs.replay_run_id }}
+      - run: node harness/scripts/ci/verify-qualification-artifacts.mjs verify --root replay --manifest replay/manifest.json --manifest-sha256 "$MANIFEST_SHA" --target-sha "$BASE" --base-sha "$REPLAY_BASE" --run-id "$REPLAY_RUN"
+  native-linux:
+    runs-on: ubuntu-24.04
+    needs: [preflight, artifact-replay]
+    if: needs.preflight.outputs.test_linux == 'true' || needs.preflight.outputs.build_linux == 'true'
+  native-windows:
+    runs-on: windows-2022
+    needs: [preflight, artifact-replay]
+    if: needs.preflight.outputs.test_windows == 'true' || needs.preflight.outputs.build_windows == 'true'
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: \${{ needs.preflight.outputs.workflow_sha }}
+          path: harness
+      - run: |
+          & ./harness/scripts/ci/verify-windows-candidate.ps1 -Exe "$EXE" -Msi "$MSI" -Version "$VERSION"
+  native-macos:
+    runs-on: macos-15-intel
+    needs: [preflight, artifact-replay]
+    if: needs.preflight.outputs.test_macos == 'true' || needs.preflight.outputs.build_macos == 'true'
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: \${{ needs.preflight.outputs.workflow_sha }}
+          path: harness
+      - run: |
+          node harness/scripts/verify-macos-candidate.mjs \
+            --repo-root target \
+            --app target/src-tauri/target/release/bundle/macos/Biyan.app \
+            --dmg target/src-tauri/target/release/bundle/dmg/Biyan_0.6.640_universal.dmg \
+            --version "$VERSION" \
+            --signature ad-hoc
+  aggregate-artifacts:
+    runs-on: ubuntu-24.04
+    needs: [preflight, native-linux, native-windows, native-macos]
+  qualification-gate:
+    if: \${{ always() }}
+    runs-on: ubuntu-24.04
+    needs: [preflight, docs-build, artifact-replay, native-linux, native-windows, native-macos, aggregate-artifacts]
+    steps:
+      - run: |
+          require_result() { test "$2" = success; }
+          require_result preflight "$PREFLIGHT_RESULT"
+          expect_result docs-build "$DOCS_REQUIRED" "$DOCS_RESULT"
+          expect_result artifact-replay "$REPLAY_REQUIRED" "$REPLAY_RESULT"
+          expect_result native-linux "$LINUX_REQUIRED" "$LINUX_RESULT"
+          expect_result native-windows "$WINDOWS_REQUIRED" "$WINDOWS_RESULT"
+          expect_result native-macos "$MACOS_REQUIRED" "$MACOS_RESULT"
+          expect_result aggregate-artifacts "$AGGREGATE_REQUIRED" "$AGGREGATE_RESULT"
+`
+
+test('exact-SHA qualification keeps the harness trusted and has no production authority', () => {
+  assert.deepEqual(validateQualificationWorkflow(qualificationWorkflow), [])
+
+  for (const [index, mutation] of [
+    qualificationWorkflow.replace('  workflow_dispatch:', '  push:'),
+    qualificationWorkflow.replace(
+      '  workflow_dispatch:',
+      '  workflow_dispatch:\n  push: {}'
+    ),
+    qualificationWorkflow.replace(
+      'refs/heads/mita-main',
+      'refs/heads/release/test'
+    ),
+    qualificationWorkflow.replace('  contents: read', '  contents: write'),
+    qualificationWorkflow.replace(
+      '  actions: read',
+      '  actions: read\n  id-token: read'
+    ),
+    qualificationWorkflow.replace(
+      'runs-on: windows-2022',
+      'runs-on: windows-latest'
+    ),
+    qualificationWorkflow.replace(
+      'runs-on: macos-15-intel',
+      'runs-on: macos-latest'
+    ),
+    qualificationWorkflow.replace(
+      'ref: \${{ github.sha }}',
+      'ref: \${{ inputs.target_sha }}'
+    ),
+    qualificationWorkflow.replace(
+      'ref: \${{ inputs.target_sha }}',
+      'ref: \${{ inputs.base_sha }}'
+    ),
+    qualificationWorkflow.replace(
+      'test "$(git -C target rev-parse HEAD)" = "$TARGET"',
+      'echo test "$(git -C target rev-parse HEAD)" = "$TARGET"'
+    ),
+    qualificationWorkflow.replace(
+      'git -C harness merge-base --is-ancestor',
+      'echo git -C harness merge-base --is-ancestor'
+    ),
+    qualificationWorkflow.replace(
+      'node harness/scripts/ci/qualification-impact.mjs classify',
+      'echo node harness/scripts/ci/qualification-impact.mjs classify'
+    ),
+    qualificationWorkflow.replace(
+      'node harness/scripts/ci/qualification-impact.mjs classify',
+      '# node harness/scripts/ci/qualification-impact.mjs classify'
+    ),
+    qualificationWorkflow.replace(
+      'if [ "\${{ inputs.bootstrap_full }}" = true ]; then',
+      'if true; then'
+    ),
+    qualificationWorkflow.replace('$bootstrap_full --format', '--format'),
+    qualificationWorkflow.replace(
+      'node harness/scripts/ci/verify-qualification-artifacts.mjs verify',
+      'echo node harness/scripts/ci/verify-qualification-artifacts.mjs verify'
+    ),
+    qualificationWorkflow.replace(
+      'node harness/scripts/ci/verify-qualification-artifacts.mjs verify',
+      '# node harness/scripts/ci/verify-qualification-artifacts.mjs verify'
+    ),
+    qualificationWorkflow.replace(
+      '--manifest-sha256 "$MANIFEST_SHA"',
+      '--manifest-sha "$MANIFEST_SHA"'
+    ),
+    qualificationWorkflow.replace(
+      'needs: [preflight, artifact-replay]',
+      'needs: artifact-replay'
+    ),
+    qualificationWorkflow.replace(
+      'repository: \${{ github.repository }}',
+      'repository: attacker/fork'
+    ),
+    qualificationWorkflow.replace(
+      'name: qualification-manifest-\${{ needs.preflight.outputs.replay_run_id }}',
+      'pattern: qualification-*'
+    ),
+    qualificationWorkflow.replace(
+      'ref: \${{ needs.preflight.outputs.workflow_sha }}',
+      'ref: \${{ needs.preflight.outputs.target_sha }}'
+    ),
+    qualificationWorkflow.replace(
+      "needs.preflight.outputs.build_macos == 'true'",
+      "needs.preflight.outputs.test_macos == 'true'"
+    ),
+    qualificationWorkflow.replace(
+      'node harness/scripts/verify-macos-candidate.mjs',
+      'echo node harness/scripts/verify-macos-candidate.mjs'
+    ),
+    qualificationWorkflow.replace(
+      '& ./harness/scripts/ci/verify-windows-candidate.ps1',
+      'Write-Output ./harness/scripts/ci/verify-windows-candidate.ps1'
+    ),
+    qualificationWorkflow.replace(
+      'if: \${{ always() }}',
+      'if: \${{ success() }}'
+    ),
+    qualificationWorkflow.replace(
+      'require_result preflight',
+      'echo require_result preflight'
+    ),
+    qualificationWorkflow.replace(
+      'expect_result native-macos',
+      'echo expect_result native-macos'
+    ),
+    qualificationWorkflow.replace(
+      'permissions:\n',
+      'environment: production\npermissions:\n'
+    ),
+    qualificationWorkflow.replace(
+      'permissions:\n',
+      'secrets: inherit\npermissions:\n'
+    ),
+    `${qualificationWorkflow}\n  deploy:\n    runs-on: ubuntu-24.04\n    steps:\n      - run: gh release create v1\n`,
+    `${qualificationWorkflow}\n  upload:\n    runs-on: ubuntu-24.04\n    steps:\n      - run: curl -T artifact https://example.com/upload\n`,
+    `${qualificationWorkflow}\n  upload:\n    runs-on: ubuntu-24.04\n    steps:\n      - run: curl --data-binary @artifact https://example.com/upload\n`,
+  ].entries()) {
+    assert.notDeepEqual(
+      validateQualificationWorkflow(mutation),
+      [],
+      `qualification mutation ${index} must fail`
+    )
+  }
 })
 
 test('docs archive is excluded from production typechecking', () => {

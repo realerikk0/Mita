@@ -28,6 +28,121 @@ function jobNeeds(block, dependency) {
   ).test(needs)
 }
 
+function topLevelBlock(source, key) {
+  const normalized = source.replace(/\r\n?/g, '\n')
+  const header = new RegExp(`^${escapeRegExp(key)}:\\s*(?:#.*)?$`, 'm')
+  const match = header.exec(normalized)
+  if (!match) return null
+
+  const start = match.index
+  const remainder = normalized.slice(start + match[0].length)
+  const nextKey = /^[A-Za-z0-9_-]+:\s*(?:[^\n]*)?$/m.exec(remainder)
+  return normalized.slice(
+    start,
+    nextKey ? start + match[0].length + nextKey.index : normalized.length
+  )
+}
+
+function uncommentedSource(source) {
+  return source
+    .replace(/\r\n?/g, '\n')
+    .split('\n')
+    .filter((line) => !/^\s*#/.test(line))
+    .join('\n')
+}
+
+function runBlocks(block) {
+  if (!block) return []
+  const lines = block.replace(/\r\n?/g, '\n').split('\n')
+  const blocks = []
+
+  for (let index = 0; index < lines.length; index += 1) {
+    const match = /^(\s*)(?:-\s*)?run:\s*(.*)$/.exec(lines[index])
+    if (!match) continue
+
+    const indentation = match[1].length
+    const inline = match[2].trim()
+    const commands = []
+    if (inline && !/^[|>][-+]?\s*$/.test(inline)) commands.push(inline)
+
+    if (/^[|>][-+]?\s*$/.test(inline)) {
+      for (index += 1; index < lines.length; index += 1) {
+        const line = lines[index]
+        if (line.trim() && line.match(/^\s*/)[0].length <= indentation) {
+          index -= 1
+          break
+        }
+        const command = line.trim()
+        if (command && !command.startsWith('#')) commands.push(command)
+      }
+    }
+    blocks.push(commands)
+  }
+  return blocks
+}
+
+function hasRunInvocation(block, invocation, required = []) {
+  return runBlocks(block).some((commands) => {
+    const executable = commands.some(
+      (command) =>
+        !/^(?:echo|printf|Write-(?:Host|Output))\b/i.test(command) &&
+        invocation.test(command)
+    )
+    if (!executable) return false
+    const text = commands.join('\n')
+    return required.every((pattern) => pattern.test(text))
+  })
+}
+
+function findRunInvocation(block, invocation) {
+  for (const commands of runBlocks(block)) {
+    const command = commands.find(
+      (candidate) =>
+        !/^(?:echo|printf|Write-(?:Host|Output))\b/i.test(candidate) &&
+        invocation.test(candidate)
+    )
+    if (command) return { command, commands }
+  }
+  return null
+}
+
+function actionStepBlocks(source, action) {
+  const normalized = source.replace(/\r\n?/g, '\n')
+  const lines = normalized.split('\n')
+  const escaped = escapeRegExp(action)
+  const blocks = []
+  for (let index = 0; index < lines.length; index += 1) {
+    const match = new RegExp(
+      `^(\\s*)(-\\s*)?uses:\\s*${escaped}\\s*$`
+    ).exec(lines[index])
+    if (!match) continue
+    const stepIndent = match[2]
+      ? match[1].length
+      : Math.max(0, match[1].length - 2)
+    let end = index + 1
+    for (; end < lines.length; end += 1) {
+      if (
+        lines[end].trim() &&
+        new RegExp(`^\\s{${stepIndent}}-\\s+`).test(lines[end])
+      ) {
+        break
+      }
+    }
+    blocks.push(lines.slice(index, end).join('\n'))
+  }
+  return blocks
+}
+
+function jobUsesScopeFlag(block, flag) {
+  if (!block) return false
+  const names = Array.isArray(flag) ? flag : [flag]
+  return names.some((name) =>
+    new RegExp(
+      `needs\\.ci-scope\\.outputs\\.${escapeRegExp(name)}\\s*==\\s*['\"]true['\"]`
+    ).test(uncommentedSource(block))
+  )
+}
+
 export function validateReleaseIdentity({
   version,
   migrationPhase,
@@ -306,19 +421,189 @@ export function validateReleaseEnvironmentWorkflows(workflows) {
 
 export function validateCiWorkflow(source) {
   const failures = []
+  const permissions = topLevelBlock(source, 'permissions')
+  const active = uncommentedSource(source)
+  if (
+    !permissions ||
+    !/^  contents:\s*read\s*$/m.test(permissions) ||
+    /^  (?!contents:)[A-Za-z0-9_-]+:/m.test(permissions)
+  ) {
+    failures.push('Biyan CI top-level permissions must be contents: read only')
+  }
+  if (/^\s{4,}[A-Za-z0-9_-]+:\s*write\s*$/m.test(active)) {
+    failures.push('Biyan CI jobs must not grant write permissions')
+  }
+  const checkoutSteps = actionStepBlocks(source, 'actions/checkout@v4')
+  if (
+    checkoutSteps.some(
+      (step) => !/^\s*persist-credentials:\s*false\s*$/m.test(step)
+    )
+  ) {
+    failures.push('Biyan CI checkout steps must disable credential persistence')
+  }
   const ciScope = jobBlock(source, 'ci-scope')
+  const quickPrCheck = jobBlock(source, 'quick-pr-check')
   const releaseSafety = jobBlock(source, 'release-safety')
+  const baseBranchCoverage = jobBlock(source, 'base_branch_cov')
+  const baseBranchRustCoverage = jobBlock(source, 'base_branch_rust_cov')
+  const macos = jobBlock(source, 'test-on-macos')
+  const windowsPush = jobBlock(source, 'test-on-windows')
+  const windowsPr = jobBlock(source, 'test-on-windows-pr')
+  const linux = jobBlock(source, 'test-on-ubuntu')
   const coverageCheck = jobBlock(source, 'coverage-check')
   const prGate = jobBlock(source, 'pr-ci-gate')
 
   if (!ciScope) {
     failures.push('Biyan CI is missing the ci-scope job')
-  } else if (
-    /printf[^\n]*\|\s*grep[^\n]*(?:-[A-Za-z]*q[A-Za-z]*|--quiet)/.test(ciScope)
-  ) {
-    failures.push(
-      'Biyan CI scope detection must not use a short-circuiting printf | grep -q pipeline under pipefail'
+  } else {
+    if (
+      /printf[^\n]*\|\s*grep[^\n]*(?:-[A-Za-z]*q[A-Za-z]*|--quiet)/.test(
+        ciScope
+      )
+    ) {
+      failures.push(
+        'Biyan CI scope detection must not use a short-circuiting printf | grep -q pipeline under pipefail'
+      )
+    }
+
+    for (const [axis, outputNames] of [
+      ['quick', ['quick', 'run_checks']],
+      ['test_linux', ['test_linux']],
+      ['test_windows', ['test_windows']],
+      ['test_macos', ['test_macos']],
+      ['full', ['full', 'full_ci']],
+      ['docs', ['docs']],
+      ['checkpoint', ['checkpoint']],
+      ['policy', ['policy']],
+      ['updater', ['updater']],
+      ['artifact_replay', ['artifact_replay']],
+    ]) {
+      if (
+        !outputNames.some((outputName) =>
+          new RegExp(
+            `^      ${outputName}:\\s*\\$\\{\\{\\s*steps\\.[A-Za-z0-9_-]+\\.outputs\\.${axis}\\s*\\}\\}\\s*$`,
+            'm'
+          ).test(ciScope)
+        )
+      ) {
+        failures.push(`Biyan CI scope must expose the ${axis} impact axis`)
+      }
+    }
+
+    if (
+      !hasRunInvocation(ciScope, /^(?:if\s+!\s+|if\s+)?git show\b/, [
+        /:scripts\/ci\/qualification-impact\.mjs/,
+        /RUNNER_TEMP/,
+      ])
+    ) {
+      failures.push(
+        'Biyan CI scope must load the trusted qualification-impact classifier from the base commit with git show'
+      )
+    }
+    if (
+      !hasRunInvocation(
+        ciScope,
+        /^node\s+(?:["']?\$RUNNER_TEMP\/qualification-impact\.mjs["']?|["']?\$classifier["']?)\s+classify\b/,
+        [
+          /--repo\s+(?:\.|["']?\$GITHUB_WORKSPACE["']?)(?:\s|$)/,
+          /--base\s+[^\n]+/,
+          /--target\s+(?:["']?HEAD["']?|[^\n]+)/,
+          /--format\s+github-output/,
+        ]
+      )
+    ) {
+      failures.push(
+        'Biyan CI scope must execute the trusted base classifier with exact base and target inputs'
+      )
+    }
+
+    const scopeCommands = runBlocks(ciScope).flat()
+    const scopeCommandText = scopeCommands.join('\n')
+    const explicitFullFallback = [
+      'quick',
+      'test_macos',
+      'test_windows',
+      'test_linux',
+      'full',
+    ].every((flag) =>
+      new RegExp(`echo\\s+["']${flag}=true["']`).test(scopeCommandText)
     )
+    const loopFullFallback =
+      /for\s+flag\s+in[^\n]*\bquick\b[^\n]*\btest_linux\b[^\n]*\btest_windows\b[^\n]*\btest_macos\b[^\n]*\bfull\b[^\n]*;\s*do/.test(
+        scopeCommandText
+      ) && /echo\s+["']\$\{flag\}=true["']/.test(scopeCommandText)
+    if (!explicitFullFallback && !loopFullFallback) {
+      failures.push(
+        'Biyan CI scope must fail closed to full axes when the base classifier is unavailable or self-modified'
+      )
+    }
+
+    const scopeValidation = findRunInvocation(
+      ciScope,
+      /^node\s+-\s+["']?\$CLASSIFICATION_JSON["']?\s+/
+    )
+    const validationText = scopeValidation?.commands.join('\n') ?? ''
+    for (const [axis, variable] of [
+      ['docs', 'DOCS'],
+      ['checkpoint', 'CHECKPOINT'],
+      ['focused', 'FOCUSED'],
+      ['quick', 'QUICK'],
+      ['policy', 'POLICY'],
+      ['updater', 'UPDATER'],
+      ['artifact_replay', 'ARTIFACT_REPLAY'],
+      ['test_macos', 'TEST_MACOS'],
+      ['test_windows', 'TEST_WINDOWS'],
+      ['test_linux', 'TEST_LINUX'],
+      ['build_macos', 'BUILD_MACOS'],
+      ['build_windows', 'BUILD_WINDOWS'],
+      ['build_linux', 'BUILD_LINUX'],
+      ['full', 'FULL'],
+    ]) {
+      const mapsOutput = new RegExp(
+        `^\\s+${variable}:\\s*\\$\\{\\{\\s*steps\\.scope\\.outputs\\.${axis}\\s*\\}\\}\\s*$`,
+        'm'
+      ).test(ciScope)
+      const validatesBoolean = new RegExp(
+        `["']${axis}=\\$${variable}["']`
+      ).test(validationText)
+      if (!mapsOutput || !validatesBoolean) {
+        failures.push(`Biyan CI scope must validate ${axis} as a boolean output`)
+      }
+    }
+    if (
+      !scopeValidation ||
+      !/^\s+BLOCKED:\s*\$\{\{\s*steps\.scope\.outputs\.blocked\s*\}\}\s*$/m.test(
+        ciScope
+      ) ||
+      !/\[\s*["']?\$BLOCKED["']?\s*!=\s*["']false["']\s*\]/.test(
+        validationText
+      )
+    ) {
+      failures.push('Biyan CI scope must reject missing or blocked classifier output')
+    }
+    if (
+      !/^\s+PLAN_SHA256:\s*\$\{\{\s*steps\.scope\.outputs\.plan_sha256\s*\}\}\s*$/m.test(
+        ciScope
+      ) ||
+      !/\^\[0-9a-f\]\{64\}\$/.test(validationText)
+    ) {
+      failures.push('Biyan CI scope must validate the classifier plan SHA-256')
+    }
+    if (
+      !/^\s+CLASSIFICATION:\s*\$\{\{\s*steps\.scope\.outputs\.classification\s*\}\}\s*$/m.test(
+        ciScope
+      ) ||
+      !/^\s+CLASSIFICATION_JSON:\s*\$\{\{\s*steps\.scope\.outputs\.classification_json\s*\}\}\s*$/m.test(
+        ciScope
+      ) ||
+      !/JSON\.parse\(/.test(validationText) ||
+      !/plan\.classification\s*!==\s*classification/.test(validationText) ||
+      !/plan\.planSha256\s*!==\s*planSha256/.test(validationText)
+    ) {
+      failures.push(
+        'Biyan CI scope must parse and authenticate classification JSON identity'
+      )
+    }
   }
 
   if (!releaseSafety) {
@@ -327,11 +612,36 @@ export function validateCiWorkflow(source) {
     for (const command of [
       'node scripts/ci/verify-release-policy.mjs',
       'node --test scripts/ci/__tests__/release-policy.test.mjs',
+      'node --test scripts/ci/__tests__/qualification-impact.test.mjs',
+      'node --test scripts/ci/__tests__/verify-qualification-artifacts.test.mjs',
       'node --test scripts/updater/__tests__/updater.test.mjs',
+      'node --test scripts/release-distribution/__tests__/release-distribution.test.mjs',
     ]) {
-      if (!releaseSafety.includes(command)) {
+      if (
+        !hasRunInvocation(
+          releaseSafety,
+          new RegExp(`^${escapeRegExp(command)}(?:\\s|$)`)
+        )
+      ) {
         failures.push(`Biyan CI release-safety job does not run: ${command}`)
       }
+    }
+  }
+
+  for (const [jobName, block, flag] of [
+    ['quick-pr-check', quickPrCheck, ['quick', 'run_checks']],
+    ['base_branch_cov', baseBranchCoverage, ['full', 'full_ci']],
+    ['base_branch_rust_cov', baseBranchRustCoverage, ['full', 'full_ci']],
+    ['test-on-macos', macos, 'test_macos'],
+    ['test-on-windows', windowsPush, 'test_windows'],
+    ['test-on-windows-pr', windowsPr, 'test_windows'],
+    ['test-on-ubuntu', linux, 'test_linux'],
+    ['coverage-check', coverageCheck, ['full', 'full_ci']],
+  ]) {
+    if (!block) {
+      failures.push(`Biyan CI is missing the ${jobName} job`)
+    } else if (!jobUsesScopeFlag(block, flag)) {
+      failures.push(`${jobName} must be gated by the ${flag} impact axis`)
     }
   }
 
@@ -339,10 +649,14 @@ export function validateCiWorkflow(source) {
     !prGate ||
     !jobNeeds(prGate, 'ci-scope') ||
     !jobNeeds(prGate, 'release-safety') ||
+    !jobNeeds(prGate, 'quick-pr-check') ||
+    !jobNeeds(prGate, 'test-on-macos') ||
+    !jobNeeds(prGate, 'test-on-windows-pr') ||
+    !jobNeeds(prGate, 'test-on-ubuntu') ||
     !jobNeeds(prGate, 'coverage-check')
   ) {
     failures.push(
-      'PR CI Gate must require ci-scope, release-safety, and coverage-check results'
+      'PR CI Gate must receive scope, safety, quick, platform, and coverage results'
     )
   }
 
@@ -352,11 +666,538 @@ export function validateCiWorkflow(source) {
     failures.push('coverage-check must not be advisory at the job level')
   }
 
+  if (prGate) {
+    for (const [flags, job, result] of [
+      [['quick', 'run_checks'], 'Fast PR check', 'FAST_RESULT'],
+      [['test_macos'], 'test-on-macos', 'MACOS_RESULT'],
+      [['test_linux'], 'test-on-ubuntu', 'UBUNTU_RESULT'],
+      [['test_windows'], 'test-on-windows-pr', 'WINDOWS_PR_RESULT'],
+      [['full', 'full_ci'], 'coverage-check', 'COVERAGE_RESULT'],
+    ]) {
+      const consumesFlag = flags.some((flag) =>
+        prGate.includes(`needs.ci-scope.outputs.${flag}`)
+      )
+      const quickNoOpGate =
+        flags.includes('quick') &&
+        quickPrCheck &&
+        quickPrCheck.includes('needs.ci-scope.outputs.run_checks')
+      if (!consumesFlag && !quickNoOpGate) {
+        failures.push(`PR CI Gate must consume the ${flags[0]} impact axis`)
+      }
+      if (
+        !hasRunInvocation(
+          prGate,
+          new RegExp(
+            `^require_success\\s+["']${escapeRegExp(job)}["']\\s+["']\\$${escapeRegExp(result)}["'](?:\\s|$)`
+          )
+        )
+      ) {
+        failures.push(`PR CI Gate must enforce ${job} when ${flags[0]}=true`)
+      }
+    }
+  }
+
+  return failures
+}
+
+export function validateCiControlOwnership(source) {
+  const failures = []
+  const ownersByPattern = new Map()
+  for (const rawLine of source.replace(/\r\n?/g, '\n').split('\n')) {
+    const line = rawLine.replace(/\s+#.*$/, '').trim()
+    if (!line || line.startsWith('#')) continue
+    const [pattern, ...owners] = line.split(/\s+/)
+    ownersByPattern.set(pattern, owners)
+  }
+  for (const pattern of [
+    '/.github/',
+    '/scripts/ci/',
+    '/scripts/release-distribution/',
+    '/scripts/updater/',
+    '/scripts/macos-architecture-policy.mjs',
+    '/scripts/sign-macos-binaries.mjs',
+    '/scripts/verify-macos-candidate.mjs',
+    '/.yarn/',
+    '/.yarnrc.yml',
+    '/Makefile',
+    '/package.json',
+    '/yarn.lock',
+  ]) {
+    const owners = ownersByPattern.get(pattern) ?? []
+    for (const owner of ['@realerikk0', '@twokar']) {
+      if (!owners.includes(owner)) {
+        failures.push(`CI control path ${pattern} must require review from ${owner}`)
+      }
+    }
+  }
+  return failures
+}
+
+export function validateWindowsCandidateVerifier(source) {
+  const active = uncommentedSource(source)
+  const failures = []
+  for (const [pattern, message] of [
+    [/ReadUInt16\(\)[\s\S]*0x5A4D/, 'must validate the DOS PE signature'],
+    [/ReadUInt32\(\)[\s\S]*0x00004550/, 'must validate the PE header signature'],
+    [/0x8664/, 'must require an AMD64 application payload'],
+    [/Get-Command\s+7z/, 'must extract and inspect the NSIS payload'],
+    [/["']Biyan\.exe["']/, 'must locate the packaged Biyan executable'],
+    [/FileVersionInfo/, 'must verify packaged executable version metadata'],
+    [/OpenDatabase/, 'must open the MSI database'],
+    [/["']ProductName["']/, 'must verify MSI ProductName'],
+    [/["']ProductVersion["']/, 'must verify MSI ProductVersion'],
+    [/SummaryInformation\(0\)/, 'must read the MSI summary information'],
+    [/Property\(7\)/, 'must read the MSI Template Summary'],
+    [/x64\|Intel64/, 'must require an x64 MSI Template Summary'],
+  ]) {
+    if (!pattern.test(active)) {
+      failures.push(`Windows candidate verifier ${message}`)
+    }
+  }
+  return failures
+}
+
+export function validateMacOSCandidateVerifier(source) {
+  const active = uncommentedSource(source)
+  const failures = []
+  for (const [pattern, message] of [
+    [/runCommand\(["']hdiutil["'],\s*\[["']verify["']/, 'must verify the DMG container'],
+    [/["']attach["'][\s\S]*["']-readonly["'][\s\S]*["']-mountpoint["']/, 'must mount the DMG read-only'],
+    [/bundleSnapshot\(appPath\)/, 'must snapshot the accepted app'],
+    [/bundleSnapshot\(mountedApp\)/, 'must snapshot the DMG app'],
+    [/sha256File\(/, 'must hash bundle files'],
+    [/sourceSnapshot[\s\S]*mountedSnapshot/, 'must compare source and DMG app snapshots'],
+    [/runCommand\(["']hdiutil["'],\s*\[["']detach["']/, 'must detach the DMG'],
+  ]) {
+    if (!pattern.test(active)) {
+      failures.push(`macOS candidate verifier ${message}`)
+    }
+  }
+  return failures
+}
+
+export function validateQualificationWorkflow(source) {
+  const failures = []
+  const trigger = topLevelBlock(source, 'on')
+  const permissions = topLevelBlock(source, 'permissions')
+  const active = uncommentedSource(source)
+
+  if (!trigger) {
+    failures.push('exact-SHA qualification must declare workflow_dispatch')
+  } else {
+    const events = [...trigger.matchAll(/^  ([A-Za-z0-9_-]+):[^\n]*$/gm)].map(
+      (match) => match[1]
+    )
+    if (events.length !== 1 || events[0] !== 'workflow_dispatch') {
+      failures.push('exact-SHA qualification must be workflow_dispatch-only')
+    }
+    for (const input of ['target_sha', 'base_sha']) {
+      if (!new RegExp(`^      ${input}:\\s*$`, 'm').test(trigger)) {
+        failures.push(`exact-SHA qualification is missing ${input} input`)
+      }
+    }
+    const booleanBootstrap = /^      bootstrap_full:\s*$/m.test(trigger)
+    const modeBootstrap =
+      /^      mode:\s*$/m.test(trigger) &&
+      /^          - bootstrap-full\s*$/m.test(trigger)
+    if (!booleanBootstrap && !modeBootstrap) {
+      failures.push(
+        'exact-SHA qualification must expose an explicit bootstrap-full mode'
+      )
+    }
+  }
+
   if (
-    prGate &&
-    !prGate.includes('require_success "coverage-check" "$COVERAGE_RESULT"')
+    !permissions ||
+    !/^  contents:\s*read\s*$/m.test(permissions) ||
+    !/^  actions:\s*read\s*$/m.test(permissions) ||
+    /^  (?!contents:|actions:)[A-Za-z0-9_-]+:/m.test(permissions)
   ) {
-    failures.push('PR CI Gate must enforce coverage-check for full CI')
+    failures.push(
+      'exact-SHA qualification permissions must be limited to contents: read and actions: read'
+    )
+  }
+  if (
+    /^\s*permissions:\s*write-all\s*$/m.test(active) ||
+    /^\s+\w[\w-]*:\s*write\s*$/m.test(active)
+  ) {
+    failures.push('exact-SHA qualification must not have write permissions')
+  }
+
+  const preflight = jobBlock(source, 'preflight')
+  const docsBuild = jobBlock(source, 'docs-build')
+  const artifactReplay = jobBlock(source, 'artifact-replay')
+  const linux = jobBlock(source, 'native-linux')
+  const windows = jobBlock(source, 'native-windows')
+  const macos = jobBlock(source, 'native-macos')
+  const aggregate = jobBlock(source, 'aggregate-artifacts')
+  const gate = jobBlock(source, 'qualification-gate')
+
+  if (!preflight) {
+    failures.push('exact-SHA qualification is missing preflight')
+  } else {
+    if (!/^    runs-on:\s*['"]?ubuntu-24\.04['"]?\s*$/m.test(preflight)) {
+      failures.push('qualification preflight must use ubuntu-24.04')
+    }
+    const activePreflight = uncommentedSource(preflight)
+    const jobLevelMainGuard =
+      /^    if:\s*.*github\.ref\s*==\s*['"]refs\/heads\/mita-main['"]/m.test(
+        activePreflight
+      )
+    const executableMainGuard =
+      /DISPATCH_REF:\s*\$\{\{\s*github\.ref\s*\}\}/.test(activePreflight) &&
+      hasRunInvocation(
+        preflight,
+        /^if\s+\[\s+["']?\$DISPATCH_REF["']?\s+!=\s+["']refs\/heads\/mita-main["']\s+\];\s*then$/
+      ) &&
+      /rev-parse\s+refs\/remotes\/origin\/mita-main/.test(activePreflight) &&
+      /\$WORKFLOW_SHA["']?\s+!=\s+["']?\$LIVE_MAIN/.test(activePreflight)
+    if (!jobLevelMainGuard && !executableMainGuard) {
+      failures.push(
+        'qualification preflight must refuse dispatches outside protected mita-main'
+      )
+    }
+    for (const identity of [
+      /^\s*ref:\s*\$\{\{\s*github\.sha\s*\}\}\s*$/m,
+      /^\s*path:\s*harness\s*$/m,
+      /^\s*path:\s*target\s*$/m,
+    ]) {
+      if (!identity.test(uncommentedSource(preflight))) {
+        failures.push(
+          'qualification preflight must keep a trusted harness checkout and a separate exact target checkout'
+        )
+        break
+      }
+    }
+    if (
+      !/^\s*ref:\s*\$\{\{\s*(?:inputs\.target_sha|steps\.[A-Za-z0-9_-]+\.outputs\.target_sha)\s*\}\}\s*$/m.test(
+        activePreflight
+      ) ||
+      !hasRunInvocation(
+        preflight,
+        /^test\s+["']?\$\(git\s+-C\s+target\s+rev-parse\s+HEAD\)["']?\s*=\s*["']?\$(?:TARGET|TARGET_SHA)["']?$/
+      )
+    ) {
+      failures.push(
+        'qualification preflight must checkout and verify the exact target SHA separately'
+      )
+    }
+    if (!/\^\[0-9(?:a-f|A-Fa-f)\]\{40\}\$/.test(preflight)) {
+      failures.push('qualification preflight must require exact 40-hex SHAs')
+    }
+    if (
+      !hasRunInvocation(
+        preflight,
+        /^(?:if\s+!\s+)?git\s+(?:-C\s+\S+\s+)?merge-base\s+--is-ancestor\b/
+      )
+    ) {
+      failures.push(
+        'qualification preflight must prove base_sha is an ancestor of target_sha'
+      )
+    }
+    const classifierInvocation = findRunInvocation(
+      preflight,
+      /^node\s+harness\/scripts\/ci\/qualification-impact\.mjs(?:\s+classify\b|\s+\\?$)/
+    )
+    const classifierCommands = classifierInvocation?.commands ?? []
+    const classifierText = classifierCommands.join('\n')
+    const forceUpgradeIsInvoked =
+      classifierInvocation &&
+      (/(?:--force-full|\$(?:bootstrap_full|force_full))/.test(
+        classifierInvocation.command
+      ) ||
+        classifierCommands.some((command) =>
+          /^["']?\$\{(?:args|classifier_args)\[@\]\}["']?\s*\\?$/.test(command)
+        ))
+    const forceUpgradeIsConditional =
+      (classifierText.match(/--force-full/g) ?? []).length === 1 &&
+      /if\s+\[[^\n]*(?:bootstrap_full|bootstrap-full)[^\n]*\];\s*then\n[\s\S]*?--force-full[\s\S]*?\nfi/.test(
+        classifierText
+      )
+    if (
+      !classifierInvocation ||
+      ![
+        /\bclassify\b/,
+        /--repo\s+harness/,
+        /--base\s+[^\n]+/,
+        /--target\s+[^\n]+/,
+        /--format\s+github-output/,
+        /(?:bootstrap_full|bootstrap-full)/,
+        /--force-full/,
+      ].every((pattern) => pattern.test(classifierText)) ||
+      !forceUpgradeIsInvoked ||
+      !forceUpgradeIsConditional
+    ) {
+      failures.push(
+        'qualification preflight must run the trusted classifier with exact identity and bootstrap-full as an upgrade only'
+      )
+    }
+
+    const trustedContractTests = findRunInvocation(
+      preflight,
+      /^node\s+--test(?:\s|$)/
+    )
+    const trustedContractText = trustedContractTests?.commands.join('\n') ?? ''
+    const explicitlyTrustedPaths = /harness\/scripts\/ci\/__tests__/.test(
+      trustedContractText
+    )
+    const trustedWorkingDirectory =
+      /^\s*(?:-\s*)?working-directory:\s*harness\s*$/m.test(activePreflight)
+    if (
+      !trustedContractTests ||
+      ![
+        /(?:harness\/)?scripts\/ci\/__tests__\/qualification-impact\.test\.mjs/,
+        /(?:harness\/)?scripts\/ci\/__tests__\/verify-qualification-artifacts\.test\.mjs/,
+      ].every((pattern) => pattern.test(trustedContractText)) ||
+      (!explicitlyTrustedPaths && !trustedWorkingDirectory)
+    ) {
+      failures.push(
+        'qualification focused preflight must test the trusted classifier and artifact verifier'
+      )
+    }
+    for (const [command, condition] of [
+      ['node scripts/ci/verify-release-policy.mjs', 'policy'],
+      ['node --test scripts/ci/__tests__/release-policy.test.mjs', 'policy'],
+      ['node --test scripts/updater/__tests__/updater.test.mjs', 'updater'],
+    ]) {
+      if (
+        !hasRunInvocation(
+          preflight,
+          new RegExp(`^${escapeRegExp(command)}(?:\\s|$)`)
+        ) ||
+        !new RegExp(`steps\\.classification\\.outputs\\.${condition}`).test(
+          activePreflight
+        )
+      ) {
+        failures.push(
+          `qualification focused preflight does not run: ${command}`
+        )
+      }
+    }
+    if (
+      !/scripts\/release-distribution\/__tests__\/release-distribution\.test\.mjs/.test(
+        activePreflight
+      ) ||
+      !hasRunInvocation(
+        preflight,
+        /^node\s+--test\s+["']?\$test_file["']?(?:\s|$)/
+      )
+    ) {
+      failures.push(
+        'qualification focused preflight must run release-distribution contracts when present'
+      )
+    }
+  }
+
+  for (const [jobName, block] of [
+    ['docs-build', docsBuild],
+    ['artifact-replay', artifactReplay],
+    ['aggregate-artifacts', aggregate],
+    ['qualification-gate', gate],
+  ]) {
+    if (!block) failures.push(`exact-SHA qualification is missing ${jobName}`)
+    else if (!/^    runs-on:\s*['"]?ubuntu-24\.04['"]?\s*$/m.test(block)) {
+      failures.push(`${jobName} must use ubuntu-24.04`)
+    }
+  }
+
+  for (const [jobName, block, runner, flag] of [
+    ['native-linux', linux, 'ubuntu-24.04', 'test_linux'],
+    ['native-windows', windows, 'windows-2022', 'test_windows'],
+    ['native-macos', macos, 'macos-15-intel', 'test_macos'],
+  ]) {
+    if (!block) {
+      failures.push(`exact-SHA qualification is missing ${jobName}`)
+      continue
+    }
+    if (
+      !new RegExp(
+        `^    runs-on:\\s*['\"]?${escapeRegExp(runner)}['\"]?\\s*$`,
+        'm'
+      ).test(block)
+    ) {
+      failures.push(`${jobName} must use ${runner}`)
+    }
+    if (!jobNeeds(block, 'preflight') || !jobNeeds(block, 'artifact-replay')) {
+      failures.push(
+        `${jobName} must wait for focused preflight and artifact replay`
+      )
+    }
+    const buildFlag = flag.replace('test_', 'build_')
+    if (
+      !new RegExp(`needs\\.preflight\\.outputs\\.${flag}`).test(block) ||
+      !new RegExp(`needs\\.preflight\\.outputs\\.${buildFlag}`).test(block)
+    ) {
+      failures.push(
+        `${jobName} must use the ${flag} and ${buildFlag} qualification axes`
+      )
+    }
+  }
+
+  for (const [jobName, block] of [
+    ['native-windows', windows],
+    ['native-macos', macos],
+  ]) {
+    const protectedCheckout = actionStepBlocks(
+      block ?? '',
+      'actions/checkout@v4'
+    ).some(
+      (step) =>
+        /^\s*ref:\s*\$\{\{\s*needs\.preflight\.outputs\.workflow_sha\s*\}\}\s*$/m.test(
+          step
+        ) && /^\s*path:\s*harness\s*$/m.test(step)
+    )
+    if (!protectedCheckout) {
+      failures.push(`${jobName} must checkout the protected qualification harness`)
+    }
+  }
+  if (
+    macos &&
+    !hasRunInvocation(
+      macos,
+      /^node\s+harness\/scripts\/verify-macos-candidate\.mjs\b/,
+      [
+        /--repo-root\s+target(?:\s|$)/,
+        /target\/src-tauri/,
+        /--app\s+[^\n]+/,
+        /--dmg\s+[^\n]+/,
+        /--version\s+[^\n]+/,
+        /--signature\s+ad-hoc/,
+      ]
+    )
+  ) {
+    failures.push(
+      'native-macos must accept the candidate with the protected harness verifier'
+    )
+  }
+  if (
+    windows &&
+    !hasRunInvocation(
+      windows,
+      /^&\s+(?:\.\/)?harness\/scripts\/ci\/verify-windows-candidate\.ps1\b/,
+      [/-Exe\s+[^\n]+/, /-Msi\s+[^\n]+/, /-Version\s+[^\n]+/]
+    )
+  ) {
+    failures.push(
+      'native-windows must accept EXE and MSI packages with the protected harness verifier'
+    )
+  }
+
+  if (artifactReplay) {
+    if (
+      !/uses:\s*actions\/download-artifact@v4/.test(artifactReplay) ||
+      !/repository:\s*\$\{\{\s*github\.repository\s*\}\}/.test(
+        artifactReplay
+      ) ||
+      !/run-id:\s*\$\{\{\s*needs\.preflight\.outputs\.replay_run_id\s*\}\}/.test(
+        artifactReplay
+      ) ||
+      !/name:\s*qualification-manifest-\$\{\{\s*needs\.preflight\.outputs\.replay_run_id\s*\}\}/.test(
+        artifactReplay
+      ) ||
+      /^\s*pattern:\s*/m.test(artifactReplay)
+    ) {
+      failures.push('artifact replay must download a retained GitHub artifact')
+    }
+    if (
+      !/^\s*ref:\s*\$\{\{\s*needs\.preflight\.outputs\.workflow_sha\s*\}\}\s*$/m.test(
+        artifactReplay
+      ) ||
+      !/^\s*path:\s*harness\s*$/m.test(artifactReplay)
+    ) {
+      failures.push('artifact replay must use the protected harness verifier')
+    }
+    if (
+      !hasRunInvocation(
+        artifactReplay,
+        /^node\s+harness\/scripts\/ci\/verify-qualification-artifacts\.mjs\s+verify\b/,
+        [
+          /--manifest\s+[^\n]+/,
+          /--manifest-sha256\s+[^\n]+/,
+          /--target-sha\s+[^\n]+/,
+          /--base-sha\s+[^\n]+/,
+          /--run-id\s+[^\n]+/,
+        ]
+      )
+    ) {
+      failures.push(
+        'artifact replay must strictly verify digest, target, base, and source run identity'
+      )
+    }
+  }
+
+  if (gate) {
+    if (!/^    if:\s*(?:\$\{\{\s*)?always\(\)(?:\s*\}\})?\s*$/m.test(gate)) {
+      failures.push('qualification gate must run with always()')
+    }
+    for (const dependency of [
+      'preflight',
+      'docs-build',
+      'artifact-replay',
+      'native-linux',
+      'native-windows',
+      'native-macos',
+      'aggregate-artifacts',
+    ]) {
+      if (!jobNeeds(gate, dependency)) {
+        failures.push(`qualification gate must receive ${dependency} result`)
+      }
+    }
+    if (
+      !hasRunInvocation(
+        gate,
+        /^(?:if\s+\[\s+["']?\$PREFLIGHT_RESULT["']?\s+!=\s+["']success["']\s+\];\s*then|(?:require_|check_|expect_)[A-Za-z0-9_-]+\s+["']?preflight["']?(?:\s|$))/
+      )
+    ) {
+      failures.push('qualification gate must fail closed on preflight result')
+    }
+    for (const plannedJob of [
+      'docs-build',
+      'artifact-replay',
+      'native-linux',
+      'native-windows',
+      'native-macos',
+      'aggregate-artifacts',
+    ]) {
+      if (
+        !hasRunInvocation(
+          gate,
+          new RegExp(
+            `^(?:require_|check_|expect_)[A-Za-z0-9_-]+\\s+["']?${escapeRegExp(plannedJob)}["']?(?:\\s|$)`
+          )
+        )
+      ) {
+        failures.push(
+          `qualification gate must fail closed on ${plannedJob} result`
+        )
+      }
+    }
+    if (
+      !hasRunInvocation(
+        gate,
+        /^(?:require_|check_|expect_)[A-Za-z0-9_-]+\s+[^({]/
+      )
+    ) {
+      failures.push(
+        'qualification gate must fail closed on required job results'
+      )
+    }
+  }
+
+  if (/^\s*environment:\s*/m.test(active)) {
+    failures.push('exact-SHA qualification must not use an environment')
+  }
+  if (/\$\{\{\s*secrets\.|^\s*secrets:\s*(?:inherit|\S+)/m.test(active)) {
+    failures.push('exact-SHA qualification must not consume secrets')
+  }
+  if (
+    /(?:softprops\/action-gh-release|\bgh\s+release\b|\b(?:npm|cargo)\s+publish\b|\byarn\s+npm\s+publish\b|\bgit\s+push\b|\bdocker\s+push\b|\b(?:aws\s+s3|gsutil\s+cp|az\s+storage|rclone|scp)\b|\bcurl\b[^\n]*(?:--upload-file|-T\b|-X\s*(?:POST|PUT)|--data(?:-binary)?\b|--form\b)|\bwget\b[^\n]*--post|Invoke-(?:WebRequest|RestMethod)[^\n]*-Method\s+(?:Post|Put)|promote-desktop-update|deploy-updater)/i.test(
+      active
+    )
+  ) {
+    failures.push(
+      'exact-SHA qualification must not publish, deploy, or upload outside GitHub Actions artifacts'
+    )
   }
 
   return failures
