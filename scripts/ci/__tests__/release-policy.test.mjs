@@ -746,7 +746,7 @@ test('PR CI is read-only and CI control paths require owner review', () => {
   const workflow = fs.readFileSync(
     '.github/workflows/biyan-linter-and-test.yml',
     'utf8'
-  )
+  ).replace(/\r\n?/g, '\n')
   assert.deepEqual(validateCiWorkflow(workflow), [])
   assert.ok(
     validateCiWorkflow(

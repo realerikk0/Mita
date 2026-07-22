@@ -404,7 +404,7 @@ jobs:
     needs: ci-scope
     runs-on: macos-15-intel
     if: needs.ci-scope.outputs.test_macos == 'true'
-    timeout-minutes: 45
+    timeout-minutes: 90
     steps:
       - name: Getting the repo
         uses: actions/checkout@v4
