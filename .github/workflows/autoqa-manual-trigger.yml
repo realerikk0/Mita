@@ -7,17 +7,17 @@ on:
         description: 'URL to download Biyan app for Windows (.exe)'
         required: true
         type: string
-        default: 'https://updates.mita.so/biyan/nightly/Biyan-nightly_0.6.637_x64-setup.exe'
+        default: 'https://updates.mita.so/biyan/nightly/Biyan-nightly_0.6.640_x64-setup.exe'
       biyan_app_url_ubuntu:
         description: 'URL to download Biyan app for Ubuntu (.deb)'
         required: true
         type: string
-        default: 'https://updates.mita.so/biyan/nightly/Biyan-nightly_0.6.637_amd64.deb'
+        default: 'https://updates.mita.so/biyan/nightly/Biyan-nightly_0.6.640_amd64.deb'
       biyan_app_url_macos:
         description: 'URL to download Biyan app for macOS (.dmg)'
         required: true
         type: string
-        default: 'https://updates.mita.so/biyan/nightly/Biyan-nightly_0.6.637_universal.dmg'
+        default: 'https://updates.mita.so/biyan/nightly/Biyan-nightly_0.6.640_universal.dmg'
       is_nightly:
         description: 'Is this a nightly build?'
         required: true

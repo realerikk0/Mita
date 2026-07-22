@@ -6,7 +6,7 @@ on:
       expected_version:
         description: "Latest approved A-series bridge version"
         required: true
-        default: "0.6.637"
+        default: "0.6.640"
         type: string
   schedule:
     - cron: "17 */6 * * *"
@@ -21,7 +21,7 @@ jobs:
     steps:
       - name: Download both immutable legacy entrypoints
         env:
-          EXPECTED_VERSION: ${{ inputs.expected_version || vars.LEGACY_BRIDGE_VERSION || '0.6.637' }}
+          EXPECTED_VERSION: ${{ inputs.expected_version || vars.LEGACY_BRIDGE_VERSION || '0.6.640' }}
         run: |
           set -euo pipefail
           mkdir -p dist

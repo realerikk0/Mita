@@ -9,6 +9,7 @@ import {
   assertMacOSArchitectures,
   isMachOFile,
 } from './macos-architecture-policy.mjs'
+import { assertSafeCandidatePaths } from './ci/candidate-path-policy.mjs'
 
 export const EXPECTED_PREINSTALL_PACKAGES = [
   'biyan-assistant-extension-1.0.2.tgz',
@@ -22,10 +23,6 @@ const EXPECTED_MINIMUM_SYSTEM_VERSION = '12.0'
 const EXPECTED_SIGNING_AUTHORITY =
   'Developer ID Application: LILYN DYNAMICS (7NZP53ZJ4D)'
 const EXPECTED_TEAM_ID = '7NZP53ZJ4D'
-const RETIRED_PRODUCT_PATH =
-  /(?:^|[-_.@\s])(?:jan(?:hq)?|mita|silence)(?=$|[-_.\s])/i
-const RETIRED_RUNTIME_PATH =
-  /(?:^|[-_.\s])(?:llama(?:[-_.]?cpp)?|mlx|foundation[-_.]?models?|rag|vector[-_.]?db|local[-_.]?models?)(?=$|[-_.\s])/i
 
 function assertSemver(version) {
   if (!/^\d+\.\d+\.\d+(?:[-+][0-9A-Za-z.-]+)?$/.test(version ?? '')) {
@@ -58,24 +55,6 @@ function walkBundle(root) {
   }
   visit(root)
   return entries
-}
-
-function assertSafeBundlePaths(appPath, entries) {
-  for (const { absolute } of entries) {
-    const relative = path.relative(appPath, absolute)
-    for (const component of relative.split(path.sep)) {
-      if (RETIRED_PRODUCT_PATH.test(component)) {
-        throw new Error(
-          `Retired product name found in candidate path: ${relative}`
-        )
-      }
-      if (RETIRED_RUNTIME_PATH.test(component)) {
-        throw new Error(
-          `Retired local runtime found in candidate path: ${relative}`
-        )
-      }
-    }
-  }
 }
 
 function assertIdenticalFile(candidateFile, sourceFile, label) {
@@ -240,8 +219,8 @@ export function verifyMacOSCandidate(
   )
   assertPreinstallPackages(path.join(resources, 'pre-install'))
 
+  assertSafeCandidatePaths(resolvedApp)
   const entries = walkBundle(resolvedApp)
-  assertSafeBundlePaths(resolvedApp, entries)
   const machOFiles = inspectMachOArchitectures(resolvedApp, entries, runCommand)
 
   runCommand('codesign', [

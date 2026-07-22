@@ -28,6 +28,31 @@ function jobNeeds(block, dependency) {
   ).test(needs)
 }
 
+const CANDIDATE_PATH_POLICY =
+  'node scripts/ci/candidate-path-policy.mjs --root'
+const LEGACY_BROAD_CANDIDATE_GREP =
+  /grep\s+-Ei[^\n]*(?:llama|mlx|foundation|rag|vector)/i
+
+function hasStandaloneCommand(source, command) {
+  const normalizedSource = source.replace(/\r\n?/g, '\n')
+  return new RegExp(
+    `(?:^|\\n)[ \\t]*(?:(?:-\\s*)?run:\\s*)?${escapeRegExp(command)}[ \\t]*(?:\\n|$)`
+  ).test(normalizedSource)
+}
+
+function validateCandidatePathPolicyJob(block, label, candidateRoot) {
+  const failures = []
+  const normalizedBlock = block.replace(/\r\n?/g, '\n')
+  const command = `${CANDIDATE_PATH_POLICY} ${candidateRoot} --runtime-only`
+  if (!hasStandaloneCommand(normalizedBlock, command)) {
+    failures.push(`${label} must run the token-aware candidate path policy`)
+  }
+  if (LEGACY_BROAD_CANDIDATE_GREP.test(normalizedBlock)) {
+    failures.push(`${label} must not use the broad retired-runtime grep`)
+  }
+  return failures
+}
+
 export function validateReleaseIdentity({
   version,
   migrationPhase,
@@ -54,6 +79,9 @@ export function validateReleaseIdentity({
     '0.6.637': { migrationPhase: 'A', dataSchema: 1 },
     '0.6.638': { migrationPhase: 'B', dataSchema: 2 },
     '0.6.639': { migrationPhase: 'C', dataSchema: 3 },
+    '0.6.640': { migrationPhase: 'A', dataSchema: 1 },
+    '0.6.641': { migrationPhase: 'B', dataSchema: 2 },
+    '0.6.642': { migrationPhase: 'C', dataSchema: 3 },
   }[version]
   if (
     bridgeTrain &&
@@ -219,6 +247,7 @@ export function validateDocsArchiveConfig(tsconfig) {
 }
 
 export function validateCandidateWorkflow(source) {
+  source = source.replace(/\r\n?/g, '\n')
   const failures = []
   const preflight = jobBlock(source, 'preflight')
   const qualityGate = jobBlock(source, 'quality-gate')
@@ -282,8 +311,34 @@ export function validateCandidateWorkflow(source) {
         'build-macos must verify the signed app and DMG candidate contents'
       )
     }
+    if (buildJob === 'build-windows' || buildJob === 'build-linux') {
+      failures.push(
+        ...validateCandidatePathPolicyJob(
+          block,
+          buildJob,
+          'src-tauri/target/release/bundle'
+        )
+      )
+    }
   }
 
+  return failures
+}
+
+export function validateCandidatePathPolicyWorkflows(workflows) {
+  const failures = []
+  for (const [workflow, { candidateRoot, jobName, source }] of Object.entries(
+    workflows
+  )) {
+    const block = jobBlock(source.replace(/\r\n?/g, '\n'), jobName)
+    if (!block) {
+      failures.push(`${workflow} is missing the ${jobName} job`)
+      continue
+    }
+    failures.push(
+      ...validateCandidatePathPolicyJob(block, workflow, candidateRoot)
+    )
+  }
   return failures
 }
 

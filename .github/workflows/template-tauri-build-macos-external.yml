@@ -99,12 +99,7 @@ jobs:
         run: |
           set -euo pipefail
           app_root="src-tauri/target/universal-apple-darwin/release/bundle/macos"
-          test -d "$app_root"
-          if find "$app_root" -type f \
-            | grep -Ei '/[^/]*(llama|mlx|foundation|rag|vector)[^/]*$'; then
-            echo "Retired local runtime extension found in app bundle" >&2
-            exit 1
-          fi
+          node scripts/ci/candidate-path-policy.mjs --root "$app_root" --runtime-only
 
       - name: Upload Artifact
         uses: actions/upload-artifact@v4

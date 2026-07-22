@@ -3,8 +3,10 @@
 import fs from 'node:fs'
 import path from 'node:path'
 
+import { assertSafeCandidatePaths } from './candidate-path-policy.mjs'
 import {
   validateBundledLegalResources,
+  validateCandidatePathPolicyWorkflows,
   validateCandidateWorkflow,
   validateCiWorkflow,
   validateDocsArchiveConfig,
@@ -137,6 +139,21 @@ if (
   )
 }
 for (const message of validateCandidateWorkflow(desktopRelease)) fail(message)
+
+for (const message of validateCandidatePathPolicyWorkflows({
+  '.github/workflows/template-tauri-build-macos.yml': {
+    candidateRoot: '"$app_root"',
+    jobName: 'build-macos',
+    source: read('.github/workflows/template-tauri-build-macos.yml'),
+  },
+  '.github/workflows/template-tauri-build-macos-external.yml': {
+    candidateRoot: '"$app_root"',
+    jobName: 'build-macos-external',
+    source: read('.github/workflows/template-tauri-build-macos-external.yml'),
+  },
+})) {
+  fail(message)
+}
 
 const releaseEnvironmentWorkflows = {
   '.github/workflows/release-distribution.yml': {
@@ -352,42 +369,36 @@ function binaryContains(file, needles) {
 }
 
 if (artifactRoot) {
-  if (!fs.existsSync(artifactRoot))
-    fail(`artifact root does not exist: ${artifactRoot}`)
-  walk(artifactRoot, (file) => {
-    const name = path.basename(file)
-    if (/\b(?:jan|mita)(?:[-_.]|$)/i.test(name)) {
-      fail(
-        `release artifact uses a retired product name: ${path.relative(artifactRoot, file)}`
-      )
-    }
-    if (
-      /\.(?:tgz|zip|exe|msi|dmg|AppImage|deb|rpm)$/i.test(name) &&
-      /(?:llama|mlx|foundation|rag|vector)/i.test(name)
-    ) {
-      fail(
-        `release artifact exposes a retired local runtime: ${path.relative(artifactRoot, file)}`
-      )
-    }
-    const retiredPayload = binaryContains(file, [
-      'github.com/janhq/llama.cpp',
-      'catalog.jan.ai',
-      'apps.jan.ai',
-      'apps-nightly.jan.ai',
-      '@janhq/',
-      'jan-utils',
-      'llamacpp-extension',
-      'rag-extension',
-      'vector-db-extension',
-      'foundation-models-extension',
-      'mlx-extension',
-    ])
-    if (retiredPayload) {
-      fail(
-        `release artifact contains retired payload "${retiredPayload}": ${path.relative(artifactRoot, file)}`
-      )
-    }
-  })
+  let artifactRootIsSafe = false
+  try {
+    assertSafeCandidatePaths(artifactRoot)
+    artifactRootIsSafe = true
+  } catch (error) {
+    fail(error instanceof Error ? error.message : String(error))
+  }
+  if (artifactRootIsSafe) {
+    walk(artifactRoot, (file) => {
+      if (!fs.lstatSync(file).isFile()) return
+      const retiredPayload = binaryContains(file, [
+        'github.com/janhq/llama.cpp',
+        'catalog.jan.ai',
+        'apps.jan.ai',
+        'apps-nightly.jan.ai',
+        '@janhq/',
+        'jan-utils',
+        'llamacpp-extension',
+        'rag-extension',
+        'vector-db-extension',
+        'foundation-models-extension',
+        'mlx-extension',
+      ])
+      if (retiredPayload) {
+        fail(
+          `release artifact contains retired payload "${retiredPayload}": ${path.relative(artifactRoot, file)}`
+        )
+      }
+    })
+  }
 }
 
 if (failures.length > 0) {

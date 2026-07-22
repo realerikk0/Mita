@@ -67,7 +67,22 @@ function createFixture(t) {
     path.join(resources, 'opaque.bin'),
     Buffer.from('Mita and llamacpp-extension strings are not path payloads')
   )
-  writeFile(path.join(resources, 'drag-helper.js'), 'export default true')
+  for (const name of [
+    'playwright-test-coverage.prompt.md',
+    'crCoverage.js',
+    'crDragDrop.js',
+    'userAgent.js',
+    'storage-state.md',
+    'webstorage.js',
+    'storage.js',
+    'coverage.js',
+    'snapshotStorage.js',
+  ]) {
+    writeFile(
+      path.join(resources, 'ms-playwright', 'policy-fixtures', name),
+      'allowed Playwright path fixture'
+    )
+  }
   writeFile(dmgPath, 'fixture dmg')
 
   return { appPath, dmgPath, resources, sourceRoot }

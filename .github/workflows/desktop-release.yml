@@ -7,7 +7,7 @@ on:
   workflow_dispatch:
     inputs:
       version:
-        description: "Existing release tag to build, for example v0.6.637"
+        description: "Existing release tag to build, for example v0.6.640"
         required: true
         type: string
 
@@ -306,11 +306,7 @@ jobs:
           test -f "src-tauri/target/release/bundle/nsis/Biyan_${VERSION}_x64-setup.exe"
           test -f "src-tauri/target/release/bundle/nsis/Biyan_${VERSION}_x64-setup.exe.sig"
           test -f "src-tauri/target/release/bundle/msi/Biyan_${VERSION}_x64_en-US.msi"
-          if find src-tauri/target/release/bundle -type f \
-            | grep -Ei '/[^/]*(llama|mlx|foundation|rag|vector)[^/]*$'; then
-            echo "Retired local runtime payload found in Windows candidate" >&2
-            exit 1
-          fi
+          node scripts/ci/candidate-path-policy.mjs --root src-tauri/target/release/bundle --runtime-only
 
       - name: Upload Windows candidate
         uses: actions/upload-artifact@v4
@@ -386,11 +382,7 @@ jobs:
           test -f "src-tauri/target/release/bundle/appimage/Biyan_${VERSION}_amd64.AppImage"
           test -f "src-tauri/target/release/bundle/appimage/Biyan_${VERSION}_amd64.AppImage.sig"
           test -f "src-tauri/target/release/bundle/deb/Biyan_${VERSION}_amd64.deb"
-          if find src-tauri/target/release/bundle -type f \
-            | grep -Ei '/[^/]*(llama|mlx|foundation|rag|vector)[^/]*$'; then
-            echo "Retired local runtime payload found in Linux candidate" >&2
-            exit 1
-          fi
+          node scripts/ci/candidate-path-policy.mjs --root src-tauri/target/release/bundle --runtime-only
 
       - name: Upload Linux candidate
         uses: actions/upload-artifact@v4
