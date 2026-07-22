@@ -1,7 +1,9 @@
 #!/usr/bin/env node
 
 import { spawnSync } from 'node:child_process'
+import crypto from 'node:crypto'
 import fs from 'node:fs'
+import os from 'node:os'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 
@@ -118,6 +120,96 @@ function defaultRunCommand(command, args) {
   return `${result.stdout ?? ''}${result.stderr ?? ''}`
 }
 
+function sha256File(file) {
+  const hash = crypto.createHash('sha256')
+  const descriptor = fs.openSync(file, 'r')
+  const buffer = Buffer.allocUnsafe(1024 * 1024)
+  try {
+    for (;;) {
+      const bytesRead = fs.readSync(descriptor, buffer, 0, buffer.length, null)
+      if (bytesRead === 0) break
+      hash.update(buffer.subarray(0, bytesRead))
+    }
+  } finally {
+    fs.closeSync(descriptor)
+  }
+  return hash.digest('hex')
+}
+
+function bundleSnapshot(appPath) {
+  const root = path.resolve(appPath)
+  return walkBundle(root).map(({ absolute, entry }) => {
+    const relative = path.relative(root, absolute).split(path.sep).join('/')
+    const stat = fs.lstatSync(absolute)
+    if (entry.isDirectory()) return { path: relative, type: 'directory' }
+    if (entry.isFile()) {
+      return {
+        path: relative,
+        type: 'file',
+        size: stat.size,
+        executable: (stat.mode & 0o111) !== 0,
+        sha256: sha256File(absolute),
+      }
+    }
+    if (entry.isSymbolicLink()) {
+      const target = fs.readlinkSync(absolute)
+      const resolvedTarget = path.resolve(path.dirname(absolute), target)
+      if (
+        resolvedTarget !== root &&
+        !resolvedTarget.startsWith(`${root}${path.sep}`)
+      ) {
+        throw new Error(`Bundle symlink escapes the app: ${relative} -> ${target}`)
+      }
+      return { path: relative, type: 'symlink', target }
+    }
+    throw new Error(`Unsupported bundle entry: ${relative}`)
+  })
+}
+
+function assertDmgContainsIdenticalApp(appPath, dmgPath, runCommand) {
+  const mountPoint = fs.mkdtempSync(path.join(os.tmpdir(), 'biyan-dmg-'))
+  let attached = false
+  try {
+    runCommand('hdiutil', [
+      'attach',
+      '-readonly',
+      '-nobrowse',
+      '-noautoopen',
+      '-mountpoint',
+      mountPoint,
+      dmgPath,
+    ])
+    attached = true
+    const mountedApp = path.join(mountPoint, `${EXPECTED_PRODUCT_NAME}.app`)
+    const mountedStat = fs.lstatSync(mountedApp, { throwIfNoEntry: false })
+    if (!mountedStat?.isDirectory() || mountedStat.isSymbolicLink()) {
+      throw new Error(
+        `DMG does not contain a regular ${EXPECTED_PRODUCT_NAME}.app`
+      )
+    }
+    const sourceSnapshot = bundleSnapshot(appPath)
+    const mountedSnapshot = bundleSnapshot(mountedApp)
+    if (JSON.stringify(sourceSnapshot) !== JSON.stringify(mountedSnapshot)) {
+      const length = Math.max(sourceSnapshot.length, mountedSnapshot.length)
+      let mismatch = 'unknown entry'
+      for (let index = 0; index < length; index += 1) {
+        if (
+          JSON.stringify(sourceSnapshot[index] ?? null) !==
+          JSON.stringify(mountedSnapshot[index] ?? null)
+        ) {
+          mismatch =
+            sourceSnapshot[index]?.path ?? mountedSnapshot[index]?.path ?? mismatch
+          break
+        }
+      }
+      throw new Error(`DMG Biyan.app differs from accepted app at: ${mismatch}`)
+    }
+  } finally {
+    if (attached) runCommand('hdiutil', ['detach', mountPoint])
+    fs.rmSync(mountPoint, { force: true, recursive: true })
+  }
+}
+
 function readInfoPlist(infoPlist, runCommand) {
   const source = runCommand('plutil', [
     '-convert',
@@ -173,7 +265,7 @@ function inspectMachOArchitectures(appPath, entries, runCommand) {
 
 export function parseMacOSCandidateArgs(argv) {
   const options = {}
-  const supported = new Set(['app', 'dmg', 'repo-root', 'version'])
+  const supported = new Set(['app', 'dmg', 'repo-root', 'version', 'signature'])
   for (let index = 0; index < argv.length; index += 2) {
     const argument = argv[index]
     const value = argv[index + 1]
@@ -192,11 +284,24 @@ export function parseMacOSCandidateArgs(argv) {
     if (!options[required])
       throw new Error(`Missing required argument: --${required}`)
   }
+  if (
+    options.signature !== undefined &&
+    options.signature !== 'production' &&
+    options.signature !== 'ad-hoc'
+  ) {
+    throw new Error(`Unsupported signature mode: ${options.signature}`)
+  }
   return options
 }
 
 export function verifyMacOSCandidate(
-  { appPath, dmgPath, version, repoRoot },
+  {
+    appPath,
+    dmgPath,
+    version,
+    repoRoot,
+    signatureMode = 'production',
+  },
   { runCommand = defaultRunCommand } = {}
 ) {
   assertSemver(version)
@@ -256,15 +361,32 @@ export function verifyMacOSCandidate(
     '--verbose=4',
     resolvedApp,
   ])
-  if (!signature.includes(`Authority=${EXPECTED_SIGNING_AUTHORITY}`)) {
-    throw new Error(
-      `Candidate app is not signed by ${EXPECTED_SIGNING_AUTHORITY}`
-    )
-  }
-  if (!signature.includes(`TeamIdentifier=${EXPECTED_TEAM_ID}`)) {
-    throw new Error(`Candidate app is not signed by team ${EXPECTED_TEAM_ID}`)
+  if (signatureMode === 'production') {
+    if (!signature.includes(`Authority=${EXPECTED_SIGNING_AUTHORITY}`)) {
+      throw new Error(
+        `Candidate app is not signed by ${EXPECTED_SIGNING_AUTHORITY}`
+      )
+    }
+    if (!signature.includes(`TeamIdentifier=${EXPECTED_TEAM_ID}`)) {
+      throw new Error(`Candidate app is not signed by team ${EXPECTED_TEAM_ID}`)
+    }
+  } else if (signatureMode === 'ad-hoc') {
+    if (!signature.includes('Signature=adhoc')) {
+      throw new Error('Qualification app is not ad-hoc signed')
+    }
+    if (
+      signature.includes('Authority=') ||
+      /TeamIdentifier=(?!not set)/.test(signature)
+    ) {
+      throw new Error(
+        'Ad-hoc qualification app unexpectedly carries a signing identity'
+      )
+    }
+  } else {
+    throw new Error(`Unsupported signature mode: ${signatureMode}`)
   }
   runCommand('hdiutil', ['verify', resolvedDmg])
+  assertDmgContainsIdenticalApp(resolvedApp, resolvedDmg, runCommand)
 
   return {
     appPath: resolvedApp,
@@ -276,7 +398,7 @@ export function verifyMacOSCandidate(
 }
 
 function usage() {
-  return `Usage: node scripts/verify-macos-candidate.mjs --app <Biyan.app> --dmg <Biyan_VERSION_universal.dmg> --version <version> [--repo-root <repository>]`
+  return `Usage: node scripts/verify-macos-candidate.mjs --app <Biyan.app> --dmg <Biyan_VERSION_universal.dmg> --version <version> [--repo-root <repository>] [--signature <production|ad-hoc>]`
 }
 
 function main() {
@@ -289,6 +411,7 @@ function main() {
     dmgPath: args.dmg,
     repoRoot: args['repo-root'],
     version: args.version,
+    signatureMode: args.signature ?? 'production',
   })
   console.log(
     `macOS candidate verified: ${result.version}, ${result.machOCount} Mach-O file(s), ${result.preinstallPackages.length} pre-install package(s)`

@@ -87,6 +87,13 @@ function createRunner(appPath, overrides = {}) {
   }
   const runCommand = (command, args) => {
     calls.push([command, args])
+    if (command === 'hdiutil' && args[0] === 'attach') {
+      const mountPoint = args[args.indexOf('-mountpoint') + 1]
+      const mountedApp = path.join(mountPoint, 'Biyan.app')
+      fs.cpSync(appPath, mountedApp, { recursive: true })
+      overrides.mutateMountedApp?.(mountedApp)
+      return ''
+    }
     if (command === 'plutil') return JSON.stringify(plist)
     if (command === 'lipo') {
       const relative = path.relative(appPath, args.at(-1))
@@ -148,6 +155,32 @@ test('verifies a signed universal app and DMG using injectable macOS commands', 
         command === 'hdiutil' && args.join(' ') === `verify ${fixture.dmgPath}`
     )
   )
+  assert.ok(
+    runner.calls.some(
+      ([command, args]) =>
+        command === 'hdiutil' &&
+        args[0] === 'attach' &&
+        args.at(-1) === fixture.dmgPath
+    )
+  )
+  assert.ok(
+    runner.calls.some(
+      ([command, args]) => command === 'hdiutil' && args[0] === 'detach'
+    )
+  )
+})
+
+test('rejects a DMG whose Biyan.app differs from the accepted app', (t) => {
+  const fixture = createFixture(t)
+  const runner = createRunner(fixture.appPath, {
+    mutateMountedApp(mountedApp) {
+      fs.appendFileSync(
+        path.join(mountedApp, 'Contents', 'Resources', 'resources', 'NOTICE'),
+        'tampered'
+      )
+    },
+  })
+  assert.throws(() => verifyFixture(fixture, runner), /DMG Biyan\.app differs/)
 })
 
 test('rejects legal-file drift and unexpected pre-install packages', (t) => {
@@ -233,6 +266,36 @@ test('rejects an app signed by the wrong Developer ID team', (t) => {
   )
 })
 
+test('accepts explicit ad-hoc qualification signatures without weakening production', (t) => {
+  const fixture = createFixture(t)
+  const runner = createRunner(fixture.appPath)
+  const originalRunCommand = runner.runCommand
+  runner.runCommand = (command, args) => {
+    const result = originalRunCommand(command, args)
+    if (command === 'codesign' && args.includes('--display')) {
+      return 'Signature=adhoc\nTeamIdentifier=not set'
+    }
+    return result
+  }
+
+  assert.doesNotThrow(() =>
+    verifyMacOSCandidate(
+      {
+        appPath: fixture.appPath,
+        dmgPath: fixture.dmgPath,
+        repoRoot: fixture.sourceRoot,
+        version,
+        signatureMode: 'ad-hoc',
+      },
+      { runCommand: runner.runCommand }
+    )
+  )
+  assert.throws(
+    () => verifyFixture(fixture, runner),
+    /not signed by Developer ID/
+  )
+})
+
 test('CLI arguments and build wiring require explicit candidate paths', () => {
   assert.deepEqual(
     parseMacOSCandidateArgs([
@@ -242,12 +305,29 @@ test('CLI arguments and build wiring require explicit candidate paths', () => {
       `/tmp/Biyan_${version}_universal.dmg`,
       '--version',
       version,
+      '--signature',
+      'ad-hoc',
     ]),
     {
       app: '/tmp/Biyan.app',
       dmg: `/tmp/Biyan_${version}_universal.dmg`,
       version,
+      signature: 'ad-hoc',
     }
+  )
+  assert.throws(
+    () =>
+      parseMacOSCandidateArgs([
+        '--app',
+        '/tmp/Biyan.app',
+        '--dmg',
+        `/tmp/Biyan_${version}_universal.dmg`,
+        '--version',
+        version,
+        '--signature',
+        'unknown',
+      ]),
+    /Unsupported signature mode/
   )
   assert.throws(
     () => parseMacOSCandidateArgs(['--app', '/tmp/Biyan.app']),

@@ -1,0 +1,1753 @@
+name: Biyan Exact-SHA Qualification
+
+on:
+  workflow_dispatch:
+    inputs:
+      target_sha:
+        description: Exact 40-hex descendant commit to qualify
+        required: true
+        type: string
+      base_sha:
+        description: Exact 40-hex qualified base commit
+        required: true
+        type: string
+      mode:
+        description: Impact-scoped qualification or initial full bootstrap
+        required: true
+        default: auto
+        type: choice
+        options:
+          - auto
+          - bootstrap-full
+      replay_run_id:
+        description: Prior same-repository qualification run for artifact replay
+        required: false
+        type: string
+      replay_base_sha:
+        description: Original base of the replayed qualification manifest
+        required: false
+        type: string
+      replay_manifest_sha256:
+        description: SHA-256 of the replayed qualification manifest
+        required: false
+        type: string
+
+permissions:
+  contents: read
+  actions: read
+
+concurrency:
+  group: biyan-exact-sha-${{ inputs.target_sha }}
+  cancel-in-progress: false
+
+env:
+  NODE_OPTIONS: --max-old-space-size=4196
+  YARN_ENABLE_IMMUTABLE_INSTALLS: "true"
+
+jobs:
+  preflight:
+    name: Trusted impact and focused preflight
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    outputs:
+      target_sha: ${{ steps.source.outputs.target_sha }}
+      base_sha: ${{ steps.source.outputs.base_sha }}
+      workflow_sha: ${{ steps.source.outputs.workflow_sha }}
+      mode: ${{ steps.source.outputs.mode }}
+      replay_run_id: ${{ steps.source.outputs.replay_run_id }}
+      replay_base_sha: ${{ steps.source.outputs.replay_base_sha }}
+      replay_manifest_sha256: ${{ steps.source.outputs.replay_manifest_sha256 }}
+      data_schema: ${{ steps.metadata.outputs.data_schema }}
+      migration_phase: ${{ steps.metadata.outputs.migration_phase }}
+      version: ${{ steps.metadata.outputs.version }}
+      docs: ${{ steps.classification.outputs.docs }}
+      checkpoint: ${{ steps.classification.outputs.checkpoint }}
+      focused: ${{ steps.classification.outputs.focused }}
+      policy: ${{ steps.classification.outputs.policy }}
+      updater: ${{ steps.classification.outputs.updater }}
+      artifact_replay: ${{ steps.classification.outputs.artifact_replay }}
+      test_macos: ${{ steps.classification.outputs.test_macos }}
+      test_windows: ${{ steps.classification.outputs.test_windows }}
+      test_linux: ${{ steps.classification.outputs.test_linux }}
+      build_macos: ${{ steps.classification.outputs.build_macos }}
+      build_windows: ${{ steps.classification.outputs.build_windows }}
+      build_linux: ${{ steps.classification.outputs.build_linux }}
+      full: ${{ steps.classification.outputs.full }}
+      plan_sha256: ${{ steps.classification.outputs.plan_sha256 }}
+      classification_json: ${{ steps.classification.outputs.classification_json }}
+    steps:
+      - name: Checkout protected qualification harness
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}
+          fetch-depth: 0
+          persist-credentials: false
+          path: harness
+
+      - name: Set up trusted Node runtime
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+
+      - name: Set up focused Python runtime
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+
+      - name: Validate dispatch, live main, and exact commit topology
+        id: source
+        shell: bash
+        env:
+          DISPATCH_REF: ${{ github.ref }}
+          WORKFLOW_SHA_INPUT: ${{ github.sha }}
+          TARGET_SHA_INPUT: ${{ inputs.target_sha }}
+          BASE_SHA_INPUT: ${{ inputs.base_sha }}
+          MODE_INPUT: ${{ inputs.mode }}
+          REPLAY_RUN_INPUT: ${{ inputs.replay_run_id }}
+          REPLAY_BASE_INPUT: ${{ inputs.replay_base_sha }}
+          REPLAY_MANIFEST_INPUT: ${{ inputs.replay_manifest_sha256 }}
+        run: |
+          set -euo pipefail
+
+          if [ "$DISPATCH_REF" != "refs/heads/mita-main" ]; then
+            echo "This workflow must be dispatched from refs/heads/mita-main" >&2
+            exit 1
+          fi
+          if [ "$MODE_INPUT" != "auto" ] && [ "$MODE_INPUT" != "bootstrap-full" ]; then
+            echo "Unsupported qualification mode: $MODE_INPUT" >&2
+            exit 1
+          fi
+
+          normalize_commit() {
+            local value="$1"
+            local label="$2"
+            if [[ ! "$value" =~ ^[0-9A-Fa-f]{40}$ ]]; then
+              echo "$label must be exactly 40 hexadecimal characters" >&2
+              exit 1
+            fi
+            printf '%s' "$value" | tr '[:upper:]' '[:lower:]'
+          }
+
+          WORKFLOW_SHA="$(normalize_commit "$WORKFLOW_SHA_INPUT" "workflow SHA")"
+          TARGET_SHA="$(normalize_commit "$TARGET_SHA_INPUT" "target SHA")"
+          BASE_SHA="$(normalize_commit "$BASE_SHA_INPUT" "base SHA")"
+
+          git -C harness fetch --no-tags --prune origin \
+            '+refs/heads/*:refs/remotes/origin/*'
+          LIVE_MAIN="$(git -C harness rev-parse refs/remotes/origin/mita-main)"
+          if [ "$WORKFLOW_SHA" != "$LIVE_MAIN" ]; then
+            echo "Workflow SHA $WORKFLOW_SHA is not live origin/mita-main $LIVE_MAIN" >&2
+            exit 1
+          fi
+          if [ "$(git -C harness rev-parse HEAD)" != "$WORKFLOW_SHA" ]; then
+            echo "Trusted harness checkout does not match the workflow SHA" >&2
+            exit 1
+          fi
+
+          origin_branch_contains() {
+            local commit="$1"
+            local label="$2"
+            local reachable=false
+            local ref
+
+            git -C harness cat-file -e "${commit}^{commit}"
+            while IFS= read -r ref; do
+              case "$ref" in
+                refs/remotes/origin/HEAD) ;;
+                refs/remotes/origin/*)
+                  reachable=true
+                  echo "$label is reachable from $ref"
+                  break
+                  ;;
+              esac
+            done < <(
+              git -C harness for-each-ref \
+                --contains="$commit" \
+                --format='%(refname)' \
+                refs/remotes/origin
+            )
+            if [ "$reachable" != "true" ]; then
+              echo "$label $commit is not reachable from an origin branch" >&2
+              exit 1
+            fi
+          }
+
+          origin_branch_contains "$BASE_SHA" "base SHA"
+          origin_branch_contains "$TARGET_SHA" "target SHA"
+          if ! git -C harness merge-base --is-ancestor "$BASE_SHA" "$TARGET_SHA"; then
+            echo "base SHA must be an ancestor of target SHA" >&2
+            exit 1
+          fi
+
+          replay_values=0
+          [ -n "$REPLAY_RUN_INPUT" ] && replay_values=$((replay_values + 1))
+          [ -n "$REPLAY_BASE_INPUT" ] && replay_values=$((replay_values + 1))
+          [ -n "$REPLAY_MANIFEST_INPUT" ] && replay_values=$((replay_values + 1))
+          if [ "$replay_values" -ne 0 ] && [ "$replay_values" -ne 3 ]; then
+            echo "Replay run, base SHA, and manifest SHA-256 are all-or-none" >&2
+            exit 1
+          fi
+          if [ "$MODE_INPUT" = "auto" ] && [ "$replay_values" -ne 3 ]; then
+            echo "auto mode requires a hash-pinned qualified-base replay" >&2
+            exit 1
+          fi
+          if [ "$MODE_INPUT" = "bootstrap-full" ] && [ "$replay_values" -ne 0 ]; then
+            echo "bootstrap-full must create a fresh baseline without replay inputs" >&2
+            exit 1
+          fi
+
+          REPLAY_RUN=""
+          REPLAY_BASE=""
+          REPLAY_MANIFEST=""
+          if [ "$replay_values" -eq 3 ]; then
+            if [[ ! "$REPLAY_RUN_INPUT" =~ ^[1-9][0-9]*$ ]]; then
+              echo "Replay run ID must be a positive integer" >&2
+              exit 1
+            fi
+            REPLAY_RUN="$REPLAY_RUN_INPUT"
+            REPLAY_BASE="$(normalize_commit "$REPLAY_BASE_INPUT" "replay base SHA")"
+            if [[ ! "$REPLAY_MANIFEST_INPUT" =~ ^[0-9A-Fa-f]{64}$ ]]; then
+              echo "Replay manifest SHA-256 must be exactly 64 hexadecimal characters" >&2
+              exit 1
+            fi
+            REPLAY_MANIFEST="$(
+              printf '%s' "$REPLAY_MANIFEST_INPUT" | tr '[:upper:]' '[:lower:]'
+            )"
+            origin_branch_contains "$REPLAY_BASE" "replay base SHA"
+            if ! git -C harness merge-base --is-ancestor "$REPLAY_BASE" "$BASE_SHA"; then
+              echo "Replay base SHA must be an ancestor of the current base SHA" >&2
+              exit 1
+            fi
+          fi
+
+          {
+            echo "workflow_sha=$WORKFLOW_SHA"
+            echo "mode=$MODE_INPUT"
+            echo "target_sha=$TARGET_SHA"
+            echo "base_sha=$BASE_SHA"
+            echo "replay_run_id=$REPLAY_RUN"
+            echo "replay_base_sha=$REPLAY_BASE"
+            echo "replay_manifest_sha256=$REPLAY_MANIFEST"
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Compute fail-closed impact plan from protected main
+        id: classification
+        shell: bash
+        env:
+          BASE_SHA: ${{ steps.source.outputs.base_sha }}
+          TARGET_SHA: ${{ steps.source.outputs.target_sha }}
+          MODE: ${{ inputs.mode }}
+        run: |
+          set -euo pipefail
+          args=(
+            classify
+            --repo harness
+            --base "$BASE_SHA"
+            --target "$TARGET_SHA"
+          )
+          if [ "$MODE" = "bootstrap-full" ]; then
+            args+=(--force-full)
+          else
+            args+=(--require-replay)
+          fi
+          node harness/scripts/ci/qualification-impact.mjs \
+            "${args[@]}" \
+            --format github-output >> "$GITHUB_OUTPUT"
+
+      - name: Validate classifier output and bootstrap semantics
+        shell: bash
+        env:
+          MODE: ${{ inputs.mode }}
+          DOCS: ${{ steps.classification.outputs.docs }}
+          CHECKPOINT: ${{ steps.classification.outputs.checkpoint }}
+          FOCUSED: ${{ steps.classification.outputs.focused }}
+          POLICY: ${{ steps.classification.outputs.policy }}
+          UPDATER: ${{ steps.classification.outputs.updater }}
+          ARTIFACT_REPLAY: ${{ steps.classification.outputs.artifact_replay }}
+          TEST_MACOS: ${{ steps.classification.outputs.test_macos }}
+          TEST_WINDOWS: ${{ steps.classification.outputs.test_windows }}
+          TEST_LINUX: ${{ steps.classification.outputs.test_linux }}
+          BUILD_MACOS: ${{ steps.classification.outputs.build_macos }}
+          BUILD_WINDOWS: ${{ steps.classification.outputs.build_windows }}
+          BUILD_LINUX: ${{ steps.classification.outputs.build_linux }}
+          FULL: ${{ steps.classification.outputs.full }}
+          PLAN_SHA256: ${{ steps.classification.outputs.plan_sha256 }}
+          CLASSIFICATION_JSON: ${{ steps.classification.outputs.classification_json }}
+          REPLAY_RUN_ID: ${{ steps.source.outputs.replay_run_id }}
+        run: |
+          set -euo pipefail
+          for value in \
+            "$DOCS" "$CHECKPOINT" "$FOCUSED" "$POLICY" "$UPDATER" \
+            "$ARTIFACT_REPLAY" "$TEST_MACOS" "$TEST_WINDOWS" "$TEST_LINUX" \
+            "$BUILD_MACOS" "$BUILD_WINDOWS" "$BUILD_LINUX" "$FULL"; do
+            if [ "$value" != "true" ] && [ "$value" != "false" ]; then
+              echo "Classifier emitted a non-boolean flag: ${value:-<empty>}" >&2
+              exit 1
+            fi
+          done
+          if [[ ! "$PLAN_SHA256" =~ ^[0-9a-f]{64}$ ]]; then
+            echo "Classifier plan_sha256 is invalid" >&2
+            exit 1
+          fi
+          node -e 'JSON.parse(process.argv[1])' "$CLASSIFICATION_JSON"
+
+          if [ "$ARTIFACT_REPLAY" = "true" ] && [ -z "$REPLAY_RUN_ID" ]; then
+            echo "Impact plan requires replay evidence, but replay inputs are absent" >&2
+            exit 1
+          fi
+          if [ "$MODE" = "auto" ] && [ "$ARTIFACT_REPLAY" != "true" ]; then
+            echo "auto mode must authenticate its qualified base" >&2
+            exit 1
+          fi
+          if [ "$MODE" = "bootstrap-full" ] && [ "$ARTIFACT_REPLAY" != "false" ]; then
+            echo "bootstrap-full must not inherit retained artifacts" >&2
+            exit 1
+          fi
+          if [ "$FULL" = "true" ]; then
+            for value in \
+              "$TEST_MACOS" "$TEST_WINDOWS" "$TEST_LINUX" \
+              "$BUILD_MACOS" "$BUILD_WINDOWS" "$BUILD_LINUX"; do
+              if [ "$value" != "true" ]; then
+                echo "A full plan must test and build every native platform" >&2
+                exit 1
+              fi
+            done
+          fi
+          if [ "$MODE" = "bootstrap-full" ] && [ "$FULL" != "true" ]; then
+            echo "bootstrap-full may only upgrade the plan to full qualification" >&2
+            exit 1
+          fi
+
+      - name: Checkout exact target separately from trusted harness
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ steps.source.outputs.target_sha }}
+          fetch-depth: 0
+          persist-credentials: false
+          path: target
+
+      - name: Verify exact target checkout and release metadata
+        id: metadata
+        shell: bash
+        env:
+          TARGET_SHA: ${{ steps.source.outputs.target_sha }}
+        run: |
+          set -euo pipefail
+          test "$(git -C target rev-parse HEAD)" = "$TARGET_SHA"
+          data_schema="$(
+            jq -er '
+              .dataSchema
+              | select(type == "number" and . >= 0 and floor == .)
+              | tostring
+            ' target/biyan-release.json
+          )"
+          migration_phase="$(
+            jq -er '
+              .migrationPhase
+              | select(. == "A" or . == "B" or . == "C")
+            ' target/biyan-release.json
+          )"
+          case "$migration_phase:$data_schema" in
+            A:1|B:2|C:3) ;;
+            *)
+              echo "Invalid migration phase/data schema: $migration_phase/$data_schema" >&2
+              exit 1
+              ;;
+          esac
+          version="$(
+            jq -er '
+              .version
+              | select(type == "string")
+              | select(test("^[0-9]+\\.[0-9]+\\.[0-9]+(?:[-+][0-9A-Za-z.-]+)?$"))
+            ' target/src-tauri/tauri.conf.json
+          )"
+          {
+            echo "data_schema=$data_schema"
+            echo "migration_phase=$migration_phase"
+            echo "version=$version"
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Test trusted classifier and artifact verifier contracts
+        working-directory: harness
+        run: |
+          node --test \
+            scripts/ci/__tests__/qualification-impact.test.mjs \
+            scripts/ci/__tests__/verify-qualification-artifacts.test.mjs
+
+      - name: Verify exact checkpoint topology
+        if: steps.classification.outputs.checkpoint == 'true'
+        shell: bash
+        env:
+          BASE_SHA: ${{ steps.source.outputs.base_sha }}
+          TARGET_SHA: ${{ steps.source.outputs.target_sha }}
+        run: |
+          node harness/scripts/ci/qualification-impact.mjs \
+            verify-checkpoint \
+            --repo harness \
+            --base "$BASE_SHA" \
+            --target "$TARGET_SHA"
+
+      - name: Run focused syntax and changed Node tests
+        if: steps.classification.outputs.focused == 'true'
+        shell: bash
+        env:
+          BASE_SHA: ${{ steps.source.outputs.base_sha }}
+          TARGET_SHA: ${{ steps.source.outputs.target_sha }}
+        run: |
+          set -euo pipefail
+          changed_file_list="$(mktemp)"
+          git -C harness diff --name-only -z "$BASE_SHA" "$TARGET_SHA" \
+            > "$changed_file_list"
+
+          node_tests=()
+          workflow_files=()
+          shell_files=()
+          javascript_files=()
+          python_files=()
+          python_tests=()
+          run_autoqa_contract=false
+          while IFS= read -r -d '' relative; do
+            case "$relative" in
+              autoqa/tests/*) run_autoqa_contract=true ;;
+            esac
+            [ -f "target/$relative" ] || continue
+            case "$relative" in
+              .github/workflows/*.yml|.github/workflows/*.yaml)
+                workflow_files+=("target/$relative")
+                ;;
+            esac
+            case "$relative" in
+              *.sh) shell_files+=("target/$relative") ;;
+              *.js|*.cjs|*.mjs) javascript_files+=("target/$relative") ;;
+              *.py) python_files+=("target/$relative") ;;
+            esac
+            case "$relative" in
+              *.test.js|*.test.cjs|*.test.mjs|*.spec.js|*.spec.cjs|*.spec.mjs)
+                node_tests+=("$relative")
+                ;;
+              autoqa/tests/test_*.py)
+                module="${relative%.py}"
+                python_tests+=("${module//\//.}")
+                ;;
+            esac
+          done < "$changed_file_list"
+
+          while IFS= read -r -d '' relative; do
+            case "$relative" in
+              autoqa/tests/*) run_autoqa_contract=true ;;
+            esac
+          done < <(
+            git -C harness diff --diff-filter=D --name-only -z \
+              "$BASE_SHA" "$TARGET_SHA"
+          )
+
+          if [ "${#workflow_files[@]}" -gt 0 ]; then
+            ruby -e 'require "yaml"; ARGV.each { |file| YAML.parse_file(file) }' \
+              "${workflow_files[@]}"
+          fi
+          if [ "${#shell_files[@]}" -gt 0 ]; then
+            bash -n "${shell_files[@]}"
+          fi
+          for file in "${javascript_files[@]}"; do
+            node --check "$file"
+          done
+          if [ "${#python_files[@]}" -gt 0 ]; then
+            python -m py_compile "${python_files[@]}"
+          fi
+          if [ "${#python_tests[@]}" -gt 0 ] && \
+             [ "$run_autoqa_contract" != "true" ]; then
+            (
+              cd target
+              python -m unittest -v "${python_tests[@]}"
+            )
+          fi
+          if [ "$run_autoqa_contract" = "true" ]; then
+            (
+              cd target
+              python -m unittest discover -s autoqa/tests -p 'test_*.py' -v
+            )
+          fi
+          if [ "${#node_tests[@]}" -gt 0 ]; then
+            (
+              cd target
+              node --test "${node_tests[@]}"
+            )
+          fi
+
+      - name: Run focused TypeScript tests
+        if: steps.classification.outputs.focused == 'true'
+        shell: bash
+        env:
+          BASE_SHA: ${{ steps.source.outputs.base_sha }}
+          TARGET_SHA: ${{ steps.source.outputs.target_sha }}
+        run: |
+          set -euo pipefail
+          typescript_tests=()
+          while IFS= read -r -d '' relative; do
+            [ -f "target/$relative" ] || continue
+            case "$relative" in
+              *.test.ts|*.test.tsx|*.spec.ts|*.spec.tsx)
+                typescript_tests+=("$relative")
+                ;;
+            esac
+          done < <(
+            git -C harness diff --name-only -z "$BASE_SHA" "$TARGET_SHA"
+          )
+          if [ "${#typescript_tests[@]}" -eq 0 ]; then
+            echo "No changed TypeScript test files"
+            exit 0
+          fi
+          corepack enable
+          corepack prepare yarn@4.5.3 --activate
+          (
+            cd target
+            yarn install --immutable
+            yarn vitest run "${typescript_tests[@]}"
+          )
+
+      - name: Run release policy contracts
+        if: steps.classification.outputs.policy == 'true'
+        working-directory: target
+        run: |
+          node scripts/ci/verify-release-policy.mjs
+          node --test scripts/ci/__tests__/release-policy.test.mjs
+
+      - name: Run updater contracts
+        if: steps.classification.outputs.updater == 'true'
+        working-directory: target
+        run: node --test scripts/updater/__tests__/updater.test.mjs
+
+      - name: Run distribution contracts when present
+        if: >-
+          steps.classification.outputs.policy == 'true' ||
+          steps.classification.outputs.updater == 'true'
+        working-directory: target
+        shell: bash
+        run: |
+          set -euo pipefail
+          test_file="scripts/release-distribution/__tests__/release-distribution.test.mjs"
+          if [ -f "$test_file" ]; then
+            node --test "$test_file"
+          else
+            echo "No release-distribution contract test at this target SHA"
+          fi
+
+  docs-build:
+    name: Build documentation without publishing
+    needs: preflight
+    if: needs.preflight.outputs.docs == 'true'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - name: Checkout exact target
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.preflight.outputs.target_sha }}
+          persist-credentials: false
+          path: target
+
+      - name: Set up Node and docs dependency cache
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: yarn
+          cache-dependency-path: target/docs/yarn.lock
+
+      - name: Build docs only
+        working-directory: target/docs
+        shell: bash
+        run: |
+          set -euo pipefail
+          corepack enable
+          corepack prepare yarn@1.22.22 --activate
+          cp .env.example .env
+          yarn install --frozen-lockfile
+          rm -rf out .next
+          NODE_ENV=production yarn build
+
+  artifact-replay:
+    name: Verify retained qualification artifacts
+    needs: preflight
+    if: needs.preflight.outputs.artifact_replay == 'true'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - name: Checkout protected artifact verifier
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.preflight.outputs.workflow_sha }}
+          persist-credentials: false
+          fetch-depth: 0
+          path: harness
+
+      - name: Checkout exact target verifier separately
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.preflight.outputs.target_sha }}
+          persist-credentials: false
+          path: target
+
+      - name: Set up trusted Node runtime
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+
+      - name: Require a successful protected qualification source run
+        id: prior-run
+        uses: actions/github-script@v7
+        env:
+          REPLAY_RUN_ID: ${{ needs.preflight.outputs.replay_run_id }}
+        with:
+          github-token: ${{ github.token }}
+          script: |
+            const runId = Number(process.env.REPLAY_RUN_ID)
+            if (!Number.isSafeInteger(runId) || runId <= 0) {
+              core.setFailed('Replay run ID is not a safe positive integer')
+              return
+            }
+            const { data: run } = await github.rest.actions.getWorkflowRun({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              run_id: runId,
+            })
+            const workflowPath =
+              '.github/workflows/biyan-exact-sha-qualification.yml'
+            if (
+              run.event !== 'workflow_dispatch' ||
+              run.head_branch !== 'mita-main' ||
+              run.conclusion !== 'success' ||
+              run.path !== workflowPath ||
+              run.repository?.full_name !==
+                `${context.repo.owner}/${context.repo.repo}`
+            ) {
+              core.setFailed(
+                `Run ${runId} is not a successful protected exact-SHA qualification`
+              )
+              return
+            }
+            core.setOutput('head_sha', run.head_sha)
+
+      - name: Download retained artifacts from the same repository
+        uses: actions/download-artifact@v4
+        with:
+          github-token: ${{ github.token }}
+          repository: ${{ github.repository }}
+          run-id: ${{ needs.preflight.outputs.replay_run_id }}
+          name: qualification-manifest-${{ needs.preflight.outputs.replay_run_id }}
+          path: replay-downloads/qualification-manifest-${{ needs.preflight.outputs.replay_run_id }}
+
+      - name: Verify replay manifest, run, base, target, and every file
+        id: replay
+        shell: bash
+        env:
+          CURRENT_BASE_SHA: ${{ needs.preflight.outputs.base_sha }}
+          REPLAY_BASE_SHA: ${{ needs.preflight.outputs.replay_base_sha }}
+          REPLAY_RUN_ID: ${{ needs.preflight.outputs.replay_run_id }}
+          REPLAY_MANIFEST_SHA256: ${{ needs.preflight.outputs.replay_manifest_sha256 }}
+        run: |
+          set -euo pipefail
+          manifest_dirs=(replay-downloads/qualification-manifest-*)
+          if [ "${#manifest_dirs[@]}" -ne 1 ] || [ ! -d "${manifest_dirs[0]}" ]; then
+            echo "Expected exactly one retained qualification-manifest artifact" >&2
+            exit 1
+          fi
+          artifact_root="${manifest_dirs[0]}"
+          manifest="$artifact_root/qualification-manifest.json"
+          node harness/scripts/ci/verify-qualification-artifacts.mjs verify \
+            --root "$artifact_root" \
+            --manifest "$manifest" \
+            --manifest-sha256 "$REPLAY_MANIFEST_SHA256" \
+            --target-sha "$CURRENT_BASE_SHA" \
+            --base-sha "$REPLAY_BASE_SHA" \
+            --run-id "$REPLAY_RUN_ID"
+          verify_args=(
+            verify
+            --root "$artifact_root"
+            --manifest "$manifest"
+            --manifest-sha256 "$REPLAY_MANIFEST_SHA256"
+            --target-sha "$CURRENT_BASE_SHA"
+            --base-sha "$REPLAY_BASE_SHA"
+            --run-id "$REPLAY_RUN_ID"
+          )
+          node harness/scripts/ci/verify-qualification-artifacts.mjs \
+            verify-platforms --root "$artifact_root"
+          git -C harness fetch --no-tags --prune origin \
+            '+refs/heads/*:refs/remotes/origin/*'
+          jq -e \
+            --arg workflow_sha "${{ steps.prior-run.outputs.head_sha }}" \
+            '.workflowSha == $workflow_sha' \
+            "$manifest" >/dev/null
+
+          require_full_platform() {
+            local platform="$1"
+            local architecture="$2"
+            local provenance="$artifact_root/runner-provenance-${platform}.json"
+            test -f "$provenance"
+            jq -e \
+              --arg platform "$platform" \
+              --arg architecture "$architecture" \
+              '.schema == 1
+               and .platform == $platform
+               and .architecture == $architecture
+               and .runnerArch == "X64"
+               and .built == true
+               and (.imageOS | type == "string" and length > 0)
+               and (.imageVersion | type == "string" and length > 0)' \
+              "$provenance" >/dev/null
+            local built_target
+            local built_base
+            built_target="$(jq -er .targetSha "$provenance")"
+            built_base="$(jq -er .baseSha "$provenance")"
+            git -C harness cat-file -e "${built_target}^{commit}"
+            git -C harness cat-file -e "${built_base}^{commit}"
+            git -C harness merge-base --is-ancestor \
+              "$built_base" "$built_target"
+            git -C harness merge-base --is-ancestor \
+              "$built_target" "$CURRENT_BASE_SHA"
+          }
+          require_full_platform linux x86_64
+          require_full_platform windows AMD64
+          require_full_platform macos x86_64
+
+          if [ ! -f target/scripts/ci/verify-qualification-artifacts.mjs ]; then
+            echo "Exact target is missing the artifact verifier contract" >&2
+            exit 1
+          fi
+          sandbox_home="$(mktemp -d)"
+          sudo chown nobody "$sandbox_home"
+          chmod -R a+rX,a-w "$artifact_root"
+          sudo -u nobody env -i PATH="$PATH" HOME="$sandbox_home" \
+            node target/scripts/ci/verify-qualification-artifacts.mjs \
+              "${verify_args[@]}"
+          sudo -u nobody env -i PATH="$PATH" HOME="$sandbox_home" \
+            node target/scripts/ci/verify-qualification-artifacts.mjs \
+              verify-platforms --root "$artifact_root"
+          chmod -R u+w "$artifact_root"
+          sudo rm -rf "$sandbox_home"
+
+          # The target verifier is untrusted input. Re-run the protected
+          # verifier after it exits so any attempted mutation still fails.
+          node harness/scripts/ci/verify-qualification-artifacts.mjs \
+            "${verify_args[@]}"
+          node harness/scripts/ci/verify-qualification-artifacts.mjs \
+            verify-platforms --root "$artifact_root"
+
+          mkdir -p "$artifact_root/qualification-evidence"
+          jq -n \
+            --arg target_sha "${{ needs.preflight.outputs.target_sha }}" \
+            --arg qualified_base_sha "$CURRENT_BASE_SHA" \
+            --arg replay_run_id "$REPLAY_RUN_ID" \
+            --arg replay_manifest_sha256 "$REPLAY_MANIFEST_SHA256" \
+            '{schema: 1, status: "verified", targetSha: $target_sha,
+              qualifiedBaseSha: $qualified_base_sha,
+              replayRunId: $replay_run_id,
+              replayManifestSha256: $replay_manifest_sha256,
+              trustedVerifier: true, targetVerifier: true}' \
+            > "$artifact_root/qualification-evidence/run-${{ github.run_id }}-base-replay.json"
+          echo "artifact_root=$artifact_root" >> "$GITHUB_OUTPUT"
+
+      - name: Upload verified replay base for chain-forward aggregation
+        if: >-
+          needs.preflight.outputs.build_linux != 'true' ||
+          needs.preflight.outputs.build_windows != 'true' ||
+          needs.preflight.outputs.build_macos != 'true'
+        uses: actions/upload-artifact@v4
+        with:
+          name: qualification-replay-base-${{ github.run_id }}
+          path: ${{ steps.replay.outputs.artifact_root }}
+          if-no-files-found: error
+          overwrite: true
+          retention-days: 30
+
+  native-linux:
+    name: Native Linux x86_64 qualification
+    needs: [preflight, artifact-replay]
+    if: >-
+      always() &&
+      needs.preflight.result == 'success' &&
+      (needs.artifact-replay.result == 'success' ||
+       needs.artifact-replay.result == 'skipped') &&
+      (needs.preflight.outputs.test_linux == 'true' ||
+       needs.preflight.outputs.build_linux == 'true')
+    runs-on: ubuntu-24.04
+    timeout-minutes: 180
+    steps:
+      - name: Checkout exact target
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.preflight.outputs.target_sha }}
+          fetch-depth: 0
+          persist-credentials: false
+          path: target
+
+      - name: Assert native x86_64 runner and record image
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(uname -m)" = "x86_64"
+          test "$RUNNER_ARCH" = "X64"
+          printf 'ImageOS=%s\nImageVersion=%s\n' \
+            "${ImageOS:-unknown}" "${ImageVersion:-unknown}"
+
+      - name: Set up Node and Yarn cache
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: yarn
+          cache-dependency-path: target/yarn.lock
+
+      - name: Configure Yarn and Rust
+        shell: bash
+        run: |
+          corepack enable
+          corepack prepare yarn@4.5.3 --activate
+          rustup default stable
+
+      - name: Restore Cargo cache
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+          key: qualification-linux-x64-${{ hashFiles('target/**/Cargo.lock') }}
+          restore-keys: qualification-linux-x64-
+
+      - name: Install Linux desktop dependencies
+        shell: bash
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            libglib2.0-dev libatk1.0-dev libpango1.0-dev libgtk-3-dev \
+            libsoup-3.0-dev libwebkit2gtk-4.1-dev librsvg2-dev libfuse2 \
+            libappindicator3-dev webkit2gtk-driver xvfb
+
+      - name: Run native Linux test suite
+        if: needs.preflight.outputs.test_linux == 'true'
+        working-directory: target
+        env:
+          BIYAN_DATA_SCHEMA: ${{ needs.preflight.outputs.data_schema }}
+        run: xvfb-run -a make test
+
+      - name: Reclaim Linux test-only build space
+        if: needs.preflight.outputs.build_linux == 'true'
+        working-directory: target
+        shell: bash
+        run: |
+          set -euo pipefail
+          echo "Disk before Linux test-output cleanup"
+          df -h .
+          rm -rf \
+            coverage core/coverage web-app/coverage electron/playwright-report \
+            src-tauri/target/debug src-tauri/target/*/debug
+          if [ -d src-tauri/target ]; then
+            find src-tauri/target -type d -name incremental -print0 \
+              | xargs -0 rm -rf
+          fi
+          echo "Disk before Linux qualification build"
+          df -h .
+
+      - name: Build unsigned Linux qualification packages
+        if: needs.preflight.outputs.build_linux == 'true'
+        working-directory: target
+        env:
+          BIYAN_DATA_SCHEMA: ${{ needs.preflight.outputs.data_schema }}
+          TAURI_TRAY: libappindicator3
+        run: make build
+
+      - name: Record Linux post-build disk
+        if: always() && needs.preflight.outputs.build_linux == 'true'
+        working-directory: target
+        run: df -h .
+
+      - name: Verify unsigned Linux qualification candidate
+        if: needs.preflight.outputs.build_linux == 'true'
+        working-directory: target
+        shell: bash
+        env:
+          VERSION: ${{ needs.preflight.outputs.version }}
+        run: |
+          set -euo pipefail
+          bundle="src-tauri/target/release/bundle"
+          appimage="$bundle/appimage/Biyan_${VERSION}_amd64.AppImage"
+          deb="$bundle/deb/Biyan_${VERSION}_amd64.deb"
+          test -s "$appimage"
+          test -s "$deb"
+          file "$appimage" | grep -E 'ELF 64-bit.*x86-64'
+          test "$(dpkg-deb -f "$deb" Version)" = "$VERSION"
+          test "$(dpkg-deb -f "$deb" Architecture)" = "amd64"
+          if find "$bundle" -type f \
+            | grep -Ei '/[^/]*(llama|mlx|foundation|rag|vector)[^/]*$'; then
+            echo "Retired local runtime payload found in Linux qualification" >&2
+            exit 1
+          fi
+
+      - name: Collect Linux packages and runner provenance
+        shell: bash
+        env:
+          TARGET_SHA: ${{ needs.preflight.outputs.target_sha }}
+          BASE_SHA: ${{ needs.preflight.outputs.base_sha }}
+          DATA_SCHEMA: ${{ needs.preflight.outputs.data_schema }}
+          MIGRATION_PHASE: ${{ needs.preflight.outputs.migration_phase }}
+          VERSION: ${{ needs.preflight.outputs.version }}
+          BUILT: ${{ needs.preflight.outputs.build_linux }}
+        run: |
+          set -euo pipefail
+          mkdir -p qualification-output
+          if [ "$BUILT" = "true" ]; then
+            bundle="target/src-tauri/target/release/bundle"
+            test -d "$bundle"
+            mkdir -p qualification-output/packages/linux
+            cp "$bundle/appimage/Biyan_${VERSION}_amd64.AppImage" \
+              qualification-output/packages/linux/
+            cp "$bundle/deb/Biyan_${VERSION}_amd64.deb" \
+              qualification-output/packages/linux/
+            rm -rf "$bundle"
+          fi
+          provenance_file="qualification-output/runner-provenance-linux.json"
+          if [ "$BUILT" != "true" ]; then
+            mkdir -p qualification-output/qualification-evidence
+            provenance_file="qualification-output/qualification-evidence/test-provenance-linux.json"
+          fi
+          jq -n \
+            --arg platform linux \
+            --arg architecture "$(uname -m)" \
+            --arg runner_arch "$RUNNER_ARCH" \
+            --arg image_os "${ImageOS:-unknown}" \
+            --arg image_version "${ImageVersion:-unknown}" \
+            --arg node "$(node --version)" \
+            --arg yarn "$(yarn --version)" \
+            --arg rust "$(rustc --version)" \
+            --arg cargo "$(cargo --version)" \
+            --arg target_sha "$TARGET_SHA" \
+            --arg base_sha "$BASE_SHA" \
+            --argjson data_schema "$DATA_SCHEMA" \
+            --arg migration_phase "$MIGRATION_PHASE" \
+            --arg version "$VERSION" \
+            --arg built "$BUILT" \
+            '{schema: 1, platform: $platform, architecture: $architecture,
+              runnerArch: $runner_arch, imageOS: $image_os,
+              imageVersion: $image_version, node: $node, yarn: $yarn,
+              rust: $rust, cargo: $cargo, targetSha: $target_sha,
+              baseSha: $base_sha, version: $version,
+              migrationPhase: $migration_phase, dataSchema: $data_schema,
+              built: ($built == "true")}' \
+            > "$provenance_file"
+
+      - name: Upload Linux qualification output
+        uses: actions/upload-artifact@v4
+        with:
+          name: qualification-build-linux-${{ github.run_id }}
+          path: qualification-output
+          if-no-files-found: error
+          overwrite: true
+          retention-days: 30
+
+  native-windows:
+    name: Native Windows AMD64 qualification
+    needs: [preflight, artifact-replay]
+    if: >-
+      always() &&
+      needs.preflight.result == 'success' &&
+      (needs.artifact-replay.result == 'success' ||
+       needs.artifact-replay.result == 'skipped') &&
+      (needs.preflight.outputs.test_windows == 'true' ||
+       needs.preflight.outputs.build_windows == 'true')
+    runs-on: windows-2022
+    timeout-minutes: 180
+    steps:
+      - name: Checkout exact target
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.preflight.outputs.target_sha }}
+          fetch-depth: 0
+          persist-credentials: false
+          path: target
+
+      - name: Checkout protected qualification harness
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.preflight.outputs.workflow_sha }}
+          fetch-depth: 1
+          persist-credentials: false
+          path: harness
+
+      - name: Assert native AMD64 runner and record image
+        shell: pwsh
+        run: |
+          if ($env:PROCESSOR_ARCHITECTURE -ne 'AMD64') {
+            throw "Expected AMD64, got $env:PROCESSOR_ARCHITECTURE"
+          }
+          if ($env:RUNNER_ARCH -ne 'X64') {
+            throw "Expected RUNNER_ARCH=X64, got $env:RUNNER_ARCH"
+          }
+          Write-Output "ImageOS=$env:ImageOS"
+          Write-Output "ImageVersion=$env:ImageVersion"
+
+      - name: Set up Node and Yarn cache
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: yarn
+          cache-dependency-path: target/yarn.lock
+
+      - name: Configure Yarn, Rust, and GNU make
+        shell: pwsh
+        run: |
+          corepack enable
+          corepack prepare yarn@4.5.3 --activate
+          rustup default stable
+          choco install make --yes --no-progress
+
+      - name: Restore Cargo cache
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+          key: qualification-windows-x64-${{ hashFiles('target/**/Cargo.lock') }}
+          restore-keys: qualification-windows-x64-
+
+      - name: Run native Windows test suite
+        if: needs.preflight.outputs.test_windows == 'true'
+        working-directory: target
+        shell: pwsh
+        env:
+          BIYAN_DATA_SCHEMA: ${{ needs.preflight.outputs.data_schema }}
+        run: make test
+
+      - name: Reclaim Windows test-only build space
+        if: needs.preflight.outputs.build_windows == 'true'
+        working-directory: target
+        shell: pwsh
+        run: |
+          Write-Output 'Disk before Windows test-output cleanup'
+          Get-PSDrive -Name C | Format-Table -AutoSize
+          $remove = @(
+            'coverage',
+            'core/coverage',
+            'web-app/coverage',
+            'electron/playwright-report',
+            'src-tauri/target/debug'
+          )
+          if (Test-Path 'src-tauri/target') {
+            Get-ChildItem 'src-tauri/target' -Directory | ForEach-Object {
+              $remove += (Join-Path $_.FullName 'debug')
+            }
+            Get-ChildItem 'src-tauri/target' -Directory -Recurse `
+              -Filter incremental -ErrorAction SilentlyContinue |
+              Sort-Object FullName -Descending |
+              Remove-Item -Recurse -Force -ErrorAction SilentlyContinue
+          }
+          foreach ($path in $remove) {
+            Remove-Item $path -Recurse -Force -ErrorAction SilentlyContinue
+          }
+          Write-Output 'Disk before Windows qualification build'
+          Get-PSDrive -Name C | Format-Table -AutoSize
+
+      - name: Build unsigned Windows qualification packages
+        if: needs.preflight.outputs.build_windows == 'true'
+        working-directory: target
+        shell: pwsh
+        env:
+          BIYAN_DATA_SCHEMA: ${{ needs.preflight.outputs.data_schema }}
+        run: make build
+
+      - name: Record Windows post-build disk
+        if: always() && needs.preflight.outputs.build_windows == 'true'
+        working-directory: target
+        shell: pwsh
+        run: Get-PSDrive -Name C | Format-Table -AutoSize
+
+      - name: Verify unsigned Windows qualification candidate
+        if: needs.preflight.outputs.build_windows == 'true'
+        shell: pwsh
+        env:
+          VERSION: ${{ needs.preflight.outputs.version }}
+        run: |
+          $bundle = 'target/src-tauri/target/release/bundle'
+          $exe = "$bundle/nsis/Biyan_$env:VERSION`_x64-setup.exe"
+          $msi = "$bundle/msi/Biyan_$env:VERSION`_x64_en-US.msi"
+          & ./harness/scripts/ci/verify-windows-candidate.ps1 `
+            -Exe $exe `
+            -Msi $msi `
+            -Version $env:VERSION
+          $retired = Get-ChildItem $bundle -File -Recurse | Where-Object {
+            $_.Name -match '(?i)(llama|mlx|foundation|rag|vector)'
+          } | Select-Object -First 1
+          if ($retired) {
+            throw "Retired local runtime payload found: $($retired.FullName)"
+          }
+
+      - name: Collect Windows packages and runner provenance
+        shell: pwsh
+        env:
+          TARGET_SHA: ${{ needs.preflight.outputs.target_sha }}
+          BASE_SHA: ${{ needs.preflight.outputs.base_sha }}
+          DATA_SCHEMA: ${{ needs.preflight.outputs.data_schema }}
+          MIGRATION_PHASE: ${{ needs.preflight.outputs.migration_phase }}
+          VERSION: ${{ needs.preflight.outputs.version }}
+          BUILT: ${{ needs.preflight.outputs.build_windows }}
+        run: |
+          New-Item -ItemType Directory -Force -Path qualification-output | Out-Null
+          if ($env:BUILT -eq 'true') {
+            $bundle = 'target/src-tauri/target/release/bundle'
+            if (-not (Test-Path -LiteralPath $bundle -PathType Container)) {
+              throw "Missing Windows bundle directory: $bundle"
+            }
+            $destination = 'qualification-output/packages/windows'
+            New-Item -ItemType Directory -Force -Path $destination | Out-Null
+            Copy-Item `
+              "$bundle/nsis/Biyan_$env:VERSION`_x64-setup.exe" $destination
+            Copy-Item `
+              "$bundle/msi/Biyan_$env:VERSION`_x64_en-US.msi" $destination
+            Remove-Item $bundle -Recurse -Force
+          }
+          $provenance = [ordered]@{
+            schema = 1
+            platform = 'windows'
+            architecture = $env:PROCESSOR_ARCHITECTURE
+            runnerArch = $env:RUNNER_ARCH
+            imageOS = $env:ImageOS
+            imageVersion = $env:ImageVersion
+            node = (node --version)
+            yarn = (yarn --version)
+            rust = (rustc --version)
+            cargo = (cargo --version)
+            targetSha = $env:TARGET_SHA
+            baseSha = $env:BASE_SHA
+            version = $env:VERSION
+            migrationPhase = $env:MIGRATION_PHASE
+            dataSchema = [int]$env:DATA_SCHEMA
+            built = ($env:BUILT -eq 'true')
+          }
+          $provenancePath = 'qualification-output/runner-provenance-windows.json'
+          if ($env:BUILT -ne 'true') {
+            New-Item -ItemType Directory -Force `
+              -Path qualification-output/qualification-evidence | Out-Null
+            $provenancePath = `
+              'qualification-output/qualification-evidence/test-provenance-windows.json'
+          }
+          $provenance | ConvertTo-Json -Depth 4 |
+            Set-Content -Encoding utf8 $provenancePath
+
+      - name: Upload Windows qualification output
+        uses: actions/upload-artifact@v4
+        with:
+          name: qualification-build-windows-${{ github.run_id }}
+          path: qualification-output
+          if-no-files-found: error
+          overwrite: true
+          retention-days: 30
+
+  native-macos:
+    name: Native macOS Intel qualification
+    needs: [preflight, artifact-replay]
+    if: >-
+      always() &&
+      needs.preflight.result == 'success' &&
+      (needs.artifact-replay.result == 'success' ||
+       needs.artifact-replay.result == 'skipped') &&
+      (needs.preflight.outputs.test_macos == 'true' ||
+       needs.preflight.outputs.build_macos == 'true')
+    runs-on: macos-15-intel
+    timeout-minutes: 180
+    steps:
+      - name: Checkout exact target
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.preflight.outputs.target_sha }}
+          fetch-depth: 0
+          persist-credentials: false
+          path: target
+
+      - name: Checkout protected qualification harness
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.preflight.outputs.workflow_sha }}
+          fetch-depth: 1
+          persist-credentials: false
+          path: harness
+
+      - name: Assert native x86_64 runner and record image
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(uname -m)" = "x86_64"
+          test "$RUNNER_ARCH" = "X64"
+          sudo xcode-select -s /Applications/Xcode_26.2.app/Contents/Developer
+          xcodebuild -version
+          printf 'ImageOS=%s\nImageVersion=%s\n' \
+            "${ImageOS:-unknown}" "${ImageVersion:-unknown}"
+
+      - name: Set up Node and Yarn cache
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: yarn
+          cache-dependency-path: target/yarn.lock
+
+      - name: Configure Yarn and Rust targets
+        shell: bash
+        run: |
+          corepack enable
+          corepack prepare yarn@4.5.3 --activate
+          rustup default stable
+          rustup target add x86_64-apple-darwin aarch64-apple-darwin
+
+      - name: Restore Cargo cache
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+          key: qualification-macos-intel-${{ hashFiles('target/**/Cargo.lock') }}
+          restore-keys: qualification-macos-intel-
+
+      - name: Run native macOS test suite
+        if: needs.preflight.outputs.test_macos == 'true'
+        working-directory: target
+        env:
+          APPLE_SIGNING_IDENTITY: "-"
+          BIYAN_DATA_SCHEMA: ${{ needs.preflight.outputs.data_schema }}
+          CSC_IDENTITY_AUTO_DISCOVERY: "false"
+        run: make test
+
+      - name: Reclaim macOS test-only build space
+        if: needs.preflight.outputs.build_macos == 'true'
+        working-directory: target
+        shell: bash
+        run: |
+          set -euo pipefail
+          echo "Disk before macOS test-output cleanup"
+          df -h .
+          rm -rf \
+            coverage core/coverage web-app/coverage electron/playwright-report \
+            src-tauri/target/debug src-tauri/target/*/debug
+          if [ -d src-tauri/target ]; then
+            find src-tauri/target -type d -name incremental -print0 \
+              | xargs -0 rm -rf
+          fi
+          echo "Disk before macOS qualification build"
+          df -h .
+
+      - name: Prepare auditable ad-hoc macOS signing harness
+        if: needs.preflight.outputs.build_macos == 'true'
+        working-directory: target
+        shell: bash
+        run: |
+          set -euo pipefail
+          signer="scripts/sign-macos-binaries.mjs"
+          original_sha="$(shasum -a 256 "$signer" | awk '{print $1}')"
+          node --input-type=module <<'NODE'
+          import fs from 'node:fs'
+
+          const file = 'scripts/sign-macos-binaries.mjs'
+          let source = fs.readFileSync(file, 'utf8')
+          const replacements = [
+            [
+              'if (identity !== EXPECTED_IDENTITY) {',
+              "if (identity !== EXPECTED_IDENTITY && identity !== '-') {",
+            ],
+            [
+              '  if (dryRun) return',
+              "  if (dryRun || identity === '-') return",
+            ],
+            [
+              `  const args = [
+              '--force',
+              '--options',
+              'runtime',
+              '--timestamp',
+              '--sign',
+              identity,
+            ]`,
+              `  const args =
+              identity === '-'
+                ? ['--force', '--sign', identity]
+                : [
+                    '--force',
+                    '--options',
+                    'runtime',
+                    '--timestamp',
+                    '--sign',
+                    identity,
+                  ]`,
+            ],
+          ]
+          for (const [before, after] of replacements) {
+            const first = source.indexOf(before)
+            if (first < 0 || source.indexOf(before, first + 1) >= 0) {
+              throw new Error(`ad-hoc signing harness anchor mismatch: ${before}`)
+            }
+            source = source.replace(before, after)
+          }
+          fs.writeFileSync(file, source)
+          NODE
+          patched_sha="$(shasum -a 256 "$signer" | awk '{print $1}')"
+          git diff --check -- "$signer"
+          git diff --binary -- "$signer" > "$RUNNER_TEMP/macos-ad-hoc-signing.patch"
+          {
+            echo "original $original_sha"
+            echo "ad-hoc $patched_sha"
+          } > "$RUNNER_TEMP/macos-ad-hoc-signing-sha256.txt"
+
+      - name: Build ad-hoc macOS qualification packages
+        if: needs.preflight.outputs.build_macos == 'true'
+        working-directory: target
+        env:
+          APPLE_SIGNING_IDENTITY: "-"
+          BIYAN_DATA_SCHEMA: ${{ needs.preflight.outputs.data_schema }}
+          CSC_IDENTITY_AUTO_DISCOVERY: "false"
+        run: make build
+
+      - name: Record macOS post-build disk
+        if: always() && needs.preflight.outputs.build_macos == 'true'
+        working-directory: target
+        run: df -h .
+
+      - name: Verify ad-hoc macOS candidate with protected harness
+        if: needs.preflight.outputs.build_macos == 'true'
+        shell: bash
+        env:
+          VERSION: ${{ needs.preflight.outputs.version }}
+        run: |
+          set -euo pipefail
+          bundle="target/src-tauri/target/universal-apple-darwin/release/bundle"
+          node harness/scripts/verify-macos-candidate.mjs \
+            --repo-root target \
+            --app "$bundle/macos/Biyan.app" \
+            --dmg "$bundle/dmg/Biyan_${VERSION}_universal.dmg" \
+            --version "$VERSION" \
+            --signature ad-hoc
+
+      - name: Collect macOS packages and runner provenance
+        shell: bash
+        env:
+          TARGET_SHA: ${{ needs.preflight.outputs.target_sha }}
+          BASE_SHA: ${{ needs.preflight.outputs.base_sha }}
+          DATA_SCHEMA: ${{ needs.preflight.outputs.data_schema }}
+          MIGRATION_PHASE: ${{ needs.preflight.outputs.migration_phase }}
+          VERSION: ${{ needs.preflight.outputs.version }}
+          BUILT: ${{ needs.preflight.outputs.build_macos }}
+        run: |
+          set -euo pipefail
+          mkdir -p qualification-output
+          if [ "$BUILT" = "true" ]; then
+            bundle="target/src-tauri/target/universal-apple-darwin/release/bundle"
+            test -d "$bundle"
+            mkdir -p qualification-output/packages/macos
+            cp "$bundle/dmg/Biyan_${VERSION}_universal.dmg" \
+              qualification-output/packages/macos/
+            tar -czf \
+              "qualification-output/packages/macos/Biyan_${VERSION}.app.tar.gz" \
+              -C "$bundle/macos" Biyan.app
+            rm -rf "$bundle"
+            mkdir -p qualification-output/qualification-evidence/macos-signing
+            cp "$RUNNER_TEMP/macos-ad-hoc-signing.patch" \
+              qualification-output/qualification-evidence/macos-signing/
+            cp "$RUNNER_TEMP/macos-ad-hoc-signing-sha256.txt" \
+              qualification-output/qualification-evidence/macos-signing/
+          fi
+          provenance_file="qualification-output/runner-provenance-macos.json"
+          if [ "$BUILT" != "true" ]; then
+            mkdir -p qualification-output/qualification-evidence
+            provenance_file="qualification-output/qualification-evidence/test-provenance-macos.json"
+          fi
+          jq -n \
+            --arg platform macos \
+            --arg architecture "$(uname -m)" \
+            --arg runner_arch "$RUNNER_ARCH" \
+            --arg image_os "${ImageOS:-unknown}" \
+            --arg image_version "${ImageVersion:-unknown}" \
+            --arg node "$(node --version)" \
+            --arg yarn "$(yarn --version)" \
+            --arg rust "$(rustc --version)" \
+            --arg cargo "$(cargo --version)" \
+            --arg target_sha "$TARGET_SHA" \
+            --arg base_sha "$BASE_SHA" \
+            --argjson data_schema "$DATA_SCHEMA" \
+            --arg migration_phase "$MIGRATION_PHASE" \
+            --arg version "$VERSION" \
+            --arg built "$BUILT" \
+            --arg signing ad-hoc \
+            '{schema: 1, platform: $platform, architecture: $architecture,
+              runnerArch: $runner_arch, imageOS: $image_os,
+              imageVersion: $image_version, node: $node, yarn: $yarn,
+              rust: $rust, cargo: $cargo, targetSha: $target_sha,
+              baseSha: $base_sha, version: $version,
+              migrationPhase: $migration_phase, dataSchema: $data_schema,
+              built: ($built == "true"), signing: $signing}' \
+            > "$provenance_file"
+
+      - name: Upload macOS qualification output
+        uses: actions/upload-artifact@v4
+        with:
+          name: qualification-build-macos-${{ github.run_id }}
+          path: qualification-output
+          if-no-files-found: error
+          overwrite: true
+          retention-days: 30
+
+  aggregate-artifacts:
+    name: Hash qualification build artifacts
+    needs:
+      - preflight
+      - docs-build
+      - artifact-replay
+      - native-linux
+      - native-windows
+      - native-macos
+    if: >-
+      always() &&
+      needs.preflight.result == 'success' &&
+      (needs.preflight.outputs.artifact_replay == 'true' ||
+       needs.preflight.outputs.build_linux == 'true' ||
+       needs.preflight.outputs.build_windows == 'true' ||
+       needs.preflight.outputs.build_macos == 'true') &&
+      (needs.docs-build.result == 'success' ||
+       needs.preflight.outputs.docs != 'true') &&
+      (needs.artifact-replay.result == 'success' ||
+       needs.preflight.outputs.artifact_replay != 'true') &&
+      (needs.native-linux.result == 'success' ||
+       (needs.preflight.outputs.test_linux != 'true' &&
+        needs.preflight.outputs.build_linux != 'true')) &&
+      (needs.native-windows.result == 'success' ||
+       (needs.preflight.outputs.test_windows != 'true' &&
+        needs.preflight.outputs.build_windows != 'true')) &&
+      (needs.native-macos.result == 'success' ||
+       (needs.preflight.outputs.test_macos != 'true' &&
+        needs.preflight.outputs.build_macos != 'true'))
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    outputs:
+      manifest_sha256: ${{ steps.manifest.outputs.manifest_sha256 }}
+    steps:
+      - name: Checkout protected artifact manifest tool
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.preflight.outputs.workflow_sha }}
+          persist-credentials: false
+          path: harness
+
+      - name: Checkout exact target verifier separately
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.preflight.outputs.target_sha }}
+          persist-credentials: false
+          path: target
+
+      - name: Set up trusted Node runtime
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+
+      - name: Download authenticated replay base
+        if: >-
+          needs.preflight.outputs.artifact_replay == 'true' &&
+          (needs.preflight.outputs.build_linux != 'true' ||
+           needs.preflight.outputs.build_windows != 'true' ||
+           needs.preflight.outputs.build_macos != 'true')
+        uses: actions/download-artifact@v4
+        with:
+          name: qualification-replay-base-${{ github.run_id }}
+          path: qualification-base
+
+      - name: Download this run's Linux evidence
+        if: >-
+          needs.preflight.outputs.test_linux == 'true' ||
+          needs.preflight.outputs.build_linux == 'true'
+        uses: actions/download-artifact@v4
+        with:
+          name: qualification-build-linux-${{ github.run_id }}
+          path: qualification-current/linux
+
+      - name: Download this run's Windows evidence
+        if: >-
+          needs.preflight.outputs.test_windows == 'true' ||
+          needs.preflight.outputs.build_windows == 'true'
+        uses: actions/download-artifact@v4
+        with:
+          name: qualification-build-windows-${{ github.run_id }}
+          path: qualification-current/windows
+
+      - name: Download this run's macOS evidence
+        if: >-
+          needs.preflight.outputs.test_macos == 'true' ||
+          needs.preflight.outputs.build_macos == 'true'
+        uses: actions/download-artifact@v4
+        with:
+          name: qualification-build-macos-${{ github.run_id }}
+          path: qualification-current/macos
+
+      - name: Compose complete chain-forward artifact set
+        shell: bash
+        env:
+          REPLAY_REQUIRED: ${{ needs.preflight.outputs.artifact_replay }}
+          NEED_BASE_BYTES: ${{ needs.preflight.outputs.artifact_replay == 'true' && (needs.preflight.outputs.build_linux != 'true' || needs.preflight.outputs.build_windows != 'true' || needs.preflight.outputs.build_macos != 'true') }}
+          TEST_LINUX: ${{ needs.preflight.outputs.test_linux }}
+          BUILD_LINUX: ${{ needs.preflight.outputs.build_linux }}
+          TEST_WINDOWS: ${{ needs.preflight.outputs.test_windows }}
+          BUILD_WINDOWS: ${{ needs.preflight.outputs.build_windows }}
+          TEST_MACOS: ${{ needs.preflight.outputs.test_macos }}
+          BUILD_MACOS: ${{ needs.preflight.outputs.build_macos }}
+          TARGET_SHA: ${{ needs.preflight.outputs.target_sha }}
+          BASE_SHA: ${{ needs.preflight.outputs.base_sha }}
+          VERSION: ${{ needs.preflight.outputs.version }}
+          MIGRATION_PHASE: ${{ needs.preflight.outputs.migration_phase }}
+          DATA_SCHEMA: ${{ needs.preflight.outputs.data_schema }}
+          CHECKPOINT: ${{ needs.preflight.outputs.checkpoint }}
+          CLASSIFICATION_JSON: ${{ needs.preflight.outputs.classification_json }}
+        run: |
+          set -euo pipefail
+          rm -rf qualification-output
+          if [ "$NEED_BASE_BYTES" = "true" ]; then
+            mv qualification-base qualification-output
+            rm -f qualification-output/qualification-manifest.json
+          else
+            mkdir -p qualification-output
+          fi
+          mkdir -p qualification-output/qualification-evidence
+
+          overlay_platform() {
+            local platform="$1"
+            local tested="$2"
+            local built="$3"
+            local source="qualification-current/$platform"
+            if [ "$tested" = "true" ] || [ "$built" = "true" ]; then
+              test -d "$source"
+            fi
+            if [ "$built" = "true" ]; then
+              test -f "$source/runner-provenance-$platform.json"
+              jq -e \
+                --arg target "$TARGET_SHA" \
+                --arg base "$BASE_SHA" \
+                '.targetSha == $target and .baseSha == $base and .built == true' \
+                "$source/runner-provenance-$platform.json" >/dev/null
+              rm -rf "qualification-output/packages/$platform"
+              rm -f "qualification-output/runner-provenance-$platform.json"
+              mkdir -p qualification-output/packages
+              cp -R "$source/packages/$platform" \
+                "qualification-output/packages/$platform"
+              cp "$source/runner-provenance-$platform.json" \
+                qualification-output/
+            fi
+            if [ -d "$source/qualification-evidence" ]; then
+              cp -R "$source/qualification-evidence/." \
+                qualification-output/qualification-evidence/
+            fi
+          }
+          overlay_platform linux "$TEST_LINUX" "$BUILD_LINUX"
+          overlay_platform windows "$TEST_WINDOWS" "$BUILD_WINDOWS"
+          overlay_platform macos "$TEST_MACOS" "$BUILD_MACOS"
+
+          printf '%s' "$CLASSIFICATION_JSON" | jq -e \
+            --arg target_sha "$TARGET_SHA" \
+            --arg base_sha "$BASE_SHA" \
+            --arg version "$VERSION" \
+            --arg migration_phase "$MIGRATION_PHASE" \
+            --argjson data_schema "$DATA_SCHEMA" \
+            --argjson checkpoint "$CHECKPOINT" \
+            '. + {
+              schema: 1,
+              targetSha: $target_sha,
+              baseSha: $base_sha,
+              targetVersion: $version,
+              targetMigrationPhase: $migration_phase,
+              targetDataSchema: $data_schema,
+              artifactStatus: (if $checkpoint then
+                "checkpoint-continuity-only"
+              else "qualified-artifact-chain" end)
+            }' \
+            > "qualification-output/qualification-evidence/run-${{ github.run_id }}-impact-plan.json"
+
+          node harness/scripts/ci/verify-qualification-artifacts.mjs \
+            verify-platforms --root qualification-output
+
+      - name: Create immutable qualification artifact manifest
+        id: manifest
+        shell: bash
+        env:
+          TARGET_SHA: ${{ needs.preflight.outputs.target_sha }}
+          BASE_SHA: ${{ needs.preflight.outputs.base_sha }}
+          WORKFLOW_SHA: ${{ needs.preflight.outputs.workflow_sha }}
+          RUN_ID: ${{ github.run_id }}
+          REPLAY_REQUIRED: ${{ needs.preflight.outputs.artifact_replay }}
+          SOURCE_RUN_ID: ${{ needs.preflight.outputs.replay_run_id }}
+          SOURCE_MANIFEST_SHA256: ${{ needs.preflight.outputs.replay_manifest_sha256 }}
+        run: |
+          set -euo pipefail
+          manifest="qualification-output/qualification-manifest.json"
+          args=(
+            create
+            --root qualification-output
+            --output "$manifest"
+            --target-sha "$TARGET_SHA"
+            --base-sha "$BASE_SHA"
+            --workflow-sha "$WORKFLOW_SHA"
+            --run-id "$RUN_ID"
+          )
+          if [ "$REPLAY_REQUIRED" = "true" ]; then
+            args+=(
+              --source-run-id "$SOURCE_RUN_ID"
+              --source-manifest-sha256 "$SOURCE_MANIFEST_SHA256"
+            )
+          fi
+          node harness/scripts/ci/verify-qualification-artifacts.mjs create \
+            "${args[@]:1}"
+          manifest_sha256="$(sha256sum "$manifest" | awk '{print $1}')"
+          verify_args=(
+            verify
+            --root qualification-output
+            --manifest "$manifest"
+            --manifest-sha256 "$manifest_sha256"
+            --target-sha "$TARGET_SHA"
+            --base-sha "$BASE_SHA"
+            --run-id "$RUN_ID"
+          )
+          if [ "$REPLAY_REQUIRED" = "true" ]; then
+            verify_args+=(
+              --source-run-id "$SOURCE_RUN_ID"
+              --source-manifest-sha256 "$SOURCE_MANIFEST_SHA256"
+            )
+          fi
+          node harness/scripts/ci/verify-qualification-artifacts.mjs \
+            "${verify_args[@]}"
+          if [ -f target/scripts/ci/verify-qualification-artifacts.mjs ]; then
+            sandbox_home="$(mktemp -d)"
+            sudo chown nobody "$sandbox_home"
+            chmod -R a+rX,a-w qualification-output
+            sudo -u nobody env -i PATH="$PATH" HOME="$sandbox_home" \
+              node target/scripts/ci/verify-qualification-artifacts.mjs \
+                "${verify_args[@]}"
+            sudo -u nobody env -i PATH="$PATH" HOME="$sandbox_home" \
+              node target/scripts/ci/verify-qualification-artifacts.mjs \
+                verify-platforms --root qualification-output
+            sudo rm -rf "$sandbox_home"
+            node harness/scripts/ci/verify-qualification-artifacts.mjs \
+              "${verify_args[@]}"
+            node harness/scripts/ci/verify-qualification-artifacts.mjs \
+              verify-platforms --root qualification-output
+          elif [ "$REPLAY_REQUIRED" = "true" ]; then
+            echo "An auto target is missing the artifact verifier contract" >&2
+            exit 1
+          else
+            echo "Historical bootstrap target uses the protected-main verifier"
+          fi
+          echo "manifest_sha256=$manifest_sha256" >> "$GITHUB_OUTPUT"
+          echo "Qualification manifest SHA-256: $manifest_sha256"
+
+      - name: Upload hash-pinned aggregate qualification artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: qualification-manifest-${{ github.run_id }}
+          path: qualification-output
+          if-no-files-found: error
+          overwrite: true
+          retention-days: 30
+
+  qualification-gate:
+    name: Exact-SHA qualification gate
+    if: always()
+    needs:
+      - preflight
+      - docs-build
+      - artifact-replay
+      - native-linux
+      - native-windows
+      - native-macos
+      - aggregate-artifacts
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - name: Require every planned job and reject unplanned execution
+        shell: bash
+        env:
+          PREFLIGHT_RESULT: ${{ needs.preflight.result }}
+          DOCS_REQUIRED: ${{ needs.preflight.outputs.docs }}
+          DOCS_RESULT: ${{ needs.docs-build.result }}
+          REPLAY_REQUIRED: ${{ needs.preflight.outputs.artifact_replay }}
+          REPLAY_RESULT: ${{ needs.artifact-replay.result }}
+          TEST_LINUX: ${{ needs.preflight.outputs.test_linux }}
+          BUILD_LINUX: ${{ needs.preflight.outputs.build_linux }}
+          LINUX_RESULT: ${{ needs.native-linux.result }}
+          TEST_WINDOWS: ${{ needs.preflight.outputs.test_windows }}
+          BUILD_WINDOWS: ${{ needs.preflight.outputs.build_windows }}
+          WINDOWS_RESULT: ${{ needs.native-windows.result }}
+          TEST_MACOS: ${{ needs.preflight.outputs.test_macos }}
+          BUILD_MACOS: ${{ needs.preflight.outputs.build_macos }}
+          MACOS_RESULT: ${{ needs.native-macos.result }}
+          AGGREGATE_RESULT: ${{ needs.aggregate-artifacts.result }}
+        run: |
+          set -euo pipefail
+          failed=0
+
+          require_boolean() {
+            local name="$1"
+            local value="$2"
+            if [ "$value" != "true" ] && [ "$value" != "false" ]; then
+              echo "::error::$name is not a classifier boolean: ${value:-missing}"
+              failed=1
+            fi
+          }
+
+          expect_result() {
+            local name="$1"
+            local required="$2"
+            local result="$3"
+            if [ "$required" = "true" ] && [ "$result" != "success" ]; then
+              echo "::error::$name was required but finished as ${result:-missing}"
+              failed=1
+            elif [ "$required" = "false" ] && [ "$result" != "skipped" ]; then
+              echo "::error::$name was not planned but finished as ${result:-missing}"
+              failed=1
+            fi
+          }
+
+          if [ "$PREFLIGHT_RESULT" != "success" ]; then
+            echo "::error::Trusted preflight finished as ${PREFLIGHT_RESULT:-missing}"
+            exit 1
+          fi
+
+          for pair in \
+            "docs:$DOCS_REQUIRED" \
+            "artifact_replay:$REPLAY_REQUIRED" \
+            "test_linux:$TEST_LINUX" \
+            "build_linux:$BUILD_LINUX" \
+            "test_windows:$TEST_WINDOWS" \
+            "build_windows:$BUILD_WINDOWS" \
+            "test_macos:$TEST_MACOS" \
+            "build_macos:$BUILD_MACOS"; do
+            require_boolean "${pair%%:*}" "${pair#*:}"
+          done
+
+          linux_required=false
+          windows_required=false
+          macos_required=false
+          aggregate_required=false
+          if [ "$TEST_LINUX" = "true" ] || [ "$BUILD_LINUX" = "true" ]; then
+            linux_required=true
+          fi
+          if [ "$TEST_WINDOWS" = "true" ] || [ "$BUILD_WINDOWS" = "true" ]; then
+            windows_required=true
+          fi
+          if [ "$TEST_MACOS" = "true" ] || [ "$BUILD_MACOS" = "true" ]; then
+            macos_required=true
+          fi
+          if [ "$REPLAY_REQUIRED" = "true" ] || \
+             [ "$BUILD_LINUX" = "true" ] || \
+             [ "$BUILD_WINDOWS" = "true" ] || \
+             [ "$BUILD_MACOS" = "true" ]; then
+            aggregate_required=true
+          fi
+
+          expect_result docs-build "$DOCS_REQUIRED" "$DOCS_RESULT"
+          expect_result artifact-replay "$REPLAY_REQUIRED" "$REPLAY_RESULT"
+          expect_result native-linux "$linux_required" "$LINUX_RESULT"
+          expect_result native-windows "$windows_required" "$WINDOWS_RESULT"
+          expect_result native-macos "$macos_required" "$MACOS_RESULT"
+          expect_result aggregate-artifacts "$aggregate_required" "$AGGREGATE_RESULT"
+
+          if [ "$failed" -ne 0 ]; then
+            exit 1
+          fi
+          echo "Exact-SHA qualification plan completed without publishing"

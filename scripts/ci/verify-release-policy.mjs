@@ -6,12 +6,16 @@ import path from 'node:path'
 import {
   validateBundledLegalResources,
   validateCandidateWorkflow,
+  validateCiControlOwnership,
   validateCiWorkflow,
   validateDocsArchiveConfig,
   validateFlatpakMetadata,
   validateLinuxReleaseBuild,
+  validateMacOSCandidateVerifier,
+  validateQualificationWorkflow,
   validateReleaseIdentity,
   validateReleaseEnvironmentWorkflows,
+  validateWindowsCandidateVerifier,
 } from './release-policy-contracts.mjs'
 
 const repoRoot = path.resolve(import.meta.dirname, '../..')
@@ -190,6 +194,24 @@ for (const message of validateReleaseEnvironmentWorkflows(
 
 const biyanCi = read('.github/workflows/biyan-linter-and-test.yml')
 for (const message of validateCiWorkflow(biyanCi)) fail(message)
+for (const message of validateCiControlOwnership(read('.github/CODEOWNERS')))
+  fail(message)
+for (const message of validateWindowsCandidateVerifier(
+  read('scripts/ci/verify-windows-candidate.ps1')
+)) {
+  fail(message)
+}
+for (const message of validateMacOSCandidateVerifier(
+  read('scripts/verify-macos-candidate.mjs')
+)) {
+  fail(message)
+}
+
+const exactShaQualification = read(
+  '.github/workflows/biyan-exact-sha-qualification.yml'
+)
+for (const message of validateQualificationWorkflow(exactShaQualification))
+  fail(message)
 
 const docsTsconfig = JSON.parse(read('docs/tsconfig.json'))
 for (const message of validateDocsArchiveConfig(docsTsconfig)) fail(message)

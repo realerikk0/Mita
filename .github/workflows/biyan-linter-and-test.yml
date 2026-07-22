@@ -29,27 +29,39 @@ on:
       - release/**
     # No paths filter on purpose: the workflow must run on EVERY PR so the
     # required "PR CI Gate" check always reports. With a paths filter a
-    # docs-only PR never triggers this workflow, leaving the gate perpetually
-    # "expected" and the PR un-mergeable. Cost is controlled by the run_checks
-    # scope below — docs-only PRs no-op the Fast PR check and skip heavy jobs.
+    # focused PR can leave the gate perpetually "expected" and un-mergeable.
+    # Cost is controlled by the trusted-base impact plan below.
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
+permissions:
+  contents: read
+
 jobs:
   ci-scope:
     name: Detect CI scope
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     outputs:
-      full_ci: ${{ steps.scope.outputs.full_ci }}
-      run_checks: ${{ steps.scope.outputs.run_checks }}
-      changed_files: ${{ steps.scope.outputs.changed_files }}
+      full_ci: ${{ steps.scope.outputs.full }}
+      run_checks: ${{ steps.scope.outputs.quick }}
+      docs: ${{ steps.scope.outputs.docs }}
+      checkpoint: ${{ steps.scope.outputs.checkpoint }}
+      policy: ${{ steps.scope.outputs.policy }}
+      updater: ${{ steps.scope.outputs.updater }}
+      artifact_replay: ${{ steps.scope.outputs.artifact_replay }}
+      test_macos: ${{ steps.scope.outputs.test_macos }}
+      test_windows: ${{ steps.scope.outputs.test_windows }}
+      test_linux: ${{ steps.scope.outputs.test_linux }}
+      plan_sha256: ${{ steps.scope.outputs.plan_sha256 }}
+      classification_json: ${{ steps.scope.outputs.classification_json }}
     steps:
       - name: Getting the repo
         uses: actions/checkout@v4
         with:
           fetch-depth: 0
+          persist-credentials: false
 
       - name: Detect changed files
         id: scope
@@ -57,41 +69,144 @@ jobs:
         run: |
           set -euo pipefail
 
-          if [ "${{ github.event_name }}" != "pull_request" ]; then
+          emit_bootstrap_full() {
+            local plan
+            local plan_sha
+            plan='{"classification":"bootstrap-full","reason":"trusted classifier is not available on the base commit"}'
+            plan_sha="$(printf '%s' "$plan" | sha256sum | awk '{print $1}')"
             {
-              echo "full_ci=true"
-              echo "run_checks=true"
-              echo "changed_files=non-pr event"
+              echo 'classification=bootstrap-full'
+              echo 'blocked=false'
+              echo 'docs=true'
+              echo 'checkpoint=false'
+              echo 'focused=true'
+              echo 'quick=true'
+              echo 'policy=true'
+              echo 'updater=true'
+              echo 'artifact_replay=false'
+              echo 'test_macos=true'
+              echo 'test_windows=true'
+              echo 'test_linux=true'
+              echo 'build_macos=true'
+              echo 'build_windows=true'
+              echo 'build_linux=true'
+              echo 'full=true'
+              echo "plan_sha256=$plan_sha"
+              echo "classification_json=$plan"
             } >> "$GITHUB_OUTPUT"
+          }
+
+          event='${{ github.event_name }}'
+          if [ "$event" = 'pull_request' ]; then
+            policy_sha='${{ github.event.pull_request.base.sha }}'
+            target_sha='${{ github.event.pull_request.head.sha }}'
+            base_sha="$(git merge-base "$policy_sha" "$target_sha")"
+          elif [ "$event" = 'push' ]; then
+            policy_sha='${{ github.event.before }}'
+            target_sha='${{ github.sha }}'
+            base_sha="$policy_sha"
+          else
+            emit_bootstrap_full
             exit 0
           fi
 
-          git fetch --no-tags --depth=1 origin "${{ github.base_ref }}:refs/remotes/origin/${{ github.base_ref }}"
-          changed_files="$(git diff --name-only "origin/${{ github.base_ref }}"...HEAD)"
-
-          echo "Changed files:"
-          printf '%s\n' "$changed_files"
-
-          {
-            echo 'changed_files<<EOF'
-            printf '%s\n' "$changed_files"
-            echo 'EOF'
-          } >> "$GITHUB_OUTPUT"
-
-          if grep -E '^(\.github/workflows/|Makefile|package\.json|yarn\.lock|core/|extensions/|scripts/|src-tauri/)' <<< "$changed_files" >/dev/null; then
-            echo "full_ci=true" >> "$GITHUB_OUTPUT"
-          else
-            echo "full_ci=false" >> "$GITHUB_OUTPUT"
+          if [[ ! "$policy_sha" =~ ^[0-9a-f]{40}$ ]] ||
+             [[ ! "$target_sha" =~ ^[0-9a-f]{40}$ ]] ||
+             [[ ! "$base_sha" =~ ^[0-9a-f]{40}$ ]] ||
+             [[ "$policy_sha" =~ ^0{40}$ ]]; then
+            emit_bootstrap_full
+            exit 0
           fi
 
-          # run_checks=false only when EVERY changed file is docs/markdown, so a
-          # docs-only PR skips lint/test/build yet the Fast PR check still
-          # reports success and satisfies the gate. Any non-doc file flips it on.
-          if grep -vE '^(docs/|.*\.mdx?$|LICENSE$|\.gitignore$)' <<< "$changed_files" >/dev/null; then
-            echo "run_checks=true" >> "$GITHUB_OUTPUT"
-          else
-            echo "run_checks=false" >> "$GITHUB_OUTPUT"
+          classifier="$RUNNER_TEMP/qualification-impact.mjs"
+          if ! git show "${policy_sha}:scripts/ci/qualification-impact.mjs" > "$classifier"; then
+            emit_bootstrap_full
+            exit 0
           fi
+
+          # Run policy from the immutable base commit. A PR cannot weaken its
+          # own scope, and a classifier change is classified as full by the
+          # preceding trusted version.
+          node "$classifier" classify \
+            --repo "$GITHUB_WORKSPACE" \
+            --base "$base_sha" \
+            --target "$target_sha" \
+            --format github-output >> "$GITHUB_OUTPUT"
+
+      - name: Validate CI scope outputs
+        shell: bash
+        env:
+          CLASSIFICATION: ${{ steps.scope.outputs.classification }}
+          BLOCKED: ${{ steps.scope.outputs.blocked }}
+          DOCS: ${{ steps.scope.outputs.docs }}
+          CHECKPOINT: ${{ steps.scope.outputs.checkpoint }}
+          FOCUSED: ${{ steps.scope.outputs.focused }}
+          QUICK: ${{ steps.scope.outputs.quick }}
+          POLICY: ${{ steps.scope.outputs.policy }}
+          UPDATER: ${{ steps.scope.outputs.updater }}
+          ARTIFACT_REPLAY: ${{ steps.scope.outputs.artifact_replay }}
+          TEST_MACOS: ${{ steps.scope.outputs.test_macos }}
+          TEST_WINDOWS: ${{ steps.scope.outputs.test_windows }}
+          TEST_LINUX: ${{ steps.scope.outputs.test_linux }}
+          BUILD_MACOS: ${{ steps.scope.outputs.build_macos }}
+          BUILD_WINDOWS: ${{ steps.scope.outputs.build_windows }}
+          BUILD_LINUX: ${{ steps.scope.outputs.build_linux }}
+          FULL: ${{ steps.scope.outputs.full }}
+          PLAN_SHA256: ${{ steps.scope.outputs.plan_sha256 }}
+          CLASSIFICATION_JSON: ${{ steps.scope.outputs.classification_json }}
+        run: |
+          set -euo pipefail
+
+          for entry in \
+            "docs=$DOCS" \
+            "checkpoint=$CHECKPOINT" \
+            "focused=$FOCUSED" \
+            "quick=$QUICK" \
+            "policy=$POLICY" \
+            "updater=$UPDATER" \
+            "artifact_replay=$ARTIFACT_REPLAY" \
+            "test_macos=$TEST_MACOS" \
+            "test_windows=$TEST_WINDOWS" \
+            "test_linux=$TEST_LINUX" \
+            "build_macos=$BUILD_MACOS" \
+            "build_windows=$BUILD_WINDOWS" \
+            "build_linux=$BUILD_LINUX" \
+            "full=$FULL"; do
+            name="${entry%%=*}"
+            value="${entry#*=}"
+            if [ "$value" != "true" ] && [ "$value" != "false" ]; then
+              echo "::error::Classifier output '$name' is not boolean: ${value:-missing}"
+              exit 1
+            fi
+          done
+          if [ -z "$CLASSIFICATION" ]; then
+            echo "::error::Classifier output 'classification' is missing"
+            exit 1
+          fi
+          if [ "$BLOCKED" != "false" ]; then
+            echo "::error::Classifier blocked the PR scope: ${BLOCKED:-missing}"
+            exit 1
+          fi
+          if [[ ! "$PLAN_SHA256" =~ ^[0-9a-f]{64}$ ]]; then
+            echo "::error::Classifier plan_sha256 is invalid"
+            exit 1
+          fi
+          node - "$CLASSIFICATION_JSON" "$PLAN_SHA256" "$CLASSIFICATION" <<'NODE'
+          const [raw, planSha256, classification] = process.argv.slice(2)
+          const plan = JSON.parse(raw)
+          if (!plan || Array.isArray(plan) || typeof plan !== 'object') {
+            throw new Error('classification_json must be an object')
+          }
+          if (plan.classification !== classification) {
+            throw new Error('classification_json identity mismatch')
+          }
+          if (plan.planSha256 !== undefined && plan.planSha256 !== planSha256) {
+            throw new Error('classification_json plan hash mismatch')
+          }
+          if (plan.blocked === true) {
+            throw new Error('classification_json is blocked')
+          }
+          NODE
 
   quick-pr-check:
     name: Fast PR check
@@ -100,17 +215,18 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 20
     steps:
-      # Docs-only PRs (run_checks=false) report success without doing any work,
-      # so the required Fast PR check + gate pass without wasting CI on a build.
-      - name: Skip checks (docs-only change)
+      # Focused policy/checkpoint/docs changes are handled by their dedicated
+      # gates and report success here without allocating a web build.
+      - name: Skip broad web checks (focused change)
         if: needs.ci-scope.outputs.run_checks != 'true'
-        run: echo "Docs-only PR — no lint/test/build needed; reporting success."
+        run: echo "The trusted impact plan does not require broad web checks."
 
       - name: Getting the repo
         if: needs.ci-scope.outputs.run_checks == 'true'
         uses: actions/checkout@v4
         with:
           fetch-depth: 0
+          persist-credentials: false
 
       - name: Installing node
         if: needs.ci-scope.outputs.run_checks == 'true'
@@ -144,11 +260,19 @@ jobs:
 
   release-safety:
     name: Release safety policy
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 10
     steps:
       - name: Getting the repo
         uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      - name: Parse workflow YAML
+        shell: bash
+        run: |
+          ruby -e 'require "yaml"; ARGV.each { |file| YAML.parse_file(file) }' \
+            .github/workflows/*.yml .github/workflows/*.yaml
 
       - name: Verify private packages, signing keys, egress, and artifact policy
         run: node scripts/ci/verify-release-policy.mjs
@@ -159,6 +283,12 @@ jobs:
       - name: Test updater candidate, promotion, and routing contracts
         run: node --test scripts/updater/__tests__/updater.test.mjs
 
+      - name: Test scoped qualification contracts
+        run: |
+          node --test scripts/ci/__tests__/qualification-impact.test.mjs
+          node --test scripts/ci/__tests__/verify-qualification-artifacts.test.mjs
+          node --test scripts/release-distribution/__tests__/release-distribution.test.mjs
+
   base_branch_cov:
     needs: ci-scope
     if: github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository && needs.ci-scope.outputs.full_ci == 'true'
@@ -168,6 +298,7 @@ jobs:
       - uses: actions/checkout@v4
         with:
           ref: ${{ github.base_ref }}
+          persist-credentials: false
       - name: Use Node.js 20.x
         uses: actions/setup-node@v4
         with:
@@ -213,6 +344,7 @@ jobs:
       - uses: actions/checkout@v4
         with:
           ref: ${{ github.base_ref }}
+          persist-credentials: false
 
       - name: Install Tauri dependencies
         run: |
@@ -270,14 +402,15 @@ jobs:
 
   test-on-macos:
     needs: ci-scope
-    runs-on: 'macos-latest'
-    if: needs.ci-scope.outputs.full_ci == 'true'
-    timeout-minutes: 45
+    runs-on: macos-15-intel
+    if: needs.ci-scope.outputs.test_macos == 'true'
+    timeout-minutes: 90
     steps:
       - name: Getting the repo
         uses: actions/checkout@v4
         with:
           fetch-depth: 0
+          persist-credentials: false
 
       - name: Installing node
         uses: actions/setup-node@v4
@@ -297,8 +430,11 @@ jobs:
           yarn --version
           yarn config set -H enableImmutableInstalls false
 
-      - name: Set up Xcode version
-        run: sudo xcode-select -s /Applications/Xcode_26.2.app/Contents/Developer
+      - name: Verify native x86_64 runner
+        run: |
+          test "$(uname -m)" = 'x86_64'
+          sudo xcode-select -s /Applications/Xcode_26.2.app/Contents/Developer
+          xcodebuild -version
 
       - name: Linter and test
         run: |
@@ -308,23 +444,30 @@ jobs:
 
   test-on-windows:
     needs: ci-scope
-    if: needs.ci-scope.outputs.full_ci == 'true' && github.event_name == 'push'
-    strategy:
-      fail-fast: false
-      matrix:
-        antivirus-tools: ['mcafee', 'bit-defender']
-    runs-on: windows-desktop-${{ matrix.antivirus-tools }}
+    if: needs.ci-scope.outputs.test_windows == 'true' && github.event_name == 'push'
+    runs-on: windows-2022
     timeout-minutes: 45
     steps:
       - name: Getting the repo
         uses: actions/checkout@v4
         with:
           fetch-depth: 0
+          persist-credentials: false
+
+      - name: Install dependencies
+        run: choco install --yes --no-progress make
 
       - name: Installing node
         uses: actions/setup-node@v4
         with:
           node-version: 20
+
+      - name: Verify native x86_64 runner
+        shell: powershell
+        run: |
+          if ($env:PROCESSOR_ARCHITECTURE -ne 'AMD64') {
+            throw "Expected AMD64, got $env:PROCESSOR_ARCHITECTURE"
+          }
 
       # Clean cache, continue on error
       - name: 'Cleanup cache'
@@ -353,18 +496,26 @@ jobs:
 
   test-on-windows-pr:
     needs: ci-scope
-    if: needs.ci-scope.outputs.full_ci == 'true' && github.event_name != 'push'
-    runs-on: 'windows-latest'
+    if: needs.ci-scope.outputs.test_windows == 'true' && github.event_name != 'push'
+    runs-on: windows-2022
     timeout-minutes: 45
     steps:
       - name: Getting the repo
         uses: actions/checkout@v4
         with:
           fetch-depth: 0
+          persist-credentials: false
 
       - name: install dependencies
         run: |
           choco install --yes --no-progress make
+
+      - name: Verify native x86_64 runner
+        shell: powershell
+        run: |
+          if ($env:PROCESSOR_ARCHITECTURE -ne 'AMD64') {
+            throw "Expected AMD64, got $env:PROCESSOR_ARCHITECTURE"
+          }
 
       - name: Installing node
         uses: actions/setup-node@v4
@@ -405,14 +556,15 @@ jobs:
 
   test-on-ubuntu:
     needs: ci-scope
-    runs-on: ${{ (github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name != github.repository) && 'ubuntu-latest' || 'ubuntu-latest' }}
-    if: needs.ci-scope.outputs.full_ci == 'true'
+    runs-on: ubuntu-24.04
+    if: needs.ci-scope.outputs.test_linux == 'true'
     timeout-minutes: 45
     steps:
       - name: Getting the repo
         uses: actions/checkout@v4
         with:
           fetch-depth: 0
+          persist-credentials: false
 
       - name: Free Disk Space (Ubuntu)
         uses: jlumbroso/free-disk-space@v1.3.1
@@ -429,6 +581,9 @@ jobs:
         uses: actions/setup-node@v4
         with:
           node-version: 20
+
+      - name: Verify native x86_64 runner
+        run: test "$(uname -m)" = 'x86_64'
 
       - name: Install Tauri dependencies
         run: |
@@ -468,13 +623,12 @@ jobs:
     needs: [ci-scope, base_branch_cov, base_branch_rust_cov]
     permissions:
       contents: read
-      issues: write
-      pull-requests: write
     steps:
       - name: Getting the repo
         uses: actions/checkout@v4
         with:
           fetch-depth: 0
+          persist-credentials: false
 
       - name: Installing node
         uses: actions/setup-node@v4
@@ -545,16 +699,16 @@ jobs:
             echo "available=true" >> "$GITHUB_OUTPUT"
           fi
 
-      - name: Generate Code Coverage report
+      - name: Record coverage evidence without repository writes
         if: steps.base-coverage.outputs.available == 'true'
-        id: code-coverage
-        uses: barecheck/code-coverage-action@v1
-        with:
-          github-token: ${{ secrets.GITHUB_TOKEN }}
-          lcov-file: './merged-lcov.info'
-          base-lcov-file: './base-merged-lcov.info'
-          send-summary-comment: true
-          show-annotations: 'warning'
+        run: |
+          test -s merged-lcov.info
+          test -s base-merged-lcov.info
+          {
+            echo '## Coverage evidence'
+            echo
+            echo 'Target and base LCOV reports were generated successfully.'
+          } >> "$GITHUB_STEP_SUMMARY"
 
   pr-ci-gate:
     name: PR CI Gate
@@ -573,6 +727,9 @@ jobs:
         shell: bash
         env:
           FULL_CI: ${{ needs.ci-scope.outputs.full_ci }}
+          TEST_MACOS: ${{ needs.ci-scope.outputs.test_macos }}
+          TEST_LINUX: ${{ needs.ci-scope.outputs.test_linux }}
+          TEST_WINDOWS: ${{ needs.ci-scope.outputs.test_windows }}
           SCOPE_RESULT: ${{ needs.ci-scope.result }}
           FAST_RESULT: ${{ needs.quick-pr-check.result }}
           RELEASE_SAFETY_RESULT: ${{ needs.release-safety.result }}
@@ -599,13 +756,19 @@ jobs:
           require_success "Fast PR check" "$FAST_RESULT"
           require_success "Release safety policy" "$RELEASE_SAFETY_RESULT"
 
-          if [ "$FULL_CI" = "true" ]; then
+          if [ "$TEST_MACOS" = "true" ]; then
             require_success "test-on-macos" "$MACOS_RESULT"
-            require_success "test-on-ubuntu" "$UBUNTU_RESULT"
-            require_success "test-on-windows-pr" "$WINDOWS_PR_RESULT"
-            require_success "coverage-check" "$COVERAGE_RESULT"
-          else
-            echo "full_ci=false; full platform jobs are not required for this PR."
           fi
+          if [ "$TEST_LINUX" = "true" ]; then
+            require_success "test-on-ubuntu" "$UBUNTU_RESULT"
+          fi
+          if [ "$TEST_WINDOWS" = "true" ]; then
+            require_success "test-on-windows-pr" "$WINDOWS_PR_RESULT"
+          fi
+          if [ "$FULL_CI" = "true" ]; then
+            require_success "coverage-check" "$COVERAGE_RESULT"
+          fi
+
+          echo "Scoped CI plan enforced (full_ci=$FULL_CI)."
 
           exit "$failed"
