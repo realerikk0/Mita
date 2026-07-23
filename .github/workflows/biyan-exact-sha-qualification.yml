@@ -793,8 +793,6 @@ jobs:
         uses: actions/setup-node@v4
         with:
           node-version: "20"
-          cache: yarn
-          cache-dependency-path: target/yarn.lock
 
       - name: Configure Yarn and Rust
         shell: bash
@@ -987,8 +985,6 @@ jobs:
         uses: actions/setup-node@v4
         with:
           node-version: "20"
-          cache: yarn
-          cache-dependency-path: target/yarn.lock
 
       - name: Configure Yarn, Rust, and GNU make
         shell: pwsh
@@ -1183,8 +1179,6 @@ jobs:
         uses: actions/setup-node@v4
         with:
           node-version: "20"
-          cache: yarn
-          cache-dependency-path: target/yarn.lock
 
       - name: Configure Yarn and Rust targets
         shell: bash
