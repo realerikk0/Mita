@@ -372,6 +372,7 @@ jobs:
         run: |
           node --test \
             scripts/ci/__tests__/qualification-impact.test.mjs \
+            scripts/ci/__tests__/release-policy.test.mjs \
             scripts/ci/__tests__/verify-qualification-artifacts.test.mjs
 
       - name: Verify exact checkpoint topology
@@ -780,6 +781,14 @@ jobs:
           persist-credentials: false
           path: target
 
+      - name: Checkout protected qualification harness
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.preflight.outputs.workflow_sha }}
+          fetch-depth: 1
+          persist-credentials: false
+          path: harness
+
       - name: Assert native x86_64 runner and record image
         shell: bash
         run: |
@@ -873,11 +882,9 @@ jobs:
           file "$appimage" | grep -E 'ELF 64-bit.*x86-64'
           test "$(dpkg-deb -f "$deb" Version)" = "$VERSION"
           test "$(dpkg-deb -f "$deb" Architecture)" = "amd64"
-          if find "$bundle" -type f \
-            | grep -Ei '/[^/]*(llama|mlx|foundation|rag|vector)[^/]*$'; then
-            echo "Retired local runtime payload found in Linux qualification" >&2
-            exit 1
-          fi
+          node ../harness/scripts/ci/candidate-path-policy.mjs \
+            --root "$bundle" \
+            --runtime-only
 
       - name: Collect Linux packages and runner provenance
         shell: bash
@@ -1067,12 +1074,9 @@ jobs:
             -Exe $exe `
             -Msi $msi `
             -Version $env:VERSION
-          $retired = Get-ChildItem $bundle -File -Recurse | Where-Object {
-            $_.Name -match '(?i)(llama|mlx|foundation|rag|vector)'
-          } | Select-Object -First 1
-          if ($retired) {
-            throw "Retired local runtime payload found: $($retired.FullName)"
-          }
+          node ./harness/scripts/ci/candidate-path-policy.mjs `
+            --root $bundle `
+            --runtime-only
 
       - name: Collect Windows packages and runner provenance
         shell: pwsh
