@@ -1,7 +1,13 @@
 import assert from 'node:assert/strict'
 import fs from 'node:fs'
+import os from 'node:os'
+import path from 'node:path'
 import test from 'node:test'
 
+import {
+  assertSafeCandidatePaths,
+  findCandidatePathViolation,
+} from '../candidate-path-policy.mjs'
 import {
   validateBundledLegalResources,
   validateCandidateWorkflow,
@@ -29,6 +35,142 @@ const platformConfigPaths = [
 const normalizeLineEndings = (source) => source.replace(/\r\n?/g, '\n')
 const withLineEndings = (source, lineEnding) =>
   normalizeLineEndings(source).replaceAll('\n', lineEnding)
+
+const runtimeOnly = { checkProduct: false, checkRuntime: true }
+
+test('candidate path policy allows Playwright vocabulary but rejects retired tokens', () => {
+  for (const name of [
+    'playwright-test-coverage.prompt.md',
+    'crCoverage.js',
+    'crDragDrop.js',
+    'userAgent.js',
+    'storage-state.md',
+    'webstorage.js',
+    'storage.js',
+    'coverage.js',
+    'snapshotStorage.js',
+    'storageScriptSource.js',
+  ]) {
+    assert.equal(
+      findCandidatePathViolation(`resources/ms-playwright/${name}`, runtimeOnly),
+      null,
+      name
+    )
+  }
+
+  for (const name of [
+    'llamacpp-extension.dylib',
+    'llama.cpp',
+    'mlx-extension.tgz',
+    'foundation-models-extension',
+    'rag-extension',
+    'vector-db-extension',
+    'local-models',
+    'rag+extension.tgz',
+    'rag@extension.tgz',
+    '(rag)-extension.tgz',
+    'llama+cpp-extension.tgz',
+    'foundation+models-extension',
+    'vector(db)-extension',
+    'local~models',
+  ]) {
+    assert.equal(
+      findCandidatePathViolation(`resources/native/${name}`, runtimeOnly)?.kind,
+      'runtime',
+      name
+    )
+  }
+
+  assert.equal(
+    findCandidatePathViolation(
+      'Contents/Resources/rag-extension/index.js',
+      runtimeOnly
+    )?.kind,
+    'runtime'
+  )
+  assert.equal(
+    findCandidatePathViolation(
+      'Contents\\Resources\\rag-extension\\index.js',
+      runtimeOnly
+    )?.kind,
+    'runtime'
+  )
+  for (const candidatePath of [
+    'resources/vector/db/extension',
+    'resources/foundation/models/extension',
+    'resources/local/models',
+    'resources\\vector\\db\\extension',
+    'resources\\foundation\\models\\extension',
+    'resources\\local\\models',
+  ]) {
+    assert.equal(
+      findCandidatePathViolation(candidatePath, runtimeOnly)?.kind,
+      'runtime',
+      candidatePath
+    )
+  }
+  assert.equal(
+    findCandidatePathViolation('Contents/Resources/Mita-helper.js')?.kind,
+    'product'
+  )
+  for (const name of [
+    'mita+helper.dmg',
+    'silence(helper).dmg',
+    '(jan)-runtime.zip',
+  ]) {
+    assert.equal(
+      findCandidatePathViolation(`artifacts/${name}`)?.kind,
+      'product',
+      name
+    )
+  }
+
+  for (const name of [
+    'vectorize.js',
+    'foundationless.js',
+    'localmodelsafe.js',
+    'mitapp-helper.js',
+    'silenced-helper.js',
+  ]) {
+    assert.equal(findCandidatePathViolation(`resources/${name}`), null, name)
+  }
+})
+
+test('candidate path traversal fails closed without following bundle symlinks', (t) => {
+  const parent = fs.mkdtempSync(path.join(os.tmpdir(), 'biyan-path-policy-'))
+  t.after(() => fs.rmSync(parent, { force: true, recursive: true }))
+  const root = path.join(parent, 'candidate')
+  fs.mkdirSync(root)
+  fs.writeFileSync(path.join(root, 'coverage.js'), '')
+  assert.doesNotThrow(() => assertSafeCandidatePaths(root, runtimeOnly))
+
+  assert.throws(
+    () => assertSafeCandidatePaths(path.join(parent, 'missing'), runtimeOnly),
+    /root does not exist/
+  )
+
+  const rootLink = path.join(parent, 'candidate-link')
+  fs.symlinkSync(root, rootLink, 'dir')
+  assert.throws(
+    () => assertSafeCandidatePaths(rootLink, runtimeOnly),
+    /root must not be a symbolic link/
+  )
+
+  fs.symlinkSync(
+    '/relocated/workspace/Biyan.png',
+    path.join(root, '.DirIcon')
+  )
+  assert.doesNotThrow(() => assertSafeCandidatePaths(root, runtimeOnly))
+
+  fs.symlinkSync(
+    '/relocated/workspace/rag-extension',
+    path.join(root, 'runtime-link')
+  )
+  assert.throws(
+    () => assertSafeCandidatePaths(root, runtimeOnly),
+    /Retired local runtime found in candidate path/
+  )
+})
 
 test('bridge release trains lock version, phase, schema, and Cargo.lock together', () => {
   for (const [version, migrationPhase, dataSchema] of [
@@ -322,9 +464,13 @@ const candidateWorkflow = `jobs:
       - preflight
       - quality-gate
     environment: release-distribution
+    steps:
+      - run: node scripts/ci/candidate-path-policy.mjs --root src-tauri/target/release/bundle --runtime-only
   build-linux:
     needs: [preflight, quality-gate]
     environment: release-distribution
+    steps:
+      - run: node scripts/ci/candidate-path-policy.mjs --root src-tauri/target/release/bundle --runtime-only
 `
 
 test('candidate workflow gates every platform build on exact-tag tests', () => {
@@ -371,6 +517,41 @@ test('candidate workflow gates every platform build on exact-tag tests', () => {
   assert.ok(
     validateCandidateWorkflow(splitReleaseBuildEnvironment).some((failure) =>
       failure.includes('release-distribution environment')
+    )
+  )
+
+  const withoutRetiredRuntimeScanner = candidateWorkflow.replace(
+    'node scripts/ci/candidate-path-policy.mjs --root src-tauri/target/release/bundle --runtime-only',
+    'echo skipped-retired-runtime-scan'
+  )
+  assert.ok(
+    validateCandidateWorkflow(withoutRetiredRuntimeScanner).some((failure) =>
+      failure.includes('token-aware candidate path policy')
+    )
+  )
+
+  const broadRuntimeGrep = candidateWorkflow.replace(
+    '      - run: node scripts/ci/candidate-path-policy.mjs --root src-tauri/target/release/bundle --runtime-only',
+    `      - run: node scripts/ci/candidate-path-policy.mjs --root src-tauri/target/release/bundle --runtime-only
+      - run: find bundle -type f | grep -Ei '(llama|mlx|foundation|rag|vector)'`
+  )
+  assert.ok(
+    validateCandidateWorkflow(broadRuntimeGrep).some((failure) =>
+      failure.includes('broad retired-runtime verifier')
+    )
+  )
+
+  const broadRuntimePowerShellMatch = candidateWorkflow.replace(
+    '      - run: node scripts/ci/candidate-path-policy.mjs --root src-tauri/target/release/bundle --runtime-only',
+    `      - run: node scripts/ci/candidate-path-policy.mjs --root src-tauri/target/release/bundle --runtime-only
+      - run: |
+          if ($path -match '(?i)(llama|mlx|foundation|rag|vector)') {
+            throw "retired runtime"
+          }`
+  )
+  assert.ok(
+    validateCandidateWorkflow(broadRuntimePowerShellMatch).some((failure) =>
+      failure.includes('broad retired-runtime verifier')
     )
   )
 })
@@ -851,7 +1032,7 @@ jobs:
           fi
           node harness/scripts/ci/qualification-impact.mjs classify --repo harness --base "$BASE" --target "$TARGET" $bootstrap_full --format github-output
       - working-directory: harness
-        run: node --test scripts/ci/__tests__/qualification-impact.test.mjs scripts/ci/__tests__/verify-qualification-artifacts.test.mjs
+        run: node --test scripts/ci/__tests__/qualification-impact.test.mjs scripts/ci/__tests__/release-policy.test.mjs scripts/ci/__tests__/verify-qualification-artifacts.test.mjs
       - if: steps.classification.outputs.policy == 'true'
         working-directory: target
         run: |
@@ -885,6 +1066,13 @@ jobs:
     runs-on: ubuntu-24.04
     needs: [preflight, artifact-replay]
     if: needs.preflight.outputs.test_linux == 'true' || needs.preflight.outputs.build_linux == 'true'
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: \${{ needs.preflight.outputs.workflow_sha }}
+          path: harness
+      - working-directory: target
+        run: node ../harness/scripts/ci/candidate-path-policy.mjs --root "$bundle" --runtime-only
   native-windows:
     runs-on: windows-2022
     needs: [preflight, artifact-replay]
@@ -896,6 +1084,7 @@ jobs:
           path: harness
       - run: |
           & ./harness/scripts/ci/verify-windows-candidate.ps1 -Exe "$EXE" -Msi "$MSI" -Version "$VERSION"
+          node ./harness/scripts/ci/candidate-path-policy.mjs --root $bundle --runtime-only
   native-macos:
     runs-on: macos-15-intel
     needs: [preflight, artifact-replay]
@@ -1021,6 +1210,26 @@ test('exact-SHA qualification keeps the harness trusted and has no production au
     qualificationWorkflow.replace(
       'node harness/scripts/verify-macos-candidate.mjs',
       'echo node harness/scripts/verify-macos-candidate.mjs'
+    ),
+    qualificationWorkflow.replace(
+      'node ../harness/scripts/ci/candidate-path-policy.mjs --root "$bundle" --runtime-only',
+      'echo skipped-linux-retired-runtime-scan'
+    ),
+    qualificationWorkflow.replace(
+      'node ./harness/scripts/ci/candidate-path-policy.mjs --root $bundle --runtime-only',
+      'Write-Output skipped-windows-retired-runtime-scan'
+    ),
+    qualificationWorkflow.replace(
+      'node ../harness/scripts/ci/candidate-path-policy.mjs --root "$bundle" --runtime-only',
+      `node ../harness/scripts/ci/candidate-path-policy.mjs --root "$bundle" --runtime-only
+          find bundle -type f | grep -Ei '(llama|mlx|foundation|rag|vector)'`
+    ),
+    qualificationWorkflow.replace(
+      'node ./harness/scripts/ci/candidate-path-policy.mjs --root $bundle --runtime-only',
+      `node ./harness/scripts/ci/candidate-path-policy.mjs --root $bundle --runtime-only
+          if ($path -match '(?i)(llama|mlx|foundation|rag|vector)') {
+            throw "retired runtime"
+          }`
     ),
     qualificationWorkflow.replace(
       '& ./harness/scripts/ci/verify-windows-candidate.ps1',

@@ -2,6 +2,9 @@ function escapeRegExp(value) {
   return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
 }
 
+const LEGACY_BROAD_CANDIDATE_VERIFIER =
+  /(?:grep\s+-Ei|-match\s+)[^\n]*(?:llama|mlx|foundation|rag|vector)/i
+
 function jobBlock(source, jobName) {
   const header = new RegExp(`^  ${escapeRegExp(jobName)}:\\s*$`, 'm')
   const match = header.exec(source)
@@ -396,6 +399,27 @@ export function validateCandidateWorkflow(source) {
       failures.push(
         'build-macos must verify the signed app and DMG candidate contents'
       )
+    }
+    if (['build-windows', 'build-linux'].includes(buildJob)) {
+      if (
+        !hasRunInvocation(
+          block,
+          /^node\s+scripts\/ci\/candidate-path-policy\.mjs(?:\s|$)/,
+          [
+            /--root\s+src-tauri\/target\/release\/bundle/,
+            /--runtime-only/,
+          ]
+        )
+      ) {
+        failures.push(
+          `${buildJob} must run the token-aware candidate path policy`
+        )
+      }
+      if (LEGACY_BROAD_CANDIDATE_VERIFIER.test(block)) {
+        failures.push(
+          `${buildJob} must not use a broad retired-runtime verifier`
+        )
+      }
     }
   }
 
@@ -947,12 +971,13 @@ export function validateQualificationWorkflow(source) {
       !trustedContractTests ||
       ![
         /(?:harness\/)?scripts\/ci\/__tests__\/qualification-impact\.test\.mjs/,
+        /(?:harness\/)?scripts\/ci\/__tests__\/release-policy\.test\.mjs/,
         /(?:harness\/)?scripts\/ci\/__tests__\/verify-qualification-artifacts\.test\.mjs/,
       ].every((pattern) => pattern.test(trustedContractText)) ||
       (!explicitlyTrustedPaths && !trustedWorkingDirectory)
     ) {
       failures.push(
-        'qualification focused preflight must test the trusted classifier and artifact verifier'
+        'qualification focused preflight must test trusted classifier, release policy, and artifact verifier contracts'
       )
     }
     for (const [command, condition] of [
@@ -1035,6 +1060,7 @@ export function validateQualificationWorkflow(source) {
   }
 
   for (const [jobName, block] of [
+    ['native-linux', linux],
     ['native-windows', windows],
     ['native-macos', macos],
   ]) {
@@ -1049,6 +1075,40 @@ export function validateQualificationWorkflow(source) {
     )
     if (!protectedCheckout) {
       failures.push(`${jobName} must checkout the protected qualification harness`)
+    }
+  }
+  if (
+    linux &&
+    !hasRunInvocation(
+      linux,
+      /^node\s+\.\.\/harness\/scripts\/ci\/candidate-path-policy\.mjs(?:\s|$)/,
+      [/--root\s+["']?\$bundle["']?/, /--runtime-only/]
+    )
+  ) {
+    failures.push(
+      'native-linux must run the protected token-aware candidate path policy'
+    )
+  }
+  if (
+    windows &&
+    !hasRunInvocation(
+      windows,
+      /^node\s+(?:\.\/)?harness\/scripts\/ci\/candidate-path-policy\.mjs(?:\s|$)/,
+      [/--root\s+\$bundle/, /--runtime-only/]
+    )
+  ) {
+    failures.push(
+      'native-windows must run the protected token-aware candidate path policy'
+    )
+  }
+  for (const [jobName, block] of [
+    ['native-linux', linux],
+    ['native-windows', windows],
+  ]) {
+    if (block && LEGACY_BROAD_CANDIDATE_VERIFIER.test(block)) {
+      failures.push(
+        `${jobName} must not use a broad retired-runtime verifier`
+      )
     }
   }
   if (
