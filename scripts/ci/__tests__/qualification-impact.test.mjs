@@ -408,23 +408,39 @@ test('platform template workflows select only their native platform axes', () =>
   }
 })
 
-test('protected qualification workflows fail closed to a fresh three-platform build', () => {
+test('production release workflow changes fail closed to a fresh three-platform build', () => {
+  const result = classifyChangedFiles([
+    '.github/workflows/desktop-release.yml',
+  ])
+  assert.equal(result.classification, 'formal-release-control')
+  assert.equal(result.categories.controlPlane, true)
+  assert.equal(result.flags.full, true)
+  assert.equal(result.flags.quick, true)
+  assert.equal(result.flags.nativeTests, true)
+  assert.equal(result.flags.checkpoint, false)
+  assert.equal(result.flags.artifactReplay, false)
+  for (const platform of ['Macos', 'Windows', 'Linux']) {
+    assert.equal(result.flags[`test${platform}`], true)
+    assert.equal(result.flags[`build${platform}`], true)
+  }
+})
+
+test('qualification control workflows run focused policy without native cold builds', () => {
   for (const name of [
-    'desktop-release.yml',
     'biyan-exact-sha-qualification.yml',
     'biyan-linter-and-test.yml',
   ]) {
     const result = classifyChangedFiles([`.github/workflows/${name}`])
-    assert.equal(result.classification, 'formal-release-control')
+    assert.equal(result.classification, 'control-plane')
     assert.equal(result.categories.controlPlane, true)
-    assert.equal(result.flags.full, true)
-    assert.equal(result.flags.quick, true)
-    assert.equal(result.flags.nativeTests, true)
-    assert.equal(result.flags.checkpoint, false)
+    assert.equal(result.flags.focused, true)
+    assert.equal(result.flags.policy, true)
+    assert.equal(result.flags.full, false)
+    assert.equal(result.flags.nativeTests, false)
     assert.equal(result.flags.artifactReplay, false)
     for (const platform of ['Macos', 'Windows', 'Linux']) {
-      assert.equal(result.flags[`test${platform}`], true)
-      assert.equal(result.flags[`build${platform}`], true)
+      assert.equal(result.flags[`test${platform}`], false)
+      assert.equal(result.flags[`build${platform}`], false)
     }
   }
 })

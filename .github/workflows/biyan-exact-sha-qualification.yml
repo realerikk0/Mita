@@ -12,13 +12,14 @@ on:
         required: true
         type: string
       mode:
-        description: Impact-scoped qualification or initial full bootstrap
+        description: Impact-scoped qualification, full bootstrap, or aggregate recovery
         required: true
         default: auto
         type: choice
         options:
           - auto
           - bootstrap-full
+          - aggregate-recovery
       replay_run_id:
         description: Prior same-repository qualification run for artifact replay
         required: false
@@ -29,6 +30,10 @@ on:
         type: string
       replay_manifest_sha256:
         description: SHA-256 of the replayed qualification manifest
+        required: false
+        type: string
+      recovery_run_id:
+        description: Failed same-repository bootstrap run whose native artifacts are recovered
         required: false
         type: string
 
@@ -57,6 +62,7 @@ jobs:
       replay_run_id: ${{ steps.source.outputs.replay_run_id }}
       replay_base_sha: ${{ steps.source.outputs.replay_base_sha }}
       replay_manifest_sha256: ${{ steps.source.outputs.replay_manifest_sha256 }}
+      recovery_run_id: ${{ steps.source.outputs.recovery_run_id }}
       data_schema: ${{ steps.metadata.outputs.data_schema }}
       migration_phase: ${{ steps.metadata.outputs.migration_phase }}
       version: ${{ steps.metadata.outputs.version }}
@@ -106,6 +112,7 @@ jobs:
           REPLAY_RUN_INPUT: ${{ inputs.replay_run_id }}
           REPLAY_BASE_INPUT: ${{ inputs.replay_base_sha }}
           REPLAY_MANIFEST_INPUT: ${{ inputs.replay_manifest_sha256 }}
+          RECOVERY_RUN_INPUT: ${{ inputs.recovery_run_id }}
         run: |
           set -euo pipefail
 
@@ -113,7 +120,9 @@ jobs:
             echo "This workflow must be dispatched from refs/heads/mita-main" >&2
             exit 1
           fi
-          if [ "$MODE_INPUT" != "auto" ] && [ "$MODE_INPUT" != "bootstrap-full" ]; then
+          if [ "$MODE_INPUT" != "auto" ] && \
+             [ "$MODE_INPUT" != "bootstrap-full" ] && \
+             [ "$MODE_INPUT" != "aggregate-recovery" ]; then
             echo "Unsupported qualification mode: $MODE_INPUT" >&2
             exit 1
           fi
@@ -195,6 +204,19 @@ jobs:
             echo "bootstrap-full must create a fresh baseline without replay inputs" >&2
             exit 1
           fi
+          if [ "$MODE_INPUT" = "aggregate-recovery" ] && [ "$replay_values" -ne 0 ]; then
+            echo "aggregate-recovery must not consume manifest replay inputs" >&2
+            exit 1
+          fi
+          if [ "$MODE_INPUT" = "aggregate-recovery" ]; then
+            if [[ ! "$RECOVERY_RUN_INPUT" =~ ^[1-9][0-9]*$ ]]; then
+              echo "aggregate-recovery requires a positive recovery run ID" >&2
+              exit 1
+            fi
+          elif [ -n "$RECOVERY_RUN_INPUT" ]; then
+            echo "recovery_run_id is only valid in aggregate-recovery mode" >&2
+            exit 1
+          fi
 
           REPLAY_RUN=""
           REPLAY_BASE=""
@@ -228,6 +250,7 @@ jobs:
             echo "replay_run_id=$REPLAY_RUN"
             echo "replay_base_sha=$REPLAY_BASE"
             echo "replay_manifest_sha256=$REPLAY_MANIFEST"
+            echo "recovery_run_id=$RECOVERY_RUN_INPUT"
           } >> "$GITHUB_OUTPUT"
 
       - name: Compute fail-closed impact plan from protected main
@@ -245,7 +268,8 @@ jobs:
             --base "$BASE_SHA"
             --target "$TARGET_SHA"
           )
-          if [ "$MODE" = "bootstrap-full" ]; then
+          if [ "$MODE" = "bootstrap-full" ] || \
+             [ "$MODE" = "aggregate-recovery" ]; then
             args+=(--force-full)
           else
             args+=(--require-replay)
@@ -303,6 +327,11 @@ jobs:
             echo "bootstrap-full must not inherit retained artifacts" >&2
             exit 1
           fi
+          if [ "$MODE" = "aggregate-recovery" ] && \
+             [ "$ARTIFACT_REPLAY" != "false" ]; then
+            echo "aggregate-recovery must authenticate native artifacts directly" >&2
+            exit 1
+          fi
           if [ "$FULL" = "true" ]; then
             for value in \
               "$TEST_MACOS" "$TEST_WINDOWS" "$TEST_LINUX" \
@@ -313,8 +342,10 @@ jobs:
               fi
             done
           fi
-          if [ "$MODE" = "bootstrap-full" ] && [ "$FULL" != "true" ]; then
-            echo "bootstrap-full may only upgrade the plan to full qualification" >&2
+          if { [ "$MODE" = "bootstrap-full" ] || \
+               [ "$MODE" = "aggregate-recovery" ]; } && \
+             [ "$FULL" != "true" ]; then
+            echo "$MODE may only use a full qualification impact plan" >&2
             exit 1
           fi
 
@@ -373,7 +404,106 @@ jobs:
           node --test \
             scripts/ci/__tests__/qualification-impact.test.mjs \
             scripts/ci/__tests__/release-policy.test.mjs \
-            scripts/ci/__tests__/verify-qualification-artifacts.test.mjs
+            scripts/ci/__tests__/verify-qualification-artifacts.test.mjs \
+            scripts/ci/__tests__/verify-qualification-recovery.test.mjs
+
+      - name: Prove exact target verifier sandbox before native jobs
+        shell: bash
+        env:
+          MODE: ${{ steps.source.outputs.mode }}
+          TARGET_SHA: ${{ steps.source.outputs.target_sha }}
+          BASE_SHA: ${{ steps.source.outputs.base_sha }}
+          WORKFLOW_SHA: ${{ steps.source.outputs.workflow_sha }}
+          VERSION: ${{ steps.metadata.outputs.version }}
+          MIGRATION_PHASE: ${{ steps.metadata.outputs.migration_phase }}
+          DATA_SCHEMA: ${{ steps.metadata.outputs.data_schema }}
+        run: |
+          set -euo pipefail
+          verifier="target/scripts/ci/verify-qualification-artifacts.mjs"
+          if [ ! -f "$verifier" ]; then
+            if [ "$MODE" = "bootstrap-full" ]; then
+              echo "Historical bootstrap target has no target verifier sandbox probe"
+              exit 0
+            fi
+            echo "Exact target is missing the artifact verifier contract" >&2
+            exit 1
+          fi
+
+          probe_root="$GITHUB_WORKSPACE/qualification-verifier-probe"
+          rm -rf "$probe_root"
+          trap 'rm -rf "$probe_root"' EXIT
+          mkdir -p \
+            "$probe_root/packages/linux" \
+            "$probe_root/packages/windows" \
+            "$probe_root/packages/macos"
+          printf 'probe\n' > "$probe_root/packages/linux/Biyan_${VERSION}_amd64.AppImage"
+          printf 'probe\n' > "$probe_root/packages/linux/Biyan_${VERSION}_amd64.deb"
+          printf 'probe\n' > "$probe_root/packages/windows/Biyan_${VERSION}_x64-setup.exe"
+          printf 'probe\n' > "$probe_root/packages/windows/Biyan_${VERSION}_x64_en-US.msi"
+          printf 'probe\n' > "$probe_root/packages/macos/Biyan_${VERSION}.app.tar.gz"
+          printf 'probe\n' > "$probe_root/packages/macos/Biyan_${VERSION}_universal.dmg"
+
+          write_provenance() {
+            local platform="$1"
+            local architecture="$2"
+            jq -n \
+              --arg platform "$platform" \
+              --arg architecture "$architecture" \
+              --arg target_sha "$TARGET_SHA" \
+              --arg base_sha "$BASE_SHA" \
+              --arg version "$VERSION" \
+              --arg migration_phase "$MIGRATION_PHASE" \
+              --argjson data_schema "$DATA_SCHEMA" \
+              '{schema: 1, platform: $platform, architecture: $architecture,
+                runnerArch: "X64", imageOS: "sandbox-probe",
+                imageVersion: "sandbox-probe", node: "sandbox-probe",
+                yarn: "sandbox-probe", rust: "sandbox-probe",
+                cargo: "sandbox-probe", targetSha: $target_sha,
+                baseSha: $base_sha, version: $version,
+                migrationPhase: $migration_phase, dataSchema: $data_schema,
+                built: true}' \
+              > "$probe_root/runner-provenance-${platform}.json"
+          }
+          write_provenance linux x86_64
+          write_provenance windows AMD64
+          write_provenance macos x86_64
+
+          manifest="$probe_root/qualification-manifest.json"
+          node harness/scripts/ci/verify-qualification-artifacts.mjs create \
+            --root "$probe_root" \
+            --output "$manifest" \
+            --target-sha "$TARGET_SHA" \
+            --base-sha "$BASE_SHA" \
+            --workflow-sha "$WORKFLOW_SHA" \
+            --run-id "$GITHUB_RUN_ID"
+          manifest_sha256="$(sha256sum "$manifest" | awk '{print $1}')"
+          verify_args=(
+            verify
+            --root "$probe_root"
+            --manifest "$manifest"
+            --manifest-sha256 "$manifest_sha256"
+            --target-sha "$TARGET_SHA"
+            --base-sha "$BASE_SHA"
+            --run-id "$GITHUB_RUN_ID"
+          )
+          node harness/scripts/ci/verify-qualification-artifacts.mjs \
+            "${verify_args[@]}"
+          node harness/scripts/ci/verify-qualification-artifacts.mjs \
+            verify-platforms --root "$probe_root" \
+            --target-sha "$TARGET_SHA" --base-sha "$BASE_SHA"
+
+          harness/scripts/ci/run-untrusted-qualification-verifier.sh \
+            --read-root "$probe_root" "$verifier" "${verify_args[@]}"
+          harness/scripts/ci/run-untrusted-qualification-verifier.sh \
+            --read-root "$probe_root" "$verifier" \
+            verify-platforms --root "$probe_root" \
+            --target-sha "$TARGET_SHA" --base-sha "$BASE_SHA"
+
+          node harness/scripts/ci/verify-qualification-artifacts.mjs \
+            "${verify_args[@]}"
+          node harness/scripts/ci/verify-qualification-artifacts.mjs \
+            verify-platforms --root "$probe_root" \
+            --target-sha "$TARGET_SHA" --base-sha "$BASE_SHA"
 
       - name: Verify exact checkpoint topology
         if: steps.classification.outputs.checkpoint == 'true'
@@ -536,7 +666,9 @@ jobs:
   docs-build:
     name: Build documentation without publishing
     needs: preflight
-    if: needs.preflight.outputs.docs == 'true'
+    if: >-
+      needs.preflight.outputs.docs == 'true' &&
+      needs.preflight.outputs.mode != 'aggregate-recovery'
     runs-on: ubuntu-24.04
     timeout-minutes: 20
     steps:
@@ -565,6 +697,114 @@ jobs:
           yarn install --frozen-lockfile
           rm -rf out .next
           NODE_ENV=production yarn build
+
+  recovery-auth:
+    name: Authenticate failed bootstrap artifacts for aggregate recovery
+    needs: preflight
+    if: needs.preflight.outputs.mode == 'aggregate-recovery'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    outputs:
+      source_head_sha: ${{ steps.verify.outputs.source_head_sha }}
+      summary_json: ${{ steps.verify.outputs.summary_json }}
+    steps:
+      - name: Checkout protected recovery verifier
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.preflight.outputs.workflow_sha }}
+          persist-credentials: false
+          fetch-depth: 0
+          path: harness
+
+      - name: Set up trusted Node runtime
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+
+      - name: Fetch same-repository source run metadata
+        uses: actions/github-script@v7
+        env:
+          RECOVERY_RUN_ID: ${{ needs.preflight.outputs.recovery_run_id }}
+        with:
+          github-token: ${{ github.token }}
+          script: |
+            const fs = require('fs')
+            const runId = Number(process.env.RECOVERY_RUN_ID)
+            if (!Number.isSafeInteger(runId) || runId <= 0) {
+              core.setFailed('Recovery run ID is not a safe positive integer')
+              return
+            }
+            const { data: run } = await github.rest.actions.getWorkflowRun({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              run_id: runId,
+            })
+            const jobs = await github.paginate(
+              github.rest.actions.listJobsForWorkflowRun,
+              {
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                run_id: runId,
+                filter: 'latest',
+                per_page: 100,
+              }
+            )
+            const artifacts = await github.paginate(
+              github.rest.actions.listWorkflowRunArtifacts,
+              {
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                run_id: runId,
+                per_page: 100,
+              }
+            )
+            fs.mkdirSync('recovery-metadata', { recursive: true })
+            fs.writeFileSync(
+              'recovery-metadata/run.json',
+              `${JSON.stringify(run)}\n`,
+              { mode: 0o600 }
+            )
+            fs.writeFileSync(
+              'recovery-metadata/jobs.json',
+              `${JSON.stringify({ total_count: jobs.length, jobs })}\n`,
+              { mode: 0o600 }
+            )
+            fs.writeFileSync(
+              'recovery-metadata/artifacts.json',
+              `${JSON.stringify({
+                total_count: artifacts.length,
+                artifacts,
+              })}\n`,
+              { mode: 0o600 }
+            )
+
+      - name: Validate failed run, successful native jobs, and exact artifacts
+        id: verify
+        shell: bash
+        env:
+          RECOVERY_RUN_ID: ${{ needs.preflight.outputs.recovery_run_id }}
+          TARGET_SHA: ${{ needs.preflight.outputs.target_sha }}
+          BASE_SHA: ${{ needs.preflight.outputs.base_sha }}
+        run: |
+          set -euo pipefail
+          node harness/scripts/ci/verify-qualification-recovery.mjs \
+            --run recovery-metadata/run.json \
+            --jobs recovery-metadata/jobs.json \
+            --artifacts recovery-metadata/artifacts.json \
+            --source-run-id "$RECOVERY_RUN_ID" \
+            --repository "$GITHUB_REPOSITORY" \
+            --target-sha "$TARGET_SHA" \
+            --base-sha "$BASE_SHA" \
+            --output recovery-metadata/recovery-summary.json \
+            --github-output "$GITHUB_OUTPUT"
+
+          source_head_sha="$(
+            jq -er '.sourceHeadSha | select(test("^[0-9a-f]{40}$"))' \
+              recovery-metadata/recovery-summary.json
+          )"
+          git -C harness cat-file -e "${source_head_sha}^{commit}"
+          git -C harness merge-base --is-ancestor \
+            "$source_head_sha" "${{ needs.preflight.outputs.workflow_sha }}"
 
   artifact-replay:
     name: Verify retained qualification artifacts
@@ -714,24 +954,23 @@ jobs:
             echo "Exact target is missing the artifact verifier contract" >&2
             exit 1
           fi
-          sandbox_home="$(mktemp -d)"
-          sudo chown nobody "$sandbox_home"
-          chmod -R a+rX,a-w "$artifact_root"
-          sudo -u nobody env -i PATH="$PATH" HOME="$sandbox_home" \
-            node target/scripts/ci/verify-qualification-artifacts.mjs \
-              "${verify_args[@]}"
-          sudo -u nobody env -i PATH="$PATH" HOME="$sandbox_home" \
-            node target/scripts/ci/verify-qualification-artifacts.mjs \
-              verify-platforms --root "$artifact_root"
-          chmod -R u+w "$artifact_root"
-          sudo rm -rf "$sandbox_home"
+          harness/scripts/ci/run-untrusted-qualification-verifier.sh \
+            --read-root "$artifact_root" \
+            target/scripts/ci/verify-qualification-artifacts.mjs \
+            "${verify_args[@]}"
+          harness/scripts/ci/run-untrusted-qualification-verifier.sh \
+            --read-root "$artifact_root" \
+            target/scripts/ci/verify-qualification-artifacts.mjs \
+            verify-platforms --root "$artifact_root" \
+            --target-sha "$CURRENT_BASE_SHA" --base-sha "$REPLAY_BASE_SHA"
 
           # The target verifier is untrusted input. Re-run the protected
           # verifier after it exits so any attempted mutation still fails.
           node harness/scripts/ci/verify-qualification-artifacts.mjs \
             "${verify_args[@]}"
           node harness/scripts/ci/verify-qualification-artifacts.mjs \
-            verify-platforms --root "$artifact_root"
+            verify-platforms --root "$artifact_root" \
+            --target-sha "$CURRENT_BASE_SHA" --base-sha "$REPLAY_BASE_SHA"
 
           mkdir -p "$artifact_root/qualification-evidence"
           jq -n \
@@ -766,6 +1005,7 @@ jobs:
     if: >-
       always() &&
       needs.preflight.result == 'success' &&
+      needs.preflight.outputs.mode != 'aggregate-recovery' &&
       (needs.artifact-replay.result == 'success' ||
        needs.artifact-replay.result == 'skipped') &&
       (needs.preflight.outputs.test_linux == 'true' ||
@@ -999,6 +1239,7 @@ jobs:
     if: >-
       always() &&
       needs.preflight.result == 'success' &&
+      needs.preflight.outputs.mode != 'aggregate-recovery' &&
       (needs.artifact-replay.result == 'success' ||
        needs.artifact-replay.result == 'skipped') &&
       (needs.preflight.outputs.test_windows == 'true' ||
@@ -1190,6 +1431,7 @@ jobs:
     if: >-
       always() &&
       needs.preflight.result == 'success' &&
+      needs.preflight.outputs.mode != 'aggregate-recovery' &&
       (needs.artifact-replay.result == 'success' ||
        needs.artifact-replay.result == 'skipped') &&
       (needs.preflight.outputs.test_macos == 'true' ||
@@ -1436,6 +1678,7 @@ jobs:
     needs:
       - preflight
       - docs-build
+      - recovery-auth
       - artifact-replay
       - native-linux
       - native-windows
@@ -1443,21 +1686,28 @@ jobs:
     if: >-
       always() &&
       needs.preflight.result == 'success' &&
+      (needs.recovery-auth.result == 'success' ||
+       needs.preflight.outputs.mode != 'aggregate-recovery') &&
       (needs.preflight.outputs.artifact_replay == 'true' ||
+       needs.preflight.outputs.mode == 'aggregate-recovery' ||
        needs.preflight.outputs.build_linux == 'true' ||
        needs.preflight.outputs.build_windows == 'true' ||
        needs.preflight.outputs.build_macos == 'true') &&
       (needs.docs-build.result == 'success' ||
+       needs.preflight.outputs.mode == 'aggregate-recovery' ||
        needs.preflight.outputs.docs != 'true') &&
       (needs.artifact-replay.result == 'success' ||
        needs.preflight.outputs.artifact_replay != 'true') &&
       (needs.native-linux.result == 'success' ||
+       needs.preflight.outputs.mode == 'aggregate-recovery' ||
        (needs.preflight.outputs.test_linux != 'true' &&
         needs.preflight.outputs.build_linux != 'true')) &&
       (needs.native-windows.result == 'success' ||
+       needs.preflight.outputs.mode == 'aggregate-recovery' ||
        (needs.preflight.outputs.test_windows != 'true' &&
         needs.preflight.outputs.build_windows != 'true')) &&
       (needs.native-macos.result == 'success' ||
+       needs.preflight.outputs.mode == 'aggregate-recovery' ||
        (needs.preflight.outputs.test_macos != 'true' &&
         needs.preflight.outputs.build_macos != 'true'))
     runs-on: ubuntu-24.04
@@ -1497,8 +1747,9 @@ jobs:
 
       - name: Download this run's Linux evidence
         if: >-
-          needs.preflight.outputs.test_linux == 'true' ||
-          needs.preflight.outputs.build_linux == 'true'
+          needs.preflight.outputs.mode != 'aggregate-recovery' &&
+          (needs.preflight.outputs.test_linux == 'true' ||
+           needs.preflight.outputs.build_linux == 'true')
         uses: actions/download-artifact@v4
         with:
           name: qualification-build-linux-${{ github.run_id }}
@@ -1506,8 +1757,9 @@ jobs:
 
       - name: Download this run's Windows evidence
         if: >-
-          needs.preflight.outputs.test_windows == 'true' ||
-          needs.preflight.outputs.build_windows == 'true'
+          needs.preflight.outputs.mode != 'aggregate-recovery' &&
+          (needs.preflight.outputs.test_windows == 'true' ||
+           needs.preflight.outputs.build_windows == 'true')
         uses: actions/download-artifact@v4
         with:
           name: qualification-build-windows-${{ github.run_id }}
@@ -1515,11 +1767,42 @@ jobs:
 
       - name: Download this run's macOS evidence
         if: >-
-          needs.preflight.outputs.test_macos == 'true' ||
-          needs.preflight.outputs.build_macos == 'true'
+          needs.preflight.outputs.mode != 'aggregate-recovery' &&
+          (needs.preflight.outputs.test_macos == 'true' ||
+           needs.preflight.outputs.build_macos == 'true')
         uses: actions/download-artifact@v4
         with:
           name: qualification-build-macos-${{ github.run_id }}
+          path: qualification-current/macos
+
+      - name: Download authenticated recovery Linux evidence
+        if: needs.preflight.outputs.mode == 'aggregate-recovery'
+        uses: actions/download-artifact@v4
+        with:
+          github-token: ${{ github.token }}
+          repository: ${{ github.repository }}
+          run-id: ${{ needs.preflight.outputs.recovery_run_id }}
+          name: qualification-build-linux-${{ needs.preflight.outputs.recovery_run_id }}
+          path: qualification-current/linux
+
+      - name: Download authenticated recovery Windows evidence
+        if: needs.preflight.outputs.mode == 'aggregate-recovery'
+        uses: actions/download-artifact@v4
+        with:
+          github-token: ${{ github.token }}
+          repository: ${{ github.repository }}
+          run-id: ${{ needs.preflight.outputs.recovery_run_id }}
+          name: qualification-build-windows-${{ needs.preflight.outputs.recovery_run_id }}
+          path: qualification-current/windows
+
+      - name: Download authenticated recovery macOS evidence
+        if: needs.preflight.outputs.mode == 'aggregate-recovery'
+        uses: actions/download-artifact@v4
+        with:
+          github-token: ${{ github.token }}
+          repository: ${{ github.repository }}
+          run-id: ${{ needs.preflight.outputs.recovery_run_id }}
+          name: qualification-build-macos-${{ needs.preflight.outputs.recovery_run_id }}
           path: qualification-current/macos
 
       - name: Compose complete chain-forward artifact set
@@ -1540,6 +1823,8 @@ jobs:
           DATA_SCHEMA: ${{ needs.preflight.outputs.data_schema }}
           CHECKPOINT: ${{ needs.preflight.outputs.checkpoint }}
           CLASSIFICATION_JSON: ${{ needs.preflight.outputs.classification_json }}
+          RECOVERY_MODE: ${{ needs.preflight.outputs.mode == 'aggregate-recovery' }}
+          RECOVERY_SUMMARY_JSON: ${{ needs.recovery-auth.outputs.summary_json }}
         run: |
           set -euo pipefail
           rm -rf qualification-output
@@ -1603,8 +1888,23 @@ jobs:
             }' \
             > "qualification-output/qualification-evidence/run-${{ github.run_id }}-impact-plan.json"
 
+          if [ "$RECOVERY_MODE" = "true" ]; then
+            printf '%s' "$RECOVERY_SUMMARY_JSON" | jq -e \
+              --arg recovery_run_id \
+                "${{ needs.preflight.outputs.recovery_run_id }}" \
+              --arg target_sha "$TARGET_SHA" \
+              --arg base_sha "$BASE_SHA" \
+              '.sourceRunId == $recovery_run_id
+               and .targetSha == $target_sha
+               and .baseSha == $base_sha
+               and (.artifacts | length == 3)' >/dev/null
+            printf '%s\n' "$RECOVERY_SUMMARY_JSON" | jq -S . \
+              > "qualification-output/qualification-evidence/run-${{ github.run_id }}-aggregate-recovery.json"
+          fi
+
           node harness/scripts/ci/verify-qualification-artifacts.mjs \
-            verify-platforms --root qualification-output
+            verify-platforms --root qualification-output \
+            --target-sha "$TARGET_SHA" --base-sha "$BASE_SHA"
 
       - name: Create immutable qualification artifact manifest
         id: manifest
@@ -1614,6 +1914,7 @@ jobs:
           BASE_SHA: ${{ needs.preflight.outputs.base_sha }}
           WORKFLOW_SHA: ${{ needs.preflight.outputs.workflow_sha }}
           RUN_ID: ${{ github.run_id }}
+          MODE: ${{ needs.preflight.outputs.mode }}
           REPLAY_REQUIRED: ${{ needs.preflight.outputs.artifact_replay }}
           SOURCE_RUN_ID: ${{ needs.preflight.outputs.replay_run_id }}
           SOURCE_MANIFEST_SHA256: ${{ needs.preflight.outputs.replay_manifest_sha256 }}
@@ -1656,22 +1957,23 @@ jobs:
           node harness/scripts/ci/verify-qualification-artifacts.mjs \
             "${verify_args[@]}"
           if [ -f target/scripts/ci/verify-qualification-artifacts.mjs ]; then
-            sandbox_home="$(mktemp -d)"
-            sudo chown nobody "$sandbox_home"
-            chmod -R a+rX,a-w qualification-output
-            sudo -u nobody env -i PATH="$PATH" HOME="$sandbox_home" \
-              node target/scripts/ci/verify-qualification-artifacts.mjs \
-                "${verify_args[@]}"
-            sudo -u nobody env -i PATH="$PATH" HOME="$sandbox_home" \
-              node target/scripts/ci/verify-qualification-artifacts.mjs \
-                verify-platforms --root qualification-output
-            sudo rm -rf "$sandbox_home"
+            harness/scripts/ci/run-untrusted-qualification-verifier.sh \
+              --read-root qualification-output \
+              target/scripts/ci/verify-qualification-artifacts.mjs \
+              "${verify_args[@]}"
+            harness/scripts/ci/run-untrusted-qualification-verifier.sh \
+              --read-root qualification-output \
+              target/scripts/ci/verify-qualification-artifacts.mjs \
+              verify-platforms --root qualification-output \
+              --target-sha "$TARGET_SHA" --base-sha "$BASE_SHA"
             node harness/scripts/ci/verify-qualification-artifacts.mjs \
               "${verify_args[@]}"
             node harness/scripts/ci/verify-qualification-artifacts.mjs \
-              verify-platforms --root qualification-output
-          elif [ "$REPLAY_REQUIRED" = "true" ]; then
-            echo "An auto target is missing the artifact verifier contract" >&2
+              verify-platforms --root qualification-output \
+              --target-sha "$TARGET_SHA" --base-sha "$BASE_SHA"
+          elif [ "$REPLAY_REQUIRED" = "true" ] || \
+               [ "$MODE" = "aggregate-recovery" ]; then
+            echo "$MODE target is missing the artifact verifier contract" >&2
             exit 1
           else
             echo "Historical bootstrap target uses the protected-main verifier"
@@ -1694,6 +1996,7 @@ jobs:
     needs:
       - preflight
       - docs-build
+      - recovery-auth
       - artifact-replay
       - native-linux
       - native-windows
@@ -1706,8 +2009,10 @@ jobs:
         shell: bash
         env:
           PREFLIGHT_RESULT: ${{ needs.preflight.result }}
+          MODE: ${{ needs.preflight.outputs.mode }}
           DOCS_REQUIRED: ${{ needs.preflight.outputs.docs }}
           DOCS_RESULT: ${{ needs.docs-build.result }}
+          RECOVERY_RESULT: ${{ needs.recovery-auth.result }}
           REPLAY_REQUIRED: ${{ needs.preflight.outputs.artifact_replay }}
           REPLAY_RESULT: ${{ needs.artifact-replay.result }}
           TEST_LINUX: ${{ needs.preflight.outputs.test_linux }}
@@ -1767,16 +2072,25 @@ jobs:
           windows_required=false
           macos_required=false
           aggregate_required=false
-          if [ "$TEST_LINUX" = "true" ] || [ "$BUILD_LINUX" = "true" ]; then
+          recovery_required=false
+          if [ "$MODE" = "aggregate-recovery" ]; then
+            recovery_required=true
+            DOCS_REQUIRED=false
+          fi
+          if [ "$MODE" != "aggregate-recovery" ] && \
+             { [ "$TEST_LINUX" = "true" ] || [ "$BUILD_LINUX" = "true" ]; }; then
             linux_required=true
           fi
-          if [ "$TEST_WINDOWS" = "true" ] || [ "$BUILD_WINDOWS" = "true" ]; then
+          if [ "$MODE" != "aggregate-recovery" ] && \
+             { [ "$TEST_WINDOWS" = "true" ] || [ "$BUILD_WINDOWS" = "true" ]; }; then
             windows_required=true
           fi
-          if [ "$TEST_MACOS" = "true" ] || [ "$BUILD_MACOS" = "true" ]; then
+          if [ "$MODE" != "aggregate-recovery" ] && \
+             { [ "$TEST_MACOS" = "true" ] || [ "$BUILD_MACOS" = "true" ]; }; then
             macos_required=true
           fi
-          if [ "$REPLAY_REQUIRED" = "true" ] || \
+          if [ "$MODE" = "aggregate-recovery" ] || \
+             [ "$REPLAY_REQUIRED" = "true" ] || \
              [ "$BUILD_LINUX" = "true" ] || \
              [ "$BUILD_WINDOWS" = "true" ] || \
              [ "$BUILD_MACOS" = "true" ]; then
@@ -1784,6 +2098,7 @@ jobs:
           fi
 
           expect_result docs-build "$DOCS_REQUIRED" "$DOCS_RESULT"
+          expect_result recovery-auth "$recovery_required" "$RECOVERY_RESULT"
           expect_result artifact-replay "$REPLAY_REQUIRED" "$REPLAY_RESULT"
           expect_result native-linux "$linux_required" "$LINUX_RESULT"
           expect_result native-windows "$windows_required" "$WINDOWS_RESULT"
