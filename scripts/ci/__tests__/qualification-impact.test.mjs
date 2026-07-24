@@ -795,7 +795,7 @@ test('CLI deletion metadata prevents deleted JS/TS tests from producing zero tes
   assert.equal(result.json.flags.buildLinux, false)
 })
 
-test('CLI blocks empty, non-ancestor, rename, mode, symlink, and control-path diffs', async (t) => {
+test('CLI normalizes renames and blocks unsafe commit or file shapes', async (t) => {
   await t.test('empty diff', (subtest) => {
     const repo = createRepo(subtest)
     writeFile(repo, 'README.md', '# base\n')
@@ -837,9 +837,9 @@ test('CLI blocks empty, non-ancestor, rename, mode, symlink, and control-path di
 
   await t.test('rename', (subtest) => {
     const repo = createRepo(subtest)
-    writeFile(repo, 'scripts/old.mjs', 'export const value = 1\n')
+    writeFile(repo, 'docs/old.md', '# retained history\n')
     const base = commitAll(repo, 'base')
-    git(repo, ['mv', 'scripts/old.mjs', 'scripts/new.mjs'])
+    git(repo, ['mv', 'docs/old.md', 'docs/new.md'])
     const target = commitAll(repo, 'rename')
     const result = runJson([
       'classify',
@@ -850,8 +850,12 @@ test('CLI blocks empty, non-ancestor, rename, mode, symlink, and control-path di
       '--target',
       target,
     ])
-    assert.equal(result.status, 1)
-    assert.match(result.json.reasons[0], /rename\/copy\/type/)
+    assert.equal(result.status, 0)
+    assert.equal(result.json.blocked, false)
+    assert.equal(result.json.classification, 'docs-only')
+    assert.deepEqual(result.json.changedFiles, ['docs/new.md', 'docs/old.md'])
+    assert.equal(result.json.flags.docs, true)
+    assert.equal(result.json.flags.full, false)
   })
 
   await t.test('executable mode change', (subtest) => {

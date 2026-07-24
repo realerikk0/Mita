@@ -525,6 +525,15 @@ export function validateCiWorkflow(source) {
       )
     }
     if (
+      !/base_sha="\$\(git merge-base "\$policy_sha" "\$target_sha" \|\| true\)"/.test(
+        ciScope
+      )
+    ) {
+      failures.push(
+        'Biyan trusted CI scope must fail closed instead of aborting when merge-base is unavailable'
+      )
+    }
+    if (
       !hasRunInvocation(
         ciScope,
         /^node\s+(?:["']?\$RUNNER_TEMP\/qualification-impact\.mjs["']?|["']?\$classifier["']?)\s+classify\b/,

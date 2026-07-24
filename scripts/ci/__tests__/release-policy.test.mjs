@@ -696,6 +696,9 @@ jobs:
       - id: scope
         run: |
           base_sha="\${{ github.event.pull_request.base.sha }}"
+          policy_sha="$base_sha"
+          target_sha=HEAD
+          base_sha="$(git merge-base "$policy_sha" "$target_sha" || true)"
           if ! git show "\${base_sha}:scripts/ci/qualification-impact.mjs" > "$RUNNER_TEMP/qualification-impact.mjs"; then
             echo "Base classifier unavailable; fail closed to full axes."
             for flag in quick test_linux test_windows test_macos full; do
@@ -829,6 +832,10 @@ jobs:
   )
 
   for (const unsafeScope of [
+    workflow.replace(
+      'base_sha="$(git merge-base "$policy_sha" "$target_sha" || true)"',
+      'base_sha="$(git merge-base "$policy_sha" "$target_sha")"'
+    ),
     workflow.replace(
       'git show "\${base_sha}:scripts/ci/qualification-impact.mjs"',
       'echo git show "\${base_sha}:scripts/ci/qualification-impact.mjs"'
