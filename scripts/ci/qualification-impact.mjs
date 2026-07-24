@@ -635,7 +635,10 @@ function inspectRawDiff(repo, base, target) {
       '--raw',
       '-z',
       '--no-abbrev',
-      '--find-renames',
+      // Normalize renames/copies to exact deletion + addition records. Git's
+      // similarity heuristics vary by content and version; both paths must be
+      // classified deterministically instead.
+      '--no-renames',
       base,
       target,
       '--',

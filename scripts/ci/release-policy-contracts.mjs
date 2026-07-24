@@ -1,3 +1,4 @@
+import { createHash } from 'node:crypto'
 import fs from 'node:fs'
 
 const releaseTrainPolicy = JSON.parse(
@@ -13,6 +14,30 @@ function escapeRegExp(value) {
 
 const LEGACY_BROAD_CANDIDATE_VERIFIER =
   /(?:grep\s+-Ei|-match\s+)[^\n]*(?:llama|mlx|foundation|rag|vector)/i
+
+const TRUSTED_CI_SCOPE_COMMAND_ALLOWLIST = new Set([
+  // Reviewed active-command sequence for the fail-closed ci-scope detector.
+  'e0867c3b7586d4844629574802faf1a99bbe73e5c9d62dad5c90bc38800933c2',
+])
+
+const TRUSTED_CI_SCOPE_JOB_ALLOWLIST = new Set([
+  // Exact ci-scope job envelope; line endings and trailing blank lines are compatible.
+  '965743af788bb834a1b0d29d01033b9edfdb7d0939065ae97f3f70069306fa71',
+])
+
+const TRUSTED_CI_JOB_KEY_ALLOWLIST = new Set([
+  'ci-scope',
+  'quick-pr-check',
+  'release-safety',
+  'base_branch_cov',
+  'base_branch_rust_cov',
+  'test-on-macos',
+  'test-on-windows',
+  'test-on-windows-pr',
+  'test-on-ubuntu',
+  'coverage-check',
+  'pr-ci-gate',
+])
 
 function jobBlock(source, jobName) {
   const header = new RegExp(`^  ${escapeRegExp(jobName)}:\\s*$`, 'm')
@@ -61,6 +86,13 @@ function uncommentedSource(source) {
     .split('\n')
     .filter((line) => !/^\s*#/.test(line))
     .join('\n')
+}
+
+function normalizedYamlEnvelope(source) {
+  if (typeof source !== 'string') return ''
+  const lines = source.replace(/\r\n?/g, '\n').split('\n')
+  while (lines.length > 0 && /^\s*$/.test(lines.at(-1))) lines.pop()
+  return `${lines.join('\n')}\n`
 }
 
 function runBlocks(block) {
@@ -770,12 +802,112 @@ export function validateReleaseEnvironmentWorkflows(workflows) {
 
 export function validateCiWorkflow(source) {
   const failures = []
-  const permissions = topLevelBlock(source, 'permissions')
-  const active = uncommentedSource(source)
+  const normalizedSource = source.replace(/\r\n?/g, '\n')
+  const allowedTopLevelKeys = new Set([
+    'name',
+    'on',
+    'concurrency',
+    'permissions',
+    'jobs',
+  ])
+  const topLevelLines = normalizedSource
+    .split('\n')
+    .filter((line) => line && !/^[\t #]/.test(line))
+  const canonicalTopLevelKeys = topLevelLines.map(
+    (line) => /^([a-z][a-z0-9_-]*):(?:[ \t].*)?$/.exec(line)?.[1] ?? null
+  )
   if (
-    !permissions ||
-    !/^  contents:\s*read\s*$/m.test(permissions) ||
-    /^  (?!contents:)[A-Za-z0-9_-]+:/m.test(permissions)
+    canonicalTopLevelKeys.some(
+      (key) => key === null || !allowedTopLevelKeys.has(key)
+    ) ||
+    [...allowedTopLevelKeys].some(
+      (key) => canonicalTopLevelKeys.filter((candidate) => candidate === key).length !== 1
+    )
+  ) {
+    failures.push(
+      'Biyan CI must use the exact canonical top-level key allowlist: name, on, concurrency, permissions, jobs'
+    )
+  }
+  const permissions = topLevelBlock(source, 'permissions')
+  const jobsBlock = topLevelBlock(source, 'jobs')
+  const active = uncommentedSource(source)
+  const topLevelKeyCount = (key) =>
+    [
+      ...normalizedSource.matchAll(
+        new RegExp(
+          `^(?:${escapeRegExp(key)}|["']${escapeRegExp(key)}["'])\\s*:`,
+          'gm'
+        )
+      ),
+    ].length
+  if (topLevelKeyCount('permissions') !== 1) {
+    failures.push('Biyan CI must define exactly one top-level permissions block')
+  }
+  if (topLevelKeyCount('jobs') !== 1) {
+    failures.push('Biyan CI must define exactly one top-level jobs block')
+  }
+  const jobKeyLines =
+    jobsBlock
+      ?.replace(/\r\n?/g, '\n')
+      .split('\n')
+      .filter((line) => /^  \S/.test(line) && !/^  #/.test(line)) ?? []
+  const canonicalJobKeys = jobKeyLines.map(
+    (line) => /^  ([A-Za-z0-9_-]+):\s*(?:#.*)?$/.exec(line)?.[1] ?? null
+  )
+  if (canonicalJobKeys.some((key) => key === null)) {
+    failures.push(
+      'Biyan CI jobs must use canonical unquoted job keys'
+    )
+  }
+  if (
+    canonicalJobKeys.length !== TRUSTED_CI_JOB_KEY_ALLOWLIST.size ||
+    canonicalJobKeys.some(
+      (key) => !TRUSTED_CI_JOB_KEY_ALLOWLIST.has(key)
+    )
+  ) {
+    failures.push(
+      'Biyan CI jobs must match the reviewed job-key allowlist'
+    )
+  }
+  const jobsLines = jobsBlock?.replace(/\r\n?/g, '\n').split('\n') ?? []
+  const noncanonicalJobField = jobsLines.find(
+    (line) =>
+      /^    \S/.test(line) &&
+      !/^    #/.test(line) &&
+      !/^    [A-Za-z0-9_-]+:(?:\s.*)?$/.test(line)
+  )
+  if (noncanonicalJobField) {
+    failures.push('Biyan CI jobs must use canonical unquoted field keys')
+  }
+  for (let index = 0; index < jobsLines.length; index += 1) {
+    if (!/^    permissions:/.test(jobsLines[index])) continue
+    const block = [jobsLines[index]]
+    for (index += 1; index < jobsLines.length; index += 1) {
+      if (jobsLines[index].trim() && !/^ {6,}/.test(jobsLines[index])) {
+        index -= 1
+        break
+      }
+      block.push(jobsLines[index])
+    }
+    if (
+      normalizedYamlEnvelope(block.join('\n')) !==
+      '    permissions:\n      contents: read\n'
+    ) {
+      failures.push(
+        'Biyan CI job permissions must be exactly contents: read'
+      )
+    }
+  }
+  for (const inheritedControl of ['env', 'defaults']) {
+    if (topLevelKeyCount(inheritedControl) !== 0) {
+      failures.push(
+        `Biyan CI must not define top-level ${inheritedControl} that can alter trusted job execution`
+      )
+    }
+  }
+  if (
+    normalizedYamlEnvelope(permissions) !==
+    'permissions:\n  contents: read\n'
   ) {
     failures.push('Biyan CI top-level permissions must be contents: read only')
   }
@@ -791,6 +923,14 @@ export function validateCiWorkflow(source) {
     failures.push('Biyan CI checkout steps must disable credential persistence')
   }
   const ciScope = jobBlock(source, 'ci-scope')
+  const ciScopeDefinitions = [
+    ...normalizedSource.matchAll(
+      /^  (?:ci-scope|["']ci-scope["'])\s*:/gm
+    ),
+  ].length
+  if (ciScopeDefinitions !== 1) {
+    failures.push('Biyan CI must define exactly one ci-scope job')
+  }
   const quickPrCheck = jobBlock(source, 'quick-pr-check')
   const releaseSafety = jobBlock(source, 'release-safety')
   const baseBranchCoverage = jobBlock(source, 'base_branch_cov')
@@ -805,6 +945,15 @@ export function validateCiWorkflow(source) {
   if (!ciScope) {
     failures.push('Biyan CI is missing the ci-scope job')
   } else {
+    const ciScopeJobSha256 = createHash('sha256')
+      .update(normalizedYamlEnvelope(ciScope))
+      .digest('hex')
+    if (!TRUSTED_CI_SCOPE_JOB_ALLOWLIST.has(ciScopeJobSha256)) {
+      failures.push(
+        `Biyan trusted CI scope job must match the reviewed execution-envelope allowlist (got ${ciScopeJobSha256})`
+      )
+    }
+    const activeCiScope = uncommentedSource(ciScope)
     if (
       /printf[^\n]*\|\s*grep[^\n]*(?:-[A-Za-z]*q[A-Za-z]*|--quiet)/.test(
         ciScope
@@ -839,37 +988,117 @@ export function validateCiWorkflow(source) {
       }
     }
 
+    const classifierRunBlocks = runBlocks(activeCiScope).filter((commands) =>
+      commands.some(
+        (command) =>
+          /qualification-impact\.mjs/.test(command) ||
+          /^node\s+.*\sclassify(?:\s|\\|$)/.test(command)
+      )
+    )
+    const classifierCommands =
+      classifierRunBlocks.length === 1 ? classifierRunBlocks[0] : []
+    const classifierCommandSha256 = createHash('sha256')
+      .update(classifierCommands.join('\n'))
+      .digest('hex')
+    if (!TRUSTED_CI_SCOPE_COMMAND_ALLOWLIST.has(classifierCommandSha256)) {
+      failures.push(
+        'Biyan trusted CI scope active commands must match the reviewed fail-closed allowlist'
+      )
+    }
+    const expectedClassifierAssignment =
+      'classifier="$RUNNER_TEMP/qualification-impact.mjs"'
+    const expectedClassifierLoad =
+      'if ! git show "${policy_sha}:scripts/ci/qualification-impact.mjs" > "$classifier"; then'
+    const classifierLoads = classifierCommands.filter(
+      (command) =>
+        /\bgit show\b/.test(command) &&
+        /qualification-impact\.mjs/.test(command)
+    )
     if (
-      !hasRunInvocation(ciScope, /^(?:if\s+!\s+|if\s+)?git show\b/, [
-        /:scripts\/ci\/qualification-impact\.mjs/,
-        /RUNNER_TEMP/,
-      ])
+      classifierRunBlocks.length !== 1 ||
+      classifierLoads.length !== 1 ||
+      classifierLoads[0] !== expectedClassifierLoad
     ) {
       failures.push(
         'Biyan CI scope must load the trusted qualification-impact classifier from the base commit with git show'
       )
     }
+
+    const expectedMergeBase =
+      'base_sha="$(git merge-base "$policy_sha" "$target_sha" || true)"'
+    const mergeBaseAssignments = classifierCommands.filter((command) =>
+      /^base_sha="\$\(git merge-base\b/.test(command)
+    )
     if (
-      !/base_sha="\$\(git merge-base "\$policy_sha" "\$target_sha" \|\| true\)"/.test(
-        ciScope
-      )
+      mergeBaseAssignments.length !== 1 ||
+      mergeBaseAssignments[0] !== expectedMergeBase
     ) {
       failures.push(
         'Biyan trusted CI scope must fail closed instead of aborting when merge-base is unavailable'
       )
     }
-    if (
-      !hasRunInvocation(
-        ciScope,
-        /^node\s+(?:["']?\$RUNNER_TEMP\/qualification-impact\.mjs["']?|["']?\$classifier["']?)\s+classify\b/,
-        [
-          /--repo\s+(?:\.|["']?\$GITHUB_WORKSPACE["']?)(?:\s|$)/,
-          /--base\s+[^\n]+/,
-          /--target\s+(?:["']?HEAD["']?|[^\n]+)/,
-          /--format\s+github-output/,
-        ]
+
+    const expectedIdentityGuard = [
+      'if [[ ! "$policy_sha" =~ ^[0-9a-f]{40}$ ]] ||',
+      '[[ ! "$target_sha" =~ ^[0-9a-f]{40}$ ]] ||',
+      '[[ ! "$base_sha" =~ ^[0-9a-f]{40}$ ]] ||',
+      '[[ "$policy_sha" =~ ^0{40}$ ]]; then',
+      'emit_bootstrap_full',
+      'exit 0',
+      'fi',
+    ]
+    const identityGuardStarts = classifierCommands
+      .map((command, index) =>
+        /^if \[\[ ! "\$policy_sha" =~/.test(command) ? index : -1
       )
-    ) {
+      .filter((index) => index >= 0)
+    const identityGuardStart = identityGuardStarts[0] ?? -1
+    const mergeBaseIndex = classifierCommands.indexOf(expectedMergeBase)
+    const identityGuardPredecessor =
+      classifierCommands[identityGuardStart - 1] ?? ''
+    const classifierTransactionStart =
+      identityGuardStart + expectedIdentityGuard.length
+    const exactIdentityGuard =
+      identityGuardStarts.length === 1 &&
+      expectedIdentityGuard.every(
+        (command, offset) =>
+          classifierCommands[identityGuardStart + offset] === command
+      ) &&
+      mergeBaseIndex >= 0 &&
+      identityGuardStart > mergeBaseIndex &&
+      [expectedMergeBase, 'fi'].includes(identityGuardPredecessor) &&
+      classifierCommands[classifierTransactionStart] ===
+        expectedClassifierAssignment
+    if (!exactIdentityGuard) {
+      failures.push(
+        'Biyan trusted CI scope must route invalid commit identity to bootstrap-full and exit successfully'
+      )
+    }
+
+    const expectedClassifierTransaction = [
+      expectedClassifierAssignment,
+      expectedClassifierLoad,
+      'emit_bootstrap_full',
+      'exit 0',
+      'fi',
+      'node "$classifier" classify \\',
+      '--repo "$GITHUB_WORKSPACE" \\',
+      '--base "$base_sha" \\',
+      '--target "$target_sha" \\',
+      '--format github-output >> "$GITHUB_OUTPUT"',
+    ]
+    const classifierExecutions = classifierCommands.filter((command) =>
+      /^node\s+.*\sclassify(?:\s|\\|$)/.test(command)
+    )
+    const exactClassifierTransaction =
+      classifierExecutions.length === 1 &&
+      classifierCommands.length ===
+        classifierTransactionStart + expectedClassifierTransaction.length &&
+      expectedClassifierTransaction.every(
+        (command, offset) =>
+          classifierCommands[classifierTransactionStart + offset] === command
+      )
+    if (!exactClassifierTransaction) {
       failures.push(
         'Biyan CI scope must execute the trusted base classifier with exact base and target inputs'
       )
