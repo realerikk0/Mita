@@ -847,6 +847,13 @@ jobs:
       'base_sha="$(git merge-base "$policy_sha" "$target_sha")"'
     ),
     workflow.replace(
+      '          base_sha="$(git merge-base "$policy_sha" "$target_sha" || true)"',
+      [
+        '          # base_sha="$(git merge-base "$policy_sha" "$target_sha" || true)"',
+        '          base_sha="$(git merge-base "$policy_sha" "$target_sha")"',
+      ].join('\n')
+    ),
+    workflow.replace(
       'git show "\${base_sha}:scripts/ci/qualification-impact.mjs"',
       'echo git show "\${base_sha}:scripts/ci/qualification-impact.mjs"'
     ),
@@ -897,6 +904,18 @@ jobs:
     workflow.replace(
       '            emit_bootstrap_full\n            exit 0\n          fi\n          if ! git show',
       '            exit 0\n            emit_bootstrap_full\n          fi\n          if ! git show'
+    ),
+    workflow.replace(
+      '            emit_bootstrap_full\n            exit 0\n          fi\n          if ! git show',
+      '            exit 0\n            emit_bootstrap_full\n            exit 0\n          fi\n          if ! git show'
+    ),
+    workflow.replace(
+      '            emit_bootstrap_full\n            exit 0\n          fi\n          if ! git show',
+      '            false\n            emit_bootstrap_full\n            exit 0\n          fi\n          if ! git show'
+    ),
+    workflow.replace(
+      '          if [[ ! "$policy_sha" =~ ^[0-9a-f]{40}$ ]] ||',
+      '          if [[ ! "$policy_sha" =~ ^[0-9a-f]{40}$ ]] &&'
     ),
     workflow.replace(
       '             [[ ! "$base_sha" =~ ^[0-9a-f]{40}$ ]] ||',

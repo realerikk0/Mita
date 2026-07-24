@@ -480,6 +480,7 @@ export function validateCiWorkflow(source) {
   if (!ciScope) {
     failures.push('Biyan CI is missing the ci-scope job')
   } else {
+    const activeCiScope = uncommentedSource(ciScope)
     if (
       /printf[^\n]*\|\s*grep[^\n]*(?:-[A-Za-z]*q[A-Za-z]*|--quiet)/.test(
         ciScope
@@ -514,44 +515,66 @@ export function validateCiWorkflow(source) {
       }
     }
 
+    const classifierInvocation = findRunInvocation(
+      activeCiScope,
+      /^(?:if\s+!\s+|if\s+)?git show\b/
+    )
     if (
-      !hasRunInvocation(ciScope, /^(?:if\s+!\s+|if\s+)?git show\b/, [
-        /:scripts\/ci\/qualification-impact\.mjs/,
-        /RUNNER_TEMP/,
-      ])
+      !classifierInvocation ||
+      ![/:scripts\/ci\/qualification-impact\.mjs/, /RUNNER_TEMP/].every(
+        (pattern) => pattern.test(classifierInvocation.commands.join('\n'))
+      )
     ) {
       failures.push(
         'Biyan CI scope must load the trusted qualification-impact classifier from the base commit with git show'
       )
     }
+
+    const classifierCommands = classifierInvocation?.commands ?? []
+    const expectedMergeBase =
+      'base_sha="$(git merge-base "$policy_sha" "$target_sha" || true)"'
+    const mergeBaseAssignments = classifierCommands.filter((command) =>
+      /^base_sha="\$\(git merge-base\b/.test(command)
+    )
     if (
-      !/base_sha="\$\(git merge-base "\$policy_sha" "\$target_sha" \|\| true\)"/.test(
-        ciScope
-      )
+      mergeBaseAssignments.length !== 1 ||
+      mergeBaseAssignments[0] !== expectedMergeBase
     ) {
       failures.push(
         'Biyan trusted CI scope must fail closed instead of aborting when merge-base is unavailable'
       )
     }
-    const invalidIdentityGuard =
-      uncommentedSource(ciScope).match(
-        /^\s*if \[\[ ! "\$policy_sha" =~ \^\[0-9a-f\]\{40\}\$ \]\] \|\|[\s\S]*?^\s*fi\s*$/m
-      )?.[0] ?? ''
-    const exactIdentityChecks = [
-      /\[\[ ! "\$policy_sha" =~ \^\[0-9a-f\]\{40\}\$ \]\]/,
-      /\[\[ ! "\$target_sha" =~ \^\[0-9a-f\]\{40\}\$ \]\]/,
-      /\[\[ ! "\$base_sha" =~ \^\[0-9a-f\]\{40\}\$ \]\]/,
-      /\[\[ "\$policy_sha" =~ \^0\{40\}\$ \]\]/,
+
+    const expectedIdentityGuard = [
+      'if [[ ! "$policy_sha" =~ ^[0-9a-f]{40}$ ]] ||',
+      '[[ ! "$target_sha" =~ ^[0-9a-f]{40}$ ]] ||',
+      '[[ ! "$base_sha" =~ ^[0-9a-f]{40}$ ]] ||',
+      '[[ "$policy_sha" =~ ^0{40}$ ]]; then',
+      'emit_bootstrap_full',
+      'exit 0',
+      'fi',
     ]
-    if (
-      !invalidIdentityGuard ||
-      !exactIdentityChecks.every((pattern) =>
-        pattern.test(invalidIdentityGuard)
-      ) ||
-      !/^\s*emit_bootstrap_full\s*\n\s*exit 0\s*$/m.test(
-        invalidIdentityGuard
+    const identityGuardStarts = classifierCommands
+      .map((command, index) =>
+        /^if \[\[ ! "\$policy_sha" =~/.test(command) ? index : -1
       )
-    ) {
+      .filter((index) => index >= 0)
+    const identityGuardStart = identityGuardStarts[0] ?? -1
+    const mergeBaseIndex = classifierCommands.indexOf(expectedMergeBase)
+    const classifierLoadIndex = classifierInvocation
+      ? classifierCommands.indexOf(classifierInvocation.command)
+      : -1
+    const exactIdentityGuard =
+      identityGuardStarts.length === 1 &&
+      expectedIdentityGuard.every(
+        (command, offset) =>
+          classifierCommands[identityGuardStart + offset] === command
+      ) &&
+      mergeBaseIndex >= 0 &&
+      identityGuardStart > mergeBaseIndex &&
+      classifierLoadIndex >=
+        identityGuardStart + expectedIdentityGuard.length
+    if (!exactIdentityGuard) {
       failures.push(
         'Biyan trusted CI scope must route invalid commit identity to bootstrap-full and exit successfully'
       )
