@@ -40,6 +40,27 @@ const withLineEndings = (source, lineEnding) =>
 
 const runtimeOnly = { checkProduct: false, checkRuntime: true }
 
+test('candidate content policy tests have no external runtime dependency', () => {
+  const source = fs.readFileSync(
+    'scripts/ci/__tests__/candidate-content-policy.test.mjs',
+    'utf8'
+  )
+  const specifiers = [
+    ...source.matchAll(
+      /^import(?:\s+(?:[\s\S]*?)\s+from)?\s*['"]([^'"]+)['"]\s*$/gm
+    ),
+  ].map((match) => match[1])
+  assert.ok(specifiers.length > 0)
+  assert.deepEqual(
+    specifiers.filter(
+      (specifier) =>
+        !specifier.startsWith('node:') &&
+        specifier !== '../candidate-content-policy.mjs'
+    ),
+    []
+  )
+})
+
 test('candidate path policy allows Playwright vocabulary but rejects retired tokens', () => {
   for (const name of [
     'playwright-test-coverage.prompt.md',
@@ -988,6 +1009,9 @@ jobs:
       - id: scope
         run: |
           base_sha="\${{ github.event.pull_request.base.sha }}"
+          policy_sha="$base_sha"
+          target_sha=HEAD
+          base_sha="$(git merge-base "$policy_sha" "$target_sha" || true)"
           if ! git show "\${base_sha}:scripts/ci/qualification-impact.mjs" > "$RUNNER_TEMP/qualification-impact.mjs"; then
             echo "Base classifier unavailable; fail closed to full axes."
             for flag in quick test_linux test_windows test_macos full; do
@@ -1035,6 +1059,7 @@ jobs:
   release-safety:
     steps:
       - run: node scripts/ci/verify-release-policy.mjs
+      - run: node --test scripts/ci/__tests__/candidate-content-policy.test.mjs
       - run: node --test scripts/ci/__tests__/release-policy.test.mjs
       - run: node --test scripts/ci/__tests__/qualification-impact.test.mjs
       - run: node --test scripts/ci/__tests__/verify-qualification-artifacts.test.mjs
@@ -1121,6 +1146,10 @@ jobs:
   )
 
   for (const unsafeScope of [
+    workflow.replace(
+      'base_sha="$(git merge-base "$policy_sha" "$target_sha" || true)"',
+      'base_sha="$(git merge-base "$policy_sha" "$target_sha")"'
+    ),
     workflow.replace(
       'git show "\${base_sha}:scripts/ci/qualification-impact.mjs"',
       'echo git show "\${base_sha}:scripts/ci/qualification-impact.mjs"'

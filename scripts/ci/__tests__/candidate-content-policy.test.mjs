@@ -6,8 +6,6 @@ import path from 'node:path'
 import test from 'node:test'
 import zlib from 'node:zlib'
 
-import tar from 'tar'
-
 import {
   CANDIDATE_CONTENT_LIMITS,
   EXPECTED_PREINSTALL_PACKAGE_IDENTITIES,
@@ -39,6 +37,38 @@ function encodeUtf16be(value) {
   return bytes
 }
 
+function octal(value, width) {
+  return `${value.toString(8).padStart(width - 1, '0')}\0`
+}
+
+function tarMember(name, contents, type = '0') {
+  const payload = Buffer.isBuffer(contents) ? contents : Buffer.from(contents)
+  const header = Buffer.alloc(512)
+  header.write(name, 0, 100, 'utf8')
+  header.write(octal(0o644, 8), 100, 8, 'ascii')
+  header.write(octal(0, 8), 108, 8, 'ascii')
+  header.write(octal(0, 8), 116, 8, 'ascii')
+  header.write(octal(payload.length, 12), 124, 12, 'ascii')
+  header.write(octal(0, 12), 136, 12, 'ascii')
+  header.fill(0x20, 148, 156)
+  header.write(type, 156, 1, 'ascii')
+  header.write('ustar\0', 257, 6, 'ascii')
+  header.write('00', 263, 2, 'ascii')
+  let checksum = 0
+  for (const byte of header) checksum += byte
+  header.write(`${checksum.toString(8).padStart(6, '0')}\0 `, 148, 8, 'ascii')
+  const padding = Buffer.alloc((512 - (payload.length % 512)) % 512)
+  return Buffer.concat([header, payload, padding])
+}
+
+function regularTarMember(name, contents) {
+  if (Buffer.byteLength(name) <= 100) return tarMember(name, contents)
+  return Buffer.concat([
+    tarMember('././@LongLink', Buffer.from(`${name}\0`), 'L'),
+    tarMember('package/.biyan-long-path', contents),
+  ])
+}
+
 function writePackageArchive(
   root,
   archiveName,
@@ -51,25 +81,20 @@ function writePackageArchive(
     },
   } = {}
 ) {
-  const source = path.join(
-    root,
-    `source-${archiveName.replaceAll(/[^A-Za-z0-9]/g, '-')}`
-  )
-  writeFile(
-    path.join(source, 'package', 'package.json'),
-    `${JSON.stringify(manifest)}\n`
-  )
-  for (const [relative, contents] of Object.entries(files)) {
-    writeFile(path.join(source, 'package', relative), contents)
-  }
   const archive = path.join(root, archiveName)
-  tar.c({
-    cwd: source,
-    file: archive,
-    gzip: true,
-    portable: true,
-    sync: true,
-  }, ['package'])
+  const members = [
+    regularTarMember(
+      'package/package.json',
+      `${JSON.stringify(manifest)}\n`
+    ),
+    ...Object.entries(files)
+      .sort(([left], [right]) => left.localeCompare(right))
+      .map(([relative, contents]) =>
+        regularTarMember(`package/${relative}`, contents)
+      ),
+    Buffer.alloc(1024),
+  ]
+  fs.writeFileSync(archive, zlib.gzipSync(Buffer.concat(members)))
   return archive
 }
 
@@ -83,10 +108,6 @@ function writeExpectedPackages(root) {
       },
     })
   }
-}
-
-function octal(value, width) {
-  return `${value.toString(8).padStart(width - 1, '0')}\0`
 }
 
 function maliciousArchive(

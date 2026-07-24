@@ -850,6 +850,15 @@ export function validateCiWorkflow(source) {
       )
     }
     if (
+      !/base_sha="\$\(git merge-base "\$policy_sha" "\$target_sha" \|\| true\)"/.test(
+        ciScope
+      )
+    ) {
+      failures.push(
+        'Biyan trusted CI scope must fail closed instead of aborting when merge-base is unavailable'
+      )
+    }
+    if (
       !hasRunInvocation(
         ciScope,
         /^node\s+(?:["']?\$RUNNER_TEMP\/qualification-impact\.mjs["']?|["']?\$classifier["']?)\s+classify\b/,
@@ -960,6 +969,7 @@ export function validateCiWorkflow(source) {
   } else {
     for (const command of [
       'node scripts/ci/verify-release-policy.mjs',
+      'node --test scripts/ci/__tests__/candidate-content-policy.test.mjs',
       'node --test scripts/ci/__tests__/release-policy.test.mjs',
       'node --test scripts/ci/__tests__/qualification-impact.test.mjs',
       'node --test scripts/ci/__tests__/verify-qualification-artifacts.test.mjs',
