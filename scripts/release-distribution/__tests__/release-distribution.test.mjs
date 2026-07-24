@@ -1131,10 +1131,11 @@ fi
   const publicUrl = 'https://static.mitapp.cn/biyan/download/latest.json'
   const environment = {
     ...process.env,
-    PATH: `${bin}:${process.env.PATH}`,
+    PATH: `${bin}${path.delimiter}${process.env.PATH ?? ''}`,
     RECOVERY_COUNTER: counter,
     RECOVERY_GOOD_FILE: good,
   }
+  assert.equal(environment.PATH.split(path.delimiter)[0], bin)
   const productionCommand = buildBoundedPublicReadbackCommand(
     publicUrl,
     expected
