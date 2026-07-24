@@ -12,6 +12,7 @@ const ARCHIVE_PREFIX = 'docs/unpublished-upstream-history/'
 const DOCS_ARCHIVE_ASSET_PREFIX = 'docs/unpublished-upstream-history/assets/'
 const DOCS_SOURCE_PREFIX = 'docs/src/'
 const DOCS_MEDIA_PATH = /\.(?:avif|gif|ico|jpe?g|png|svg|webp)$/i
+const DIGEST_MODES = new Set(['byte-exact', 'text-lf'])
 const EXPECTED_EXTENSION_PACKAGES = new Map([
   [
     'assistant-extension',
@@ -79,6 +80,14 @@ function sha256(value) {
   return crypto.createHash('sha256').update(value).digest('hex')
 }
 
+function lockedContentDigest(buffer, mode) {
+  if (mode === 'byte-exact') return sha256(buffer)
+  if (mode !== 'text-lf') throw new Error(`unsupported digest mode: ${mode}`)
+  if (!isUtf8Text(buffer))
+    throw new Error('text-lf digest input must be valid UTF-8 text')
+  return sha256(buffer.toString('utf8').replace(/\r\n?/g, '\n'))
+}
+
 function normalizePath(value) {
   return value.split(path.sep).join('/')
 }
@@ -122,13 +131,23 @@ export function legacyMatchDigest(matches) {
 export function inspectDocsArchiveInventory(
   repoRoot,
   trackedFiles,
-  prefix = DOCS_ARCHIVE_ASSET_PREFIX
+  prefix = DOCS_ARCHIVE_ASSET_PREFIX,
+  canonicalTextPaths = []
 ) {
   const records = []
   const failures = []
+  const textPaths = new Set(canonicalTextPaths)
   const paths = [...new Set(trackedFiles.map(normalizePath))]
     .filter((relativePath) => relativePath.startsWith(prefix))
     .sort()
+  const pathSet = new Set(paths)
+  for (const relativePath of textPaths) {
+    if (!pathSet.has(relativePath)) {
+      failures.push(
+        `archived docs canonical text path is not tracked: ${relativePath}`
+      )
+    }
+  }
   for (const relativePath of paths) {
     const absolute = path.join(repoRoot, relativePath)
     const stat = fs.lstatSync(absolute, { throwIfNoEntry: false })
@@ -142,7 +161,19 @@ export function inspectDocsArchiveInventory(
       )
       continue
     }
-    records.push(`${relativePath}\0${sha256(fs.readFileSync(absolute))}`)
+    const digestMode = textPaths.has(relativePath) ? 'text-lf' : 'byte-exact'
+    try {
+      records.push(
+        `${relativePath}\0${lockedContentDigest(
+          fs.readFileSync(absolute),
+          digestMode
+        )}`
+      )
+    } catch (error) {
+      failures.push(
+        `archived docs asset cannot use ${digestMode} digest: ${relativePath}: ${error.message}`
+      )
+    }
   }
   return {
     count: paths.length,
@@ -187,7 +218,8 @@ export function validateDocsAssetBoundary({
   const archive = inspectDocsArchiveInventory(
     repoRoot,
     trackedFiles,
-    allowlist.archivedDocsAssets.prefix
+    allowlist.archivedDocsAssets.prefix,
+    allowlist.archivedDocsAssets.canonicalTextPaths
   )
   failures.push(...archive.failures)
   if (archive.count !== allowlist.archivedDocsAssets.expectedFiles) {
@@ -361,8 +393,8 @@ export function validateLegacyCompatibilityAllowlist(allowlist) {
   if (!allowlist || typeof allowlist !== 'object' || Array.isArray(allowlist)) {
     return ['legacy compatibility allowlist must be an object']
   }
-  if (allowlist.schema !== 1)
-    failures.push('legacy compatibility allowlist schema must be 1')
+  if (allowlist.schema !== 2)
+    failures.push('legacy compatibility allowlist schema must be 2')
   if (!Array.isArray(allowlist.excludedTrackedFiles))
     failures.push('legacy compatibility allowlist exclusions must be an array')
   if (!Array.isArray(allowlist.rules))
@@ -391,6 +423,33 @@ export function validateLegacyCompatibilityAllowlist(allowlist) {
     if (!/^[a-f0-9]{64}$/.test(archivedDocsAssets.inventorySha256 || '')) {
       failures.push('archived docs asset inventory must provide a SHA-256')
     }
+    if (!Array.isArray(archivedDocsAssets.canonicalTextPaths)) {
+      failures.push('archived docs canonical text paths must be an array')
+    } else {
+      const seenCanonicalTextPaths = new Set()
+      let previousPath = ''
+      for (const relativePath of archivedDocsAssets.canonicalTextPaths) {
+        if (
+          typeof relativePath !== 'string' ||
+          path.isAbsolute(relativePath) ||
+          normalizePath(relativePath) !== relativePath ||
+          !relativePath.startsWith(archivedDocsAssets.prefix)
+        ) {
+          failures.push(
+            `archived docs canonical text path must be normalized and inside ${archivedDocsAssets.prefix}: ${relativePath}`
+          )
+          continue
+        }
+        if (seenCanonicalTextPaths.has(relativePath))
+          failures.push(
+            `duplicate archived docs canonical text path ${relativePath}`
+          )
+        if (previousPath && relativePath < previousPath)
+          failures.push('archived docs canonical text paths must be sorted')
+        seenCanonicalTextPaths.add(relativePath)
+        previousPath = relativePath
+      }
+    }
     if (
       typeof archivedDocsAssets.reason !== 'string' ||
       archivedDocsAssets.reason.trim().length < 20
@@ -401,7 +460,13 @@ export function validateLegacyCompatibilityAllowlist(allowlist) {
     }
     for (const key of Object.keys(archivedDocsAssets)) {
       if (
-        !['expectedFiles', 'inventorySha256', 'prefix', 'reason'].includes(key)
+        ![
+          'canonicalTextPaths',
+          'expectedFiles',
+          'inventorySha256',
+          'prefix',
+          'reason',
+        ].includes(key)
       )
         failures.push(`archived docs asset inventory has unknown field ${key}`)
     }
@@ -428,6 +493,8 @@ export function validateLegacyCompatibilityAllowlist(allowlist) {
     }
     if (!/^[a-f0-9]{64}$/.test(entry.sha256 || ''))
       failures.push(`${label} must provide a SHA-256`)
+    if (!DIGEST_MODES.has(entry.digestMode))
+      failures.push(`${label} must declare byte-exact or text-lf digestMode`)
     if (typeof entry.reason !== 'string' || entry.reason.trim().length < 20)
       failures.push(`${label} must document why the file is excluded`)
     if (exclusionIds.has(entry.id))
@@ -437,7 +504,7 @@ export function validateLegacyCompatibilityAllowlist(allowlist) {
     exclusionIds.add(entry.id)
     exclusionPaths.add(entry.path)
     for (const key of Object.keys(entry)) {
-      if (!['id', 'path', 'reason', 'sha256'].includes(key))
+      if (!['digestMode', 'id', 'path', 'reason', 'sha256'].includes(key))
         failures.push(`${label} contains unknown field ${key}`)
     }
   }
@@ -989,7 +1056,15 @@ export function validateLegacyCompatibilityRepository(
       failures.push(`${entry.id} excluded file is missing: ${entry.path}`)
       continue
     }
-    const actual = sha256(fs.readFileSync(absolute))
+    let actual
+    try {
+      actual = lockedContentDigest(fs.readFileSync(absolute), entry.digestMode)
+    } catch (error) {
+      failures.push(
+        `${entry.id} excluded file cannot use ${entry.digestMode} digest: ${entry.path}: ${error.message}`
+      )
+      continue
+    }
     if (actual !== entry.sha256) {
       failures.push(
         `${entry.id} excluded file digest changed: expected ${entry.sha256}, found ${actual}`

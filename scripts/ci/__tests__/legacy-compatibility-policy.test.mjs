@@ -88,7 +88,14 @@ function makeRule(
 function archiveInventory(files) {
   const root = writeFixture(files)
   try {
-    return inspectDocsArchiveInventory(root, Object.keys(files))
+    return inspectDocsArchiveInventory(
+      root,
+      Object.keys(files),
+      'docs/unpublished-upstream-history/assets/',
+      Object.keys(files)
+        .filter((relativePath) => relativePath.endsWith('.svg'))
+        .sort()
+    )
   } finally {
     fs.rmSync(root, { force: true, recursive: true })
   }
@@ -98,6 +105,9 @@ function allowlist(rules = [], excludedTrackedFiles = [], files = {}) {
   const archive = archiveInventory(files)
   return {
     archivedDocsAssets: {
+      canonicalTextPaths: Object.keys(files)
+        .filter((relativePath) => relativePath.endsWith('.svg'))
+        .sort(),
       expectedFiles: archive.count,
       inventorySha256: archive.sha256,
       prefix: 'docs/unpublished-upstream-history/assets/',
@@ -106,7 +116,7 @@ function allowlist(rules = [], excludedTrackedFiles = [], files = {}) {
     },
     excludedTrackedFiles,
     rules,
-    schema: 1,
+    schema: 2,
   }
 }
 
@@ -750,11 +760,13 @@ test('active docs media requires a resolvable source reference', () => {
   )
 })
 
-test('archived docs media inventory is an exact path and content hash lock', () => {
+test('archived docs media inventory canonicalizes only allowlisted text line endings', () => {
   const files = {
     'docs/unpublished-upstream-history/assets/docs-src/old.png': Buffer.from([
       1, 2, 3,
     ]),
+    'docs/unpublished-upstream-history/assets/docs-src/old.svg':
+      '<svg>\n<path />\n</svg>\n',
   }
   const reviewed = allowlist([], [], files)
   const root = writeFixture(files)
@@ -771,9 +783,75 @@ test('archived docs media inventory is an exact path and content hash lock', () 
     fs.writeFileSync(
       path.join(
         root,
+        'docs/unpublished-upstream-history/assets/docs-src/old.svg'
+      ),
+      '<svg>\r\n<changed />\r\n</svg>\r\n'
+    )
+    assert.ok(
+      validateDocsAssetBoundary({
+        allowlist: reviewed,
+        contents: new Map(),
+        repoRoot: root,
+        trackedFiles: Object.keys(files),
+      }).some((failure) =>
+        failure.includes('archived docs asset inventory digest changed')
+      )
+    )
+    fs.writeFileSync(
+      path.join(
+        root,
+        'docs/unpublished-upstream-history/assets/docs-src/old.svg'
+      ),
+      '<svg>\r\n<path />\r\n</svg>\r\n'
+    )
+    assert.deepEqual(
+      validateDocsAssetBoundary({
+        allowlist: reviewed,
+        contents: new Map(),
+        repoRoot: root,
+        trackedFiles: Object.keys(files),
+      }),
+      []
+    )
+    fs.writeFileSync(
+      path.join(
+        root,
+        'docs/unpublished-upstream-history/assets/docs-src/old.svg'
+      ),
+      '<svg>\r<path />\r</svg>\r'
+    )
+    assert.deepEqual(
+      validateDocsAssetBoundary({
+        allowlist: reviewed,
+        contents: new Map(),
+        repoRoot: root,
+        trackedFiles: Object.keys(files),
+      }),
+      []
+    )
+    fs.writeFileSync(
+      path.join(
+        root,
         'docs/unpublished-upstream-history/assets/docs-src/old.png'
       ),
       Buffer.from([3, 2, 1])
+    )
+    assert.ok(
+      validateDocsAssetBoundary({
+        allowlist: reviewed,
+        contents: new Map(),
+        repoRoot: root,
+        trackedFiles: Object.keys(files),
+      }).some((failure) =>
+        failure.includes('archived docs asset inventory digest changed')
+      )
+    )
+    fs.writeFileSync(
+      path.join(
+        root,
+        'docs/unpublished-upstream-history/assets/docs-src/old.png'
+      ),
+      Buffer.from([1, 13, 10, 3])
     )
     assert.ok(
       validateDocsAssetBoundary({
@@ -805,7 +883,7 @@ test('archived docs media inventory is an exact path and content hash lock', () 
         trackedFiles: Object.keys(expandedFiles),
       }).some((failure) =>
         failure.includes(
-          'archived docs asset inventory expected 1 files but found 2'
+          'archived docs asset inventory expected 2 files but found 3'
         )
       )
     )
@@ -814,19 +892,100 @@ test('archived docs media inventory is an exact path and content hash lock', () 
   }
 })
 
-test('generated and vendored exclusions are exact-path hash locks', () => {
+test('archived docs canonical text path allowlist rejects broadening and stale entries', () => {
+  const reviewed = allowlist()
+  reviewed.archivedDocsAssets.canonicalTextPaths = [
+    'docs/unpublished-upstream-history/assets/exact.svg',
+    'docs/unpublished-upstream-history/assets/exact.svg',
+    'outside/archive.svg',
+  ]
+  const failures = validateLegacyCompatibilityAllowlist(reviewed)
+  assert.ok(
+    failures.some((failure) =>
+      failure.includes(
+        'duplicate archived docs canonical text path docs/unpublished-upstream-history/assets/exact.svg'
+      )
+    )
+  )
+  assert.ok(
+    failures.some((failure) =>
+      failure.includes(
+        'archived docs canonical text path must be normalized and inside'
+      )
+    )
+  )
+
+  const root = writeFixture({})
+  try {
+    assert.ok(
+      inspectDocsArchiveInventory(
+        root,
+        [],
+        'docs/unpublished-upstream-history/assets/',
+        ['docs/unpublished-upstream-history/assets/missing.svg']
+      ).failures.some((failure) =>
+        failure.includes('archived docs canonical text path is not tracked')
+      )
+    )
+  } finally {
+    fs.rmSync(root, { force: true, recursive: true })
+  }
+})
+
+test('digest allowlist schema requires explicit cross-platform byte semantics', () => {
+  const legacySchema = allowlist()
+  legacySchema.schema = 1
+  assert.ok(
+    validateLegacyCompatibilityAllowlist(legacySchema).some((failure) =>
+      failure.includes('legacy compatibility allowlist schema must be 2')
+    )
+  )
+
+  const missingMode = allowlist([], [
+    {
+      id: 'missing-digest-mode',
+      path: 'src/generated.ts',
+      reason: 'This exact fixture intentionally omits its digest byte semantics.',
+      sha256: '0'.repeat(64),
+    },
+  ])
+  assert.ok(
+    validateLegacyCompatibilityAllowlist(missingMode).some((failure) =>
+      failure.includes('must declare byte-exact or text-lf digestMode')
+    )
+  )
+})
+
+test('generated and vendored exclusions explicitly lock text or binary digests', () => {
   const files = { 'src/generated.ts': 'export const value = "Biyan"\n' }
   const digest = crypto
     .createHash('sha256')
     .update(files['src/generated.ts'])
     .digest('hex')
   const exclusion = {
+    digestMode: 'text-lf',
     id: 'generated-fixture',
     path: 'src/generated.ts',
     reason: 'Generated fixture is reviewed and locked by exact digest.',
     sha256: digest,
   }
   assert.deepEqual(validateFixture(files, [], [exclusion]), [])
+  assert.deepEqual(
+    validateFixture(
+      { 'src/generated.ts': 'export const value = "Biyan"\r\n' },
+      [],
+      [exclusion]
+    ),
+    []
+  )
+  assert.deepEqual(
+    validateFixture(
+      { 'src/generated.ts': 'export const value = "Biyan"\r' },
+      [],
+      [exclusion]
+    ),
+    []
+  )
   const failures = validateFixture(
     { 'src/generated.ts': 'export const value = "changed"\n' },
     [],
@@ -834,6 +993,46 @@ test('generated and vendored exclusions are exact-path hash locks', () => {
   )
   assert.ok(
     failures.some((failure) => failure.includes('excluded file digest changed'))
+  )
+  assert.ok(
+    validateFixture(
+      { 'src/generated.ts': Buffer.from([0xff, 0xfe, 0xfd]) },
+      [],
+      [exclusion]
+    ).some((failure) =>
+      failure.includes('text-lf digest input must be valid UTF-8 text')
+    )
+  )
+  assert.ok(
+    validateFixture(
+      { 'src/generated.ts': Buffer.from([0x41, 0, 0x42]) },
+      [],
+      [exclusion]
+    ).some((failure) =>
+      failure.includes('text-lf digest input must be valid UTF-8 text')
+    )
+  )
+
+  const binaryFiles = {
+    'src/vendored.ico': Buffer.from([1, 13, 10, 2]),
+  }
+  const binaryExclusion = {
+    digestMode: 'byte-exact',
+    id: 'binary-fixture',
+    path: 'src/vendored.ico',
+    reason: 'Vendored binary fixture is reviewed and locked byte for byte.',
+    sha256: crypto
+      .createHash('sha256')
+      .update(binaryFiles['src/vendored.ico'])
+      .digest('hex'),
+  }
+  assert.deepEqual(validateFixture(binaryFiles, [], [binaryExclusion]), [])
+  assert.ok(
+    validateFixture(
+      { 'src/vendored.ico': Buffer.from([1, 10, 2]) },
+      [],
+      [binaryExclusion]
+    ).some((failure) => failure.includes('excluded file digest changed'))
   )
 })
 
