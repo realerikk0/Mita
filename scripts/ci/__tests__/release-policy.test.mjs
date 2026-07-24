@@ -677,7 +677,7 @@ test('Flatpak reusable build keeps caller-compatible read-only contents permissi
 })
 
 test('PR CI uses a trusted impact classifier and gates each affected axis', () => {
-  const workflow = `permissions:
+  const syntheticWorkflow = `permissions:
   contents: read
 jobs:
   ci-scope:
@@ -695,15 +695,49 @@ jobs:
     steps:
       - id: scope
         run: |
+          set -euo pipefail
+
           emit_bootstrap_full() {
-            for flag in quick test_linux test_windows test_macos full; do
-              echo "\${flag}=true" >> "$GITHUB_OUTPUT"
-            done
+            local plan
+            local plan_sha
+            plan='{"classification":"bootstrap-full","reason":"trusted classifier is not available on the base commit"}'
+            plan_sha="$(printf '%s' "$plan" | sha256sum | awk '{print $1}')"
+            {
+              echo 'classification=bootstrap-full'
+              echo 'blocked=false'
+              echo 'docs=true'
+              echo 'checkpoint=false'
+              echo 'focused=true'
+              echo 'quick=true'
+              echo 'policy=true'
+              echo 'updater=true'
+              echo 'artifact_replay=false'
+              echo 'test_macos=true'
+              echo 'test_windows=true'
+              echo 'test_linux=true'
+              echo 'build_macos=true'
+              echo 'build_windows=true'
+              echo 'build_linux=true'
+              echo 'full=true'
+              echo "plan_sha256=$plan_sha"
+              echo "classification_json=$plan"
+            } >> "$GITHUB_OUTPUT"
           }
-          base_sha="\${{ github.event.pull_request.base.sha }}"
-          policy_sha="$base_sha"
-          target_sha=HEAD
-          base_sha="$(git merge-base "$policy_sha" "$target_sha" || true)"
+
+          event='\${{ github.event_name }}'
+          if [ "$event" = 'pull_request' ]; then
+            policy_sha='\${{ github.event.pull_request.base.sha }}'
+            target_sha='\${{ github.event.pull_request.head.sha }}'
+            base_sha="$(git merge-base "$policy_sha" "$target_sha" || true)"
+          elif [ "$event" = 'push' ]; then
+            policy_sha='\${{ github.event.before }}'
+            target_sha='\${{ github.sha }}'
+            base_sha="$policy_sha"
+          else
+            emit_bootstrap_full
+            exit 0
+          fi
+
           if [[ ! "$policy_sha" =~ ^[0-9a-f]{40}$ ]] ||
              [[ ! "$target_sha" =~ ^[0-9a-f]{40}$ ]] ||
              [[ ! "$base_sha" =~ ^[0-9a-f]{40}$ ]] ||
@@ -711,12 +745,18 @@ jobs:
             emit_bootstrap_full
             exit 0
           fi
-          if ! git show "\${base_sha}:scripts/ci/qualification-impact.mjs" > "$RUNNER_TEMP/qualification-impact.mjs"; then
-            echo "Base classifier unavailable; fail closed to full axes."
+
+          classifier="$RUNNER_TEMP/qualification-impact.mjs"
+          if ! git show "\${policy_sha}:scripts/ci/qualification-impact.mjs" > "$classifier"; then
             emit_bootstrap_full
-          else
-            node "$RUNNER_TEMP/qualification-impact.mjs" classify --repo . --base "$base_sha" --target HEAD --format github-output
+            exit 0
           fi
+
+          node "$classifier" classify \\
+            --repo "$GITHUB_WORKSPACE" \\
+            --base "$base_sha" \\
+            --target "$target_sha" \\
+            --format github-output >> "$GITHUB_OUTPUT"
       - name: Validate CI scope outputs
         env:
           CLASSIFICATION: \${{ steps.scope.outputs.classification }}
@@ -810,7 +850,201 @@ jobs:
             require_success "coverage-check" "$COVERAGE_RESULT"
           fi
 `
+  const productionWorkflow = fs
+    .readFileSync('.github/workflows/biyan-linter-and-test.yml', 'utf8')
+    .replace(/\r\n?/g, '\n')
+  const productionCiScope = productionWorkflow.match(
+    /^  ci-scope:\s*$[\s\S]*?(?=^  [A-Za-z0-9_-]+:\s*$)/m
+  )?.[0]
+  assert.ok(productionCiScope)
+  const workflow = [
+    'name: Biyan CI contract fixture',
+    'on: pull_request',
+    'concurrency: biyan-ci-contract-fixture',
+    syntheticWorkflow.replace(
+      /^  ci-scope:\s*$[\s\S]*?(?=^  quick-pr-check:\s*$)/m,
+      productionCiScope
+    ),
+  ].join('\n')
   assert.deepEqual(validateCiWorkflow(workflow), [])
+  assert.deepEqual(
+    validateCiWorkflow(withLineEndings(workflow, '\r\n')),
+    []
+  )
+  assert.deepEqual(
+    validateCiWorkflow(
+      workflow.replace('\n  quick-pr-check:', '\n\n\n  quick-pr-check:')
+    ),
+    []
+  )
+  assert.ok(
+    validateCiWorkflow(
+      workflow.replace(
+        '          set -euo pipefail',
+        '          # Even comment-only job edits require a reviewed allowlist update.\n          set -euo pipefail'
+      )
+    ).some((failure) => failure.includes('execution-envelope allowlist'))
+  )
+  for (const envelopeMutation of [
+    workflow.replace(
+      '    runs-on: ubuntu-24.04',
+      '    runs-on: ubuntu-24.04\n    env:\n      BASH_ENV: ./unreviewed.sh'
+    ),
+    workflow.replace(
+      '        shell: bash\n        run: |\n          set -euo pipefail',
+      '        shell: bash\n        env:\n          NODE_OPTIONS: --require=./unreviewed.cjs\n        run: |\n          set -euo pipefail'
+    ),
+    workflow.replace(
+      '      - name: Detect changed files',
+      '      - name: Unreviewed environment setup\n        run: echo ./bin >> "$GITHUB_PATH"\n\n      - name: Detect changed files'
+    ),
+    workflow.replace(
+      '        shell: bash\n        run: |\n          set -euo pipefail',
+      '        shell: ./unreviewed-shell {0}\n        run: |\n          set -euo pipefail'
+    ),
+    workflow.replace(
+      '        shell: bash\n        run: |\n          set -euo pipefail',
+      '        shell: bash\n        continue-on-error: true\n        run: |\n          set -euo pipefail'
+    ),
+    workflow.replace(
+      '        shell: bash\n        run: |\n          set -euo pipefail',
+      '        shell: bash\n        run: >\n          set -euo pipefail'
+    ),
+    workflow.replace('uses: actions/checkout@v4', 'uses: ./unreviewed-action'),
+    workflow.replace('          NODE\n', '          NODE   \n'),
+  ]) {
+    assert.ok(
+      validateCiWorkflow(envelopeMutation).some((failure) =>
+        failure.includes('execution-envelope allowlist')
+      )
+    )
+  }
+  for (const inheritedMutation of [
+    workflow.replace(
+      'permissions:\n  contents: read',
+      'permissions:\n  contents: read\nenv:\n  BASH_ENV: ./unreviewed.sh'
+    ),
+    workflow.replace(
+      'permissions:\n  contents: read',
+      'permissions:\n  contents: read\ndefaults:\n  run:\n    shell: ./unreviewed-shell {0}'
+    ),
+  ]) {
+    assert.ok(
+      validateCiWorkflow(inheritedMutation).some((failure) =>
+        failure.includes('alter trusted job execution')
+      )
+    )
+  }
+  for (const permissionMutation of [
+    workflow.replace(
+      'permissions:\n  contents: read',
+      'permissions:\n  contents: read\n  "actions": write'
+    ),
+    workflow.replace(
+      'permissions:\n  contents: read',
+      'permissions:\n  contents: read\n  ? actions\n  : write'
+    ),
+    workflow.replace(
+      'permissions:\n  contents: read',
+      'permissions:\n  contents: read\n  <<: { actions: write }'
+    ),
+  ]) {
+    assert.ok(
+      validateCiWorkflow(permissionMutation).some((failure) =>
+        failure.includes('top-level permissions must be contents: read only')
+      )
+    )
+  }
+  for (const jobPermissionMutation of [
+    productionWorkflow.replace(
+      '    permissions:\n      contents: read',
+      '    permissions:\n      contents: read\n      "actions": write'
+    ),
+    productionWorkflow.replace(
+      '    permissions:\n      contents: read',
+      '    "permissions": { contents: read, actions: write }'
+    ),
+  ]) {
+    assert.ok(
+      validateCiWorkflow(jobPermissionMutation).some(
+        (failure) =>
+          failure.includes('job permissions must be exactly contents: read') ||
+          failure.includes('canonical unquoted field keys')
+      )
+    )
+  }
+  for (const noncanonicalTopLevel of [
+    workflow.replace(
+      'permissions:\n',
+      '"\\u0065nv": { BASH_ENV: ./unreviewed.sh }\npermissions:\n'
+    ),
+    workflow.replace(
+      'permissions:\n',
+      '!!str env: { BASH_ENV: ./unreviewed.sh }\npermissions:\n'
+    ),
+    workflow.replace(
+      'permissions:\n',
+      '? env\n:\n  BASH_ENV: ./unreviewed.sh\npermissions:\n'
+    ),
+    workflow.replace(
+      'permissions:\n',
+      'x-unreviewed: &unreviewed { env: { BASH_ENV: ./unreviewed.sh } }\npermissions:\n'
+    ),
+  ]) {
+    assert.ok(
+      validateCiWorkflow(noncanonicalTopLevel).some((failure) =>
+        failure.includes('canonical top-level key allowlist')
+      )
+    )
+  }
+  for (const duplicateControl of [
+    workflow.replace(
+      'permissions:\n  contents: read',
+      'permissions:\n  contents: read\npermissions:\n  contents: write'
+    ),
+    workflow.replace(
+      'jobs:\n',
+      'jobs:\n  placeholder:\n    runs-on: ubuntu-latest\njobs:\n'
+    ),
+    workflow.replace(
+      '\n  quick-pr-check:',
+      '\n  ci-scope:\n    uses: ./unreviewed.yml\n\n  quick-pr-check:'
+    ),
+  ]) {
+    assert.ok(
+      validateCiWorkflow(duplicateControl).some((failure) =>
+        failure.includes('exactly one')
+      )
+    )
+  }
+  for (const noncanonicalJobKey of [
+    workflow.replace(
+      '\n  quick-pr-check:',
+      '\n  "ci\\u002dscope": { uses: ./unreviewed.yml }\n\n  quick-pr-check:'
+    ),
+    workflow.replace(
+      '\n  quick-pr-check:',
+      '\n  !!str ci-scope: { uses: ./unreviewed.yml }\n\n  quick-pr-check:'
+    ),
+    workflow.replace(
+      '\n  quick-pr-check:',
+      '\n  ? ci-scope\n  : { uses: ./unreviewed.yml }\n\n  quick-pr-check:'
+    ),
+  ]) {
+    assert.ok(
+      validateCiWorkflow(noncanonicalJobKey).some((failure) =>
+        failure.includes('canonical unquoted job keys')
+      )
+    )
+  }
+  assert.ok(
+    validateCiWorkflow(
+      workflow.replace(
+        '\n  quick-pr-check:',
+        '\n  unreviewed-gate:\n    runs-on: ubuntu-latest\n\n  quick-pr-check:'
+      )
+    ).some((failure) => failure.includes('reviewed job-key allowlist'))
+  )
 
   assert.ok(
     validateCiWorkflow(
@@ -854,20 +1088,70 @@ jobs:
       ].join('\n')
     ),
     workflow.replace(
-      'git show "\${base_sha}:scripts/ci/qualification-impact.mjs"',
-      'echo git show "\${base_sha}:scripts/ci/qualification-impact.mjs"'
+      'git show "\${policy_sha}:scripts/ci/qualification-impact.mjs"',
+      'echo git show "\${policy_sha}:scripts/ci/qualification-impact.mjs"'
     ),
     workflow.replace(
-      'node "$RUNNER_TEMP/qualification-impact.mjs" classify',
-      'echo node "$RUNNER_TEMP/qualification-impact.mjs" classify'
+      'node "$classifier" classify',
+      'echo node "$classifier" classify'
     ),
     workflow.replace(
-      'node "$RUNNER_TEMP/qualification-impact.mjs" classify',
-      '# node "$RUNNER_TEMP/qualification-impact.mjs" classify'
+      'node "$classifier" classify',
+      '# node "$classifier" classify'
     ),
     workflow.replace(
       ':scripts/ci/qualification-impact.mjs',
       ':scripts/ci/qualification-impact-mutated.mjs'
+    ),
+    workflow.replace(
+      '          node "$classifier" classify \\\n',
+      [
+        '          git show "\${target_sha}:scripts/ci/qualification-impact.mjs" > "$classifier"',
+        '          node "$classifier" classify \\',
+        '',
+      ].join('\n')
+    ),
+    workflow.replace(
+      '            --format github-output >> "$GITHUB_OUTPUT"\n',
+      [
+        '            --format github-output >> "$GITHUB_OUTPUT"',
+        '          node scripts/ci/qualification-impact.mjs classify --repo . --base "$base_sha" --target "$target_sha" --format github-output >> "$GITHUB_OUTPUT"',
+        '',
+      ].join('\n')
+    ),
+    workflow.replace(
+      '            base_sha="$(git merge-base "$policy_sha" "$target_sha" || true)"',
+      [
+        '            base_sha="$(git merge-base "$policy_sha" "$target_sha" || true)"',
+        '            exit 0',
+      ].join('\n')
+    ),
+    workflow.replace(
+      "            target_sha='${{ github.event.pull_request.head.sha }}'",
+      [
+        "            target_sha='${{ github.event.pull_request.head.sha }}'",
+        '            policy_sha="$target_sha"',
+      ].join('\n')
+    ),
+    workflow.replace(
+      "          event='${{ github.event_name }}'",
+      ['          node() { :; }', "          event='${{ github.event_name }}'"].join(
+        '\n'
+      )
+    ),
+    workflow.replace(
+      "          event='${{ github.event_name }}'",
+      ['          exit 0', "          event='${{ github.event_name }}'"].join(
+        '\n'
+      )
+    ),
+    workflow.replace(
+      '            base_sha="$(git merge-base "$policy_sha" "$target_sha" || true)"',
+      [
+        '            base_sha="$(git merge-base "$policy_sha" "$target_sha" || true)"',
+        '            command node scripts/ci/qualification-impact.mjs classify --repo . --base "$policy_sha" --target "$target_sha" --format github-output >> "$GITHUB_OUTPUT"',
+        '            exit 0',
+      ].join('\n')
     ),
   ]) {
     assert.ok(
@@ -878,8 +1162,8 @@ jobs:
   }
 
   const missingInvalidIdentityFallback = workflow.replace(
-    '            emit_bootstrap_full\n            exit 0\n          fi\n          if ! git show',
-    '            exit 1\n          fi\n          if ! git show'
+    '            emit_bootstrap_full\n            exit 0\n          fi\n\n          classifier=',
+    '            exit 1\n          fi\n\n          classifier='
   )
   assert.ok(
     validateCiWorkflow(missingInvalidIdentityFallback).some((failure) =>
@@ -902,20 +1186,28 @@ jobs:
   }
   for (const invalidFallbackMutation of [
     workflow.replace(
-      '            emit_bootstrap_full\n            exit 0\n          fi\n          if ! git show',
-      '            exit 0\n            emit_bootstrap_full\n          fi\n          if ! git show'
+      '            emit_bootstrap_full\n            exit 0\n          fi\n\n          classifier=',
+      '            exit 0\n            emit_bootstrap_full\n          fi\n\n          classifier='
     ),
     workflow.replace(
-      '            emit_bootstrap_full\n            exit 0\n          fi\n          if ! git show',
-      '            exit 0\n            emit_bootstrap_full\n            exit 0\n          fi\n          if ! git show'
+      '            emit_bootstrap_full\n            exit 0\n          fi\n\n          classifier=',
+      '            exit 0\n            emit_bootstrap_full\n            exit 0\n          fi\n\n          classifier='
     ),
     workflow.replace(
-      '            emit_bootstrap_full\n            exit 0\n          fi\n          if ! git show',
-      '            false\n            emit_bootstrap_full\n            exit 0\n          fi\n          if ! git show'
+      '            emit_bootstrap_full\n            exit 0\n          fi\n\n          classifier=',
+      '            false\n            emit_bootstrap_full\n            exit 0\n          fi\n\n          classifier='
     ),
     workflow.replace(
       '          if [[ ! "$policy_sha" =~ ^[0-9a-f]{40}$ ]] ||',
       '          if [[ ! "$policy_sha" =~ ^[0-9a-f]{40}$ ]] &&'
+    ),
+    workflow.replace(
+      '          if [[ ! "$policy_sha" =~ ^[0-9a-f]{40}$ ]] ||',
+      '          exit 0\n          if [[ ! "$policy_sha" =~ ^[0-9a-f]{40}$ ]] ||'
+    ),
+    workflow.replace(
+      '          fi\n\n          classifier="$RUNNER_TEMP/qualification-impact.mjs"',
+      '          fi\n\n          false\n          classifier="$RUNNER_TEMP/qualification-impact.mjs"'
     ),
     workflow.replace(
       '             [[ ! "$base_sha" =~ ^[0-9a-f]{40}$ ]] ||',
@@ -940,8 +1232,8 @@ jobs:
   )
 
   const incompleteFallback = workflow.replace(
-    'for flag in quick test_linux test_windows test_macos full',
-    'for flag in quick test_linux test_windows full'
+    "              echo 'test_macos=true'\n",
+    ''
   )
 
   const missingBooleanValidation = workflow.replace(
