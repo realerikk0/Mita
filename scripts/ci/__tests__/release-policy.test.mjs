@@ -1130,6 +1130,23 @@ jobs:
   test-on-windows-pr:
     needs: ci-scope
     if: needs.ci-scope.outputs.test_windows == 'true'
+    runs-on: windows-2022
+    timeout-minutes: 90
+    steps:
+      - name: Build focused unsigned Windows candidate
+        if: needs.ci-scope.outputs.build_windows == 'true'
+        shell: pwsh
+        run: |
+          $releaseMetadata = Get-Content biyan-release.json -Raw |
+            ConvertFrom-Json
+          $env:BIYAN_DATA_SCHEMA = [string]$releaseMetadata.dataSchema
+          make build
+      - name: Verify focused unsigned Windows candidate
+        if: needs.ci-scope.outputs.build_windows == 'true'
+        shell: pwsh
+        run: |
+          & ./scripts/ci/verify-windows-candidate.ps1 -Exe $exe -Msi $msi -Version $version
+          node ./scripts/ci/candidate-path-policy.mjs --root $bundle
   test-on-ubuntu:
     needs: ci-scope
     if: needs.ci-scope.outputs.test_linux == 'true'
@@ -1545,6 +1562,16 @@ jobs:
     )
   )
 
+  const hiddenWindowsBuildAxis = workflow.replace(
+    '      build_windows: \${{ steps.scope.outputs.build_windows }}\n',
+    ''
+  )
+  assert.ok(
+    validateCiWorkflow(hiddenWindowsBuildAxis).some((failure) =>
+      failure.includes('expose build_windows')
+    )
+  )
+
   const incompleteFallback = workflow.replace(
     "              echo 'test_macos=true'\n",
     ''
@@ -1584,6 +1611,46 @@ jobs:
       failure.includes('test-on-macos must be gated')
     )
   )
+
+  for (const [index, focusedWindowsMutation] of [
+    workflow.replace('    timeout-minutes: 90', '    timeout-minutes: 45'),
+    workflow.replace(
+      "        if: needs.ci-scope.outputs.build_windows == 'true'",
+      "        if: needs.ci-scope.outputs.build_windows == 'false'"
+    ),
+    workflow.replace('          make build', '          Write-Output make build'),
+    workflow.replace(
+      '          $env:BIYAN_DATA_SCHEMA = [string]$releaseMetadata.dataSchema',
+      '          Write-Output $env:BIYAN_DATA_SCHEMA = [string]$releaseMetadata.dataSchema'
+    ),
+    workflow.replace(
+      '      - name: Build focused unsigned Windows candidate\n',
+      '      - name: Build focused unsigned Windows candidate\n        continue-on-error: true\n'
+    ),
+    workflow.replace(
+      '          & ./scripts/ci/verify-windows-candidate.ps1',
+      '          Write-Output ./scripts/ci/verify-windows-candidate.ps1'
+    ),
+    workflow.replace(
+      '          & ./scripts/ci/verify-windows-candidate.ps1 -Exe $exe -Msi $msi -Version $version',
+      "          $fakeVerifier = 'verify-windows-candidate.ps1 -Exe $exe -Msi $msi -Version $version'"
+    ),
+    workflow.replace(
+      '          node ./scripts/ci/candidate-path-policy.mjs --root $bundle',
+      '          Write-Output ./scripts/ci/candidate-path-policy.mjs --root $bundle'
+    ),
+    workflow.replace(
+      '          node ./scripts/ci/candidate-path-policy.mjs --root $bundle',
+      "          $fakePolicy = 'candidate-path-policy.mjs --root $bundle'"
+    ),
+  ].entries()) {
+    assert.ok(
+      validateCiWorkflow(focusedWindowsMutation).some((failure) =>
+        failure.includes('focused unsigned candidate')
+      ),
+      `focused Windows mutation ${index} must fail closed`
+    )
+  }
 
   for (const command of [
     'node --test scripts/ci/__tests__/qualification-impact.test.mjs',
@@ -1649,27 +1716,52 @@ test('protected Windows verifier authenticates native EXE and MSI identity', () 
     'utf8'
   ).replace(/\r\n?/g, '\n')
   assert.deepEqual(validateWindowsCandidateVerifier(verifier), [])
-  for (const mutation of [
+  for (const [index, mutation] of [
     verifier.replaceAll('0x8664', '0x014C'),
     verifier.replace("'Biyan.exe'", "'Other.exe'"),
     verifier.replace('OpenDatabase', 'OpenData'),
     verifier.replace("'/a'", "'/i'"),
-    verifier.replace('TARGETDIR=$msiExtractRoot', 'INSTALLDIR=$msiExtractRoot'),
+    verifier.replace(
+      'TARGETDIR=`"$msiExtractRoot`"',
+      'INSTALLDIR=`"$msiExtractRoot`"'
+    ),
     verifier.replace('$msiExitCode -ne 0', '$msiExitCode -eq 0'),
-    verifier.replace('& $msiExec `', 'Write-Output $msiExec `'),
+    verifier.replace('    -Wait `\n', ''),
+    verifier.replace('    -PassThru\n', ''),
+    verifier.replace(
+      '  $msiProcess = Start-Process `',
+      '  Write-Output Start-Process `'
+    ),
     verifier
       .replace(
-        '  & $msiExec `',
-        '  $msiExitCode = $LASTEXITCODE\n  & $msiExec `'
+        '  $msiProcess = Start-Process `',
+        '  $msiExitCode = $msiProcess.ExitCode\n  $msiProcess = Start-Process `'
       )
       .replace(
-        '  $msiExitCode = $LASTEXITCODE\n  if ($msiExitCode',
-        '  if ($msiExitCode'
+        '  $msiExitCode = $msiProcess.ExitCode\n  $msiProcess.Dispose()',
+        '  $msiProcess.Dispose()'
       ),
     verifier.replace(
-      '$msiExec = (Get-Command msiexec.exe -ErrorAction Stop).Source',
-      '$msiExec = (Get-Command msiexec.exe -ErrorAction Stop).Source\n' +
-        '  $msiExec = (Get-Command cmd.exe -ErrorAction Stop).Source'
+      '  $msiProcess = Start-Process `',
+      '  $msiProcess = Start-Process `\n' +
+        '  $msiProcess = Write-Output decoy\n' +
+        '  $decoy = Start-Process `'
+    ),
+    verifier.replace(
+      '  $msiExitCode = $msiProcess.ExitCode',
+      '  $msiExitCode = $LASTEXITCODE'
+    ),
+    verifier.replace(
+      '  $msiProcess = Start-Process `',
+      '  & $msiExec @msiArguments\n  $msiProcess = Start-Process `'
+    ),
+    verifier.replace(
+      'catch {\n  Write-MsiLogTail -Path $msiLogPath\n  throw\n}',
+      'catch {\n  throw\n}'
+    ),
+    verifier.replace(
+      '  $msiExitCode = $msiProcess.ExitCode\n  $msiProcess.Dispose()\n',
+      '  $msiProcess.Dispose()\n'
     ),
     verifier.replace(
       '-LiteralPath $msiExtractRoot `\n    -Recurse',
@@ -1686,8 +1778,12 @@ test('protected Windows verifier authenticates native EXE and MSI identity', () 
     verifier.replace("'ProductVersion'", "'OtherVersion'"),
     verifier.replace('SummaryInformation(0)', 'SummaryInformation(1)'),
     verifier.replace('(?i:x64|Intel64)', '(?i:Intel)'),
-  ]) {
-    assert.notDeepEqual(validateWindowsCandidateVerifier(mutation), [])
+  ].entries()) {
+    assert.notDeepEqual(
+      validateWindowsCandidateVerifier(mutation),
+      [],
+      `Windows verifier mutation ${index} must fail closed`
+    )
   }
 })
 

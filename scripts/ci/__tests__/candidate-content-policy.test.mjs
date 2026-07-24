@@ -390,6 +390,10 @@ test('full tests and native candidate workflows keep the content gate wired', ()
     path.join(repoRoot, 'scripts/ci/verify-windows-candidate.ps1'),
     'utf8'
   )
+  const prCi = fs.readFileSync(
+    path.join(repoRoot, '.github/workflows/biyan-linter-and-test.yml'),
+    'utf8'
+  )
   const desktopRelease = fs.readFileSync(
     path.join(repoRoot, '.github/workflows/desktop-release.yml'),
     'utf8'
@@ -421,7 +425,16 @@ test('full tests and native candidate workflows keep the content gate wired', ()
   assert.match(windowsVerifier, /"biyan-msi-admin-\{0\}"/)
   assert.match(
     windowsVerifier,
-    /Get-Command msiexec\.exe[\s\S]*'\/a'[\s\S]*"TARGETDIR=\$msiExtractRoot"/
+    /Get-Command msiexec\.exe[\s\S]*'\/a'[\s\S]*TARGETDIR=`"\$msiExtractRoot`"/
+  )
+  assert.match(
+    windowsVerifier,
+    /Start-Process[\s\S]*-Wait[\s\S]*-PassThru[\s\S]*\$msiProcess\.ExitCode/
+  )
+  assert.doesNotMatch(windowsVerifier, /(^|\n)\s*&\s+\$msiExec\b/)
+  assert.doesNotMatch(
+    windowsVerifier,
+    /\$msiExitCode\s*=\s*\$LASTEXITCODE/
   )
   assert.doesNotMatch(windowsVerifier, /& \$sevenZip[^\n]*\$msiPath/)
   assert.equal(
@@ -433,6 +446,14 @@ test('full tests and native candidate workflows keep the content gate wired', ()
     2
   )
   assert.match(desktopRelease, /verify-windows-candidate\.ps1/)
+  assert.match(
+    prCi,
+    /Build focused unsigned Windows candidate[\s\S]*needs\.ci-scope\.outputs\.build_windows == 'true'[\s\S]*make build/
+  )
+  assert.match(
+    prCi,
+    /Verify focused unsigned Windows candidate[\s\S]*verify-windows-candidate\.ps1[\s\S]*candidate-path-policy\.mjs --root \$bundle/
+  )
   assert.match(
     desktopRelease,
     /candidate-content-policy\.mjs \\\s*\n\s*--root "\$extract_root\/squashfs-root"/

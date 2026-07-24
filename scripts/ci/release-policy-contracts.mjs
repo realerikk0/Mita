@@ -21,8 +21,8 @@ const TRUSTED_CI_SCOPE_COMMAND_ALLOWLIST = new Set([
 ])
 
 const TRUSTED_CI_SCOPE_JOB_ALLOWLIST = new Set([
-  // Exact ci-scope job envelope; line endings and trailing blank lines are compatible.
-  '965743af788bb834a1b0d29d01033b9edfdb7d0939065ae97f3f70069306fa71',
+  // Exact ci-scope job envelope with all native build axes exposed downstream.
+  'b6dd841bdaa14442a7528630f2cc52d3b8071468b13173b22e8b88f4c4163977',
 ])
 
 const TRUSTED_CI_JOB_KEY_ALLOWLIST = new Set([
@@ -1196,6 +1196,18 @@ export function validateCiWorkflow(source) {
         failures.push(`Biyan CI scope must validate ${axis} as a boolean output`)
       }
     }
+    for (const axis of ['build_macos', 'build_windows', 'build_linux']) {
+      if (
+        !new RegExp(
+          `^      ${axis}:\\s*\\$\\{\\{\\s*steps\\.scope\\.outputs\\.${axis}\\s*\\}\\}\\s*$`,
+          'm'
+        ).test(ciScope)
+      ) {
+        failures.push(
+          `Biyan CI scope must expose ${axis} to affected native jobs`
+        )
+      }
+    }
     if (
       !scopeValidation ||
       !/^\s+BLOCKED:\s*\$\{\{\s*steps\.scope\.outputs\.blocked\s*\}\}\s*$/m.test(
@@ -1269,6 +1281,49 @@ export function validateCiWorkflow(source) {
       failures.push(`Biyan CI is missing the ${jobName} job`)
     } else if (!jobUsesScopeFlag(block, flag)) {
       failures.push(`${jobName} must be gated by the ${flag} impact axis`)
+    }
+  }
+
+  if (windowsPr) {
+    const windowsPrSteps = workflowStepBlocks(windowsPr)
+    const buildStep = windowsPrSteps.find((step) =>
+      /^\s*-\s+name:\s*Build focused unsigned Windows candidate\s*$/m.test(
+        step
+      )
+    )
+    const verifyStep = windowsPrSteps.find((step) =>
+      /^\s*-\s+name:\s*Verify focused unsigned Windows candidate\s*$/m.test(
+        step
+      )
+    )
+    const buildCondition =
+      /^\s*if:\s*needs\.ci-scope\.outputs\.build_windows\s*==\s*'true'\s*$/m
+    const buildSchemaSequence =
+      /^\s*\$releaseMetadata\s*=\s*Get-Content\s+biyan-release\.json\s+-Raw\s*\|\s*\n\s*ConvertFrom-Json\s*\n\s*\$env:BIYAN_DATA_SCHEMA\s*=\s*\[string\]\$releaseMetadata\.dataSchema\s*\n\s*make build\s*$/m
+    if (
+      !/^\s*timeout-minutes:\s*90\s*$/m.test(windowsPr) ||
+      !buildStep ||
+      !buildCondition.test(buildStep) ||
+      /^\s*continue-on-error:\s*/m.test(buildStep) ||
+      !hasRunInvocation(buildStep, /^make build$/) ||
+      !buildSchemaSequence.test(uncommentedSource(buildStep)) ||
+      !verifyStep ||
+      !buildCondition.test(verifyStep) ||
+      /^\s*continue-on-error:\s*/m.test(verifyStep) ||
+      !hasRunInvocation(
+        verifyStep,
+        /^&\s+\.\/scripts\/ci\/verify-windows-candidate\.ps1(?:\s|$)/,
+        [/-Exe\s+\$exe/, /-Msi\s+\$msi/, /-Version\s+\$version/]
+      ) ||
+      !hasRunInvocation(
+        verifyStep,
+        /^node\s+\.\/scripts\/ci\/candidate-path-policy\.mjs(?:\s|$)/,
+        [/--root\s+\$bundle/]
+      )
+    ) {
+      failures.push(
+        'test-on-windows-pr must run the focused unsigned candidate build and verifier when build_windows is true'
+      )
     }
   }
 
@@ -1387,24 +1442,43 @@ export function validateWindowsCandidateVerifier(source) {
       active
     )?.[0] ?? ''
   const msiAdminExecution =
-    /^\s*\$msiExec\s*=\s*\(Get-Command\s+msiexec\.exe\s+-ErrorAction\s+Stop\)\.Source\s*\n\s*&\s+\$msiExec\s+`\s*\n\s*["']\/a["']\s+`\s*\n\s*\$msiPath\s+`\s*\n\s*["']\/qn["']\s+`\s*\n\s*["']\/norestart["']\s+`\s*\n\s*["']TARGETDIR=\$msiExtractRoot["']\s+`\s*\n\s*["']\/L\*V["']\s+`\s*\n\s*\$msiLogPath\s*\n\s*\$msiExitCode\s*=\s*\$LASTEXITCODE\s*\n\s*if\s*\(\$msiExitCode\s+-ne\s+0\)\s*\{/m
+    /^\s*\$msiExec\s*=\s*\(Get-Command\s+msiexec\.exe\s+-ErrorAction\s+Stop\)\.Source\s*\n\s*\$msiArguments\s*=\s*@\(\s*\n\s*["']\/a["'],\s*\n\s*["']?`["']\$msiPath`["']{2},\s*\n\s*["']\/qn["'],\s*\n\s*["']\/norestart["'],\s*\n\s*["']TARGETDIR=`["']\$msiExtractRoot`["']["'],\s*\n\s*["']\/L\*V["'],\s*\n\s*["']?`["']\$msiLogPath`["']{2}\s*\n\s*\)\s*\n\s*\$msiProcess\s*=\s*Start-Process\s+`\s*\n\s*-FilePath\s+\$msiExec\s+`\s*\n\s*-ArgumentList\s+\$msiArguments\s+`\s*\n\s*-Wait\s+`\s*\n\s*-PassThru\s*\n\s*\$msiExitCode\s*=\s*\$msiProcess\.ExitCode\s*\n\s*\$msiProcess\.Dispose\(\)\s*\n\s*if\s*\(\$msiExitCode\s+-ne\s+0\)\s*\{/m
   if (
     !msiAdminExecution.test(msiAdminBlock) ||
     (msiAdminBlock.match(/\$msiExec\s*=/g)?.length ?? 0) !== 1 ||
-    (msiAdminBlock.match(/^\s*&\s+\$msiExec\b/gm)?.length ?? 0) !== 1 ||
+    (msiAdminBlock.match(/\$msiArguments\s*=/g)?.length ?? 0) !== 1 ||
+    (msiAdminBlock.match(/\bStart-Process\b/g)?.length ?? 0) !== 1 ||
+    (msiAdminBlock.match(/\$msiProcess\s*=/g)?.length ?? 0) !== 1 ||
     (msiAdminBlock.match(/\$msiExitCode\s*=/g)?.length ?? 0) !== 1
   ) {
     failures.push(
-      'Windows candidate verifier must resolve, execute, and capture Windows Installer administrative extraction in order'
+      'Windows candidate verifier must synchronously execute and capture Windows Installer administrative extraction in order'
     )
   }
   if (
-    !/\$msiExitCode\s*=\s*\$LASTEXITCODE[\s\S]*?if\s*\(\$msiExitCode\s+-ne\s+0\)\s*\{[\s\S]*?throw\s+["'][^"']*exit\s+\$msiExitCode[^"']*["']/.test(
+    !/\$msiExitCode\s*=\s*\$msiProcess\.ExitCode[\s\S]*?if\s*\(\$msiExitCode\s+-ne\s+0\)\s*\{[\s\S]*?throw\s+["'][^"']*exit\s+\$msiExitCode[^"']*["']/.test(
       msiAdminBlock
     )
   ) {
     failures.push(
       'Windows candidate verifier must fail closed when Windows Installer cannot create the administrative image'
+    )
+  }
+  if (
+    /(^|\n)\s*&\s+\$msiExec\b/.test(msiAdminBlock) ||
+    /\$LASTEXITCODE/.test(msiAdminBlock)
+  ) {
+    failures.push(
+      'Windows candidate verifier must not background msiexec or reuse LASTEXITCODE'
+    )
+  }
+  if (
+    !/catch\s*\{[\s\S]*?Write-MsiLogTail\s+-Path\s+\$msiLogPath[\s\S]*?throw[\s\S]*?\}\s*finally\s*\{/.test(
+      msiAdminBlock
+    )
+  ) {
+    failures.push(
+      'Windows candidate verifier must emit the MSI log before cleanup on every failure'
     )
   }
   if (

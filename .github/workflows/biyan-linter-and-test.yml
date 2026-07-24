@@ -54,6 +54,9 @@ jobs:
       test_macos: ${{ steps.scope.outputs.test_macos }}
       test_windows: ${{ steps.scope.outputs.test_windows }}
       test_linux: ${{ steps.scope.outputs.test_linux }}
+      build_macos: ${{ steps.scope.outputs.build_macos }}
+      build_windows: ${{ steps.scope.outputs.build_windows }}
+      build_linux: ${{ steps.scope.outputs.build_linux }}
       plan_sha256: ${{ steps.scope.outputs.plan_sha256 }}
       classification_json: ${{ steps.scope.outputs.classification_json }}
     steps:
@@ -507,7 +510,7 @@ jobs:
     needs: ci-scope
     if: needs.ci-scope.outputs.test_windows == 'true' && github.event_name != 'push'
     runs-on: windows-2022
-    timeout-minutes: 45
+    timeout-minutes: 90
     steps:
       - name: Getting the repo
         uses: actions/checkout@v4
@@ -562,6 +565,56 @@ jobs:
           make test
         env:
           NODE_OPTIONS: '--max-old-space-size=2048'
+
+      - name: Reclaim Windows test-only build space
+        if: needs.ci-scope.outputs.build_windows == 'true'
+        shell: pwsh
+        run: |
+          $remove = @(
+            'coverage',
+            'core/coverage',
+            'web-app/coverage',
+            'electron/playwright-report',
+            'src-tauri/target/debug'
+          )
+          if (Test-Path 'src-tauri/target') {
+            Get-ChildItem 'src-tauri/target' -Directory | ForEach-Object {
+              $remove += (Join-Path $_.FullName 'debug')
+            }
+            Get-ChildItem 'src-tauri/target' -Directory -Recurse `
+              -Filter incremental -ErrorAction SilentlyContinue |
+              Sort-Object FullName -Descending |
+              Remove-Item -Recurse -Force -ErrorAction SilentlyContinue
+          }
+          foreach ($path in $remove) {
+            Remove-Item $path -Recurse -Force -ErrorAction SilentlyContinue
+          }
+          Get-PSDrive -Name C | Format-Table -AutoSize
+
+      - name: Build focused unsigned Windows candidate
+        if: needs.ci-scope.outputs.build_windows == 'true'
+        shell: pwsh
+        run: |
+          $releaseMetadata = Get-Content biyan-release.json -Raw |
+            ConvertFrom-Json
+          $env:BIYAN_DATA_SCHEMA = [string]$releaseMetadata.dataSchema
+          make build
+
+      - name: Verify focused unsigned Windows candidate
+        if: needs.ci-scope.outputs.build_windows == 'true'
+        shell: pwsh
+        run: |
+          $tauriConfig = Get-Content src-tauri/tauri.conf.json -Raw |
+            ConvertFrom-Json
+          $version = [string]$tauriConfig.version
+          $bundle = 'src-tauri/target/release/bundle'
+          $exe = "$bundle/nsis/Biyan_$version`_x64-setup.exe"
+          $msi = "$bundle/msi/Biyan_$version`_x64_en-US.msi"
+          & ./scripts/ci/verify-windows-candidate.ps1 `
+            -Exe $exe `
+            -Msi $msi `
+            -Version $version
+          node ./scripts/ci/candidate-path-policy.mjs --root $bundle
 
   test-on-ubuntu:
     needs: ci-scope

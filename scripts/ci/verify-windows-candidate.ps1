@@ -152,6 +152,27 @@ function Invoke-ExtractedCandidatePolicies {
   }
 }
 
+function Write-MsiLogTail {
+  param(
+    [Parameter(Mandatory = $true)]
+    [string]$Path
+  )
+
+  if (-not (Test-Path -LiteralPath $Path -PathType Leaf)) {
+    return
+  }
+  foreach (
+    $line in @(
+      Get-Content `
+        -LiteralPath $Path `
+        -Tail 80 `
+        -ErrorAction SilentlyContinue
+    )
+  ) {
+    [Console]::Error.WriteLine($line)
+  }
+}
+
 $exePath = (Resolve-Path -LiteralPath $Exe).Path
 $msiPath = (Resolve-Path -LiteralPath $Msi).Path
 foreach ($candidate in @($exePath, $msiPath)) {
@@ -197,28 +218,23 @@ $msiLogPath = Join-Path `
 New-Item -ItemType Directory -Force -Path $msiExtractRoot | Out-Null
 try {
   $msiExec = (Get-Command msiexec.exe -ErrorAction Stop).Source
-  & $msiExec `
-    '/a' `
-    $msiPath `
-    '/qn' `
-    '/norestart' `
-    "TARGETDIR=$msiExtractRoot" `
-    '/L*V' `
-    $msiLogPath
-  $msiExitCode = $LASTEXITCODE
+  $msiArguments = @(
+    '/a',
+    "`"$msiPath`"",
+    '/qn',
+    '/norestart',
+    "TARGETDIR=`"$msiExtractRoot`"",
+    '/L*V',
+    "`"$msiLogPath`""
+  )
+  $msiProcess = Start-Process `
+    -FilePath $msiExec `
+    -ArgumentList $msiArguments `
+    -Wait `
+    -PassThru
+  $msiExitCode = $msiProcess.ExitCode
+  $msiProcess.Dispose()
   if ($msiExitCode -ne 0) {
-    if (Test-Path -LiteralPath $msiLogPath -PathType Leaf) {
-      foreach (
-        $line in @(
-          Get-Content `
-            -LiteralPath $msiLogPath `
-            -Tail 80 `
-            -ErrorAction SilentlyContinue
-        )
-      ) {
-        [Console]::Error.WriteLine($line)
-      }
-    }
     throw "Windows Installer could not create the MSI administrative image (exit $msiExitCode)"
   }
   Test-ExtractedBiyanApp `
@@ -226,6 +242,10 @@ try {
     -Version $Version `
     -Label 'MSI'
   Invoke-ExtractedCandidatePolicies -Root $msiExtractRoot -Label 'MSI'
+}
+catch {
+  Write-MsiLogTail -Path $msiLogPath
+  throw
 }
 finally {
   Remove-Item `
