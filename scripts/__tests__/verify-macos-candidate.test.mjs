@@ -4,6 +4,9 @@ import os from 'node:os'
 import path from 'node:path'
 import test from 'node:test'
 
+import tar from 'tar'
+
+import { EXPECTED_PREINSTALL_PACKAGE_IDENTITIES } from '../ci/candidate-content-policy.mjs'
 import {
   EXPECTED_PREINSTALL_PACKAGES,
   parseMacOSCandidateArgs,
@@ -26,6 +29,34 @@ function writeMachO(file) {
   writeFile(file, Buffer.from([0xcf, 0xfa, 0xed, 0xfe, 0, 0, 0, 0]))
 }
 
+function writePackageArchive(root, archive, packageName, packageVersion) {
+  const archiveVersion = path
+    .basename(archive)
+    .match(/-(\d+\.\d+\.\d+(?:[-+][0-9A-Za-z.-]+)?)\.tgz$/u)?.[1]
+  assert.equal(archiveVersion, packageVersion)
+  const source = path.join(root, `pack-${packageName.split('/').at(-1)}`)
+  writeFile(
+    path.join(source, 'package', 'package.json'),
+    JSON.stringify({
+      name: packageName,
+      private: true,
+      version: packageVersion,
+    })
+  )
+  writeFile(path.join(source, 'package', 'dist', 'index.js'), 'export {}\n')
+  fs.mkdirSync(path.dirname(archive), { recursive: true })
+  tar.c(
+    {
+      cwd: source,
+      file: archive,
+      gzip: true,
+      portable: true,
+      sync: true,
+    },
+    ['package']
+  )
+}
+
 function createFixture(t) {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'biyan-macos-candidate-'))
   t.after(() => fs.rmSync(root, { force: true, recursive: true }))
@@ -38,8 +69,17 @@ function createFixture(t) {
   writeFile(path.join(sourceRoot, 'NOTICE'), Buffer.from('notice\nbytes'))
   writeFile(path.join(resources, 'LICENSE'), Buffer.from('license\0bytes'))
   writeFile(path.join(resources, 'NOTICE'), Buffer.from('notice\nbytes'))
-  for (const archive of EXPECTED_PREINSTALL_PACKAGES) {
-    writeFile(path.join(resources, 'pre-install', archive), archive)
+  for (const {
+    file: archive,
+    name: packageName,
+    version: packageVersion,
+  } of EXPECTED_PREINSTALL_PACKAGE_IDENTITIES) {
+    writePackageArchive(
+      root,
+      path.join(resources, 'pre-install', archive),
+      packageName,
+      packageVersion
+    )
   }
   writeFile(path.join(appPath, 'Contents', 'Info.plist'), 'fixture plist')
   writeMachO(path.join(appPath, 'Contents', 'MacOS', 'Biyan'))
@@ -83,6 +123,12 @@ function createRunner(appPath, overrides = {}) {
     CFBundleShortVersionString: version,
     CFBundleVersion: version,
     LSMinimumSystemVersion: '12.0',
+    CFBundleURLTypes: [
+      {
+        CFBundleURLName: 'uk.jingxing.mita',
+        CFBundleURLSchemes: ['biyan', 'mita'],
+      },
+    ],
     ...overrides.plist,
   }
   const runCommand = (command, args) => {
@@ -245,6 +291,92 @@ test('rejects wrong Info.plist identity and thin unknown Mach-O files', (t) => {
         })
       ),
     /expected \[arm64, x86_64\]/
+  )
+})
+
+test('rejects Info.plist URL scheme additions, removals, and reorderings', (t) => {
+  for (const schemes of [
+    ['biyan'],
+    ['biyan', 'mita', 'jan'],
+    ['mita', 'biyan'],
+  ]) {
+    const fixture = createFixture(t)
+    assert.throws(
+      () =>
+        verifyFixture(
+          fixture,
+          createRunner(fixture.appPath, {
+            plist: {
+              CFBundleURLTypes: [{ CFBundleURLSchemes: schemes }],
+            },
+          })
+        ),
+      /URL schemes/
+    )
+  }
+
+  const extraTypeFixture = createFixture(t)
+  assert.throws(
+    () =>
+      verifyFixture(
+        extraTypeFixture,
+        createRunner(extraTypeFixture.appPath, {
+          plist: {
+            CFBundleURLTypes: [
+              { CFBundleURLSchemes: ['biyan', 'mita'] },
+              { CFBundleURLSchemes: [] },
+            ],
+          },
+        })
+      ),
+    /URL schemes/
+  )
+})
+
+test('rejects forbidden fingerprints in app files and nested pre-install packages', (t) => {
+  const fileFixture = createFixture(t)
+  writeFile(
+    path.join(fileFixture.resources, 'unexpected.txt'),
+    'Jan GPU Detection'
+  )
+  assert.throws(
+    () => verifyFixture(fileFixture, createRunner(fileFixture.appPath)),
+    /Jan GPU Detection/
+  )
+
+  const packageFixture = createFixture(t)
+  const archive = path.join(
+    packageFixture.resources,
+    'pre-install',
+    EXPECTED_PREINSTALL_PACKAGES[0]
+  )
+  writePackageArchive(
+    packageFixture.sourceRoot,
+    archive,
+    EXPECTED_PREINSTALL_PACKAGE_IDENTITIES[0].name,
+    EXPECTED_PREINSTALL_PACKAGE_IDENTITIES[0].version
+  )
+  const source = path.join(
+    packageFixture.sourceRoot,
+    'pack-assistant-extension',
+    'package',
+    'dist',
+    'index.js'
+  )
+  writeFile(source, 'const catalog = "latest_jan_model.json"\n')
+  tar.c(
+    {
+      cwd: path.join(packageFixture.sourceRoot, 'pack-assistant-extension'),
+      file: archive,
+      gzip: true,
+      portable: true,
+      sync: true,
+    },
+    ['package']
+  )
+  assert.throws(
+    () => verifyFixture(packageFixture, createRunner(packageFixture.appPath)),
+    /latest_jan_model/
   )
 })
 

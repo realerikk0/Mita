@@ -25,8 +25,6 @@ export type ModelSettingParams = {
   user_prompt?: string
   // path param
   model_path?: string
-  // legacy path param
-  llama_model_path?: string
   // clip model path
   mmproj?: string
   cont_batching?: boolean

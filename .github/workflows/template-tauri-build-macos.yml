@@ -15,10 +15,6 @@ on:
         required: true
         type: string
         default: ''
-      cortex_api_port:
-        required: false
-        type: string
-        default: ''
       upload_url:
         required: false
         type: string
@@ -81,7 +77,7 @@ jobs:
         if: inputs.channel != 'stable'
         shell: bash
         run: |
-          cp .github/scripts/icon-${{ inputs.channel }}.png src-tauri/icons/icon.png
+          cp .github/scripts/icon-${{ inputs.channel }}.png src-tauri/app-icon.png
 
       - name: Installing node
         uses: actions/setup-node@v1
@@ -181,17 +177,21 @@ jobs:
           TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
           BIYAN_SIGNING_KEY: ${{ secrets.BIYAN_SIGNING_KEY }}
 
-      - name: Reject retired local runtime extensions
+      - name: Verify bundle paths
         shell: bash
         run: |
           set -euo pipefail
           app_root="src-tauri/target/universal-apple-darwin/release/bundle/macos"
           test -d "$app_root"
-          if find "$app_root" -type f \
-            | grep -Ei '/[^/]*(llama|mlx|foundation|rag|vector)[^/]*$'; then
-            echo "Retired local runtime extension found in app bundle" >&2
+          node scripts/ci/candidate-path-policy.mjs --root "$app_root"
+          shopt -s nullglob
+          apps=("$app_root"/Biyan*.app)
+          [ "${#apps[@]}" -eq 1 ] || {
+            echo "Expected exactly one Biyan app, found ${#apps[@]}" >&2
             exit 1
-          fi
+          }
+          node scripts/ci/candidate-path-policy.mjs --root "${apps[0]}"
+          node scripts/ci/candidate-content-policy.mjs --root "${apps[0]}"
 
       # Publish app
 

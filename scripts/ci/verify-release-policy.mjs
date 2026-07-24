@@ -13,17 +13,46 @@ import {
   validateLinuxReleaseBuild,
   validateMacOSCandidateVerifier,
   validateQualificationWorkflow,
+  validateActiveReleaseIdentity,
   validateReleaseIdentity,
   validateReleaseEnvironmentWorkflows,
   validateWindowsCandidateVerifier,
 } from './release-policy-contracts.mjs'
+import { validateLegacyCompatibilityRepository } from './legacy-compatibility-policy.mjs'
 
-const repoRoot = path.resolve(import.meta.dirname, '../..')
-const artifactRootIndex = process.argv.indexOf('--artifact-root')
-const artifactRoot =
-  artifactRootIndex >= 0
-    ? path.resolve(process.argv[artifactRootIndex + 1])
-    : null
+function parseArgs(argv) {
+  let repoRoot = path.resolve(import.meta.dirname, '../..')
+  let artifactRoot = null
+  let requireActive = false
+  const seen = new Set()
+  for (let index = 0; index < argv.length; index += 1) {
+    const argument = argv[index]
+    if (argument === '--require-active') {
+      if (seen.has(argument)) throw new Error(`Duplicate argument: ${argument}`)
+      seen.add(argument)
+      requireActive = true
+      continue
+    }
+    if (argument === '--repo-root' || argument === '--artifact-root') {
+      if (seen.has(argument)) throw new Error(`Duplicate argument: ${argument}`)
+      const value = argv[index + 1]
+      if (!value || value.startsWith('--')) {
+        throw new Error(`Missing value for ${argument}`)
+      }
+      seen.add(argument)
+      if (argument === '--repo-root') repoRoot = path.resolve(value)
+      else artifactRoot = path.resolve(value)
+      index += 1
+      continue
+    }
+    throw new Error(`Unexpected argument: ${argument ?? 'missing'}`)
+  }
+  return { artifactRoot, repoRoot, requireActive }
+}
+
+const { artifactRoot, repoRoot, requireActive } = parseArgs(
+  process.argv.slice(2)
+)
 const failures = []
 
 function fail(message) {
@@ -33,6 +62,9 @@ function fail(message) {
 function read(relative) {
   return fs.readFileSync(path.join(repoRoot, relative), 'utf8')
 }
+
+for (const message of validateLegacyCompatibilityRepository(repoRoot))
+  fail(message)
 
 const releaseMetadata = JSON.parse(read('biyan-release.json'))
 if (releaseMetadata.schema !== 1) {
@@ -50,12 +82,15 @@ if (!cargoPackage || cargoPackage !== tauriConfig.version) {
     `Cargo package version ${cargoPackage ?? 'missing'} does not match ${tauriConfig.version}`
   )
 }
-for (const message of validateReleaseIdentity({
+const releaseIdentity = {
   version: tauriConfig.version,
   migrationPhase: releaseMetadata.migrationPhase,
   dataSchema: releaseMetadata.dataSchema,
   cargoLockVersion: cargoLockPackage,
-})) {
+}
+for (const message of (requireActive
+  ? validateActiveReleaseIdentity(releaseIdentity)
+  : validateReleaseIdentity(releaseIdentity))) {
   fail(message)
 }
 for (const message of validateLinuxReleaseBuild(

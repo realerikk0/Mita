@@ -18,7 +18,9 @@ import {
   validateLinuxReleaseBuild,
   validateMacOSCandidateVerifier,
   validateQualificationWorkflow,
+  validateActiveReleaseIdentity,
   validateReleaseIdentity,
+  validateReleaseTrainPolicy,
   validateReleaseEnvironmentWorkflows,
   validateWindowsCandidateVerifier,
 } from '../release-policy-contracts.mjs'
@@ -37,6 +39,27 @@ const withLineEndings = (source, lineEnding) =>
   normalizeLineEndings(source).replaceAll('\n', lineEnding)
 
 const runtimeOnly = { checkProduct: false, checkRuntime: true }
+
+test('candidate content policy tests have no external runtime dependency', () => {
+  const source = fs.readFileSync(
+    'scripts/ci/__tests__/candidate-content-policy.test.mjs',
+    'utf8'
+  )
+  const specifiers = [
+    ...source.matchAll(
+      /^import(?:\s+(?:[\s\S]*?)\s+from)?\s*['"]([^'"]+)['"]\s*$/gm
+    ),
+  ].map((match) => match[1])
+  assert.ok(specifiers.length > 0)
+  assert.deepEqual(
+    specifiers.filter(
+      (specifier) =>
+        !specifier.startsWith('node:') &&
+        specifier !== '../candidate-content-policy.mjs'
+    ),
+    []
+  )
+})
 
 test('candidate path policy allows Playwright vocabulary but rejects retired tokens', () => {
   for (const name of [
@@ -136,7 +159,7 @@ test('candidate path policy allows Playwright vocabulary but rejects retired tok
   }
 })
 
-test('candidate path traversal fails closed without following bundle symlinks', (t) => {
+test('candidate path traversal requires contained, relative, live bundle symlinks', (t) => {
   const parent = fs.mkdtempSync(path.join(os.tmpdir(), 'biyan-path-policy-'))
   t.after(() => fs.rmSync(parent, { force: true, recursive: true }))
   const root = path.join(parent, 'candidate')
@@ -156,14 +179,33 @@ test('candidate path traversal fails closed without following bundle symlinks', 
     /root must not be a symbolic link/
   )
 
-  fs.symlinkSync(
-    '/relocated/workspace/Biyan.png',
-    path.join(root, '.DirIcon')
-  )
+  fs.writeFileSync(path.join(root, 'Biyan.png'), '')
+  fs.symlinkSync('Biyan.png', path.join(root, '.DirIcon'))
   assert.doesNotThrow(() => assertSafeCandidatePaths(root, runtimeOnly))
 
+  fs.symlinkSync('/relocated/workspace/Biyan.png', path.join(root, 'absolute'))
+  assert.throws(
+    () => assertSafeCandidatePaths(root, runtimeOnly),
+    /symlink target must be relative/
+  )
+  fs.rmSync(path.join(root, 'absolute'))
+
+  fs.symlinkSync('../outside', path.join(root, 'escaping'))
+  assert.throws(
+    () => assertSafeCandidatePaths(root, runtimeOnly),
+    /symlink escapes the bundle/
+  )
+  fs.rmSync(path.join(root, 'escaping'))
+
+  fs.symlinkSync('missing', path.join(root, 'dangling'))
+  assert.throws(
+    () => assertSafeCandidatePaths(root, runtimeOnly),
+    /symlink target does not exist/
+  )
+  fs.rmSync(path.join(root, 'dangling'))
+
   fs.symlinkSync(
-    '/relocated/workspace/rag-extension',
+    'rag-extension',
     path.join(root, 'runtime-link')
   )
   assert.throws(
@@ -180,6 +222,12 @@ test('bridge release trains lock version, phase, schema, and Cargo.lock together
     ['0.6.637', 'A', 1],
     ['0.6.638', 'B', 2],
     ['0.6.639', 'C', 3],
+    ['0.6.640', 'A', 1],
+    ['0.6.641', 'B', 2],
+    ['0.6.642', 'C', 3],
+    ['0.6.643', 'A', 1],
+    ['0.6.644', 'B', 2],
+    ['0.6.645', 'C', 3],
   ]) {
     assert.deepEqual(
       validateReleaseIdentity({
@@ -207,6 +255,119 @@ test('bridge release trains lock version, phase, schema, and Cargo.lock together
       dataSchema: 3,
       cargoLockVersion: '0.6.638',
     }).some((failure) => failure.includes('Cargo.lock version'))
+  )
+  assert.ok(
+    validateReleaseIdentity({
+      version: '0.6.646',
+      migrationPhase: 'A',
+      dataSchema: 1,
+      cargoLockVersion: '0.6.646',
+    }).some((failure) => failure.includes('is not declared'))
+  )
+})
+
+test('formal release identity accepts only the active train checkpoint', () => {
+  assert.deepEqual(
+    validateActiveReleaseIdentity({
+      version: '0.6.643',
+      migrationPhase: 'A',
+      dataSchema: 1,
+      cargoLockVersion: '0.6.643',
+    }),
+    []
+  )
+  for (const [version, migrationPhase, dataSchema] of [
+    ['0.6.640', 'A', 1],
+    ['0.6.641', 'B', 2],
+    ['0.6.642', 'C', 3],
+  ]) {
+    assert.ok(
+      validateActiveReleaseIdentity({
+        version,
+        migrationPhase,
+        dataSchema,
+        cargoLockVersion: version,
+      }).some((failure) => failure.includes('not the declared active train'))
+    )
+  }
+})
+
+test('release train policy is unique, contiguous, and fail-closed', () => {
+  const policy = JSON.parse(
+    fs.readFileSync('scripts/ci/release-train-policy.json', 'utf8')
+  )
+  assert.deepEqual(validateReleaseTrainPolicy(policy), [])
+
+  const twoActive = structuredClone(policy)
+  twoActive.trains[0].status = 'active'
+  assert.ok(
+    validateReleaseTrainPolicy(twoActive).some((failure) =>
+      failure.includes('exactly one matching active train')
+    )
+  )
+
+  const phaseGap = structuredClone(policy)
+  phaseGap.trains.at(-1).releases.B.version = '0.6.650'
+  assert.ok(
+    validateReleaseTrainPolicy(phaseGap).some((failure) =>
+      failure.includes('versions must be contiguous')
+    )
+  )
+
+  const missingPhase = structuredClone(policy)
+  delete missingPhase.trains.at(-1).releases.C
+  assert.ok(
+    validateReleaseTrainPolicy(missingPhase).some((failure) =>
+      failure.includes('exactly A, B, C')
+    )
+  )
+
+  const downgradedActive = structuredClone(policy)
+  downgradedActive.trains.at(-1).releases.A.version = '0.6.100'
+  downgradedActive.trains.at(-1).releases.B.version = '0.6.101'
+  downgradedActive.trains.at(-1).releases.C.version = '0.6.102'
+  assert.ok(
+    validateReleaseTrainPolicy(downgradedActive).some((failure) =>
+      failure.includes('must start immediately after the previous C version')
+    )
+  )
+
+  const reordered = structuredClone(policy)
+  ;[reordered.trains[1], reordered.trains[2]] = [
+    reordered.trains[2],
+    reordered.trains[1],
+  ]
+  assert.ok(
+    validateReleaseTrainPolicy(reordered).some((failure) =>
+      failure.includes('must start immediately after the previous C version')
+    )
+  )
+
+  const unknownStatus = structuredClone(policy)
+  unknownStatus.trains[0].status = 'anything'
+  assert.ok(
+    validateReleaseTrainPolicy(unknownStatus).some((failure) =>
+      failure.includes('unsupported status anything')
+    )
+  )
+
+  const activeNotLast = structuredClone(policy)
+  ;[activeNotLast.trains[2], activeNotLast.trains[3]] = [
+    activeNotLast.trains[3],
+    activeNotLast.trains[2],
+  ]
+  assert.ok(
+    validateReleaseTrainPolicy(activeNotLast).some((failure) =>
+      failure.includes('active release train must be the final history entry')
+    )
+  )
+
+  const extraField = structuredClone(policy)
+  extraField.trains.at(-1).releases.A.alias = 'latest'
+  assert.ok(
+    validateReleaseTrainPolicy(extraField).some((failure) =>
+      failure.includes('keys must be exactly dataSchema, version')
+    )
   )
 })
 
@@ -444,11 +605,30 @@ test('every platform bundle includes LICENSE and NOTICE', () => {
   )
 })
 
-const candidateWorkflow = `jobs:
+const candidateWorkflow = `permissions:
+  contents: read
+jobs:
   preflight:
     steps:
-      - run: node scripts/ci/verify-release-policy.mjs
-      - run: node --test scripts/ci/__tests__/release-policy.test.mjs
+      - uses: actions/checkout@v4
+        with:
+          ref: mita-main
+          path: harness
+          persist-credentials: false
+      - uses: actions/checkout@v4
+        with:
+          ref: v0.6.643
+          path: target
+          persist-credentials: false
+      - run: |
+          checkout_head="$(git -C harness rev-parse HEAD)"
+          live_main="$(git -C harness rev-parse refs/remotes/origin/mita-main)"
+          if [ "$checkout_head" != "$live_main" ]; then exit 1; fi
+          echo "trusted_main_commit=$live_main"
+      - run: git -C harness merge-base --is-ancestor "$source_commit" refs/remotes/origin/mita-main
+      - run: node harness/scripts/ci/verify-release-policy.mjs --repo-root target --require-active
+      - working-directory: harness
+        run: node --test scripts/ci/__tests__/release-policy.test.mjs
   quality-gate:
     needs: preflight
     steps:
@@ -458,23 +638,123 @@ const candidateWorkflow = `jobs:
     needs: [preflight, quality-gate]
     environment: release-distribution
     steps:
+      - run: git ls-remote --exit-code origin refs/heads/mita-main && echo needs.preflight.outputs.trusted_main_commit
       - run: make verify-macos-candidate APP=Biyan.app DMG=Biyan.dmg VERSION=0.6.636
+      - uses: actions/upload-artifact@v4
   build-windows:
     needs:
       - preflight
       - quality-gate
     environment: release-distribution
     steps:
-      - run: node scripts/ci/candidate-path-policy.mjs --root src-tauri/target/release/bundle --runtime-only
+      - run: git ls-remote --exit-code origin refs/heads/mita-main && echo needs.preflight.outputs.trusted_main_commit
+      - run: node scripts/ci/candidate-path-policy.mjs --root src-tauri/target/release/bundle
+      - uses: actions/upload-artifact@v4
   build-linux:
     needs: [preflight, quality-gate]
     environment: release-distribution
     steps:
-      - run: node scripts/ci/candidate-path-policy.mjs --root src-tauri/target/release/bundle --runtime-only
+      - run: git ls-remote --exit-code origin refs/heads/mita-main && echo needs.preflight.outputs.trusted_main_commit
+      - run: node scripts/ci/candidate-path-policy.mjs --root src-tauri/target/release/bundle
+      - uses: actions/upload-artifact@v4
+  package-candidate:
+    needs: [preflight, build-macos, build-windows, build-linux]
+    environment: release-distribution
+    steps:
+      - run: git ls-remote --exit-code origin refs/heads/mita-main && echo needs.preflight.outputs.trusted_main_commit
+      - run: yarn tauri signer sign dist/updater-candidate/candidate.json
+      - run: sha256sum Biyan* candidate.json candidate.json.sig latest.json > SHA256SUMS
+      - uses: actions/upload-artifact@v4
+  draft-release:
+    permissions:
+      contents: write
+    steps:
+      - run: git ls-remote --exit-code origin refs/heads/mita-main && echo needs.preflight.outputs.trusted_main_commit
+      - uses: softprops/action-gh-release@v2
 `
 
 test('candidate workflow gates every platform build on exact-tag tests', () => {
   assert.deepEqual(validateCandidateWorkflow(candidateWorkflow), [])
+
+  const topLevelWrite = candidateWorkflow.replace(
+    'permissions:\n  contents: read',
+    'permissions:\n  contents: write'
+  )
+  assert.ok(
+    validateCandidateWorkflow(topLevelWrite).some((failure) =>
+      failure.includes('top-level permissions')
+    )
+  )
+
+  const persistedCheckout = candidateWorkflow.replace(
+    'persist-credentials: false',
+    'persist-credentials: true'
+  )
+  assert.ok(
+    validateCandidateWorkflow(persistedCheckout).some((failure) =>
+      failure.includes('persisted credentials')
+    )
+  )
+
+  const untrustedHarness = candidateWorkflow.replace(
+    'ref: mita-main',
+    'ref: v0.6.643'
+  )
+  assert.ok(
+    validateCandidateWorkflow(untrustedHarness).some((failure) =>
+      failure.includes('protected mita-main harness')
+    )
+  )
+
+  const withoutAncestorProof = candidateWorkflow.replace(
+    'git -C harness merge-base --is-ancestor',
+    'echo no-ancestor-proof'
+  )
+
+  const withoutExactHarnessHead = candidateWorkflow.replace(
+    'checkout_head="$(git -C harness rev-parse HEAD)"',
+    'checkout_head="$source_commit"'
+  )
+  assert.ok(
+    validateCandidateWorkflow(withoutExactHarnessHead).some((failure) =>
+      failure.includes('trusted harness HEAD')
+    )
+  )
+
+  const withoutMutationRevalidation = candidateWorkflow.replaceAll(
+    'git ls-remote --exit-code origin refs/heads/mita-main',
+    'echo stale-main'
+  )
+  assert.ok(
+    validateCandidateWorkflow(withoutMutationRevalidation).some((failure) =>
+      failure.includes('before external mutation')
+    )
+  )
+
+  const lateMutationRevalidation = candidateWorkflow.replace(
+    '      - run: git ls-remote --exit-code origin refs/heads/mita-main && echo needs.preflight.outputs.trusted_main_commit\n      - run: make verify-macos-candidate APP=Biyan.app DMG=Biyan.dmg VERSION=0.6.636\n      - uses: actions/upload-artifact@v4',
+    '      - run: make verify-macos-candidate APP=Biyan.app DMG=Biyan.dmg VERSION=0.6.636\n      - uses: actions/upload-artifact@v4\n      - run: git ls-remote --exit-code origin refs/heads/mita-main && echo needs.preflight.outputs.trusted_main_commit'
+  )
+  assert.ok(
+    validateCandidateWorkflow(lateMutationRevalidation).some((failure) =>
+      failure.includes('build-macos must revalidate')
+    )
+  )
+  assert.ok(
+    validateCandidateWorkflow(withoutAncestorProof).some((failure) =>
+      failure.includes('ancestor of live mita-main')
+    )
+  )
+
+  const withoutActiveTrainGate = candidateWorkflow.replace(
+    '--require-active',
+    '--ignored-active'
+  )
+  assert.ok(
+    validateCandidateWorkflow(withoutActiveTrainGate).some((failure) =>
+      failure.includes('active-train release policy')
+    )
+  )
 
   const withoutUpdaterContracts = candidateWorkflow.replace(
     'node --test scripts/updater/__tests__/updater.test.mjs',
@@ -483,6 +763,29 @@ test('candidate workflow gates every platform build on exact-tag tests', () => {
   assert.ok(
     validateCandidateWorkflow(withoutUpdaterContracts).some((failure) =>
       failure.includes('updater contract tests')
+    )
+  )
+
+  const unsignedProvenance = candidateWorkflow.replace(
+    'yarn tauri signer sign dist/updater-candidate/candidate.json',
+    'echo unsigned'
+  )
+  assert.ok(
+    validateCandidateWorkflow(unsignedProvenance).some((failure) =>
+      failure.includes('sign candidate.json')
+    )
+  )
+
+  const unprotectedProvenanceKey = candidateWorkflow.replace(
+    `  package-candidate:
+    needs: [preflight, build-macos, build-windows, build-linux]
+    environment: release-distribution`,
+    `  package-candidate:
+    needs: [preflight, build-macos, build-windows, build-linux]`
+  )
+  assert.ok(
+    validateCandidateWorkflow(unprotectedProvenanceKey).some((failure) =>
+      failure.includes('provenance signing key')
     )
   )
 
@@ -521,7 +824,7 @@ test('candidate workflow gates every platform build on exact-tag tests', () => {
   )
 
   const withoutRetiredRuntimeScanner = candidateWorkflow.replace(
-    'node scripts/ci/candidate-path-policy.mjs --root src-tauri/target/release/bundle --runtime-only',
+    'node scripts/ci/candidate-path-policy.mjs --root src-tauri/target/release/bundle',
     'echo skipped-retired-runtime-scan'
   )
   assert.ok(
@@ -530,9 +833,19 @@ test('candidate workflow gates every platform build on exact-tag tests', () => {
     )
   )
 
+  const runtimeOnlyScanner = candidateWorkflow.replace(
+    'node scripts/ci/candidate-path-policy.mjs --root src-tauri/target/release/bundle',
+    'node scripts/ci/candidate-path-policy.mjs --root src-tauri/target/release/bundle --runtime-only'
+  )
+  assert.ok(
+    validateCandidateWorkflow(runtimeOnlyScanner).some((failure) =>
+      failure.includes('product and runtime names')
+    )
+  )
+
   const broadRuntimeGrep = candidateWorkflow.replace(
-    '      - run: node scripts/ci/candidate-path-policy.mjs --root src-tauri/target/release/bundle --runtime-only',
-    `      - run: node scripts/ci/candidate-path-policy.mjs --root src-tauri/target/release/bundle --runtime-only
+    '      - run: node scripts/ci/candidate-path-policy.mjs --root src-tauri/target/release/bundle',
+    `      - run: node scripts/ci/candidate-path-policy.mjs --root src-tauri/target/release/bundle
       - run: find bundle -type f | grep -Ei '(llama|mlx|foundation|rag|vector)'`
   )
   assert.ok(
@@ -542,8 +855,8 @@ test('candidate workflow gates every platform build on exact-tag tests', () => {
   )
 
   const broadRuntimePowerShellMatch = candidateWorkflow.replace(
-    '      - run: node scripts/ci/candidate-path-policy.mjs --root src-tauri/target/release/bundle --runtime-only',
-    `      - run: node scripts/ci/candidate-path-policy.mjs --root src-tauri/target/release/bundle --runtime-only
+    '      - run: node scripts/ci/candidate-path-policy.mjs --root src-tauri/target/release/bundle',
+    `      - run: node scripts/ci/candidate-path-policy.mjs --root src-tauri/target/release/bundle
       - run: |
           if ($path -match '(?i)(llama|mlx|foundation|rag|vector)') {
             throw "retired runtime"
@@ -796,6 +1109,7 @@ jobs:
   release-safety:
     steps:
       - run: node scripts/ci/verify-release-policy.mjs
+      - run: node --test scripts/ci/__tests__/candidate-content-policy.test.mjs
       - run: node --test scripts/ci/__tests__/release-policy.test.mjs
       - run: node --test scripts/ci/__tests__/qualification-impact.test.mjs
       - run: node --test scripts/ci/__tests__/verify-qualification-artifacts.test.mjs
@@ -1440,7 +1754,7 @@ jobs:
           ref: \${{ needs.preflight.outputs.workflow_sha }}
           path: harness
       - working-directory: target
-        run: node ../harness/scripts/ci/candidate-path-policy.mjs --root "$bundle" --runtime-only
+        run: node ../harness/scripts/ci/candidate-path-policy.mjs --root "$bundle"
   native-windows:
     runs-on: windows-2022
     needs: [preflight, artifact-replay]
@@ -1452,7 +1766,7 @@ jobs:
           path: harness
       - run: |
           & ./harness/scripts/ci/verify-windows-candidate.ps1 -Exe "$EXE" -Msi "$MSI" -Version "$VERSION"
-          node ./harness/scripts/ci/candidate-path-policy.mjs --root $bundle --runtime-only
+          node ./harness/scripts/ci/candidate-path-policy.mjs --root $bundle
   native-macos:
     runs-on: macos-15-intel
     needs: [preflight, artifact-replay]
@@ -1580,21 +1894,29 @@ test('exact-SHA qualification keeps the harness trusted and has no production au
       'echo node harness/scripts/verify-macos-candidate.mjs'
     ),
     qualificationWorkflow.replace(
-      'node ../harness/scripts/ci/candidate-path-policy.mjs --root "$bundle" --runtime-only',
+      'node ../harness/scripts/ci/candidate-path-policy.mjs --root "$bundle"',
       'echo skipped-linux-retired-runtime-scan'
     ),
     qualificationWorkflow.replace(
-      'node ./harness/scripts/ci/candidate-path-policy.mjs --root $bundle --runtime-only',
+      'node ./harness/scripts/ci/candidate-path-policy.mjs --root $bundle',
       'Write-Output skipped-windows-retired-runtime-scan'
     ),
     qualificationWorkflow.replace(
-      'node ../harness/scripts/ci/candidate-path-policy.mjs --root "$bundle" --runtime-only',
-      `node ../harness/scripts/ci/candidate-path-policy.mjs --root "$bundle" --runtime-only
+      'node ../harness/scripts/ci/candidate-path-policy.mjs --root "$bundle"',
+      'node ../harness/scripts/ci/candidate-path-policy.mjs --root "$bundle" --runtime-only'
+    ),
+    qualificationWorkflow.replace(
+      'node ./harness/scripts/ci/candidate-path-policy.mjs --root $bundle',
+      'node ./harness/scripts/ci/candidate-path-policy.mjs --root $bundle --runtime-only'
+    ),
+    qualificationWorkflow.replace(
+      'node ../harness/scripts/ci/candidate-path-policy.mjs --root "$bundle"',
+      `node ../harness/scripts/ci/candidate-path-policy.mjs --root "$bundle"
           find bundle -type f | grep -Ei '(llama|mlx|foundation|rag|vector)'`
     ),
     qualificationWorkflow.replace(
-      'node ./harness/scripts/ci/candidate-path-policy.mjs --root $bundle --runtime-only',
-      `node ./harness/scripts/ci/candidate-path-policy.mjs --root $bundle --runtime-only
+      'node ./harness/scripts/ci/candidate-path-policy.mjs --root $bundle',
+      `node ./harness/scripts/ci/candidate-path-policy.mjs --root $bundle
           if ($path -match '(?i)(llama|mlx|foundation|rag|vector)') {
             throw "retired runtime"
           }`

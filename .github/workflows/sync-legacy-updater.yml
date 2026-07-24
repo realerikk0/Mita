@@ -1,13 +1,7 @@
-name: Verify Legacy A Updater Pin
+name: Verify Legacy Updater Bridge
 
 on:
   workflow_dispatch:
-    inputs:
-      expected_version:
-        description: "Latest approved A-series bridge version"
-        required: true
-        default: "0.6.637"
-        type: string
   schedule:
     - cron: "17 */6 * * *"
 
@@ -16,35 +10,49 @@ permissions:
 
 jobs:
   verify:
-    name: Legacy manifests remain byte-identical and pinned to A
+    name: Legacy manifests match the tracked bridge state
     runs-on: ubuntu-latest
     steps:
+      - name: Check out trusted default-branch policy
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.repository.default_branch }}
+          persist-credentials: false
+
+      - name: Test the fail-closed manifest verifier
+        run: node --test scripts/updater/__tests__/legacy-manifest-policy.test.mjs
+
       - name: Download both immutable legacy entrypoints
-        env:
-          EXPECTED_VERSION: ${{ inputs.expected_version || vars.LEGACY_BRIDGE_VERSION || '0.6.637' }}
         run: |
           set -euo pipefail
+          policy=scripts/updater/legacy-bridge-policy.json
           mkdir -p dist
-          curl -fsSL --retry 10 --retry-delay 6 \
-            https://static.mitapp.cn/mita/latest.json -o dist/aliyun-latest.json
-          curl -fsSL --retry 10 --retry-delay 6 \
-            https://updates.mita.so/mita/latest.json -o dist/r2-latest.json
-          cmp dist/aliyun-latest.json dist/r2-latest.json
-          test "$(jq -r .version dist/aliyun-latest.json)" = "$EXPECTED_VERSION"
-          for platform in darwin-aarch64 darwin-x86_64 windows-x86_64 linux-x86_64; do
-            jq -e --arg platform "$platform" \
-              '.platforms[$platform].url | type == "string" and length > 0' \
-              dist/aliyun-latest.json >/dev/null
-            jq -e --arg platform "$platform" \
-              '.platforms[$platform].signature | type == "string" and length > 0' \
-              dist/aliyun-latest.json >/dev/null
-          done
+          cp "$policy" dist/legacy-bridge-policy.json
+          aliyun_url="$(jq -er '.manifestUrls.aliyun' "$policy")"
+          r2_url="$(jq -er '.manifestUrls.r2' "$policy")"
+          curl --proto '=https' --tlsv1.2 -fsSL \
+            --retry 5 --retry-all-errors --retry-delay 6 \
+            --connect-timeout 10 --max-time 120 \
+            "$aliyun_url" -o dist/aliyun-latest.json
+          curl --proto '=https' --tlsv1.2 -fsSL \
+            --retry 5 --retry-all-errors --retry-delay 6 \
+            --connect-timeout 10 --max-time 120 \
+            "$r2_url" -o dist/r2-latest.json
+
+      - name: Verify tracked state and write evidence
+        run: |
+          set -euo pipefail
+          node scripts/updater/legacy-manifest-policy.mjs \
+            --aliyun dist/aliyun-latest.json \
+            --r2 dist/r2-latest.json \
+            --evidence dist/legacy-manifest-verification.json
           sha256sum dist/aliyun-latest.json dist/r2-latest.json
 
       - name: Upload verification evidence
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: legacy-a-pin-${{ github.run_id }}
-          if-no-files-found: ignore
+          name: legacy-bridge-verification-${{ github.run_id }}
+          if-no-files-found: warn
+          retention-days: 30
           path: dist/*.json

@@ -9,7 +9,7 @@ export interface CPU {
   extensions: string[]
   name: string
   usage: number
-  instructions?: string[] // Cortex migration: ensure instructions data ready
+  instructions?: string[] // Keep instruction data available across platforms.
 }
 
 export interface GPUAdditionalInfo {
@@ -174,7 +174,7 @@ export const useHardware = create<HardwareStore>()(
             ...data,
             cpu: {
               ...data.cpu,
-              // Cortex migration - ensure instructions data ready
+              // Keep the cross-platform shape stable when instructions are unavailable.
               instructions: [],
             },
             ram: {

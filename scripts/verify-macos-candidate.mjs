@@ -11,12 +11,13 @@ import {
   assertMacOSArchitectures,
   isMachOFile,
 } from './macos-architecture-policy.mjs'
+import {
+  EXPECTED_PREINSTALL_PACKAGE_IDENTITIES,
+  scanCandidateTree,
+} from './ci/candidate-content-policy.mjs'
 
-export const EXPECTED_PREINSTALL_PACKAGES = [
-  'biyan-assistant-extension-1.0.2.tgz',
-  'biyan-conversational-extension-1.0.0.tgz',
-  'biyan-download-extension-1.0.0.tgz',
-]
+export const EXPECTED_PREINSTALL_PACKAGES =
+  EXPECTED_PREINSTALL_PACKAGE_IDENTITIES.map(({ file }) => file)
 
 const EXPECTED_BUNDLE_ID = 'uk.jingxing.mita'
 const EXPECTED_PRODUCT_NAME = 'Biyan'
@@ -242,6 +243,22 @@ function assertInfoPlist(plist, version) {
       )
     }
   }
+  const urlTypes = Array.isArray(plist.CFBundleURLTypes)
+    ? plist.CFBundleURLTypes
+    : []
+  const urlSchemes = urlTypes.flatMap((entry) =>
+    Array.isArray(entry?.CFBundleURLSchemes)
+      ? entry.CFBundleURLSchemes.map(String)
+      : []
+  )
+  if (
+    urlTypes.length !== 1 ||
+    JSON.stringify(urlSchemes) !== JSON.stringify(['biyan', 'mita'])
+  ) {
+    throw new Error(
+      `Info.plist URL schemes are ${JSON.stringify(urlSchemes)}, expected exactly ["biyan","mita"]`
+    )
+  }
 }
 
 function inspectMachOArchitectures(appPath, entries, runCommand) {
@@ -347,6 +364,7 @@ export function verifyMacOSCandidate(
 
   const entries = walkBundle(resolvedApp)
   assertSafeBundlePaths(resolvedApp, entries)
+  scanCandidateTree(resolvedApp)
   const machOFiles = inspectMachOArchitectures(resolvedApp, entries, runCommand)
 
   runCommand('codesign', [

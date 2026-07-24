@@ -80,6 +80,20 @@ attested `dataSchema` through `BIYAN_DATA_SCHEMA`. Retired runtime source and
 package graphs remain forbidden in every phase rather than being restored in
 earlier checkpoints.
 
+The authoritative active closure train is `0.6.643/A/1` →
+`0.6.644/B/2` → `0.6.645/C/3`. Cut one replacement Shared → A → B → C
+train only after a change to product source, product dependencies, bundled
+resources, or packaged product content. Clear all known product blockers first
+and keep Shared/C on the same audited source tree; preserve every prior
+checkpoint commit, ref, and evidence record.
+
+Workflow-, test-, verifier-, and distribution-only fixes belong in an
+independent control-plane pull request. Such a fix preserves the existing
+checkpoints, never recuts the train, and revalidates only the fail-closed
+impact scope selected by protected-branch policy. If control-plane validation
+reveals a product blocker, stop qualification and wait for the audited product
+fix before cutting the single required replacement train.
+
 ## Promotion
 
 Use `.github/workflows/promote-desktop-update.yml` only after environment
@@ -90,6 +104,15 @@ approval. Promotion requires:
 - real upgrade smoke evidence for the requested source/target pair;
 - rollout timing and health evidence;
 - a recoverable snapshot of the previous policy and manifests.
+
+The initial A bridge also requires
+`scripts/updater/legacy-a-transition-policy.json` to name the exact reviewed
+`0.6.643` manifest SHA-256 and four-platform set. It intentionally remains
+`approvedNext: null` until the signed A candidate exists and passes source,
+candidate, and artifact acceptance. Populate that one hash through a
+CODEOWNER-reviewed control-plane pull request; this verifier-only change does
+not recut A/B/C. A missing or mismatched approval blocks promotion before any
+production mutation.
 
 The dynamic Biyan route returns `204` when a phase is closed, paused, outside
 its cohort, or covered by the kill switch. Promotion always follows

@@ -280,10 +280,17 @@ jobs:
         run: node scripts/ci/verify-release-policy.mjs
 
       - name: Test release gate policy contracts
-        run: node --test scripts/ci/__tests__/release-policy.test.mjs
+        run: |
+          node --test scripts/ci/__tests__/candidate-content-policy.test.mjs
+          node --test scripts/ci/__tests__/cloudflare-preview-cleanup.test.mjs
+          node --test scripts/ci/__tests__/legacy-compatibility-policy.test.mjs
+          node --test scripts/ci/__tests__/release-policy.test.mjs
 
       - name: Test updater candidate, promotion, and routing contracts
-        run: node --test scripts/updater/__tests__/updater.test.mjs
+        run: |
+          node --test scripts/updater/__tests__/legacy-manifest-policy.test.mjs
+          node --test scripts/updater/__tests__/promotion-transaction.test.mjs
+          node --test scripts/updater/__tests__/updater.test.mjs
 
       - name: Test scoped qualification contracts
         run: |

@@ -50,10 +50,6 @@ jobs:
     runs-on: windows-11-nvidia-gpu
     timeout-minutes: 60
 
-    env:
-      DEFAULT_BIYAN_APP_URL: 'https://updates.mita.so/biyan/nightly/Biyan-nightly_0.6.637_x64-setup.exe'
-      DEFAULT_IS_NIGHTLY: 'true'
-
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
@@ -98,8 +94,8 @@ jobs:
               -WorkflowInputIsNightly "${{ inputs.is_nightly }}" `
               -RepoVariableUrl "${{ vars.BIYAN_APP_URL }}" `
               -RepoVariableIsNightly "${{ vars.IS_NIGHTLY }}" `
-              -DefaultUrl "$env:DEFAULT_BIYAN_APP_URL" `
-              -DefaultIsNightly "$env:DEFAULT_IS_NIGHTLY"
+              -DefaultUrl "" `
+              -DefaultIsNightly "true"
           }
 
       - name: Install Biyan app
@@ -167,10 +163,6 @@ jobs:
   ubuntu:
     runs-on: ubuntu-22-04-nvidia-gpu
     timeout-minutes: 60
-
-    env:
-      DEFAULT_BIYAN_APP_URL: 'https://updates.mita.so/biyan/nightly/Biyan-nightly_0.6.637_amd64.deb'
-      DEFAULT_IS_NIGHTLY: 'true'
 
     steps:
       - name: Checkout repository
@@ -247,8 +239,8 @@ jobs:
               "${{ inputs.is_nightly }}" \
               "${{ vars.BIYAN_APP_URL_LINUX }}" \
               "${{ vars.IS_NIGHTLY }}" \
-              "$DEFAULT_BIYAN_APP_URL" \
-              "$DEFAULT_IS_NIGHTLY"
+              "" \
+              "true"
             
             # Set the expected process name; the install script records the executable path.
             if [ "${{ inputs.is_nightly }}" = "true" ]; then
@@ -312,10 +304,6 @@ jobs:
     runs-on: macos-selfhosted-15-arm64-cua
     timeout-minutes: 60
 
-    env:
-      DEFAULT_BIYAN_APP_URL: 'https://updates.mita.so/biyan/nightly/Biyan-nightly_0.6.637_universal.dmg'
-      DEFAULT_IS_NIGHTLY: 'true'
-
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
@@ -367,8 +355,8 @@ jobs:
               "${{ inputs.is_nightly }}" \
               "${{ vars.BIYAN_APP_URL }}" \
               "${{ vars.IS_NIGHTLY }}" \
-              "$DEFAULT_BIYAN_APP_URL" \
-              "$DEFAULT_IS_NIGHTLY"
+              "" \
+              "true"
             
             # Set the expected process name; the install script records the executable path.
             if [ "${{ inputs.is_nightly }}" = "true" ]; then

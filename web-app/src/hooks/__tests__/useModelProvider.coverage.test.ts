@@ -218,7 +218,7 @@ describe('useModelProvider - coverage', () => {
       expect(provider?.models.find((m: any) => m.id === 'new-model')).toBeDefined()
     })
 
-    it('cortex migration: migrates legacy llama.cpp models', () => {
+    it('migrates retired llama.cpp model settings once', () => {
       const { result } = renderHook(() => useModelProvider())
 
       act(() => {

@@ -81,7 +81,6 @@ jobs:
       public_provider: ${{ needs.set-public-provider.outputs.public_provider }}
       new_version: ${{ needs.get-update-version.outputs.new_version }}
       channel: nightly
-      cortex_api_port: '39261'
 
   build-windows-x64:
     uses: ./.github/workflows/template-tauri-build-windows-x64.yml
@@ -93,7 +92,6 @@ jobs:
       public_provider: ${{ needs.set-public-provider.outputs.public_provider }}
       new_version: ${{ needs.get-update-version.outputs.new_version }}
       channel: nightly
-      cortex_api_port: '39261'
   build-linux-x64:
     uses: ./.github/workflows/template-tauri-build-linux-x64.yml
     secrets: inherit
@@ -104,7 +102,6 @@ jobs:
       public_provider: ${{ needs.set-public-provider.outputs.public_provider }}
       new_version: ${{ needs.get-update-version.outputs.new_version }}
       channel: nightly
-      cortex_api_port: '39261'
       disable_updater: ${{ github.event.inputs.disable_updater == 'true' }}
 
   sync-temp-to-latest:

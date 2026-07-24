@@ -11,6 +11,15 @@ const DEFAULT_QUALITY = 'medium'
 const DEFAULT_POLL_INTERVAL_MS = 2500
 const DEFAULT_TIMEOUT_MS = 600_000
 
+export function validateJingxingBaseUrl(value) {
+  if (value !== DEFAULT_JINGXING_BASE_URL) {
+    throw new Error(
+      `JINGXING_BASE_URL must be exactly ${DEFAULT_JINGXING_BASE_URL}`
+    )
+  }
+  return value
+}
+
 function parseArgs(argv) {
   const args = {}
   for (let index = 0; index < argv.length; index += 1) {
@@ -278,6 +287,7 @@ async function saveImageItem(item, output, options) {
 }
 
 export async function generateReleasePoster(release, options) {
+  validateJingxingBaseUrl(options.baseUrl)
   const highlights = extractPosterHighlights(release)
   const prompt = options.prompt ?? buildPosterPrompt(release, highlights)
   const response = await postJson(
@@ -326,7 +336,9 @@ async function main() {
 
   if (!releaseJson) throw new Error('--release-json is required')
 
-  const baseUrl = (process.env.JINGXING_BASE_URL || DEFAULT_JINGXING_BASE_URL).replace(/\/$/, '')
+  const baseUrl = validateJingxingBaseUrl(
+    process.env.JINGXING_BASE_URL || DEFAULT_JINGXING_BASE_URL
+  )
   const apiKey = process.env.JINGXING_API_KEY
 
   try {

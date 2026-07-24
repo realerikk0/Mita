@@ -883,8 +883,26 @@ jobs:
           test "$(dpkg-deb -f "$deb" Version)" = "$VERSION"
           test "$(dpkg-deb -f "$deb" Architecture)" = "amd64"
           node ../harness/scripts/ci/candidate-path-policy.mjs \
-            --root "$bundle" \
-            --runtime-only
+            --root "$bundle"
+          appimage="$(realpath "$appimage")"
+          deb="$(realpath "$deb")"
+          chmod +x "$appimage"
+          extract_root="$(mktemp -d)"
+          deb_root="$(mktemp -d)"
+          trap 'rm -rf "$extract_root" "$deb_root"' EXIT
+          (
+            cd "$extract_root"
+            "$appimage" --appimage-extract >/dev/null
+          )
+          dpkg-deb --extract "$deb" "$deb_root"
+          node ../harness/scripts/ci/candidate-path-policy.mjs \
+            --root "$extract_root/squashfs-root"
+          node ../harness/scripts/ci/candidate-content-policy.mjs \
+            --root "$extract_root/squashfs-root"
+          node ../harness/scripts/ci/candidate-path-policy.mjs \
+            --root "$deb_root"
+          node ../harness/scripts/ci/candidate-content-policy.mjs \
+            --root "$deb_root"
 
       - name: Collect Linux packages and runner provenance
         shell: bash
@@ -1075,8 +1093,7 @@ jobs:
             -Msi $msi `
             -Version $env:VERSION
           node ./harness/scripts/ci/candidate-path-policy.mjs `
-            --root $bundle `
-            --runtime-only
+            --root $bundle
 
       - name: Collect Windows packages and runner provenance
         shell: pwsh

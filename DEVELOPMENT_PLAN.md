@@ -10,14 +10,15 @@ The bridge releases use cumulative forward-only data migrations:
 
 | Release | App version | Data schema | Purpose |
 | --- | --- | --- | --- |
-| A | 0.6.637 | 1 | Establish the migration substrate and activate Biyan storage |
-| B | 0.6.638 | 2 | Remove retired runtime payloads and finish package branding |
-| C | 0.6.639 | 3 | Restrict legacy aliases to isolated ingress and migration code |
+| A | 0.6.643 | 1 | Establish the migration substrate and activate Biyan storage |
+| B | 0.6.644 | 2 | Remove retired runtime payloads and finish package branding |
+| C | 0.6.645 | 3 | Restrict legacy aliases to isolated ingress and migration code |
 
 The superseded `0.6.634` candidate failed before a GitHub Release was created;
 its public tag remains immutable release evidence. Versions `0.6.635` and
-`0.6.636` were never tagged. The supported replacement train starts at
-`0.6.637`.
+`0.6.636` were never tagged. All earlier train refs, checkpoints, and
+qualification evidence remain immutable audit history. The authoritative
+active closure train is `0.6.643/A/1` → `0.6.644/B/2` → `0.6.645/C/3`.
 
 Every later release carries all earlier migration steps. Sources remain
 read-only, conversion happens in staging, integrity checks run before the
@@ -32,6 +33,21 @@ compiles the attested target schema into each candidate. Do not resurrect
 retired runtime source or package graphs to manufacture artificial phase
 diffs: release policy forbids those paths for every phase.
 
+## Closure recut boundary
+
+Cut one new Shared → A → B → C train only when product source, product
+dependencies, bundled resources, or packaged product content changes. Finish
+the concentrated source and artifact audit, clear every product blocker, and
+then cut that single train from one audited Shared/C source tree. Preserve all
+prior checkpoint commits, refs, and evidence.
+
+Workflow-, test-, verifier-, and distribution-only changes must use an
+independent control-plane pull request. They preserve the existing checkpoint
+commits, do not recut the train, and revalidate only the fail-closed impact
+scope selected by protected-branch policy. If a control-plane change exposes a
+product blocker, stop qualification; merge no release checkpoint until the
+product fix is audited and the one required replacement train is cut.
+
 ## Release invariants
 
 - Only `BIYAN_SIGNING_KEY` is accepted for formal builds.
@@ -41,6 +57,10 @@ diffs: release policy forbids those paths for every phase.
   hostnames may remain only as documented upgrade/ingress infrastructure; they
   must never surface as the product name or re-enable retired behavior.
 - The updater installs the exact signed update object that was checked.
+- Initial A promotion stays fail-closed until a control-plane pull request
+  records the accepted `0.6.643` manifest SHA-256 in
+  `scripts/updater/legacy-a-transition-policy.json`; this approval does not
+  recut the product train.
 - Promotion is gated by health evidence, rollout timing, and a kill switch.
 - User-owned retired data is deleted only after explicit confirmation.
 

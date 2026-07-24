@@ -136,7 +136,15 @@ endif
 	node --test ./scripts/__tests__/rust-workspace-lock.test.mjs
 	node --test ./scripts/__tests__/release-version-stamp.test.mjs
 	node --test ./scripts/__tests__/verify-macos-candidate.test.mjs
+	node --test ./scripts/__tests__/icon-generation.test.mjs
+	node --test ./scripts/ci/__tests__/candidate-content-policy.test.mjs
+	node --test ./scripts/ci/__tests__/cloudflare-preview-cleanup.test.mjs
+	node --test ./scripts/ci/__tests__/legacy-compatibility-policy.test.mjs
 	node --test ./scripts/ci/__tests__/release-policy.test.mjs
+	node --test ./scripts/updater/__tests__/legacy-manifest-policy.test.mjs
+	node --test ./scripts/updater/__tests__/promotion-transaction.test.mjs
+	node --test ./scripts/updater/__tests__/updater.test.mjs
+	node --test ./scripts/release-distribution/__tests__/release-distribution.test.mjs
 	yarn copy:assets:tauri
 	yarn build:icon
 	bash ./scripts/prepare-tauri-test-resources.sh

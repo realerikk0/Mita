@@ -13,17 +13,14 @@ on:
         description: 'Windows installer URL path (used when source_type=url or to select artifact)'
         required: true
         type: string
-        default: 'https://updates.mita.so/biyan/windows/Biyan_0.6.637_x64-setup.exe'
       biyan_app_ubuntu_source:
         description: 'Ubuntu .deb URL path'
         required: true
         type: string
-        default: 'https://updates.mita.so/biyan/nightly/Biyan-nightly_0.6.637_amd64.deb'
       biyan_app_macos_source:
         description: 'macOS .dmg URL path'
         required: true
         type: string
-        default: 'https://updates.mita.so/biyan/nightly/Biyan-nightly_0.6.637_universal.dmg'
       is_nightly:
         description: 'Is the app a nightly build?'
         required: true
@@ -50,9 +47,6 @@ jobs:
   reliability-windows:
     runs-on: windows-11-nvidia-gpu
     timeout-minutes: 60
-    env:
-      DEFAULT_BIYAN_APP_URL: 'https://updates.mita.so/biyan/windows/Biyan_0.6.637_x64-setup.exe'
-      DEFAULT_IS_NIGHTLY: 'false'
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
@@ -75,8 +69,8 @@ jobs:
             -WorkflowInputIsNightly "${{ inputs.is_nightly }}" `
             -RepoVariableUrl "${{ vars.BIYAN_APP_URL }}" `
             -RepoVariableIsNightly "${{ vars.IS_NIGHTLY }}" `
-            -DefaultUrl "$env:DEFAULT_BIYAN_APP_URL" `
-            -DefaultIsNightly "$env:DEFAULT_IS_NIGHTLY"
+            -DefaultUrl "" `
+            -DefaultIsNightly "false"
 
       - name: Install Biyan app
         shell: powershell

@@ -1,0 +1,228 @@
+{
+  "archivedDocsAssets": {
+    "canonicalTextPaths": [
+      "docs/unpublished-upstream-history/assets/docs-src/icons/Amazone.svg",
+      "docs/unpublished-upstream-history/assets/docs-src/icons/ChatGPT.svg",
+      "docs/unpublished-upstream-history/assets/docs-src/icons/Claude.svg",
+      "docs/unpublished-upstream-history/assets/docs-src/icons/DeepSeek.svg",
+      "docs/unpublished-upstream-history/assets/docs-src/icons/Figma.svg",
+      "docs/unpublished-upstream-history/assets/docs-src/icons/Gemini.svg",
+      "docs/unpublished-upstream-history/assets/docs-src/icons/Gemma.svg",
+      "docs/unpublished-upstream-history/assets/docs-src/icons/Gmail.svg",
+      "docs/unpublished-upstream-history/assets/docs-src/icons/Google-drive.svg",
+      "docs/unpublished-upstream-history/assets/docs-src/icons/Google.svg",
+      "docs/unpublished-upstream-history/assets/docs-src/icons/Jira.svg",
+      "docs/unpublished-upstream-history/assets/docs-src/icons/Kimi.svg",
+      "docs/unpublished-upstream-history/assets/docs-src/icons/Meta.svg",
+      "docs/unpublished-upstream-history/assets/docs-src/icons/Mistral AI.svg",
+      "docs/unpublished-upstream-history/assets/docs-src/icons/Notion.svg",
+      "docs/unpublished-upstream-history/assets/docs-src/icons/Qwen.svg",
+      "docs/unpublished-upstream-history/assets/docs-src/icons/Slack.svg",
+      "docs/unpublished-upstream-history/assets/docs-src/icons/Youtube.svg",
+      "docs/unpublished-upstream-history/assets/docs-src/icons/code.svg",
+      "docs/unpublished-upstream-history/assets/docs-src/icons/huggingface.svg",
+      "docs/unpublished-upstream-history/assets/docs-src/icons/logo-jan.svg",
+      "docs/unpublished-upstream-history/assets/docs-src/icons/robot.svg",
+      "docs/unpublished-upstream-history/assets/docs-src/icons/share-android.svg"
+    ],
+    "expectedFiles": 260,
+    "inventorySha256": "1443f7e789110de186114be269b0ac192424650b027001907c331bb7de1910ee",
+    "prefix": "docs/unpublished-upstream-history/assets/",
+    "reason": "Unpublished historical media stays outside every documentation build input; the 23 exact SVG text paths use canonical LF digests while all other assets remain byte-exact."
+  },
+  "excludedTrackedFiles": [
+    {
+      "digestMode": "text-lf",
+      "id": "generated-route-tree",
+      "path": "web-app/src/routeTree.gen.ts",
+      "reason": "TanStack Router generates this text file; its reviewed canonical LF content is locked instead of treated as first-party source.",
+      "sha256": "aa94c6734fa7cdf485d1480fdad6da580be83e8d721659a281a20738f986a3c7"
+    },
+    {
+      "digestMode": "byte-exact",
+      "id": "vendored-swagger-favicon",
+      "path": "src-tauri/static/swagger-ui/favicon.ico",
+      "reason": "Swagger UI supplies this vendored binary; its reviewed bytes are locked.",
+      "sha256": "60426f33d57fd801ab7f25956784a6ca6db4a3305bfb76e72ad7fe1556abe412"
+    },
+    {
+      "digestMode": "text-lf",
+      "id": "vendored-swagger-javascript",
+      "path": "src-tauri/static/swagger-ui/swagger-ui-bundle.js",
+      "reason": "Swagger UI supplies this vendored JavaScript bundle; its reviewed canonical LF content is locked.",
+      "sha256": "dbf3b6deb546cd86fd699f2dab5b349f68a40fd0b31f2a9fe4d4be5495977032"
+    },
+    {
+      "digestMode": "text-lf",
+      "id": "vendored-swagger-styles",
+      "path": "src-tauri/static/swagger-ui/swagger-ui.css",
+      "reason": "Swagger UI supplies this vendored stylesheet; its reviewed canonical LF content is locked.",
+      "sha256": "bc5e8d5c013477cf1f35e2fb8ba1dff66be0f72f24e669a509635657145e1acb"
+    }
+  ],
+  "rules": [
+    {
+      "expectedMatches": 33,
+      "id": "autoqa-upgrade-scenarios",
+      "matchesSha256": "e5cde01854f79d3642100cc63c2a877e297bc0af2d5fc0754ca2f9fa786f3dba",
+      "pathRegex": "^(?:autoqa/checklist\\.md|autoqa/migration_runner\\.py|autoqa/scripts/macos_cleanup\\.sh|autoqa/scripts/macos_post_cleanup\\.sh)$",
+      "pattern": "(?:catalog\\.jan\\.ai|apps(?:-nightly)?\\.jan\\.ai|janhq|latest[_-]jan[_-]model|model[-_]catalog|(?<![a-z0-9])(?:jan|mita|silence)(?![a-z0-9]))",
+      "reason": "AutoQA retains exact legacy identities only to build and verify upgrade or cleanup scenarios.",
+      "scope": "content"
+    },
+    {
+      "expectedMatches": 383,
+      "id": "compatibility-test-fixtures",
+      "matchesSha256": "3941455bc9c49089dbea9d2b38012111b718d809c704214eeca8af6562729497",
+      "pathRegex": "^(?:scripts/__tests__/flatpak-manifest\\.test\\.mjs|scripts/__tests__/thinking-content-windows-verifier\\.test\\.mjs|scripts/__tests__/verify-macos-candidate\\.test\\.mjs|scripts/__tests__/windows-installer-template\\.test\\.mjs|scripts/ci/__tests__/candidate-content-policy\\.test\\.mjs|scripts/ci/__tests__/cloudflare-preview-cleanup\\.test\\.mjs|scripts/ci/__tests__/legacy-compatibility-policy\\.test\\.mjs|scripts/ci/__tests__/qualification-impact\\.test\\.mjs|scripts/ci/__tests__/release-policy\\.test\\.mjs|scripts/release-distribution/__tests__/release-distribution\\.test\\.mjs|scripts/updater/__tests__/legacy-manifest-policy\\.test\\.mjs|scripts/updater/__tests__/promotion-transaction\\.test\\.mjs|scripts/updater/__tests__/updater\\.test\\.mjs|src-tauri/src/core/downloads/tests\\.rs|src-tauri/src/core/filesystem/tests\\.rs|src-tauri/src/core/image_assets/tests\\.rs|src-tauri/src/core/mcp/tests\\.rs|tests/checklist\\.md|web-app/src/containers/dialogs/__tests__/LegacyLocalDataCleanupDialog\\.test\\.tsx|web-app/src/hooks/__tests__/useAssistant\\.coverage\\.test\\.ts|web-app/src/hooks/__tests__/useAssistant\\.test\\.ts|web-app/src/hooks/__tests__/useMCPServers\\.test\\.ts|web-app/src/hooks/__tests__/useModelProvider\\.legacy-provider\\.test\\.ts|web-app/src/hooks/__tests__/useReleaseNotes\\.test\\.ts|web-app/src/hooks/__tests__/useThreads\\.coverage\\.test\\.ts|web-app/src/lib/__tests__/biyan-prompt\\.test\\.ts|web-app/src/lib/__tests__/integration/compaction\\.integration\\.test\\.ts|web-app/src/lib/__tests__/integration/integration-helpers\\.ts|web-app/src/lib/__tests__/provider-connection-import\\.test\\.ts|web-app/src/providers/__tests__/DataProvider\\.test\\.tsx|web-app/src/routes/__tests__/images\\.test\\.tsx|web-app/src/routes/__tests__/index\\.test\\.tsx|web-app/src/services/__tests__/app\\.test\\.ts|web-app/src/services/__tests__/path\\.test\\.ts|web-app/src/services/__tests__/serviceHub\\.integration\\.test\\.ts|web-app/src/services/deeplink/__tests__/tauri\\.test\\.ts|web-app/src/services/image-generation/__tests__/tauri\\.test\\.ts|web-app/src/services/video-generation/__tests__/default\\.test\\.ts|web-app/src/services/video-generation/__tests__/tauri\\.test\\.ts|web-app/src/types/__tests__/biyan-teams\\.test\\.ts|web-app/src/utils/__tests__/formatDate\\.test\\.ts)$",
+      "pattern": "(?:static\\.mitapp\\.cn|catalog\\.jan\\.ai|apps(?:-nightly)?\\.jan\\.ai|janhq|latest[_-]jan[_-]model|model[-_]catalog|(?<![a-z0-9])(?:jan|mita|silence)(?![a-z0-9]))",
+      "reason": "Exact automated test fixtures exercise legacy migration, stable identity, or fail-closed rejection behavior.",
+      "scope": "content"
+    },
+    {
+      "expectedMatches": 8,
+      "id": "docs-retired-route-denylist",
+      "matchesSha256": "082537c288696ab10b25d730a41dca060675dcf282062494fe7226e5fde0a3e9",
+      "pathRegex": "^(?:docs/scripts/verify-unpublished-archive\\.cjs)$",
+      "pattern": "(?:catalog\\.jan\\.ai|apps(?:-nightly)?\\.jan\\.ai|janhq|latest[_-]jan[_-]model|model[-_]catalog|(?<![a-z0-9])(?:jan|mita|silence)(?![a-z0-9]))",
+      "reason": "Documentation deny-list logic names retired routes only to keep them out of the published site.",
+      "scope": "content"
+    },
+    {
+      "expectedMatches": 18,
+      "id": "first-party-stable-anchors",
+      "matchesSha256": "4d1e143733b0553ea59d36f2564395e0f58262f926fb8d777619164b812412d4",
+      "pathRegex": "^(?:src-tauri/Cargo\\.toml|src-tauri/plugins/tauri-plugin-document-parser/Cargo\\.toml|src-tauri/plugins/tauri-plugin-hardware/Cargo\\.toml|src-tauri/tauri\\.android\\.conf\\.json|src-tauri/tauri\\.conf\\.json|src-tauri/tauri\\.ios\\.conf\\.json|src-tauri/utils/src/network\\.rs|web-app/src/hooks/useReleaseNotes\\.ts|web-app/src/routes/settings/general\\.tsx)$",
+      "pattern": "(?:catalog\\.jan\\.ai|apps(?:-nightly)?\\.jan\\.ai|janhq|latest[_-]jan[_-]model|model[-_]catalog|(?<![a-z0-9])(?:jan|mita|silence)(?![a-z0-9]))",
+      "reason": "Exact first-party compatibility surface retains a reviewed published identifier, repository link, or migration key.",
+      "scope": "content"
+    },
+    {
+      "expectedMatches": 18,
+      "id": "flatpak-published-identity",
+      "matchesSha256": "7020741e18470b442156bf91819176e0039db9e96a4e40e7f5bb46ae74a6cc11",
+      "pathRegex": "^(?:flatpak/uk\\.jingxing\\.Mita\\.metainfo\\.xml|flatpak/uk\\.jingxing\\.Mita\\.yml)$",
+      "pattern": "(?:catalog\\.jan\\.ai|apps(?:-nightly)?\\.jan\\.ai|janhq|latest[_-]jan[_-]model|model[-_]catalog|(?<![a-z0-9])(?:jan|mita|silence)(?![a-z0-9]))",
+      "reason": "The published Flatpak application identifier and metadata filename remain stable so existing installations receive upgrades.",
+      "scope": "content"
+    },
+    {
+      "expectedMatches": 139,
+      "id": "github-distribution-anchors",
+      "matchesSha256": "215053da4eb51095a3c0340e1e9f1d37a497b2e32be6dd83aedc4251e2f10bee",
+      "pathRegex": "^(?:\\.github/ISSUE_TEMPLATE/config\\.yml|\\.github/scripts/rename-tauri-app\\.sh|\\.github/workflows/biyan-docs\\.yml|\\.github/workflows/biyan-exact-sha-qualification\\.yml|\\.github/workflows/biyan-linter-and-test\\.yml|\\.github/workflows/biyan-tauri-build-nightly-external\\.yaml|\\.github/workflows/biyan-tauri-build-nightly\\.yaml|\\.github/workflows/biyan-tauri-build\\.yaml|\\.github/workflows/clean-cloudflare-page-preview-url-and-r2\\.yml|\\.github/workflows/desktop-release\\.yml|\\.github/workflows/manual-build-portable\\.yml|\\.github/workflows/promote-desktop-update\\.yml|\\.github/workflows/release-distribution\\.yml|\\.github/workflows/template-get-update-version\\.yml|\\.github/workflows/template-noti-discord-and-update-url-readme\\.yml|\\.github/workflows/template-tauri-build-linux-x64-external\\.yml|\\.github/workflows/template-tauri-build-linux-x64-flatpak\\.yml|\\.github/workflows/template-tauri-build-linux-x64\\.yml|\\.github/workflows/template-tauri-build-macos-external\\.yml|\\.github/workflows/template-tauri-build-macos\\.yml|\\.github/workflows/template-tauri-build-windows-x64-external\\.yml|\\.github/workflows/template-tauri-build-windows-x64\\.yml|\\.github/workflows/updater-health-gate\\.yml|\\.github/workflows/updater-kill-switch\\.yml)$",
+      "pattern": "(?:static\\.mitapp\\.cn|catalog\\.jan\\.ai|apps(?:-nightly)?\\.jan\\.ai|janhq|latest[_-]jan[_-]model|model[-_]catalog|(?<![a-z0-9])(?:jan|mita|silence)(?![a-z0-9]))",
+      "reason": "GitHub control-plane metadata retains the protected branch, repository slug, or published updater host as an exact anchor.",
+      "scope": "content"
+    },
+    {
+      "expectedMatches": 12,
+      "id": "legal-attribution",
+      "matchesSha256": "056bff5240bf54e2edb999c62d5d88416dd02d5dce11b18a01ede5978f4efa23",
+      "pathRegex": "^(?:LICENSE|NOTICE|src-tauri/gen/android/app/src/main/assets/resources/LICENSE|src-tauri/gen/android/app/src/main/assets/resources/NOTICE|src-tauri/resources/LICENSE|src-tauri/resources/NOTICE)$",
+      "pattern": "(?:catalog\\.jan\\.ai|apps(?:-nightly)?\\.jan\\.ai|janhq|latest[_-]jan[_-]model|model[-_]catalog|(?<![a-z0-9])(?:jan|mita|silence)(?![a-z0-9]))",
+      "reason": "Legal attribution retains the exact upstream product name required by the project license and notice.",
+      "scope": "content"
+    },
+    {
+      "expectedMatches": 4,
+      "id": "retired-local-runtime-migration-key",
+      "matchesSha256": "77efe46927983307d8ca423a4ab56181beb7e7c1d646d5d837934af83bec5b2b",
+      "pathRegex": "^(?:web-app/src/hooks/__tests__/useModelProvider\\.coverage\\.test\\.ts|web-app/src/legacy_migrations/model-provider-store\\.ts)$",
+      "pattern": "cortex_model_settings_migrated",
+      "reason": "The exact persisted migration key and its behavior test remain stable so an existing local-model settings migration is never repeated.",
+      "scope": "content"
+    },
+    {
+      "expectedMatches": 362,
+      "id": "migration-implementations",
+      "matchesSha256": "a99d901ec92d9e8cb8b1565cc4c88ce5b23026cfe07e50cd7f15ef8d8d2a0b54",
+      "pathRegex": "^(?:extensions/assistant-extension/src/legacy_migrations\\.ts|src-tauri/Info\\.plist|src-tauri/src/core/app/constants\\.rs|src-tauri/src/core/legacy_migrations\\.rs|src-tauri/src/core/system/commands\\.rs|src-tauri/src/core/threads/db\\.rs|src-tauri/src/core/windows_migration\\.rs|src-tauri/tauri\\.bundle\\.windows\\.nsis\\.template|src-tauri/tests/branding_compatibility\\.rs|src-tauri/tests/windows_migration\\.rs|web-app/src/legacy_migrations/__tests__/project-assistants\\.test\\.ts|web-app/src/legacy_migrations/agent-metadata\\.ts|web-app/src/legacy_migrations/assistant\\.ts|web-app/src/legacy_migrations/deep-link\\.ts|web-app/src/legacy_migrations/mcp\\.ts|web-app/src/legacy_migrations/model-provider-store\\.ts|web-app/src/legacy_migrations/retired-providers\\.ts|web-app/src/legacy_migrations/storage\\.ts|web-app/src/legacy_migrations/thread-title\\.ts)$",
+      "pattern": "(?:catalog\\.jan\\.ai|apps(?:-nightly)?\\.jan\\.ai|janhq|latest[_-]jan[_-]model|model[-_]catalog|(?<![a-z0-9])(?:jan|mita|silence)(?![a-z0-9]))",
+      "reason": "Exact compatibility code retains reviewed legacy identities only to import, migrate, reject, or remove prior installations.",
+      "scope": "content"
+    },
+    {
+      "expectedMatches": 14,
+      "id": "published-migration-guidance",
+      "matchesSha256": "38ac307ccbc7b9ed5b2421ff907b0df169d5d3ac61edb20cce3811fd03c20a3a",
+      "pathRegex": "^(?:docs/src/pages/docs/desktop/cli\\.mdx|docs/src/pages/docs/desktop/data-folder\\.mdx|docs/src/pages/docs/desktop/index\\.mdx|docs/src/pages/docs/desktop/settings\\.mdx)$",
+      "pattern": "(?:catalog\\.jan\\.ai|apps(?:-nightly)?\\.jan\\.ai|janhq|latest[_-]jan[_-]model|model[-_]catalog|(?<![a-z0-9])(?:jan|mita|silence)(?![a-z0-9]))",
+      "reason": "Published migration documentation names prior products solely to explain supported upgrade and cleanup behavior.",
+      "scope": "content"
+    },
+    {
+      "expectedMatches": 3,
+      "id": "published-source-links",
+      "matchesSha256": "edccc8c7857994383b6aaf5d9b84784c5eb4493917cadc6f43b5242f66e8069a",
+      "pathRegex": "^(?:docs/src/components/FooterMenu/index\\.tsx|docs/theme\\.config\\.tsx)$",
+      "pattern": "(?:catalog\\.jan\\.ai|apps(?:-nightly)?\\.jan\\.ai|janhq|latest[_-]jan[_-]model|model[-_]catalog|(?<![a-z0-9])(?:jan|mita|silence)(?![a-z0-9]))",
+      "reason": "Exact reviewed compatibility reference is retained for migration, denial, legal, provenance, or stable ingress behavior.",
+      "scope": "content"
+    },
+    {
+      "expectedMatches": 35,
+      "id": "release-distribution-anchors",
+      "matchesSha256": "d2d094746be60ec508ed3e72c116c9514f64b49813a4d73f48d5d7b8dcbe83ec",
+      "pathRegex": "^(?:scripts/release-distribution/build-download-manifest\\.mjs|scripts/release-distribution/build-release-notes\\.mjs|scripts/release-distribution/collect-release-assets\\.mjs|scripts/release-distribution/publish-download-transaction\\.mjs|scripts/updater/build-candidate\\.mjs|scripts/updater/candidate-url-policy\\.mjs|scripts/updater/legacy-bridge-policy\\.json|scripts/updater/legacy-manifest-policy\\.mjs|scripts/updater/promotion-transaction\\.mjs|scripts/updater/run-promotion-transaction\\.sh|scripts/updater/wrangler\\.toml)$",
+      "pattern": "(?:static\\.mitapp\\.cn|catalog\\.jan\\.ai|apps(?:-nightly)?\\.jan\\.ai|janhq|latest[_-]jan[_-]model|model[-_]catalog|(?<![a-z0-9])(?:jan|mita|silence)(?![a-z0-9]))",
+      "reason": "Release control code retains the published repository and updater namespace as a distribution compatibility anchor.",
+      "scope": "content"
+    },
+    {
+      "expectedMatches": 67,
+      "id": "release-policy-deny-needles",
+      "matchesSha256": "f78a9218a8290007f019ee7c51df3c0ccfc6a71af23ecd668afa3d4fc3e54b25",
+      "pathRegex": "^(?:scripts/ci/candidate-content-policy\\.mjs|scripts/ci/candidate-path-policy\\.mjs|scripts/ci/legacy-compatibility-policy\\.mjs|scripts/ci/release-policy-contracts\\.mjs|scripts/ci/verify-release-policy\\.mjs|scripts/smoke-preinstall-extension-imports\\.mjs|scripts/verify-macos-candidate\\.mjs)$",
+      "pattern": "(?:static\\.mitapp\\.cn|catalog\\.jan\\.ai|apps(?:-nightly)?\\.jan\\.ai|janhq|latest[_-]jan[_-]model|model[-_]catalog|(?<![a-z0-9])(?:jan|mita|silence)(?![a-z0-9]))",
+      "reason": "Fail-closed release policy names retired identities only as forbidden needles or compatibility assertions.",
+      "scope": "content"
+    },
+    {
+      "expectedMatches": 35,
+      "id": "repository-provenance",
+      "matchesSha256": "81fb8af59914800c44051be814b5e516c7953fcf304af818c689f11b3ef37982",
+      "pathRegex": "^(?:DEVELOPMENT_PLAN\\.md|README\\.ja\\.md|README\\.md|README\\.zh\\.md|UPSTREAM_JAN_COMMIT\\.md|docs/README\\.md|docs/release-distribution\\.md)$",
+      "pattern": "(?:catalog\\.jan\\.ai|apps(?:-nightly)?\\.jan\\.ai|janhq|latest[_-]jan[_-]model|model[-_]catalog|(?<![a-z0-9])(?:jan|mita|silence)(?![a-z0-9]))",
+      "reason": "Repository provenance and release documentation records the exact upstream lineage and supported compatibility anchors.",
+      "scope": "content"
+    },
+    {
+      "expectedMatches": 1,
+      "id": "path-flatpak-uk-jingxing-mita-metainfo-xml",
+      "matchesSha256": "f288a8eeb44d9d4f4e5ae0bfbbb5d8abd28ac025c77d07bfe3197d588cc02e71",
+      "path": "flatpak/uk.jingxing.Mita.metainfo.xml",
+      "pattern": "(?:catalog\\.jan\\.ai|apps(?:-nightly)?\\.jan\\.ai|janhq|latest[_-]jan[_-]model|model[-_]catalog|(?<![a-z0-9])(?:jan|mita|silence)(?![a-z0-9]))",
+      "reason": "The published Flatpak application identifier and metadata filename remain stable so existing installations receive upgrades.",
+      "scope": "path"
+    },
+    {
+      "expectedMatches": 1,
+      "id": "path-flatpak-uk-jingxing-mita-yml",
+      "matchesSha256": "f5d71f1f8ad14513d50b7a0fa5192ffb8023cf6c9992073254a7a69bc12b0ae1",
+      "path": "flatpak/uk.jingxing.Mita.yml",
+      "pattern": "(?:catalog\\.jan\\.ai|apps(?:-nightly)?\\.jan\\.ai|janhq|latest[_-]jan[_-]model|model[-_]catalog|(?<![a-z0-9])(?:jan|mita|silence)(?![a-z0-9]))",
+      "reason": "The published Flatpak application identifier and metadata filename remain stable so existing installations receive upgrades.",
+      "scope": "path"
+    },
+    {
+      "expectedMatches": 417,
+      "id": "path-unpublished-upstream-history",
+      "matchesSha256": "3a824afd0ad1ae85af16351da9459be802a32d2398cdcb997d1875d30d9dc80e",
+      "pathRegex": "^docs/unpublished-upstream-history/.*$",
+      "pattern": "(?:catalog\\.jan\\.ai|apps(?:-nightly)?\\.jan\\.ai|janhq|latest[_-]jan[_-]model|model[-_]catalog|(?<![a-z0-9])(?:jan|mita|silence)(?![a-z0-9]))",
+      "reason": "Legacy-named archive paths are isolated from product inputs and locked to this exact reviewed inventory.",
+      "scope": "path"
+    },
+    {
+      "expectedMatches": 1,
+      "id": "path-upstream-jan-commit-md",
+      "matchesSha256": "7cb94b7a6e0425d420f784e16c55b3a9b5da1e448fa8e8982967ed4f39b1c75e",
+      "path": "UPSTREAM_JAN_COMMIT.md",
+      "pattern": "(?:catalog\\.jan\\.ai|apps(?:-nightly)?\\.jan\\.ai|janhq|latest[_-]jan[_-]model|model[-_]catalog|(?<![a-z0-9])(?:jan|mita|silence)(?![a-z0-9]))",
+      "reason": "Repository provenance and release documentation records the exact upstream lineage and supported compatibility anchors.",
+      "scope": "path"
+    }
+  ],
+  "schema": 2
+}

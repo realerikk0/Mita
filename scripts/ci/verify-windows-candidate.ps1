@@ -93,6 +93,65 @@ function Get-MsiProperty {
   }
 }
 
+function Test-ExtractedBiyanApp {
+  param(
+    [Parameter(Mandatory = $true)]
+    [string]$Root,
+    [Parameter(Mandatory = $true)]
+    [string]$Version,
+    [Parameter(Mandatory = $true)]
+    [string]$Label
+  )
+
+  $apps = @(
+    Get-ChildItem -LiteralPath $Root -File -Recurse |
+      Where-Object { $_.Name -ceq 'Biyan.exe' }
+  )
+  if ($apps.Count -eq 0) {
+    throw "$Label candidate does not contain Biyan.exe"
+  }
+
+  foreach ($app in $apps) {
+    if ((Get-PeMachine -Path $app.FullName) -ne 0x8664) {
+      continue
+    }
+    $versionInfo = [Diagnostics.FileVersionInfo]::GetVersionInfo($app.FullName)
+    if ($versionInfo.ProductName -cne 'Biyan') {
+      continue
+    }
+    if (
+      (Test-ExpectedFileVersion -Value $versionInfo.ProductVersion -Expected $Version) -or
+      (Test-ExpectedFileVersion -Value $versionInfo.FileVersion -Expected $Version)
+    ) {
+      return
+    }
+  }
+  throw "$Label candidate has no AMD64 Biyan.exe with version $Version"
+}
+
+function Invoke-ExtractedCandidatePolicies {
+  param(
+    [Parameter(Mandatory = $true)]
+    [string]$Root,
+    [Parameter(Mandatory = $true)]
+    [string]$Label
+  )
+
+  $policies = @(
+    (Join-Path $PSScriptRoot 'candidate-path-policy.mjs'),
+    (Join-Path $PSScriptRoot 'candidate-content-policy.mjs')
+  )
+  foreach ($policy in $policies) {
+    if (-not (Test-Path -LiteralPath $policy -PathType Leaf)) {
+      throw "Missing protected candidate policy: $policy"
+    }
+    & node $policy --root $Root
+    if ($LASTEXITCODE -ne 0) {
+      throw "$Label candidate failed $(Split-Path -Leaf $policy) (exit $LASTEXITCODE)"
+    }
+  }
+}
+
 $exePath = (Resolve-Path -LiteralPath $Exe).Path
 $msiPath = (Resolve-Path -LiteralPath $Msi).Path
 foreach ($candidate in @($exePath, $msiPath)) {
@@ -119,37 +178,37 @@ try {
   if ($LASTEXITCODE -ne 0) {
     throw "7-Zip could not extract the NSIS candidate (exit $LASTEXITCODE)"
   }
-  $apps = @(
-    Get-ChildItem -LiteralPath $extractRoot -File -Recurse |
-      Where-Object { $_.Name -ceq 'Biyan.exe' }
-  )
-  if ($apps.Count -eq 0) {
-    throw 'NSIS candidate does not contain Biyan.exe'
-  }
-
-  $acceptedApp = $false
-  foreach ($app in $apps) {
-    if ((Get-PeMachine -Path $app.FullName) -ne 0x8664) {
-      continue
-    }
-    $versionInfo = [Diagnostics.FileVersionInfo]::GetVersionInfo($app.FullName)
-    if ($versionInfo.ProductName -cne 'Biyan') {
-      continue
-    }
-    if (
-      (Test-ExpectedFileVersion -Value $versionInfo.ProductVersion -Expected $Version) -or
-      (Test-ExpectedFileVersion -Value $versionInfo.FileVersion -Expected $Version)
-    ) {
-      $acceptedApp = $true
-      break
-    }
-  }
-  if (-not $acceptedApp) {
-    throw "NSIS candidate has no AMD64 Biyan.exe with version $Version"
-  }
+  Test-ExtractedBiyanApp `
+    -Root $extractRoot `
+    -Version $Version `
+    -Label 'NSIS'
+  Invoke-ExtractedCandidatePolicies -Root $extractRoot -Label 'NSIS'
 }
 finally {
   Remove-Item -LiteralPath $extractRoot -Recurse -Force -ErrorAction SilentlyContinue
+}
+
+$msiExtractRoot = Join-Path `
+  ([System.IO.Path]::GetTempPath()) `
+  ("biyan-msi-{0}" -f [guid]::NewGuid().ToString('N'))
+New-Item -ItemType Directory -Force -Path $msiExtractRoot | Out-Null
+try {
+  & $sevenZip 'x' "-o$msiExtractRoot" '-y' $msiPath | Out-Null
+  if ($LASTEXITCODE -ne 0) {
+    throw "7-Zip could not extract the MSI candidate (exit $LASTEXITCODE)"
+  }
+  Test-ExtractedBiyanApp `
+    -Root $msiExtractRoot `
+    -Version $Version `
+    -Label 'MSI'
+  Invoke-ExtractedCandidatePolicies -Root $msiExtractRoot -Label 'MSI'
+}
+finally {
+  Remove-Item `
+    -LiteralPath $msiExtractRoot `
+    -Recurse `
+    -Force `
+    -ErrorAction SilentlyContinue
 }
 
 $windowsInstaller = $null

@@ -5,6 +5,12 @@ import { execFileSync } from 'node:child_process'
 import { fileURLToPath } from 'node:url'
 
 const DEFAULT_MAX_ITEMS_PER_SECTION = 12
+const COMPATIBILITY_SUBJECT = /^(?:compat|compatibility)(?:\([^)]+\))?!?:\s*/i
+const COMPATIBILITY_BULLET = '- [兼容] '
+const RETIRED_PRODUCT_TOKEN =
+  /(^|[^0-9A-Za-z])(?:jan(?:hq)?|mita|silence)(?=$|[^0-9A-Za-z])/i
+const LEGACY_REPOSITORY_URL =
+  /https:\/\/github\.com\/realerikk0\/Mita(?:\/[^\s)>]*)?/gi
 
 const SECTION_DEFINITIONS = [
   {
@@ -107,7 +113,7 @@ export function findPreviousTag(currentTag) {
 
 function subjectWithoutConventionalPrefix(subject) {
   return subject
-    .replace(/^(?:feat|fix|perf|refactor|style|build|chore|ci|docs|test)(?:\([^)]+\))?!?:\s*/i, '')
+    .replace(/^(?:feat|fix|perf|refactor|style|build|chore|ci|docs|test|compat|compatibility)(?:\([^)]+\))?!?:\s*/i, '')
     .replace(/\s+\(#\d+\)$/g, '')
     .replace(/\s+@\S+$/g, '')
     .replace(/\s+/g, ' ')
@@ -119,6 +125,7 @@ function isNoiseSubject(subject) {
 }
 
 function categorizeCommit(subject) {
+  if (COMPATIBILITY_SUBJECT.test(subject)) return 'maintenance'
   const type = /^(feat|fix|perf|refactor|style|build|chore|ci|docs|test)(?:\([^)]+\))?!?:/i
     .exec(subject)?.[1]
     ?.toLowerCase()
@@ -133,6 +140,24 @@ function categorizeCommit(subject) {
     }
   }
   return 'improvements'
+}
+
+function hasRetiredProductToken(value) {
+  return RETIRED_PRODUCT_TOKEN.test(
+    String(value ?? '').replace(LEGACY_REPOSITORY_URL, ''),
+  )
+}
+
+export function validateReleaseNotesProductPolicy(notes) {
+  const lines = String(notes ?? '').replace(/\r\n?/g, '\n').split('\n')
+  for (const [index, line] of lines.entries()) {
+    if (!hasRetiredProductToken(line)) continue
+    if (line.startsWith(COMPATIBILITY_BULLET)) continue
+    throw new Error(
+      `Release notes line ${index + 1} contains a retired product name outside an explicit ${COMPATIBILITY_BULLET.trim()} item`,
+    )
+  }
+  return true
 }
 
 export function collectCommitSubjects(tagName, previousTag) {
@@ -163,9 +188,17 @@ export function buildReleaseNotes({
 
     const item = subjectWithoutConventionalPrefix(subject)
     if (!item || seen.has(item)) continue
+    const compatibility = COMPATIBILITY_SUBJECT.test(subject)
+    if (hasRetiredProductToken(item) && !compatibility) {
+      throw new Error(
+        `Release note subject contains a retired product name without a compat: prefix: ${subject}`,
+      )
+    }
 
     seen.add(item)
-    categorized[categorizeCommit(subject)].push(item)
+    categorized[categorizeCommit(subject)].push(
+      compatibility ? `[兼容] ${item}` : item,
+    )
   }
 
   const lines = []
@@ -198,7 +231,9 @@ export function buildReleaseNotes({
   lines.push('## 完整变更', '')
   lines.push(compareUrl || `${previousTag ? `${previousTag}...` : ''}${tagName}`)
 
-  return `${lines.join('\n').trim()}\n`
+  const notes = `${lines.join('\n').trim()}\n`
+  validateReleaseNotesProductPolicy(notes)
+  return notes
 }
 
 async function main() {

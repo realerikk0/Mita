@@ -4,6 +4,14 @@ import { createHash } from 'node:crypto'
 import fs from 'node:fs'
 import path from 'node:path'
 
+import {
+  assertCanonicalUpdaterAssetBaseUrl,
+  canonicalUpdaterAssetUrl,
+  canonicalUpdaterObjectKey,
+  validateCanonicalUpdaterCandidateMetadata,
+  validateCanonicalUpdaterManifest,
+} from './candidate-url-policy.mjs'
+
 function parseArgs(argv) {
   const args = {}
   for (let index = 0; index < argv.length; index += 1) {
@@ -65,6 +73,7 @@ export function buildCandidate({
   if (Number(dataSchema) !== expectedDataSchema) {
     throw new Error(`Migration phase ${migrationPhase} requires data schema ${expectedDataSchema}`)
   }
+  assertCanonicalUpdaterAssetBaseUrl(assetBaseUrl)
   if (!fs.statSync(artifactsDir).isDirectory()) throw new Error(`Not a directory: ${artifactsDir}`)
 
   const macArchive = findExactlyOne(
@@ -82,9 +91,24 @@ export function buildCandidate({
     (name) => name === `Biyan_${version}_amd64.AppImage`,
     `Biyan_${version}_amd64.AppImage`,
   )
+  const macDmg = findExactlyOne(
+    artifactsDir,
+    (name) => name === `Biyan_${version}_universal.dmg`,
+    `Biyan_${version}_universal.dmg`,
+  )
+  const windowsMsi = findExactlyOne(
+    artifactsDir,
+    (name) => name === `Biyan_${version}_x64_en-US.msi`,
+    `Biyan_${version}_x64_en-US.msi`,
+  )
+  const linuxDeb = findExactlyOne(
+    artifactsDir,
+    (name) => name === `Biyan_${version}_amd64.deb`,
+    `Biyan_${version}_amd64.deb`,
+  )
   const inputs = [
     macArchive, `${macArchive}.sig`, windowsInstaller, `${windowsInstaller}.sig`,
-    linuxAppImage, `${linuxAppImage}.sig`,
+    linuxAppImage, `${linuxAppImage}.sig`, macDmg, windowsMsi, linuxDeb,
   ]
   for (const file of inputs) {
     if (!fs.existsSync(file)) throw new Error(`Missing updater artifact: ${file}`)
@@ -94,7 +118,6 @@ export function buildCandidate({
   fs.mkdirSync(outputDir, { recursive: true })
   for (const file of inputs) fs.copyFileSync(file, path.join(outputDir, path.basename(file)))
 
-  const base = assetBaseUrl.replace(/\/$/, '')
   const objectPrefix = `biyan/updater/releases/v${version}`
   const macName = path.basename(macArchive)
   const windowsName = path.basename(windowsInstaller)
@@ -109,19 +132,19 @@ export function buildCandidate({
     platforms: {
       'darwin-aarch64': {
         signature: fs.readFileSync(`${macArchive}.sig`, 'utf8').trim(),
-        url: `${base}/${objectPrefix}/${macName}`,
+        url: canonicalUpdaterAssetUrl(version, macName),
       },
       'darwin-x86_64': {
         signature: fs.readFileSync(`${macArchive}.sig`, 'utf8').trim(),
-        url: `${base}/${objectPrefix}/${macName}`,
+        url: canonicalUpdaterAssetUrl(version, macName),
       },
       'windows-x86_64': {
         signature: fs.readFileSync(`${windowsInstaller}.sig`, 'utf8').trim(),
-        url: `${base}/${objectPrefix}/${windowsName}`,
+        url: canonicalUpdaterAssetUrl(version, windowsName),
       },
       'linux-x86_64': {
         signature: fs.readFileSync(`${linuxAppImage}.sig`, 'utf8').trim(),
-        url: `${base}/${objectPrefix}/${linuxName}`,
+        url: canonicalUpdaterAssetUrl(version, linuxName),
       },
     },
   }
@@ -135,8 +158,8 @@ export function buildCandidate({
     signatureFile: path.basename(signatureFile),
     sha256: sha256(file),
     signatureSha256: sha256(signatureFile),
-    objectKey: `${objectPrefix}/${path.basename(file)}`,
-    url: `${base}/${objectPrefix}/${path.basename(file)}`,
+    objectKey: canonicalUpdaterObjectKey(version, path.basename(file)),
+    url: canonicalUpdaterAssetUrl(version, path.basename(file)),
   })
   const candidate = {
     schema: 1,
@@ -154,7 +177,31 @@ export function buildCandidate({
       asset('windows-x86_64', windowsInstaller, `${windowsInstaller}.sig`),
       asset('linux-x86_64', linuxAppImage, `${linuxAppImage}.sig`),
     ],
+    distributionAssets: {
+      macosDmg: {
+        file: path.basename(macDmg),
+        sha256: sha256(macDmg),
+      },
+      windowsExe: {
+        file: path.basename(windowsInstaller),
+        sha256: sha256(windowsInstaller),
+      },
+      windowsMsi: {
+        file: path.basename(windowsMsi),
+        sha256: sha256(windowsMsi),
+      },
+      linuxAppImage: {
+        file: path.basename(linuxAppImage),
+        sha256: sha256(linuxAppImage),
+      },
+      linuxDeb: {
+        file: path.basename(linuxDeb),
+        sha256: sha256(linuxDeb),
+      },
+    },
   }
+  validateCanonicalUpdaterCandidateMetadata(candidate)
+  validateCanonicalUpdaterManifest(manifest, candidate)
   fs.writeFileSync(path.join(outputDir, 'candidate.json'), `${JSON.stringify(candidate, null, 2)}\n`)
   return candidate
 }

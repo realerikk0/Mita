@@ -186,7 +186,7 @@ More content.`
 
 describe('extractModelName', () => {
   it('extracts model name from repo path', () => {
-    expect(extractModelName('cortexso/tinyllama')).toBe('tinyllama')
+    expect(extractModelName('example-org/tinyllama')).toBe('tinyllama')
     expect(extractModelName('microsoft/DialoGPT-medium')).toBe(
       'DialoGPT-medium'
     )
@@ -215,8 +215,8 @@ describe('extractModelName', () => {
 
 describe('extractModelRepo', () => {
   it('extracts repo path from HuggingFace URL', () => {
-    expect(extractModelRepo('https://huggingface.co/cortexso/tinyllama')).toBe(
-      'cortexso/tinyllama'
+    expect(extractModelRepo('https://huggingface.co/example-org/tinyllama')).toBe(
+      'example-org/tinyllama'
     )
     expect(
       extractModelRepo('https://huggingface.co/microsoft/DialoGPT-medium')
@@ -224,7 +224,9 @@ describe('extractModelRepo', () => {
   })
 
   it('returns input unchanged when not a HuggingFace URL', () => {
-    expect(extractModelRepo('cortexso/tinyllama')).toBe('cortexso/tinyllama')
+    expect(extractModelRepo('example-org/tinyllama')).toBe(
+      'example-org/tinyllama'
+    )
     expect(extractModelRepo('https://github.com/user/repo')).toBe(
       'https://github.com/user/repo'
     )
@@ -239,8 +241,10 @@ describe('extractModelRepo', () => {
   })
 
   it('handles URLs with trailing slashes', () => {
-    expect(extractModelRepo('https://huggingface.co/cortexso/tinyllama/')).toBe(
-      'cortexso/tinyllama/'
+    expect(
+      extractModelRepo('https://huggingface.co/example-org/tinyllama/')
+    ).toBe(
+      'example-org/tinyllama/'
     )
   })
 })
