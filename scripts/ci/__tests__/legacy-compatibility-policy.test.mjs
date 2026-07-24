@@ -85,29 +85,30 @@ function makeRule(
   }
 }
 
-function archiveInventory(files) {
+function archiveInventory(files, canonicalTextPaths = []) {
   const root = writeFixture(files)
   try {
     return inspectDocsArchiveInventory(
       root,
       Object.keys(files),
       'docs/unpublished-upstream-history/assets/',
-      Object.keys(files)
-        .filter((relativePath) => relativePath.endsWith('.svg'))
-        .sort()
+      canonicalTextPaths
     )
   } finally {
     fs.rmSync(root, { force: true, recursive: true })
   }
 }
 
-function allowlist(rules = [], excludedTrackedFiles = [], files = {}) {
-  const archive = archiveInventory(files)
+function allowlist(
+  rules = [],
+  excludedTrackedFiles = [],
+  files = {},
+  canonicalTextPaths = []
+) {
+  const archive = archiveInventory(files, canonicalTextPaths)
   return {
     archivedDocsAssets: {
-      canonicalTextPaths: Object.keys(files)
-        .filter((relativePath) => relativePath.endsWith('.svg'))
-        .sort(),
+      canonicalTextPaths,
       expectedFiles: archive.count,
       inventorySha256: archive.sha256,
       prefix: 'docs/unpublished-upstream-history/assets/',
@@ -761,14 +762,18 @@ test('active docs media requires a resolvable source reference', () => {
 })
 
 test('archived docs media inventory canonicalizes only allowlisted text line endings', () => {
+  const canonicalSvgPath =
+    'docs/unpublished-upstream-history/assets/docs-src/old.svg'
+  const byteExactSvgPath =
+    'docs/unpublished-upstream-history/assets/docs-src/raw.svg'
   const files = {
     'docs/unpublished-upstream-history/assets/docs-src/old.png': Buffer.from([
       1, 2, 3,
     ]),
-    'docs/unpublished-upstream-history/assets/docs-src/old.svg':
-      '<svg>\n<path />\n</svg>\n',
+    [canonicalSvgPath]: '<svg>\n<path />\n</svg>\n',
+    [byteExactSvgPath]: '<svg>\n<text>raw</text>\n</svg>\n',
   }
-  const reviewed = allowlist([], [], files)
+  const reviewed = allowlist([], [], files, [canonicalSvgPath])
   const root = writeFixture(files)
   try {
     assert.deepEqual(
@@ -781,10 +786,7 @@ test('archived docs media inventory canonicalizes only allowlisted text line end
       []
     )
     fs.writeFileSync(
-      path.join(
-        root,
-        'docs/unpublished-upstream-history/assets/docs-src/old.svg'
-      ),
+      path.join(root, canonicalSvgPath),
       '<svg>\r\n<changed />\r\n</svg>\r\n'
     )
     assert.ok(
@@ -798,10 +800,7 @@ test('archived docs media inventory canonicalizes only allowlisted text line end
       )
     )
     fs.writeFileSync(
-      path.join(
-        root,
-        'docs/unpublished-upstream-history/assets/docs-src/old.svg'
-      ),
+      path.join(root, canonicalSvgPath),
       '<svg>\r\n<path />\r\n</svg>\r\n'
     )
     assert.deepEqual(
@@ -814,10 +813,7 @@ test('archived docs media inventory canonicalizes only allowlisted text line end
       []
     )
     fs.writeFileSync(
-      path.join(
-        root,
-        'docs/unpublished-upstream-history/assets/docs-src/old.svg'
-      ),
+      path.join(root, canonicalSvgPath),
       '<svg>\r<path />\r</svg>\r'
     )
     assert.deepEqual(
@@ -828,6 +824,24 @@ test('archived docs media inventory canonicalizes only allowlisted text line end
         trackedFiles: Object.keys(files),
       }),
       []
+    )
+    fs.writeFileSync(
+      path.join(root, byteExactSvgPath),
+      '<svg>\r\n<text>raw</text>\r\n</svg>\r\n'
+    )
+    assert.ok(
+      validateDocsAssetBoundary({
+        allowlist: reviewed,
+        contents: new Map(),
+        repoRoot: root,
+        trackedFiles: Object.keys(files),
+      }).some((failure) =>
+        failure.includes('archived docs asset inventory digest changed')
+      )
+    )
+    fs.writeFileSync(
+      path.join(root, byteExactSvgPath),
+      '<svg>\n<text>raw</text>\n</svg>\n'
     )
     fs.writeFileSync(
       path.join(
@@ -883,7 +897,7 @@ test('archived docs media inventory canonicalizes only allowlisted text line end
         trackedFiles: Object.keys(expandedFiles),
       }).some((failure) =>
         failure.includes(
-          'archived docs asset inventory expected 2 files but found 3'
+          'archived docs asset inventory expected 3 files but found 4'
         )
       )
     )
