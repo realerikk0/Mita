@@ -1647,7 +1647,7 @@ test('protected Windows verifier authenticates native EXE and MSI identity', () 
   const verifier = fs.readFileSync(
     'scripts/ci/verify-windows-candidate.ps1',
     'utf8'
-  )
+  ).replace(/\r\n?/g, '\n')
   assert.deepEqual(validateWindowsCandidateVerifier(verifier), [])
   for (const mutation of [
     verifier.replaceAll('0x8664', '0x014C'),
