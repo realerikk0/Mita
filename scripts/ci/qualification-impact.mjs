@@ -62,8 +62,6 @@ const UPDATER_WORKFLOW_NAMES = new Set([
 ])
 const FULL_QUALIFICATION_WORKFLOW_NAMES = new Set([
   'desktop-release.yml',
-  'biyan-exact-sha-qualification.yml',
-  'biyan-linter-and-test.yml',
 ])
 
 function emptyFlags(value = false) {

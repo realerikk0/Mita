@@ -161,6 +161,15 @@
       "scope": "content"
     },
     {
+      "expectedMatches": 7,
+      "id": "qualification-recovery-provenance-anchors",
+      "matchesSha256": "6c8c04ba9d64c23a0b434e2b1e831fa9181083b57bf1a6b553a908e127b679c3",
+      "pathRegex": "^(?:scripts/ci/__tests__/verify-qualification-recovery\\.test\\.mjs|scripts/ci/verify-qualification-recovery\\.mjs)$",
+      "pattern": "(?<![a-z0-9])mita(?![a-z0-9])",
+      "reason": "Exact repository and protected-branch identifiers are retained only to authenticate same-repository qualification recovery provenance.",
+      "scope": "content"
+    },
+    {
       "expectedMatches": 35,
       "id": "release-distribution-anchors",
       "matchesSha256": "d2d094746be60ec508ed3e72c116c9514f64b49813a4d73f48d5d7b8dcbe83ec",

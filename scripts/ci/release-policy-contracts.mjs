@@ -1247,12 +1247,17 @@ export function validateCiWorkflow(source) {
   if (!releaseSafety) {
     failures.push('Biyan CI is missing the release-safety job')
   } else {
+    if (!/^    runs-on:\s*['"]?ubuntu-24\.04['"]?\s*$/m.test(releaseSafety)) {
+      failures.push('Biyan CI release-safety must use ubuntu-24.04')
+    }
     for (const command of [
       'node scripts/ci/verify-release-policy.mjs',
       'node --test scripts/ci/__tests__/candidate-content-policy.test.mjs',
       'node --test scripts/ci/__tests__/release-policy.test.mjs',
       'node --test scripts/ci/__tests__/qualification-impact.test.mjs',
+      'node --test scripts/ci/__tests__/run-untrusted-qualification-verifier.test.mjs',
       'node --test scripts/ci/__tests__/verify-qualification-artifacts.test.mjs',
+      'node --test scripts/ci/__tests__/verify-qualification-recovery.test.mjs',
       'node --test scripts/updater/__tests__/updater.test.mjs',
       'node --test scripts/release-distribution/__tests__/release-distribution.test.mjs',
     ]) {
@@ -1264,6 +1269,29 @@ export function validateCiWorkflow(source) {
       ) {
         failures.push(`Biyan CI release-safety job does not run: ${command}`)
       }
+    }
+    const helperSmoke = workflowStepBlocks(releaseSafety).find((step) =>
+      hasRunInvocation(
+        step,
+        /^scripts\/ci\/run-untrusted-qualification-verifier\.sh(?:\s|$)/
+      )
+    )
+    const helperSmokeCommands = helperSmoke
+      ? runBlocks(helperSmoke).flat().join('\n')
+      : ''
+    if (
+      !helperSmoke ||
+      !/^\s*(?:-\s*)?shell:\s*bash\s*$/m.test(helperSmoke) ||
+      /^    continue-on-error:\s*/m.test(releaseSafety) ||
+      /^\s*(?:-\s*)?continue-on-error:\s*/m.test(helperSmoke) ||
+      !hasRunInvocation(helperSmoke, /^set\s+-euo\s+pipefail$/) ||
+      !/^scripts\/ci\/run-untrusted-qualification-verifier\.sh\s+\\\n--read-root\s+["']?\$probe_root["']?\s+["']?\$verifier["']?\s+["']?\$probe_root\/marker\.txt["']?$/m.test(
+        helperSmokeCommands
+      )
+    ) {
+      failures.push(
+        'Biyan CI release-safety must exercise the untrusted verifier helper on ubuntu without advisory bypass'
+      )
     }
   }
 
@@ -1549,13 +1577,21 @@ export function validateQualificationWorkflow(source) {
         failures.push(`exact-SHA qualification is missing ${input} input`)
       }
     }
-    const booleanBootstrap = /^      bootstrap_full:\s*$/m.test(trigger)
-    const modeBootstrap =
-      /^      mode:\s*$/m.test(trigger) &&
-      /^          - bootstrap-full\s*$/m.test(trigger)
-    if (!booleanBootstrap && !modeBootstrap) {
+    const modeInput = /^      mode:\s*$/m.test(trigger)
+    const modeBootstrap = /^          - bootstrap-full\s*$/m.test(trigger)
+    const modeRecovery = /^          - aggregate-recovery\s*$/m.test(trigger)
+    if (!modeInput || !modeBootstrap) {
       failures.push(
         'exact-SHA qualification must expose an explicit bootstrap-full mode'
+      )
+    }
+    if (
+      !modeInput ||
+      !modeRecovery ||
+      !/^      recovery_run_id:\s*$/m.test(trigger)
+    ) {
+      failures.push(
+        'exact-SHA qualification must expose aggregate-recovery with a recovery_run_id input'
       )
     }
   }
@@ -1579,6 +1615,7 @@ export function validateQualificationWorkflow(source) {
 
   const preflight = jobBlock(source, 'preflight')
   const docsBuild = jobBlock(source, 'docs-build')
+  const recoveryAuth = jobBlock(source, 'recovery-auth')
   const artifactReplay = jobBlock(source, 'artifact-replay')
   const linux = jobBlock(source, 'native-linux')
   const windows = jobBlock(source, 'native-windows')
@@ -1662,11 +1699,14 @@ export function validateQualificationWorkflow(source) {
         classifierCommands.some((command) =>
           /^["']?\$\{(?:args|classifier_args)\[@\]\}["']?\s*\\?$/.test(command)
         ))
+    const forceUpgradeBlock =
+      /if\s+\[[\s\S]*?\];\s*then\n[\s\S]*?--force-full[\s\S]*?\nfi/.exec(
+        classifierText
+      )?.[0] ?? ''
     const forceUpgradeIsConditional =
       (classifierText.match(/--force-full/g) ?? []).length === 1 &&
-      /if\s+\[[^\n]*(?:bootstrap_full|bootstrap-full)[^\n]*\];\s*then\n[\s\S]*?--force-full[\s\S]*?\nfi/.test(
-        classifierText
-      )
+      /bootstrap_full|bootstrap-full/.test(forceUpgradeBlock) &&
+      /aggregate-recovery/.test(forceUpgradeBlock)
     if (
       !classifierInvocation ||
       ![
@@ -1702,11 +1742,39 @@ export function validateQualificationWorkflow(source) {
         /(?:harness\/)?scripts\/ci\/__tests__\/qualification-impact\.test\.mjs/,
         /(?:harness\/)?scripts\/ci\/__tests__\/release-policy\.test\.mjs/,
         /(?:harness\/)?scripts\/ci\/__tests__\/verify-qualification-artifacts\.test\.mjs/,
+        /(?:harness\/)?scripts\/ci\/__tests__\/verify-qualification-recovery\.test\.mjs/,
       ].every((pattern) => pattern.test(trustedContractText)) ||
       (!explicitlyTrustedPaths && !trustedWorkingDirectory)
     ) {
       failures.push(
-        'qualification focused preflight must test trusted classifier, release policy, and artifact verifier contracts'
+        'qualification focused preflight must test trusted classifier, release policy, artifact verifier, and recovery verifier contracts'
+      )
+    }
+    const sandboxProbe = runBlocks(preflight).find((commands) =>
+      commands.some((command) =>
+        /^harness\/scripts\/ci\/run-untrusted-qualification-verifier\.sh(?:\s|$)/.test(
+          command
+        )
+      )
+    )
+    const sandboxProbeText = sandboxProbe?.join('\n') ?? ''
+    const sandboxHelperCalls =
+      sandboxProbe?.filter((command) =>
+        /^harness\/scripts\/ci\/run-untrusted-qualification-verifier\.sh(?:\s|$)/.test(
+          command
+        )
+      ).length ?? 0
+    if (
+      sandboxHelperCalls !== 2 ||
+      !/--read-root\s+["']?\$probe_root["']?\s+["']?\$verifier["']?/.test(
+        sandboxProbeText
+      ) ||
+      !/verify-platforms\s+--root\s+["']?\$probe_root["']?/.test(
+        sandboxProbeText
+      )
+    ) {
+      failures.push(
+        'qualification preflight must probe both exact-target verifier modes through the protected sandbox helper'
       )
     }
     for (const [command, condition] of [
@@ -1745,6 +1813,7 @@ export function validateQualificationWorkflow(source) {
 
   for (const [jobName, block] of [
     ['docs-build', docsBuild],
+    ['recovery-auth', recoveryAuth],
     ['artifact-replay', artifactReplay],
     ['aggregate-artifacts', aggregate],
     ['qualification-gate', gate],
@@ -1753,6 +1822,116 @@ export function validateQualificationWorkflow(source) {
     else if (!/^    runs-on:\s*['"]?ubuntu-24\.04['"]?\s*$/m.test(block)) {
       failures.push(`${jobName} must use ubuntu-24.04`)
     }
+  }
+
+  if (recoveryAuth) {
+    const activeRecoveryAuth = uncommentedSource(recoveryAuth)
+    if (
+      !jobNeeds(recoveryAuth, 'preflight') ||
+      !/^    if:\s*needs\.preflight\.outputs\.mode\s*==\s*['"]aggregate-recovery['"]\s*$/m.test(
+        activeRecoveryAuth
+      )
+    ) {
+      failures.push(
+        'recovery-auth must run only for aggregate-recovery after preflight'
+      )
+    }
+    const protectedCheckout = actionStepBlocks(
+      recoveryAuth,
+      'actions/checkout@v4'
+    ).some(
+      (step) =>
+        /^\s*ref:\s*\$\{\{\s*needs\.preflight\.outputs\.workflow_sha\s*\}\}\s*$/m.test(
+          step
+        ) &&
+        /^\s*path:\s*harness\s*$/m.test(step) &&
+        /^\s*fetch-depth:\s*0\s*$/m.test(step)
+    )
+    if (!protectedCheckout) {
+      failures.push(
+        'recovery-auth must checkout the protected recovery verifier with full history'
+      )
+    }
+    const metadataStep = actionStepBlocks(
+      recoveryAuth,
+      'actions/github-script@v7'
+    )[0]
+    const metadataSource = metadataStep
+      ? uncommentedSource(metadataStep)
+      : ''
+    const sameRepositoryOwnerCount =
+      metadataSource.match(/\bowner:\s*context\.repo\.owner\b/g)?.length ?? 0
+    const sameRepositoryRepoCount =
+      metadataSource.match(/\brepo:\s*context\.repo\.repo\b/g)?.length ?? 0
+    const sourceRunIdCount =
+      metadataSource.match(/\brun_id:\s*runId\b/g)?.length ?? 0
+    if (
+      !metadataStep ||
+      !/github-token:\s*\$\{\{\s*github\.token\s*\}\}/.test(metadataSource) ||
+      !/github\.rest\.actions\.getWorkflowRun\s*\(/.test(metadataSource) ||
+      !/github\.rest\.actions\.listJobsForWorkflowRun\b/.test(metadataSource) ||
+      !/github\.rest\.actions\.listWorkflowRunArtifacts\b/.test(
+        metadataSource
+      ) ||
+      sameRepositoryOwnerCount !== 3 ||
+      sameRepositoryRepoCount !== 3 ||
+      sourceRunIdCount !== 3
+    ) {
+      failures.push(
+        'recovery-auth must fetch run, job, and artifact metadata explicitly from the current repository'
+      )
+    }
+    if (
+      !hasRunInvocation(
+        recoveryAuth,
+        /^node\s+harness\/scripts\/ci\/verify-qualification-recovery\.mjs(?:\s|$)/,
+        [
+          /--run\s+recovery-metadata\/run\.json/,
+          /--jobs\s+recovery-metadata\/jobs\.json/,
+          /--artifacts\s+recovery-metadata\/artifacts\.json/,
+          /--source-run-id\s+["']?\$RECOVERY_RUN_ID["']?/,
+          /--repository\s+["']?\$GITHUB_REPOSITORY["']?/,
+          /--target-sha\s+["']?\$TARGET_SHA["']?/,
+          /--base-sha\s+["']?\$BASE_SHA["']?/,
+          /--output\s+recovery-metadata\/recovery-summary\.json/,
+          /--github-output\s+["']?\$GITHUB_OUTPUT["']?/,
+        ]
+      )
+    ) {
+      failures.push(
+        'recovery-auth must run the protected recovery validator over source run, jobs, and artifacts'
+      )
+    }
+    if (
+      !/\.sourceHeadSha[\s\S]*\^\[0-9a-f\]\{40\}\$/.test(
+        activeRecoveryAuth
+      ) ||
+      !hasRunInvocation(
+        recoveryAuth,
+        /^git\s+-C\s+harness\s+cat-file\s+-e\s+["']?\$\{source_head_sha\}\^\{commit\}["']?$/
+      ) ||
+      !hasRunInvocation(
+        recoveryAuth,
+        /^git\s+-C\s+harness\s+merge-base\s+--is-ancestor\b/,
+        [
+          /["']?\$source_head_sha["']?/,
+          /\$\{\{\s*needs\.preflight\.outputs\.workflow_sha\s*\}\}/,
+        ]
+      )
+    ) {
+      failures.push(
+        'recovery-auth must prove the authenticated source head is an ancestor of the protected workflow SHA'
+      )
+    }
+  }
+
+  if (
+    docsBuild &&
+    !/needs\.preflight\.outputs\.mode\s*!=\s*['"]aggregate-recovery['"]/.test(
+      uncommentedSource(docsBuild)
+    )
+  ) {
+    failures.push('docs-build must be skipped during aggregate-recovery')
   }
 
   for (const [jobName, block, runner, flag] of [
@@ -1785,6 +1964,13 @@ export function validateQualificationWorkflow(source) {
       failures.push(
         `${jobName} must use the ${flag} and ${buildFlag} qualification axes`
       )
+    }
+    if (
+      !/needs\.preflight\.outputs\.mode\s*!=\s*['"]aggregate-recovery['"]/.test(
+        uncommentedSource(block)
+      )
+    ) {
+      failures.push(`${jobName} must be skipped during aggregate-recovery`)
     }
   }
 
@@ -1966,7 +2152,7 @@ export function validateQualificationWorkflow(source) {
     if (
       !hasRunInvocation(
         artifactReplay,
-        /^node\s+harness\/scripts\/ci\/verify-qualification-artifacts\.mjs\s+verify\b/,
+        /^node\s+harness\/scripts\/ci\/verify-qualification-artifacts\.mjs\s+verify(?:\s|\\|$)/,
         [
           /--manifest\s+[^\n]+/,
           /--manifest-sha256\s+[^\n]+/,
@@ -1980,6 +2166,232 @@ export function validateQualificationWorkflow(source) {
         'artifact replay must strictly verify digest, target, base, and source run identity'
       )
     }
+    const replaySandbox = runBlocks(artifactReplay).find((commands) =>
+      commands.some((command) =>
+        /^harness\/scripts\/ci\/run-untrusted-qualification-verifier\.sh(?:\s|$)/.test(
+          command
+        )
+      )
+    )
+    const replaySandboxText = replaySandbox?.join('\n') ?? ''
+    const replaySandboxCalls =
+      replaySandbox?.filter((command) =>
+        /^harness\/scripts\/ci\/run-untrusted-qualification-verifier\.sh(?:\s|$)/.test(
+          command
+        )
+      ).length ?? 0
+    const replayLastHelper = replaySandboxText.lastIndexOf(
+      'harness/scripts/ci/run-untrusted-qualification-verifier.sh'
+    )
+    const replayBeforeHelper =
+      replayLastHelper >= 0 ? replaySandboxText.slice(0, replayLastHelper) : ''
+    const replayAfterHelper =
+      replayLastHelper >= 0 ? replaySandboxText.slice(replayLastHelper) : ''
+    const replayLastHelperCommand = replaySandbox
+      ? replaySandbox.findLastIndex((command) =>
+          /^harness\/scripts\/ci\/run-untrusted-qualification-verifier\.sh(?:\s|$)/.test(
+            command
+          )
+        )
+      : -1
+    const replayProtectedAfter =
+      replayLastHelperCommand >= 0
+        ? replaySandbox
+            .slice(replayLastHelperCommand + 1)
+            .filter((command) =>
+              /^node\s+harness\/scripts\/ci\/verify-qualification-artifacts\.mjs(?:\s|$)/.test(
+                command
+              )
+            )
+        : []
+    if (
+      replaySandboxCalls !== 2 ||
+      !/--read-root\s+["']?\$artifact_root["']?[\s\S]*target\/scripts\/ci\/verify-qualification-artifacts\.mjs/.test(
+        replaySandboxText
+      ) ||
+      !/verify-platforms\s+--root\s+["']?\$artifact_root["']?/.test(
+        replaySandboxText
+      ) ||
+      !/node\s+harness\/scripts\/ci\/verify-qualification-artifacts\.mjs\s+verify(?:\s|\\|$)/.test(
+        replayBeforeHelper
+      ) ||
+      replayProtectedAfter.length < 2 ||
+      !/\$\{verify_args\[@\]\}/.test(replayAfterHelper) ||
+      !/verify-platforms\s+--root\s+["']?\$artifact_root["']?/.test(
+        replayAfterHelper
+      )
+    ) {
+      failures.push(
+        'artifact replay must sandbox both exact-target verifier modes between protected verification passes'
+      )
+    }
+  }
+
+  if (aggregate) {
+    const activeAggregate = uncommentedSource(aggregate)
+    if (
+      !jobNeeds(aggregate, 'recovery-auth') ||
+      !/needs\.recovery-auth\.result\s*==\s*['"]success['"]/.test(
+        activeAggregate
+      )
+    ) {
+      failures.push(
+        'aggregate-artifacts must depend on successful recovery-auth in aggregate-recovery mode'
+      )
+    }
+
+    const recoveryDownloads = workflowStepBlocks(activeAggregate).filter(
+      (step) =>
+        /uses:\s*actions\/download-artifact@v4/.test(step) &&
+        /^\s*(?:-\s*)?if:\s*needs\.preflight\.outputs\.mode\s*==\s*['"]aggregate-recovery['"]\s*$/m.test(
+          step
+        )
+    )
+    for (const platform of ['linux', 'windows', 'macos']) {
+      const expectedName = new RegExp(
+        `^\\s*name:\\s*qualification-build-${platform}-\\$\\{\\{\\s*needs\\.preflight\\.outputs\\.recovery_run_id\\s*\\}\\}\\s*$`,
+        'm'
+      )
+      const expectedPath = new RegExp(
+        `^\\s*path:\\s*qualification-current/${platform}\\s*$`,
+        'm'
+      )
+      const downloads = recoveryDownloads.filter((step) =>
+        expectedName.test(step)
+      )
+      if (
+        downloads.length !== 1 ||
+        !/^\s*(?:-\s*)?if:\s*needs\.preflight\.outputs\.mode\s*==\s*['"]aggregate-recovery['"]\s*$/m.test(
+          downloads[0] ?? ''
+        ) ||
+        !/github-token:\s*\$\{\{\s*github\.token\s*\}\}/.test(
+          downloads[0] ?? ''
+        ) ||
+        !/repository:\s*\$\{\{\s*github\.repository\s*\}\}/.test(
+          downloads[0] ?? ''
+        ) ||
+        !/run-id:\s*\$\{\{\s*needs\.preflight\.outputs\.recovery_run_id\s*\}\}/.test(
+          downloads[0] ?? ''
+        ) ||
+        !expectedPath.test(downloads[0] ?? '') ||
+        /^\s*pattern:\s*/m.test(downloads[0] ?? '')
+      ) {
+        failures.push(
+          `aggregate recovery must download the exact authenticated ${platform} artifact by source run ID`
+        )
+      }
+    }
+    if (
+      recoveryDownloads.length !== 3 ||
+      recoveryDownloads.some((step) => /^\s*pattern:\s*/m.test(step))
+    ) {
+      failures.push(
+        'aggregate recovery must use exactly three named source artifacts and never a pattern'
+      )
+    }
+
+    if (
+      !/RECOVERY_SUMMARY_JSON:\s*\$\{\{\s*needs\.recovery-auth\.outputs\.summary_json\s*\}\}/.test(
+        activeAggregate
+      ) ||
+      !/RECOVERY_MODE:\s*\$\{\{\s*needs\.preflight\.outputs\.mode\s*==\s*['"]aggregate-recovery['"]\s*\}\}/.test(
+        activeAggregate
+      ) ||
+      !/\.sourceRunId\s*==\s*\$recovery_run_id/.test(activeAggregate) ||
+      !/\.targetSha\s*==\s*\$target_sha/.test(activeAggregate) ||
+      !/\.baseSha\s*==\s*\$base_sha/.test(activeAggregate) ||
+      !/\.artifacts\s*\|\s*length\s*==\s*3/.test(activeAggregate) ||
+      !/qualification-evidence\/run-\$\{\{\s*github\.run_id\s*\}\}-aggregate-recovery\.json/.test(
+        activeAggregate
+      )
+    ) {
+      failures.push(
+        'aggregate recovery must validate and embed the authenticated recovery summary'
+      )
+    }
+
+    const aggregateSandbox = runBlocks(aggregate).find((commands) =>
+      commands.some((command) =>
+        /^harness\/scripts\/ci\/run-untrusted-qualification-verifier\.sh(?:\s|$)/.test(
+          command
+        )
+      )
+    )
+    const aggregateSandboxText = aggregateSandbox?.join('\n') ?? ''
+    const aggregateHelperCalls =
+      aggregateSandbox?.filter((command) =>
+        /^harness\/scripts\/ci\/run-untrusted-qualification-verifier\.sh(?:\s|$)/.test(
+          command
+        )
+      ).length ?? 0
+    const aggregateFirstHelper = aggregateSandboxText.indexOf(
+      'harness/scripts/ci/run-untrusted-qualification-verifier.sh'
+    )
+    const aggregateLastHelper = aggregateSandboxText.lastIndexOf(
+      'harness/scripts/ci/run-untrusted-qualification-verifier.sh'
+    )
+    const aggregateBeforeHelper =
+      aggregateFirstHelper >= 0
+        ? aggregateSandboxText.slice(0, aggregateFirstHelper)
+        : ''
+    const aggregateAfterHelper =
+      aggregateLastHelper >= 0
+        ? aggregateSandboxText.slice(aggregateLastHelper)
+        : ''
+    const aggregateFirstHelperCommand = aggregateSandbox
+      ? aggregateSandbox.findIndex((command) =>
+          /^harness\/scripts\/ci\/run-untrusted-qualification-verifier\.sh(?:\s|$)/.test(
+            command
+          )
+        )
+      : -1
+    const aggregateLastHelperCommand = aggregateSandbox
+      ? aggregateSandbox.findLastIndex((command) =>
+          /^harness\/scripts\/ci\/run-untrusted-qualification-verifier\.sh(?:\s|$)/.test(
+            command
+          )
+        )
+      : -1
+    const aggregateProtectedBefore =
+      aggregateFirstHelperCommand >= 0
+        ? aggregateSandbox
+            .slice(0, aggregateFirstHelperCommand)
+            .some((command) =>
+              /^node\s+harness\/scripts\/ci\/verify-qualification-artifacts\.mjs(?:\s|$)/.test(
+                command
+              )
+            )
+        : false
+    const aggregateProtectedAfter =
+      aggregateLastHelperCommand >= 0
+        ? aggregateSandbox
+            .slice(aggregateLastHelperCommand + 1)
+            .filter((command) =>
+              /^node\s+harness\/scripts\/ci\/verify-qualification-artifacts\.mjs(?:\s|$)/.test(
+                command
+              )
+            )
+        : []
+    if (
+      aggregateHelperCalls !== 2 ||
+      !/--read-root\s+qualification-output[\s\S]*target\/scripts\/ci\/verify-qualification-artifacts\.mjs/.test(
+        aggregateSandboxText
+      ) ||
+      !/verify-platforms\s+--root\s+qualification-output/.test(
+        aggregateSandboxText
+      ) ||
+      !aggregateProtectedBefore ||
+      !/\$\{verify_args\[@\]\}/.test(aggregateBeforeHelper) ||
+      aggregateProtectedAfter.length < 2 ||
+      !/\$\{verify_args\[@\]\}/.test(aggregateAfterHelper) ||
+      !/verify-platforms\s+--root\s+qualification-output/.test(
+        aggregateAfterHelper
+      )
+    ) {
+      failures.push(
+        'aggregate-artifacts must sandbox both target verifier modes between protected verification passes'
+      )
+    }
   }
 
   if (gate) {
@@ -1989,6 +2401,7 @@ export function validateQualificationWorkflow(source) {
     for (const dependency of [
       'preflight',
       'docs-build',
+      'recovery-auth',
       'artifact-replay',
       'native-linux',
       'native-windows',
@@ -2009,6 +2422,7 @@ export function validateQualificationWorkflow(source) {
     }
     for (const plannedJob of [
       'docs-build',
+      'recovery-auth',
       'artifact-replay',
       'native-linux',
       'native-windows',
@@ -2038,6 +2452,29 @@ export function validateQualificationWorkflow(source) {
         'qualification gate must fail closed on required job results'
       )
     }
+    if (
+      !/RECOVERY_RESULT:\s*\$\{\{\s*needs\.recovery-auth\.result\s*\}\}/.test(
+        uncommentedSource(gate)
+      ) ||
+      !/if\s+\[\s+["']?\$MODE["']?\s+=\s+["']aggregate-recovery["']\s+\];\s*then[\s\S]*?recovery_required=true/.test(
+        uncommentedSource(gate)
+      )
+    ) {
+      failures.push(
+        'qualification gate must require recovery-auth only for aggregate-recovery'
+      )
+    }
+  }
+
+  if (
+    hasRunInvocation(
+      source,
+      /^(?:(?:&|command)\s+)?node\s+target\/scripts\/ci\/verify-qualification-artifacts\.mjs(?:\s|$)/
+    )
+  ) {
+    failures.push(
+      'exact target qualification verifier must never run directly outside the protected sandbox helper'
+    )
   }
 
   if (/^\s*environment:\s*/m.test(active)) {
