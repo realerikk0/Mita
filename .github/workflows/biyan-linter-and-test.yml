@@ -100,7 +100,9 @@ jobs:
           if [ "$event" = 'pull_request' ]; then
             policy_sha='${{ github.event.pull_request.base.sha }}'
             target_sha='${{ github.event.pull_request.head.sha }}'
-            base_sha="$(git merge-base "$policy_sha" "$target_sha")"
+            # A missing/disconnected object must upgrade the plan to the
+            # fail-closed bootstrap-full path instead of aborting under -e.
+            base_sha="$(git merge-base "$policy_sha" "$target_sha" || true)"
           elif [ "$event" = 'push' ]; then
             policy_sha='${{ github.event.before }}'
             target_sha='${{ github.sha }}'
