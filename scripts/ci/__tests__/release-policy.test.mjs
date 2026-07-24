@@ -879,6 +879,20 @@ jobs:
       failure.includes('invalid commit identity')
     )
   )
+  for (const [needle, replacement] of [
+    ['! "$policy_sha" =~ ^[0-9a-f]{40}$', '! "$other_sha" =~ ^[0-9a-f]{40}$'],
+    ['! "$target_sha" =~ ^[0-9a-f]{40}$', '! "$other_sha" =~ ^[0-9a-f]{40}$'],
+    ['! "$base_sha" =~ ^[0-9a-f]{40}$', '! "$other_sha" =~ ^[0-9a-f]{40}$'],
+    ['"$policy_sha" =~ ^0{40}$', '"$policy_sha" =~ ^0+$'],
+  ]) {
+    const missingExactIdentityCheck = workflow.replace(needle, replacement)
+    assert.ok(
+      validateCiWorkflow(missingExactIdentityCheck).some((failure) =>
+        failure.includes('invalid commit identity')
+      ),
+      needle
+    )
+  }
 
   const missingAxis = workflow.replace(
     '      test_macos: \${{ steps.scope.outputs.test_macos }}\n',

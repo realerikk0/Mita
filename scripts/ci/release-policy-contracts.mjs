@@ -537,8 +537,17 @@ export function validateCiWorkflow(source) {
       ciScope.match(
         /^\s*if \[\[ ! "\$policy_sha" =~ \^\[0-9a-f\]\{40\}\$ \]\] \|\|[\s\S]*?^\s*fi\s*$/m
       )?.[0] ?? ''
+    const exactIdentityChecks = [
+      /\[\[ ! "\$policy_sha" =~ \^\[0-9a-f\]\{40\}\$ \]\]/,
+      /\[\[ ! "\$target_sha" =~ \^\[0-9a-f\]\{40\}\$ \]\]/,
+      /\[\[ ! "\$base_sha" =~ \^\[0-9a-f\]\{40\}\$ \]\]/,
+      /\[\[ "\$policy_sha" =~ \^0\{40\}\$ \]\]/,
+    ]
     if (
       !invalidIdentityGuard ||
+      !exactIdentityChecks.every((pattern) =>
+        pattern.test(invalidIdentityGuard)
+      ) ||
       !/^\s*emit_bootstrap_full\s*$/m.test(invalidIdentityGuard) ||
       !/^\s*exit 0\s*$/m.test(invalidIdentityGuard)
     ) {
