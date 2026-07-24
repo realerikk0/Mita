@@ -1096,46 +1096,37 @@ test('publication transaction polls stale CDN bytes until bounded convergence', 
 test('executable recovery CDN poll converges or fails at its exact deadline', (t) => {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'biyan-recovery-cdn-'))
   t.after(() => fs.rmSync(root, { force: true, recursive: true }))
-  const bin = path.join(root, 'bin')
   const counter = path.join(root, 'counter')
   const good = path.join(root, 'good')
-  fs.mkdirSync(bin)
   fs.writeFileSync(good, 'expected-public-bytes')
-  const curl = path.join(bin, 'curl')
-  fs.writeFileSync(
-    curl,
-    `#!/usr/bin/env bash
-set -euo pipefail
-output=""
-while [ "$#" -gt 0 ]; do
-  if [ "$1" = "--output" ]; then
-    output="$2"
-    shift 2
-  else
-    shift
-  fi
-done
-count=0
-if [ -f "$RECOVERY_COUNTER" ]; then count="$(cat "$RECOVERY_COUNTER")"; fi
-count="$((count + 1))"
-printf '%s\\n' "$count" > "$RECOVERY_COUNTER"
-if [ "$count" -ge "$RECOVERY_GOOD_AFTER" ]; then
-  cp "$RECOVERY_GOOD_FILE" "$output"
-else
-  printf 'stale' > "$output"
-fi
-`
-  )
-  fs.chmodSync(curl, 0o755)
   const expected = sha256(good)
   const publicUrl = 'https://static.mitapp.cn/biyan/download/latest.json'
   const environment = {
     ...process.env,
-    PATH: `${bin}${path.delimiter}${process.env.PATH ?? ''}`,
-    RECOVERY_COUNTER: counter,
-    RECOVERY_GOOD_FILE: good,
+    RECOVERY_COUNTER: 'counter',
+    RECOVERY_GOOD_FILE: 'good',
   }
-  assert.equal(environment.PATH.split(path.delimiter)[0], bin)
+  const withFakeCurl = (command) => `curl() {
+  output=""
+  while [ "$#" -gt 0 ]; do
+    if [ "$1" = "--output" ]; then
+      output="$2"
+      shift 2
+    else
+      shift
+    fi
+  done
+  count=0
+  if [ -f "$RECOVERY_COUNTER" ]; then count="$(cat "$RECOVERY_COUNTER")"; fi
+  count="$((count + 1))"
+  printf '%s\\n' "$count" > "$RECOVERY_COUNTER"
+  if [ "$count" -ge "$RECOVERY_GOOD_AFTER" ]; then
+    cp "$RECOVERY_GOOD_FILE" "$output"
+  else
+    printf 'stale' > "$output"
+  fi
+}
+${command}`
   const productionCommand = buildBoundedPublicReadbackCommand(
     publicUrl,
     expected
@@ -1148,12 +1139,15 @@ fi
     'bash',
     [
       '-c',
-      buildBoundedPublicReadbackCommand(publicUrl, expected, {
-        timeoutSeconds: 5,
-        pollSeconds: 0.01,
-      }),
+      withFakeCurl(
+        buildBoundedPublicReadbackCommand(publicUrl, expected, {
+          timeoutSeconds: 5,
+          pollSeconds: 0.01,
+        })
+      ),
     ],
     {
+      cwd: root,
       encoding: 'utf8',
       env: { ...environment, RECOVERY_GOOD_AFTER: '3' },
     }
@@ -1166,12 +1160,15 @@ fi
     'bash',
     [
       '-c',
-      buildBoundedPublicReadbackCommand(publicUrl, expected, {
-        timeoutSeconds: 1,
-        pollSeconds: 0.05,
-      }),
+      withFakeCurl(
+        buildBoundedPublicReadbackCommand(publicUrl, expected, {
+          timeoutSeconds: 1,
+          pollSeconds: 0.05,
+        })
+      ),
     ],
     {
+      cwd: root,
       encoding: 'utf8',
       env: { ...environment, RECOVERY_GOOD_AFTER: '999999' },
     }
