@@ -695,15 +695,25 @@ jobs:
     steps:
       - id: scope
         run: |
+          emit_bootstrap_full() {
+            for flag in quick test_linux test_windows test_macos full; do
+              echo "\${flag}=true" >> "$GITHUB_OUTPUT"
+            done
+          }
           base_sha="\${{ github.event.pull_request.base.sha }}"
           policy_sha="$base_sha"
           target_sha=HEAD
           base_sha="$(git merge-base "$policy_sha" "$target_sha" || true)"
+          if [[ ! "$policy_sha" =~ ^[0-9a-f]{40}$ ]] ||
+             [[ ! "$target_sha" =~ ^[0-9a-f]{40}$ ]] ||
+             [[ ! "$base_sha" =~ ^[0-9a-f]{40}$ ]] ||
+             [[ "$policy_sha" =~ ^0{40}$ ]]; then
+            emit_bootstrap_full
+            exit 0
+          fi
           if ! git show "\${base_sha}:scripts/ci/qualification-impact.mjs" > "$RUNNER_TEMP/qualification-impact.mjs"; then
             echo "Base classifier unavailable; fail closed to full axes."
-            for flag in quick test_linux test_windows test_macos full; do
-              echo "\${flag}=true" >> "$GITHUB_OUTPUT"
-            done
+            emit_bootstrap_full
           else
             node "$RUNNER_TEMP/qualification-impact.mjs" classify --repo . --base "$base_sha" --target HEAD --format github-output
           fi
@@ -859,6 +869,16 @@ jobs:
       )
     )
   }
+
+  const missingInvalidIdentityFallback = workflow.replace(
+    '            emit_bootstrap_full\n            exit 0\n          fi\n          if ! git show',
+    '            exit 1\n          fi\n          if ! git show'
+  )
+  assert.ok(
+    validateCiWorkflow(missingInvalidIdentityFallback).some((failure) =>
+      failure.includes('invalid commit identity')
+    )
+  )
 
   const missingAxis = workflow.replace(
     '      test_macos: \${{ steps.scope.outputs.test_macos }}\n',

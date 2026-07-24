@@ -858,6 +858,32 @@ test('CLI normalizes renames and blocks unsafe commit or file shapes', async (t)
     assert.equal(result.json.flags.full, false)
   })
 
+  await t.test('runtime-to-docs rename keeps the higher-risk source path', (subtest) => {
+    const repo = createRepo(subtest)
+    writeFile(repo, 'web-app/src/runtime.ts', 'export const product = true\n')
+    const base = commitAll(repo, 'base')
+    git(repo, ['mv', 'web-app/src/runtime.ts', 'retired.md'])
+    const target = commitAll(repo, 'rename runtime to docs')
+    const result = runJson([
+      'classify',
+      '--repo',
+      repo,
+      '--base',
+      base,
+      '--target',
+      target,
+    ])
+    assert.equal(result.status, 0)
+    assert.equal(result.json.blocked, false)
+    assert.deepEqual(result.json.changedFiles, [
+      'retired.md',
+      'web-app/src/runtime.ts',
+    ])
+    assert.equal(result.json.flags.docs, true)
+    assert.equal(result.json.flags.full, true)
+    assert.equal(result.json.flags.buildLinux, true)
+  })
+
   await t.test('executable mode change', (subtest) => {
     const repo = createRepo(subtest)
     writeFile(repo, 'scripts/run.sh', '#!/bin/sh\n', 0o644)

@@ -533,6 +533,19 @@ export function validateCiWorkflow(source) {
         'Biyan trusted CI scope must fail closed instead of aborting when merge-base is unavailable'
       )
     }
+    const invalidIdentityGuard =
+      ciScope.match(
+        /^\s*if \[\[ ! "\$policy_sha" =~ \^\[0-9a-f\]\{40\}\$ \]\] \|\|[\s\S]*?^\s*fi\s*$/m
+      )?.[0] ?? ''
+    if (
+      !invalidIdentityGuard ||
+      !/^\s*emit_bootstrap_full\s*$/m.test(invalidIdentityGuard) ||
+      !/^\s*exit 0\s*$/m.test(invalidIdentityGuard)
+    ) {
+      failures.push(
+        'Biyan trusted CI scope must route invalid commit identity to bootstrap-full and exit successfully'
+      )
+    }
     if (
       !hasRunInvocation(
         ciScope,
