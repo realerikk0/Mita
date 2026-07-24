@@ -1106,7 +1106,13 @@ test('executable recovery CDN poll converges or fails at its exact deadline', (t
     RECOVERY_COUNTER: 'counter',
     RECOVERY_GOOD_FILE: 'good',
   }
-  const withFakeCurl = (command) => `curl() {
+  const withFakeCurl = (command) => {
+    assert.equal(
+      command.split('\n').filter((line) => line.startsWith('if curl ')).length,
+      1
+    )
+    assert.equal(command.match(/\bcurl\b/gu)?.length, 1)
+    return `curl() {
   output=""
   while [ "$#" -gt 0 ]; do
     if [ "$1" = "--output" ]; then
@@ -1127,6 +1133,7 @@ test('executable recovery CDN poll converges or fails at its exact deadline', (t
   fi
 }
 ${command}`
+  }
   const productionCommand = buildBoundedPublicReadbackCommand(
     publicUrl,
     expected
