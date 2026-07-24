@@ -177,6 +177,45 @@ function actionStepBlocks(source, action) {
   return blocks
 }
 
+function workflowStepBlocks(source) {
+  const normalized = source.replace(/\r\n?/g, '\n')
+  const lines = normalized.split('\n')
+  const stepsHeaderIndex = lines.findIndex((line) => /^(\s*)steps:\s*$/.test(line))
+  if (stepsHeaderIndex < 0) return []
+
+  const headerIndent = /^(\s*)/.exec(lines[stepsHeaderIndex])?.[1].length ?? 0
+  const stepIndent = headerIndent + 2
+  const stepStart = new RegExp(`^\\s{${stepIndent}}-\\s+`)
+  const blocks = []
+  let index = stepsHeaderIndex + 1
+
+  while (index < lines.length) {
+    if (
+      lines[index].trim() &&
+      (lines[index].match(/^\s*/)?.[0].length ?? 0) <= headerIndent
+    ) {
+      break
+    }
+    if (!stepStart.test(lines[index])) {
+      index += 1
+      continue
+    }
+    const start = index
+    index += 1
+    while (index < lines.length && !stepStart.test(lines[index])) {
+      if (
+        lines[index].trim() &&
+        (lines[index].match(/^\s*/)?.[0].length ?? 0) <= headerIndent
+      ) {
+        break
+      }
+      index += 1
+    }
+    blocks.push(lines.slice(start, index).join('\n'))
+  }
+  return blocks
+}
+
 function jobUsesScopeFlag(block, flag) {
   if (!block) return false
   const names = Array.isArray(flag) ? flag : [flag]
@@ -1342,6 +1381,58 @@ export function validateWindowsCandidateVerifier(source) {
       failures.push(`Windows candidate verifier ${message}`)
     }
   }
+
+  const msiAdminBlock =
+    /\$msiExtractRoot\s*=[\s\S]*?(?=^\$windowsInstaller\s*=)/m.exec(
+      active
+    )?.[0] ?? ''
+  const msiAdminExecution =
+    /^\s*\$msiExec\s*=\s*\(Get-Command\s+msiexec\.exe\s+-ErrorAction\s+Stop\)\.Source\s*\n\s*&\s+\$msiExec\s+`\s*\n\s*["']\/a["']\s+`\s*\n\s*\$msiPath\s+`\s*\n\s*["']\/qn["']\s+`\s*\n\s*["']\/norestart["']\s+`\s*\n\s*["']TARGETDIR=\$msiExtractRoot["']\s+`\s*\n\s*["']\/L\*V["']\s+`\s*\n\s*\$msiLogPath\s*\n\s*\$msiExitCode\s*=\s*\$LASTEXITCODE\s*\n\s*if\s*\(\$msiExitCode\s+-ne\s+0\)\s*\{/m
+  if (
+    !msiAdminExecution.test(msiAdminBlock) ||
+    (msiAdminBlock.match(/\$msiExec\s*=/g)?.length ?? 0) !== 1 ||
+    (msiAdminBlock.match(/^\s*&\s+\$msiExec\b/gm)?.length ?? 0) !== 1 ||
+    (msiAdminBlock.match(/\$msiExitCode\s*=/g)?.length ?? 0) !== 1
+  ) {
+    failures.push(
+      'Windows candidate verifier must resolve, execute, and capture Windows Installer administrative extraction in order'
+    )
+  }
+  if (
+    !/\$msiExitCode\s*=\s*\$LASTEXITCODE[\s\S]*?if\s*\(\$msiExitCode\s+-ne\s+0\)\s*\{[\s\S]*?throw\s+["'][^"']*exit\s+\$msiExitCode[^"']*["']/.test(
+      msiAdminBlock
+    )
+  ) {
+    failures.push(
+      'Windows candidate verifier must fail closed when Windows Installer cannot create the administrative image'
+    )
+  }
+  if (
+    !/Test-ExtractedBiyanApp[\s\S]*?-Root\s+\$msiExtractRoot/.test(
+      msiAdminBlock
+    ) ||
+    !/Invoke-ExtractedCandidatePolicies\s+-Root\s+\$msiExtractRoot\s+-Label\s+["']MSI["']/.test(
+      msiAdminBlock
+    )
+  ) {
+    failures.push(
+      'Windows candidate verifier must inspect the MSI administrative image'
+    )
+  }
+  if (
+    !/finally\s*\{[\s\S]*?Remove-Item[\s\S]*?-LiteralPath\s+\$msiExtractRoot[\s\S]*?-Recurse[\s\S]*?Remove-Item[\s\S]*?-LiteralPath\s+\$msiLogPath[\s\S]*?-Force/.test(
+      msiAdminBlock
+    )
+  ) {
+    failures.push(
+      'Windows candidate verifier must clean the MSI administrative image and log'
+    )
+  }
+  if (/\$sevenZip[\s\S]*?\$msiPath/.test(msiAdminBlock)) {
+    failures.push(
+      'Windows candidate verifier must not treat the MSI database as a flat 7-Zip payload'
+    )
+  }
   return failures
 }
 
@@ -1642,6 +1733,61 @@ export function validateQualificationWorkflow(source) {
     }
   }
   if (linux) {
+    const activeLinux = uncommentedSource(linux)
+    const linuxSteps = workflowStepBlocks(activeLinux)
+    const freeDiskAction = linuxSteps.find(
+      (step) =>
+        /uses:\s*jlumbroso\/free-disk-space@54081f138730dfa15788a46383842cd2f914a1be/.test(
+          step
+        ) &&
+        /^\s*with:\s*$/m.test(step) &&
+        !/^\s*(?:-\s*)?if:\s*/m.test(step) &&
+        !/^\s*(?:-\s*)?continue-on-error:\s*/m.test(step) &&
+        [
+        /tool-cache:\s*false/,
+        /android:\s*true/,
+        /dotnet:\s*true/,
+        /haskell:\s*true/,
+        /large-packages:\s*true/,
+        /docker-images:\s*true/,
+        /swap-storage:\s*true/,
+      ].every((pattern) => pattern.test(step))
+    )
+    if (!freeDiskAction) {
+      failures.push(
+        'native-linux must reclaim runner image space with the pinned protected action'
+      )
+    }
+    const diskBudgetStep = linuxSteps.find((step) =>
+      /available_kib=["']\$\(df -Pk \/ \| awk ['"]NR == 2 \{ print \$4 \}['"]\)["']/.test(
+        step
+      )
+    )
+    const diskBudgetCommands = diskBudgetStep
+      ? runBlocks(diskBudgetStep)[0]
+      : null
+    const diskBudget = diskBudgetCommands?.join('\n') ?? ''
+    const validatesMeasurement =
+      /if ! \[\[ "\$available_kib" =~ \^\[0-9\]\+\$ \]\]; then\n(?:(?!fi(?:\n|$))[^\n]*\n)*?exit 1\nfi/.test(
+        diskBudget
+      )
+    const rejectsLowDisk =
+      /minimum_kib=\$\(\(40 \* 1024 \* 1024\)\)\nif \[ "\$available_kib" -lt "\$minimum_kib" \]; then\n(?:(?!fi(?:\n|$))[^\n]*\n)*?exit 1\nfi/.test(
+        diskBudget
+      )
+    if (
+      !diskBudgetStep ||
+      !/^\s*(?:-\s*)?shell:\s*bash\s*$/m.test(diskBudgetStep) ||
+      /^\s*(?:-\s*)?if:\s*/m.test(diskBudgetStep) ||
+      /^\s*(?:-\s*)?continue-on-error:\s*/m.test(diskBudgetStep) ||
+      !diskBudgetCommands ||
+      !validatesMeasurement ||
+      !rejectsLowDisk
+    ) {
+      failures.push(
+        'native-linux must fail closed below the 40 GiB pre-test disk budget'
+      )
+    }
     const candidatePolicy = findRunInvocation(
       linux,
       /^node\s+\.\.\/harness\/scripts\/ci\/candidate-path-policy\.mjs(?:\s|$)/

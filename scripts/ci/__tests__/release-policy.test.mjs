@@ -1647,12 +1647,42 @@ test('protected Windows verifier authenticates native EXE and MSI identity', () 
   const verifier = fs.readFileSync(
     'scripts/ci/verify-windows-candidate.ps1',
     'utf8'
-  )
+  ).replace(/\r\n?/g, '\n')
   assert.deepEqual(validateWindowsCandidateVerifier(verifier), [])
   for (const mutation of [
     verifier.replaceAll('0x8664', '0x014C'),
     verifier.replace("'Biyan.exe'", "'Other.exe'"),
     verifier.replace('OpenDatabase', 'OpenData'),
+    verifier.replace("'/a'", "'/i'"),
+    verifier.replace('TARGETDIR=$msiExtractRoot', 'INSTALLDIR=$msiExtractRoot'),
+    verifier.replace('$msiExitCode -ne 0', '$msiExitCode -eq 0'),
+    verifier.replace('& $msiExec `', 'Write-Output $msiExec `'),
+    verifier
+      .replace(
+        '  & $msiExec `',
+        '  $msiExitCode = $LASTEXITCODE\n  & $msiExec `'
+      )
+      .replace(
+        '  $msiExitCode = $LASTEXITCODE\n  if ($msiExitCode',
+        '  if ($msiExitCode'
+      ),
+    verifier.replace(
+      '$msiExec = (Get-Command msiexec.exe -ErrorAction Stop).Source',
+      '$msiExec = (Get-Command msiexec.exe -ErrorAction Stop).Source\n' +
+        '  $msiExec = (Get-Command cmd.exe -ErrorAction Stop).Source'
+    ),
+    verifier.replace(
+      '-LiteralPath $msiExtractRoot `\n    -Recurse',
+      '-LiteralPath $msiExtractRoot `'
+    ),
+    verifier.replace(
+      '-LiteralPath $msiLogPath `\n    -Force',
+      '-LiteralPath $msiLogPath `'
+    ),
+    verifier.replace(
+      'try {\n  $msiExec =',
+      "try {\n  & $sevenZip `\n    'x' `\n    $msiPath\n  $msiExec ="
+    ),
     verifier.replace("'ProductVersion'", "'OtherVersion'"),
     verifier.replace('SummaryInformation(0)', 'SummaryInformation(1)'),
     verifier.replace('(?i:x64|Intel64)', '(?i:Intel)'),
@@ -1753,6 +1783,25 @@ jobs:
         with:
           ref: \${{ needs.preflight.outputs.workflow_sha }}
           path: harness
+      - uses: jlumbroso/free-disk-space@54081f138730dfa15788a46383842cd2f914a1be
+        with:
+          tool-cache: false
+          android: true
+          dotnet: true
+          haskell: true
+          large-packages: true
+          docker-images: true
+          swap-storage: true
+      - shell: bash
+        run: |
+          available_kib="$(df -Pk / | awk 'NR == 2 { print $4 }')"
+          if ! [[ "$available_kib" =~ ^[0-9]+$ ]]; then
+            exit 1
+          fi
+          minimum_kib=$((40 * 1024 * 1024))
+          if [ "$available_kib" -lt "$minimum_kib" ]; then
+            exit 1
+          fi
       - working-directory: target
         run: node ../harness/scripts/ci/candidate-path-policy.mjs --root "$bundle"
   native-windows:
@@ -1900,6 +1949,47 @@ test('exact-SHA qualification keeps the harness trusted and has no production au
     qualificationWorkflow.replace(
       'node ./harness/scripts/ci/candidate-path-policy.mjs --root $bundle',
       'Write-Output skipped-windows-retired-runtime-scan'
+    ),
+    qualificationWorkflow.replace(
+      'jlumbroso/free-disk-space@54081f138730dfa15788a46383842cd2f914a1be',
+      'jlumbroso/free-disk-space@v1.3.1'
+    ),
+    qualificationWorkflow.replace(
+      '      - uses: jlumbroso/free-disk-space',
+      '      - if: ${{ false }}\n        uses: jlumbroso/free-disk-space'
+    ),
+    qualificationWorkflow.replace('tool-cache: false', 'tool-cache: true'),
+    qualificationWorkflow.replace(
+      '        with:\n          tool-cache: false',
+      '        env:\n          tool-cache: false'
+    ),
+    qualificationWorkflow.replace(
+      'available_kib="$(df -Pk / | awk \'NR == 2 { print $4 }\')"',
+      'available_kib=999999999'
+    ),
+    qualificationWorkflow.replace(
+      '      - shell: bash\n        run: |\n          available_kib=',
+      '      - continue-on-error: true\n        shell: bash\n        run: |\n          available_kib='
+    ),
+    qualificationWorkflow.replace(
+      '      - shell: bash\n        run: |\n          available_kib=',
+      '      - continue-on-error: ${{ true }}\n        shell: bash\n        run: |\n          available_kib='
+    ),
+    qualificationWorkflow.replace(
+      '      - shell: bash\n        run: |\n          available_kib=',
+      '      - if: ${{ false }}\n        shell: bash\n        run: |\n          available_kib='
+    ),
+    qualificationWorkflow.replace(
+      '      - shell: bash\n        run: |\n          available_kib=',
+      '      - run: |\n          available_kib='
+    ),
+    qualificationWorkflow.replace(
+      'minimum_kib=$((40 * 1024 * 1024))',
+      'minimum_kib=$((4 * 1024 * 1024))'
+    ),
+    qualificationWorkflow.replace(
+      'if [ "$available_kib" -lt "$minimum_kib" ]; then\n            exit 1',
+      'if [ "$available_kib" -lt "$minimum_kib" ]; then\n            echo ignored'
     ),
     qualificationWorkflow.replace(
       'node ../harness/scripts/ci/candidate-path-policy.mjs --root "$bundle"',

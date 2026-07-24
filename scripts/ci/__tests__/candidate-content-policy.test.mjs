@@ -418,11 +418,12 @@ test('full tests and native candidate workflows keep the content gate wired', ()
   assert.doesNotMatch(contentPolicy, /from ['"]tar['"]/)
   assert.match(windowsVerifier, /candidate-path-policy\.mjs'/)
   assert.match(windowsVerifier, /candidate-content-policy\.mjs'/)
-  assert.match(windowsVerifier, /"biyan-msi-\{0\}"/)
+  assert.match(windowsVerifier, /"biyan-msi-admin-\{0\}"/)
   assert.match(
     windowsVerifier,
-    /& \$sevenZip 'x' "-o\$msiExtractRoot" '-y' \$msiPath/
+    /Get-Command msiexec\.exe[\s\S]*'\/a'[\s\S]*"TARGETDIR=\$msiExtractRoot"/
   )
+  assert.doesNotMatch(windowsVerifier, /& \$sevenZip[^\n]*\$msiPath/)
   assert.equal(
     windowsVerifier.match(/Invoke-ExtractedCandidatePolicies -Root/g)?.length,
     2
@@ -457,6 +458,14 @@ test('full tests and native candidate workflows keep the content gate wired', ()
   assert.match(
     exactQualification,
     /harness\/scripts\/ci\/candidate-content-policy\.mjs \\\s*\n\s*--root "\$deb_root"/
+  )
+  assert.match(
+    exactQualification,
+    /jlumbroso\/free-disk-space@54081f138730dfa15788a46383842cd2f914a1be/
+  )
+  assert.match(
+    exactQualification,
+    /minimum_kib=\$\(\(40 \* 1024 \* 1024\)\)/
   )
   assert.match(
     exactQualification,

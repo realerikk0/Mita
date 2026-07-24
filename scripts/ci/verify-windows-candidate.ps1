@@ -190,12 +190,36 @@ finally {
 
 $msiExtractRoot = Join-Path `
   ([System.IO.Path]::GetTempPath()) `
-  ("biyan-msi-{0}" -f [guid]::NewGuid().ToString('N'))
+  ("biyan-msi-admin-{0}" -f [guid]::NewGuid().ToString('N'))
+$msiLogPath = Join-Path `
+  ([System.IO.Path]::GetTempPath()) `
+  ("biyan-msi-admin-{0}.log" -f [guid]::NewGuid().ToString('N'))
 New-Item -ItemType Directory -Force -Path $msiExtractRoot | Out-Null
 try {
-  & $sevenZip 'x' "-o$msiExtractRoot" '-y' $msiPath | Out-Null
-  if ($LASTEXITCODE -ne 0) {
-    throw "7-Zip could not extract the MSI candidate (exit $LASTEXITCODE)"
+  $msiExec = (Get-Command msiexec.exe -ErrorAction Stop).Source
+  & $msiExec `
+    '/a' `
+    $msiPath `
+    '/qn' `
+    '/norestart' `
+    "TARGETDIR=$msiExtractRoot" `
+    '/L*V' `
+    $msiLogPath
+  $msiExitCode = $LASTEXITCODE
+  if ($msiExitCode -ne 0) {
+    if (Test-Path -LiteralPath $msiLogPath -PathType Leaf) {
+      foreach (
+        $line in @(
+          Get-Content `
+            -LiteralPath $msiLogPath `
+            -Tail 80 `
+            -ErrorAction SilentlyContinue
+        )
+      ) {
+        [Console]::Error.WriteLine($line)
+      }
+    }
+    throw "Windows Installer could not create the MSI administrative image (exit $msiExitCode)"
   }
   Test-ExtractedBiyanApp `
     -Root $msiExtractRoot `
@@ -207,6 +231,10 @@ finally {
   Remove-Item `
     -LiteralPath $msiExtractRoot `
     -Recurse `
+    -Force `
+    -ErrorAction SilentlyContinue
+  Remove-Item `
+    -LiteralPath $msiLogPath `
     -Force `
     -ErrorAction SilentlyContinue
 }
