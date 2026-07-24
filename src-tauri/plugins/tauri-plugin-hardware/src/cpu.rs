@@ -122,7 +122,7 @@ impl CpuStaticInfo {
         exts
     }
 
-    // Cortex always returns empty list for non-x86
+    // Non-x86 targets do not expose these instruction flags.
     #[cfg(not(any(target_arch = "x86", target_arch = "x86_64")))]
     fn get_extensions() -> Vec<String> {
         vec![]

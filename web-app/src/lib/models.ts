@@ -237,7 +237,7 @@ export const getModelCapabilities = (
 }
 
 /**
- * This utility is to extract cortexso model description from README.md file
+ * Extract a model description from README.md content.
  * @returns
  */
 export const extractDescription = (text?: string) => {
@@ -268,7 +268,7 @@ export const removeYamlFrontMatter = (content: string): string => {
 }
 
 /**
- * Extract model name from repo path, e.g. cortexso/tinyllama -> tinyllama
+ * Extract model name from repo path, e.g. example-org/tinyllama -> tinyllama
  * @param modelId
  * @returns
  */
@@ -277,7 +277,7 @@ export const extractModelName = (model?: string) => {
 }
 
 /**
- * Extract model name from repo path, e.g. https://huggingface.co/cortexso/tinyllama -> cortexso/tinyllama
+ * Extract a repository path from a Hugging Face URL.
  * @param modelId
  * @returns
  */

@@ -6,97 +6,229 @@ on:
   workflow_dispatch:
     inputs:
       tag:
-        description: "Existing GitHub release tag to distribute, for example v0.6.605"
+        description: 'Existing GitHub release tag to distribute, for example v0.6.605'
         required: true
         type: string
       dry_run:
-        description: "Render and validate only; do not upload to Aliyun OSS or send Feishu"
+        description: 'Render plus remote read-only preflight; do not upload to Aliyun OSS or send Feishu'
         required: true
         default: true
         type: boolean
+      confirm:
+        description: 'Required for a non-dry-run manual dispatch: type DISTRIBUTE'
+        required: false
+        default: ''
+        type: string
 
 permissions:
   contents: read
 
 concurrency:
-  group: release-distribution-${{ github.event.release.tag_name || inputs.tag }}
+  group: release-distribution-live-keys
   cancel-in-progress: false
 
 env:
-  NODE_OPTIONS: "--max-old-space-size=4096"
+  NODE_OPTIONS: '--max-old-space-size=4096'
 
 jobs:
   distribute:
     name: Publish release assets and notify Feishu
     runs-on: ubuntu-latest
-    timeout-minutes: 60
+    timeout-minutes: 240
     environment: release-distribution
     env:
       GH_TOKEN: ${{ github.token }}
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+        with:
+          ref: mita-main
+          fetch-depth: 0
+          persist-credentials: false
 
       - name: Resolve release tag
         id: release
         shell: bash
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          EVENT_TAG: ${{ github.event.release.tag_name }}
+          INPUT_TAG: ${{ inputs.tag }}
+          INPUT_DRY_RUN: ${{ inputs.dry_run }}
+          INPUT_CONFIRM: ${{ inputs.confirm }}
         run: |
-          if [ "${{ github.event_name }}" = "release" ]; then
-            tag="${{ github.event.release.tag_name }}"
+          set -euo pipefail
+          if [ "$EVENT_NAME" = "release" ]; then
+            tag="$EVENT_TAG"
             dry_run="false"
+            confirm="RELEASE_EVENT"
           else
-            tag="${{ inputs.tag }}"
-            dry_run="${{ inputs.dry_run }}"
+            tag="$INPUT_TAG"
+            dry_run="$INPUT_DRY_RUN"
+            confirm="$INPUT_CONFIRM"
           fi
 
-          if [ -z "$tag" ]; then
-            echo "Release tag is required" >&2
+          if [[ ! "$tag" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            echo "Release tag must be a stable vMAJOR.MINOR.PATCH tag: $tag" >&2
+            exit 1
+          fi
+          if [ "$dry_run" != "true" ] && [ "$dry_run" != "false" ]; then
+            echo "dry_run must resolve to true or false" >&2
+            exit 1
+          fi
+          if [ "$EVENT_NAME" = "workflow_dispatch" ] \
+            && [ "$dry_run" = "false" ] \
+            && [ "$confirm" != "DISTRIBUTE" ]; then
+            echo "A non-dry-run manual dispatch requires confirm=DISTRIBUTE" >&2
             exit 1
           fi
 
           {
             echo "tag=$tag"
+            echo "version=${tag#v}"
             echo "dry_run=$dry_run"
           } >> "$GITHUB_OUTPUT"
           echo "Distributing release $tag (dry_run=$dry_run)"
 
+      - name: Verify protected tag provenance
+        id: provenance
+        shell: bash
+        env:
+          TAG: ${{ steps.release.outputs.tag }}
+        run: |
+          set -euo pipefail
+          mkdir -p dist
+          git fetch --force --no-tags origin \
+            "+refs/heads/mita-main:refs/remotes/origin/mita-main"
+          git fetch --force --no-tags origin \
+            "+refs/tags/${TAG}:refs/tags/${TAG}"
+          checkout_head="$(git rev-parse HEAD)"
+          live_main="$(git rev-parse origin/mita-main)"
+          if [ "$checkout_head" != "$live_main" ]; then
+            echo "Trusted release harness $checkout_head is not live origin/mita-main $live_main" >&2
+            exit 1
+          fi
+          tag_commit="$(git rev-parse "${TAG}^{commit}")"
+          if ! git merge-base --is-ancestor "$tag_commit" origin/mita-main; then
+            echo "Tag commit $tag_commit is not an ancestor of origin/mita-main" >&2
+            exit 1
+          fi
+          git show "${TAG}:biyan-release.json" > dist/tag-biyan-release.json
+          git show "${TAG}:src-tauri/tauri.conf.json" > dist/tag-tauri.conf.json
+          git show "${TAG}:src-tauri/Cargo.lock" > dist/tag-Cargo.lock
+          {
+            echo "source_commit=$tag_commit"
+            echo "mita_main_commit=$live_main"
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Initialize distribution transaction evidence
+        shell: bash
+        env:
+          TAG: ${{ steps.release.outputs.tag }}
+        run: |
+          set -euo pipefail
+          mkdir -p dist/distribution-transaction
+          jq -n \
+            --arg tag "$TAG" \
+            --arg source "${{ steps.provenance.outputs.source_commit }}" \
+            '{
+              schema: 1,
+              tag: $tag,
+              sourceCommit: $source,
+              status: "not-started",
+              note: "No live publication mutation has started."
+            }' > dist/distribution-transaction/state.json
+          jq -n \
+            '{
+              schema: 1,
+              status: "not-started",
+              instructions: "No manual recovery is required.",
+              commands: []
+            }' > dist/distribution-transaction/recovery.json
+
       - name: Setup Node
         uses: actions/setup-node@v4
         with:
-          node-version: "20"
+          node-version: '20'
 
       - name: Fetch release metadata
         shell: bash
         run: |
+          set -euo pipefail
           mkdir -p dist/release-assets
           gh release view "${{ steps.release.outputs.tag }}" \
-            --json tagName,name,url,publishedAt,body,assets \
+            --json tagName,name,url,publishedAt,body,isDraft,isPrerelease,assets \
             > dist/release.json
 
-      - name: Download release packages
+      - name: Download release packages and provenance
         shell: bash
+        env:
+          TAG: ${{ steps.release.outputs.tag }}
+          VERSION: ${{ steps.release.outputs.version }}
         run: |
-          gh release download "${{ steps.release.outputs.tag }}" \
+          set -euo pipefail
+          patterns=(
+            "Biyan_${VERSION}_universal.dmg"
+            "Biyan_${VERSION}_x64-setup.exe"
+            "Biyan_${VERSION}_x64-setup.exe.sig"
+            "Biyan_${VERSION}_x64_en-US.msi"
+            "Biyan_${VERSION}_amd64.AppImage"
+            "Biyan_${VERSION}_amd64.AppImage.sig"
+            "Biyan_${VERSION}_amd64.deb"
+            "Biyan.app.tar.gz"
+            "Biyan.app.tar.gz.sig"
+            "candidate.json"
+            "candidate.json.sig"
+            "latest.json"
+            "SHA256SUMS"
+          )
+          args=()
+          for pattern in "${patterns[@]}"; do
+            args+=(--pattern "$pattern")
+          done
+          gh release download "$TAG" \
             --dir dist/release-assets \
-            --pattern "*.dmg" \
-            --pattern "*.exe" \
-            --pattern "*.msi" \
+            "${args[@]}" \
             --clobber
           find dist/release-assets -maxdepth 1 -type f -print | sort
 
-      - name: Collect and validate release assets
+      - name: Validate release identity, assets, checksums, signatures, and provenance
         shell: bash
         run: |
+          set -euo pipefail
           node scripts/release-distribution/collect-release-assets.mjs \
             --release-json dist/release.json \
             --assets-dir dist/release-assets \
+            --candidate-dir dist/release-assets \
+            --expected-source-commit "${{ steps.provenance.outputs.source_commit }}" \
+            --tag-release-json dist/tag-biyan-release.json \
+            --tag-tauri-config dist/tag-tauri.conf.json \
+            --tag-cargo-lock dist/tag-Cargo.lock \
             --output dist/release-assets.json
+          node scripts/updater/verify-candidate.mjs \
+            dist/release-assets \
+            "${{ steps.release.outputs.tag }}"
+          (
+            cd dist/release-assets
+            sha256sum --check SHA256SUMS
+          )
+
+      - name: Revalidate protected harness before poster API mutation
+        shell: bash
+        env:
+          EXPECTED_MAIN: ${{ steps.provenance.outputs.mita_main_commit }}
+        run: |
+          set -euo pipefail
+          live_main="$(git ls-remote --exit-code origin refs/heads/mita-main | awk 'NF == 2 { print $1 }')"
+          if [[ ! "$live_main" =~ ^[0-9a-f]{40}$ ]] || [ "$live_main" != "$EXPECTED_MAIN" ]; then
+            echo "origin/mita-main moved before poster generation; retry from the new trusted harness" >&2
+            exit 1
+          fi
 
       - name: Generate release poster
         shell: bash
         env:
           JINGXING_API_KEY: ${{ secrets.JINGXING_API_KEY }}
-          JINGXING_BASE_URL: ${{ vars.JINGXING_BASE_URL || 'https://api.jingxing.io/v1' }}
+          JINGXING_BASE_URL: https://api.jingxing.io/v1
           RELEASE_POSTER_ENABLED: ${{ vars.RELEASE_POSTER_ENABLED || 'true' }}
           RELEASE_POSTER_STRICT: ${{ vars.RELEASE_POSTER_STRICT || 'false' }}
         run: |
@@ -105,26 +237,40 @@ jobs:
             --output dist/release-poster.png \
             --metadata dist/release-poster.json
 
-      - name: Install Alibaba Cloud CLI
-        if: steps.release.outputs.dry_run != 'true'
+      - name: Install exact Alibaba Cloud clients
         shell: bash
         run: |
           set -euo pipefail
-          if command -v aliyun >/dev/null 2>&1; then
-            aliyun version
-            exit 0
-          fi
+          mkdir -p dist/tools
+          curl --proto '=https' --tlsv1.2 -fsSL \
+            --connect-timeout 10 --max-time 180 \
+            https://aliyuncli.alicdn.com/aliyun-cli-linux-3.3.22-amd64.tgz \
+            -o dist/tools/aliyun-cli.tgz
+          echo "41a67dfd2f44c00eb628d9f91fa7c4807222de54ebe44fac3477fb9c70b3b0bc  dist/tools/aliyun-cli.tgz" \
+            | sha256sum --check -
+          tar -xzf dist/tools/aliyun-cli.tgz -C dist/tools
+          sudo install -m 0755 dist/tools/aliyun /usr/local/bin/aliyun
+          test "$(aliyun version | tr -d '\r' | sed -n '1p')" = "3.3.22"
 
-          /bin/bash -c "$(curl -fsSL https://aliyuncli.alicdn.com/install.sh)"
-          aliyun version
+          curl --proto '=https' --tlsv1.2 -fsSL \
+            --connect-timeout 10 --max-time 180 \
+            https://gosspublic.alicdn.com/ossutil/v2/2.3.0/ossutil-2.3.0-linux-amd64.zip \
+            -o dist/tools/ossutil.zip
+          echo "3ae4d9fc85a7a6e9f5654d1599766f1a3a42a3692870887b5ae9338d582ef65a  dist/tools/ossutil.zip" \
+            | sha256sum --check -
+          unzip -q dist/tools/ossutil.zip -d dist/tools
+          sudo install -m 0755 \
+            dist/tools/ossutil-2.3.0-linux-amd64/ossutil \
+            /usr/local/bin/ossutil
+          ossutil version | tee dist/tools/ossutil-version.txt
+          grep -Eq '(^|[^0-9])2\.3\.0([^0-9]|$)' dist/tools/ossutil-version.txt
 
       - name: Configure Alibaba Cloud CLI
-        if: steps.release.outputs.dry_run != 'true'
         shell: bash
         env:
           ALIYUN_ACCESS_KEY_ID: ${{ secrets.ALIYUN_ACCESS_KEY_ID }}
           ALIYUN_ACCESS_KEY_SECRET: ${{ secrets.ALIYUN_ACCESS_KEY_SECRET }}
-          ALIYUN_REGION: ${{ vars.ALIYUN_REGION || 'cn-hangzhou' }}
+          ALIYUN_REGION: cn-hangzhou
         run: |
           set -euo pipefail
 
@@ -145,106 +291,102 @@ jobs:
             --access-key-id "$ALIYUN_ACCESS_KEY_ID" \
             --access-key-secret "$ALIYUN_ACCESS_KEY_SECRET"
 
-      - name: Publish download manifest to Aliyun OSS
-        if: steps.release.outputs.dry_run != 'true'
+      - name: Build canonical download transaction payload
         shell: bash
         env:
-          ALIYUN_OSS_BUCKET: ${{ secrets.ALIYUN_OSS_BUCKET || vars.ALIYUN_OSS_BUCKET || 'mita-static' }}
-          ALIYUN_OSS_ENDPOINT: ${{ vars.ALIYUN_OSS_ENDPOINT || 'oss-cn-hangzhou.aliyuncs.com' }}
-          ALIYUN_CDN_DOMAIN: ${{ vars.ALIYUN_CDN_DOMAIN || 'static.mitapp.cn' }}
+          TAG: ${{ steps.release.outputs.tag }}
           UPDATES_CDN_BASE_URL: ${{ vars.UPDATES_CDN_BASE_URL || 'https://static.mitapp.cn' }}
           BIYAN_DOWNLOAD_MANIFEST_KEY: ${{ vars.BIYAN_DOWNLOAD_MANIFEST_KEY || 'biyan/download/latest.json' }}
           BIYAN_DOWNLOAD_PAGE_KEY: ${{ vars.BIYAN_DOWNLOAD_PAGE_KEY || 'biyan/download' }}
           BIYAN_DOWNLOAD_VERSION_ROOT: ${{ vars.BIYAN_DOWNLOAD_VERSION_ROOT || 'biyan/download/releases' }}
+          LEGACY_DOWNLOAD_MANIFEST_KEY: ${{ vars.LEGACY_DOWNLOAD_MANIFEST_KEY || 'mita/download/latest.json' }}
+          LEGACY_DOWNLOAD_PAGE_KEY: ${{ vars.LEGACY_DOWNLOAD_PAGE_KEY || 'mita/download' }}
         run: |
           set -euo pipefail
-
-          required=(
-            ALIYUN_OSS_BUCKET
-            ALIYUN_OSS_ENDPOINT
-          )
-          for name in "${required[@]}"; do
-            if [ -z "${!name:-}" ]; then
-              echo "$name is required for publishing the Biyan download manifest" >&2
-              exit 1
-            fi
-          done
-
-          endpoint="${ALIYUN_OSS_ENDPOINT#https://}"
-          endpoint="${endpoint#http://}"
-          endpoint="https://${endpoint}"
-          manifest_key="${BIYAN_DOWNLOAD_MANIFEST_KEY#/}"
-          page_key="${BIYAN_DOWNLOAD_PAGE_KEY#/}"
-          version_root="${BIYAN_DOWNLOAD_VERSION_ROOT%/}/${{ steps.release.outputs.tag }}"
-          cdn_base="${UPDATES_CDN_BASE_URL%/}"
-          manifest_cache="public, max-age=60, must-revalidate"
-          page_cache="public, max-age=60, must-revalidate"
-          immutable_cache="public, max-age=31536000, immutable"
-
-          mac_name="$(jq -r '.assets.macosDmg.name' dist/release-assets.json)"
-          win_name="$(jq -r '.assets.windowsExe.name' dist/release-assets.json)"
-          msi_name="$(jq -r '.assets.windowsMsi.name' dist/release-assets.json)"
-          mac_path="dist/release-assets/${mac_name}"
-          win_path="dist/release-assets/${win_name}"
-          msi_path="dist/release-assets/${msi_name}"
-
-          aliyun --profile release oss cp "$mac_path" "oss://${ALIYUN_OSS_BUCKET}/${version_root}/${mac_name}" \
-            --endpoint "$endpoint" \
-            --meta "Cache-Control:${immutable_cache}#Content-Type:application/x-apple-diskimage" \
-            --force
-          aliyun --profile release oss cp "$win_path" "oss://${ALIYUN_OSS_BUCKET}/${version_root}/${win_name}" \
-            --endpoint "$endpoint" \
-            --meta "Cache-Control:${immutable_cache}#Content-Type:application/octet-stream" \
-            --force
-          aliyun --profile release oss cp "$msi_path" "oss://${ALIYUN_OSS_BUCKET}/${version_root}/${msi_name}" \
-            --endpoint "$endpoint" \
-            --meta "Cache-Control:${immutable_cache}#Content-Type:application/octet-stream" \
-            --force
-
+          cdn_base="$UPDATES_CDN_BASE_URL"
+          if [ "${BIYAN_DOWNLOAD_MANIFEST_KEY#/}" != "biyan/download/latest.json" ] \
+            || [ "${BIYAN_DOWNLOAD_PAGE_KEY#/}" != "biyan/download" ] \
+            || [ "${BIYAN_DOWNLOAD_VERSION_ROOT%/}" != "biyan/download/releases" ] \
+            || [ "${LEGACY_DOWNLOAD_MANIFEST_KEY#/}" != "mita/download/latest.json" ] \
+            || [ "${LEGACY_DOWNLOAD_PAGE_KEY#/}" != "mita/download" ]; then
+            echo "Download publication keys differ from the reviewed compatibility policy" >&2
+            exit 1
+          fi
+          if [ "$cdn_base" != "https://static.mitapp.cn" ]; then
+            echo "UPDATES_CDN_BASE_URL must be exactly https://static.mitapp.cn" >&2
+            exit 1
+          fi
+          jq -e \
+            --arg tag "$TAG" \
+            --arg source "${{ steps.provenance.outputs.source_commit }}" \
+            '.tagName == $tag
+              and .provenance.schema == 1
+              and .provenance.sourceCommit == $source
+              and (.provenance.migrationPhase == "A"
+                or .provenance.migrationPhase == "B"
+                or .provenance.migrationPhase == "C")
+              and ((.provenance.migrationPhase == "A" and .provenance.dataSchema == 1)
+                or (.provenance.migrationPhase == "B" and .provenance.dataSchema == 2)
+                or (.provenance.migrationPhase == "C" and .provenance.dataSchema == 3))' \
+            dist/release-assets.json >/dev/null
           node scripts/release-distribution/build-download-manifest.mjs \
             --release-json dist/release-assets.json \
             --manifest-output dist/biyan-download/latest.json \
             --page-output dist/biyan-download/index.html \
             --cdn-base-url "$cdn_base" \
-            --download-version-root "$version_root" \
-            --download-page-url "${cdn_base}/${page_key}"
+            --download-version-root "biyan/download/releases/${TAG}" \
+            --download-page-url "${cdn_base}/biyan/download"
 
-          aliyun --profile release oss cp dist/biyan-download/latest.json "oss://${ALIYUN_OSS_BUCKET}/${manifest_key}" \
-            --endpoint "$endpoint" \
-            --meta "Cache-Control:${manifest_cache}#Content-Type:application/json" \
-            --force
-          aliyun --profile release oss cp dist/biyan-download/index.html "oss://${ALIYUN_OSS_BUCKET}/${page_key}" \
-            --endpoint "$endpoint" \
-            --meta "Cache-Control:${page_cache}#Content-Type:text/html; charset=utf-8" \
-            --force
-          aliyun --profile release oss cp dist/biyan-download/latest.json "oss://${ALIYUN_OSS_BUCKET}/${version_root}/download.json" \
-            --endpoint "$endpoint" \
-            --meta "Cache-Control:${immutable_cache}#Content-Type:application/json" \
-            --force
-          aliyun --profile release oss cp dist/biyan-download/index.html "oss://${ALIYUN_OSS_BUCKET}/${version_root}/index.html" \
-            --endpoint "$endpoint" \
-            --meta "Cache-Control:${immutable_cache}#Content-Type:text/html; charset=utf-8" \
-            --force
+      - name: Revalidate protected harness before OSS mutation
+        shell: bash
+        env:
+          EXPECTED_MAIN: ${{ steps.provenance.outputs.mita_main_commit }}
+        run: |
+          set -euo pipefail
+          live_main="$(git ls-remote --exit-code origin refs/heads/mita-main | awk 'NF == 2 { print $1 }')"
+          if [[ ! "$live_main" =~ ^[0-9a-f]{40}$ ]] || [ "$live_main" != "$EXPECTED_MAIN" ]; then
+            echo "origin/mita-main moved before OSS publication; retry from the new trusted harness" >&2
+            exit 1
+          fi
 
-          echo "Published Biyan download manifest: ${cdn_base}/${manifest_key}"
-          echo "Published Biyan download page: ${cdn_base}/${page_key}"
-
-          aliyun --profile release cdn RefreshObjectCaches \
-            --ObjectPath "$(printf '%s\n%s' "${cdn_base}/${manifest_key}" "${cdn_base}/${page_key}")" \
-            --ObjectType File
-
-          urls=(
-            "${cdn_base}/${manifest_key}"
-            "${cdn_base}/${page_key}"
-            "${cdn_base}/${version_root}/${mac_name}"
-            "${cdn_base}/${version_root}/${win_name}"
-            "${cdn_base}/${version_root}/${msi_name}"
+      - name: Execute recoverable download publication transaction
+        shell: bash
+        env:
+          DRY_RUN: ${{ steps.release.outputs.dry_run }}
+          TAG: ${{ steps.release.outputs.tag }}
+          ALIYUN_OSS_BUCKET: mita-static
+          ALIYUN_OSS_ENDPOINT: https://oss-cn-hangzhou.aliyuncs.com
+          OSS_ACCESS_KEY_ID: ${{ secrets.ALIYUN_ACCESS_KEY_ID }}
+          OSS_ACCESS_KEY_SECRET: ${{ secrets.ALIYUN_ACCESS_KEY_SECRET }}
+          OSS_ENDPOINT: https://oss-cn-hangzhou.aliyuncs.com
+          OSS_REGION: cn-hangzhou
+          UPDATES_CDN_BASE_URL: ${{ vars.UPDATES_CDN_BASE_URL || 'https://static.mitapp.cn' }}
+        run: |
+          set -euo pipefail
+          args=(
+            --release-json dist/release-assets.json
+            --payload-dir dist/biyan-download
+            --tag "$TAG"
+            --evidence dist/distribution-transaction/state.json
+            --recovery dist/distribution-transaction/recovery.json
           )
+          if [ "$DRY_RUN" = "true" ]; then
+            args+=(--dry-run)
+          fi
+          node scripts/release-distribution/publish-download-transaction.mjs \
+            "${args[@]}"
 
-          for url in "${urls[@]}"; do
-            echo "Verifying $url"
-            curl -fsSI --retry 5 --retry-delay 5 "$url"
-          done
+      - name: Revalidate protected harness before Feishu mutation
+        shell: bash
+        env:
+          EXPECTED_MAIN: ${{ steps.provenance.outputs.mita_main_commit }}
+        run: |
+          set -euo pipefail
+          live_main="$(git ls-remote --exit-code origin refs/heads/mita-main | awk 'NF == 2 { print $1 }')"
+          if [[ ! "$live_main" =~ ^[0-9a-f]{40}$ ]] || [ "$live_main" != "$EXPECTED_MAIN" ]; then
+            echo "origin/mita-main moved before Feishu notification; release state is preserved in transaction evidence" >&2
+            exit 1
+          fi
 
       - name: Send Feishu release messages
         shell: bash
@@ -272,15 +414,31 @@ jobs:
           fi
           node scripts/release-distribution/send-feishu-card.mjs "${args[@]}"
 
+      - name: Require transaction evidence
+        if: always()
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -s dist/distribution-transaction/state.json
+          test -s dist/distribution-transaction/recovery.json
+          jq -e '.schema == 1 and (.status | type == "string")' \
+            dist/distribution-transaction/state.json >/dev/null
+          jq -e '.schema == 1 and (.status | type == "string")' \
+            dist/distribution-transaction/recovery.json >/dev/null
+
       - name: Upload distribution metadata
         if: always()
         uses: actions/upload-artifact@v4
         with:
           name: release-distribution-${{ steps.release.outputs.tag }}
-          if-no-files-found: ignore
+          if-no-files-found: error
           path: |
             dist/release.json
             dist/release-assets.json
+            dist/tag-biyan-release.json
+            dist/tag-tauri.conf.json
+            dist/tag-Cargo.lock
             dist/feishu-card.json
             dist/release-poster.*
             dist/biyan-download/*
+            dist/distribution-transaction/**

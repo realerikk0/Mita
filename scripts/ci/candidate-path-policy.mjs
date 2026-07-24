@@ -95,14 +95,34 @@ export function assertSafeCandidatePaths(root, options = {}) {
       entryCount += 1
 
       if (entry.isSymbolicLink()) {
-        // Bundle symlinks can intentionally be absolute or become dangling
-        // after an accepted workspace is relocated. Do not follow them; only
-        // enforce the same token policy on the recorded link target.
-        assertSafeCandidatePath(fs.readlinkSync(absolute), options)
+        const target = fs.readlinkSync(absolute)
+        assertSafeCandidatePath(target, options)
+        if (path.isAbsolute(target)) {
+          throw new Error(
+            `Candidate symlink target must be relative: ${relative} -> ${target}`
+          )
+        }
+        const resolvedTarget = path.resolve(path.dirname(absolute), target)
+        if (
+          resolvedTarget !== resolvedRoot &&
+          !resolvedTarget.startsWith(`${resolvedRoot}${path.sep}`)
+        ) {
+          throw new Error(
+            `Candidate symlink escapes the bundle: ${relative} -> ${target}`
+          )
+        }
+        if (!fs.existsSync(resolvedTarget)) {
+          throw new Error(
+            `Candidate symlink target does not exist: ${relative} -> ${target}`
+          )
+        }
         continue
       }
 
       if (entry.isDirectory()) visit(absolute)
+      else if (!entry.isFile()) {
+        throw new Error(`Unsupported candidate entry type: ${relative}`)
+      }
     }
   }
 

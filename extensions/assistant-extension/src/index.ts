@@ -347,7 +347,7 @@ export default class BiyanAssistantExtension extends AssistantExtension {
     }
   }
 
-  /** Remove RAG-era assistant tools without deleting the user's assistant. */
+  /** Remove retired retrieval tools without deleting the user's assistant. */
   private async removeRetiredRetrievalTools(): Promise<void> {
     if (!(await fs.existsSync('file://assistants'))) return
 

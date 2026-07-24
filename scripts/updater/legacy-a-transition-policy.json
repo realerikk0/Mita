@@ -1,0 +1,9 @@
+{
+  "schema": 1,
+  "state": "pre-a",
+  "current": {
+    "version": "0.6.633",
+    "manifestSha256": "142abddf03744562195404d0dd9ae92f53d8f74d20b2cef19b2db60aeb8ec350"
+  },
+  "approvedNext": null
+}

@@ -1,3 +1,12 @@
+import fs from 'node:fs'
+
+const releaseTrainPolicy = JSON.parse(
+  fs.readFileSync(
+    new URL('./release-train-policy.json', import.meta.url),
+    'utf8'
+  )
+)
+
 function escapeRegExp(value) {
   return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
 }
@@ -146,13 +155,153 @@ function jobUsesScopeFlag(block, flag) {
   )
 }
 
+export function validateReleaseTrainPolicy(policy) {
+  const failures = []
+  const exactKeys = (value, expected, description) => {
+    if (!value || typeof value !== 'object' || Array.isArray(value)) {
+      failures.push(`${description} must be an object`)
+      return
+    }
+    const actual = Object.keys(value).sort()
+    const wanted = [...expected].sort()
+    if (
+      actual.length !== wanted.length ||
+      actual.some((key, index) => key !== wanted[index])
+    ) {
+      failures.push(
+        `${description} keys must be exactly ${wanted.join(', ')}; found ${
+          actual.join(', ') || '(none)'
+        }`
+      )
+    }
+  }
+  exactKeys(policy, ['schema', 'activeTrain', 'trains'], 'release train policy')
+  if (policy?.schema !== 1) {
+    failures.push('release train policy must use schema 1')
+  }
+  if (!Array.isArray(policy?.trains) || policy.trains.length === 0) {
+    failures.push('release train policy must declare at least one train')
+    return failures
+  }
+
+  const active = policy.trains.filter((train) => train?.status === 'active')
+  if (
+    active.length !== 1 ||
+    typeof policy.activeTrain !== 'string' ||
+    active[0]?.id !== policy.activeTrain
+  ) {
+    failures.push(
+      'release train policy must name exactly one matching active train'
+    )
+  }
+
+  const ids = new Set()
+  const versions = new Set()
+  const allowedStatuses = new Set([
+    'failed-preserved',
+    'accepted-pretag-superseded',
+    'active',
+  ])
+  let previousC = null
+  for (const [trainIndex, train] of policy.trains.entries()) {
+    if (!train || typeof train.id !== 'string' || !train.id) {
+      failures.push('every release train must have a non-empty id')
+      continue
+    }
+    exactKeys(train, ['id', 'status', 'releases'], `release train ${train.id}`)
+    if (!allowedStatuses.has(train.status)) {
+      failures.push(
+        `release train ${train.id} has unsupported status ${train.status}`
+      )
+    }
+    if (
+      (train.status === 'active') !==
+      (trainIndex === policy.trains.length - 1)
+    ) {
+      failures.push('the active release train must be the final history entry')
+    }
+    if (ids.has(train.id)) {
+      failures.push(`duplicate release train id: ${train.id}`)
+    }
+    ids.add(train.id)
+
+    const releases = train.releases
+    if (
+      !releases ||
+      Object.keys(releases).sort().join(',') !== 'A,B,C'
+    ) {
+      failures.push(`release train ${train.id} must contain exactly A, B, C`)
+      continue
+    }
+
+    const parsedVersions = []
+    for (const [phase, expectedSchema] of [
+      ['A', 1],
+      ['B', 2],
+      ['C', 3],
+    ]) {
+      const release = releases[phase]
+      exactKeys(
+        release,
+        ['version', 'dataSchema'],
+        `release train ${train.id} ${phase}`
+      )
+      const match =
+        typeof release?.version === 'string'
+          ? /^(\d+)\.(\d+)\.(\d+)$/.exec(release.version)
+          : null
+      if (!match || release.dataSchema !== expectedSchema) {
+        failures.push(
+          `release train ${train.id} has invalid ${phase} version/schema`
+        )
+        continue
+      }
+      if (versions.has(release.version)) {
+        failures.push(`duplicate release version: ${release.version}`)
+      }
+      versions.add(release.version)
+      parsedVersions.push(match.slice(1).map(Number))
+    }
+
+    if (
+      parsedVersions.length === 3 &&
+      (parsedVersions.some(
+        ([major, minor]) =>
+          major !== parsedVersions[0][0] || minor !== parsedVersions[0][1]
+      ) ||
+        parsedVersions[1][2] !== parsedVersions[0][2] + 1 ||
+        parsedVersions[2][2] !== parsedVersions[1][2] + 1)
+    ) {
+      failures.push(
+        `release train ${train.id} versions must be contiguous in A -> B -> C order`
+      )
+    }
+    if (parsedVersions.length === 3) {
+      const [activeA, , activeC] = parsedVersions
+      if (
+        previousC &&
+        (activeA[0] !== previousC[0] ||
+          activeA[1] !== previousC[1] ||
+          activeA[2] !== previousC[2] + 1)
+      ) {
+        failures.push(
+          `release train ${train.id} must start immediately after the previous C version`
+        )
+      }
+      previousC = activeC
+    }
+  }
+  return failures
+}
+
 export function validateReleaseIdentity({
   version,
   migrationPhase,
   dataSchema,
   cargoLockVersion,
+  trainPolicy = releaseTrainPolicy,
 }) {
-  const failures = []
+  const failures = validateReleaseTrainPolicy(trainPolicy)
   const expectedSchema = { A: 1, B: 2, C: 3 }[migrationPhase]
   if (!expectedSchema || dataSchema !== expectedSchema) {
     failures.push(
@@ -165,21 +314,58 @@ export function validateReleaseIdentity({
     )
   }
 
-  const bridgeTrain = {
-    '0.6.634': { migrationPhase: 'A', dataSchema: 1 },
-    '0.6.635': { migrationPhase: 'B', dataSchema: 2 },
-    '0.6.636': { migrationPhase: 'C', dataSchema: 3 },
-    '0.6.637': { migrationPhase: 'A', dataSchema: 1 },
-    '0.6.638': { migrationPhase: 'B', dataSchema: 2 },
-    '0.6.639': { migrationPhase: 'C', dataSchema: 3 },
-  }[version]
+  const bridgeTrain = trainPolicy?.trains
+    ?.flatMap((train) =>
+      Object.entries(train.releases ?? {}).map(([phase, release]) => ({
+        ...release,
+        migrationPhase: phase,
+        trainId: train.id,
+      }))
+    )
+    .find((release) => release.version === version)
+  if (!bridgeTrain) {
+    failures.push(
+      `release ${version} is not declared in release-train-policy.json`
+    )
+    return failures
+  }
   if (
-    bridgeTrain &&
     (migrationPhase !== bridgeTrain.migrationPhase ||
       dataSchema !== bridgeTrain.dataSchema)
   ) {
     failures.push(
-      `bridge release ${version} must attest ${bridgeTrain.migrationPhase}/${bridgeTrain.dataSchema}`
+      `bridge release ${version} in ${bridgeTrain.trainId} must attest ${bridgeTrain.migrationPhase}/${bridgeTrain.dataSchema}`
+    )
+  }
+  return failures
+}
+
+export function validateActiveReleaseIdentity({
+  version,
+  migrationPhase,
+  dataSchema,
+  cargoLockVersion,
+  trainPolicy = releaseTrainPolicy,
+}) {
+  const failures = validateReleaseIdentity({
+    version,
+    migrationPhase,
+    dataSchema,
+    cargoLockVersion,
+    trainPolicy,
+  })
+  const activeTrain = trainPolicy?.trains?.find(
+    (train) =>
+      train.id === trainPolicy.activeTrain && train.status === 'active'
+  )
+  const activeRelease = activeTrain?.releases?.[migrationPhase]
+  if (
+    !activeRelease ||
+    activeRelease.version !== version ||
+    activeRelease.dataSchema !== dataSchema
+  ) {
+    failures.push(
+      `release ${version} ${migrationPhase}/${dataSchema} is not the declared active train ${trainPolicy?.activeTrain ?? 'missing'} release`
     )
   }
   return failures
@@ -340,22 +526,115 @@ export function validateCandidateWorkflow(source) {
   const failures = []
   const preflight = jobBlock(source, 'preflight')
   const qualityGate = jobBlock(source, 'quality-gate')
+  const packageCandidate = jobBlock(source, 'package-candidate')
+  const draftRelease = jobBlock(source, 'draft-release')
+  const permissions = topLevelBlock(source, 'permissions')
+  const checkoutSteps = actionStepBlocks(source, 'actions/checkout@v4')
+
+  if (
+    !permissions ||
+    !/^  contents:\s*read\s*$/m.test(permissions) ||
+    /\bwrite\b/.test(permissions)
+  ) {
+    failures.push(
+      'desktop release top-level permissions must be contents: read only'
+    )
+  }
+  if (
+    checkoutSteps.some(
+      (step) => !/^\s*persist-credentials:\s*false\s*$/m.test(step)
+    )
+  ) {
+    failures.push(
+      'desktop release checkouts must disable persisted credentials'
+    )
+  }
+  if (
+    !draftRelease ||
+    !/^    permissions:\s*\n      contents:\s*write\s*$/m.test(draftRelease)
+  ) {
+    failures.push(
+      'only the draft release job may request contents: write permission'
+    )
+  }
+  if (!packageCandidate) {
+    failures.push('desktop release is missing the immutable package job')
+  } else {
+    if (
+      !/^    environment:\s*release-distribution\s*$/m.test(packageCandidate)
+    ) {
+      failures.push(
+        'package-candidate must protect the provenance signing key with release-distribution'
+      )
+    }
+    if (
+      !packageCandidate.includes('yarn tauri signer sign') ||
+      !packageCandidate.includes('dist/updater-candidate/candidate.json') ||
+      !packageCandidate.includes('candidate.json.sig') ||
+      !packageCandidate.includes('SHA256SUMS')
+    ) {
+      failures.push(
+        'package-candidate must sign candidate.json and checksum the detached provenance signature'
+      )
+    }
+  }
 
   if (!preflight) {
     failures.push('desktop release is missing the immutable preflight job')
   } else {
-    if (!preflight.includes('node scripts/ci/verify-release-policy.mjs')) {
+    if (
+      !checkoutSteps.some(
+        (step) =>
+          /^\s*ref:\s*mita-main\s*$/m.test(step) &&
+          /^\s*path:\s*harness\s*$/m.test(step)
+      ) ||
+      !checkoutSteps.some((step) => /^\s*path:\s*target\s*$/m.test(step))
+    ) {
       failures.push(
-        'desktop release preflight does not run the release policy scan'
+        'desktop release preflight must separate the protected mita-main harness from the exact target checkout'
+      )
+    }
+    if (
+      !preflight.includes(
+        'git -C harness merge-base --is-ancestor'
+      ) ||
+      !preflight.includes('refs/remotes/origin/mita-main')
+    ) {
+      failures.push(
+        'desktop release preflight must prove the tag commit is an ancestor of live mita-main'
+      )
+    }
+    if (
+      !preflight.includes('checkout_head="$(git -C harness rev-parse HEAD)"') ||
+      !preflight.includes(
+        'live_main="$(git -C harness rev-parse refs/remotes/origin/mita-main)"'
+      ) ||
+      !preflight.includes('[ "$checkout_head" != "$live_main" ]') ||
+      !preflight.includes('echo "trusted_main_commit=$live_main"')
+    ) {
+      failures.push(
+        'desktop release trusted harness HEAD must equal freshly fetched live origin/mita-main'
+      )
+    }
+    if (
+      !preflight.includes(
+        'node harness/scripts/ci/verify-release-policy.mjs'
+      ) ||
+      !preflight.includes('--repo-root target') ||
+      !preflight.includes('--require-active')
+    ) {
+      failures.push(
+        'desktop release preflight does not run the protected active-train release policy against the target'
       )
     }
     if (
       !preflight.includes(
         'node --test scripts/ci/__tests__/release-policy.test.mjs'
-      )
+      ) ||
+      !preflight.includes('working-directory: harness')
     ) {
       failures.push(
-        'desktop release preflight does not test release policy contracts'
+        'desktop release preflight does not test protected release policy contracts'
       )
     }
   }
@@ -392,6 +671,22 @@ export function validateCandidateWorkflow(source) {
     if (!jobNeeds(block, 'preflight') || !jobNeeds(block, 'quality-gate')) {
       failures.push(`${buildJob} must depend on preflight and quality-gate`)
     }
+    const liveMainProbe =
+      'git ls-remote --exit-code origin refs/heads/mita-main'
+    const firstLiveMainProbe = block.indexOf(liveMainProbe)
+    const lastLiveMainProbe = block.lastIndexOf(liveMainProbe)
+    const artifactUpload = block.indexOf('uses: actions/upload-artifact@v4')
+    if (
+      firstLiveMainProbe < 0 ||
+      !block.includes('needs.preflight.outputs.trusted_main_commit') ||
+      (artifactUpload >= 0 &&
+        (lastLiveMainProbe < firstLiveMainProbe ||
+          lastLiveMainProbe > artifactUpload))
+    ) {
+      failures.push(
+        `${buildJob} must revalidate unchanged live mita-main before external mutation`
+      )
+    }
     if (
       buildJob === 'build-macos' &&
       !block.includes('make verify-macos-candidate')
@@ -401,18 +696,24 @@ export function validateCandidateWorkflow(source) {
       )
     }
     if (['build-windows', 'build-linux'].includes(buildJob)) {
+      const candidatePolicy = findRunInvocation(
+        block,
+        /^node\s+scripts\/ci\/candidate-path-policy\.mjs(?:\s|$)/
+      )
       if (
-        !hasRunInvocation(
-          block,
-          /^node\s+scripts\/ci\/candidate-path-policy\.mjs(?:\s|$)/,
-          [
-            /--root\s+src-tauri\/target\/release\/bundle/,
-            /--runtime-only/,
-          ]
+        !candidatePolicy ||
+        !/--root\s+src-tauri\/target\/release\/bundle/.test(
+          candidatePolicy.commands.join('\n')
         )
       ) {
         failures.push(
           `${buildJob} must run the token-aware candidate path policy`
+        )
+      } else if (
+        /--runtime-only/.test(candidatePolicy.commands.join('\n'))
+      ) {
+        failures.push(
+          `${buildJob} candidate path policy must check product and runtime names`
         )
       }
       if (LEGACY_BROAD_CANDIDATE_VERIFIER.test(block)) {
@@ -420,6 +721,30 @@ export function validateCandidateWorkflow(source) {
           `${buildJob} must not use a broad retired-runtime verifier`
         )
       }
+    }
+  }
+
+  for (const [jobName, block] of [
+    ['package-candidate', packageCandidate],
+    ['draft-release', draftRelease],
+  ]) {
+    const liveMainProbe =
+      'git ls-remote --exit-code origin refs/heads/mita-main'
+    const probeIndex = block?.lastIndexOf(liveMainProbe) ?? -1
+    const mutationIndex =
+      jobName === 'package-candidate'
+        ? (block?.indexOf('uses: actions/upload-artifact@v4') ?? -1)
+        : (block?.indexOf('uses: softprops/action-gh-release@v2') ?? -1)
+    if (
+      block &&
+      (probeIndex < 0 ||
+        mutationIndex < 0 ||
+        probeIndex > mutationIndex ||
+        !block.includes('needs.preflight.outputs.trusted_main_commit'))
+    ) {
+      failures.push(
+        `${jobName} must revalidate unchanged live mita-main before external mutation`
+      )
     }
   }
 
@@ -1077,29 +1402,41 @@ export function validateQualificationWorkflow(source) {
       failures.push(`${jobName} must checkout the protected qualification harness`)
     }
   }
-  if (
-    linux &&
-    !hasRunInvocation(
+  if (linux) {
+    const candidatePolicy = findRunInvocation(
       linux,
-      /^node\s+\.\.\/harness\/scripts\/ci\/candidate-path-policy\.mjs(?:\s|$)/,
-      [/--root\s+["']?\$bundle["']?/, /--runtime-only/]
+      /^node\s+\.\.\/harness\/scripts\/ci\/candidate-path-policy\.mjs(?:\s|$)/
     )
-  ) {
-    failures.push(
-      'native-linux must run the protected token-aware candidate path policy'
-    )
+    if (
+      !candidatePolicy ||
+      !/--root\s+["']?\$bundle["']?/.test(candidatePolicy.commands.join('\n'))
+    ) {
+      failures.push(
+        'native-linux must run the protected token-aware candidate path policy'
+      )
+    } else if (/--runtime-only/.test(candidatePolicy.commands.join('\n'))) {
+      failures.push(
+        'native-linux candidate path policy must check product and runtime names'
+      )
+    }
   }
-  if (
-    windows &&
-    !hasRunInvocation(
+  if (windows) {
+    const candidatePolicy = findRunInvocation(
       windows,
-      /^node\s+(?:\.\/)?harness\/scripts\/ci\/candidate-path-policy\.mjs(?:\s|$)/,
-      [/--root\s+\$bundle/, /--runtime-only/]
+      /^node\s+(?:\.\/)?harness\/scripts\/ci\/candidate-path-policy\.mjs(?:\s|$)/
     )
-  ) {
-    failures.push(
-      'native-windows must run the protected token-aware candidate path policy'
-    )
+    if (
+      !candidatePolicy ||
+      !/--root\s+\$bundle/.test(candidatePolicy.commands.join('\n'))
+    ) {
+      failures.push(
+        'native-windows must run the protected token-aware candidate path policy'
+      )
+    } else if (/--runtime-only/.test(candidatePolicy.commands.join('\n'))) {
+      failures.push(
+        'native-windows candidate path policy must check product and runtime names'
+      )
+    }
   }
   for (const [jobName, block] of [
     ['native-linux', linux],

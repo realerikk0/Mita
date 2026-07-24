@@ -1,0 +1,42 @@
+{
+  "schema": 1,
+  "activeTrain": "closure-20260724",
+  "trains": [
+    {
+      "id": "generation-10",
+      "status": "failed-preserved",
+      "releases": {
+        "A": { "version": "0.6.634", "dataSchema": 1 },
+        "B": { "version": "0.6.635", "dataSchema": 2 },
+        "C": { "version": "0.6.636", "dataSchema": 3 }
+      }
+    },
+    {
+      "id": "generation-11",
+      "status": "failed-preserved",
+      "releases": {
+        "A": { "version": "0.6.637", "dataSchema": 1 },
+        "B": { "version": "0.6.638", "dataSchema": 2 },
+        "C": { "version": "0.6.639", "dataSchema": 3 }
+      }
+    },
+    {
+      "id": "generation-12",
+      "status": "accepted-pretag-superseded",
+      "releases": {
+        "A": { "version": "0.6.640", "dataSchema": 1 },
+        "B": { "version": "0.6.641", "dataSchema": 2 },
+        "C": { "version": "0.6.642", "dataSchema": 3 }
+      }
+    },
+    {
+      "id": "closure-20260724",
+      "status": "active",
+      "releases": {
+        "A": { "version": "0.6.643", "dataSchema": 1 },
+        "B": { "version": "0.6.644", "dataSchema": 2 },
+        "C": { "version": "0.6.645", "dataSchema": 3 }
+      }
+    }
+  ]
+}

@@ -15,10 +15,6 @@ on:
         required: true
         type: string
         default: ''
-      cortex_api_port:
-        required: false
-        type: string
-        default: ''
       upload_url:
         required: false
         type: string
@@ -87,7 +83,7 @@ jobs:
         if: inputs.channel != 'stable'
         shell: bash
         run: |
-          cp .github/scripts/icon-${{ inputs.channel }}.png src-tauri/icons/icon.png
+          cp .github/scripts/icon-${{ inputs.channel }}.png src-tauri/app-icon.png
 
       - name: Installing node
         uses: actions/setup-node@v1
@@ -184,6 +180,40 @@ jobs:
           AUTO_UPDATER_DISABLED: ${{ inputs.disable_updater && 'true' || 'false' }}
           BIYAN_SIGNING_KEY: ${{ secrets.BIYAN_SIGNING_KEY }}
           TAURI_TRAY: libappindicator3
+
+      - name: Verify Linux candidates
+        shell: bash
+        run: |
+          set -euo pipefail
+          bundle="src-tauri/target/release/bundle"
+          node scripts/ci/candidate-path-policy.mjs --root "$bundle"
+          shopt -s nullglob
+          appimages=("$bundle"/appimage/Biyan*.AppImage)
+          debs=("$bundle"/deb/Biyan*.deb)
+          [ "${#appimages[@]}" -eq 1 ] || {
+            echo "Expected exactly one Biyan AppImage, found ${#appimages[@]}" >&2
+            exit 1
+          }
+          [ "${#debs[@]}" -eq 1 ] || {
+            echo "Expected exactly one Biyan DEB, found ${#debs[@]}" >&2
+            exit 1
+          }
+          appimage="$(realpath "${appimages[0]}")"
+          deb="$(realpath "${debs[0]}")"
+          chmod +x "$appimage"
+          extract_root="$(mktemp -d)"
+          deb_root="$(mktemp -d)"
+          trap 'rm -rf "$extract_root" "$deb_root"' EXIT
+          (
+            cd "$extract_root"
+            "$appimage" --appimage-extract >/dev/null
+          )
+          dpkg-deb --extract "$deb" "$deb_root"
+          for root in "$extract_root/squashfs-root" "$deb_root"; do
+            node scripts/ci/candidate-path-policy.mjs --root "$root"
+            node scripts/ci/candidate-content-policy.mjs --root "$root"
+          done
+
       # Publish app
 
       ## Artifacts, for dev and test

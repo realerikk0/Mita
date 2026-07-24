@@ -1,52 +1,86 @@
-name: "Clean old cloudflare pages preview urls and nightly build"
+name: Clean old Biyan Docs preview deployments
+
 on:
   schedule:
-    - cron: "0 0 * * *" # every day at 00:00
+    - cron: '0 0 * * *'
   workflow_dispatch:
+    inputs:
+      dry_run:
+        description: Report eligible previews without deleting them
+        type: boolean
+        default: true
+
+permissions:
+  contents: read
+
+concurrency:
+  group: clean-biyan-docs-preview-deployments
+  cancel-in-progress: false
 
 jobs:
   clean-cloudflare-pages-preview-urls:
-    strategy:
-      matrix:
-        project: ["nitro", "docs"]
+    if: github.event_name == 'schedule' || github.ref == 'refs/heads/mita-main'
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     steps:
-      - uses: actions/setup-python@v4
-        with:
-          python-version: '3.x'
-      - name: install requests
+      - name: Record the read-only trigger provenance
+        env:
+          TRIGGER_REF: ${{ github.ref }}
+          TRIGGER_SHA: ${{ github.sha }}
         run: |
-          python3 -m pip install requests pytz tqdm
-      - name: Python Inline script
-        uses: jannekem/run-python-script-action@v1
-        with: 
-          script: |
-            import requests
-            from datetime import datetime, UTC
-            from pytz import timezone
-            from tqdm import tqdm
-            
-            # Configuration
-            endpoint = "https://api.cloudflare.com/client/v4/accounts/${{ secrets.CLOUDFLARE_ACCOUNT_ID }}/pages/projects/${{ matrix.project }}/deployments"
-            expiration_days = 3
-            headers = {
-                "Content-Type": "application/json;charset=UTF-8",
-                "Authorization": "Bearer ${{ secrets.CLOUDFLARE_API_TOKEN }}"
-            }
-            utc_tz = timezone('UTC')
+          printf 'Cleanup trigger ref: %s\n' "$TRIGGER_REF"
+          printf 'Cleanup trigger SHA: %s\n' "$TRIGGER_SHA"
 
-            # Fetch the list of deployments
-            response = requests.get(endpoint, headers=headers)
-            deployments = response.json()
+      - name: Resolve live protected mita-main
+        id: trusted-main
+        env:
+          REPOSITORY: ${{ github.repository }}
+          SERVER_URL: ${{ github.server_url }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          remote_url="${SERVER_URL}/${REPOSITORY}.git"
+          trusted_sha="$(
+            git ls-remote --exit-code "$remote_url" refs/heads/mita-main |
+              awk 'NR == 1 { print $1 }'
+          )"
+          if [[ ! "$trusted_sha" =~ ^[0-9a-f]{40}$ ]]; then
+            echo "Unable to resolve a unique live origin/mita-main commit" >&2
+            exit 1
+          fi
+          printf 'sha=%s\n' "$trusted_sha" >> "$GITHUB_OUTPUT"
 
-            for deployment in tqdm(deployments['result']):
-                # Calculate the age of the deployment
-                created_on = datetime.strptime(deployment['created_on'], "%Y-%m-%dT%H:%M:%S.%fZ").replace(tzinfo=utc_tz)
-                if (datetime.now(UTC) - created_on).days > expiration_days:
-                    # Delete the deployment
-                    delete_response = requests.delete(f"{endpoint}/{deployment['id']}", headers=headers)
-                    if delete_response.status_code == 200:
-                        print(f"Deleted deployment: {deployment['id']}")
-                    else:
-                        print(f"Failed to delete deployment: {deployment['id']}")
+      - name: Checkout the exact trusted cleanup control
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ steps.trusted-main.outputs.sha }}
+          path: trusted-control
+          fetch-depth: 1
+          persist-credentials: false
 
+      - name: Delete expired Biyan Docs preview deployments
+        env:
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_PAGES_PROJECT: biyan-docs
+          EXPIRATION_DAYS: '3'
+          DRY_RUN: ${{ github.event_name == 'workflow_dispatch' && inputs.dry_run || false }}
+          EXPECTED_TRUSTED_SHA: ${{ steps.trusted-main.outputs.sha }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          actual_sha="$(git -C trusted-control rev-parse HEAD)"
+          if [ "$actual_sha" != "$EXPECTED_TRUSTED_SHA" ]; then
+            echo "Trusted cleanup checkout drifted from origin/mita-main" >&2
+            exit 1
+          fi
+          live_sha="$(
+            git -C trusted-control ls-remote --exit-code \
+              origin refs/heads/mita-main |
+              awk 'NR == 1 { print $1 }'
+          )"
+          if [ "$live_sha" != "$EXPECTED_TRUSTED_SHA" ]; then
+            echo "origin/mita-main moved before cleanup; retry safely" >&2
+            exit 1
+          fi
+          node trusted-control/scripts/ci/cleanup-cloudflare-pages-previews.mjs

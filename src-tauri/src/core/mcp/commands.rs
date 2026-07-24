@@ -244,7 +244,7 @@ pub async fn restart_mcp_servers<R: Runtime>(
 
     stop_mcp_servers_with_context(&app, &state, ShutdownContext::ManualRestart).await?;
 
-    // Restart only previously active servers (like cortex)
+    // Restart only servers that were active before shutdown.
     restart_active_mcp_servers(&app, servers).await?;
 
     app.emit("mcp-update", "MCP servers updated")

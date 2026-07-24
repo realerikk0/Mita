@@ -6,6 +6,7 @@ import path from 'node:path'
 import test from 'node:test'
 
 import { buildCandidate } from '../build-candidate.mjs'
+import { validateCanonicalUpdaterCandidateMetadata } from '../candidate-url-policy.mjs'
 import { evaluateRolloutHealth } from '../evaluate-rollout-health.mjs'
 import { initialPolicy, preparePromotion } from '../prepare-promotion.mjs'
 import { handleRequest } from '../worker.mjs'
@@ -89,6 +90,9 @@ test('candidate builder emits Biyan-only immutable assets and canonical manifest
   fs.writeFileSync(path.join(source, 'Biyan_0.6.637_x64-setup.exe.sig'), 'windows-signature')
   fs.writeFileSync(path.join(source, 'Biyan_0.6.637_amd64.AppImage'), 'linux')
   fs.writeFileSync(path.join(source, 'Biyan_0.6.637_amd64.AppImage.sig'), 'linux-signature')
+  fs.writeFileSync(path.join(source, 'Biyan_0.6.637_universal.dmg'), 'mac-dmg')
+  fs.writeFileSync(path.join(source, 'Biyan_0.6.637_x64_en-US.msi'), 'windows-msi')
+  fs.writeFileSync(path.join(source, 'Biyan_0.6.637_amd64.deb'), 'linux-deb')
 
   const candidate = buildCandidate({
     version: '0.6.637',
@@ -103,7 +107,67 @@ test('candidate builder emits Biyan-only immutable assets and canonical manifest
   assert.equal(candidate.manifestKey, 'biyan/updater/releases/v0.6.637/latest.json')
   assert.equal(candidate.sourceCommit, sourceCommit)
   assert.equal(candidate.dataSchema, 1)
+  assert.deepEqual(
+    Object.keys(candidate.distributionAssets).sort(),
+    ['linuxAppImage', 'linuxDeb', 'macosDmg', 'windowsExe', 'windowsMsi'],
+  )
   assert.match(fs.readFileSync(path.join(output, 'latest.json'), 'utf8'), /Biyan_0\.6\.637/)
+
+  const wrongAssetOrigin = structuredClone(candidate)
+  wrongAssetOrigin.assets[0].url =
+    'https://evil.invalid/biyan/updater/releases/v0.6.637/Biyan.app.tar.gz'
+  assert.throws(
+    () => validateCanonicalUpdaterCandidateMetadata(wrongAssetOrigin),
+    /URL must be exactly https:\/\/static\.mitapp\.cn/
+  )
+  const extraMetadata = structuredClone(candidate)
+  extraMetadata.channel = 'unreviewed'
+  assert.throws(
+    () => validateCanonicalUpdaterCandidateMetadata(extraMetadata),
+    /Updater candidate keys must be exactly/
+  )
+
+  for (const invalidBaseUrl of [
+    'http://static.mitapp.cn',
+    'https://evil.invalid',
+    'https://static.mitapp.cn/biyan',
+    'https://static.mitapp.cn?channel=stable',
+    'https://static.mitapp.cn#stable',
+  ]) {
+    assert.throws(
+      () =>
+        buildCandidate({
+          version: '0.6.637',
+          artifactsDir: source,
+          outputDir: path.join(
+            root,
+            `invalid-origin-${Buffer.from(invalidBaseUrl).toString('hex')}`
+          ),
+          assetBaseUrl: invalidBaseUrl,
+          publishedAt: '2026-07-14T00:00:00Z',
+          sourceCommit,
+          migrationPhase: 'A',
+          dataSchema: 1,
+        }),
+      /Updater asset base URL must be exactly https:\/\/static\.mitapp\.cn/
+    )
+  }
+
+  fs.rmSync(path.join(source, 'Biyan_0.6.637_x64_en-US.msi'))
+  assert.throws(
+    () =>
+      buildCandidate({
+        version: '0.6.637',
+        artifactsDir: source,
+        outputDir: path.join(root, 'missing-msi-output'),
+        assetBaseUrl: 'https://static.mitapp.cn',
+        publishedAt: '2026-07-14T00:00:00Z',
+        sourceCommit,
+        migrationPhase: 'A',
+        dataSchema: 1,
+      }),
+    /Expected exactly one Biyan_0\.6\.637_x64_en-US\.msi, found 0/,
+  )
 })
 
 test('promotion is forward-only, phase-gated, and supports rollout increases', () => {

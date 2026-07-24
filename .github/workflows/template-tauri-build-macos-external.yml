@@ -28,7 +28,7 @@ jobs:
         if: inputs.channel != 'stable'
         shell: bash
         run: |
-          cp .github/scripts/icon-${{ inputs.channel }}.png src-tauri/icons/icon.png
+          cp .github/scripts/icon-${{ inputs.channel }}.png src-tauri/app-icon.png
 
       - name: Installing node
         uses: actions/setup-node@v1

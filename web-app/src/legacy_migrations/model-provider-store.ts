@@ -236,7 +236,7 @@ export const useModelProvider = create<ModelProviderState>()(
             })
 
           let legacyModels: Model[] | undefined = []
-          /// Cortex Migration
+          // Retired local-model settings migration.
           if (
             localStorage.getItem('cortex_model_settings_migrated') !== 'true'
           ) {

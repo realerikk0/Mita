@@ -1,0 +1,15 @@
+{
+  "schema": 1,
+  "state": "pre-a",
+  "expectedVersion": "0.6.633",
+  "expectedManifestSha256": "142abddf03744562195404d0dd9ae92f53d8f74d20b2cef19b2db60aeb8ec350",
+  "requiredPlatforms": [
+    "darwin-aarch64",
+    "darwin-x86_64",
+    "windows-x86_64"
+  ],
+  "manifestUrls": {
+    "aliyun": "https://static.mitapp.cn/mita/latest.json",
+    "r2": "https://updates.mita.so/mita/latest.json"
+  }
+}

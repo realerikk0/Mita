@@ -1006,7 +1006,7 @@ pub fn extract_active_status(config: &Value) -> Option<bool> {
     Some(active)
 }
 
-/// Restart only servers that were previously active (like cortex restart behavior)
+/// Restart only servers that were active before shutdown.
 pub async fn restart_active_mcp_servers<R: Runtime>(
     app: &AppHandle<R>,
     servers_state: SharedMcpServers,

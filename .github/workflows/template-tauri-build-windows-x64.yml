@@ -15,10 +15,6 @@ on:
         required: true
         type: string
         default: ''
-      cortex_api_port:
-        required: false
-        type: string
-        default: ''
       upload_url:
         required: false
         type: string
@@ -82,7 +78,7 @@ jobs:
         if: inputs.channel != 'stable'
         shell: bash
         run: |
-          cp .github/scripts/icon-${{ inputs.channel }}.png src-tauri/icons/icon.png
+          cp .github/scripts/icon-${{ inputs.channel }}.png src-tauri/app-icon.png
 
       - name: Installing node
         uses: actions/setup-node@v1
@@ -227,6 +223,28 @@ jobs:
           TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
           TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
           BIYAN_SIGNING_KEY: ${{ secrets.BIYAN_SIGNING_KEY }}
+
+      - name: Verify bundle paths
+        shell: bash
+        run: node scripts/ci/candidate-path-policy.mjs --root src-tauri/target/release/bundle
+
+      - name: Verify extracted Windows candidate
+        shell: pwsh
+        run: |
+          $bundle = 'src-tauri/target/release/bundle'
+          $installers = @(
+            Get-ChildItem -LiteralPath "$bundle/nsis" -Filter 'Biyan*_x64-setup.exe'
+          )
+          $msis = @(
+            Get-ChildItem -LiteralPath "$bundle/msi" -Filter 'Biyan*_x64_en-US.msi'
+          )
+          if ($installers.Count -ne 1 -or $msis.Count -ne 1) {
+            throw "Expected exactly one Biyan NSIS and MSI candidate"
+          }
+          & ./scripts/ci/verify-windows-candidate.ps1 `
+            -Exe $installers[0].FullName `
+            -Msi $msis[0].FullName `
+            -Version '${{ inputs.new_version }}'
 
       - name: Upload NSIS Installer Artifact
         uses: actions/upload-artifact@v4

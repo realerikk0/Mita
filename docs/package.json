@@ -7,7 +7,6 @@
     "build": "next build",
     "start": "npx serve@latest out",
     "lint": "next lint",
-    "create:blogpost": "plop create-blogpost",
     "postbuild": "next-sitemap && yarn verify:archive",
     "verify:archive": "node scripts/verify-unpublished-archive.cjs"
   },
@@ -39,8 +38,6 @@
     "nextra": "^2.13.4",
     "nextra-theme-docs": "^2.13.4",
     "path": "^0.12.7",
-    "plop": "^4.0.1",
-    "plop-helper-date": "^1.0.0",
     "posthog-js": "^1.194.6",
     "react": "^18",
     "react-dom": "^18",

@@ -12,7 +12,7 @@ on:
         type: string
 
 permissions:
-  contents: write
+  contents: read
 
 concurrency:
   group: desktop-candidate-${{ github.event.inputs.version || github.ref }}
@@ -31,14 +31,25 @@ jobs:
       tag: ${{ steps.release.outputs.tag }}
       published_at: ${{ steps.release.outputs.published_at }}
       source_commit: ${{ steps.release.outputs.source_commit }}
+      trusted_main_commit: ${{ steps.release.outputs.trusted_main_commit }}
       migration_phase: ${{ steps.release.outputs.migration_phase }}
       data_schema: ${{ steps.release.outputs.data_schema }}
     steps:
-      - name: Checkout tag
+      - name: Checkout protected release harness
+        uses: actions/checkout@v4
+        with:
+          ref: mita-main
+          path: harness
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Checkout exact release target
         uses: actions/checkout@v4
         with:
           ref: ${{ github.event.inputs.version || github.ref }}
+          path: target
           fetch-depth: 0
+          persist-credentials: false
 
       - name: Setup Node
         uses: actions/setup-node@v4
@@ -57,28 +68,45 @@ jobs:
             exit 1
           fi
           version="${RELEASE_TAG#v}"
-          test "$(git tag --points-at HEAD | grep -Fx "$RELEASE_TAG")" = "$RELEASE_TAG"
-          node scripts/release-version.mjs check "$version"
+          git -C harness fetch --force --no-tags origin \
+            "+refs/heads/mita-main:refs/remotes/origin/mita-main" \
+            "+refs/tags/$RELEASE_TAG:refs/tags/$RELEASE_TAG"
+          checkout_head="$(git -C harness rev-parse HEAD)"
+          live_main="$(git -C harness rev-parse refs/remotes/origin/mita-main)"
+          if [ "$checkout_head" != "$live_main" ]; then
+            echo "Trusted release harness $checkout_head is not live origin/mita-main $live_main" >&2
+            exit 1
+          fi
+          source_commit="$(git -C harness rev-list -n 1 "refs/tags/$RELEASE_TAG")"
+          test "$source_commit" = "$(git -C target rev-parse HEAD)"
+          test "$source_commit" = "$(git -C target rev-list -n 1 "refs/tags/$RELEASE_TAG")"
+          git -C harness merge-base --is-ancestor \
+            "$source_commit" refs/remotes/origin/mita-main
           jq -e '
             .schema == 1
             and (.migrationPhase == "A" or .migrationPhase == "B" or .migrationPhase == "C")
             and ((.migrationPhase == "A" and .dataSchema == 1)
               or (.migrationPhase == "B" and .dataSchema == 2)
               or (.migrationPhase == "C" and .dataSchema == 3))
-          ' biyan-release.json >/dev/null
+          ' target/biyan-release.json >/dev/null
           {
             echo "version=$version"
             echo "tag=$RELEASE_TAG"
-            echo "published_at=$(git show -s --format=%cI HEAD)"
-            echo "source_commit=$(git rev-parse HEAD)"
-            echo "migration_phase=$(jq -r .migrationPhase biyan-release.json)"
-            echo "data_schema=$(jq -r .dataSchema biyan-release.json)"
+            echo "published_at=$(git -C target show -s --format=%cI "$source_commit")"
+            echo "source_commit=$source_commit"
+            echo "trusted_main_commit=$live_main"
+            echo "migration_phase=$(jq -r .migrationPhase target/biyan-release.json)"
+            echo "data_schema=$(jq -r .dataSchema target/biyan-release.json)"
           } >> "$GITHUB_OUTPUT"
 
-      - name: Verify release safety policy
-        run: node scripts/ci/verify-release-policy.mjs
+      - name: Verify target with protected release policy
+        run: |
+          node harness/scripts/ci/verify-release-policy.mjs \
+            --repo-root target \
+            --require-active
 
-      - name: Test release policy contracts
+      - name: Test protected release policy contracts
+        working-directory: harness
         run: node --test scripts/ci/__tests__/release-policy.test.mjs
 
   quality-gate:
@@ -90,8 +118,9 @@ jobs:
       - name: Checkout tag
         uses: actions/checkout@v4
         with:
-          ref: ${{ needs.preflight.outputs.tag }}
+          ref: ${{ needs.preflight.outputs.source_commit }}
           fetch-depth: 0
+          persist-credentials: false
 
       - name: Setup Node
         uses: actions/setup-node@v4
@@ -128,7 +157,8 @@ jobs:
       - name: Checkout tag
         uses: actions/checkout@v4
         with:
-          ref: ${{ needs.preflight.outputs.tag }}
+          ref: ${{ needs.preflight.outputs.source_commit }}
+          persist-credentials: false
 
       - name: Setup Node
         uses: actions/setup-node@v4
@@ -176,6 +206,18 @@ jobs:
           p12-file-base64: ${{ secrets.CODE_SIGN_P12_BASE64 }}
           p12-password: ${{ secrets.CODE_SIGN_P12_PASSWORD }}
 
+      - name: Revalidate protected main before macOS build mutation
+        shell: bash
+        env:
+          EXPECTED_MAIN: ${{ needs.preflight.outputs.trusted_main_commit }}
+        run: |
+          set -euo pipefail
+          live_main="$(git ls-remote --exit-code origin refs/heads/mita-main | awk 'NF == 2 { print $1 }')"
+          if [[ ! "$live_main" =~ ^[0-9a-f]{40}$ ]] || [ "$live_main" != "$EXPECTED_MAIN" ]; then
+            echo "origin/mita-main moved before macOS build; retry from the new trusted harness" >&2
+            exit 1
+          fi
+
       - name: Build app
         shell: bash
         env:
@@ -213,6 +255,11 @@ jobs:
           APPLE_API_KEY_PATH: /tmp/notary-key.p8
         run: |
           set -euo pipefail
+          live_main="$(git ls-remote --exit-code origin refs/heads/mita-main | awk 'NF == 2 { print $1 }')"
+          if [[ ! "$live_main" =~ ^[0-9a-f]{40}$ ]] || [ "$live_main" != "${{ needs.preflight.outputs.trusted_main_commit }}" ]; then
+            echo "origin/mita-main moved before notarization; retry from the new trusted harness" >&2
+            exit 1
+          fi
           shopt -s nullglob
           dmgs=(src-tauri/target/universal-apple-darwin/release/bundle/dmg/Biyan_*.dmg)
           [ "${#dmgs[@]}" -gt 0 ] || { echo "No Biyan DMG found" >&2; exit 1; }
@@ -227,6 +274,18 @@ jobs:
           done
           codesign --verify --deep --strict --verbose=2 \
             src-tauri/target/universal-apple-darwin/release/bundle/macos/Biyan.app
+
+      - name: Revalidate protected main before macOS artifact mutation
+        shell: bash
+        env:
+          EXPECTED_MAIN: ${{ needs.preflight.outputs.trusted_main_commit }}
+        run: |
+          set -euo pipefail
+          live_main="$(git ls-remote --exit-code origin refs/heads/mita-main | awk 'NF == 2 { print $1 }')"
+          if [[ ! "$live_main" =~ ^[0-9a-f]{40}$ ]] || [ "$live_main" != "$EXPECTED_MAIN" ]; then
+            echo "origin/mita-main moved before macOS artifact upload; retry safely" >&2
+            exit 1
+          fi
 
       - name: Upload macOS candidate
         uses: actions/upload-artifact@v4
@@ -248,7 +307,8 @@ jobs:
       - name: Checkout tag
         uses: actions/checkout@v4
         with:
-          ref: ${{ needs.preflight.outputs.tag }}
+          ref: ${{ needs.preflight.outputs.source_commit }}
+          persist-credentials: false
 
       - name: Setup Node
         uses: actions/setup-node@v4
@@ -285,6 +345,18 @@ jobs:
             [ -n "${!name:-}" ] || { echo "Missing required production secret: $name" >&2; exit 1; }
           done
 
+      - name: Revalidate protected main before Windows build mutation
+        shell: bash
+        env:
+          EXPECTED_MAIN: ${{ needs.preflight.outputs.trusted_main_commit }}
+        run: |
+          set -euo pipefail
+          live_main="$(git ls-remote --exit-code origin refs/heads/mita-main | awk 'NF == 2 { print $1 }')"
+          if [[ ! "$live_main" =~ ^[0-9a-f]{40}$ ]] || [ "$live_main" != "$EXPECTED_MAIN" ]; then
+            echo "origin/mita-main moved before Windows build; retry from the new trusted harness" >&2
+            exit 1
+          fi
+
       - name: Build app
         shell: bash
         env:
@@ -307,8 +379,30 @@ jobs:
           test -f "src-tauri/target/release/bundle/nsis/Biyan_${VERSION}_x64-setup.exe.sig"
           test -f "src-tauri/target/release/bundle/msi/Biyan_${VERSION}_x64_en-US.msi"
           node scripts/ci/candidate-path-policy.mjs \
-            --root src-tauri/target/release/bundle \
-            --runtime-only
+            --root src-tauri/target/release/bundle
+
+      - name: Verify extracted Windows candidate
+        shell: pwsh
+        env:
+          VERSION: ${{ needs.preflight.outputs.version }}
+        run: |
+          $bundle = 'src-tauri/target/release/bundle'
+          & ./scripts/ci/verify-windows-candidate.ps1 `
+            -Exe "$bundle/nsis/Biyan_$env:VERSION`_x64-setup.exe" `
+            -Msi "$bundle/msi/Biyan_$env:VERSION`_x64_en-US.msi" `
+            -Version $env:VERSION
+
+      - name: Revalidate protected main before Windows artifact mutation
+        shell: bash
+        env:
+          EXPECTED_MAIN: ${{ needs.preflight.outputs.trusted_main_commit }}
+        run: |
+          set -euo pipefail
+          live_main="$(git ls-remote --exit-code origin refs/heads/mita-main | awk 'NF == 2 { print $1 }')"
+          if [[ ! "$live_main" =~ ^[0-9a-f]{40}$ ]] || [ "$live_main" != "$EXPECTED_MAIN" ]; then
+            echo "origin/mita-main moved before Windows artifact upload; retry safely" >&2
+            exit 1
+          fi
 
       - name: Upload Windows candidate
         uses: actions/upload-artifact@v4
@@ -330,7 +424,8 @@ jobs:
       - name: Checkout tag
         uses: actions/checkout@v4
         with:
-          ref: ${{ needs.preflight.outputs.tag }}
+          ref: ${{ needs.preflight.outputs.source_commit }}
+          persist-credentials: false
 
       - name: Setup Node
         uses: actions/setup-node@v4
@@ -365,6 +460,17 @@ jobs:
             [ -n "${!name:-}" ] || { echo "Missing required production secret: $name" >&2; exit 1; }
           done
 
+      - name: Revalidate protected main before Linux build mutation
+        env:
+          EXPECTED_MAIN: ${{ needs.preflight.outputs.trusted_main_commit }}
+        run: |
+          set -euo pipefail
+          live_main="$(git ls-remote --exit-code origin refs/heads/mita-main | awk 'NF == 2 { print $1 }')"
+          if [[ ! "$live_main" =~ ^[0-9a-f]{40}$ ]] || [ "$live_main" != "$EXPECTED_MAIN" ]; then
+            echo "origin/mita-main moved before Linux build; retry from the new trusted harness" >&2
+            exit 1
+          fi
+
       - name: Build app
         env:
           POSTHOG_KEY: ${{ secrets.POSTHOG_KEY }}
@@ -385,8 +491,37 @@ jobs:
           test -f "src-tauri/target/release/bundle/appimage/Biyan_${VERSION}_amd64.AppImage.sig"
           test -f "src-tauri/target/release/bundle/deb/Biyan_${VERSION}_amd64.deb"
           node scripts/ci/candidate-path-policy.mjs \
-            --root src-tauri/target/release/bundle \
-            --runtime-only
+            --root src-tauri/target/release/bundle
+          appimage="$(realpath "src-tauri/target/release/bundle/appimage/Biyan_${VERSION}_amd64.AppImage")"
+          deb="$(realpath "src-tauri/target/release/bundle/deb/Biyan_${VERSION}_amd64.deb")"
+          chmod +x "$appimage"
+          extract_root="$(mktemp -d)"
+          deb_root="$(mktemp -d)"
+          trap 'rm -rf "$extract_root" "$deb_root"' EXIT
+          (
+            cd "$extract_root"
+            "$appimage" --appimage-extract >/dev/null
+          )
+          dpkg-deb --extract "$deb" "$deb_root"
+          node scripts/ci/candidate-path-policy.mjs \
+            --root "$extract_root/squashfs-root"
+          node scripts/ci/candidate-content-policy.mjs \
+            --root "$extract_root/squashfs-root"
+          node scripts/ci/candidate-path-policy.mjs \
+            --root "$deb_root"
+          node scripts/ci/candidate-content-policy.mjs \
+            --root "$deb_root"
+
+      - name: Revalidate protected main before Linux artifact mutation
+        env:
+          EXPECTED_MAIN: ${{ needs.preflight.outputs.trusted_main_commit }}
+        run: |
+          set -euo pipefail
+          live_main="$(git ls-remote --exit-code origin refs/heads/mita-main | awk 'NF == 2 { print $1 }')"
+          if [[ ! "$live_main" =~ ^[0-9a-f]{40}$ ]] || [ "$live_main" != "$EXPECTED_MAIN" ]; then
+            echo "origin/mita-main moved before Linux artifact upload; retry safely" >&2
+            exit 1
+          fi
 
       - name: Upload Linux candidate
         uses: actions/upload-artifact@v4
@@ -402,11 +537,24 @@ jobs:
     name: Package immutable updater candidate
     runs-on: ubuntu-latest
     needs: [preflight, build-macos, build-windows, build-linux]
+    environment: release-distribution
     steps:
       - name: Checkout release scripts
         uses: actions/checkout@v4
         with:
-          ref: ${{ needs.preflight.outputs.tag }}
+          ref: ${{ needs.preflight.outputs.source_commit }}
+          persist-credentials: false
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+
+      - name: Install locked Tauri signer
+        run: |
+          corepack enable
+          corepack prepare yarn@4.5.3 --activate
+          yarn install --immutable --mode=skip-builds
 
       - name: Download signed candidates
         uses: actions/download-artifact@v4
@@ -422,6 +570,8 @@ jobs:
           MIGRATION_PHASE: ${{ needs.preflight.outputs.migration_phase }}
           DATA_SCHEMA: ${{ needs.preflight.outputs.data_schema }}
           ASSET_BASE_URL: ${{ vars.BIYAN_UPDATER_ASSET_BASE_URL || 'https://static.mitapp.cn' }}
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
         run: |
           node scripts/updater/build-candidate.mjs \
             --version "$VERSION" \
@@ -434,10 +584,25 @@ jobs:
             --migration-phase "$MIGRATION_PHASE" \
             --data-schema "$DATA_SCHEMA"
           node scripts/ci/verify-release-policy.mjs --artifact-root dist/updater-candidate
+          yarn tauri signer sign \
+            --private-key "$TAURI_SIGNING_PRIVATE_KEY" \
+            --password "$TAURI_SIGNING_PRIVATE_KEY_PASSWORD" \
+            dist/updater-candidate/candidate.json
           (
             cd dist/updater-candidate
-            sha256sum Biyan* candidate.json latest.json > SHA256SUMS
+            sha256sum Biyan* candidate.json candidate.json.sig latest.json > SHA256SUMS
           )
+
+      - name: Revalidate protected main before updater artifact mutation
+        env:
+          EXPECTED_MAIN: ${{ needs.preflight.outputs.trusted_main_commit }}
+        run: |
+          set -euo pipefail
+          live_main="$(git ls-remote --exit-code origin refs/heads/mita-main | awk 'NF == 2 { print $1 }')"
+          if [[ ! "$live_main" =~ ^[0-9a-f]{40}$ ]] || [ "$live_main" != "$EXPECTED_MAIN" ]; then
+            echo "origin/mita-main moved before updater artifact upload; retry safely" >&2
+            exit 1
+          fi
 
       - name: Upload updater candidate
         uses: actions/upload-artifact@v4
@@ -450,12 +615,15 @@ jobs:
     name: Create draft release without promoting stable
     runs-on: ubuntu-latest
     needs: [preflight, build-macos, build-windows, build-linux, package-candidate]
+    permissions:
+      contents: write
     steps:
       - name: Checkout
         uses: actions/checkout@v4
         with:
-          ref: ${{ needs.preflight.outputs.tag }}
+          ref: ${{ needs.preflight.outputs.source_commit }}
           fetch-depth: 0
+          persist-credentials: false
 
       - name: Download all candidate artifacts
         uses: actions/download-artifact@v4
@@ -468,6 +636,17 @@ jobs:
             --tag "${{ needs.preflight.outputs.tag }}" \
             --output dist/release-notes.md
 
+      - name: Revalidate protected main before draft release mutation
+        env:
+          EXPECTED_MAIN: ${{ needs.preflight.outputs.trusted_main_commit }}
+        run: |
+          set -euo pipefail
+          live_main="$(git ls-remote --exit-code origin refs/heads/mita-main | awk 'NF == 2 { print $1 }')"
+          if [[ ! "$live_main" =~ ^[0-9a-f]{40}$ ]] || [ "$live_main" != "$EXPECTED_MAIN" ]; then
+            echo "origin/mita-main moved before draft release creation; retry safely" >&2
+            exit 1
+          fi
+
       - name: Create draft candidate release
         uses: softprops/action-gh-release@v2
         with:
@@ -478,7 +657,4 @@ jobs:
           body_path: dist/release-notes.md
           fail_on_unmatched_files: true
           files: |
-            dist/biyan-macos-universal-*/*.dmg
-            dist/biyan-windows-x64-*/*.msi
-            dist/biyan-linux-x64-*/*.deb
             dist/biyan-updater-candidate-*/*
