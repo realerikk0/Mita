@@ -534,7 +534,7 @@ export function validateCiWorkflow(source) {
       )
     }
     const invalidIdentityGuard =
-      ciScope.match(
+      uncommentedSource(ciScope).match(
         /^\s*if \[\[ ! "\$policy_sha" =~ \^\[0-9a-f\]\{40\}\$ \]\] \|\|[\s\S]*?^\s*fi\s*$/m
       )?.[0] ?? ''
     const exactIdentityChecks = [
@@ -548,8 +548,9 @@ export function validateCiWorkflow(source) {
       !exactIdentityChecks.every((pattern) =>
         pattern.test(invalidIdentityGuard)
       ) ||
-      !/^\s*emit_bootstrap_full\s*$/m.test(invalidIdentityGuard) ||
-      !/^\s*exit 0\s*$/m.test(invalidIdentityGuard)
+      !/^\s*emit_bootstrap_full\s*\n\s*exit 0\s*$/m.test(
+        invalidIdentityGuard
+      )
     ) {
       failures.push(
         'Biyan trusted CI scope must route invalid commit identity to bootstrap-full and exit successfully'

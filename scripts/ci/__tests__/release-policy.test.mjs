@@ -893,6 +893,22 @@ jobs:
       needle
     )
   }
+  for (const invalidFallbackMutation of [
+    workflow.replace(
+      '            emit_bootstrap_full\n            exit 0\n          fi\n          if ! git show',
+      '            exit 0\n            emit_bootstrap_full\n          fi\n          if ! git show'
+    ),
+    workflow.replace(
+      '             [[ ! "$base_sha" =~ ^[0-9a-f]{40}$ ]] ||',
+      '             # [[ ! "$base_sha" =~ ^[0-9a-f]{40}$ ]] ||'
+    ),
+  ]) {
+    assert.ok(
+      validateCiWorkflow(invalidFallbackMutation).some((failure) =>
+        failure.includes('invalid commit identity')
+      )
+    )
+  }
 
   const missingAxis = workflow.replace(
     '      test_macos: \${{ steps.scope.outputs.test_macos }}\n',
