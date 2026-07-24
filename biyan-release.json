@@ -1,5 +1,5 @@
 {
   "schema": 1,
-  "migrationPhase": "B",
-  "dataSchema": 2
+  "migrationPhase": "C",
+  "dataSchema": 3
 }
