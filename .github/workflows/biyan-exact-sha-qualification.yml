@@ -789,6 +789,34 @@ jobs:
           persist-credentials: false
           path: harness
 
+      - name: Reclaim Linux runner image space
+        uses: jlumbroso/free-disk-space@54081f138730dfa15788a46383842cd2f914a1be
+        with:
+          tool-cache: false
+          android: true
+          dotnet: true
+          haskell: true
+          large-packages: true
+          docker-images: true
+          swap-storage: true
+
+      - name: Enforce Linux runner disk budget
+        shell: bash
+        run: |
+          set -euo pipefail
+          df -h /
+          available_kib="$(df -Pk / | awk 'NR == 2 { print $4 }')"
+          if ! [[ "$available_kib" =~ ^[0-9]+$ ]]; then
+            echo "::error::Could not determine available Linux runner disk"
+            exit 1
+          fi
+          minimum_kib=$((40 * 1024 * 1024))
+          if [ "$available_kib" -lt "$minimum_kib" ]; then
+            available_gib=$((available_kib / 1024 / 1024))
+            echo "::error::Linux runner has ${available_gib} GiB free; at least 40 GiB is required"
+            exit 1
+          fi
+
       - name: Assert native x86_64 runner and record image
         shell: bash
         run: |
