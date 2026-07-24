@@ -371,7 +371,7 @@ test('promotion workflow is main-pinned and invokes the tracked legacy gate', ()
   const workflow = fs.readFileSync(
     path.join(repoRoot, '.github/workflows/promote-desktop-update.yml'),
     'utf8',
-  )
+  ).replace(/\r\n?/g, '\n')
   assert.match(workflow, /if: github\.ref == 'refs\/heads\/mita-main'/)
   assert.match(
     workflow,

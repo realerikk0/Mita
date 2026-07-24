@@ -14,6 +14,10 @@ const validConfiguration = {
   expirationDays: 3,
 }
 
+function normalizeLineEndings(source) {
+  return source.replace(/\r\n?/g, '\n')
+}
+
 function trustedCleanupWorkflowFailures(workflow) {
   const failures = []
   if ((workflow.match(/uses: actions\/checkout@v4/g) ?? []).length !== 1) {
@@ -130,20 +134,29 @@ test('cleanup rejects malformed Cloudflare deployment data', () => {
 })
 
 test('scheduled workflow is single-project and executes only live trusted main control', () => {
-  const workflow = fs.readFileSync(
-    '.github/workflows/clean-cloudflare-page-preview-url-and-r2.yml',
-    'utf8'
+  const workflow = normalizeLineEndings(
+    fs.readFileSync(
+      '.github/workflows/clean-cloudflare-page-preview-url-and-r2.yml',
+      'utf8'
+    )
   )
   assert.match(workflow, /CLOUDFLARE_PAGES_PROJECT: biyan-docs/)
-  assert.deepEqual(trustedCleanupWorkflowFailures(workflow), [])
+  for (const lineEnding of ['\n', '\r\n']) {
+    assert.deepEqual(
+      trustedCleanupWorkflowFailures(workflow.replaceAll('\n', lineEnding)),
+      []
+    )
+  }
   assert.doesNotMatch(workflow, /matrix:\s*[\s\S]*project:/)
   assert.doesNotMatch(workflow, /jannekem|project:\s*\[(?:"nitro"|"docs")/)
 })
 
 test('workflow policy rejects trigger-ref code and stale or untrusted cleanup control', () => {
-  const workflow = fs.readFileSync(
-    '.github/workflows/clean-cloudflare-page-preview-url-and-r2.yml',
-    'utf8'
+  const workflow = normalizeLineEndings(
+    fs.readFileSync(
+      '.github/workflows/clean-cloudflare-page-preview-url-and-r2.yml',
+      'utf8'
+    )
   )
   const regressions = [
     workflow.replace(
@@ -168,6 +181,11 @@ test('workflow policy rejects trigger-ref code and stale or untrusted cleanup co
     ),
   ]
   for (const regression of regressions) {
+    assert.notEqual(
+      regression,
+      workflow,
+      'regression fixture must change workflow'
+    )
     assert.notDeepEqual(trustedCleanupWorkflowFailures(regression), [])
   }
 })
