@@ -11,6 +11,7 @@ import {
 } from '../candidate-path-policy.mjs'
 import {
   validateBundledLegalResources,
+  validateCandidateRecoveryWorkflow,
   validateCandidateWorkflow,
   validateCiControlOwnership,
   validateCiWorkflow,
@@ -725,35 +726,163 @@ ${candidateReleasePin}
   package-candidate:
     needs: [preflight, build-macos, build-windows, build-linux]
     environment: release-distribution
+    permissions:
+      actions: read
+      contents: read
+    outputs:
+      updater_artifact_id: \${{ steps.updater.outputs.artifact-id }}
+      updater_artifact_digest: \${{ steps.updater-metadata.outputs.artifact_digest }}
+      updater_artifact_size: \${{ steps.updater-metadata.outputs.artifact_size }}
     steps:
       - uses: actions/checkout@v4
         with:
           ref: \${{ needs.preflight.outputs.trusted_main_commit }}
           persist-credentials: false
-      - run: yarn tauri signer sign dist/updater-candidate/candidate.json
-      - run: sha256sum Biyan* candidate.json candidate.json.sig latest.json > SHA256SUMS
+      - name: Install locked Tauri signer
+        run: |
+          corepack enable
+          corepack prepare yarn@4.5.3 --activate
+          yarn install --immutable --mode=skip-build
+      - name: Download signed candidates
+        uses: actions/download-artifact@v4
+        with:
+          path: dist/builds
+      - name: Build canonical candidate manifest
+        run: node scripts/updater/build-candidate.mjs
+      - name: Sign canonical candidate manifest
+        env:
+          TAURI_SIGNING_PRIVATE_KEY: \${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: \${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+        run: |
+          yarn tauri signer sign \\
+            --private-key "$TAURI_SIGNING_PRIVATE_KEY" \\
+            --password "$TAURI_SIGNING_PRIVATE_KEY_PASSWORD" \\
+            dist/updater-candidate/candidate.json
+      - name: Verify signed candidate and write hashes
+        env:
+          TAG: \${{ needs.preflight.outputs.tag }}
+        run: |
+          node scripts/updater/verify-candidate.mjs \\
+            dist/updater-candidate \\
+            "$TAG"
+          sha256sum Biyan* candidate.json candidate.json.sig latest.json > SHA256SUMS
 ${candidateReleasePin}
-      - uses: actions/upload-artifact@v4
+      - name: Upload updater candidate
+        id: updater
+        uses: actions/upload-artifact@v4
+      - name: Authenticate uploaded updater artifact
+        id: updater-metadata
+        env:
+          ACTION_ARTIFACT_DIGEST: \${{ steps.updater.outputs.artifact-digest }}
+          ARTIFACT_ID: \${{ steps.updater.outputs.artifact-id }}
+        run: |
+          [[ "$ACTION_ARTIFACT_DIGEST" =~ ^[0-9a-f]{64}$ ]]
+          artifact_digest="sha256:$ACTION_ARTIFACT_DIGEST"
+          jq -e '
+            .digest == $digest
+            and .workflow_run.id == $run_id
+            and .workflow_run.head_sha == $head
+          ' updater-artifact.json
+          echo "artifact_digest=$artifact_digest" >>"$GITHUB_OUTPUT"
+          echo "artifact_size=$artifact_size" >>"$GITHUB_OUTPUT"
   draft-release:
+    needs: [preflight, build-macos, build-windows, build-linux, package-candidate]
     permissions:
+      actions: read
       contents: write
     steps:
       - uses: actions/checkout@v4
         with:
           ref: \${{ needs.preflight.outputs.trusted_main_commit }}
           persist-credentials: false
+      - name: Download exact updater archive by authenticated ID
+        env:
+          ARTIFACT_ID: \${{ needs.package-candidate.outputs.updater_artifact_id }}
+          ARTIFACT_DIGEST: \${{ needs.package-candidate.outputs.updater_artifact_digest }}
+          ARTIFACT_SIZE: \${{ needs.package-candidate.outputs.updater_artifact_size }}
+        run: |
+          gh api "repos/$GITHUB_REPOSITORY/actions/artifacts/$ARTIFACT_ID/zip"
+          test "$(stat -c '%s' updater.zip)" = "$ARTIFACT_SIZE"
+          if [ "$actual_digest" != "$ARTIFACT_DIGEST" ]; then exit 1; fi
+      - name: Extract exact updater candidate
+        run: |
+          python3 scripts/ci/extract-release-candidate-recovery.py \\
+            --updater-archive dist/recovered-updater/updater.zip \\
+            --output-dir "dist/biyan-updater-candidate-$VERSION" \\
+            --version "$VERSION"
       - name: Require a fresh draft release slot
         run: |
-          if gh api "repos/$GITHUB_REPOSITORY/releases/tags/$RELEASE_TAG"; then exit 1; fi
-          if ! grep -q 'HTTP 404' release-probe.err; then exit 1; fi
+          gh api \\
+            --paginate \\
+            --slurp \\
+            "repos/$GITHUB_REPOSITORY/releases?per_page=100" \\
+            >"$RUNNER_TEMP/existing-release-pages.json"
+          jq -e '[.[][] | select(.tag_name == $tag)] | length == 0' existing-release-pages.json
 ${candidateReleasePin}
-      - uses: softprops/action-gh-release@v2
-        with:
-          tag_name: \${{ needs.preflight.outputs.tag }}
-          target_commitish: \${{ needs.preflight.outputs.source_commit }}
-          draft: true
-          prerelease: false
-          files: dist/biyan-updater-candidate-*/*
+      - name: Atomically create an empty Draft
+        run: |
+          jq -n '{
+            tag_name: $tag,
+            target_commitish: $target,
+            name: $name,
+            draft: true,
+            prerelease: false
+          }' >"$RUNNER_TEMP/create-draft-request.json"
+          gh api \\
+            --method POST \\
+            "repos/$GITHUB_REPOSITORY/releases" \\
+            --input "$RUNNER_TEMP/create-draft-request.json" \\
+            >"$RUNNER_TEMP/created-draft.json"
+          jq -e '
+            .published_at == null
+            and (.assets | length == 0)
+            and (.html_url | test("/releases/tag/untagged-[0-9a-f]{20}$"))
+          ' "$RUNNER_TEMP/created-draft.json"
+          release_id="$(
+            jq -er '.id | select(type == "number" and . > 0)' \\
+              "$RUNNER_TEMP/created-draft.json"
+          )"
+          jq -e '[.[][] | select(.tag_name == $tag) | .id] == [$release_id]' releases.json
+      - name: Upload exact assets only to the newly created Draft ID
+        run: |
+          release_id="$(
+            jq -er '.id | select(type == "number" and . > 0)' \\
+              "$RUNNER_TEMP/created-draft.json"
+          )"
+          curl \\
+            --fail-with-body \\
+            --silent \\
+            --show-error \\
+            --request POST \\
+            --header "Accept: application/vnd.github+json" \\
+            --header "Authorization: Bearer $GH_TOKEN" \\
+            --header "Content-Type: application/octet-stream" \\
+            --header "X-GitHub-Api-Version: 2022-11-28" \\
+            --data-binary "@$file" \\
+            "https://uploads.github.com/repos/$GITHUB_REPOSITORY/releases/$release_id/assets?name=$encoded_name" \\
+            >"$RUNNER_TEMP/uploaded-asset-$index.json"
+          jq -e '
+            .name == $name
+            and .state == "uploaded"
+            and .size == $size
+            and .digest == $digest
+            and (.browser_download_url ==
+              $draft_slug + "/" + $name)
+          ' uploaded.json
+          printf '%s\\n' \\
+            "Biyan_\${VERSION}_universal.dmg" \\
+            "Biyan.app.tar.gz" \\
+            "Biyan.app.tar.gz.sig" \\
+            "Biyan_\${VERSION}_x64-setup.exe" \\
+            "Biyan_\${VERSION}_x64-setup.exe.sig" \\
+            "Biyan_\${VERSION}_x64_en-US.msi" \\
+            "Biyan_\${VERSION}_amd64.AppImage" \\
+            "Biyan_\${VERSION}_amd64.AppImage.sig" \\
+            "Biyan_\${VERSION}_amd64.deb" \\
+            "candidate.json" \\
+            "candidate.json.sig" \\
+            "latest.json" \\
+            "SHA256SUMS"
       - name: Verify exact draft release
         env:
           EXPECTED_MAIN: \${{ needs.preflight.outputs.trusted_main_commit }}
@@ -770,9 +899,26 @@ ${candidateReleasePin}
           ')"
           if [[ ! "$live_main" =~ ^[0-9a-f]{40}$ ]] || [ "$live_main" != "$EXPECTED_MAIN" ]; then exit 1; fi
           if [[ ! "$live_tag" =~ ^[0-9a-f]{40}$ ]] || [ "$live_tag" != "$EXPECTED_SOURCE" ]; then exit 1; fi
-          expected_assets='Biyan_\${VERSION}_universal.dmg Biyan.app.tar.gz Biyan.app.tar.gz.sig Biyan_\${VERSION}_x64-setup.exe Biyan_\${VERSION}_x64-setup.exe.sig Biyan_\${VERSION}_x64_en-US.msi Biyan_\${VERSION}_amd64.AppImage Biyan_\${VERSION}_amd64.AppImage.sig Biyan_\${VERSION}_amd64.deb candidate.json candidate.json.sig latest.json SHA256SUMS'
-          gh api "repos/$GITHUB_REPOSITORY/releases/tags/$RELEASE_TAG"
-          jq -e '.tag_name == $tag and .draft == true and .prerelease == false and (([.assets[].name] | sort) == $expected)'
+          release_id="$(
+            jq -er '.id | select(type == "number" and . > 0)' \\
+              "$RUNNER_TEMP/created-draft.json"
+          )"
+          gh api "repos/$GITHUB_REPOSITORY/releases/$release_id"
+          jq -e '
+            .id == $release_id
+            and .tag_name == $tag
+            and .draft == true
+            and .prerelease == false
+            and .published_at == null
+            and (([.assets[] | { name, size, digest }]) == $expected)
+            and ("/releases/download/" + $draft_slug + "/")
+          '
+          gh api \\
+            --paginate \\
+            --slurp \\
+            "repos/$GITHUB_REPOSITORY/releases?per_page=100" \\
+            >"$RUNNER_TEMP/final-release-pages.json"
+          jq -e '[.[][] | select(.tag_name == $tag) | .id] == [$release_id]' releases.json
 `
 
 test('candidate workflow gates every platform build on exact-tag tests', () => {
@@ -955,12 +1101,115 @@ test('candidate workflow gates every platform build on exact-tag tests', () => {
   )
 
   const unsignedProvenance = candidateWorkflow.replace(
-    'yarn tauri signer sign dist/updater-candidate/candidate.json',
+    'yarn tauri signer sign',
     'echo unsigned'
   )
   assert.ok(
     validateCandidateWorkflow(unsignedProvenance).some((failure) =>
-      failure.includes('sign candidate.json')
+      failure.includes('active signer step')
+    )
+  )
+
+  const pluralSkipBuildMode = candidateWorkflow.replace(
+    '--mode=skip-build',
+    '--mode=skip-builds'
+  )
+  assert.ok(
+    validateCandidateWorkflow(pluralSkipBuildMode).some((failure) =>
+      failure.includes('immutable skip-build mode')
+    )
+  )
+
+  const unlockedSignerInstall = candidateWorkflow.replace(
+    'yarn install --immutable --mode=skip-build',
+    'yarn install'
+  )
+  assert.ok(
+    validateCandidateWorkflow(unlockedSignerInstall).some((failure) =>
+      failure.includes('locked Yarn 4.5.3')
+    )
+  )
+
+  const crossRunCandidateDownload = candidateWorkflow.replace(
+    '          path: dist/builds',
+    '          path: dist/builds\n          run-id: 123'
+  )
+  assert.ok(
+    validateCandidateWorkflow(crossRunCandidateDownload).some((failure) =>
+      failure.includes('current-run signed artifacts')
+    )
+  )
+
+  const packageWithoutWindows = candidateWorkflow.replace(
+    'needs: [preflight, build-macos, build-windows, build-linux]',
+    'needs: [preflight, build-macos, build-linux]'
+  )
+  assert.ok(
+    validateCandidateWorkflow(packageWithoutWindows).some((failure) =>
+      failure.includes('all three signed builds')
+    )
+  )
+
+  const literalSigningSecret = candidateWorkflow.replace(
+    'TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}',
+    'TAURI_SIGNING_PRIVATE_KEY: literal'
+  )
+  assert.ok(
+    validateCandidateWorkflow(literalSigningSecret).some((failure) =>
+      failure.includes('both protected Tauri signing secrets')
+    )
+  )
+
+  const draftWithoutPackage = candidateWorkflow.replace(
+    'needs: [preflight, build-macos, build-windows, build-linux, package-candidate]',
+    'needs: [preflight, build-macos, build-windows, build-linux]'
+  )
+  assert.ok(
+    validateCandidateWorkflow(draftWithoutPackage).some((failure) =>
+      failure.includes('immutable packaging')
+    )
+  )
+
+  const withoutPinnedCandidateVerification = candidateWorkflow.replace(
+    'node scripts/updater/verify-candidate.mjs',
+    'echo skipped-pinned-candidate-verification'
+  )
+  assert.ok(
+    validateCandidateWorkflow(withoutPinnedCandidateVerification).some(
+      (failure) => failure.includes('pinned updater key')
+    )
+  )
+
+  for (const stepName of [
+    'Install locked Tauri signer',
+    'Require a fresh draft release slot',
+    'Verify exact draft release',
+  ]) {
+    for (const bypass of [
+      '        continue-on-error: true\n',
+      '        "continue-on-error": true\n',
+      '        if: ${{ true }}\n',
+      '        "if": ${{ true }}\n',
+    ]) {
+      const advisory = candidateWorkflow.replace(
+        `      - name: ${stepName}\n`,
+        `      - name: ${stepName}\n${bypass}`
+      )
+      assert.ok(
+        validateCandidateWorkflow(advisory).some((failure) =>
+          failure.includes('unconditional')
+        ),
+        `${stepName} must reject ${bypass.trim()}`
+      )
+    }
+  }
+  const advisoryPin = candidateWorkflow.replace(
+    '      - env:\n          EXPECTED_MAIN:',
+    '      - continue-on-error: true\n        env:\n          EXPECTED_MAIN:'
+  )
+  assert.ok(
+    validateCandidateWorkflow(advisoryPin).some((failure) =>
+      failure.includes('unconditional')
     )
   )
 
@@ -997,22 +1246,26 @@ test('candidate workflow gates every platform build on exact-tag tests', () => {
     )
   )
 
-  const tagReleaseTooling = candidateWorkflow.replace(
-    `  package-candidate:
-    needs: [preflight, build-macos, build-windows, build-linux]
-    environment: release-distribution
-    steps:
-      - uses: actions/checkout@v4
-        with:
-          ref: \${{ needs.preflight.outputs.trusted_main_commit }}`,
-    `  package-candidate:
-    needs: [preflight, build-macos, build-windows, build-linux]
-    environment: release-distribution
-    steps:
-      - uses: actions/checkout@v4
-        with:
-          ref: v0.6.643`
+  const packageStart = candidateWorkflow.indexOf('  package-candidate:\n')
+  const packageEnd = candidateWorkflow.indexOf(
+    '\n  draft-release:\n',
+    packageStart
   )
+  assert.notEqual(packageStart, -1)
+  assert.notEqual(packageEnd, -1)
+  const packageBlock = candidateWorkflow.slice(packageStart, packageEnd)
+  assert.ok(
+    packageBlock.includes(
+      'ref: ${{ needs.preflight.outputs.trusted_main_commit }}'
+    )
+  )
+  const tagReleaseTooling =
+    candidateWorkflow.slice(0, packageStart) +
+    packageBlock.replace(
+      'ref: ${{ needs.preflight.outputs.trusted_main_commit }}',
+      'ref: v0.6.643'
+    ) +
+    candidateWorkflow.slice(packageEnd)
   assert.ok(
     validateCandidateWorkflow(tagReleaseTooling).some((failure) =>
       failure.includes('release tooling from the protected harness')
@@ -1020,12 +1273,12 @@ test('candidate workflow gates every platform build on exact-tag tests', () => {
   )
 
   const reusedDraftSlot = candidateWorkflow.replace(
-    "grep -q 'HTTP 404'",
-    "grep -q 'HTTP 200'"
+    '[.[][] | select(.tag_name == $tag)] | length == 0',
+    '[.[][] | select(.tag_name == $tag)] | length > 0'
   )
   assert.ok(
     validateCandidateWorkflow(reusedDraftSlot).some((failure) =>
-      failure.includes('release slot is absent')
+      failure.includes('enumerate all releases')
     )
   )
 
@@ -1052,37 +1305,37 @@ test('candidate workflow gates every platform build on exact-tag tests', () => {
     withoutFreshSlot.slice(verifyDraftIndex)
   assert.ok(
     validateCandidateWorkflow(lateFreshSlot).some((failure) =>
-      failure.includes('release slot is absent')
+      failure.includes('enumerate all releases')
     )
   )
 
   const branchTargetedDraft = candidateWorkflow.replace(
-    'target_commitish: ${{ needs.preflight.outputs.source_commit }}',
+    'target_commitish: $target',
     'target_commitish: mita-main'
   )
   assert.ok(
     validateCandidateWorkflow(branchTargetedDraft).some((failure) =>
-      failure.includes('draft-only release for the exact source')
+      failure.includes('enumerate all releases')
     )
   )
 
   const withoutReleaseTag = candidateWorkflow.replace(
-    '          tag_name: ${{ needs.preflight.outputs.tag }}\n',
+    '            tag_name: $tag,\n',
     ''
   )
   assert.ok(
     validateCandidateWorkflow(withoutReleaseTag).some((failure) =>
-      failure.includes('draft-only release for the exact source')
+      failure.includes('enumerate all releases')
     )
   )
 
   const incompleteDraftAssets = candidateWorkflow.replace(
-    'Biyan_${VERSION}_amd64.deb candidate.json candidate.json.sig latest.json SHA256SUMS',
-    'Biyan_${VERSION}_amd64.deb candidate.json latest.json SHA256SUMS'
+    '            "candidate.json.sig" \\\n',
+    ''
   )
   assert.ok(
     validateCandidateWorkflow(incompleteDraftAssets).some((failure) =>
-      failure.includes('13-asset set')
+      failure.includes('byte-bind exactly 13')
     )
   )
 
@@ -1154,6 +1407,537 @@ test('candidate workflow gates every platform build on exact-tag tests', () => {
       failure.includes('broad retired-runtime verifier')
     )
   )
+})
+
+test('candidate Draft mutations match reviewed execution envelopes', () => {
+  const workflow = fs.readFileSync(
+    '.github/workflows/desktop-release.yml',
+    'utf8'
+  )
+  assert.deepEqual(
+    validateCandidateWorkflow(workflow, {
+      requireReviewedEnvelope: true,
+    }),
+    []
+  )
+
+  const replaceInNamedStep = (source, stepName, needle, replacement) => {
+    const marker = `      - name: ${stepName}\n`
+    const start = source.indexOf(marker)
+    assert.notEqual(start, -1, stepName)
+    const next = source.indexOf('\n      - name: ', start + marker.length)
+    const end = next < 0 ? source.length : next
+    const step = source.slice(start, end)
+    assert.ok(step.includes(needle), `${stepName} mutation needle`)
+    return (
+      source.slice(0, start) +
+      step.replace(needle, replacement) +
+      source.slice(end)
+    )
+  }
+
+  const postSequence = [
+    '          gh api \\',
+    '            --method POST \\',
+    '            "repos/$GITHUB_REPOSITORY/releases" \\',
+    '            --input "$RUNNER_TEMP/create-draft-request.json" \\',
+    '            >"$RUNNER_TEMP/created-draft.json"',
+  ].join('\n')
+  const postDecoy = [
+    "          : <<'POLICY_DECOY'",
+    postSequence,
+    '          POLICY_DECOY',
+    '          gh api \\',
+    '            --method PATCH \\',
+    '            "repos/$GITHUB_REPOSITORY/releases" \\',
+    '            --input "$RUNNER_TEMP/create-draft-request.json" \\',
+    '            >"$RUNNER_TEMP/created-draft.json"',
+  ].join('\n')
+  const patchedCreate = replaceInNamedStep(
+    workflow,
+    'Atomically create an empty Draft',
+    postSequence,
+    postDecoy
+  )
+  assert.ok(
+    validateCandidateWorkflow(patchedCreate, {
+      requireReviewedEnvelope: true,
+    }).some((failure) =>
+      failure.includes('whole-workflow execution-envelope allowlist')
+    )
+  )
+
+  const exactDigest = [
+    '                .name == $name',
+    '                and .state == "uploaded"',
+    '                and .size == $size',
+    '                and .digest == $digest',
+    '                and (.browser_download_url ==',
+  ].join('\n')
+  const broadDigest = exactDigest.replace(
+    'and .digest == $digest',
+    'and (.digest | test("^sha256:"))'
+  )
+  const weakenedDigest = replaceInNamedStep(
+    workflow,
+    'Upload exact assets only to the newly created Draft ID',
+    exactDigest,
+    broadDigest
+  )
+  const digestDecoy = replaceInNamedStep(
+    weakenedDigest,
+    'Upload exact assets only to the newly created Draft ID',
+    '            jq -e \\',
+    [
+      "            : <<'POLICY_DECOY'",
+      exactDigest,
+      '            POLICY_DECOY',
+      '            jq -e \\',
+    ].join('\n')
+  )
+  assert.ok(
+    validateCandidateWorkflow(digestDecoy, {
+      requireReviewedEnvelope: true,
+    }).some((failure) =>
+      failure.includes('whole-workflow execution-envelope allowlist')
+    )
+  )
+
+  const extraDraftMutation = workflow.replace(
+    '      - name: Verify exact draft release\n',
+    `      - name: Unauthorized publish mutation
+        run: gh api --method PATCH "repos/$GITHUB_REPOSITORY/releases/123" -f draft=false
+      - name: Verify exact draft release
+`
+  )
+  assert.ok(
+    validateCandidateWorkflow(extraDraftMutation, {
+      requireReviewedEnvelope: true,
+    }).some((failure) =>
+      failure.includes('whole-workflow execution-envelope allowlist')
+    )
+  )
+
+  const renamedWithMutation = extraDraftMutation.replace(
+    'name: Desktop Release Candidate',
+    'name: Desktop Release Candidate Evil'
+  )
+  assert.ok(
+    validateCandidateWorkflow(renamedWithMutation, {
+      requireReviewedEnvelope: true,
+    }).some((failure) =>
+      failure.includes('exact reviewed workflow name')
+    )
+  )
+
+  const extraSecretJob = `${workflow}
+  unauthorized-secret-job:
+    permissions:
+      contents: read
+    environment: release-distribution
+    steps:
+      - env:
+          TAURI_SIGNING_PRIVATE_KEY: \${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+        run: printf '%s' "$TAURI_SIGNING_PRIVATE_KEY"
+`
+  assert.ok(
+    validateCandidateWorkflow(extraSecretJob, {
+      requireReviewedEnvelope: true,
+    }).some((failure) =>
+      failure.includes('reviewed ordered job allowlist')
+    )
+  )
+
+  const packageWrite = workflow.replace(
+    '  package-candidate:\n',
+    `  package-candidate:
+    permissions:
+      contents: write
+`
+  )
+  assert.ok(
+    validateCandidateWorkflow(packageWrite, {
+      requireReviewedEnvelope: true,
+    }).some((failure) =>
+      failure.includes('only draft-release may request write permissions')
+    )
+  )
+})
+
+test('candidate recovery authenticates exact artifacts and only resumes package to Draft', () => {
+  const workflow = fs.readFileSync(
+    '.github/workflows/desktop-release-recovery.yml',
+    'utf8'
+  )
+  assert.deepEqual(validateCandidateRecoveryWorkflow(workflow), [])
+  const replaceInNamedStep = (source, stepName, needle, replacement) => {
+    const marker = `      - name: ${stepName}\n`
+    const start = source.indexOf(marker)
+    assert.notEqual(start, -1, stepName)
+    const next = source.indexOf('\n      - name: ', start + marker.length)
+    const end = next < 0 ? source.length : next
+    const step = source.slice(start, end)
+    assert.ok(step.includes(needle), `${stepName} mutation needle`)
+    return (
+      source.slice(0, start) +
+      step.replace(needle, replacement) +
+      source.slice(end)
+    )
+  }
+
+  for (const [label, mutated, expected] of [
+    [
+      'top-level write',
+      workflow.replace('actions: read', 'actions: write'),
+      'top-level permissions',
+    ],
+    [
+      'different concurrency',
+      workflow.replace(
+        'group: desktop-candidate-${{ inputs.version }}',
+        'group: recovery-${{ github.run_id }}'
+      ),
+      'concurrency lock',
+    ],
+    [
+      'unprotected manual ref',
+      workflow.replace(
+        '[ "$WORKFLOW_REF" != "refs/heads/mita-main" ]',
+        '[ "$WORKFLOW_REF" != "refs/heads/recovery" ]'
+      ),
+      'live protected main',
+    ],
+    [
+      'different accepted source run',
+      workflow.replace(
+        '[ "$SOURCE_RUN_ID" != "30195339449" ]',
+        '[ "$SOURCE_RUN_ID" != "30195339450" ]'
+      ),
+      'live protected main',
+    ],
+    [
+      'forged source endpoint',
+      workflow.replace(
+        'actions/runs/$SOURCE_RUN_ID/artifacts?per_page=100',
+        'actions/runs/1/artifacts?per_page=100'
+      ),
+      'run, job, and artifact metadata',
+    ],
+    [
+      'advisory recovery verifier',
+      workflow.replace(
+        'node harness/scripts/ci/verify-release-candidate-recovery.mjs',
+        'echo skipped recovery verifier'
+      ),
+      'authenticate exact source topology',
+    ],
+    [
+      'forged source ancestry',
+      workflow.replace(
+        'git -C harness merge-base --is-ancestor "$source_head" "$TRUSTED_MAIN"',
+        'echo assumed ancestor'
+      ),
+      'authenticate exact source topology',
+    ],
+    [
+      'allow product drift',
+      workflow.replace(
+        '"scripts/ci/verify-release-target.mjs"',
+        '"src-tauri/src/main.rs"'
+      ),
+      'authenticate exact source topology',
+    ],
+    [
+      'plural Yarn mode',
+      workflow.replace('--mode=skip-build', '--mode=skip-builds'),
+      'immutable skip-build mode',
+    ],
+    [
+      'artifact download by name',
+      workflow.replace(
+        'actions/artifacts/$artifact_id/zip',
+        'actions/artifacts/by-name/zip'
+      ),
+      'exact artifact IDs',
+    ],
+    [
+      'advisory digest',
+      workflow.replace(
+        'if [ "$actual_digest" != "$artifact_digest" ]; then',
+        'if false; then'
+      ),
+      'digest mismatch',
+    ],
+    [
+      'replace safe extractor',
+      workflow.replace(
+        'python3 scripts/ci/extract-release-candidate-recovery.py',
+        'python3 -c "pass"'
+      ),
+      'safely extract',
+    ],
+    [
+      'unbind extractor version',
+      workflow.replace(
+        '--output-dir dist/builds \\\n            --version "$VERSION"',
+        '--output-dir dist/builds \\\n            --version 0.0.0'
+      ),
+      'exactly nine',
+    ],
+    [
+      'skip pinned candidate verification',
+      workflow.replace(
+        'node scripts/updater/verify-candidate.mjs',
+        'echo skipped pinned verification'
+      ),
+      'pinned updater key',
+    ],
+    [
+      'drop updater artifact identity output',
+      workflow.replace(
+        'updater_artifact_digest: ${{ steps.updater-metadata.outputs.artifact_digest }}',
+        'updater_artifact_digest: forged'
+      ),
+      'authenticated updater artifact identity',
+    ],
+    [
+      'treat raw upload digest as REST digest',
+      workflow.replace(
+        'artifact_digest="sha256:$ACTION_ARTIFACT_DIGEST"',
+        'artifact_digest="$ACTION_ARTIFACT_DIGEST"'
+      ),
+      'authenticate the exact updater artifact',
+    ],
+    [
+      'make updater ZIP digest advisory',
+      workflow.replace(
+        'if [ "$actual_digest" != "$ARTIFACT_DIGEST" ]; then',
+        'if false; then'
+      ),
+      'exact ID, size, and digest',
+    ],
+    [
+      'replace updater safe extractor',
+      workflow.replace(
+        'python3 scripts/ci/extract-release-candidate-recovery.py \\\n            --updater-archive',
+        'python3 -c "pass" \\\n            --updater-archive'
+      ),
+      'exact 13-file extraction',
+    ],
+    [
+      'non-atomic Draft update',
+      workflow.replace('--method POST', '--method PATCH'),
+      'atomically POST',
+    ],
+    [
+      'echo-decoy non-atomic Draft update',
+      workflow.replace(
+        `          gh api \\
+            --method POST \\
+            "repos/$GITHUB_REPOSITORY/releases" \\`,
+        `          echo "--method POST" >/dev/null
+          gh api \\
+            --method PATCH \\
+            "repos/$GITHUB_REPOSITORY/releases" \\`
+      ),
+      'atomically POST',
+    ],
+    [
+      'allow upload digest drift',
+      workflow.replace(
+        '                and .digest == $digest\n                and (.browser_download_url ==',
+        '                and (.digest | test("^sha256:"))\n                and (.browser_download_url =='
+      ),
+      'byte-bound assets',
+    ],
+    [
+      'split environment',
+      workflow.replace(
+        'environment: release-distribution',
+        'environment: release-build'
+      ),
+      'release-distribution',
+    ],
+    [
+      'drop draft package dependency',
+      workflow.replace(
+        'needs: [preflight, package-candidate]',
+        'needs: preflight'
+      ),
+      'authenticated packaging',
+    ],
+    [
+      'allow published release',
+      workflow.replace('.published_at == null', 'true'),
+      'atomically POST',
+    ],
+  ]) {
+    assert.ok(
+      validateCandidateRecoveryWorkflow(mutated).some((failure) =>
+        failure.includes(expected)
+      ),
+      label
+    )
+  }
+
+  const releaseIdResolver = `          release_id="$(
+            jq -er '.id | select(type == "number" and . > 0)' \\
+              "$RUNNER_TEMP/created-draft.json"
+          )"`
+  const forgedReleaseId = '          release_id="123456"'
+  const forgedUploadReleaseId = replaceInNamedStep(
+    workflow,
+    'Upload exact assets only to the newly created Draft ID',
+    releaseIdResolver,
+    forgedReleaseId
+  )
+  assert.ok(
+    validateCandidateRecoveryWorkflow(forgedUploadReleaseId).some(
+      (failure) => failure.includes('byte-bound assets')
+    )
+  )
+  const forgedBothReleaseIds = replaceInNamedStep(
+    forgedUploadReleaseId,
+    'Verify exact recovered draft release',
+    releaseIdResolver,
+    forgedReleaseId
+  )
+  assert.ok(
+    validateCandidateRecoveryWorkflow(forgedBothReleaseIds).some(
+      (failure) => failure.includes('byte-bound assets')
+    )
+  )
+
+  const exactDigest = [
+    '                .name == $name',
+    '                and .state == "uploaded"',
+    '                and .size == $size',
+    '                and .digest == $digest',
+    '                and (.browser_download_url ==',
+  ].join('\n')
+  const broadDigest = exactDigest.replace(
+    'and .digest == $digest',
+    'and (.digest | test("^sha256:"))'
+  )
+  const weakenedDigest = replaceInNamedStep(
+    workflow,
+    'Upload exact assets only to the newly created Draft ID',
+    exactDigest,
+    broadDigest
+  )
+  const digestDecoy = replaceInNamedStep(
+    weakenedDigest,
+    'Upload exact assets only to the newly created Draft ID',
+    '            jq -e \\',
+    [
+      "            : <<'POLICY_DECOY'",
+      exactDigest,
+      '            POLICY_DECOY',
+      '            jq -e \\',
+    ].join('\n')
+  )
+  assert.ok(
+    validateCandidateRecoveryWorkflow(digestDecoy).some((failure) =>
+      failure.includes('whole-workflow execution-envelope allowlist')
+    )
+  )
+
+  const postSequence = [
+    '          gh api \\',
+    '            --method POST \\',
+    '            "repos/$GITHUB_REPOSITORY/releases" \\',
+    '            --input "$RUNNER_TEMP/create-draft-request.json" \\',
+    '            >"$RUNNER_TEMP/created-draft.json"',
+  ].join('\n')
+  const patchedCreate = replaceInNamedStep(
+    workflow,
+    'Atomically create an empty recovered Draft',
+    postSequence,
+    [
+      "          : <<'POLICY_DECOY'",
+      postSequence,
+      '          POLICY_DECOY',
+      '          gh api \\',
+      '            --method PATCH \\',
+      '            "repos/$GITHUB_REPOSITORY/releases" \\',
+      '            --input "$RUNNER_TEMP/create-draft-request.json" \\',
+      '            >"$RUNNER_TEMP/created-draft.json"',
+    ].join('\n')
+  )
+  assert.ok(
+    validateCandidateRecoveryWorkflow(patchedCreate).some((failure) =>
+      failure.includes('whole-workflow execution-envelope allowlist')
+    )
+  )
+
+  const extraDraftMutation = workflow.replace(
+    '      - name: Verify exact recovered draft release\n',
+    `      - name: Unauthorized publish mutation
+        run: gh api --method PATCH "repos/$GITHUB_REPOSITORY/releases/123" -f draft=false
+      - name: Verify exact recovered draft release
+`
+  )
+  assert.ok(
+    validateCandidateRecoveryWorkflow(extraDraftMutation).some((failure) =>
+      failure.includes('whole-workflow execution-envelope allowlist')
+    )
+  )
+
+  const extraSecretJob = `${workflow}
+  unauthorized-secret-job:
+    permissions:
+      contents: read
+    environment: release-distribution
+    steps:
+      - env:
+          TAURI_SIGNING_PRIVATE_KEY: \${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+        run: printf '%s' "$TAURI_SIGNING_PRIVATE_KEY"
+`
+  assert.ok(
+    validateCandidateRecoveryWorkflow(extraSecretJob).some((failure) =>
+      failure.includes('reviewed ordered job allowlist')
+    )
+  )
+
+  const packageWrite = workflow.replace(
+    '  package-candidate:\n',
+    `  package-candidate:
+    permissions:
+      contents: write
+`
+  )
+  assert.ok(
+    validateCandidateRecoveryWorkflow(packageWrite).some((failure) =>
+      failure.includes('only draft-release may request write permissions')
+    )
+  )
+
+  for (const stepName of [
+    'Install locked Tauri signer',
+    'Require a fresh draft release slot',
+    'Revalidate protected main before draft release mutation',
+    'Atomically create an empty recovered Draft',
+    'Upload exact assets only to the newly created Draft ID',
+    'Verify exact recovered draft release',
+  ]) {
+    for (const bypass of [
+      '        continue-on-error: true\n',
+      '        "continue-on-error": true\n',
+      '        if: ${{ true }}\n',
+      '        "if": ${{ true }}\n',
+    ]) {
+      const advisory = workflow.replace(
+        `      - name: ${stepName}\n`,
+        `      - name: ${stepName}\n${bypass}`
+      )
+      assert.ok(
+        validateCandidateRecoveryWorkflow(advisory).some((failure) =>
+          failure.includes('unconditional')
+        ),
+        `${stepName} must reject ${bypass.trim()}`
+      )
+    }
+  }
 })
 
 test(
@@ -1435,6 +2219,23 @@ jobs:
   release-safety:
     runs-on: ubuntu-24.04
     steps:
+      - name: Exercise locked candidate signer install
+        run: |
+          set -euo pipefail
+          corepack enable
+          corepack prepare yarn@4.5.3 --activate
+          yarn install --immutable --mode=skip-build
+          signer_probe="$RUNNER_TEMP/tauri-signer-probe"
+          install -d -m 700 "$signer_probe"
+          printf 'biyan signer preflight\\n' >"$signer_probe/payload.txt"
+          yarn tauri signer generate \\
+            --ci \\
+            --password preflight-only \\
+            --write-keys "$signer_probe/test.key"
+          TAURI_SIGNING_PRIVATE_KEY_PATH="$signer_probe/test.key" \\
+            TAURI_SIGNING_PRIVATE_KEY_PASSWORD=preflight-only \\
+            yarn tauri signer sign "$signer_probe/payload.txt"
+          test -s "$signer_probe/payload.txt.sig"
       - run: node scripts/ci/verify-release-policy.mjs
       - run: node --test scripts/ci/__tests__/candidate-content-policy.test.mjs
       - run: node --test scripts/ci/__tests__/release-policy.test.mjs
@@ -1443,6 +2244,8 @@ jobs:
       - run: node --test scripts/ci/__tests__/run-untrusted-qualification-verifier.test.mjs
       - run: node --test scripts/ci/__tests__/verify-qualification-artifacts.test.mjs
       - run: node --test scripts/ci/__tests__/verify-qualification-recovery.test.mjs
+      - run: python3 scripts/ci/__tests__/extract-release-candidate-recovery.test.py
+      - run: node --test scripts/ci/__tests__/verify-release-candidate-recovery.test.mjs
       - run: node --test scripts/updater/__tests__/updater.test.mjs
       - run: node --test scripts/release-distribution/__tests__/release-distribution.test.mjs
       - name: Exercise unprivileged qualification verifier boundary
@@ -1561,6 +2364,42 @@ jobs:
       )
     )
   )
+  for (const command of [
+    'python3 scripts/ci/__tests__/extract-release-candidate-recovery.test.py',
+    'node --test scripts/ci/__tests__/verify-release-candidate-recovery.test.mjs',
+  ]) {
+    assert.ok(
+      validateCiWorkflow(
+        workflow.replace(command, 'echo skipped-recovery-test')
+      ).some((failure) =>
+        failure.includes(`release-safety job does not run: ${command}`)
+      )
+    )
+  }
+  for (const signerMutation of [
+    workflow.replace(
+      'Exercise locked candidate signer install',
+      'Removed candidate signer smoke'
+    ),
+    workflow.replace(
+      'yarn tauri signer generate',
+      'echo skipped signer generate'
+    ),
+    workflow.replace(
+      'yarn tauri signer sign "$signer_probe/payload.txt"',
+      'echo skipped signer sign'
+    ),
+    workflow.replace(
+      '      - name: Exercise locked candidate signer install\n',
+      '      - name: Exercise locked candidate signer install\n        continue-on-error: true\n'
+    ),
+  ]) {
+    assert.ok(
+      validateCiWorkflow(signerMutation).some((failure) =>
+        failure.includes('real temporary signer')
+      )
+    )
+  }
   assert.ok(
     validateCiWorkflow(
       workflow.replace(

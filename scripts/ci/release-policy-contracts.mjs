@@ -14,6 +14,10 @@ function escapeRegExp(value) {
 
 const LEGACY_BROAD_CANDIDATE_VERIFIER =
   /(?:grep\s+-Ei|-match\s+)[^\n]*(?:llama|mlx|foundation|rag|vector)/i
+const YAML_CONTINUE_ON_ERROR =
+  /^\s*(?:-\s*)?(?:"continue-on-error"|'continue-on-error'|continue-on-error)\s*:/m
+const YAML_IF =
+  /^\s*(?:-\s*)?(?:"if"|'if'|if)\s*:/m
 
 const TRUSTED_CI_SCOPE_COMMAND_ALLOWLIST = new Set([
   // Reviewed active-command sequence for the fail-closed ci-scope detector.
@@ -37,6 +41,30 @@ const TRUSTED_CI_JOB_KEY_ALLOWLIST = new Set([
   'test-on-ubuntu',
   'coverage-check',
   'pr-ci-gate',
+])
+
+const TRUSTED_CANDIDATE_JOB_ORDER = [
+  'preflight',
+  'quality-gate',
+  'build-macos',
+  'build-windows',
+  'build-linux',
+  'package-candidate',
+  'draft-release',
+]
+
+const TRUSTED_RECOVERY_JOB_ORDER = [
+  'preflight',
+  'package-candidate',
+  'draft-release',
+]
+
+const TRUSTED_CANDIDATE_WORKFLOW_ALLOWLIST = new Set([
+  'c3965902e16c1701b15df37597996195f0a05857149685e24193f7dc815bf393',
+])
+
+const TRUSTED_RECOVERY_WORKFLOW_ALLOWLIST = new Set([
+  '24dcb09e01b701c890f6dd87c61333af9039dbdcaeb30f794b39747c63f1570f',
 ])
 
 function jobBlock(source, jobName) {
@@ -138,6 +166,25 @@ function hasRunInvocation(block, invocation, required = []) {
   })
 }
 
+function hasCommandSequence(block, expected) {
+  return runBlocks(block).some((commands) => {
+    for (
+      let index = 0;
+      index <= commands.length - expected.length;
+      index += 1
+    ) {
+      if (
+        expected.every(
+          (command, offset) => commands[index + offset] === command
+        )
+      ) {
+        return true
+      }
+    }
+    return false
+  })
+}
+
 function findRunInvocation(block, invocation) {
   for (const commands of runBlocks(block)) {
     const command = commands.find(
@@ -216,6 +263,81 @@ function workflowStepBlocks(source) {
   return blocks
 }
 
+function workflowJobKeys(source) {
+  const jobs = topLevelBlock(source, 'jobs')
+  if (!jobs) return []
+  return [...jobs.matchAll(/^  ([A-Za-z0-9_-]+):\s*$/gm)].map(
+    (match) => match[1]
+  )
+}
+
+function jobPermissionBlocks(job) {
+  if (!job) return []
+  const lines = job.replace(/\r\n?/g, '\n').split('\n')
+  const blocks = []
+  for (let index = 0; index < lines.length; index += 1) {
+    if (!/^    permissions:\s*/.test(lines[index])) continue
+    const block = [lines[index]]
+    for (index += 1; index < lines.length; index += 1) {
+      if (
+        lines[index].trim() &&
+        (lines[index].match(/^\s*/)?.[0].length ?? 0) <= 4
+      ) {
+        index -= 1
+        break
+      }
+      block.push(lines[index])
+    }
+    blocks.push(block.join('\n'))
+  }
+  return blocks
+}
+
+function validateReleaseWorkflowControlPlane(
+  source,
+  expectedJobOrder,
+  trustedWorkflowHashes,
+  workflowLabel,
+  { requireReviewedEnvelope = false } = {}
+) {
+  const failures = []
+  const jobKeys = workflowJobKeys(source)
+  if (
+    jobKeys.length !== expectedJobOrder.length ||
+    jobKeys.some((jobName, index) => jobName !== expectedJobOrder[index])
+  ) {
+    failures.push(
+      `${workflowLabel} jobs must match the reviewed ordered job allowlist`
+    )
+  }
+
+  for (const jobName of jobKeys) {
+    if (
+      jobName !== 'draft-release' &&
+      jobPermissionBlocks(jobBlock(source, jobName)).some((permissions) =>
+        /\bwrite(?:-all)?\b/.test(permissions)
+      )
+    ) {
+      failures.push(
+        `${workflowLabel} only draft-release may request write permissions`
+      )
+    }
+  }
+
+  if (requireReviewedEnvelope) {
+    const sha256 = createHash('sha256')
+      .update(normalizedYamlEnvelope(source))
+      .digest('hex')
+    if (!trustedWorkflowHashes.has(sha256)) {
+      failures.push(
+        `${workflowLabel} must match the reviewed whole-workflow execution-envelope allowlist (got ${sha256})`
+      )
+    }
+  }
+
+  return failures
+}
+
 const LIVE_MAIN_RELEASE_PROBE =
   'git ls-remote --exit-code origin refs/heads/mita-main'
 const LIVE_TAG_RELEASE_PROBE = '"refs/tags/$RELEASE_TAG^{}"'
@@ -278,6 +400,25 @@ function jobPinsReleaseSourceBefore(
     }
   }
   return false
+}
+
+function stepLoadsCreatedDraftId(step) {
+  const commands = runBlocks(step).flat()
+  const assignmentIndex = commands.indexOf('release_id="$(')
+  const selectorIndex = commands.indexOf(
+    "jq -er '.id | select(type == \"number\" and . > 0)' \\"
+  )
+  const sourceIndex = commands.indexOf(
+    '"$RUNNER_TEMP/created-draft.json"'
+  )
+  const closeIndex = commands.indexOf(')"')
+  return (
+    commands.filter((command) => /^release_id=/.test(command)).length === 1 &&
+    assignmentIndex >= 0 &&
+    selectorIndex === assignmentIndex + 1 &&
+    sourceIndex === selectorIndex + 1 &&
+    closeIndex === sourceIndex + 1
+  )
 }
 
 function jobUsesScopeFlag(block, flag) {
@@ -657,15 +798,41 @@ export function validateDocsArchiveConfig(tsconfig) {
   return failures
 }
 
-export function validateCandidateWorkflow(source) {
+export function validateCandidateWorkflow(
+  source,
+  { requireReviewedEnvelope = false } = {}
+) {
   const failures = []
-  const preflight = jobBlock(source, 'preflight')
-  const qualityGate = jobBlock(source, 'quality-gate')
-  const packageCandidate = jobBlock(source, 'package-candidate')
-  const draftRelease = jobBlock(source, 'draft-release')
-  const permissions = topLevelBlock(source, 'permissions')
-  const concurrency = topLevelBlock(source, 'concurrency')
-  const checkoutSteps = actionStepBlocks(source, 'actions/checkout@v4')
+  const activeSource = uncommentedSource(source)
+  const preflight = jobBlock(activeSource, 'preflight')
+  const qualityGate = jobBlock(activeSource, 'quality-gate')
+  const packageCandidate = jobBlock(activeSource, 'package-candidate')
+  const draftRelease = jobBlock(activeSource, 'draft-release')
+  const permissions = topLevelBlock(activeSource, 'permissions')
+  const concurrency = topLevelBlock(activeSource, 'concurrency')
+  const checkoutSteps = actionStepBlocks(
+    activeSource,
+    'actions/checkout@v4'
+  )
+
+  if (
+    requireReviewedEnvelope &&
+    !/^name:\s*Desktop Release Candidate\s*$/m.test(activeSource)
+  ) {
+    failures.push(
+      'desktop release must keep the exact reviewed workflow name'
+    )
+  }
+
+  if (
+    YAML_CONTINUE_ON_ERROR.test(activeSource) ||
+    YAML_IF.test(activeSource) ||
+    /\|\|\s*true\b/.test(activeSource)
+  ) {
+    failures.push(
+      'desktop release jobs and steps must be unconditional and must not use advisory bypasses'
+    )
+  }
 
   if (
     !concurrency ||
@@ -698,15 +865,40 @@ export function validateCandidateWorkflow(source) {
   }
   if (
     !draftRelease ||
-    !/^    permissions:\s*\n      contents:\s*write\s*$/m.test(draftRelease)
+    !/^    permissions:\s*\n      actions:\s*read\s*\n      contents:\s*write\s*$/m.test(
+      draftRelease
+    )
   ) {
     failures.push(
-      'only the draft release job may request contents: write permission'
+      'only the draft release job may request actions: read plus contents: write permission'
     )
   }
   if (!packageCandidate) {
     failures.push('desktop release is missing the immutable package job')
   } else {
+    const packageSteps = workflowStepBlocks(packageCandidate)
+    const installSigner = packageSteps.find((step) =>
+      step.includes('name: Install locked Tauri signer')
+    )
+    const buildManifest = packageSteps.find((step) =>
+      step.includes('name: Build canonical candidate manifest')
+    )
+    const signManifest = packageSteps.find((step) =>
+      step.includes('name: Sign canonical candidate manifest')
+    )
+    const verifyManifest = packageSteps.find((step) =>
+      step.includes('name: Verify signed candidate and write hashes')
+    )
+    const updaterUpload = packageSteps.find((step) =>
+      step.includes('uses: actions/upload-artifact@v4')
+    )
+    const updaterMetadata = packageSteps.find((step) =>
+      step.includes('name: Authenticate uploaded updater artifact')
+    )
+    const downloadCandidates = actionStepBlocks(
+      packageCandidate,
+      'actions/download-artifact@v4'
+    ).find((step) => /^\s*path:\s*dist\/builds\s*$/m.test(step))
     if (
       !/^    environment:\s*release-distribution\s*$/m.test(packageCandidate)
     ) {
@@ -715,13 +907,131 @@ export function validateCandidateWorkflow(source) {
       )
     }
     if (
-      !packageCandidate.includes('yarn tauri signer sign') ||
-      !packageCandidate.includes('dist/updater-candidate/candidate.json') ||
-      !packageCandidate.includes('candidate.json.sig') ||
-      !packageCandidate.includes('SHA256SUMS')
+      !/^    permissions:\s*\n      actions:\s*read\s*\n      contents:\s*read\s*$/m.test(
+        packageCandidate
+      )
     ) {
       failures.push(
-        'package-candidate must sign candidate.json and checksum the detached provenance signature'
+        'package-candidate must request only actions: read and contents: read'
+      )
+    }
+    if (
+      !jobNeeds(packageCandidate, 'preflight') ||
+      !jobNeeds(packageCandidate, 'build-macos') ||
+      !jobNeeds(packageCandidate, 'build-windows') ||
+      !jobNeeds(packageCandidate, 'build-linux') ||
+      !packageCandidate.includes(
+        'updater_artifact_id: ${{ steps.updater.outputs.artifact-id }}'
+      ) ||
+      !packageCandidate.includes(
+        'updater_artifact_digest: ${{ steps.updater-metadata.outputs.artifact_digest }}'
+      ) ||
+      !packageCandidate.includes(
+        'updater_artifact_size: ${{ steps.updater-metadata.outputs.artifact_size }}'
+      )
+    ) {
+      failures.push(
+        'package-candidate must depend on all three signed builds and export authenticated updater artifact identity'
+      )
+    }
+    if (
+      !installSigner ||
+      !hasRunInvocation(installSigner, /^corepack\s+enable$/) ||
+      !hasRunInvocation(
+        installSigner,
+        /^corepack\s+prepare\s+yarn@4\.5\.3\s+--activate$/
+      ) ||
+      !hasRunInvocation(
+        installSigner,
+        /^yarn\s+install\s+--immutable\s+--mode=skip-build$/
+      ) ||
+      installSigner.includes('--mode=skip-builds') ||
+      packageCandidate.indexOf('name: Install locked Tauri signer') >
+        packageCandidate.indexOf('yarn tauri signer sign')
+    ) {
+      failures.push(
+        'package-candidate must install the locked Yarn 4.5.3 signer dependencies with immutable skip-build mode before signing'
+      )
+    }
+    if (
+      !downloadCandidates ||
+      /^\s*(?:run-id|repository|github-token):/m.test(downloadCandidates)
+    ) {
+      failures.push(
+        'package-candidate must download all three current-run signed artifacts into dist/builds'
+      )
+    }
+    if (
+      !signManifest ||
+      !signManifest.includes(
+        'TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}'
+      ) ||
+      !signManifest.includes(
+        'TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}'
+      ) ||
+      !hasRunInvocation(
+        signManifest,
+        /^yarn\s+tauri\s+signer\s+sign(?:\s|\\|$)/,
+        [
+          /--private-key\s+"\$TAURI_SIGNING_PRIVATE_KEY"/,
+          /--password\s+"\$TAURI_SIGNING_PRIVATE_KEY_PASSWORD"/,
+          /dist\/updater-candidate\/candidate\.json/,
+        ]
+      ) ||
+      !buildManifest ||
+      buildManifest.includes('TAURI_SIGNING_PRIVATE_KEY') ||
+      !verifyManifest ||
+      verifyManifest.includes('TAURI_SIGNING_PRIVATE_KEY')
+    ) {
+      failures.push(
+        'package-candidate must expose both protected Tauri signing secrets only to the active signer step'
+      )
+    }
+    if (
+      !verifyManifest ||
+      !hasRunInvocation(
+        verifyManifest,
+        /^node\s+scripts\/updater\/verify-candidate\.mjs(?:\s|\\|$)/,
+        [/dist\/updater-candidate/, /"\$TAG"/]
+      ) ||
+      !hasRunInvocation(verifyManifest, /^sha256sum(?:\s|\\|$)/) ||
+      !verifyManifest.includes('candidate.json.sig') ||
+      !verifyManifest.includes('SHA256SUMS') ||
+      packageSteps.indexOf(signManifest) >=
+        packageSteps.indexOf(verifyManifest)
+    ) {
+      failures.push(
+        'package-candidate must verify candidate.json with the pinned updater key before checksumming the detached signature'
+      )
+    }
+    if (
+      !updaterUpload ||
+      !/^\s*id:\s*updater\s*$/m.test(updaterUpload) ||
+      !updaterMetadata ||
+      !updaterMetadata.includes(
+        'ACTION_ARTIFACT_DIGEST: ${{ steps.updater.outputs.artifact-digest }}'
+      ) ||
+      !updaterMetadata.includes(
+        'ARTIFACT_ID: ${{ steps.updater.outputs.artifact-id }}'
+      ) ||
+      !updaterMetadata.includes(
+        '[[ "$ACTION_ARTIFACT_DIGEST" =~ ^[0-9a-f]{64}$ ]]'
+      ) ||
+      !updaterMetadata.includes(
+        'artifact_digest="sha256:$ACTION_ARTIFACT_DIGEST"'
+      ) ||
+      !updaterMetadata.includes('.workflow_run.id == $run_id') ||
+      !updaterMetadata.includes('.workflow_run.head_sha == $head') ||
+      !updaterMetadata.includes('.digest == $digest') ||
+      !updaterMetadata.includes(
+        'echo "artifact_digest=$artifact_digest" >>"$GITHUB_OUTPUT"'
+      ) ||
+      !updaterMetadata.includes(
+        'echo "artifact_size=$artifact_size" >>"$GITHUB_OUTPUT"'
+      )
+    ) {
+      failures.push(
+        'package-candidate must authenticate the updater artifact raw digest, REST identity, size, run, and head'
       )
     }
   }
@@ -991,7 +1301,7 @@ export function validateCandidateWorkflow(source) {
           )
         : jobPinsReleaseSourceBefore(
             block,
-            'uses: softprops/action-gh-release@v2'
+            'name: Atomically create an empty Draft'
           ))
     ) {
       failures.push(
@@ -1001,17 +1311,43 @@ export function validateCandidateWorkflow(source) {
   }
 
   if (draftRelease) {
+    if (
+      !jobNeeds(draftRelease, 'preflight') ||
+      !jobNeeds(draftRelease, 'build-macos') ||
+      !jobNeeds(draftRelease, 'build-windows') ||
+      !jobNeeds(draftRelease, 'build-linux') ||
+      !jobNeeds(draftRelease, 'package-candidate')
+    ) {
+      failures.push(
+        'draft-release must depend on preflight, all signed platform builds, and immutable packaging'
+      )
+    }
     const draftSteps = workflowStepBlocks(draftRelease)
-    const releaseActionIndex = draftSteps.findIndex((step) =>
-      step.includes('uses: softprops/action-gh-release@v2')
+    const updaterDownload = draftSteps.find((step) =>
+      step.includes(
+        'name: Download exact updater archive by authenticated ID'
+      )
     )
-    const releaseAction =
-      releaseActionIndex >= 0 ? draftSteps[releaseActionIndex] : ''
+    const updaterExtract = draftSteps.find((step) =>
+      step.includes('name: Extract exact updater candidate')
+    )
     const freshSlotIndex = draftSteps.findIndex((step) =>
       step.includes('Require a fresh draft release slot')
     )
     const freshSlot =
       freshSlotIndex >= 0 ? draftSteps[freshSlotIndex] : ''
+    const createDraftIndex = draftSteps.findIndex((step) =>
+      step.includes('name: Atomically create an empty Draft')
+    )
+    const createDraft =
+      createDraftIndex >= 0 ? draftSteps[createDraftIndex] : ''
+    const uploadAssetsIndex = draftSteps.findIndex((step) =>
+      step.includes(
+        'name: Upload exact assets only to the newly created Draft ID'
+      )
+    )
+    const uploadAssets =
+      uploadAssetsIndex >= 0 ? draftSteps[uploadAssetsIndex] : ''
     const exactDraftIndex = draftSteps.findIndex((step) =>
       step.includes('Verify exact draft release')
     )
@@ -1033,48 +1369,828 @@ export function validateCandidateWorkflow(source) {
     ]
 
     if (
+      actionStepBlocks(
+        draftRelease,
+        'actions/download-artifact@v4'
+      ).length !== 0 ||
+      !updaterDownload ||
+      !updaterDownload.includes(
+        'ARTIFACT_ID: ${{ needs.package-candidate.outputs.updater_artifact_id }}'
+      ) ||
+      !updaterDownload.includes(
+        'ARTIFACT_DIGEST: ${{ needs.package-candidate.outputs.updater_artifact_digest }}'
+      ) ||
+      !updaterDownload.includes(
+        'ARTIFACT_SIZE: ${{ needs.package-candidate.outputs.updater_artifact_size }}'
+      ) ||
+      !updaterDownload.includes(
+        'if [ "$actual_digest" != "$ARTIFACT_DIGEST" ]'
+      ) ||
+      !updaterExtract ||
+      !hasRunInvocation(
+        updaterExtract,
+        /^python3\s+scripts\/ci\/extract-release-candidate-recovery\.py(?:\s|\\|$)/,
+        [
+          /--updater-archive\s+dist\/recovered-updater\/updater\.zip/,
+          /--output-dir\s+"dist\/biyan-updater-candidate-\$VERSION"/,
+          /--version\s+"\$VERSION"/,
+        ]
+      )
+    ) {
+      failures.push(
+        'draft-release must authenticate and exactly extract the current-run updater artifact'
+      )
+    }
+    if (
       !freshSlot ||
+      !hasCommandSequence(freshSlot, [
+        'gh api \\',
+        '--paginate \\',
+        '--slurp \\',
+        '"repos/$GITHUB_REPOSITORY/releases?per_page=100" \\',
+        '>"$RUNNER_TEMP/existing-release-pages.json"',
+      ]) ||
       !freshSlot.includes(
-        'gh api "repos/$GITHUB_REPOSITORY/releases/tags/$RELEASE_TAG"'
+        '[.[][] | select(.tag_name == $tag)] | length == 0'
       ) ||
-      !freshSlot.includes('HTTP 404') ||
-      !freshSlot.includes('exit 1') ||
-      freshSlotIndex >= releaseActionIndex
+      freshSlotIndex >= createDraftIndex ||
+      createDraftIndex < 0 ||
+      uploadAssetsIndex <= createDraftIndex ||
+      exactDraftIndex <= uploadAssetsIndex ||
+      draftRelease.includes('softprops/action-gh-release') ||
+      !hasCommandSequence(createDraft, [
+        'gh api \\',
+        '--method POST \\',
+        '"repos/$GITHUB_REPOSITORY/releases" \\',
+        '--input "$RUNNER_TEMP/create-draft-request.json" \\',
+        '>"$RUNNER_TEMP/created-draft.json"',
+      ]) ||
+      !createDraft.includes('tag_name: $tag') ||
+      !createDraft.includes('target_commitish: $target') ||
+      !createDraft.includes('name: $name') ||
+      !createDraft.includes('draft: true') ||
+      !createDraft.includes('prerelease: false') ||
+      !createDraft.includes('.published_at == null') ||
+      !createDraft.includes('and (.assets | length == 0)') ||
+      !createDraft.includes(
+        '/releases/tag/untagged-[0-9a-f]{20}$'
+      ) ||
+      !stepLoadsCreatedDraftId(createDraft) ||
+      !createDraft.includes(
+        '[.[][] | select(.tag_name == $tag) | .id] == [$release_id]'
+      )
     ) {
       failures.push(
-        'draft-release must prove the exact release slot is absent before creation'
+        'draft-release must enumerate all releases, pin source, and atomically create one empty Draft ID'
       )
     }
     if (
-      !releaseAction ||
-      !releaseAction.includes(
-        'target_commitish: ${{ needs.preflight.outputs.source_commit }}'
+      !stepLoadsCreatedDraftId(uploadAssets) ||
+      !hasCommandSequence(uploadAssets, [
+        'curl \\',
+        '--fail-with-body \\',
+        '--silent \\',
+        '--show-error \\',
+        '--request POST \\',
+        '--header "Accept: application/vnd.github+json" \\',
+        '--header "Authorization: Bearer $GH_TOKEN" \\',
+        '--header "Content-Type: application/octet-stream" \\',
+        '--header "X-GitHub-Api-Version: 2022-11-28" \\',
+        '--data-binary "@$file" \\',
+        '"https://uploads.github.com/repos/$GITHUB_REPOSITORY/releases/$release_id/assets?name=$encoded_name" \\',
+        '>"$RUNNER_TEMP/uploaded-asset-$index.json"',
+      ]) ||
+      !/\.name == \$name\s*\n\s*and \.state == "uploaded"\s*\n\s*and \.size == \$size\s*\n\s*and \.digest == \$digest\s*\n\s*and \(\.browser_download_url ==/.test(
+        uploadAssets
       ) ||
-      !releaseAction.includes(
-        'tag_name: ${{ needs.preflight.outputs.tag }}'
-      ) ||
-      !/^\s*draft:\s*true\s*$/m.test(releaseAction) ||
-      !/^\s*prerelease:\s*false\s*$/m.test(releaseAction) ||
-      !releaseAction.includes('dist/biyan-updater-candidate-*/*')
-    ) {
-      failures.push(
-        'draft-release must create a draft-only release for the exact source and candidate assets'
-      )
-    }
-    if (
-      exactDraftIndex <= releaseActionIndex ||
+      expectedAssets.some((asset) => !uploadAssets.includes(asset)) ||
+      !stepLoadsCreatedDraftId(exactDraft) ||
       !stepPinsReleaseSource(exactDraft, 'gh api') ||
+      !exactDraft.includes(
+        'gh api "repos/$GITHUB_REPOSITORY/releases/$release_id"'
+      ) ||
+      !exactDraft.includes('.id == $release_id') ||
       !exactDraft.includes('.tag_name == $tag') ||
       !exactDraft.includes('.draft == true') ||
       !exactDraft.includes('.prerelease == false') ||
-      !exactDraft.includes('([.assets[].name] | sort) == $expected') ||
-      expectedAssets.some((asset) => !exactDraft.includes(asset))
+      !exactDraft.includes('.published_at == null') ||
+      !exactDraft.includes('{ name, size, digest }') ||
+      !exactDraft.includes(
+        '"/releases/download/" + $draft_slug + "/"'
+      ) ||
+      !exactDraft.includes(
+        '[.[][] | select(.tag_name == $tag) | .id] == [$release_id]'
+      )
     ) {
       failures.push(
-        'draft-release must verify the exact source, draft state, and 13-asset set after creation'
+        'draft-release must byte-bind exactly 13 assets to the new ID and verify the same unique unpublished Draft'
       )
     }
   }
+
+  failures.push(
+    ...validateReleaseWorkflowControlPlane(
+      activeSource,
+      TRUSTED_CANDIDATE_JOB_ORDER,
+      TRUSTED_CANDIDATE_WORKFLOW_ALLOWLIST,
+      'desktop release',
+      {
+        requireReviewedEnvelope:
+          requireReviewedEnvelope ||
+          /^name:\s*Desktop Release Candidate\s*$/m.test(activeSource),
+      }
+    )
+  )
+
+  return failures
+}
+
+export function validateCandidateRecoveryWorkflow(source) {
+  const failures = []
+  const activeSource = uncommentedSource(source)
+  const permissions = topLevelBlock(activeSource, 'permissions')
+  const concurrency = topLevelBlock(activeSource, 'concurrency')
+  const preflight = jobBlock(activeSource, 'preflight')
+  const packageCandidate = jobBlock(activeSource, 'package-candidate')
+  const draftRelease = jobBlock(activeSource, 'draft-release')
+  const checkoutSteps = actionStepBlocks(
+    activeSource,
+    'actions/checkout@v4'
+  )
+
+  if (
+    !activeSource.includes('name: Desktop Release Candidate Recovery') ||
+    !activeSource.includes('workflow_dispatch:') ||
+    !activeSource.includes('source_run_id:') ||
+    /push:\s*(?:\n|$)/m.test(topLevelBlock(activeSource, 'on') ?? '')
+  ) {
+    failures.push(
+      'candidate recovery must be manual-only and require version plus source_run_id'
+    )
+  }
+  if (
+    YAML_CONTINUE_ON_ERROR.test(activeSource) ||
+    YAML_IF.test(activeSource) ||
+    /\|\|\s*true\b/.test(activeSource)
+  ) {
+    failures.push(
+      'candidate recovery jobs and steps must be unconditional and must not use advisory bypasses'
+    )
+  }
+  if (
+    !permissions ||
+    !/^  actions:\s*read\s*$/m.test(permissions) ||
+    !/^  contents:\s*read\s*$/m.test(permissions) ||
+    /\bwrite\b/.test(permissions)
+  ) {
+    failures.push(
+      'candidate recovery top-level permissions must be actions: read and contents: read only'
+    )
+  }
+  if (
+    !concurrency ||
+    !concurrency.includes('group: desktop-candidate-${{ inputs.version }}') ||
+    !concurrency.includes('cancel-in-progress: false')
+  ) {
+    failures.push(
+      'candidate recovery must share the exact-tag desktop candidate concurrency lock'
+    )
+  }
+  if (
+    checkoutSteps.some(
+      (step) => !/^\s*persist-credentials:\s*false\s*$/m.test(step)
+    )
+  ) {
+    failures.push(
+      'candidate recovery checkouts must disable persisted credentials'
+    )
+  }
+
+  if (!preflight) {
+    failures.push('candidate recovery is missing its authenticated preflight')
+  } else {
+    const steps = workflowStepBlocks(preflight)
+    const resolver = steps.find((step) =>
+      step.includes('name: Resolve immutable recovery metadata')
+    )
+    const targetPolicy = steps.find((step) =>
+      step.includes('node harness/scripts/ci/verify-release-target.mjs')
+    )
+    const metadataFetch = steps.find((step) =>
+      step.includes('name: Fetch exact source run metadata')
+    )
+    const recoveryAuth = steps.find((step) =>
+      step.includes(
+        'node harness/scripts/ci/verify-release-candidate-recovery.mjs'
+      )
+    )
+    const contractTests = steps.find((step) =>
+      step.includes('name: Test protected recovery policy contracts')
+    )
+    const freshSlot = steps.find((step) =>
+      step.includes('name: Require an unused release slot')
+    )
+
+    if (
+      !checkoutSteps.some(
+        (step) =>
+          /^\s*ref:\s*mita-main\s*$/m.test(step) &&
+          /^\s*path:\s*harness\s*$/m.test(step)
+      ) ||
+      !checkoutSteps.some(
+        (step) =>
+          step.includes('ref: ${{ inputs.version }}') &&
+          /^\s*path:\s*target\s*$/m.test(step)
+      )
+    ) {
+      failures.push(
+        'candidate recovery must separate the protected main harness from the exact tag target'
+      )
+    }
+    if (
+      !resolver ||
+      !resolver.includes('WORKFLOW_REF: ${{ github.ref }}') ||
+      !resolver.includes('[ "$WORKFLOW_REF" != "refs/heads/mita-main" ]') ||
+      !resolver.includes(
+        '[[ ! "$SOURCE_RUN_ID" =~ ^[1-9][0-9]*$ ]]'
+      ) ||
+      !resolver.includes(
+        '[ "$SOURCE_RUN_ID" != "30195339449" ]'
+      ) ||
+      !resolver.includes(
+        '[[ ! "$RELEASE_TAG" =~ ^v(0|[1-9][0-9]*)\\.(0|[1-9][0-9]*)\\.(0|[1-9][0-9]*)$ ]]'
+      ) ||
+      !resolver.includes(
+        'git -C harness merge-base --is-ancestor'
+      ) ||
+      !resolver.includes('checkout_head') ||
+      !resolver.includes('live_main')
+    ) {
+      failures.push(
+        'candidate recovery must bind canonical inputs to the live protected main and exact tag'
+      )
+    }
+    if (
+      !targetPolicy ||
+      !targetPolicy.includes('--harness-root harness') ||
+      !targetPolicy.includes('--release-tag "$RELEASE_TAG"') ||
+      !targetPolicy.includes('--target-root target') ||
+      !targetPolicy.includes('--source-commit "$SOURCE_COMMIT"') ||
+      !targetPolicy.includes('--trusted-main "$TRUSTED_MAIN"')
+    ) {
+      failures.push(
+        'candidate recovery must compose the protected control plane with the exact release checkpoint'
+      )
+    }
+    if (
+      !metadataFetch ||
+      !metadataFetch.includes('GH_TOKEN: ${{ github.token }}') ||
+      !metadataFetch.includes(
+        'actions/runs/$SOURCE_RUN_ID"'
+      ) ||
+      !metadataFetch.includes(
+        'actions/runs/$SOURCE_RUN_ID/jobs?per_page=100'
+      ) ||
+      !metadataFetch.includes(
+        'actions/runs/$SOURCE_RUN_ID/artifacts?per_page=100'
+      )
+    ) {
+      failures.push(
+        'candidate recovery must fetch run, job, and artifact metadata from the current repository'
+      )
+    }
+    if (
+      !recoveryAuth ||
+      !recoveryAuth.includes('--run "$RUNNER_TEMP/recovery-metadata/run.json"') ||
+      !recoveryAuth.includes(
+        '--jobs "$RUNNER_TEMP/recovery-metadata/jobs.json"'
+      ) ||
+      !recoveryAuth.includes(
+        '--artifacts "$RUNNER_TEMP/recovery-metadata/artifacts.json"'
+      ) ||
+      !recoveryAuth.includes('--source-run-id "$SOURCE_RUN_ID"') ||
+      !recoveryAuth.includes('--current-run-id "$CURRENT_RUN_ID"') ||
+      !recoveryAuth.includes('--repository "$GITHUB_REPOSITORY"') ||
+      !recoveryAuth.includes('--version "$VERSION"') ||
+      !recoveryAuth.includes(
+        'git -C harness merge-base --is-ancestor "$source_head" "$TRUSTED_MAIN"'
+      ) ||
+      !recoveryAuth.includes('git -C harness diff') ||
+      !recoveryAuth.includes('--name-status') ||
+      !recoveryAuth.includes('--no-renames') ||
+      !recoveryAuth.includes(
+        '"$source_head" \\\n            "$TRUSTED_MAIN"'
+      ) ||
+      !recoveryAuth.includes(
+        'expected-control-drift.txt'
+      ) ||
+      !recoveryAuth.includes(
+        'actual-control-drift.txt'
+      ) ||
+      !recoveryAuth.includes('diff -u') ||
+      ![
+        '.github/workflows/biyan-linter-and-test.yml',
+        '.github/workflows/desktop-release-recovery.yml',
+        '.github/workflows/desktop-release.yml',
+        'scripts/ci/__tests__/extract-release-candidate-recovery.test.py',
+        'scripts/ci/__tests__/release-policy.test.mjs',
+        'scripts/ci/__tests__/verify-release-candidate-recovery.test.mjs',
+        'scripts/ci/__tests__/verify-release-target.test.mjs',
+        'scripts/ci/extract-release-candidate-recovery.py',
+        'scripts/ci/legacy-compatibility-allowlist.json',
+        'scripts/ci/release-policy-contracts.mjs',
+        'scripts/ci/verify-release-candidate-recovery.mjs',
+        'scripts/ci/verify-release-policy.mjs',
+        'scripts/ci/verify-release-target.mjs',
+      ].every((relativePath) => recoveryAuth.includes(relativePath)) ||
+      !recoveryAuth.includes('source_run_id=$SOURCE_RUN_ID') ||
+      !recoveryAuth.includes('source_run_head=$source_head') ||
+      !recoveryAuth.includes('echo "${platform}_artifact_id=$id"') ||
+      !recoveryAuth.includes(
+        'echo "${platform}_artifact_digest=$digest"'
+      ) ||
+      !recoveryAuth.includes('echo "${platform}_artifact_size=$size"') ||
+      !['linux', 'macos', 'windows'].every((platform) =>
+        recoveryAuth.includes(`emit_artifact \\\n            ${platform} \\`)
+      )
+    ) {
+      failures.push(
+        'candidate recovery must authenticate exact source topology, ancestry, artifact IDs, sizes, and digests'
+      )
+    }
+    if (
+      !contractTests ||
+      !contractTests.includes(
+        'node --test scripts/ci/__tests__/release-policy.test.mjs'
+      ) ||
+      !contractTests.includes(
+        'node --test scripts/ci/__tests__/verify-release-target.test.mjs'
+      ) ||
+      !contractTests.includes(
+        'python3 scripts/ci/__tests__/extract-release-candidate-recovery.test.py'
+      ) ||
+      !contractTests.includes(
+        'node --test scripts/ci/__tests__/verify-release-candidate-recovery.test.mjs'
+      ) ||
+      !contractTests.includes('working-directory: harness')
+    ) {
+      failures.push(
+        'candidate recovery preflight must execute all protected recovery policy tests'
+      )
+    }
+    if (
+      !freshSlot ||
+      !hasCommandSequence(freshSlot, [
+        'gh api \\',
+        '--paginate \\',
+        '--slurp \\',
+        '"repos/$GITHUB_REPOSITORY/releases?per_page=100" \\',
+        '>"$RUNNER_TEMP/existing-release-pages.json"',
+      ]) ||
+      !freshSlot.includes(
+        '[.[][] | select(.tag_name == $tag)] | length == 0'
+      )
+    ) {
+      failures.push(
+        'candidate recovery preflight must enumerate published and Draft releases and prove the tag is unused'
+      )
+    }
+  }
+
+  if (!packageCandidate) {
+    failures.push('candidate recovery is missing immutable packaging')
+  } else {
+    const steps = workflowStepBlocks(packageCandidate)
+    const installSigner = steps.find((step) =>
+      step.includes('name: Install locked Tauri signer')
+    )
+    const archiveDownload = steps.find((step) =>
+      step.includes(
+        'name: Download exact artifact archives by authenticated ID'
+      )
+    )
+    const safeExtract = steps.find((step) =>
+      step.includes(
+        'name: Extract only the exact recovered candidate inventory'
+      )
+    )
+    const buildManifest = steps.find((step) =>
+      step.includes('name: Build canonical candidate manifest')
+    )
+    const signManifest = steps.find((step) =>
+      step.includes('name: Sign canonical candidate manifest')
+    )
+    const verifyManifest = steps.find((step) =>
+      step.includes('name: Verify signed candidate and write hashes')
+    )
+    const updaterUpload = steps.find((step) =>
+      step.includes('uses: actions/upload-artifact@v4')
+    )
+    const updaterMetadata = steps.find((step) =>
+      step.includes('name: Authenticate uploaded updater artifact')
+    )
+    if (
+      !jobNeeds(packageCandidate, 'preflight') ||
+      !/^    environment:\s*release-distribution\s*$/m.test(
+        packageCandidate
+      ) ||
+      !packageCandidate.includes(
+        'updater_artifact_id: ${{ steps.updater.outputs.artifact-id }}'
+      ) ||
+      !packageCandidate.includes(
+        'updater_artifact_digest: ${{ steps.updater-metadata.outputs.artifact_digest }}'
+      ) ||
+      !packageCandidate.includes(
+        'updater_artifact_size: ${{ steps.updater-metadata.outputs.artifact_size }}'
+      )
+    ) {
+      failures.push(
+        'candidate recovery packaging must depend on preflight, use release-distribution, and export authenticated updater artifact identity'
+      )
+    }
+    if (
+      !actionStepBlocks(packageCandidate, 'actions/checkout@v4').some(
+        (step) =>
+          step.includes(
+            'ref: ${{ needs.preflight.outputs.trusted_main_commit }}'
+          )
+      )
+    ) {
+      failures.push(
+        'candidate recovery packaging must use tooling from the protected main'
+      )
+    }
+    if (
+      !installSigner ||
+      !hasRunInvocation(installSigner, /^corepack\s+enable$/) ||
+      !hasRunInvocation(
+        installSigner,
+        /^corepack\s+prepare\s+yarn@4\.5\.3\s+--activate$/
+      ) ||
+      !hasRunInvocation(
+        installSigner,
+        /^yarn\s+install\s+--immutable\s+--mode=skip-build$/
+      ) ||
+      installSigner.includes('--mode=skip-builds')
+    ) {
+      failures.push(
+        'candidate recovery must install locked Yarn 4.5.3 dependencies with immutable skip-build mode'
+      )
+    }
+    if (
+      actionStepBlocks(
+        packageCandidate,
+        'actions/download-artifact@v4'
+      ).length !== 0 ||
+      !archiveDownload ||
+      !archiveDownload.includes('GH_TOKEN: ${{ github.token }}') ||
+      !archiveDownload.includes(
+        'actions/artifacts/$artifact_id/zip'
+      ) ||
+      !hasRunInvocation(archiveDownload, /^gh\s+api(?:\s|\\|$)/) ||
+      !hasRunInvocation(archiveDownload, /^test\s+"\$\(stat\s+-c/) ||
+      !hasRunInvocation(
+        archiveDownload,
+        /^actual_digest="sha256:\$\(sha256sum/
+      ) ||
+      !archiveDownload.includes(
+        'if [ "$actual_digest" != "$artifact_digest" ]'
+      ) ||
+      !['LINUX', 'MACOS', 'WINDOWS'].every(
+        (platform) =>
+          archiveDownload.includes(`${platform}_ARTIFACT_ID:`) &&
+          archiveDownload.includes(`${platform}_ARTIFACT_DIGEST:`) &&
+          archiveDownload.includes(`${platform}_ARTIFACT_SIZE:`)
+      )
+    ) {
+      failures.push(
+        'candidate recovery must download exact artifact IDs and fail closed on archive size or digest mismatch'
+      )
+    }
+    if (
+      !safeExtract ||
+      !hasRunInvocation(
+        safeExtract,
+        /^python3\s+scripts\/ci\/extract-release-candidate-recovery\.py(?:\s|\\|$)/,
+        [
+          /--archives-dir\s+dist\/recovery-archives/,
+          /--output-dir\s+dist\/builds/,
+          /--version\s+"\$VERSION"/,
+        ]
+      ) ||
+      !safeExtract.includes('set -euo pipefail')
+    ) {
+      failures.push(
+        'candidate recovery must whitelist and safely extract exactly nine non-empty regular candidate files'
+      )
+    }
+    if (
+      !signManifest ||
+      !signManifest.includes(
+        'TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}'
+      ) ||
+      !signManifest.includes(
+        'TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}'
+      ) ||
+      !hasRunInvocation(
+        signManifest,
+        /^yarn\s+tauri\s+signer\s+sign(?:\s|\\|$)/,
+        [
+          /--private-key\s+"\$TAURI_SIGNING_PRIVATE_KEY"/,
+          /--password\s+"\$TAURI_SIGNING_PRIVATE_KEY_PASSWORD"/,
+          /dist\/updater-candidate\/candidate\.json/,
+        ]
+      ) ||
+      !buildManifest ||
+      buildManifest.includes('TAURI_SIGNING_PRIVATE_KEY') ||
+      !verifyManifest ||
+      verifyManifest.includes('TAURI_SIGNING_PRIVATE_KEY') ||
+      !hasRunInvocation(
+        verifyManifest,
+        /^node\s+scripts\/updater\/verify-candidate\.mjs(?:\s|\\|$)/,
+        [/dist\/updater-candidate/, /"\$TAG"/]
+      ) ||
+      !hasRunInvocation(verifyManifest, /^sha256sum(?:\s|\\|$)/) ||
+      !verifyManifest.includes('candidate.json.sig') ||
+      !verifyManifest.includes('SHA256SUMS') ||
+      steps.indexOf(signManifest) >= steps.indexOf(verifyManifest)
+    ) {
+      failures.push(
+        'candidate recovery packaging must expose protected secrets only to signing, then verify signed provenance with the pinned updater key'
+      )
+    }
+    if (
+      !jobPinsReleaseSourceBefore(
+        packageCandidate,
+        'uses: actions/upload-artifact@v4',
+        { afterNeedle: 'SHA256SUMS' }
+      ) ||
+      !packageCandidate.includes(
+        'name: biyan-updater-candidate-${{ needs.preflight.outputs.version }}'
+      ) ||
+      !updaterUpload ||
+      !/^\s*id:\s*updater\s*$/m.test(updaterUpload) ||
+      !updaterMetadata ||
+      !updaterMetadata.includes(
+        'ARTIFACT_ID: ${{ steps.updater.outputs.artifact-id }}'
+      ) ||
+      !updaterMetadata.includes(
+        'ACTION_ARTIFACT_DIGEST: ${{ steps.updater.outputs.artifact-digest }}'
+      ) ||
+      !updaterMetadata.includes(
+        '[[ "$ACTION_ARTIFACT_DIGEST" =~ ^[0-9a-f]{64}$ ]]'
+      ) ||
+      !updaterMetadata.includes(
+        'artifact_digest="sha256:$ACTION_ARTIFACT_DIGEST"'
+      ) ||
+      !hasRunInvocation(
+        updaterMetadata,
+        /^gh\s+api(?:\s|\\|$)/,
+        [/actions\/artifacts\/\$ARTIFACT_ID/]
+      ) ||
+      !updaterMetadata.includes('.workflow_run.id == $run_id') ||
+      !updaterMetadata.includes('.workflow_run.head_sha == $head') ||
+      !updaterMetadata.includes('.digest == $digest') ||
+      !updaterMetadata.includes(
+        'echo "artifact_digest=$artifact_digest" >>"$GITHUB_OUTPUT"'
+      ) ||
+      !updaterMetadata.includes(
+        'echo "artifact_size=$artifact_size" >>"$GITHUB_OUTPUT"'
+      )
+    ) {
+      failures.push(
+        'candidate recovery must pin main and tag, upload once, and authenticate the exact updater artifact ID, size, digest, run, and head'
+      )
+    }
+  }
+
+  if (!draftRelease) {
+    failures.push('candidate recovery is missing draft creation')
+  } else {
+    const steps = workflowStepBlocks(draftRelease)
+    const updaterDownload = steps.find((step) =>
+      step.includes(
+        'name: Download exact updater archive by authenticated ID'
+      )
+    )
+    const updaterExtract = steps.find((step) =>
+      step.includes('name: Extract exact recovered updater candidate')
+    )
+    const freshSlotIndex = steps.findIndex((step) =>
+      step.includes('name: Require a fresh draft release slot')
+    )
+    const freshSlot =
+      freshSlotIndex >= 0 ? steps[freshSlotIndex] : ''
+    const createDraftIndex = steps.findIndex((step) =>
+      step.includes('name: Atomically create an empty recovered Draft')
+    )
+    const createDraft =
+      createDraftIndex >= 0 ? steps[createDraftIndex] : ''
+    const uploadAssetsIndex = steps.findIndex((step) =>
+      step.includes(
+        'name: Upload exact assets only to the newly created Draft ID'
+      )
+    )
+    const uploadAssets =
+      uploadAssetsIndex >= 0 ? steps[uploadAssetsIndex] : ''
+    const verifyDraftIndex = steps.findIndex((step) =>
+      step.includes('name: Verify exact recovered draft release')
+    )
+    const verifyDraft = verifyDraftIndex >= 0 ? steps[verifyDraftIndex] : ''
+    if (
+      !jobNeeds(draftRelease, 'preflight') ||
+      !jobNeeds(draftRelease, 'package-candidate') ||
+      !/^    permissions:\s*\n      actions:\s*read\s*\n      contents:\s*write\s*$/m.test(
+        draftRelease
+      )
+    ) {
+      failures.push(
+        'candidate recovery draft must depend on authenticated packaging and alone request actions: read plus contents: write'
+      )
+    }
+    if (
+      !actionStepBlocks(draftRelease, 'actions/checkout@v4').some(
+        (step) =>
+          step.includes(
+            'ref: ${{ needs.preflight.outputs.trusted_main_commit }}'
+          )
+      ) ||
+      actionStepBlocks(
+        draftRelease,
+        'actions/download-artifact@v4'
+      ).length !== 0 ||
+      !updaterDownload ||
+      !updaterDownload.includes(
+        'ARTIFACT_ID: ${{ needs.package-candidate.outputs.updater_artifact_id }}'
+      ) ||
+      !updaterDownload.includes(
+        'ARTIFACT_DIGEST: ${{ needs.package-candidate.outputs.updater_artifact_digest }}'
+      ) ||
+      !updaterDownload.includes(
+        'ARTIFACT_SIZE: ${{ needs.package-candidate.outputs.updater_artifact_size }}'
+      ) ||
+      !hasRunInvocation(
+        updaterDownload,
+        /^gh\s+api(?:\s|\\|$)/,
+        [/actions\/artifacts\/\$ARTIFACT_ID\/zip/]
+      ) ||
+      !hasRunInvocation(updaterDownload, /^test\s+"\$\(stat\s+-c/) ||
+      !updaterDownload.includes(
+        'if [ "$actual_digest" != "$ARTIFACT_DIGEST" ]'
+      ) ||
+      !updaterExtract ||
+      !hasRunInvocation(
+        updaterExtract,
+        /^python3\s+scripts\/ci\/extract-release-candidate-recovery\.py(?:\s|\\|$)/,
+        [
+          /--updater-archive\s+dist\/recovered-updater\/updater\.zip/,
+          /--output-dir\s+"dist\/biyan-updater-candidate-\$VERSION"/,
+          /--version\s+"\$VERSION"/,
+        ]
+      )
+    ) {
+      failures.push(
+        'candidate recovery draft must authenticate the current-run updater ZIP by exact ID, size, and digest before exact 13-file extraction'
+      )
+    }
+    if (
+      freshSlotIndex < 0 ||
+      !hasCommandSequence(freshSlot, [
+        'gh api \\',
+        '--paginate \\',
+        '--slurp \\',
+        '"repos/$GITHUB_REPOSITORY/releases?per_page=100" \\',
+        '>"$RUNNER_TEMP/existing-release-pages.json"',
+      ]) ||
+      !freshSlot.includes(
+        '[.[][] | select(.tag_name == $tag)] | length == 0'
+      ) ||
+      createDraftIndex < 0 ||
+      uploadAssetsIndex < 0 ||
+      verifyDraftIndex < 0 ||
+      freshSlotIndex >= createDraftIndex ||
+      createDraftIndex >= uploadAssetsIndex ||
+      uploadAssetsIndex >= verifyDraftIndex ||
+      !jobPinsReleaseSourceBefore(
+        draftRelease,
+        'name: Atomically create an empty recovered Draft'
+      ) ||
+      draftRelease.includes('softprops/action-gh-release') ||
+      !createDraft.includes(
+        'EXPECTED_SOURCE: ${{ needs.preflight.outputs.source_commit }}'
+      ) ||
+      !hasCommandSequence(createDraft, [
+        'gh api \\',
+        '--method POST \\',
+        '"repos/$GITHUB_REPOSITORY/releases" \\',
+        '--input "$RUNNER_TEMP/create-draft-request.json" \\',
+        '>"$RUNNER_TEMP/created-draft.json"',
+      ]) ||
+      !createDraft.includes('target_commitish: $target') ||
+      !createDraft.includes('draft: true') ||
+      !createDraft.includes('prerelease: false') ||
+      !createDraft.includes('.published_at == null') ||
+      !createDraft.includes('and (.assets | length == 0)') ||
+      !createDraft.includes(
+        '/releases/tag/untagged-[0-9a-f]{20}$'
+      ) ||
+      !stepLoadsCreatedDraftId(createDraft) ||
+      !hasCommandSequence(createDraft, [
+        'gh api \\',
+        '--paginate \\',
+        '--slurp \\',
+        '"repos/$GITHUB_REPOSITORY/releases?per_page=100" \\',
+        '>"$RUNNER_TEMP/post-create-release-pages.json"',
+      ]) ||
+      !createDraft.includes(
+        '[.[][] | select(.tag_name == $tag) | .id] == [$release_id]'
+      )
+    ) {
+      failures.push(
+        'candidate recovery must pin main and tag, atomically POST a new empty Draft, and bind every later mutation to its returned ID'
+      )
+    }
+    const expectedAssets = [
+      'Biyan_${VERSION}_universal.dmg',
+      'Biyan.app.tar.gz',
+      'Biyan.app.tar.gz.sig',
+      'Biyan_${VERSION}_x64-setup.exe',
+      'Biyan_${VERSION}_x64-setup.exe.sig',
+      'Biyan_${VERSION}_x64_en-US.msi',
+      'Biyan_${VERSION}_amd64.AppImage',
+      'Biyan_${VERSION}_amd64.AppImage.sig',
+      'Biyan_${VERSION}_amd64.deb',
+      'candidate.json',
+      'candidate.json.sig',
+      'latest.json',
+      'SHA256SUMS',
+    ]
+    if (
+      !uploadAssets ||
+      !stepLoadsCreatedDraftId(uploadAssets) ||
+      !hasCommandSequence(uploadAssets, [
+        'curl \\',
+        '--fail-with-body \\',
+        '--silent \\',
+        '--show-error \\',
+        '--request POST \\',
+        '--header "Accept: application/vnd.github+json" \\',
+        '--header "Authorization: Bearer $GH_TOKEN" \\',
+        '--header "Content-Type: application/octet-stream" \\',
+        '--header "X-GitHub-Api-Version: 2022-11-28" \\',
+        '--data-binary "@$file" \\',
+        '"https://uploads.github.com/repos/$GITHUB_REPOSITORY/releases/$release_id/assets?name=$encoded_name" \\',
+        '>"$RUNNER_TEMP/uploaded-asset-$index.json"',
+      ]) ||
+      !/\.name == \$name\s*\n\s*and \.state == "uploaded"\s*\n\s*and \.size == \$size\s*\n\s*and \.digest == \$digest\s*\n\s*and \(\.browser_download_url ==/.test(
+        uploadAssets
+      ) ||
+      !uploadAssets.includes('$draft_slug + "/" + $name') ||
+      expectedAssets.some((asset) => !uploadAssets.includes(asset)) ||
+      !stepLoadsCreatedDraftId(verifyDraft) ||
+      !stepPinsReleaseSource(verifyDraft, 'gh api') ||
+      !verifyDraft.includes(
+        'gh api "repos/$GITHUB_REPOSITORY/releases/$release_id"'
+      ) ||
+      !verifyDraft.includes('.id == $release_id') ||
+      !verifyDraft.includes('.name == ("Biyan " + $tag)') ||
+      !verifyDraft.includes('.tag_name == $tag') ||
+      !verifyDraft.includes('.draft == true') ||
+      !verifyDraft.includes('.prerelease == false') ||
+      !verifyDraft.includes('.published_at == null') ||
+      !verifyDraft.includes('{ name, size, digest }') ||
+      !verifyDraft.includes(
+        '"/releases/download/" + $draft_slug + "/"'
+      ) ||
+      !verifyDraft.includes('.state == "uploaded"') ||
+      !verifyDraft.includes('.size > 0') ||
+      !verifyDraft.includes('^sha256:[0-9a-f]{64}$') ||
+      !hasCommandSequence(verifyDraft, [
+        'gh api \\',
+        '--paginate \\',
+        '--slurp \\',
+        '"repos/$GITHUB_REPOSITORY/releases?per_page=100" \\',
+        '>"$RUNNER_TEMP/final-release-pages.json"',
+      ]) ||
+      !verifyDraft.includes(
+        '[.[][] | select(.tag_name == $tag) | .id] == [$release_id]'
+      )
+    ) {
+      failures.push(
+        'candidate recovery must upload exactly 13 byte-bound assets to the new Draft ID and verify that same unpublished Draft by ID and tag'
+      )
+    }
+  }
+
+  failures.push(
+    ...validateReleaseWorkflowControlPlane(
+      activeSource,
+      TRUSTED_RECOVERY_JOB_ORDER,
+      TRUSTED_RECOVERY_WORKFLOW_ALLOWLIST,
+      'candidate recovery',
+      { requireReviewedEnvelope: true }
+    )
+  )
 
   return failures
 }
@@ -1516,6 +2632,8 @@ export function validateCiWorkflow(source) {
       'node --test scripts/ci/__tests__/run-untrusted-qualification-verifier.test.mjs',
       'node --test scripts/ci/__tests__/verify-qualification-artifacts.test.mjs',
       'node --test scripts/ci/__tests__/verify-qualification-recovery.test.mjs',
+      'python3 scripts/ci/__tests__/extract-release-candidate-recovery.test.py',
+      'node --test scripts/ci/__tests__/verify-release-candidate-recovery.test.mjs',
       'node --test scripts/updater/__tests__/updater.test.mjs',
       'node --test scripts/release-distribution/__tests__/release-distribution.test.mjs',
     ]) {
@@ -1527,6 +2645,48 @@ export function validateCiWorkflow(source) {
       ) {
         failures.push(`Biyan CI release-safety job does not run: ${command}`)
       }
+    }
+    const signerSmoke = workflowStepBlocks(releaseSafety).find((step) =>
+      step.includes('name: Exercise locked candidate signer install')
+    )
+    if (
+      !signerSmoke ||
+      !hasRunInvocation(signerSmoke, /^set\s+-euo\s+pipefail$/) ||
+      !hasRunInvocation(signerSmoke, /^corepack\s+enable$/) ||
+      !hasRunInvocation(
+        signerSmoke,
+        /^corepack\s+prepare\s+yarn@4\.5\.3\s+--activate$/
+      ) ||
+      !hasRunInvocation(
+        signerSmoke,
+        /^yarn\s+install\s+--immutable\s+--mode=skip-build$/
+      ) ||
+      !hasRunInvocation(
+        signerSmoke,
+        /^yarn\s+tauri\s+signer\s+generate(?:\s|\\|$)/,
+        [
+          /--ci/,
+          /--password\s+preflight-only/,
+          /--write-keys\s+"\$signer_probe\/test\.key"/,
+        ]
+      ) ||
+      !hasRunInvocation(
+        signerSmoke,
+        /^yarn\s+tauri\s+signer\s+sign(?:\s|$)/,
+        [/"\$signer_probe\/payload\.txt"/]
+      ) ||
+      !hasRunInvocation(
+        signerSmoke,
+        /^test\s+-s\s+"\$signer_probe\/payload\.txt\.sig"$/
+      ) ||
+      signerSmoke.includes('secrets.') ||
+      signerSmoke.includes('--mode=skip-builds') ||
+      YAML_CONTINUE_ON_ERROR.test(signerSmoke) ||
+      /\|\|\s*true\b/.test(signerSmoke)
+    ) {
+      failures.push(
+        'Biyan CI release-safety must exercise a real temporary signer generate/sign transaction with locked Yarn and no advisory bypass'
+      )
     }
     const helperSmoke = workflowStepBlocks(releaseSafety).find((step) =>
       hasRunInvocation(
@@ -1541,7 +2701,8 @@ export function validateCiWorkflow(source) {
       !helperSmoke ||
       !/^\s*(?:-\s*)?shell:\s*bash\s*$/m.test(helperSmoke) ||
       /^    continue-on-error:\s*/m.test(releaseSafety) ||
-      /^\s*(?:-\s*)?continue-on-error:\s*/m.test(helperSmoke) ||
+      YAML_IF.test(releaseSafety) ||
+      YAML_CONTINUE_ON_ERROR.test(helperSmoke) ||
       !hasRunInvocation(helperSmoke, /^set\s+-euo\s+pipefail$/) ||
       !/^scripts\/ci\/run-untrusted-qualification-verifier\.sh\s+\\\n--read-root\s+["']?\$probe_root["']?\s+["']?\$verifier["']?\s+["']?\$probe_root\/marker\.txt["']?$/m.test(
         helperSmokeCommands

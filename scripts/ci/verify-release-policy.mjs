@@ -5,6 +5,7 @@ import path from 'node:path'
 
 import {
   validateBundledLegalResources,
+  validateCandidateRecoveryWorkflow,
   validateCandidateWorkflow,
   validateCiControlOwnership,
   validateCiWorkflow,
@@ -175,7 +176,16 @@ if (
     'desktop release does not compile the attested Biyan data schema into candidates'
   )
 }
-for (const message of validateCandidateWorkflow(desktopRelease)) fail(message)
+for (const message of validateCandidateWorkflow(desktopRelease, {
+  requireReviewedEnvelope: true,
+})) {
+  fail(message)
+}
+for (const message of validateCandidateRecoveryWorkflow(
+  read('.github/workflows/desktop-release-recovery.yml')
+)) {
+  fail(message)
+}
 
 const releaseEnvironmentWorkflows = {
   '.github/workflows/release-distribution.yml': {

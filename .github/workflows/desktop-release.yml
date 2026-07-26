@@ -669,6 +669,13 @@ jobs:
     runs-on: ubuntu-latest
     needs: [preflight, build-macos, build-windows, build-linux]
     environment: release-distribution
+    permissions:
+      actions: read
+      contents: read
+    outputs:
+      updater_artifact_id: ${{ steps.updater.outputs.artifact-id }}
+      updater_artifact_digest: ${{ steps.updater-metadata.outputs.artifact_digest }}
+      updater_artifact_size: ${{ steps.updater-metadata.outputs.artifact_size }}
     steps:
       - name: Checkout protected release harness
         uses: actions/checkout@v4
@@ -685,7 +692,7 @@ jobs:
         run: |
           corepack enable
           corepack prepare yarn@4.5.3 --activate
-          yarn install --immutable --mode=skip-builds
+          yarn install --immutable --mode=skip-build
 
       - name: Download signed candidates
         uses: actions/download-artifact@v4
@@ -701,8 +708,6 @@ jobs:
           MIGRATION_PHASE: ${{ needs.preflight.outputs.migration_phase }}
           DATA_SCHEMA: ${{ needs.preflight.outputs.data_schema }}
           ASSET_BASE_URL: ${{ vars.BIYAN_UPDATER_ASSET_BASE_URL || 'https://static.mitapp.cn' }}
-          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
-          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
         run: |
           node scripts/updater/build-candidate.mjs \
             --version "$VERSION" \
@@ -715,10 +720,24 @@ jobs:
             --migration-phase "$MIGRATION_PHASE" \
             --data-schema "$DATA_SCHEMA"
           node scripts/ci/verify-release-policy.mjs --artifact-root dist/updater-candidate
+
+      - name: Sign canonical candidate manifest
+        env:
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+        run: |
           yarn tauri signer sign \
             --private-key "$TAURI_SIGNING_PRIVATE_KEY" \
             --password "$TAURI_SIGNING_PRIVATE_KEY_PASSWORD" \
             dist/updater-candidate/candidate.json
+
+      - name: Verify signed candidate and write hashes
+        env:
+          TAG: ${{ needs.preflight.outputs.tag }}
+        run: |
+          node scripts/updater/verify-candidate.mjs \
+            dist/updater-candidate \
+            "$TAG"
           (
             cd dist/updater-candidate
             sha256sum Biyan* candidate.json candidate.json.sig latest.json > SHA256SUMS
@@ -749,17 +768,57 @@ jobs:
           fi
 
       - name: Upload updater candidate
+        id: updater
         uses: actions/upload-artifact@v4
         with:
           name: biyan-updater-candidate-${{ needs.preflight.outputs.version }}
           if-no-files-found: error
           path: dist/updater-candidate/*
 
+      - name: Authenticate uploaded updater artifact
+        id: updater-metadata
+        env:
+          ACTION_ARTIFACT_DIGEST: ${{ steps.updater.outputs.artifact-digest }}
+          ARTIFACT_ID: ${{ steps.updater.outputs.artifact-id }}
+          ARTIFACT_NAME: biyan-updater-candidate-${{ needs.preflight.outputs.version }}
+          CURRENT_RUN_ID: ${{ github.run_id }}
+          CURRENT_SHA: ${{ github.sha }}
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          [[ "$ARTIFACT_ID" =~ ^[1-9][0-9]*$ ]]
+          [[ "$ACTION_ARTIFACT_DIGEST" =~ ^[0-9a-f]{64}$ ]]
+          artifact_digest="sha256:$ACTION_ARTIFACT_DIGEST"
+          gh api \
+            "repos/$GITHUB_REPOSITORY/actions/artifacts/$ARTIFACT_ID" \
+            >"$RUNNER_TEMP/updater-artifact.json"
+          jq -e \
+            --arg digest "$artifact_digest" \
+            --arg head "$CURRENT_SHA" \
+            --arg name "$ARTIFACT_NAME" \
+            --argjson artifact_id "$ARTIFACT_ID" \
+            --argjson run_id "$CURRENT_RUN_ID" '
+              .id == $artifact_id
+              and .name == $name
+              and .expired == false
+              and .size_in_bytes > 0
+              and .digest == $digest
+              and .workflow_run.id == $run_id
+              and .workflow_run.head_sha == $head
+            ' "$RUNNER_TEMP/updater-artifact.json" >/dev/null
+          artifact_size="$(
+            jq -er '.size_in_bytes | select(. > 0)' \
+              "$RUNNER_TEMP/updater-artifact.json"
+          )"
+          echo "artifact_digest=$artifact_digest" >>"$GITHUB_OUTPUT"
+          echo "artifact_size=$artifact_size" >>"$GITHUB_OUTPUT"
+
   draft-release:
     name: Create draft release without promoting stable
     runs-on: ubuntu-latest
     needs: [preflight, build-macos, build-windows, build-linux, package-candidate]
     permissions:
+      actions: read
       contents: write
     steps:
       - name: Checkout
@@ -769,10 +828,38 @@ jobs:
           fetch-depth: 0
           persist-credentials: false
 
-      - name: Download all candidate artifacts
-        uses: actions/download-artifact@v4
-        with:
-          path: dist
+      - name: Download exact updater archive by authenticated ID
+        env:
+          ARTIFACT_DIGEST: ${{ needs.package-candidate.outputs.updater_artifact_digest }}
+          ARTIFACT_ID: ${{ needs.package-candidate.outputs.updater_artifact_id }}
+          ARTIFACT_SIZE: ${{ needs.package-candidate.outputs.updater_artifact_size }}
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          [[ "$ARTIFACT_ID" =~ ^[1-9][0-9]*$ ]]
+          [[ "$ARTIFACT_DIGEST" =~ ^sha256:[0-9a-f]{64}$ ]]
+          [[ "$ARTIFACT_SIZE" =~ ^[1-9][0-9]*$ ]]
+          install -d -m 700 dist/recovered-updater
+          archive="dist/recovered-updater/updater.zip"
+          gh api \
+            "repos/$GITHUB_REPOSITORY/actions/artifacts/$ARTIFACT_ID/zip" \
+            >"$archive"
+          test "$(stat -c '%s' "$archive")" = "$ARTIFACT_SIZE"
+          actual_digest="sha256:$(sha256sum "$archive" | awk '{ print $1 }')"
+          if [ "$actual_digest" != "$ARTIFACT_DIGEST" ]; then
+            echo "Updater artifact archive digest mismatch" >&2
+            exit 1
+          fi
+
+      - name: Extract exact updater candidate
+        env:
+          VERSION: ${{ needs.preflight.outputs.version }}
+        run: |
+          set -euo pipefail
+          python3 scripts/ci/extract-release-candidate-recovery.py \
+            --updater-archive dist/recovered-updater/updater.zip \
+            --output-dir "dist/biyan-updater-candidate-$VERSION" \
+            --version "$VERSION"
 
       - name: Generate release notes
         run: |
@@ -786,17 +873,15 @@ jobs:
           RELEASE_TAG: ${{ needs.preflight.outputs.tag }}
         run: |
           set -euo pipefail
-          if gh api "repos/$GITHUB_REPOSITORY/releases/tags/$RELEASE_TAG" \
-            >"$RUNNER_TEMP/existing-release.json" \
-            2>"$RUNNER_TEMP/release-probe.err"; then
-            echo "A release already exists for $RELEASE_TAG; refusing to reuse its assets" >&2
-            exit 1
-          fi
-          if ! grep -q 'HTTP 404' "$RUNNER_TEMP/release-probe.err"; then
-            cat "$RUNNER_TEMP/release-probe.err" >&2
-            echo "Could not prove the release slot is absent" >&2
-            exit 1
-          fi
+          gh api \
+            --paginate \
+            --slurp \
+            "repos/$GITHUB_REPOSITORY/releases?per_page=100" \
+            >"$RUNNER_TEMP/existing-release-pages.json"
+          jq -e \
+            --arg tag "$RELEASE_TAG" '
+              [.[][] | select(.tag_name == $tag)] | length == 0
+            ' "$RUNNER_TEMP/existing-release-pages.json" >/dev/null
 
       - name: Revalidate protected main before draft release mutation
         env:
@@ -822,18 +907,137 @@ jobs:
             exit 1
           fi
 
-      - name: Create draft candidate release
-        uses: softprops/action-gh-release@v2
-        with:
-          name: Biyan ${{ needs.preflight.outputs.tag }}
-          tag_name: ${{ needs.preflight.outputs.tag }}
-          target_commitish: ${{ needs.preflight.outputs.source_commit }}
-          draft: true
-          prerelease: false
-          body_path: dist/release-notes.md
-          fail_on_unmatched_files: true
-          files: |
-            dist/biyan-updater-candidate-*/*
+      - name: Atomically create an empty Draft
+        env:
+          EXPECTED_SOURCE: ${{ needs.preflight.outputs.source_commit }}
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_TAG: ${{ needs.preflight.outputs.tag }}
+        run: |
+          set -euo pipefail
+          jq -n \
+            --arg tag "$RELEASE_TAG" \
+            --arg target "$EXPECTED_SOURCE" \
+            --arg name "Biyan $RELEASE_TAG" \
+            --rawfile body dist/release-notes.md '{
+              tag_name: $tag,
+              target_commitish: $target,
+              name: $name,
+              body: $body,
+              draft: true,
+              prerelease: false,
+              generate_release_notes: false
+            }' >"$RUNNER_TEMP/create-draft-request.json"
+          gh api \
+            --method POST \
+            "repos/$GITHUB_REPOSITORY/releases" \
+            --input "$RUNNER_TEMP/create-draft-request.json" \
+            >"$RUNNER_TEMP/created-draft.json"
+          jq -e \
+            --arg repo "$GITHUB_REPOSITORY" \
+            --arg tag "$RELEASE_TAG" '
+              (.id | type == "number" and . > 0)
+              and .name == ("Biyan " + $tag)
+              and .tag_name == $tag
+              and .draft == true
+              and .prerelease == false
+              and .published_at == null
+              and (.assets | length == 0)
+              and (.html_url |
+                test(
+                  "^https://github.com/" + $repo +
+                  "/releases/tag/untagged-[0-9a-f]{20}$"
+                ))
+              and (.upload_url |
+                startswith(
+                  "https://uploads.github.com/repos/" + $repo + "/releases/"
+                ))
+            ' "$RUNNER_TEMP/created-draft.json" >/dev/null
+          release_id="$(
+            jq -er '.id | select(type == "number" and . > 0)' \
+              "$RUNNER_TEMP/created-draft.json"
+          )"
+          gh api \
+            --paginate \
+            --slurp \
+            "repos/$GITHUB_REPOSITORY/releases?per_page=100" \
+            >"$RUNNER_TEMP/post-create-release-pages.json"
+          jq -e \
+            --arg tag "$RELEASE_TAG" \
+            --argjson release_id "$release_id" '
+              [.[][] | select(.tag_name == $tag) | .id] == [$release_id]
+            ' "$RUNNER_TEMP/post-create-release-pages.json" >/dev/null
+
+      - name: Upload exact assets only to the newly created Draft ID
+        env:
+          GH_TOKEN: ${{ github.token }}
+          VERSION: ${{ needs.preflight.outputs.version }}
+        run: |
+          set -euo pipefail
+          release_id="$(
+            jq -er '.id | select(type == "number" and . > 0)' \
+              "$RUNNER_TEMP/created-draft.json"
+          )"
+          draft_slug="$(
+            jq -er \
+              --arg repo "$GITHUB_REPOSITORY" '
+                .html_url |
+                capture(
+                  "^https://github.com/" + $repo +
+                  "/releases/tag/(?<slug>untagged-[0-9a-f]{20})$"
+                ).slug
+              ' "$RUNNER_TEMP/created-draft.json"
+          )"
+          asset_dir="dist/biyan-updater-candidate-$VERSION"
+          assets=(
+            "Biyan_${VERSION}_universal.dmg"
+            "Biyan.app.tar.gz"
+            "Biyan.app.tar.gz.sig"
+            "Biyan_${VERSION}_x64-setup.exe"
+            "Biyan_${VERSION}_x64-setup.exe.sig"
+            "Biyan_${VERSION}_x64_en-US.msi"
+            "Biyan_${VERSION}_amd64.AppImage"
+            "Biyan_${VERSION}_amd64.AppImage.sig"
+            "Biyan_${VERSION}_amd64.deb"
+            "candidate.json"
+            "candidate.json.sig"
+            "latest.json"
+            "SHA256SUMS"
+          )
+          for index in "${!assets[@]}"; do
+            name="${assets[$index]}"
+            file="$asset_dir/$name"
+            test -f "$file"
+            size="$(stat -c '%s' "$file")"
+            test "$size" -gt 0
+            digest="sha256:$(sha256sum "$file" | awk '{ print $1 }')"
+            encoded_name="$(jq -rn --arg name "$name" '$name | @uri')"
+            curl \
+              --fail-with-body \
+              --silent \
+              --show-error \
+              --request POST \
+              --header "Accept: application/vnd.github+json" \
+              --header "Authorization: Bearer $GH_TOKEN" \
+              --header "Content-Type: application/octet-stream" \
+              --header "X-GitHub-Api-Version: 2022-11-28" \
+              --data-binary "@$file" \
+              "https://uploads.github.com/repos/$GITHUB_REPOSITORY/releases/$release_id/assets?name=$encoded_name" \
+              >"$RUNNER_TEMP/uploaded-asset-$index.json"
+            jq -e \
+              --arg digest "$digest" \
+              --arg draft_slug "$draft_slug" \
+              --arg name "$name" \
+              --arg repo "$GITHUB_REPOSITORY" \
+              --argjson size "$size" '
+                .name == $name
+                and .state == "uploaded"
+                and .size == $size
+                and .digest == $digest
+                and (.browser_download_url ==
+                  ("https://github.com/" + $repo + "/releases/download/" +
+                    $draft_slug + "/" + $name))
+              ' "$RUNNER_TEMP/uploaded-asset-$index.json" >/dev/null
+          done
 
       - name: Verify exact draft release
         env:
@@ -860,31 +1064,74 @@ jobs:
             echo "$RELEASE_TAG moved while creating the draft release" >&2
             exit 1
           fi
-          expected_assets="$(
-            printf '%s\n' \
-              "Biyan_${VERSION}_universal.dmg" \
-              "Biyan.app.tar.gz" \
-              "Biyan.app.tar.gz.sig" \
-              "Biyan_${VERSION}_x64-setup.exe" \
-              "Biyan_${VERSION}_x64-setup.exe.sig" \
-              "Biyan_${VERSION}_x64_en-US.msi" \
-              "Biyan_${VERSION}_amd64.AppImage" \
-              "Biyan_${VERSION}_amd64.AppImage.sig" \
-              "Biyan_${VERSION}_amd64.deb" \
-              "candidate.json" \
-              "candidate.json.sig" \
-              "latest.json" \
-              "SHA256SUMS" |
-              jq -R . |
-              jq -s 'sort'
+          release_id="$(
+            jq -er '.id | select(type == "number" and . > 0)' \
+              "$RUNNER_TEMP/created-draft.json"
           )"
-          gh api "repos/$GITHUB_REPOSITORY/releases/tags/$RELEASE_TAG" \
+          draft_slug="$(
+            jq -er \
+              --arg repo "$GITHUB_REPOSITORY" '
+                .html_url |
+                capture(
+                  "^https://github.com/" + $repo +
+                  "/releases/tag/(?<slug>untagged-[0-9a-f]{20})$"
+                ).slug
+              ' "$RUNNER_TEMP/created-draft.json"
+          )"
+          asset_dir="dist/biyan-updater-candidate-$VERSION"
+          : >"$RUNNER_TEMP/expected-assets.ndjson"
+          for file in "$asset_dir"/*; do
+            test -f "$file"
+            name="$(basename "$file")"
+            size="$(stat -c '%s' "$file")"
+            digest="sha256:$(sha256sum "$file" | awk '{ print $1 }')"
+            jq -n \
+              --arg digest "$digest" \
+              --arg name "$name" \
+              --argjson size "$size" \
+              '{ name: $name, size: $size, digest: $digest }' \
+              >>"$RUNNER_TEMP/expected-assets.ndjson"
+          done
+          expected_assets="$(
+            jq -s 'sort_by(.name)' "$RUNNER_TEMP/expected-assets.ndjson"
+          )"
+          gh api "repos/$GITHUB_REPOSITORY/releases/$release_id" \
             >"$RUNNER_TEMP/draft-release.json"
           jq -e \
+            --arg repo "$GITHUB_REPOSITORY" \
             --arg tag "$RELEASE_TAG" \
+            --arg draft_slug "$draft_slug" \
+            --argjson release_id "$release_id" \
             --argjson expected "$expected_assets" '
-              .tag_name == $tag
+              .id == $release_id
+              and .name == ("Biyan " + $tag)
+              and .tag_name == $tag
               and .draft == true
               and .prerelease == false
-              and (([.assets[].name] | sort) == $expected)
+              and .published_at == null
+              and (.html_url ==
+                ("https://github.com/" + $repo + "/releases/tag/" +
+                  $draft_slug))
+              and (([.assets[] | { name, size, digest }] |
+                sort_by(.name)) == $expected)
+              and all(.assets[];
+                .state == "uploaded"
+                and .size > 0
+                and (.digest | test("^sha256:[0-9a-f]{64}$"))
+                and (.browser_download_url |
+                  startswith(
+                    "https://github.com/" + $repo +
+                    "/releases/download/" + $draft_slug + "/"
+                  ))
+              )
             ' "$RUNNER_TEMP/draft-release.json" >/dev/null
+          gh api \
+            --paginate \
+            --slurp \
+            "repos/$GITHUB_REPOSITORY/releases?per_page=100" \
+            >"$RUNNER_TEMP/final-release-pages.json"
+          jq -e \
+            --arg tag "$RELEASE_TAG" \
+            --argjson release_id "$release_id" '
+              [.[][] | select(.tag_name == $tag) | .id] == [$release_id]
+            ' "$RUNNER_TEMP/final-release-pages.json" >/dev/null

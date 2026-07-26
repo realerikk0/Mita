@@ -266,7 +266,7 @@ jobs:
   release-safety:
     name: Release safety policy
     runs-on: ubuntu-24.04
-    timeout-minutes: 10
+    timeout-minutes: 15
     steps:
       - name: Getting the repo
         uses: actions/checkout@v4
@@ -279,6 +279,24 @@ jobs:
           ruby -e 'require "yaml"; ARGV.each { |file| YAML.parse_file(file) }' \
             .github/workflows/*.yml .github/workflows/*.yaml
 
+      - name: Exercise locked candidate signer install
+        run: |
+          set -euo pipefail
+          corepack enable
+          corepack prepare yarn@4.5.3 --activate
+          yarn install --immutable --mode=skip-build
+          signer_probe="$RUNNER_TEMP/tauri-signer-probe"
+          install -d -m 700 "$signer_probe"
+          printf 'biyan signer preflight\n' >"$signer_probe/payload.txt"
+          yarn tauri signer generate \
+            --ci \
+            --password preflight-only \
+            --write-keys "$signer_probe/test.key"
+          TAURI_SIGNING_PRIVATE_KEY_PATH="$signer_probe/test.key" \
+            TAURI_SIGNING_PRIVATE_KEY_PASSWORD=preflight-only \
+            yarn tauri signer sign "$signer_probe/payload.txt"
+          test -s "$signer_probe/payload.txt.sig"
+
       - name: Verify private packages, signing keys, egress, and artifact policy
         run: node scripts/ci/verify-release-policy.mjs
 
@@ -288,6 +306,8 @@ jobs:
           node --test scripts/ci/__tests__/cloudflare-preview-cleanup.test.mjs
           node --test scripts/ci/__tests__/legacy-compatibility-policy.test.mjs
           node --test scripts/ci/__tests__/release-policy.test.mjs
+          python3 scripts/ci/__tests__/extract-release-candidate-recovery.test.py
+          node --test scripts/ci/__tests__/verify-release-candidate-recovery.test.mjs
           node --test scripts/ci/__tests__/verify-release-target.test.mjs
 
       - name: Test updater candidate, promotion, and routing contracts
