@@ -842,7 +842,38 @@ ${candidateReleasePin}
             jq -er '.id | select(type == "number" and . > 0)' \\
               "$RUNNER_TEMP/created-draft.json"
           )"
-          jq -e '[.[][] | select(.tag_name == $tag) | .id] == [$release_id]' releases.json
+          draft_visible=0
+          for attempt in {1..15}; do
+            if ! gh api \\
+              --paginate \\
+              --slurp \\
+              "repos/$GITHUB_REPOSITORY/releases?per_page=100" \\
+              >"$RUNNER_TEMP/post-create-release-pages.json"; then
+              echo "Unable to enumerate the newly created Draft" >&2
+              exit 1
+            fi
+            matching_ids="$(
+              jq -ce \\
+                --arg tag "$RELEASE_TAG" '
+                  [.[][] | select(.tag_name == $tag) | .id]
+                ' "$RUNNER_TEMP/post-create-release-pages.json"
+            )"
+            if [ "$matching_ids" = "[$release_id]" ]; then
+              draft_visible=1
+              break
+            fi
+            if [ "$matching_ids" != "[]" ]; then
+              echo "Draft readback returned a conflicting release ID" >&2
+              exit 1
+            fi
+            if [ "$attempt" -lt 15 ]; then
+              sleep 2
+            fi
+          done
+          if [ "$draft_visible" -ne 1 ]; then
+            echo "Newly created Draft did not become visible" >&2
+            exit 1
+          fi
       - name: Upload exact assets only to the newly created Draft ID
         run: |
           release_id="$(
@@ -1467,6 +1498,18 @@ test('candidate Draft mutations match reviewed execution envelopes', () => {
     )
   )
 
+  const unboundedReadback = replaceInNamedStep(
+    workflow,
+    'Atomically create an empty Draft',
+    '          for attempt in {1..15}; do',
+    '          for attempt in {1..150}; do'
+  )
+  assert.ok(
+    validateCandidateWorkflow(unboundedReadback).some((failure) =>
+      failure.includes('atomically create one empty Draft ID')
+    )
+  )
+
   const exactDigest = [
     '                .name == $name',
     '                and .state == "uploaded"',
@@ -1870,6 +1913,19 @@ test('candidate recovery authenticates exact artifacts and only resumes package 
     )
   )
 
+  const waitsOnConflictingReadback = replaceInNamedStep(
+    workflow,
+    'Atomically create an empty recovered Draft',
+    '            if [ "$matching_ids" != "[]" ]; then',
+    '            if [ "$matching_ids" = "[]" ]; then'
+  )
+  assert.ok(
+    validateCandidateRecoveryWorkflow(waitsOnConflictingReadback).some(
+      (failure) =>
+        failure.includes('atomically POST a new empty Draft')
+    )
+  )
+
   const extraDraftMutation = workflow.replace(
     '      - name: Verify exact recovered draft release\n',
     `      - name: Unauthorized publish mutation
@@ -1939,6 +1995,121 @@ test('candidate recovery authenticates exact artifacts and only resumes package 
     }
   }
 })
+
+test(
+  'Draft readback retries only empty successful listings and fails closed',
+  { skip: process.platform === 'win32' },
+  () => {
+    const extractReadbackLoop = (file, stepName) => {
+      const source = normalizeLineEndings(fs.readFileSync(file, 'utf8'))
+      const marker = `      - name: ${stepName}\n`
+      const start = source.indexOf(marker)
+      assert.notEqual(start, -1, stepName)
+      const next = source.indexOf('\n      - name: ', start + marker.length)
+      const step = source.slice(start, next < 0 ? source.length : next)
+      const loopStart = step.indexOf('          draft_visible=0\n')
+      assert.notEqual(loopStart, -1, `${stepName} readback loop`)
+      return step
+        .slice(loopStart)
+        .split('\n')
+        .map((line) => line.replace(/^ {10}/, ''))
+        .join('\n')
+        .trimEnd()
+    }
+
+    const formal = extractReadbackLoop(
+      '.github/workflows/desktop-release.yml',
+      'Atomically create an empty Draft'
+    )
+    const recovery = extractReadbackLoop(
+      '.github/workflows/desktop-release-recovery.yml',
+      'Atomically create an empty recovered Draft'
+    )
+    assert.equal(formal, recovery)
+
+    const directory = fs.mkdtempSync(
+      path.join(os.tmpdir(), 'biyan-draft-readback-')
+    )
+    const run = (scenario) => {
+      const harness = [
+        'set -euo pipefail',
+        'COUNT=0',
+        'SLEEPS=0',
+        'release_id=123',
+        'RELEASE_TAG=v0.6.643',
+        'GITHUB_REPOSITORY=example/Biyan',
+        'sleep() { SLEEPS=$((SLEEPS + 1)); }',
+        'gh() {',
+        '  COUNT=$((COUNT + 1))',
+        '  case "$SCENARIO:$COUNT" in',
+        "    exact:1|empty_then_exact:3) printf '%s\\n' '[[{\"tag_name\":\"v0.6.643\",\"id\":123}]]' ;;",
+        "    empty_then_exact:1|empty_then_exact:2|empty_timeout:*) printf '%s\\n' '[[]]' ;;",
+        "    wrong:*) printf '%s\\n' '[[{\"tag_name\":\"v0.6.643\",\"id\":999}]]' ;;",
+        "    duplicate:*) printf '%s\\n' '[[{\"tag_name\":\"v0.6.643\",\"id\":123},{\"tag_name\":\"v0.6.643\",\"id\":123}]]' ;;",
+        '    api_fail:*) return 1 ;;',
+        "    malformed:*) printf '%s\\n' '{' ;;",
+        '    *) return 2 ;;',
+        '  esac',
+        '}',
+        "trap 'printf \"calls=%s sleeps=%s\\n\" \"$COUNT\" \"$SLEEPS\" >&2' EXIT",
+        formal,
+      ].join('\n')
+      const result = spawnSync('bash', ['-c', harness], {
+        encoding: 'utf8',
+        env: {
+          ...process.env,
+          RUNNER_TEMP: directory,
+          SCENARIO: scenario,
+        },
+      })
+      assert.ifError(result.error)
+      const state = /calls=(\d+) sleeps=(\d+)/.exec(result.stderr)
+      assert.ok(state, result.stderr)
+      return {
+        status: result.status,
+        calls: Number(state[1]),
+        sleeps: Number(state[2]),
+      }
+    }
+
+    try {
+      assert.deepEqual(run('exact'), { status: 0, calls: 1, sleeps: 0 })
+      assert.deepEqual(run('empty_then_exact'), {
+        status: 0,
+        calls: 3,
+        sleeps: 2,
+      })
+      assert.deepEqual(run('empty_timeout'), {
+        status: 1,
+        calls: 15,
+        sleeps: 14,
+      })
+      assert.deepEqual(run('wrong'), {
+        status: 1,
+        calls: 1,
+        sleeps: 0,
+      })
+      assert.deepEqual(run('duplicate'), {
+        status: 1,
+        calls: 1,
+        sleeps: 0,
+      })
+      assert.deepEqual(run('api_fail'), {
+        status: 1,
+        calls: 1,
+        sleeps: 0,
+      })
+      const malformed = run('malformed')
+      assert.notEqual(malformed.status, 0)
+      assert.deepEqual(
+        { calls: malformed.calls, sleeps: malformed.sleeps },
+        { calls: 1, sleeps: 0 }
+      )
+    } finally {
+      fs.rmSync(directory, { recursive: true, force: true })
+    }
+  }
+)
 
 test(
   'desktop release tag resolvers execute and peel annotated tags',

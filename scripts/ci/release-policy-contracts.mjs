@@ -60,11 +60,11 @@ const TRUSTED_RECOVERY_JOB_ORDER = [
 ]
 
 const TRUSTED_CANDIDATE_WORKFLOW_ALLOWLIST = new Set([
-  'c3965902e16c1701b15df37597996195f0a05857149685e24193f7dc815bf393',
+  '96c8d8f3b0856dddcb87582381d6bd72ae6359b445905fde6a5cc06cd9597bb1',
 ])
 
 const TRUSTED_RECOVERY_WORKFLOW_ALLOWLIST = new Set([
-  '24dcb09e01b701c890f6dd87c61333af9039dbdcaeb30f794b39747c63f1570f',
+  'adcea2c0c3548852f411ac578f8432cf127fd42e6cb46512de9a47823b12c251',
 ])
 
 function jobBlock(source, jobName) {
@@ -418,6 +418,35 @@ function stepLoadsCreatedDraftId(step) {
     selectorIndex === assignmentIndex + 1 &&
     sourceIndex === selectorIndex + 1 &&
     closeIndex === sourceIndex + 1
+  )
+}
+
+function stepWaitsForCreatedDraftReadback(step) {
+  if (!step) return false
+  return (
+    step.includes('draft_visible=0') &&
+    step.includes('for attempt in {1..15}; do') &&
+    hasCommandSequence(step, [
+      'if ! gh api \\',
+      '--paginate \\',
+      '--slurp \\',
+      '"repos/$GITHUB_REPOSITORY/releases?per_page=100" \\',
+      '>"$RUNNER_TEMP/post-create-release-pages.json"; then',
+    ]) &&
+    step.includes('Unable to enumerate the newly created Draft') &&
+    step.includes('matching_ids="$(') &&
+    step.includes(
+      '[.[][] | select(.tag_name == $tag) | .id]'
+    ) &&
+    step.includes('[ "$matching_ids" = "[$release_id]" ]') &&
+    step.includes('draft_visible=1') &&
+    step.includes('[ "$matching_ids" != "[]" ]') &&
+    step.includes('Draft readback returned a conflicting release ID') &&
+    step.includes('if [ "$attempt" -lt 15 ]; then') &&
+    (step.match(/\bsleep 2\b/g) ?? []).length === 1 &&
+    step.includes('if [ "$draft_visible" -ne 1 ]; then') &&
+    step.includes('Newly created Draft did not become visible') &&
+    (step.match(/\bexit 1\b/g) ?? []).length >= 3
   )
 }
 
@@ -1436,9 +1465,7 @@ export function validateCandidateWorkflow(
         '/releases/tag/untagged-[0-9a-f]{20}$'
       ) ||
       !stepLoadsCreatedDraftId(createDraft) ||
-      !createDraft.includes(
-        '[.[][] | select(.tag_name == $tag) | .id] == [$release_id]'
-      )
+      !stepWaitsForCreatedDraftReadback(createDraft)
     ) {
       failures.push(
         'draft-release must enumerate all releases, pin source, and atomically create one empty Draft ID'
@@ -2095,16 +2122,7 @@ export function validateCandidateRecoveryWorkflow(source) {
         '/releases/tag/untagged-[0-9a-f]{20}$'
       ) ||
       !stepLoadsCreatedDraftId(createDraft) ||
-      !hasCommandSequence(createDraft, [
-        'gh api \\',
-        '--paginate \\',
-        '--slurp \\',
-        '"repos/$GITHUB_REPOSITORY/releases?per_page=100" \\',
-        '>"$RUNNER_TEMP/post-create-release-pages.json"',
-      ]) ||
-      !createDraft.includes(
-        '[.[][] | select(.tag_name == $tag) | .id] == [$release_id]'
-      )
+      !stepWaitsForCreatedDraftReadback(createDraft)
     ) {
       failures.push(
         'candidate recovery must pin main and tag, atomically POST a new empty Draft, and bind every later mutation to its returned ID'

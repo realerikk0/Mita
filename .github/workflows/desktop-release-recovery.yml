@@ -633,16 +633,38 @@ jobs:
             jq -er '.id | select(type == "number" and . > 0)' \
               "$RUNNER_TEMP/created-draft.json"
           )"
-          gh api \
-            --paginate \
-            --slurp \
-            "repos/$GITHUB_REPOSITORY/releases?per_page=100" \
-            >"$RUNNER_TEMP/post-create-release-pages.json"
-          jq -e \
-            --arg tag "$RELEASE_TAG" \
-            --argjson release_id "$release_id" '
-              [.[][] | select(.tag_name == $tag) | .id] == [$release_id]
-            ' "$RUNNER_TEMP/post-create-release-pages.json" >/dev/null
+          draft_visible=0
+          for attempt in {1..15}; do
+            if ! gh api \
+              --paginate \
+              --slurp \
+              "repos/$GITHUB_REPOSITORY/releases?per_page=100" \
+              >"$RUNNER_TEMP/post-create-release-pages.json"; then
+              echo "Unable to enumerate the newly created Draft" >&2
+              exit 1
+            fi
+            matching_ids="$(
+              jq -ce \
+                --arg tag "$RELEASE_TAG" '
+                  [.[][] | select(.tag_name == $tag) | .id]
+                ' "$RUNNER_TEMP/post-create-release-pages.json"
+            )"
+            if [ "$matching_ids" = "[$release_id]" ]; then
+              draft_visible=1
+              break
+            fi
+            if [ "$matching_ids" != "[]" ]; then
+              echo "Draft readback returned a conflicting release ID" >&2
+              exit 1
+            fi
+            if [ "$attempt" -lt 15 ]; then
+              sleep 2
+            fi
+          done
+          if [ "$draft_visible" -ne 1 ]; then
+            echo "Newly created Draft did not become visible" >&2
+            exit 1
+          fi
 
       - name: Upload exact assets only to the newly created Draft ID
         env:
