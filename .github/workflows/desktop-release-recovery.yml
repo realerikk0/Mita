@@ -1,0 +1,814 @@
+name: Desktop Release Candidate Recovery
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "Existing release tag to recover, for example v0.6.643"
+        required: true
+        type: string
+      source_run_id:
+        description: "Failed Desktop Release Candidate run with three accepted platform artifacts"
+        required: true
+        type: string
+
+permissions:
+  actions: read
+  contents: read
+
+concurrency:
+  group: desktop-candidate-${{ inputs.version }}
+  cancel-in-progress: false
+
+env:
+  NODE_OPTIONS: "--max-old-space-size=4196"
+  YARN_ENABLE_IMMUTABLE_INSTALLS: "true"
+
+jobs:
+  preflight:
+    name: Authenticate failed candidate artifacts
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    outputs:
+      version: ${{ steps.release.outputs.version }}
+      tag: ${{ steps.release.outputs.tag }}
+      published_at: ${{ steps.release.outputs.published_at }}
+      source_commit: ${{ steps.release.outputs.source_commit }}
+      trusted_main_commit: ${{ steps.release.outputs.trusted_main_commit }}
+      migration_phase: ${{ steps.release.outputs.migration_phase }}
+      data_schema: ${{ steps.release.outputs.data_schema }}
+      source_run_id: ${{ steps.recovery.outputs.source_run_id }}
+      source_run_head: ${{ steps.recovery.outputs.source_run_head }}
+      linux_artifact_id: ${{ steps.recovery.outputs.linux_artifact_id }}
+      linux_artifact_digest: ${{ steps.recovery.outputs.linux_artifact_digest }}
+      linux_artifact_size: ${{ steps.recovery.outputs.linux_artifact_size }}
+      macos_artifact_id: ${{ steps.recovery.outputs.macos_artifact_id }}
+      macos_artifact_digest: ${{ steps.recovery.outputs.macos_artifact_digest }}
+      macos_artifact_size: ${{ steps.recovery.outputs.macos_artifact_size }}
+      windows_artifact_id: ${{ steps.recovery.outputs.windows_artifact_id }}
+      windows_artifact_digest: ${{ steps.recovery.outputs.windows_artifact_digest }}
+      windows_artifact_size: ${{ steps.recovery.outputs.windows_artifact_size }}
+    steps:
+      - name: Checkout protected recovery harness
+        uses: actions/checkout@v4
+        with:
+          ref: mita-main
+          path: harness
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Checkout exact release target
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.version }}
+          path: target
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+
+      - name: Resolve immutable recovery metadata
+        id: release
+        shell: bash
+        env:
+          RELEASE_TAG: ${{ inputs.version }}
+          SOURCE_RUN_ID: ${{ inputs.source_run_id }}
+          WORKFLOW_REF: ${{ github.ref }}
+        run: |
+          set -euo pipefail
+          if [ "$WORKFLOW_REF" != "refs/heads/mita-main" ]; then
+            echo "Candidate recovery must use protected mita-main" >&2
+            exit 1
+          fi
+          if [[ ! "$RELEASE_TAG" =~ ^v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$ ]]; then
+            echo "Recovery tag must be a canonical stable semantic version prefixed with v" >&2
+            exit 1
+          fi
+          if [[ ! "$SOURCE_RUN_ID" =~ ^[1-9][0-9]*$ ]]; then
+            echo "Source run ID must be a positive integer" >&2
+            exit 1
+          fi
+          if [ "$SOURCE_RUN_ID" != "30195339449" ]; then
+            echo "Recovery is locked to accepted source run 30195339449" >&2
+            exit 1
+          fi
+          version="${RELEASE_TAG#v}"
+          git -C harness fetch --force --no-tags origin \
+            "+refs/heads/mita-main:refs/remotes/origin/mita-main" \
+            "+refs/tags/$RELEASE_TAG:refs/tags/$RELEASE_TAG"
+          checkout_head="$(git -C harness rev-parse HEAD)"
+          live_main="$(git -C harness rev-parse refs/remotes/origin/mita-main)"
+          if [ "$checkout_head" != "$live_main" ]; then
+            echo "Protected recovery harness is not live origin/mita-main" >&2
+            exit 1
+          fi
+          source_commit="$(git -C harness rev-list -n 1 "refs/tags/$RELEASE_TAG")"
+          test "$source_commit" = "$(git -C target rev-parse HEAD)"
+          test "$source_commit" = "$(git -C target rev-list -n 1 "refs/tags/$RELEASE_TAG")"
+          git -C harness merge-base --is-ancestor \
+            "$source_commit" refs/remotes/origin/mita-main
+          jq -e '
+            .schema == 1
+            and (.migrationPhase == "A" or .migrationPhase == "B" or .migrationPhase == "C")
+            and ((.migrationPhase == "A" and .dataSchema == 1)
+              or (.migrationPhase == "B" and .dataSchema == 2)
+              or (.migrationPhase == "C" and .dataSchema == 3))
+          ' target/biyan-release.json >/dev/null
+          {
+            echo "version=$version"
+            echo "tag=$RELEASE_TAG"
+            echo "published_at=$(git -C target show -s --format=%cI "$source_commit")"
+            echo "source_commit=$source_commit"
+            echo "trusted_main_commit=$live_main"
+            echo "migration_phase=$(jq -r .migrationPhase target/biyan-release.json)"
+            echo "data_schema=$(jq -r .dataSchema target/biyan-release.json)"
+          } >>"$GITHUB_OUTPUT"
+
+      - name: Verify exact tag with protected release policy
+        env:
+          RELEASE_TAG: ${{ steps.release.outputs.tag }}
+          SOURCE_COMMIT: ${{ steps.release.outputs.source_commit }}
+          TRUSTED_MAIN: ${{ steps.release.outputs.trusted_main_commit }}
+        run: |
+          node harness/scripts/ci/verify-release-target.mjs \
+            --harness-root harness \
+            --release-tag "$RELEASE_TAG" \
+            --target-root target \
+            --source-commit "$SOURCE_COMMIT" \
+            --trusted-main "$TRUSTED_MAIN"
+
+      - name: Fetch exact source run metadata
+        env:
+          GH_TOKEN: ${{ github.token }}
+          SOURCE_RUN_ID: ${{ inputs.source_run_id }}
+        run: |
+          set -euo pipefail
+          install -d -m 700 "$RUNNER_TEMP/recovery-metadata"
+          gh api \
+            "repos/$GITHUB_REPOSITORY/actions/runs/$SOURCE_RUN_ID" \
+            >"$RUNNER_TEMP/recovery-metadata/run.json"
+          gh api \
+            "repos/$GITHUB_REPOSITORY/actions/runs/$SOURCE_RUN_ID/jobs?per_page=100" \
+            >"$RUNNER_TEMP/recovery-metadata/jobs.json"
+          gh api \
+            "repos/$GITHUB_REPOSITORY/actions/runs/$SOURCE_RUN_ID/artifacts?per_page=100" \
+            >"$RUNNER_TEMP/recovery-metadata/artifacts.json"
+
+      - name: Authenticate source run and accepted artifacts
+        id: recovery
+        env:
+          CURRENT_RUN_ID: ${{ github.run_id }}
+          SOURCE_RUN_ID: ${{ inputs.source_run_id }}
+          TRUSTED_MAIN: ${{ steps.release.outputs.trusted_main_commit }}
+          VERSION: ${{ steps.release.outputs.version }}
+        run: |
+          set -euo pipefail
+          node harness/scripts/ci/verify-release-candidate-recovery.mjs \
+            --run "$RUNNER_TEMP/recovery-metadata/run.json" \
+            --jobs "$RUNNER_TEMP/recovery-metadata/jobs.json" \
+            --artifacts "$RUNNER_TEMP/recovery-metadata/artifacts.json" \
+            --source-run-id "$SOURCE_RUN_ID" \
+            --current-run-id "$CURRENT_RUN_ID" \
+            --repository "$GITHUB_REPOSITORY" \
+            --version "$VERSION" \
+            --output "$RUNNER_TEMP/recovery-metadata/summary.json"
+          source_head="$(
+            jq -er '.sourceHeadSha | select(test("^[0-9a-f]{40}$"))' \
+              "$RUNNER_TEMP/recovery-metadata/summary.json"
+          )"
+          git -C harness merge-base --is-ancestor "$source_head" "$TRUSTED_MAIN"
+          {
+            printf 'M\t%s\n' \
+              ".github/workflows/biyan-linter-and-test.yml"
+            printf 'A\t%s\n' \
+              ".github/workflows/desktop-release-recovery.yml"
+            printf 'M\t%s\n' \
+              ".github/workflows/desktop-release.yml"
+            printf 'A\t%s\n' \
+              "scripts/ci/__tests__/extract-release-candidate-recovery.test.py"
+            printf 'M\t%s\n' \
+              "scripts/ci/__tests__/release-policy.test.mjs"
+            printf 'A\t%s\n' \
+              "scripts/ci/__tests__/verify-release-candidate-recovery.test.mjs"
+            printf 'M\t%s\n' \
+              "scripts/ci/__tests__/verify-release-target.test.mjs"
+            printf 'A\t%s\n' \
+              "scripts/ci/extract-release-candidate-recovery.py"
+            printf 'M\t%s\n' \
+              "scripts/ci/legacy-compatibility-allowlist.json"
+            printf 'M\t%s\n' \
+              "scripts/ci/release-policy-contracts.mjs"
+            printf 'A\t%s\n' \
+              "scripts/ci/verify-release-candidate-recovery.mjs"
+            printf 'M\t%s\n' \
+              "scripts/ci/verify-release-policy.mjs"
+            printf 'M\t%s\n' \
+              "scripts/ci/verify-release-target.mjs"
+          } | sort >"$RUNNER_TEMP/recovery-metadata/expected-control-drift.txt"
+          git -C harness diff \
+            --name-status \
+            --no-renames \
+            "$source_head" \
+            "$TRUSTED_MAIN" |
+            sort >"$RUNNER_TEMP/recovery-metadata/actual-control-drift.txt"
+          diff -u \
+            "$RUNNER_TEMP/recovery-metadata/expected-control-drift.txt" \
+            "$RUNNER_TEMP/recovery-metadata/actual-control-drift.txt"
+          emit_artifact() {
+            local platform="$1"
+            local name="$2"
+            local id digest size
+            id="$(
+              jq -er --arg name "$name" \
+                '.artifacts[] | select(.name == $name) | .id' \
+                "$RUNNER_TEMP/recovery-metadata/summary.json"
+            )"
+            digest="$(
+              jq -er --arg name "$name" \
+                '.artifacts[] | select(.name == $name) |
+                  .digest | select(test("^sha256:[0-9a-f]{64}$"))' \
+                "$RUNNER_TEMP/recovery-metadata/summary.json"
+            )"
+            size="$(
+              jq -er --arg name "$name" \
+                '.artifacts[] | select(.name == $name) |
+                  .sizeInBytes | select(. > 0)' \
+                "$RUNNER_TEMP/recovery-metadata/summary.json"
+            )"
+            {
+              echo "${platform}_artifact_id=$id"
+              echo "${platform}_artifact_digest=$digest"
+              echo "${platform}_artifact_size=$size"
+            } >>"$GITHUB_OUTPUT"
+          }
+          {
+            echo "source_run_id=$SOURCE_RUN_ID"
+            echo "source_run_head=$source_head"
+          } >>"$GITHUB_OUTPUT"
+          emit_artifact \
+            linux \
+            "biyan-linux-x64-$VERSION"
+          emit_artifact \
+            macos \
+            "biyan-macos-universal-$VERSION"
+          emit_artifact \
+            windows \
+            "biyan-windows-x64-$VERSION"
+
+      - name: Test protected recovery policy contracts
+        working-directory: harness
+        run: |
+          node --test scripts/ci/__tests__/release-policy.test.mjs
+          node --test scripts/ci/__tests__/verify-release-target.test.mjs
+          python3 scripts/ci/__tests__/extract-release-candidate-recovery.test.py
+          node --test scripts/ci/__tests__/verify-release-candidate-recovery.test.mjs
+
+      - name: Require an unused release slot
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_TAG: ${{ steps.release.outputs.tag }}
+        run: |
+          set -euo pipefail
+          gh api \
+            --paginate \
+            --slurp \
+            "repos/$GITHUB_REPOSITORY/releases?per_page=100" \
+            >"$RUNNER_TEMP/existing-release-pages.json"
+          jq -e \
+            --arg tag "$RELEASE_TAG" '
+              [.[][] | select(.tag_name == $tag)] | length == 0
+            ' "$RUNNER_TEMP/existing-release-pages.json" >/dev/null
+
+  package-candidate:
+    name: Recover immutable updater candidate
+    runs-on: ubuntu-24.04
+    needs: preflight
+    environment: release-distribution
+    timeout-minutes: 60
+    outputs:
+      updater_artifact_id: ${{ steps.updater.outputs.artifact-id }}
+      updater_artifact_digest: ${{ steps.updater-metadata.outputs.artifact_digest }}
+      updater_artifact_size: ${{ steps.updater-metadata.outputs.artifact_size }}
+    steps:
+      - name: Checkout protected release harness
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.preflight.outputs.trusted_main_commit }}
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+
+      - name: Install locked Tauri signer
+        run: |
+          corepack enable
+          corepack prepare yarn@4.5.3 --activate
+          yarn install --immutable --mode=skip-build
+
+      - name: Download exact artifact archives by authenticated ID
+        env:
+          GH_TOKEN: ${{ github.token }}
+          LINUX_ARTIFACT_DIGEST: ${{ needs.preflight.outputs.linux_artifact_digest }}
+          LINUX_ARTIFACT_ID: ${{ needs.preflight.outputs.linux_artifact_id }}
+          LINUX_ARTIFACT_SIZE: ${{ needs.preflight.outputs.linux_artifact_size }}
+          MACOS_ARTIFACT_DIGEST: ${{ needs.preflight.outputs.macos_artifact_digest }}
+          MACOS_ARTIFACT_ID: ${{ needs.preflight.outputs.macos_artifact_id }}
+          MACOS_ARTIFACT_SIZE: ${{ needs.preflight.outputs.macos_artifact_size }}
+          WINDOWS_ARTIFACT_DIGEST: ${{ needs.preflight.outputs.windows_artifact_digest }}
+          WINDOWS_ARTIFACT_ID: ${{ needs.preflight.outputs.windows_artifact_id }}
+          WINDOWS_ARTIFACT_SIZE: ${{ needs.preflight.outputs.windows_artifact_size }}
+        run: |
+          set -euo pipefail
+          install -d -m 700 dist/recovery-archives
+          download_exact_archive() {
+            local platform="$1"
+            local artifact_id="$2"
+            local artifact_digest="$3"
+            local artifact_size="$4"
+            local archive="dist/recovery-archives/${platform}.zip"
+            [[ "$artifact_id" =~ ^[1-9][0-9]*$ ]]
+            [[ "$artifact_digest" =~ ^sha256:[0-9a-f]{64}$ ]]
+            [[ "$artifact_size" =~ ^[1-9][0-9]*$ ]]
+            gh api \
+              "repos/$GITHUB_REPOSITORY/actions/artifacts/$artifact_id/zip" \
+              >"$archive"
+            test "$(stat -c '%s' "$archive")" = "$artifact_size"
+            actual_digest="sha256:$(sha256sum "$archive" | awk '{ print $1 }')"
+            if [ "$actual_digest" != "$artifact_digest" ]; then
+              echo "$platform artifact archive digest mismatch" >&2
+              exit 1
+            fi
+          }
+          download_exact_archive \
+            linux \
+            "$LINUX_ARTIFACT_ID" \
+            "$LINUX_ARTIFACT_DIGEST" \
+            "$LINUX_ARTIFACT_SIZE"
+          download_exact_archive \
+            macos \
+            "$MACOS_ARTIFACT_ID" \
+            "$MACOS_ARTIFACT_DIGEST" \
+            "$MACOS_ARTIFACT_SIZE"
+          download_exact_archive \
+            windows \
+            "$WINDOWS_ARTIFACT_ID" \
+            "$WINDOWS_ARTIFACT_DIGEST" \
+            "$WINDOWS_ARTIFACT_SIZE"
+
+      - name: Extract only the exact recovered candidate inventory
+        env:
+          VERSION: ${{ needs.preflight.outputs.version }}
+        run: |
+          set -euo pipefail
+          python3 scripts/ci/extract-release-candidate-recovery.py \
+            --archives-dir dist/recovery-archives \
+            --output-dir dist/builds \
+            --version "$VERSION"
+
+      - name: Build canonical candidate manifest
+        env:
+          VERSION: ${{ needs.preflight.outputs.version }}
+          TAG: ${{ needs.preflight.outputs.tag }}
+          PUBLISHED_AT: ${{ needs.preflight.outputs.published_at }}
+          SOURCE_COMMIT: ${{ needs.preflight.outputs.source_commit }}
+          MIGRATION_PHASE: ${{ needs.preflight.outputs.migration_phase }}
+          DATA_SCHEMA: ${{ needs.preflight.outputs.data_schema }}
+          ASSET_BASE_URL: ${{ vars.BIYAN_UPDATER_ASSET_BASE_URL || 'https://static.mitapp.cn' }}
+        run: |
+          node scripts/updater/build-candidate.mjs \
+            --version "$VERSION" \
+            --tag "$TAG" \
+            --artifacts-dir dist/builds \
+            --output-dir dist/updater-candidate \
+            --asset-base-url "$ASSET_BASE_URL" \
+            --published-at "$PUBLISHED_AT" \
+            --source-commit "$SOURCE_COMMIT" \
+            --migration-phase "$MIGRATION_PHASE" \
+            --data-schema "$DATA_SCHEMA"
+          node scripts/ci/verify-release-policy.mjs \
+            --artifact-root dist/updater-candidate
+
+      - name: Sign canonical candidate manifest
+        env:
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+        run: |
+          yarn tauri signer sign \
+            --private-key "$TAURI_SIGNING_PRIVATE_KEY" \
+            --password "$TAURI_SIGNING_PRIVATE_KEY_PASSWORD" \
+            dist/updater-candidate/candidate.json
+
+      - name: Verify signed candidate and write hashes
+        env:
+          TAG: ${{ needs.preflight.outputs.tag }}
+        run: |
+          node scripts/updater/verify-candidate.mjs \
+            dist/updater-candidate \
+            "$TAG"
+          (
+            cd dist/updater-candidate
+            sha256sum \
+              Biyan* candidate.json candidate.json.sig latest.json \
+              >SHA256SUMS
+          )
+
+      - name: Revalidate protected main before updater artifact mutation
+        env:
+          EXPECTED_MAIN: ${{ needs.preflight.outputs.trusted_main_commit }}
+          EXPECTED_SOURCE: ${{ needs.preflight.outputs.source_commit }}
+          RELEASE_TAG: ${{ needs.preflight.outputs.tag }}
+        run: |
+          set -euo pipefail
+          live_main="$(git ls-remote --exit-code origin refs/heads/mita-main | awk 'NF == 2 { print $1 }')"
+          if [[ ! "$live_main" =~ ^[0-9a-f]{40}$ ]] || [ "$live_main" != "$EXPECTED_MAIN" ]; then
+            echo "origin/mita-main moved before updater artifact upload" >&2
+            exit 1
+          fi
+          tag_refs="$(git ls-remote --exit-code origin \
+            "refs/tags/$RELEASE_TAG" "refs/tags/$RELEASE_TAG^{}")"
+          live_tag="$(printf '%s\n' "$tag_refs" | awk -v tag="refs/tags/$RELEASE_TAG" '
+            $2 == tag { direct = $1 }
+            $2 == tag "^{}" { peeled = $1 }
+            END { print (peeled != "" ? peeled : direct) }
+          ')"
+          if [[ ! "$live_tag" =~ ^[0-9a-f]{40}$ ]] || [ "$live_tag" != "$EXPECTED_SOURCE" ]; then
+            echo "$RELEASE_TAG moved before updater artifact upload" >&2
+            exit 1
+          fi
+
+      - name: Upload recovered updater candidate
+        id: updater
+        uses: actions/upload-artifact@v4
+        with:
+          name: biyan-updater-candidate-${{ needs.preflight.outputs.version }}
+          if-no-files-found: error
+          path: dist/updater-candidate/*
+
+      - name: Authenticate uploaded updater artifact
+        id: updater-metadata
+        env:
+          ACTION_ARTIFACT_DIGEST: ${{ steps.updater.outputs.artifact-digest }}
+          ARTIFACT_ID: ${{ steps.updater.outputs.artifact-id }}
+          ARTIFACT_NAME: biyan-updater-candidate-${{ needs.preflight.outputs.version }}
+          CURRENT_RUN_ID: ${{ github.run_id }}
+          CURRENT_SHA: ${{ github.sha }}
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          [[ "$ARTIFACT_ID" =~ ^[1-9][0-9]*$ ]]
+          [[ "$ACTION_ARTIFACT_DIGEST" =~ ^[0-9a-f]{64}$ ]]
+          artifact_digest="sha256:$ACTION_ARTIFACT_DIGEST"
+          gh api \
+            "repos/$GITHUB_REPOSITORY/actions/artifacts/$ARTIFACT_ID" \
+            >"$RUNNER_TEMP/updater-artifact.json"
+          jq -e \
+            --arg digest "$artifact_digest" \
+            --arg head "$CURRENT_SHA" \
+            --arg name "$ARTIFACT_NAME" \
+            --argjson artifact_id "$ARTIFACT_ID" \
+            --argjson run_id "$CURRENT_RUN_ID" '
+              .id == $artifact_id
+              and .name == $name
+              and .expired == false
+              and .size_in_bytes > 0
+              and .digest == $digest
+              and .workflow_run.id == $run_id
+              and .workflow_run.head_sha == $head
+            ' "$RUNNER_TEMP/updater-artifact.json" >/dev/null
+          artifact_size="$(
+            jq -er '.size_in_bytes | select(. > 0)' \
+              "$RUNNER_TEMP/updater-artifact.json"
+          )"
+          echo "artifact_digest=$artifact_digest" >>"$GITHUB_OUTPUT"
+          echo "artifact_size=$artifact_size" >>"$GITHUB_OUTPUT"
+
+  draft-release:
+    name: Create recovered draft release without promoting stable
+    runs-on: ubuntu-24.04
+    needs: [preflight, package-candidate]
+    permissions:
+      actions: read
+      contents: write
+    timeout-minutes: 60
+    steps:
+      - name: Checkout protected release harness
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.preflight.outputs.trusted_main_commit }}
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Download exact updater archive by authenticated ID
+        env:
+          ARTIFACT_DIGEST: ${{ needs.package-candidate.outputs.updater_artifact_digest }}
+          ARTIFACT_ID: ${{ needs.package-candidate.outputs.updater_artifact_id }}
+          ARTIFACT_SIZE: ${{ needs.package-candidate.outputs.updater_artifact_size }}
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          [[ "$ARTIFACT_ID" =~ ^[1-9][0-9]*$ ]]
+          [[ "$ARTIFACT_DIGEST" =~ ^sha256:[0-9a-f]{64}$ ]]
+          [[ "$ARTIFACT_SIZE" =~ ^[1-9][0-9]*$ ]]
+          install -d -m 700 dist/recovered-updater
+          archive="dist/recovered-updater/updater.zip"
+          gh api \
+            "repos/$GITHUB_REPOSITORY/actions/artifacts/$ARTIFACT_ID/zip" \
+            >"$archive"
+          test "$(stat -c '%s' "$archive")" = "$ARTIFACT_SIZE"
+          actual_digest="sha256:$(sha256sum "$archive" | awk '{ print $1 }')"
+          if [ "$actual_digest" != "$ARTIFACT_DIGEST" ]; then
+            echo "Updater artifact archive digest mismatch" >&2
+            exit 1
+          fi
+
+      - name: Extract exact recovered updater candidate
+        env:
+          VERSION: ${{ needs.preflight.outputs.version }}
+        run: |
+          set -euo pipefail
+          python3 scripts/ci/extract-release-candidate-recovery.py \
+            --updater-archive dist/recovered-updater/updater.zip \
+            --output-dir "dist/biyan-updater-candidate-$VERSION" \
+            --version "$VERSION"
+
+      - name: Generate release notes
+        run: |
+          node scripts/release-distribution/build-release-notes.mjs \
+            --tag "${{ needs.preflight.outputs.tag }}" \
+            --output dist/release-notes.md
+
+      - name: Require a fresh draft release slot
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_TAG: ${{ needs.preflight.outputs.tag }}
+        run: |
+          set -euo pipefail
+          gh api \
+            --paginate \
+            --slurp \
+            "repos/$GITHUB_REPOSITORY/releases?per_page=100" \
+            >"$RUNNER_TEMP/existing-release-pages.json"
+          jq -e \
+            --arg tag "$RELEASE_TAG" '
+              [.[][] | select(.tag_name == $tag)] | length == 0
+            ' "$RUNNER_TEMP/existing-release-pages.json" >/dev/null
+
+      - name: Revalidate protected main before draft release mutation
+        env:
+          EXPECTED_MAIN: ${{ needs.preflight.outputs.trusted_main_commit }}
+          EXPECTED_SOURCE: ${{ needs.preflight.outputs.source_commit }}
+          RELEASE_TAG: ${{ needs.preflight.outputs.tag }}
+        run: |
+          set -euo pipefail
+          live_main="$(git ls-remote --exit-code origin refs/heads/mita-main | awk 'NF == 2 { print $1 }')"
+          if [[ ! "$live_main" =~ ^[0-9a-f]{40}$ ]] || [ "$live_main" != "$EXPECTED_MAIN" ]; then
+            echo "origin/mita-main moved before draft release creation" >&2
+            exit 1
+          fi
+          tag_refs="$(git ls-remote --exit-code origin \
+            "refs/tags/$RELEASE_TAG" "refs/tags/$RELEASE_TAG^{}")"
+          live_tag="$(printf '%s\n' "$tag_refs" | awk -v tag="refs/tags/$RELEASE_TAG" '
+            $2 == tag { direct = $1 }
+            $2 == tag "^{}" { peeled = $1 }
+            END { print (peeled != "" ? peeled : direct) }
+          ')"
+          if [[ ! "$live_tag" =~ ^[0-9a-f]{40}$ ]] || [ "$live_tag" != "$EXPECTED_SOURCE" ]; then
+            echo "$RELEASE_TAG moved before draft release creation" >&2
+            exit 1
+          fi
+
+      - name: Atomically create an empty recovered Draft
+        env:
+          EXPECTED_SOURCE: ${{ needs.preflight.outputs.source_commit }}
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_TAG: ${{ needs.preflight.outputs.tag }}
+        run: |
+          set -euo pipefail
+          jq -n \
+            --arg tag "$RELEASE_TAG" \
+            --arg target "$EXPECTED_SOURCE" \
+            --arg name "Biyan $RELEASE_TAG" \
+            --rawfile body dist/release-notes.md '{
+              tag_name: $tag,
+              target_commitish: $target,
+              name: $name,
+              body: $body,
+              draft: true,
+              prerelease: false,
+              generate_release_notes: false
+            }' >"$RUNNER_TEMP/create-draft-request.json"
+          gh api \
+            --method POST \
+            "repos/$GITHUB_REPOSITORY/releases" \
+            --input "$RUNNER_TEMP/create-draft-request.json" \
+            >"$RUNNER_TEMP/created-draft.json"
+          jq -e \
+            --arg repo "$GITHUB_REPOSITORY" \
+            --arg source "$EXPECTED_SOURCE" \
+            --arg tag "$RELEASE_TAG" '
+              (.id | type == "number" and . > 0)
+              and .name == ("Biyan " + $tag)
+              and .tag_name == $tag
+              and .draft == true
+              and .prerelease == false
+              and .published_at == null
+              and (.assets | length == 0)
+              and (.html_url |
+                test(
+                  "^https://github.com/" + $repo +
+                  "/releases/tag/untagged-[0-9a-f]{20}$"
+                ))
+              and (.upload_url |
+                startswith(
+                  "https://uploads.github.com/repos/" + $repo + "/releases/"
+                ))
+            ' "$RUNNER_TEMP/created-draft.json" >/dev/null
+          release_id="$(
+            jq -er '.id | select(type == "number" and . > 0)' \
+              "$RUNNER_TEMP/created-draft.json"
+          )"
+          gh api \
+            --paginate \
+            --slurp \
+            "repos/$GITHUB_REPOSITORY/releases?per_page=100" \
+            >"$RUNNER_TEMP/post-create-release-pages.json"
+          jq -e \
+            --arg tag "$RELEASE_TAG" \
+            --argjson release_id "$release_id" '
+              [.[][] | select(.tag_name == $tag) | .id] == [$release_id]
+            ' "$RUNNER_TEMP/post-create-release-pages.json" >/dev/null
+
+      - name: Upload exact assets only to the newly created Draft ID
+        env:
+          GH_TOKEN: ${{ github.token }}
+          VERSION: ${{ needs.preflight.outputs.version }}
+        run: |
+          set -euo pipefail
+          release_id="$(
+            jq -er '.id | select(type == "number" and . > 0)' \
+              "$RUNNER_TEMP/created-draft.json"
+          )"
+          draft_slug="$(
+            jq -er \
+              --arg repo "$GITHUB_REPOSITORY" '
+                .html_url |
+                capture(
+                  "^https://github.com/" + $repo +
+                  "/releases/tag/(?<slug>untagged-[0-9a-f]{20})$"
+                ).slug
+              ' "$RUNNER_TEMP/created-draft.json"
+          )"
+          asset_dir="dist/biyan-updater-candidate-$VERSION"
+          assets=(
+            "Biyan_${VERSION}_universal.dmg"
+            "Biyan.app.tar.gz"
+            "Biyan.app.tar.gz.sig"
+            "Biyan_${VERSION}_x64-setup.exe"
+            "Biyan_${VERSION}_x64-setup.exe.sig"
+            "Biyan_${VERSION}_x64_en-US.msi"
+            "Biyan_${VERSION}_amd64.AppImage"
+            "Biyan_${VERSION}_amd64.AppImage.sig"
+            "Biyan_${VERSION}_amd64.deb"
+            "candidate.json"
+            "candidate.json.sig"
+            "latest.json"
+            "SHA256SUMS"
+          )
+          for index in "${!assets[@]}"; do
+            name="${assets[$index]}"
+            file="$asset_dir/$name"
+            test -f "$file"
+            size="$(stat -c '%s' "$file")"
+            test "$size" -gt 0
+            digest="sha256:$(sha256sum "$file" | awk '{ print $1 }')"
+            encoded_name="$(jq -rn --arg name "$name" '$name | @uri')"
+            curl \
+              --fail-with-body \
+              --silent \
+              --show-error \
+              --request POST \
+              --header "Accept: application/vnd.github+json" \
+              --header "Authorization: Bearer $GH_TOKEN" \
+              --header "Content-Type: application/octet-stream" \
+              --header "X-GitHub-Api-Version: 2022-11-28" \
+              --data-binary "@$file" \
+              "https://uploads.github.com/repos/$GITHUB_REPOSITORY/releases/$release_id/assets?name=$encoded_name" \
+              >"$RUNNER_TEMP/uploaded-asset-$index.json"
+            jq -e \
+              --arg digest "$digest" \
+              --arg draft_slug "$draft_slug" \
+              --arg name "$name" \
+              --arg repo "$GITHUB_REPOSITORY" \
+              --argjson size "$size" '
+                .name == $name
+                and .state == "uploaded"
+                and .size == $size
+                and .digest == $digest
+                and (.browser_download_url ==
+                  ("https://github.com/" + $repo + "/releases/download/" +
+                    $draft_slug + "/" + $name))
+              ' "$RUNNER_TEMP/uploaded-asset-$index.json" >/dev/null
+          done
+
+      - name: Verify exact recovered draft release
+        env:
+          EXPECTED_MAIN: ${{ needs.preflight.outputs.trusted_main_commit }}
+          EXPECTED_SOURCE: ${{ needs.preflight.outputs.source_commit }}
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_TAG: ${{ needs.preflight.outputs.tag }}
+          VERSION: ${{ needs.preflight.outputs.version }}
+        run: |
+          set -euo pipefail
+          live_main="$(git ls-remote --exit-code origin refs/heads/mita-main | awk 'NF == 2 { print $1 }')"
+          if [[ ! "$live_main" =~ ^[0-9a-f]{40}$ ]] || [ "$live_main" != "$EXPECTED_MAIN" ]; then
+            echo "origin/mita-main moved while creating the draft release" >&2
+            exit 1
+          fi
+          tag_refs="$(git ls-remote --exit-code origin \
+            "refs/tags/$RELEASE_TAG" "refs/tags/$RELEASE_TAG^{}")"
+          live_tag="$(printf '%s\n' "$tag_refs" | awk -v tag="refs/tags/$RELEASE_TAG" '
+            $2 == tag { direct = $1 }
+            $2 == tag "^{}" { peeled = $1 }
+            END { print (peeled != "" ? peeled : direct) }
+          ')"
+          if [[ ! "$live_tag" =~ ^[0-9a-f]{40}$ ]] || [ "$live_tag" != "$EXPECTED_SOURCE" ]; then
+            echo "$RELEASE_TAG moved while creating the draft release" >&2
+            exit 1
+          fi
+          release_id="$(
+            jq -er '.id | select(type == "number" and . > 0)' \
+              "$RUNNER_TEMP/created-draft.json"
+          )"
+          draft_slug="$(
+            jq -er \
+              --arg repo "$GITHUB_REPOSITORY" '
+                .html_url |
+                capture(
+                  "^https://github.com/" + $repo +
+                  "/releases/tag/(?<slug>untagged-[0-9a-f]{20})$"
+                ).slug
+              ' "$RUNNER_TEMP/created-draft.json"
+          )"
+          asset_dir="dist/biyan-updater-candidate-$VERSION"
+          : >"$RUNNER_TEMP/expected-assets.ndjson"
+          for file in "$asset_dir"/*; do
+            test -f "$file"
+            name="$(basename "$file")"
+            size="$(stat -c '%s' "$file")"
+            digest="sha256:$(sha256sum "$file" | awk '{ print $1 }')"
+            jq -n \
+              --arg digest "$digest" \
+              --arg name "$name" \
+              --argjson size "$size" \
+              '{ name: $name, size: $size, digest: $digest }' \
+              >>"$RUNNER_TEMP/expected-assets.ndjson"
+          done
+          expected_assets="$(
+            jq -s 'sort_by(.name)' "$RUNNER_TEMP/expected-assets.ndjson"
+          )"
+          gh api "repos/$GITHUB_REPOSITORY/releases/$release_id" \
+            >"$RUNNER_TEMP/draft-release.json"
+          jq -e \
+            --arg repo "$GITHUB_REPOSITORY" \
+            --arg tag "$RELEASE_TAG" \
+            --arg draft_slug "$draft_slug" \
+            --argjson release_id "$release_id" \
+            --argjson expected "$expected_assets" '
+              .id == $release_id
+              and .name == ("Biyan " + $tag)
+              and .tag_name == $tag
+              and .draft == true
+              and .prerelease == false
+              and .published_at == null
+              and (.html_url ==
+                ("https://github.com/" + $repo + "/releases/tag/" +
+                  $draft_slug))
+              and (([.assets[] | { name, size, digest }] |
+                sort_by(.name)) == $expected)
+              and all(.assets[];
+                .state == "uploaded"
+                and .size > 0
+                and (.digest | test("^sha256:[0-9a-f]{64}$"))
+                and (.browser_download_url |
+                  startswith(
+                    "https://github.com/" + $repo +
+                    "/releases/download/" + $draft_slug + "/"
+                  ))
+              )
+            ' "$RUNNER_TEMP/draft-release.json" >/dev/null
+          gh api \
+            --paginate \
+            --slurp \
+            "repos/$GITHUB_REPOSITORY/releases?per_page=100" \
+            >"$RUNNER_TEMP/final-release-pages.json"
+          jq -e \
+            --arg tag "$RELEASE_TAG" \
+            --argjson release_id "$release_id" '
+              [.[][] | select(.tag_name == $tag) | .id] == [$release_id]
+            ' "$RUNNER_TEMP/final-release-pages.json" >/dev/null

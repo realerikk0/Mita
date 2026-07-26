@@ -71,9 +71,9 @@
       "scope": "content"
     },
     {
-      "expectedMatches": 383,
+      "expectedMatches": 384,
       "id": "compatibility-test-fixtures",
-      "matchesSha256": "d3c1955c47fd3128e6f94bc3a3ac212c6ac27829b9fe851e326e944dda37d869",
+      "matchesSha256": "e637dc7292b5cf0331fa8ae8d3bbf640514d0be85c430565b5faa51cbfb4876b",
       "pathRegex": "^(?:scripts/__tests__/flatpak-manifest\\.test\\.mjs|scripts/__tests__/thinking-content-windows-verifier\\.test\\.mjs|scripts/__tests__/verify-macos-candidate\\.test\\.mjs|scripts/__tests__/windows-installer-template\\.test\\.mjs|scripts/ci/__tests__/candidate-content-policy\\.test\\.mjs|scripts/ci/__tests__/cloudflare-preview-cleanup\\.test\\.mjs|scripts/ci/__tests__/legacy-compatibility-policy\\.test\\.mjs|scripts/ci/__tests__/qualification-impact\\.test\\.mjs|scripts/ci/__tests__/release-policy\\.test\\.mjs|scripts/ci/__tests__/verify-release-target\\.test\\.mjs|scripts/release-distribution/__tests__/release-distribution\\.test\\.mjs|scripts/updater/__tests__/legacy-manifest-policy\\.test\\.mjs|scripts/updater/__tests__/promotion-transaction\\.test\\.mjs|scripts/updater/__tests__/updater\\.test\\.mjs|src-tauri/src/core/downloads/tests\\.rs|src-tauri/src/core/filesystem/tests\\.rs|src-tauri/src/core/image_assets/tests\\.rs|src-tauri/src/core/mcp/tests\\.rs|tests/checklist\\.md|web-app/src/containers/dialogs/__tests__/LegacyLocalDataCleanupDialog\\.test\\.tsx|web-app/src/hooks/__tests__/useAssistant\\.coverage\\.test\\.ts|web-app/src/hooks/__tests__/useAssistant\\.test\\.ts|web-app/src/hooks/__tests__/useMCPServers\\.test\\.ts|web-app/src/hooks/__tests__/useModelProvider\\.legacy-provider\\.test\\.ts|web-app/src/hooks/__tests__/useReleaseNotes\\.test\\.ts|web-app/src/hooks/__tests__/useThreads\\.coverage\\.test\\.ts|web-app/src/lib/__tests__/biyan-prompt\\.test\\.ts|web-app/src/lib/__tests__/integration/compaction\\.integration\\.test\\.ts|web-app/src/lib/__tests__/integration/integration-helpers\\.ts|web-app/src/lib/__tests__/provider-connection-import\\.test\\.ts|web-app/src/providers/__tests__/DataProvider\\.test\\.tsx|web-app/src/routes/__tests__/images\\.test\\.tsx|web-app/src/routes/__tests__/index\\.test\\.tsx|web-app/src/services/__tests__/app\\.test\\.ts|web-app/src/services/__tests__/path\\.test\\.ts|web-app/src/services/__tests__/serviceHub\\.integration\\.test\\.ts|web-app/src/services/deeplink/__tests__/tauri\\.test\\.ts|web-app/src/services/image-generation/__tests__/tauri\\.test\\.ts|web-app/src/services/video-generation/__tests__/default\\.test\\.ts|web-app/src/services/video-generation/__tests__/tauri\\.test\\.ts|web-app/src/types/__tests__/biyan-teams\\.test\\.ts|web-app/src/utils/__tests__/formatDate\\.test\\.ts)$",
       "pattern": "(?:static\\.mitapp\\.cn|catalog\\.jan\\.ai|apps(?:-nightly)?\\.jan\\.ai|janhq|latest[_-]jan[_-]model|model[-_]catalog|(?<![a-z0-9])(?:jan|mita|silence)(?![a-z0-9]))",
       "reason": "Exact automated test fixtures exercise legacy migration, stable identity, or fail-closed rejection behavior.",
@@ -107,10 +107,10 @@
       "scope": "content"
     },
     {
-      "expectedMatches": 143,
+      "expectedMatches": 158,
       "id": "github-distribution-anchors",
-      "matchesSha256": "10df4bacb56e71d8d95e83f147c2aae804ec7fa0a831e27a88538fa9b3e39f49",
-      "pathRegex": "^(?:\\.github/ISSUE_TEMPLATE/config\\.yml|\\.github/scripts/rename-tauri-app\\.sh|\\.github/workflows/biyan-docs\\.yml|\\.github/workflows/biyan-exact-sha-qualification\\.yml|\\.github/workflows/biyan-linter-and-test\\.yml|\\.github/workflows/biyan-tauri-build-nightly-external\\.yaml|\\.github/workflows/biyan-tauri-build-nightly\\.yaml|\\.github/workflows/biyan-tauri-build\\.yaml|\\.github/workflows/clean-cloudflare-page-preview-url-and-r2\\.yml|\\.github/workflows/desktop-release\\.yml|\\.github/workflows/manual-build-portable\\.yml|\\.github/workflows/promote-desktop-update\\.yml|\\.github/workflows/release-distribution\\.yml|\\.github/workflows/template-get-update-version\\.yml|\\.github/workflows/template-noti-discord-and-update-url-readme\\.yml|\\.github/workflows/template-tauri-build-linux-x64-external\\.yml|\\.github/workflows/template-tauri-build-linux-x64-flatpak\\.yml|\\.github/workflows/template-tauri-build-linux-x64\\.yml|\\.github/workflows/template-tauri-build-macos-external\\.yml|\\.github/workflows/template-tauri-build-macos\\.yml|\\.github/workflows/template-tauri-build-windows-x64-external\\.yml|\\.github/workflows/template-tauri-build-windows-x64\\.yml|\\.github/workflows/updater-health-gate\\.yml|\\.github/workflows/updater-kill-switch\\.yml)$",
+      "matchesSha256": "9563ff96af585705243429b9df8598e3c85963bec4c4258d4dd0288315ece5ca",
+      "pathRegex": "^(?:\\.github/ISSUE_TEMPLATE/config\\.yml|\\.github/scripts/rename-tauri-app\\.sh|\\.github/workflows/biyan-docs\\.yml|\\.github/workflows/biyan-exact-sha-qualification\\.yml|\\.github/workflows/biyan-linter-and-test\\.yml|\\.github/workflows/biyan-tauri-build-nightly-external\\.yaml|\\.github/workflows/biyan-tauri-build-nightly\\.yaml|\\.github/workflows/biyan-tauri-build\\.yaml|\\.github/workflows/clean-cloudflare-page-preview-url-and-r2\\.yml|\\.github/workflows/desktop-release-recovery\\.yml|\\.github/workflows/desktop-release\\.yml|\\.github/workflows/manual-build-portable\\.yml|\\.github/workflows/promote-desktop-update\\.yml|\\.github/workflows/release-distribution\\.yml|\\.github/workflows/template-get-update-version\\.yml|\\.github/workflows/template-noti-discord-and-update-url-readme\\.yml|\\.github/workflows/template-tauri-build-linux-x64-external\\.yml|\\.github/workflows/template-tauri-build-linux-x64-flatpak\\.yml|\\.github/workflows/template-tauri-build-linux-x64\\.yml|\\.github/workflows/template-tauri-build-macos-external\\.yml|\\.github/workflows/template-tauri-build-macos\\.yml|\\.github/workflows/template-tauri-build-windows-x64-external\\.yml|\\.github/workflows/template-tauri-build-windows-x64\\.yml|\\.github/workflows/updater-health-gate\\.yml|\\.github/workflows/updater-kill-switch\\.yml)$",
       "pattern": "(?:static\\.mitapp\\.cn|catalog\\.jan\\.ai|apps(?:-nightly)?\\.jan\\.ai|janhq|latest[_-]jan[_-]model|model[-_]catalog|(?<![a-z0-9])(?:jan|mita|silence)(?![a-z0-9]))",
       "reason": "GitHub control-plane metadata retains the protected branch, repository slug, or published updater host as an exact anchor.",
       "scope": "content"
@@ -161,6 +161,15 @@
       "scope": "content"
     },
     {
+      "expectedMatches": 9,
+      "id": "release-candidate-recovery-provenance-anchors",
+      "matchesSha256": "6d4d367b5043cd640c5c58c7397d15551676c91c9f4cc98240de7afaa4758caa",
+      "pathRegex": "^(?:scripts/ci/__tests__/verify-release-candidate-recovery\\.test\\.mjs|scripts/ci/verify-release-candidate-recovery\\.mjs)$",
+      "pattern": "(?<![a-z0-9])mita(?![a-z0-9])",
+      "reason": "Exact repository and protected-branch identifiers authenticate same-repository candidate artifact recovery provenance.",
+      "scope": "content"
+    },
+    {
       "expectedMatches": 7,
       "id": "qualification-recovery-provenance-anchors",
       "matchesSha256": "6c8c04ba9d64c23a0b434e2b1e831fa9181083b57bf1a6b553a908e127b679c3",
@@ -179,9 +188,9 @@
       "scope": "content"
     },
     {
-      "expectedMatches": 67,
+      "expectedMatches": 69,
       "id": "release-policy-deny-needles",
-      "matchesSha256": "045c51536a454be87d183dcd248fb7c108274bc0cdae2a833b24fed4f6b33b78",
+      "matchesSha256": "fe6764f2d3b6c92fb32f10e4810799721130eee1b0c2f4e57ab73d287c218935",
       "pathRegex": "^(?:scripts/ci/candidate-content-policy\\.mjs|scripts/ci/candidate-path-policy\\.mjs|scripts/ci/legacy-compatibility-policy\\.mjs|scripts/ci/release-policy-contracts\\.mjs|scripts/ci/verify-release-policy\\.mjs|scripts/smoke-preinstall-extension-imports\\.mjs|scripts/verify-macos-candidate\\.mjs)$",
       "pattern": "(?:static\\.mitapp\\.cn|catalog\\.jan\\.ai|apps(?:-nightly)?\\.jan\\.ai|janhq|latest[_-]jan[_-]model|model[-_]catalog|(?<![a-z0-9])(?:jan|mita|silence)(?![a-z0-9]))",
       "reason": "Fail-closed release policy names retired identities only as forbidden needles or compatibility assertions.",
