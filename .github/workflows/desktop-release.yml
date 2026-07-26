@@ -15,7 +15,7 @@ permissions:
   contents: read
 
 concurrency:
-  group: desktop-candidate-${{ github.event.inputs.version || github.ref }}
+  group: desktop-candidate-${{ github.event.inputs.version || github.ref_name }}
   cancel-in-progress: false
 
 env:
@@ -60,9 +60,16 @@ jobs:
         id: release
         shell: bash
         env:
+          EVENT_NAME: ${{ github.event_name }}
           RELEASE_TAG: ${{ github.event.inputs.version || github.ref_name }}
+          WORKFLOW_REF: ${{ github.ref }}
         run: |
           set -euo pipefail
+          if [ "$EVENT_NAME" = "workflow_dispatch" ] \
+            && [ "$WORKFLOW_REF" != "refs/heads/mita-main" ]; then
+            echo "Manual candidate dispatch must use protected mita-main" >&2
+            exit 1
+          fi
           if [[ ! "$RELEASE_TAG" =~ ^v[0-9]+\.[0-9]+\.[0-9]+([+-][0-9A-Za-z.-]+)?$ ]]; then
             echo "Release tag must be an exact semantic version prefixed with v" >&2
             exit 1
@@ -99,15 +106,24 @@ jobs:
             echo "data_schema=$(jq -r .dataSchema target/biyan-release.json)"
           } >> "$GITHUB_OUTPUT"
 
-      - name: Verify target with protected release policy
+      - name: Verify exact tag with protected release policy
+        env:
+          RELEASE_TAG: ${{ steps.release.outputs.tag }}
+          SOURCE_COMMIT: ${{ steps.release.outputs.source_commit }}
+          TRUSTED_MAIN: ${{ steps.release.outputs.trusted_main_commit }}
         run: |
-          node harness/scripts/ci/verify-release-policy.mjs \
-            --repo-root target \
-            --require-active
+          node harness/scripts/ci/verify-release-target.mjs \
+            --harness-root harness \
+            --release-tag "$RELEASE_TAG" \
+            --target-root target \
+            --source-commit "$SOURCE_COMMIT" \
+            --trusted-main "$TRUSTED_MAIN"
 
       - name: Test protected release policy contracts
         working-directory: harness
-        run: node --test scripts/ci/__tests__/release-policy.test.mjs
+        run: |
+          node --test scripts/ci/__tests__/release-policy.test.mjs
+          node --test scripts/ci/__tests__/verify-release-target.test.mjs
 
   quality-gate:
     name: Run candidate lint and test suites
@@ -210,11 +226,24 @@ jobs:
         shell: bash
         env:
           EXPECTED_MAIN: ${{ needs.preflight.outputs.trusted_main_commit }}
+          EXPECTED_SOURCE: ${{ needs.preflight.outputs.source_commit }}
+          RELEASE_TAG: ${{ needs.preflight.outputs.tag }}
         run: |
           set -euo pipefail
           live_main="$(git ls-remote --exit-code origin refs/heads/mita-main | awk 'NF == 2 { print $1 }')"
           if [[ ! "$live_main" =~ ^[0-9a-f]{40}$ ]] || [ "$live_main" != "$EXPECTED_MAIN" ]; then
             echo "origin/mita-main moved before macOS build; retry from the new trusted harness" >&2
+            exit 1
+          fi
+          tag_refs="$(git ls-remote --exit-code origin \
+            "refs/tags/$RELEASE_TAG" "refs/tags/$RELEASE_TAG^{}")"
+          live_tag="$(printf '%s\n' "$tag_refs" | awk -v tag="refs/tags/$RELEASE_TAG" '
+            $2 == tag { direct = $1 }
+            $2 == tag "^{}" { peeled = $1 }
+            END { print (peeled != "" ? peeled : direct) }
+          ')"
+          if [[ ! "$live_tag" =~ ^[0-9a-f]{40}$ ]] || [ "$live_tag" != "$EXPECTED_SOURCE" ]; then
+            echo "$RELEASE_TAG moved before macOS build; refusing mixed-source candidate" >&2
             exit 1
           fi
 
@@ -236,16 +265,25 @@ jobs:
           BIYAN_DATA_SCHEMA: ${{ needs.preflight.outputs.data_schema }}
         run: make build
 
+      - name: Checkout protected candidate verifier
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.preflight.outputs.trusted_main_commit }}
+          path: harness
+          persist-credentials: false
+
       - name: Verify macOS candidate
         shell: bash
         env:
           VERSION: ${{ needs.preflight.outputs.version }}
         run: |
           set -euo pipefail
-          make verify-macos-candidate \
-            APP="src-tauri/target/universal-apple-darwin/release/bundle/macos/Biyan.app" \
-            DMG="src-tauri/target/universal-apple-darwin/release/bundle/dmg/Biyan_${VERSION}_universal.dmg" \
-            VERSION="$VERSION"
+          node harness/scripts/verify-macos-candidate.mjs \
+            --repo-root . \
+            --app "src-tauri/target/universal-apple-darwin/release/bundle/macos/Biyan.app" \
+            --dmg "src-tauri/target/universal-apple-darwin/release/bundle/dmg/Biyan_${VERSION}_universal.dmg" \
+            --version "$VERSION" \
+            --signature production
 
       - name: Notarize and verify DMGs
         shell: bash
@@ -253,11 +291,25 @@ jobs:
           APPLE_API_ISSUER: ${{ secrets.NOTARY_ISSUER }}
           APPLE_API_KEY: ${{ secrets.NOTARY_KEY_ID }}
           APPLE_API_KEY_PATH: /tmp/notary-key.p8
+          EXPECTED_MAIN: ${{ needs.preflight.outputs.trusted_main_commit }}
+          EXPECTED_SOURCE: ${{ needs.preflight.outputs.source_commit }}
+          RELEASE_TAG: ${{ needs.preflight.outputs.tag }}
         run: |
           set -euo pipefail
           live_main="$(git ls-remote --exit-code origin refs/heads/mita-main | awk 'NF == 2 { print $1 }')"
-          if [[ ! "$live_main" =~ ^[0-9a-f]{40}$ ]] || [ "$live_main" != "${{ needs.preflight.outputs.trusted_main_commit }}" ]; then
+          if [[ ! "$live_main" =~ ^[0-9a-f]{40}$ ]] || [ "$live_main" != "$EXPECTED_MAIN" ]; then
             echo "origin/mita-main moved before notarization; retry from the new trusted harness" >&2
+            exit 1
+          fi
+          tag_refs="$(git ls-remote --exit-code origin \
+            "refs/tags/$RELEASE_TAG" "refs/tags/$RELEASE_TAG^{}")"
+          live_tag="$(printf '%s\n' "$tag_refs" | awk -v tag="refs/tags/$RELEASE_TAG" '
+            $2 == tag { direct = $1 }
+            $2 == tag "^{}" { peeled = $1 }
+            END { print (peeled != "" ? peeled : direct) }
+          ')"
+          if [[ ! "$live_tag" =~ ^[0-9a-f]{40}$ ]] || [ "$live_tag" != "$EXPECTED_SOURCE" ]; then
+            echo "$RELEASE_TAG moved before notarization; refusing mixed-source candidate" >&2
             exit 1
           fi
           shopt -s nullglob
@@ -279,11 +331,24 @@ jobs:
         shell: bash
         env:
           EXPECTED_MAIN: ${{ needs.preflight.outputs.trusted_main_commit }}
+          EXPECTED_SOURCE: ${{ needs.preflight.outputs.source_commit }}
+          RELEASE_TAG: ${{ needs.preflight.outputs.tag }}
         run: |
           set -euo pipefail
           live_main="$(git ls-remote --exit-code origin refs/heads/mita-main | awk 'NF == 2 { print $1 }')"
           if [[ ! "$live_main" =~ ^[0-9a-f]{40}$ ]] || [ "$live_main" != "$EXPECTED_MAIN" ]; then
             echo "origin/mita-main moved before macOS artifact upload; retry safely" >&2
+            exit 1
+          fi
+          tag_refs="$(git ls-remote --exit-code origin \
+            "refs/tags/$RELEASE_TAG" "refs/tags/$RELEASE_TAG^{}")"
+          live_tag="$(printf '%s\n' "$tag_refs" | awk -v tag="refs/tags/$RELEASE_TAG" '
+            $2 == tag { direct = $1 }
+            $2 == tag "^{}" { peeled = $1 }
+            END { print (peeled != "" ? peeled : direct) }
+          ')"
+          if [[ ! "$live_tag" =~ ^[0-9a-f]{40}$ ]] || [ "$live_tag" != "$EXPECTED_SOURCE" ]; then
+            echo "$RELEASE_TAG moved before macOS artifact upload; refusing mixed-source candidate" >&2
             exit 1
           fi
 
@@ -349,11 +414,24 @@ jobs:
         shell: bash
         env:
           EXPECTED_MAIN: ${{ needs.preflight.outputs.trusted_main_commit }}
+          EXPECTED_SOURCE: ${{ needs.preflight.outputs.source_commit }}
+          RELEASE_TAG: ${{ needs.preflight.outputs.tag }}
         run: |
           set -euo pipefail
           live_main="$(git ls-remote --exit-code origin refs/heads/mita-main | awk 'NF == 2 { print $1 }')"
           if [[ ! "$live_main" =~ ^[0-9a-f]{40}$ ]] || [ "$live_main" != "$EXPECTED_MAIN" ]; then
             echo "origin/mita-main moved before Windows build; retry from the new trusted harness" >&2
+            exit 1
+          fi
+          tag_refs="$(git ls-remote --exit-code origin \
+            "refs/tags/$RELEASE_TAG" "refs/tags/$RELEASE_TAG^{}")"
+          live_tag="$(printf '%s\n' "$tag_refs" | awk -v tag="refs/tags/$RELEASE_TAG" '
+            $2 == tag { direct = $1 }
+            $2 == tag "^{}" { peeled = $1 }
+            END { print (peeled != "" ? peeled : direct) }
+          ')"
+          if [[ ! "$live_tag" =~ ^[0-9a-f]{40}$ ]] || [ "$live_tag" != "$EXPECTED_SOURCE" ]; then
+            echo "$RELEASE_TAG moved before Windows build; refusing mixed-source candidate" >&2
             exit 1
           fi
 
@@ -369,6 +447,13 @@ jobs:
           BIYAN_DATA_SCHEMA: ${{ needs.preflight.outputs.data_schema }}
         run: make build
 
+      - name: Checkout protected candidate verifier
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.preflight.outputs.trusted_main_commit }}
+          path: harness
+          persist-credentials: false
+
       - name: Verify Biyan artifacts
         shell: bash
         env:
@@ -378,7 +463,7 @@ jobs:
           test -f "src-tauri/target/release/bundle/nsis/Biyan_${VERSION}_x64-setup.exe"
           test -f "src-tauri/target/release/bundle/nsis/Biyan_${VERSION}_x64-setup.exe.sig"
           test -f "src-tauri/target/release/bundle/msi/Biyan_${VERSION}_x64_en-US.msi"
-          node scripts/ci/candidate-path-policy.mjs \
+          node harness/scripts/ci/candidate-path-policy.mjs \
             --root src-tauri/target/release/bundle
 
       - name: Verify extracted Windows candidate
@@ -387,7 +472,7 @@ jobs:
           VERSION: ${{ needs.preflight.outputs.version }}
         run: |
           $bundle = 'src-tauri/target/release/bundle'
-          & ./scripts/ci/verify-windows-candidate.ps1 `
+          & ./harness/scripts/ci/verify-windows-candidate.ps1 `
             -Exe "$bundle/nsis/Biyan_$env:VERSION`_x64-setup.exe" `
             -Msi "$bundle/msi/Biyan_$env:VERSION`_x64_en-US.msi" `
             -Version $env:VERSION
@@ -396,11 +481,24 @@ jobs:
         shell: bash
         env:
           EXPECTED_MAIN: ${{ needs.preflight.outputs.trusted_main_commit }}
+          EXPECTED_SOURCE: ${{ needs.preflight.outputs.source_commit }}
+          RELEASE_TAG: ${{ needs.preflight.outputs.tag }}
         run: |
           set -euo pipefail
           live_main="$(git ls-remote --exit-code origin refs/heads/mita-main | awk 'NF == 2 { print $1 }')"
           if [[ ! "$live_main" =~ ^[0-9a-f]{40}$ ]] || [ "$live_main" != "$EXPECTED_MAIN" ]; then
             echo "origin/mita-main moved before Windows artifact upload; retry safely" >&2
+            exit 1
+          fi
+          tag_refs="$(git ls-remote --exit-code origin \
+            "refs/tags/$RELEASE_TAG" "refs/tags/$RELEASE_TAG^{}")"
+          live_tag="$(printf '%s\n' "$tag_refs" | awk -v tag="refs/tags/$RELEASE_TAG" '
+            $2 == tag { direct = $1 }
+            $2 == tag "^{}" { peeled = $1 }
+            END { print (peeled != "" ? peeled : direct) }
+          ')"
+          if [[ ! "$live_tag" =~ ^[0-9a-f]{40}$ ]] || [ "$live_tag" != "$EXPECTED_SOURCE" ]; then
+            echo "$RELEASE_TAG moved before Windows artifact upload; refusing mixed-source candidate" >&2
             exit 1
           fi
 
@@ -463,11 +561,24 @@ jobs:
       - name: Revalidate protected main before Linux build mutation
         env:
           EXPECTED_MAIN: ${{ needs.preflight.outputs.trusted_main_commit }}
+          EXPECTED_SOURCE: ${{ needs.preflight.outputs.source_commit }}
+          RELEASE_TAG: ${{ needs.preflight.outputs.tag }}
         run: |
           set -euo pipefail
           live_main="$(git ls-remote --exit-code origin refs/heads/mita-main | awk 'NF == 2 { print $1 }')"
           if [[ ! "$live_main" =~ ^[0-9a-f]{40}$ ]] || [ "$live_main" != "$EXPECTED_MAIN" ]; then
             echo "origin/mita-main moved before Linux build; retry from the new trusted harness" >&2
+            exit 1
+          fi
+          tag_refs="$(git ls-remote --exit-code origin \
+            "refs/tags/$RELEASE_TAG" "refs/tags/$RELEASE_TAG^{}")"
+          live_tag="$(printf '%s\n' "$tag_refs" | awk -v tag="refs/tags/$RELEASE_TAG" '
+            $2 == tag { direct = $1 }
+            $2 == tag "^{}" { peeled = $1 }
+            END { print (peeled != "" ? peeled : direct) }
+          ')"
+          if [[ ! "$live_tag" =~ ^[0-9a-f]{40}$ ]] || [ "$live_tag" != "$EXPECTED_SOURCE" ]; then
+            echo "$RELEASE_TAG moved before Linux build; refusing mixed-source candidate" >&2
             exit 1
           fi
 
@@ -482,6 +593,13 @@ jobs:
           TAURI_TRAY: libappindicator3
         run: make build
 
+      - name: Checkout protected candidate verifier
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.preflight.outputs.trusted_main_commit }}
+          path: harness
+          persist-credentials: false
+
       - name: Verify Biyan artifacts
         env:
           VERSION: ${{ needs.preflight.outputs.version }}
@@ -490,7 +608,7 @@ jobs:
           test -f "src-tauri/target/release/bundle/appimage/Biyan_${VERSION}_amd64.AppImage"
           test -f "src-tauri/target/release/bundle/appimage/Biyan_${VERSION}_amd64.AppImage.sig"
           test -f "src-tauri/target/release/bundle/deb/Biyan_${VERSION}_amd64.deb"
-          node scripts/ci/candidate-path-policy.mjs \
+          node harness/scripts/ci/candidate-path-policy.mjs \
             --root src-tauri/target/release/bundle
           appimage="$(realpath "src-tauri/target/release/bundle/appimage/Biyan_${VERSION}_amd64.AppImage")"
           deb="$(realpath "src-tauri/target/release/bundle/deb/Biyan_${VERSION}_amd64.deb")"
@@ -503,23 +621,36 @@ jobs:
             "$appimage" --appimage-extract >/dev/null
           )
           dpkg-deb --extract "$deb" "$deb_root"
-          node scripts/ci/candidate-path-policy.mjs \
+          node harness/scripts/ci/candidate-path-policy.mjs \
             --root "$extract_root/squashfs-root"
-          node scripts/ci/candidate-content-policy.mjs \
+          node harness/scripts/ci/candidate-content-policy.mjs \
             --root "$extract_root/squashfs-root"
-          node scripts/ci/candidate-path-policy.mjs \
+          node harness/scripts/ci/candidate-path-policy.mjs \
             --root "$deb_root"
-          node scripts/ci/candidate-content-policy.mjs \
+          node harness/scripts/ci/candidate-content-policy.mjs \
             --root "$deb_root"
 
       - name: Revalidate protected main before Linux artifact mutation
         env:
           EXPECTED_MAIN: ${{ needs.preflight.outputs.trusted_main_commit }}
+          EXPECTED_SOURCE: ${{ needs.preflight.outputs.source_commit }}
+          RELEASE_TAG: ${{ needs.preflight.outputs.tag }}
         run: |
           set -euo pipefail
           live_main="$(git ls-remote --exit-code origin refs/heads/mita-main | awk 'NF == 2 { print $1 }')"
           if [[ ! "$live_main" =~ ^[0-9a-f]{40}$ ]] || [ "$live_main" != "$EXPECTED_MAIN" ]; then
             echo "origin/mita-main moved before Linux artifact upload; retry safely" >&2
+            exit 1
+          fi
+          tag_refs="$(git ls-remote --exit-code origin \
+            "refs/tags/$RELEASE_TAG" "refs/tags/$RELEASE_TAG^{}")"
+          live_tag="$(printf '%s\n' "$tag_refs" | awk -v tag="refs/tags/$RELEASE_TAG" '
+            $2 == tag { direct = $1 }
+            $2 == tag "^{}" { peeled = $1 }
+            END { print (peeled != "" ? peeled : direct) }
+          ')"
+          if [[ ! "$live_tag" =~ ^[0-9a-f]{40}$ ]] || [ "$live_tag" != "$EXPECTED_SOURCE" ]; then
+            echo "$RELEASE_TAG moved before Linux artifact upload; refusing mixed-source candidate" >&2
             exit 1
           fi
 
@@ -539,10 +670,10 @@ jobs:
     needs: [preflight, build-macos, build-windows, build-linux]
     environment: release-distribution
     steps:
-      - name: Checkout release scripts
+      - name: Checkout protected release harness
         uses: actions/checkout@v4
         with:
-          ref: ${{ needs.preflight.outputs.source_commit }}
+          ref: ${{ needs.preflight.outputs.trusted_main_commit }}
           persist-credentials: false
 
       - name: Setup Node
@@ -596,11 +727,24 @@ jobs:
       - name: Revalidate protected main before updater artifact mutation
         env:
           EXPECTED_MAIN: ${{ needs.preflight.outputs.trusted_main_commit }}
+          EXPECTED_SOURCE: ${{ needs.preflight.outputs.source_commit }}
+          RELEASE_TAG: ${{ needs.preflight.outputs.tag }}
         run: |
           set -euo pipefail
           live_main="$(git ls-remote --exit-code origin refs/heads/mita-main | awk 'NF == 2 { print $1 }')"
           if [[ ! "$live_main" =~ ^[0-9a-f]{40}$ ]] || [ "$live_main" != "$EXPECTED_MAIN" ]; then
             echo "origin/mita-main moved before updater artifact upload; retry safely" >&2
+            exit 1
+          fi
+          tag_refs="$(git ls-remote --exit-code origin \
+            "refs/tags/$RELEASE_TAG" "refs/tags/$RELEASE_TAG^{}")"
+          live_tag="$(printf '%s\n' "$tag_refs" | awk -v tag="refs/tags/$RELEASE_TAG" '
+            $2 == tag { direct = $1 }
+            $2 == tag "^{}" { peeled = $1 }
+            END { print (peeled != "" ? peeled : direct) }
+          ')"
+          if [[ ! "$live_tag" =~ ^[0-9a-f]{40}$ ]] || [ "$live_tag" != "$EXPECTED_SOURCE" ]; then
+            echo "$RELEASE_TAG moved before updater artifact upload; refusing mixed-source candidate" >&2
             exit 1
           fi
 
@@ -621,7 +765,7 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
         with:
-          ref: ${{ needs.preflight.outputs.source_commit }}
+          ref: ${{ needs.preflight.outputs.trusted_main_commit }}
           fetch-depth: 0
           persist-credentials: false
 
@@ -636,14 +780,45 @@ jobs:
             --tag "${{ needs.preflight.outputs.tag }}" \
             --output dist/release-notes.md
 
+      - name: Require a fresh draft release slot
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_TAG: ${{ needs.preflight.outputs.tag }}
+        run: |
+          set -euo pipefail
+          if gh api "repos/$GITHUB_REPOSITORY/releases/tags/$RELEASE_TAG" \
+            >"$RUNNER_TEMP/existing-release.json" \
+            2>"$RUNNER_TEMP/release-probe.err"; then
+            echo "A release already exists for $RELEASE_TAG; refusing to reuse its assets" >&2
+            exit 1
+          fi
+          if ! grep -q 'HTTP 404' "$RUNNER_TEMP/release-probe.err"; then
+            cat "$RUNNER_TEMP/release-probe.err" >&2
+            echo "Could not prove the release slot is absent" >&2
+            exit 1
+          fi
+
       - name: Revalidate protected main before draft release mutation
         env:
           EXPECTED_MAIN: ${{ needs.preflight.outputs.trusted_main_commit }}
+          EXPECTED_SOURCE: ${{ needs.preflight.outputs.source_commit }}
+          RELEASE_TAG: ${{ needs.preflight.outputs.tag }}
         run: |
           set -euo pipefail
           live_main="$(git ls-remote --exit-code origin refs/heads/mita-main | awk 'NF == 2 { print $1 }')"
           if [[ ! "$live_main" =~ ^[0-9a-f]{40}$ ]] || [ "$live_main" != "$EXPECTED_MAIN" ]; then
             echo "origin/mita-main moved before draft release creation; retry safely" >&2
+            exit 1
+          fi
+          tag_refs="$(git ls-remote --exit-code origin \
+            "refs/tags/$RELEASE_TAG" "refs/tags/$RELEASE_TAG^{}")"
+          live_tag="$(printf '%s\n' "$tag_refs" | awk -v tag="refs/tags/$RELEASE_TAG" '
+            $2 == tag { direct = $1 }
+            $2 == tag "^{}" { peeled = $1 }
+            END { print (peeled != "" ? peeled : direct) }
+          ')"
+          if [[ ! "$live_tag" =~ ^[0-9a-f]{40}$ ]] || [ "$live_tag" != "$EXPECTED_SOURCE" ]; then
+            echo "$RELEASE_TAG moved before draft release creation; refusing mixed-source candidate" >&2
             exit 1
           fi
 
@@ -652,9 +827,64 @@ jobs:
         with:
           name: Biyan ${{ needs.preflight.outputs.tag }}
           tag_name: ${{ needs.preflight.outputs.tag }}
+          target_commitish: ${{ needs.preflight.outputs.source_commit }}
           draft: true
           prerelease: false
           body_path: dist/release-notes.md
           fail_on_unmatched_files: true
           files: |
             dist/biyan-updater-candidate-*/*
+
+      - name: Verify exact draft release
+        env:
+          EXPECTED_MAIN: ${{ needs.preflight.outputs.trusted_main_commit }}
+          EXPECTED_SOURCE: ${{ needs.preflight.outputs.source_commit }}
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_TAG: ${{ needs.preflight.outputs.tag }}
+          VERSION: ${{ needs.preflight.outputs.version }}
+        run: |
+          set -euo pipefail
+          live_main="$(git ls-remote --exit-code origin refs/heads/mita-main | awk 'NF == 2 { print $1 }')"
+          if [[ ! "$live_main" =~ ^[0-9a-f]{40}$ ]] || [ "$live_main" != "$EXPECTED_MAIN" ]; then
+            echo "origin/mita-main moved while creating the draft release" >&2
+            exit 1
+          fi
+          tag_refs="$(git ls-remote --exit-code origin \
+            "refs/tags/$RELEASE_TAG" "refs/tags/$RELEASE_TAG^{}")"
+          live_tag="$(printf '%s\n' "$tag_refs" | awk -v tag="refs/tags/$RELEASE_TAG" '
+            $2 == tag { direct = $1 }
+            $2 == tag "^{}" { peeled = $1 }
+            END { print (peeled != "" ? peeled : direct) }
+          ')"
+          if [[ ! "$live_tag" =~ ^[0-9a-f]{40}$ ]] || [ "$live_tag" != "$EXPECTED_SOURCE" ]; then
+            echo "$RELEASE_TAG moved while creating the draft release" >&2
+            exit 1
+          fi
+          expected_assets="$(
+            printf '%s\n' \
+              "Biyan_${VERSION}_universal.dmg" \
+              "Biyan.app.tar.gz" \
+              "Biyan.app.tar.gz.sig" \
+              "Biyan_${VERSION}_x64-setup.exe" \
+              "Biyan_${VERSION}_x64-setup.exe.sig" \
+              "Biyan_${VERSION}_x64_en-US.msi" \
+              "Biyan_${VERSION}_amd64.AppImage" \
+              "Biyan_${VERSION}_amd64.AppImage.sig" \
+              "Biyan_${VERSION}_amd64.deb" \
+              "candidate.json" \
+              "candidate.json.sig" \
+              "latest.json" \
+              "SHA256SUMS" |
+              jq -R . |
+              jq -s 'sort'
+          )"
+          gh api "repos/$GITHUB_REPOSITORY/releases/tags/$RELEASE_TAG" \
+            >"$RUNNER_TEMP/draft-release.json"
+          jq -e \
+            --arg tag "$RELEASE_TAG" \
+            --argjson expected "$expected_assets" '
+              .tag_name == $tag
+              and .draft == true
+              and .prerelease == false
+              and (([.assets[].name] | sort) == $expected)
+            ' "$RUNNER_TEMP/draft-release.json" >/dev/null
