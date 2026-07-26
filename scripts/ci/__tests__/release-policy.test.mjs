@@ -1413,7 +1413,7 @@ test('candidate Draft mutations match reviewed execution envelopes', () => {
   const workflow = fs.readFileSync(
     '.github/workflows/desktop-release.yml',
     'utf8'
-  )
+  ).replace(/\r\n?/g, '\n')
   assert.deepEqual(
     validateCandidateWorkflow(workflow, {
       requireReviewedEnvelope: true,
@@ -1568,7 +1568,7 @@ test('candidate recovery authenticates exact artifacts and only resumes package 
   const workflow = fs.readFileSync(
     '.github/workflows/desktop-release-recovery.yml',
     'utf8'
-  )
+  ).replace(/\r\n?/g, '\n')
   assert.deepEqual(validateCandidateRecoveryWorkflow(workflow), [])
   const replaceInNamedStep = (source, stepName, needle, replacement) => {
     const marker = `      - name: ${stepName}\n`
