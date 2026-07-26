@@ -288,6 +288,7 @@ jobs:
           node --test scripts/ci/__tests__/cloudflare-preview-cleanup.test.mjs
           node --test scripts/ci/__tests__/legacy-compatibility-policy.test.mjs
           node --test scripts/ci/__tests__/release-policy.test.mjs
+          node --test scripts/ci/__tests__/verify-release-target.test.mjs
 
       - name: Test updater candidate, promotion, and routing contracts
         run: |

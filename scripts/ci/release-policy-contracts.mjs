@@ -216,6 +216,70 @@ function workflowStepBlocks(source) {
   return blocks
 }
 
+const LIVE_MAIN_RELEASE_PROBE =
+  'git ls-remote --exit-code origin refs/heads/mita-main'
+const LIVE_TAG_RELEASE_PROBE = '"refs/tags/$RELEASE_TAG^{}"'
+const LIVE_MAIN_RELEASE_RESOLVER =
+  `live_main="$(${LIVE_MAIN_RELEASE_PROBE} | awk 'NF == 2 { print $1 }')"`
+const LIVE_TAG_RELEASE_RESOLVER = [
+  'tag_refs="$(git ls-remote --exit-code origin',
+  `"refs/tags/$RELEASE_TAG" ${LIVE_TAG_RELEASE_PROBE})"`,
+  `live_tag="$(printf '%s\\n' "$tag_refs" | awk -v tag="refs/tags/$RELEASE_TAG" '`,
+  '$2 == tag { direct = $1 }',
+  '$2 == tag "^{}" { peeled = $1 }',
+  'END { print (peeled != "" ? peeled : direct) }',
+]
+
+function stepPinsReleaseSource(step, beforeNeedle = null) {
+  if (!step) return false
+  const boundary =
+    beforeNeedle === null ? step.length : step.indexOf(beforeNeedle)
+  if (boundary < 0) return false
+  const guarded = step.slice(0, boundary)
+  return (
+    guarded.includes(
+      'EXPECTED_MAIN: ${{ needs.preflight.outputs.trusted_main_commit }}'
+    ) &&
+    guarded.includes(
+      'EXPECTED_SOURCE: ${{ needs.preflight.outputs.source_commit }}'
+    ) &&
+    guarded.includes('RELEASE_TAG: ${{ needs.preflight.outputs.tag }}') &&
+    guarded.includes(LIVE_MAIN_RELEASE_RESOLVER) &&
+    LIVE_TAG_RELEASE_RESOLVER.every((needle) => guarded.includes(needle)) &&
+    guarded.includes('[[ ! "$live_main" =~ ^[0-9a-f]{40}$ ]]') &&
+    guarded.includes('[[ ! "$live_tag" =~ ^[0-9a-f]{40}$ ]]') &&
+    guarded.includes('[ "$live_main" != "$EXPECTED_MAIN" ]') &&
+    guarded.includes('[ "$live_tag" != "$EXPECTED_SOURCE" ]') &&
+    (guarded.match(/\bexit 1\b/g) ?? []).length >= 2
+  )
+}
+
+function jobPinsReleaseSourceBefore(
+  block,
+  mutationNeedle,
+  { afterNeedle = null } = {}
+) {
+  const steps = workflowStepBlocks(block)
+  const mutationStep = steps.findIndex((step) => step.includes(mutationNeedle))
+  if (mutationStep < 0) return false
+  const afterStep =
+    afterNeedle === null
+      ? -1
+      : steps.findIndex((step) => step.includes(afterNeedle))
+  if (afterNeedle !== null && afterStep < 0) return false
+
+  for (let index = mutationStep; index > afterStep; index -= 1) {
+    if (
+      index === mutationStep
+        ? stepPinsReleaseSource(steps[index], mutationNeedle)
+        : stepPinsReleaseSource(steps[index])
+    ) {
+      return true
+    }
+  }
+  return false
+}
+
 function jobUsesScopeFlag(block, flag) {
   if (!block) return false
   const names = Array.isArray(flag) ? flag : [flag]
@@ -600,8 +664,20 @@ export function validateCandidateWorkflow(source) {
   const packageCandidate = jobBlock(source, 'package-candidate')
   const draftRelease = jobBlock(source, 'draft-release')
   const permissions = topLevelBlock(source, 'permissions')
+  const concurrency = topLevelBlock(source, 'concurrency')
   const checkoutSteps = actionStepBlocks(source, 'actions/checkout@v4')
 
+  if (
+    !concurrency ||
+    !concurrency.includes(
+      'group: desktop-candidate-${{ github.event.inputs.version || github.ref_name }}'
+    ) ||
+    !concurrency.includes('cancel-in-progress: false')
+  ) {
+    failures.push(
+      'desktop release must serialize tag-push and manual runs for the same exact candidate tag'
+    )
+  }
   if (
     !permissions ||
     !/^  contents:\s*read\s*$/m.test(permissions) ||
@@ -653,6 +729,13 @@ export function validateCandidateWorkflow(source) {
   if (!preflight) {
     failures.push('desktop release is missing the immutable preflight job')
   } else {
+    const preflightSteps = workflowStepBlocks(preflight)
+    const resolverStep = preflightSteps.find((step) =>
+      /^\s*(?:-\s*)?id:\s*release\s*$/m.test(step)
+    )
+    const targetPolicyStep = preflightSteps.find((step) =>
+      step.includes('node harness/scripts/ci/verify-release-target.mjs')
+    )
     if (
       !checkoutSteps.some(
         (step) =>
@@ -688,19 +771,46 @@ export function validateCandidateWorkflow(source) {
       )
     }
     if (
-      !preflight.includes(
-        'node harness/scripts/ci/verify-release-policy.mjs'
+      !targetPolicyStep ||
+      !targetPolicyStep.includes(
+        'SOURCE_COMMIT: ${{ steps.release.outputs.source_commit }}'
       ) ||
-      !preflight.includes('--repo-root target') ||
-      !preflight.includes('--require-active')
+      !targetPolicyStep.includes(
+        'TRUSTED_MAIN: ${{ steps.release.outputs.trusted_main_commit }}'
+      ) ||
+      !targetPolicyStep.includes(
+        'RELEASE_TAG: ${{ steps.release.outputs.tag }}'
+      ) ||
+      !targetPolicyStep.includes('--harness-root harness') ||
+      !targetPolicyStep.includes('--release-tag "$RELEASE_TAG"') ||
+      !targetPolicyStep.includes('--target-root target') ||
+      !targetPolicyStep.includes('--source-commit "$SOURCE_COMMIT"') ||
+      !targetPolicyStep.includes('--trusted-main "$TRUSTED_MAIN"')
     ) {
       failures.push(
-        'desktop release preflight does not run the protected active-train release policy against the target'
+        'desktop release preflight must compose the protected control plane with the exact-tag checkpoint'
+      )
+    }
+    if (
+      !resolverStep ||
+      !resolverStep.includes('EVENT_NAME: ${{ github.event_name }}') ||
+      !resolverStep.includes('WORKFLOW_REF: ${{ github.ref }}') ||
+      !resolverStep.includes('[ "$EVENT_NAME" = "workflow_dispatch" ]') ||
+      !resolverStep.includes('[ "$WORKFLOW_REF" != "refs/heads/mita-main" ]') ||
+      !/\[ "\$WORKFLOW_REF" != "refs\/heads\/mita-main" \]\s*;\s*then(?:(?!\bfi\b)[\s\S])*\bexit 1\b(?:(?!\bfi\b)[\s\S])*\bfi\b/.test(
+        resolverStep
+      )
+    ) {
+      failures.push(
+        'manual candidate dispatch must use the workflow from protected mita-main'
       )
     }
     if (
       !preflight.includes(
         'node --test scripts/ci/__tests__/release-policy.test.mjs'
+      ) ||
+      !preflight.includes(
+        'node --test scripts/ci/__tests__/verify-release-target.test.mjs'
       ) ||
       !preflight.includes('working-directory: harness')
     ) {
@@ -742,25 +852,64 @@ export function validateCandidateWorkflow(source) {
     if (!jobNeeds(block, 'preflight') || !jobNeeds(block, 'quality-gate')) {
       failures.push(`${buildJob} must depend on preflight and quality-gate`)
     }
-    const liveMainProbe =
-      'git ls-remote --exit-code origin refs/heads/mita-main'
-    const firstLiveMainProbe = block.indexOf(liveMainProbe)
-    const lastLiveMainProbe = block.lastIndexOf(liveMainProbe)
-    const artifactUpload = block.indexOf('uses: actions/upload-artifact@v4')
+    const protectedHarnessCheckout = actionStepBlocks(
+      block,
+      'actions/checkout@v4'
+    ).find(
+      (step) =>
+        step.includes(
+          'ref: ${{ needs.preflight.outputs.trusted_main_commit }}'
+        ) && /^\s*path:\s*harness\s*$/m.test(step)
+    )
+    const buildIndex = block.indexOf('run: make build')
+    const harnessIndex = block.indexOf(
+      'ref: ${{ needs.preflight.outputs.trusted_main_commit }}'
+    )
+    const verifierNeedle =
+      buildJob === 'build-macos'
+        ? 'node harness/scripts/verify-macos-candidate.mjs'
+        : buildJob === 'build-windows'
+          ? './harness/scripts/ci/verify-windows-candidate.ps1'
+          : 'node harness/scripts/ci/candidate-content-policy.mjs'
+    const verifierIndex = block.indexOf(verifierNeedle)
     if (
-      firstLiveMainProbe < 0 ||
-      !block.includes('needs.preflight.outputs.trusted_main_commit') ||
-      (artifactUpload >= 0 &&
-        (lastLiveMainProbe < firstLiveMainProbe ||
-          lastLiveMainProbe > artifactUpload))
+      !protectedHarnessCheckout ||
+      buildIndex < 0 ||
+      harnessIndex <= buildIndex ||
+      verifierIndex <= harnessIndex
     ) {
       failures.push(
-        `${buildJob} must revalidate unchanged live mita-main before external mutation`
+        `${buildJob} must build the exact tag before checking out and running the protected candidate verifier`
+      )
+    }
+    if (
+      !jobPinsReleaseSourceBefore(block, 'run: make build') ||
+      !jobPinsReleaseSourceBefore(block, 'uses: actions/upload-artifact@v4', {
+        afterNeedle:
+          buildJob === 'build-macos'
+            ? 'xcrun notarytool submit'
+            : verifierNeedle,
+      })
+    ) {
+      failures.push(
+        `${buildJob} must revalidate unchanged live main and exact tag before build and artifact mutation`
       )
     }
     if (
       buildJob === 'build-macos' &&
-      !block.includes('make verify-macos-candidate')
+      !jobPinsReleaseSourceBefore(block, 'xcrun notarytool submit', {
+        afterNeedle: verifierNeedle,
+      })
+    ) {
+      failures.push(
+        'build-macos must revalidate unchanged live main and exact tag before notarization'
+      )
+    }
+    if (
+      buildJob === 'build-macos' &&
+      (!block.includes('node harness/scripts/verify-macos-candidate.mjs') ||
+        !block.includes('--repo-root .') ||
+        !block.includes('--signature production'))
     ) {
       failures.push(
         'build-macos must verify the signed app and DMG candidate contents'
@@ -769,7 +918,7 @@ export function validateCandidateWorkflow(source) {
     if (['build-windows', 'build-linux'].includes(buildJob)) {
       const candidatePolicy = findRunInvocation(
         block,
-        /^node\s+scripts\/ci\/candidate-path-policy\.mjs(?:\s|$)/
+        /^node\s+harness\/scripts\/ci\/candidate-path-policy\.mjs(?:\s|$)/
       )
       if (
         !candidatePolicy ||
@@ -792,6 +941,26 @@ export function validateCandidateWorkflow(source) {
           `${buildJob} must not use a broad retired-runtime verifier`
         )
       }
+      if (
+        buildJob === 'build-windows' &&
+        !block.includes(
+          './harness/scripts/ci/verify-windows-candidate.ps1'
+        )
+      ) {
+        failures.push(
+          'build-windows must use the protected Windows candidate verifier'
+        )
+      }
+      if (
+        buildJob === 'build-linux' &&
+        !block.includes(
+          'node harness/scripts/ci/candidate-content-policy.mjs'
+        )
+      ) {
+        failures.push(
+          'build-linux must use the protected candidate content policy'
+        )
+      }
     }
   }
 
@@ -799,22 +968,110 @@ export function validateCandidateWorkflow(source) {
     ['package-candidate', packageCandidate],
     ['draft-release', draftRelease],
   ]) {
-    const liveMainProbe =
-      'git ls-remote --exit-code origin refs/heads/mita-main'
-    const probeIndex = block?.lastIndexOf(liveMainProbe) ?? -1
-    const mutationIndex =
-      jobName === 'package-candidate'
-        ? (block?.indexOf('uses: actions/upload-artifact@v4') ?? -1)
-        : (block?.indexOf('uses: softprops/action-gh-release@v2') ?? -1)
+    const protectedCheckout = actionStepBlocks(
+      block,
+      'actions/checkout@v4'
+    ).some((step) =>
+      step.includes(
+        'ref: ${{ needs.preflight.outputs.trusted_main_commit }}'
+      )
+    )
+    if (block && !protectedCheckout) {
+      failures.push(
+        `${jobName} must use release tooling from the protected harness`
+      )
+    }
     if (
       block &&
-      (probeIndex < 0 ||
-        mutationIndex < 0 ||
-        probeIndex > mutationIndex ||
-        !block.includes('needs.preflight.outputs.trusted_main_commit'))
+      !(jobName === 'package-candidate'
+        ? jobPinsReleaseSourceBefore(
+            block,
+            'uses: actions/upload-artifact@v4',
+            { afterNeedle: 'SHA256SUMS' }
+          )
+        : jobPinsReleaseSourceBefore(
+            block,
+            'uses: softprops/action-gh-release@v2'
+          ))
     ) {
       failures.push(
-        `${jobName} must revalidate unchanged live mita-main before external mutation`
+        `${jobName} must revalidate unchanged live main and exact tag before external mutation`
+      )
+    }
+  }
+
+  if (draftRelease) {
+    const draftSteps = workflowStepBlocks(draftRelease)
+    const releaseActionIndex = draftSteps.findIndex((step) =>
+      step.includes('uses: softprops/action-gh-release@v2')
+    )
+    const releaseAction =
+      releaseActionIndex >= 0 ? draftSteps[releaseActionIndex] : ''
+    const freshSlotIndex = draftSteps.findIndex((step) =>
+      step.includes('Require a fresh draft release slot')
+    )
+    const freshSlot =
+      freshSlotIndex >= 0 ? draftSteps[freshSlotIndex] : ''
+    const exactDraftIndex = draftSteps.findIndex((step) =>
+      step.includes('Verify exact draft release')
+    )
+    const exactDraft = exactDraftIndex >= 0 ? draftSteps[exactDraftIndex] : ''
+    const expectedAssets = [
+      'Biyan_${VERSION}_universal.dmg',
+      'Biyan.app.tar.gz',
+      'Biyan.app.tar.gz.sig',
+      'Biyan_${VERSION}_x64-setup.exe',
+      'Biyan_${VERSION}_x64-setup.exe.sig',
+      'Biyan_${VERSION}_x64_en-US.msi',
+      'Biyan_${VERSION}_amd64.AppImage',
+      'Biyan_${VERSION}_amd64.AppImage.sig',
+      'Biyan_${VERSION}_amd64.deb',
+      'candidate.json',
+      'candidate.json.sig',
+      'latest.json',
+      'SHA256SUMS',
+    ]
+
+    if (
+      !freshSlot ||
+      !freshSlot.includes(
+        'gh api "repos/$GITHUB_REPOSITORY/releases/tags/$RELEASE_TAG"'
+      ) ||
+      !freshSlot.includes('HTTP 404') ||
+      !freshSlot.includes('exit 1') ||
+      freshSlotIndex >= releaseActionIndex
+    ) {
+      failures.push(
+        'draft-release must prove the exact release slot is absent before creation'
+      )
+    }
+    if (
+      !releaseAction ||
+      !releaseAction.includes(
+        'target_commitish: ${{ needs.preflight.outputs.source_commit }}'
+      ) ||
+      !releaseAction.includes(
+        'tag_name: ${{ needs.preflight.outputs.tag }}'
+      ) ||
+      !/^\s*draft:\s*true\s*$/m.test(releaseAction) ||
+      !/^\s*prerelease:\s*false\s*$/m.test(releaseAction) ||
+      !releaseAction.includes('dist/biyan-updater-candidate-*/*')
+    ) {
+      failures.push(
+        'draft-release must create a draft-only release for the exact source and candidate assets'
+      )
+    }
+    if (
+      exactDraftIndex <= releaseActionIndex ||
+      !stepPinsReleaseSource(exactDraft, 'gh api') ||
+      !exactDraft.includes('.tag_name == $tag') ||
+      !exactDraft.includes('.draft == true') ||
+      !exactDraft.includes('.prerelease == false') ||
+      !exactDraft.includes('([.assets[].name] | sort) == $expected') ||
+      expectedAssets.some((asset) => !exactDraft.includes(asset))
+    ) {
+      failures.push(
+        'draft-release must verify the exact source, draft state, and 13-asset set after creation'
       )
     }
   }
@@ -1254,6 +1511,7 @@ export function validateCiWorkflow(source) {
       'node scripts/ci/verify-release-policy.mjs',
       'node --test scripts/ci/__tests__/candidate-content-policy.test.mjs',
       'node --test scripts/ci/__tests__/release-policy.test.mjs',
+      'node --test scripts/ci/__tests__/verify-release-target.test.mjs',
       'node --test scripts/ci/__tests__/qualification-impact.test.mjs',
       'node --test scripts/ci/__tests__/run-untrusted-qualification-verifier.test.mjs',
       'node --test scripts/ci/__tests__/verify-qualification-artifacts.test.mjs',
