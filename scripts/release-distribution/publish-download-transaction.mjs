@@ -2001,6 +2001,7 @@ function parseArgs(argv) {
     if (
       ![
         '--release-json',
+        '--assets-dir',
         '--payload-dir',
         '--tag',
         '--evidence',
@@ -2018,6 +2019,7 @@ function parseArgs(argv) {
   }
   for (const required of [
     '--release-json',
+    '--assets-dir',
     '--payload-dir',
     '--tag',
     '--evidence',
@@ -2160,7 +2162,7 @@ function httpsOrigin(value, label, { allowBareHost = false } = {}) {
   return url.origin
 }
 
-function buildPlan(args) {
+export function buildPublicationPlan(args) {
   const release = JSON.parse(
     fs.readFileSync(path.resolve(args['--release-json']), 'utf8')
   )
@@ -2168,6 +2170,12 @@ function buildPlan(args) {
   if (release.tagName !== tag) {
     throw new Error(
       `Release ${release.tagName} does not match transaction ${tag}`
+    )
+  }
+  const assetsDirectory = path.resolve(args['--assets-dir'])
+  if (!fs.statSync(assetsDirectory, { throwIfNoEntry: false })?.isDirectory()) {
+    throw new Error(
+      `Release assets directory is missing or not a directory: ${assetsDirectory}`
     )
   }
   const payloadDirectory = path.resolve(args['--payload-dir'])
@@ -2224,7 +2232,7 @@ function buildPlan(args) {
     id,
     provider: 'aliyun',
     key: `${versionRoot}/${name}`,
-    file: path.join(path.dirname(path.resolve(args['--release-json'])), name),
+    file: path.join(assetsDirectory, name),
     cacheControl: 'public, max-age=31536000, immutable',
     contentType,
   }))
@@ -2350,7 +2358,7 @@ function buildPlan(args) {
 
 async function main() {
   const args = parseArgs(process.argv.slice(2))
-  const plan = buildPlan(args)
+  const plan = buildPublicationPlan(args)
   const evidenceFile = path.resolve(args['--evidence'])
   const recoveryFile = path.resolve(args['--recovery'])
   const workspace = path.join(path.dirname(evidenceFile), 'transaction-work')

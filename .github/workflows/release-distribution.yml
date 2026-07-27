@@ -379,6 +379,7 @@ jobs:
           set -euo pipefail
           args=(
             --release-json dist/release-assets.json
+            --assets-dir dist/release-assets
             --payload-dir dist/biyan-download
             --tag "$TAG"
             --evidence dist/distribution-transaction/state.json

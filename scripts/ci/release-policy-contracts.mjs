@@ -77,7 +77,7 @@ const TRUSTED_BIYAN_DOWNLOAD_ALIAS_BOOTSTRAP_JOB_SHA256 =
   '58cb636b6139af4f0be2a21dbc1a2df9dfdf8a9ba67940be46b70a5c8922d697'
 
 const TRUSTED_RELEASE_DISTRIBUTION_WORKFLOW_SHA256 =
-  'dd14e927f08226725ddde6f6a14eea87a2b72320fbfcfef3511715aa2200d9fc'
+  'ee114cca6ddccdcd359ce66482cd61244ae37b865f5a24af6be9f78c18f92135'
 
 function jobBlock(source, jobName) {
   const header = new RegExp(`^  ${escapeRegExp(jobName)}:\\s*$`, 'm')
