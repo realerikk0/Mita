@@ -461,6 +461,28 @@ test('worker never admits a pre-A client through the dynamic route', async () =>
   assert.equal(response.status, 204)
 })
 
+test('router deployment keeps the rendered config beside its worker entrypoint', () => {
+  const repoRoot = path.resolve(import.meta.dirname, '../../..')
+  const workflow = fs.readFileSync(
+    path.join(repoRoot, '.github/workflows/deploy-updater-router.yml'),
+    'utf8',
+  )
+  assert.match(
+    workflow,
+    /WRANGLER_CONFIG: scripts\/updater\/wrangler\.generated\.toml/,
+  )
+  assert.match(workflow, /node-version: "22"/)
+  assert.match(
+    workflow,
+    /test -f "\$\(dirname "\$WRANGLER_CONFIG"\)\/worker\.mjs"/,
+  )
+  assert.equal(
+    workflow.match(/--config "\$WRANGLER_CONFIG"/g)?.length,
+    5,
+  )
+  assert.doesNotMatch(workflow, /\/tmp\/wrangler\.toml/)
+})
+
 test('health gate pauses on P0/P1, data loss, or migration failures above 0.5%', () => {
   const healthy = {
     status: 'healthy', p0Incidents: 0, p1Incidents: 0, dataLossIncidents: 0,
