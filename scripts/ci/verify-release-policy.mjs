@@ -4,6 +4,7 @@ import fs from 'node:fs'
 import path from 'node:path'
 
 import {
+  validateBiyanDownloadAliasBootstrapWorkflow,
   validateBundledLegalResources,
   validateCandidateRecoveryWorkflow,
   validateCandidateWorkflow,
@@ -189,7 +190,7 @@ for (const message of validateCandidateRecoveryWorkflow(
 
 const releaseEnvironmentWorkflows = {
   '.github/workflows/release-distribution.yml': {
-    jobName: 'distribute',
+    jobNames: ['distribute', 'bootstrap-biyan-download-aliases'],
     source: read('.github/workflows/release-distribution.yml'),
   },
   '.github/workflows/deploy-updater-router.yml': {
@@ -230,6 +231,12 @@ const releaseEnvironmentWorkflows = {
       '.github/workflows/template-tauri-build-linux-x64-flatpak.yml'
     ),
   },
+}
+for (const message of validateBiyanDownloadAliasBootstrapWorkflow(
+  releaseEnvironmentWorkflows['.github/workflows/release-distribution.yml']
+    .source
+)) {
+  fail(message)
 }
 for (const message of validateReleaseEnvironmentWorkflows(
   releaseEnvironmentWorkflows

@@ -2215,17 +2215,296 @@ export function validateCandidateRecoveryWorkflow(source) {
 
 export function validateReleaseEnvironmentWorkflows(workflows) {
   const failures = []
-  for (const [workflow, { jobName, source }] of Object.entries(workflows)) {
-    const block = jobBlock(source, jobName)
-    if (!block) {
-      failures.push(`${workflow} is missing the ${jobName} job`)
-      continue
+  for (const [workflow, { jobName, jobNames, source }] of Object.entries(
+    workflows
+  )) {
+    const requiredJobs = Array.isArray(jobNames) ? jobNames : [jobName]
+    for (const requiredJob of requiredJobs) {
+      const block = jobBlock(source, requiredJob)
+      if (!block) {
+        failures.push(`${workflow} is missing the ${requiredJob} job`)
+        continue
+      }
+      if (!/^    environment:\s*release-distribution\s*$/m.test(block)) {
+        failures.push(
+          `${workflow} ${requiredJob} must use the release-distribution environment`
+        )
+      }
     }
-    if (!/^    environment:\s*release-distribution\s*$/m.test(block)) {
+  }
+  return failures
+}
+
+export function validateBiyanDownloadAliasBootstrapWorkflow(source) {
+  const failures = []
+  const active = uncommentedSource(source)
+  const bootstrap = jobBlock(source, 'bootstrap-biyan-download-aliases')
+  const distribute = jobBlock(source, 'distribute')
+  const permissions = topLevelBlock(active, 'permissions')
+  const topLevelPermissionsCount = [
+    ...active.matchAll(/^permissions:\s*(?:#.*)?$/gm),
+  ].length
+
+  if (
+    topLevelPermissionsCount !== 1 ||
+    normalizedYamlEnvelope(permissions) !==
+      'permissions:\n  contents: read\n'
+  ) {
+    failures.push(
+      'release distribution top-level permissions must be exactly contents: read'
+    )
+  }
+  if (
+    !/concurrency:\n  group:\s*release-distribution-live-keys\n  cancel-in-progress:\s*false/m.test(
+      active
+    )
+  ) {
+    failures.push(
+      'release distribution and one-time bootstrap must share the constant live-key lock'
+    )
+  }
+  if (
+    !/^\s{6}operation:\s*$/m.test(active) ||
+    !/^\s{10}- bootstrap-biyan-download-aliases\s*$/m.test(active) ||
+    !/^\s{6}bootstrap_confirm:\s*$/m.test(active)
+  ) {
+    failures.push(
+      'release distribution manual inputs must explicitly select and confirm the allowlisted bootstrap operation'
+    )
+  }
+  if (
+    !distribute ||
+    !/^    if:\s*github\.event_name == 'release' \|\| inputs\.operation == 'distribute'\s*$/m.test(
+      distribute
+    )
+  ) {
+    failures.push(
+      'normal distribution must handle release publication and only the distribute manual operation'
+    )
+  }
+  if (!bootstrap) {
+    failures.push(
+      'release distribution is missing the bootstrap-biyan-download-aliases job'
+    )
+    return failures
+  }
+
+  if (
+    !/^    if:\s*>-\n      github\.event_name == 'workflow_dispatch' &&\n      inputs\.operation == 'bootstrap-biyan-download-aliases'\s*$/m.test(
+      bootstrap
+    ) ||
+    !/^    environment:\s*release-distribution\s*$/m.test(bootstrap) ||
+    !/^    timeout-minutes:\s*45\s*$/m.test(bootstrap)
+  ) {
+    failures.push(
+      'the Biyan alias bootstrap must be a bounded manual-only release-distribution environment job'
+    )
+  }
+  if (
+    !bootstrap.includes('ref: mita-main') ||
+    !bootstrap.includes('fetch-depth: 0') ||
+    !bootstrap.includes('persist-credentials: false') ||
+    !bootstrap.includes('WORKFLOW_REF: ${{ github.ref }}') ||
+    !bootstrap.includes('[ "$WORKFLOW_REF" != "refs/heads/mita-main" ]')
+  ) {
+    failures.push(
+      'the Biyan alias bootstrap must check out and revalidate protected live mita-main without persisted credentials'
+    )
+  }
+  const bootstrapSteps = workflowStepBlocks(bootstrap)
+  const namedBootstrapSteps = (name) =>
+    bootstrapSteps.filter(
+      (step) => step.split('\n')[0].trim() === `- name: ${name}`
+    )
+  const requestSteps = namedBootstrapSteps(
+    'Resolve exact one-time bootstrap request'
+  )
+  const provenanceSteps = namedBootstrapSteps(
+    'Verify protected harness, tag, checkpoint, and exact Draft'
+  )
+  const revalidationSteps = namedBootstrapSteps(
+    'Revalidate protected harness and Draft before OSS access'
+  )
+  const exactDraftReadAndGuard = (sourceVariable, outputName) => [
+    'gh api "repos/$GITHUB_REPOSITORY/releases/$DRAFT_RELEASE_ID" \\',
+    `> dist/biyan-download-alias-bootstrap/${outputName}`,
+    'jq -e \\',
+    '--argjson release_id "$DRAFT_RELEASE_ID" \\',
+    `--arg source "$${sourceVariable}" \\`,
+    "'.id == $release_id",
+    'and .tag_name == "v0.6.643"',
+    'and .target_commitish == $source',
+    'and .draft == true',
+    'and .prerelease == false',
+    'and .published_at == null',
+    'and (.assets | length) == 13',
+    'and all(.assets[];',
+    '.state == "uploaded"',
+    'and .size > 0',
+    `and (.digest | test("^sha256:[0-9a-f]{64}$")))' \\`,
+    `dist/biyan-download-alias-bootstrap/${outputName} >/dev/null`,
+  ]
+  if (
+    requestSteps.length !== 1 ||
+    !requestSteps[0].includes('WORKFLOW_SHA: ${{ github.sha }}') ||
+    !requestSteps[0].includes(
+      '[[ ! "$WORKFLOW_SHA" =~ ^[0-9a-f]{40}$ ]]'
+    ) ||
+    !requestSteps[0].includes('echo "workflow_sha=$WORKFLOW_SHA"')
+  ) {
+    failures.push(
+      'the Biyan alias bootstrap must freeze and validate the full workflow dispatch SHA'
+    )
+  }
+  if (
+    provenanceSteps.length !== 1 ||
+    !provenanceSteps[0].includes(
+      'WORKFLOW_SHA: ${{ steps.bootstrap.outputs.workflow_sha }}'
+    ) ||
+    !/^\s*if \[ "\$checkout_head" != "\$WORKFLOW_SHA" \] \|\| \[ "\$WORKFLOW_SHA" != "\$live_main" \]; then\n\s+echo\b[^\n]*>&2\n\s+exit 1\n\s+fi\s*$/m.test(
+      provenanceSteps[0]
+    )
+  ) {
+    failures.push(
+      'the Biyan alias bootstrap must require checkout HEAD, dispatch SHA, and live main to remain identical'
+    )
+  }
+  if (
+    provenanceSteps.length !== 1 ||
+    !provenanceSteps[0].includes("DRAFT_RELEASE_ID: '360025177'") ||
+    !hasCommandSequence(
+      provenanceSteps[0],
+      exactDraftReadAndGuard('SOURCE_COMMIT', 'draft-release.json')
+    )
+  ) {
+    failures.push(
+      'the Biyan alias bootstrap must retain the exact reviewed first Draft read and complete identity and asset guard'
+    )
+  }
+  if (
+    revalidationSteps.length !== 1 ||
+    !revalidationSteps[0].includes("DRAFT_RELEASE_ID: '360025177'") ||
+    !hasCommandSequence(
+      revalidationSteps[0],
+      exactDraftReadAndGuard(
+        'EXPECTED_SOURCE',
+        'draft-release-current.json'
+      )
+    )
+  ) {
+    failures.push(
+      'the Biyan alias bootstrap must repeat the exact reviewed Draft read and complete identity and asset guard immediately before OSS access'
+    )
+  }
+  if (
+    revalidationSteps.length !== 1 ||
+    !hasCommandSequence(revalidationSteps[0], [
+      'diff -u \\',
+      "<(jq -S '[.assets[] | {id, name, size, digest, state}] | sort_by(.id)' \\",
+      'dist/biyan-download-alias-bootstrap/draft-release.json) \\',
+      "<(jq -S '[.assets[] | {id, name, size, digest, state}] | sort_by(.id)' \\",
+      'dist/biyan-download-alias-bootstrap/draft-release-current.json)',
+    ])
+  ) {
+    failures.push(
+      'the Biyan alias bootstrap must diff the normalized complete Draft asset snapshots before OSS access'
+    )
+  }
+  for (const exact of [
+    '[ "$INPUT_TAG" != "v0.6.643" ]',
+    'source_commit=38e6d9290a8b9b0f152ff2a7eefb550e6ead7df5',
+    'migration_phase=A',
+    'data_schema=1',
+    '[ "$INPUT_CONFIRM" != "BOOTSTRAP_BIYAN_ALIASES_V0633" ]',
+    "DRAFT_RELEASE_ID: '360025177'",
+    'git merge-base --is-ancestor "$tag_commit" origin/mita-main',
+  ]) {
+    if (!bootstrap.includes(exact)) {
       failures.push(
-        `${workflow} ${jobName} must use the release-distribution environment`
+        `the Biyan alias bootstrap is missing exact reviewed identity contract: ${exact}`
       )
     }
+  }
+  if (
+    !bootstrap.includes(
+      'https://aliyuncli.alicdn.com/aliyun-cli-linux-3.3.22-amd64.tgz'
+    ) ||
+    !bootstrap.includes(
+      '41a67dfd2f44c00eb628d9f91fa7c4807222de54ebe44fac3477fb9c70b3b0bc'
+    ) ||
+    !bootstrap.includes(
+      'https://gosspublic.alicdn.com/ossutil/v2/2.3.0/ossutil-2.3.0-linux-amd64.zip'
+    ) ||
+    !bootstrap.includes(
+      '3ae4d9fc85a7a6e9f5654d1599766f1a3a42a3692870887b5ae9338d582ef65a'
+    )
+  ) {
+    failures.push(
+      'the Biyan alias bootstrap must install only the checksum-pinned Aliyun clients'
+    )
+  }
+  const revalidationIndex = bootstrap.indexOf(
+    '- name: Revalidate protected harness and Draft before OSS access'
+  )
+  const executionIndex = bootstrap.indexOf(
+    '- name: Execute allowlisted Biyan alias bootstrap'
+  )
+  if (
+    revalidationIndex < 0 ||
+    executionIndex <= revalidationIndex ||
+    !bootstrap.includes(
+      'node scripts/release-distribution/bootstrap-biyan-download-aliases.mjs'
+    ) ||
+    !bootstrap.includes(
+      '--evidence dist/biyan-download-alias-bootstrap/state.json'
+    ) ||
+    !bootstrap.includes('args+=(--dry-run)')
+  ) {
+    failures.push(
+      'the Biyan alias bootstrap must revalidate protected state before the exact dry-run-aware allowlisted script'
+    )
+  }
+  for (const exact of [
+    'ALIYUN_OSS_BUCKET: mita-static',
+    'ALIYUN_OSS_ENDPOINT: https://oss-cn-hangzhou.aliyuncs.com',
+    'OSS_REGION: cn-hangzhou',
+    'UPDATES_CDN_BASE_URL: https://static.mitapp.cn',
+  ]) {
+    if (!bootstrap.includes(exact)) {
+      failures.push(
+        `the Biyan alias bootstrap is missing canonical storage authority: ${exact}`
+      )
+    }
+  }
+  if (
+    !/- name: Require bootstrap evidence\n\s+if:\s*always\(\)/.test(
+      bootstrap
+    ) ||
+    !/- name: Upload bootstrap evidence\n\s+if:\s*always\(\)/.test(
+      bootstrap
+    ) ||
+    !bootstrap.includes('if-no-files-found: error') ||
+    !bootstrap.includes('dist/biyan-download-alias-bootstrap/**')
+  ) {
+    failures.push(
+      'the Biyan alias bootstrap must always validate and upload its evidence'
+    )
+  }
+  if (
+    /\b(?:BIYAN_SIGNING_KEY|R2_ACCESS_KEY|CLOUDFLARE_API_TOKEN)\b/.test(
+      bootstrap
+    ) ||
+    /\b(?:mita\/latest\.json|biyan\/updater\/|promote-desktop-update|deploy-updater-router)\b/.test(
+      bootstrap
+    ) ||
+    /\bgh\s+release\s+(?:create|edit|delete|upload)\b/.test(bootstrap) ||
+    /\bgh\s+api\b[^\n]*(?:--method|-X)\s+(?:POST|PUT|PATCH|DELETE)\b/i.test(
+      bootstrap
+    )
+  ) {
+    failures.push(
+      'the Biyan alias bootstrap must not gain signing, updater, router, R2, or GitHub release mutation authority'
+    )
   }
   return failures
 }
@@ -2653,6 +2932,7 @@ export function validateCiWorkflow(source) {
       'python3 scripts/ci/__tests__/extract-release-candidate-recovery.test.py',
       'node --test scripts/ci/__tests__/verify-release-candidate-recovery.test.mjs',
       'node --test scripts/updater/__tests__/updater.test.mjs',
+      'node --test scripts/release-distribution/__tests__/bootstrap-biyan-download-aliases.test.mjs',
       'node --test scripts/release-distribution/__tests__/release-distribution.test.mjs',
     ]) {
       if (
@@ -3234,9 +3514,10 @@ export function validateQualificationWorkflow(source) {
       }
     }
     if (
-      !/scripts\/release-distribution\/__tests__\/release-distribution\.test\.mjs/.test(
-        activePreflight
-      ) ||
+      ![
+        /scripts\/release-distribution\/__tests__\/bootstrap-biyan-download-aliases\.test\.mjs/,
+        /scripts\/release-distribution\/__tests__\/release-distribution\.test\.mjs/,
+      ].every((pattern) => pattern.test(activePreflight)) ||
       !hasRunInvocation(
         preflight,
         /^node\s+--test\s+["']?\$test_file["']?(?:\s|$)/

@@ -10,6 +10,7 @@ import {
   findCandidatePathViolation,
 } from '../candidate-path-policy.mjs'
 import {
+  validateBiyanDownloadAliasBootstrapWorkflow,
   validateBundledLegalResources,
   validateCandidateRecoveryWorkflow,
   validateCandidateWorkflow,
@@ -2153,7 +2154,7 @@ test(
 test('formal build, release, and updater jobs share the release-distribution environment', () => {
   const workflows = {
     '.github/workflows/release-distribution.yml': {
-      jobName: 'distribute',
+      jobNames: ['distribute', 'bootstrap-biyan-download-aliases'],
       source: fs.readFileSync(
         '.github/workflows/release-distribution.yml',
         'utf8'
@@ -2246,6 +2247,215 @@ test('formal build, release, and updater jobs share the release-distribution env
         )
       )
     }
+  }
+
+  const bootstrapSplitEnvironment = structuredClone(workflows)
+  bootstrapSplitEnvironment[
+    '.github/workflows/release-distribution.yml'
+  ].source = bootstrapSplitEnvironment[
+    '.github/workflows/release-distribution.yml'
+  ].source.replace(
+    /(^  bootstrap-biyan-download-aliases:\s*$[\s\S]*?^    environment:)\s*release-distribution\s*$/m,
+    '$1 release-build'
+  )
+  assert.ok(
+    validateReleaseEnvironmentWorkflows(bootstrapSplitEnvironment).some(
+      (failure) =>
+        failure.includes('bootstrap-biyan-download-aliases') &&
+        failure.includes('release-distribution environment')
+    )
+  )
+})
+
+test('one-time Biyan alias bootstrap is manual, exact, and fail-closed', () => {
+  const workflow = fs.readFileSync(
+    '.github/workflows/release-distribution.yml',
+    'utf8'
+  )
+  assert.deepEqual(validateBiyanDownloadAliasBootstrapWorkflow(workflow), [])
+  const bootstrapMarker = '  bootstrap-biyan-download-aliases:\n'
+  const bootstrapIndex = workflow.indexOf(bootstrapMarker)
+  assert.ok(bootstrapIndex > 0)
+  const mutateBootstrap = (search, replacement) =>
+    `${workflow.slice(0, bootstrapIndex)}${workflow
+      .slice(bootstrapIndex)
+      .replace(search, replacement)}`
+
+  const mutations = [
+    [
+      'manual-only operation',
+      mutateBootstrap(
+        "inputs.operation == 'bootstrap-biyan-download-aliases'",
+        "github.event_name == 'release'"
+      ),
+    ],
+    [
+      'release-distribution environment',
+      mutateBootstrap(
+        'environment: release-distribution',
+        'environment: release-build'
+      ),
+    ],
+    [
+      'non-persistent checkout credentials',
+      mutateBootstrap(
+        'persist-credentials: false',
+        'persist-credentials: true'
+      ),
+    ],
+    [
+      'protected main ref',
+      mutateBootstrap(
+        'refs/heads/mita-main',
+        'refs/heads/release/bootstrap'
+      ),
+    ],
+    [
+      'frozen workflow dispatch SHA',
+      mutateBootstrap(
+        'WORKFLOW_SHA: ${{ github.sha }}',
+        'WORKFLOW_SHA: ${{ github.ref }}'
+      ),
+    ],
+    [
+      'full workflow dispatch SHA',
+      mutateBootstrap(
+        '[[ ! "$WORKFLOW_SHA" =~ ^[0-9a-f]{40}$ ]]',
+        '[[ ! "$WORKFLOW_SHA" =~ ^[0-9a-f]{7,40}$ ]]'
+      ),
+    ],
+    [
+      'checkout, dispatch, and live main equality',
+      mutateBootstrap(
+        'if [ "$checkout_head" != "$WORKFLOW_SHA" ] || [ "$WORKFLOW_SHA" != "$live_main" ]; then',
+        'if [ "$checkout_head" != "$live_main" ]; then'
+      ),
+    ],
+    ['exact tag', mutateBootstrap('v0.6.643', 'v0.6.644')],
+    [
+      'exact source commit',
+      mutateBootstrap(
+        '38e6d9290a8b9b0f152ff2a7eefb550e6ead7df5',
+        'd58f4e9141ee9dfc985171d13c993103dd763b01'
+      ),
+    ],
+    [
+      'live confirmation',
+      mutateBootstrap(
+        'BOOTSTRAP_BIYAN_ALIASES_V0633',
+        'BOOTSTRAP_BIYAN_ALIASES'
+      ),
+    ],
+    [
+      'exact Draft release id',
+      mutateBootstrap(/'360025177'/g, "'360025178'"),
+    ],
+    [
+      'Draft id guard',
+      mutateBootstrap('.id == $release_id', '.id > 0'),
+    ],
+    [
+      'Draft tag guard',
+      mutateBootstrap(
+        '.tag_name == "v0.6.643"',
+        '.tag_name == "v0.6.644"'
+      ),
+    ],
+    [
+      'Draft target guard',
+      mutateBootstrap(
+        '.target_commitish == $source',
+        '.target_commitish == "unexpected-commit"'
+      ),
+    ],
+    [
+      'Draft state guard',
+      mutateBootstrap('.draft == true', '.draft == false'),
+    ],
+    [
+      'Draft prerelease guard',
+      mutateBootstrap('.prerelease == false', '.prerelease == true'),
+    ],
+    [
+      'Draft publication guard',
+      mutateBootstrap('.published_at == null', '.published_at != null'),
+    ],
+    [
+      'Draft asset count guard',
+      mutateBootstrap(
+        'and (.assets | length) == 13',
+        'and (.assets | length) > 0'
+      ),
+    ],
+    [
+      'Draft asset state guard',
+      mutateBootstrap('.state == "uploaded"', '.state != "deleted"'),
+    ],
+    [
+      'Draft asset size guard',
+      mutateBootstrap('and .size > 0', 'and .size >= 0'),
+    ],
+    [
+      'Draft asset digest guard',
+      mutateBootstrap(
+        'test("^sha256:[0-9a-f]{64}$")',
+        'test("^sha256:")'
+      ),
+    ],
+    [
+      'second Draft read',
+      mutateBootstrap(
+        '> dist/biyan-download-alias-bootstrap/draft-release-current.json',
+        '> dist/biyan-download-alias-bootstrap/draft-release-reused.json'
+      ),
+    ],
+    [
+      'normalized Draft asset diff',
+      mutateBootstrap('diff -u \\', 'diff --brief \\'),
+    ],
+    [
+      'exact bootstrap invocation',
+      mutateBootstrap(
+        'node scripts/release-distribution/bootstrap-biyan-download-aliases.mjs',
+        'echo scripts/release-distribution/bootstrap-biyan-download-aliases.mjs'
+      ),
+    ],
+    [
+      'always-uploaded evidence',
+      mutateBootstrap(
+        '- name: Upload bootstrap evidence\n        if: always()',
+        '- name: Upload bootstrap evidence\n        if: success()'
+      ),
+    ],
+    [
+      'canonical storage region',
+      mutateBootstrap(
+        'OSS_REGION: cn-hangzhou',
+        'OSS_REGION: cn-shanghai'
+      ),
+    ],
+    [
+      'forbidden signing authority',
+      mutateBootstrap(
+        'GH_TOKEN: ${{ github.token }}',
+        'BIYAN_SIGNING_KEY: ${{ secrets.BIYAN_SIGNING_KEY }}'
+      ),
+    ],
+    [
+      'exact top-level contents permission',
+      workflow.replace(
+        'permissions:\n  contents: read',
+        'permissions:\n  contents: read\n  actions: read'
+      ),
+    ],
+  ]
+  for (const [label, mutation] of mutations) {
+    assert.notEqual(mutation, workflow, `${label} mutation must apply`)
+    assert.notDeepEqual(
+      validateBiyanDownloadAliasBootstrapWorkflow(mutation),
+      [],
+      `${label} mutation must fail validation`
+    )
   }
 })
 
@@ -2418,6 +2628,7 @@ jobs:
       - run: python3 scripts/ci/__tests__/extract-release-candidate-recovery.test.py
       - run: node --test scripts/ci/__tests__/verify-release-candidate-recovery.test.mjs
       - run: node --test scripts/updater/__tests__/updater.test.mjs
+      - run: node --test scripts/release-distribution/__tests__/bootstrap-biyan-download-aliases.test.mjs
       - run: node --test scripts/release-distribution/__tests__/release-distribution.test.mjs
       - name: Exercise unprivileged qualification verifier boundary
         shell: bash
@@ -3020,6 +3231,7 @@ jobs:
     'node --test scripts/ci/__tests__/run-untrusted-qualification-verifier.test.mjs',
     'node --test scripts/ci/__tests__/verify-qualification-artifacts.test.mjs',
     'node --test scripts/ci/__tests__/verify-qualification-recovery.test.mjs',
+    'node --test scripts/release-distribution/__tests__/bootstrap-biyan-download-aliases.test.mjs',
     'node --test scripts/release-distribution/__tests__/release-distribution.test.mjs',
   ]) {
     const echoedContract = workflow.replace(command, `echo ${command}`)
@@ -3263,8 +3475,13 @@ jobs:
         run: node --test scripts/updater/__tests__/updater.test.mjs
       - working-directory: target
         run: |
-          test_file="scripts/release-distribution/__tests__/release-distribution.test.mjs"
-          node --test "$test_file"
+          test_files=(
+            "scripts/release-distribution/__tests__/bootstrap-biyan-download-aliases.test.mjs"
+            "scripts/release-distribution/__tests__/release-distribution.test.mjs"
+          )
+          for test_file in "\${test_files[@]}"; do
+            node --test "$test_file"
+          done
   docs-build:
     runs-on: ubuntu-24.04
     needs: preflight
