@@ -17,8 +17,11 @@ export const REVIEWED_CONTROL_PLANE_DRIFT = Object.freeze(
   new Map([
     ['.github/workflows/biyan-exact-sha-qualification.yml', 'M'],
     ['.github/workflows/biyan-linter-and-test.yml', 'M'],
+    ['.github/workflows/desktop-release-draft-repair.yml', 'A'],
     ['.github/workflows/desktop-release-recovery.yml', 'A'],
     ['.github/workflows/desktop-release.yml', 'M'],
+    ['.github/workflows/release-distribution.yml', 'M'],
+    ['docs/release-distribution.md', 'M'],
     ['scripts/ci/__tests__/candidate-content-policy.test.mjs', 'M'],
     ['scripts/ci/__tests__/extract-release-candidate-recovery.test.py', 'A'],
     ['scripts/ci/__tests__/qualification-impact.test.mjs', 'M'],
@@ -37,6 +40,24 @@ export const REVIEWED_CONTROL_PLANE_DRIFT = Object.freeze(
     ['scripts/ci/verify-release-policy.mjs', 'M'],
     ['scripts/ci/verify-release-target.mjs', 'A'],
     ['scripts/ci/verify-windows-candidate.ps1', 'M'],
+    [
+      'scripts/release-distribution/__tests__/bootstrap-biyan-download-aliases.test.mjs',
+      'A',
+    ],
+    [
+      'scripts/release-distribution/__tests__/draft-asset-repair-state.test.mjs',
+      'A',
+    ],
+    [
+      'scripts/release-distribution/biyan-download-alias-bootstrap-allowlist.json',
+      'A',
+    ],
+    ['scripts/release-distribution/bootstrap-biyan-download-aliases.mjs', 'A'],
+    ['scripts/release-distribution/draft-asset-repair-state.mjs', 'A'],
+    ['scripts/release-distribution/publish-download-transaction.mjs', 'M'],
+    ['scripts/updater/__tests__/verify-updater-asset-signature.test.mjs', 'A'],
+    ['scripts/updater/verify-candidate.mjs', 'M'],
+    ['scripts/updater/verify-updater-asset-signature.mjs', 'A'],
   ])
 )
 
@@ -52,7 +73,10 @@ const EXACT_RELEASE_TAG = new RegExp(
 const REGULAR_MODES = new Set(['100644', '100755'])
 const CONTROL_PLANE_ROOTS = Object.freeze([
   '.github/workflows/',
+  'docs/',
   'scripts/ci/',
+  'scripts/release-distribution/',
+  'scripts/updater/',
 ])
 
 function isExactControlPlanePath(relativePath) {
@@ -66,15 +90,13 @@ function isExactControlPlanePath(relativePath) {
   const segments = relativePath.split('/')
   if (
     segments.some(
-      (segment) =>
-        segment.length === 0 || segment === '.' || segment === '..'
+      (segment) => segment.length === 0 || segment === '.' || segment === '..'
     )
   ) {
     return false
   }
   return CONTROL_PLANE_ROOTS.some(
-    (root) =>
-      relativePath.startsWith(root) && relativePath.length > root.length
+    (root) => relativePath.startsWith(root) && relativePath.length > root.length
   )
 }
 
@@ -275,9 +297,7 @@ export function validateReleaseDrift(entries) {
       (oldMode && !REGULAR_MODES.has(oldMode)) ||
       (newMode && !REGULAR_MODES.has(newMode))
     ) {
-      failures.push(
-        `control-plane drift must use regular files: ${entry.path}`
-      )
+      failures.push(`control-plane drift must use regular files: ${entry.path}`)
       continue
     }
     if (
@@ -298,10 +318,7 @@ function verifyCheckpoint({
   releaseVersion,
   sourceCommit,
 }) {
-  const verifier = path.join(
-    harnessRoot,
-    'scripts/ci/qualification-impact.mjs'
-  )
+  const verifier = path.join(harnessRoot, 'scripts/ci/qualification-impact.mjs')
   const result = run(process.execPath, [
     verifier,
     'verify-checkpoint',
@@ -344,13 +361,7 @@ function verifyPolicyView({
   let worktreeAdded = false
 
   try {
-    git(harnessRoot, [
-      'worktree',
-      'add',
-      '--detach',
-      policyView,
-      trustedMain,
-    ])
+    git(harnessRoot, ['worktree', 'add', '--detach', policyView, trustedMain])
     worktreeAdded = true
 
     for (const relativePath of CHECKPOINT_FILES) {
@@ -381,11 +392,9 @@ function verifyPolicyView({
     }
   } finally {
     if (worktreeAdded) {
-      git(
-        harnessRoot,
-        ['worktree', 'remove', '--force', policyView],
-        { allowFailure: true }
-      )
+      git(harnessRoot, ['worktree', 'remove', '--force', policyView], {
+        allowFailure: true,
+      })
     }
     fs.rmSync(temporaryRoot, { force: true, recursive: true })
   }
@@ -394,13 +403,8 @@ function verifyPolicyView({
 }
 
 export function verifyReleaseTarget(options) {
-  const {
-    harnessRoot,
-    releaseTag,
-    sourceCommit,
-    targetRoot,
-    trustedMain,
-  } = options
+  const { harnessRoot, releaseTag, sourceCommit, targetRoot, trustedMain } =
+    options
   if (!EXACT_RELEASE_TAG.test(releaseTag)) {
     throw new Error('release tag must be an exact v-prefixed semantic version')
   }

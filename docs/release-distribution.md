@@ -6,10 +6,11 @@ artifacts; it must not overwrite a stable manifest.
 
 ## Candidate build
 
-1. Create the tag only after its exact commit is ready for release. The
-   candidate workflow checks out that immutable tag and verifies its version
-   and migration metadata.
-2. The tag workflow itself runs `make test` (lint plus the TypeScript and Rust
+1. Dispatch the candidate workflow only from protected `mita-main` after its
+   exact checkpoint commit is ready for release. Its `tag-cut` job creates or
+   verifies the immutable lightweight tag before the candidate checks out and
+   verifies that tag's version and migration metadata.
+2. The candidate workflow itself runs `make test` (lint plus the TypeScript and Rust
    suites), the release policy scan, and updater contract tests. A prior PR or
    branch CI result is useful evidence, but it never substitutes for this gate.
 3. macOS, Windows, and Linux builds all depend on the candidate quality gate;
@@ -18,6 +19,39 @@ artifacts; it must not overwrite a stable manifest.
 5. Upload artifacts under a versioned Biyan path and record SHA-256 values.
 6. Attach signed candidate metadata to the GitHub release without changing the
    stable updater route.
+
+### Exact tag cut and sequential dispatch
+
+Before each A, B, or C dispatch, enable and verify an active ruleset scoped to
+that phase's exact tag. The ruleset must forbid tag update and deletion while
+allowing creation. Do not dispatch until the exact ruleset is active; in
+particular, activate the B and C rulesets before their respective stages.
+
+Only manually dispatch `Desktop Release Candidate` from protected
+`mita-main`. The workflow accepts exactly these mappings:
+
+| Stage | Tag        | Source commit                              |
+| ----- | ---------- | ------------------------------------------ |
+| A     | `v0.6.643` | `38e6d9290a8b9b0f152ff2a7eefb550e6ead7df5` |
+| B     | `v0.6.644` | `d58f4e9141ee9dfc985171d13c993103dd763b01` |
+| C     | `v0.6.645` | `a79c715a61057d7b78b440d90e3419dfc7e55d12` |
+
+`tag-cut` uses only the repository `GITHUB_TOKEN`; do not provide an operator
+PAT or GitHub App secret and do not directly push the tag. A missing tag is
+created as the approved lightweight ref, an already exact tag is a no-op, and
+any conflict fails closed. GitHub's `GITHUB_TOKEN` recursion protection means
+this creation does not trigger the retired checkpoint `push.tags` workflow.
+
+The candidate workflow creates a Draft release. Keep it Draft until the stage's
+candidate, source, artifact, and acceptance gates pass, then publish it exactly
+once. That publication must produce exactly one `release.published` Release
+Distribution run; do not dispatch a second non-dry-run distribution in
+parallel. Use manual non-dry-run distribution only as an explicit recovery for
+a failed or absent publication-triggered run.
+
+Complete and accept A before dispatching B, and complete and accept B before
+dispatching C. The rollout timing and health gates below still apply between
+promotion stages.
 
 ## Pre-tag exact-SHA qualification
 

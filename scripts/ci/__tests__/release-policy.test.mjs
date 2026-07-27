@@ -17,6 +17,7 @@ import {
   validateCiControlOwnership,
   validateCiWorkflow,
   validateDocsArchiveConfig,
+  validateDraftAssetRepairWorkflow,
   validateFlatpakMetadata,
   validateLinuxReleaseBuild,
   validateMacOSCandidateVerifier,
@@ -78,7 +79,10 @@ test('candidate path policy allows Playwright vocabulary but rejects retired tok
     'storageScriptSource.js',
   ]) {
     assert.equal(
-      findCandidatePathViolation(`resources/ms-playwright/${name}`, runtimeOnly),
+      findCandidatePathViolation(
+        `resources/ms-playwright/${name}`,
+        runtimeOnly
+      ),
       null,
       name
     )
@@ -207,10 +211,7 @@ test('candidate path traversal requires contained, relative, live bundle symlink
   )
   fs.rmSync(path.join(root, 'dangling'))
 
-  fs.symlinkSync(
-    'rag-extension',
-    path.join(root, 'runtime-link')
-  )
+  fs.symlinkSync('rag-extension', path.join(root, 'runtime-link'))
   assert.throws(
     () => assertSafeCandidatePaths(root, runtimeOnly),
     /Retired local runtime found in candidate path/
@@ -625,33 +626,59 @@ const candidateReleasePin = `      - env:
           if [[ ! "$live_tag" =~ ^[0-9a-f]{40}$ ]] || [ "$live_tag" != "$EXPECTED_SOURCE" ]; then exit 1; fi
 `
 
-const candidateWorkflow = `permissions:
+const formalCandidateWorkflow = fs
+  .readFileSync('.github/workflows/desktop-release.yml', 'utf8')
+  .replace(/\r\n?/g, '\n')
+const formalTagCutStart = formalCandidateWorkflow.indexOf('  tag-cut:\n')
+const formalTagCutEnd = formalCandidateWorkflow.indexOf(
+  '\n  preflight:\n',
+  formalTagCutStart
+)
+assert.notEqual(formalTagCutStart, -1)
+assert.notEqual(formalTagCutEnd, -1)
+const exactTagCutFixture = formalCandidateWorkflow.slice(
+  formalTagCutStart,
+  formalTagCutEnd
+)
+
+const candidateWorkflow = `on:
+  workflow_dispatch:
+    inputs:
+      version:
+        required: true
+        type: string
+permissions:
   contents: read
 concurrency:
-  group: desktop-candidate-\${{ github.event.inputs.version || github.ref_name }}
+  group: desktop-candidate-\${{ inputs.version }}
   cancel-in-progress: false
 jobs:
+${exactTagCutFixture}
   preflight:
+    needs: tag-cut
     steps:
       - uses: actions/checkout@v4
         with:
-          ref: mita-main
+          ref: \${{ needs.tag-cut.outputs.trusted_main_commit }}
           path: harness
           persist-credentials: false
       - uses: actions/checkout@v4
         with:
-          ref: v0.6.643
+          ref: \${{ needs.tag-cut.outputs.tag }}
           path: target
           persist-credentials: false
       - id: release
         env:
-          EVENT_NAME: \${{ github.event_name }}
-          WORKFLOW_REF: \${{ github.ref }}
+          RELEASE_TAG: \${{ needs.tag-cut.outputs.tag }}
+          EXPECTED_SOURCE: \${{ needs.tag-cut.outputs.source_commit }}
+          EXPECTED_MAIN: \${{ needs.tag-cut.outputs.trusted_main_commit }}
         run: |
-          if [ "$EVENT_NAME" = "workflow_dispatch" ] && [ "$WORKFLOW_REF" != "refs/heads/mita-main" ]; then exit 1; fi
           checkout_head="$(git -C harness rev-parse HEAD)"
           live_main="$(git -C harness rev-parse refs/remotes/origin/mita-main)"
-          if [ "$checkout_head" != "$live_main" ]; then exit 1; fi
+          if [ "$checkout_head" != "$EXPECTED_MAIN" ] || [ "$live_main" != "$EXPECTED_MAIN" ]; then exit 1; fi
+          source_commit="$(git -C harness rev-list -n 1 "refs/tags/$RELEASE_TAG")"
+          test "$source_commit" = "$EXPECTED_SOURCE"
+          test "$source_commit" = "$(git -C target rev-parse HEAD)"
           echo "trusted_main_commit=$live_main"
       - run: git -C harness merge-base --is-ancestor "$source_commit" refs/remotes/origin/mita-main
       - env:
@@ -714,12 +741,36 @@ ${candidateReleasePin}
     steps:
 ${candidateReleasePin}
       - run: make build
+      - name: Re-sign final Linux AppImage
+        env:
+          VERSION: \${{ needs.preflight.outputs.version }}
+          TAURI_SIGNING_PRIVATE_KEY: \${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: \${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+        run: |
+          set -euo pipefail
+          appimage="src-tauri/target/release/bundle/appimage/Biyan_\${VERSION}_amd64.AppImage"
+          test -f "$appimage"
+          rm -f "$appimage.sig"
+          yarn tauri signer sign \
+            --private-key "$TAURI_SIGNING_PRIVATE_KEY" \
+            --password "$TAURI_SIGNING_PRIVATE_KEY_PASSWORD" \
+            "$appimage"
+          test -s "$appimage.sig"
       - uses: actions/checkout@v4
         with:
           ref: \${{ needs.preflight.outputs.trusted_main_commit }}
           path: harness
           persist-credentials: false
       - run: |
+          public_key="$(
+            jq -er '.plugins.updater.pubkey | select(type == "string" and length > 0)' \
+              harness/src-tauri/tauri.conf.json
+          )"
+          node harness/scripts/updater/verify-updater-asset-signature.mjs \
+            --asset "src-tauri/target/release/bundle/appimage/Biyan_\${VERSION}_amd64.AppImage" \
+            --signature "src-tauri/target/release/bundle/appimage/Biyan_\${VERSION}_amd64.AppImage.sig" \
+            --public-key "$public_key" \
+            --label linux-x86_64
           node harness/scripts/ci/candidate-path-policy.mjs --root src-tauri/target/release/bundle
           node harness/scripts/ci/candidate-content-policy.mjs --root src-tauri/target/release/bundle
 ${candidateReleasePin}
@@ -955,6 +1006,20 @@ ${candidateReleasePin}
 
 test('candidate workflow gates every platform build on exact-tag tests', () => {
   assert.deepEqual(validateCandidateWorkflow(candidateWorkflow), [])
+  const replaceInNamedStep = (source, stepName, needle, replacement) => {
+    const marker = `      - name: ${stepName}\n`
+    const start = source.indexOf(marker)
+    assert.notEqual(start, -1, stepName)
+    const next = source.indexOf('\n      - ', start + marker.length)
+    const end = next < 0 ? source.length : next
+    const step = source.slice(start, end)
+    assert.ok(step.includes(needle), `${stepName} mutation needle`)
+    return (
+      source.slice(0, start) +
+      step.replace(needle, replacement) +
+      source.slice(end)
+    )
+  }
 
   const topLevelWrite = candidateWorkflow.replace(
     'permissions:\n  contents: read',
@@ -967,14 +1032,84 @@ test('candidate workflow gates every platform build on exact-tag tests', () => {
   )
 
   const splitCandidateConcurrency = candidateWorkflow.replace(
-    'github.event.inputs.version || github.ref_name',
-    'github.event.inputs.version || github.ref'
+    'inputs.version',
+    'inputs.version || github.ref'
   )
   assert.ok(
     validateCandidateWorkflow(splitCandidateConcurrency).some((failure) =>
-      failure.includes('serialize tag-push and manual runs')
+      failure.includes('without a ref fallback')
     )
   )
+
+  for (const [label, mutated, expected] of [
+    [
+      'push trigger added',
+      candidateWorkflow.replace(
+        'on:\n  workflow_dispatch:',
+        'on:\n  push:\n  workflow_dispatch:'
+      ),
+      'workflow_dispatch-only',
+    ],
+    [
+      'A checkpoint mapping drifted',
+      candidateWorkflow.replace(
+        '38e6d9290a8b9b0f152ff2a7eefb550e6ead7df5',
+        'f'.repeat(40)
+      ),
+      'reviewed A/B/C checkpoints',
+    ],
+    [
+      'tag-cut gains checkout action',
+      candidateWorkflow.replace(
+        '    steps:\n      - name: Cut or verify exact lightweight release tag',
+        `    steps:
+      - uses: actions/checkout@v4
+      - name: Cut or verify exact lightweight release tag`
+      ),
+      'use no action, checkout, or secret',
+    ],
+    [
+      'tag-cut swaps in a repository secret',
+      candidateWorkflow.replace(
+        'GH_TOKEN: ${{ github.token }}',
+        'GH_TOKEN: ${{ secrets.RELEASE_PAT }}'
+      ),
+      'use no action, checkout, or secret',
+    ],
+    [
+      'tag-cut loses release environment',
+      candidateWorkflow.replace(
+        `  tag-cut:
+    name: Cut or verify exact immutable release tag
+    runs-on: ubuntu-latest
+    environment: release-distribution`,
+        `  tag-cut:
+    name: Cut or verify exact immutable release tag
+    runs-on: ubuntu-latest`
+      ),
+      'contents: write release-distribution permission domain',
+    ],
+    [
+      'absent tag state is no longer explicit',
+      candidateWorkflow.replace('            404)', '            403)'),
+      'existing, absent-and-create, and unexpected REST tag states',
+    ],
+    [
+      'preflight bypasses tag-cut',
+      candidateWorkflow.replace(
+        '  preflight:\n    needs: tag-cut',
+        '  preflight:'
+      ),
+      'preflight must depend on tag-cut',
+    ],
+  ]) {
+    assert.ok(
+      validateCandidateWorkflow(mutated).some((failure) =>
+        failure.includes(expected)
+      ),
+      label
+    )
+  }
 
   const persistedCheckout = candidateWorkflow.replace(
     'persist-credentials: false',
@@ -987,12 +1122,12 @@ test('candidate workflow gates every platform build on exact-tag tests', () => {
   )
 
   const untrustedHarness = candidateWorkflow.replace(
-    'ref: mita-main',
-    'ref: v0.6.643'
+    'ref: ${{ needs.tag-cut.outputs.trusted_main_commit }}',
+    'ref: ${{ needs.tag-cut.outputs.tag }}'
   )
   assert.ok(
     validateCandidateWorkflow(untrustedHarness).some((failure) =>
-      failure.includes('protected mita-main harness')
+      failure.includes('exact protected-main harness')
     )
   )
 
@@ -1078,17 +1213,22 @@ test('candidate workflow gates every platform build on exact-tag tests', () => {
   )
   assert.ok(
     validateCandidateWorkflow(unsafeManualRef).some((failure) =>
-      failure.includes('workflow from protected mita-main')
+      failure.includes('bind the dispatch SHA to live mita-main')
     )
   )
 
   const advisoryManualRef = candidateWorkflow.replace(
-    'then exit 1; fi',
-    'then :; fi'
+    `          if [ "$WORKFLOW_REF" != "refs/heads/mita-main" ]; then
+            echo "Candidate dispatch must use protected mita-main" >&2
+            exit 1
+          fi`,
+    `          if [ "$WORKFLOW_REF" != "refs/heads/mita-main" ]; then
+            :
+          fi`
   )
   assert.ok(
     validateCandidateWorkflow(advisoryManualRef).some((failure) =>
-      failure.includes('workflow from protected mita-main')
+      failure.includes('bind the dispatch SHA to live mita-main')
     )
   )
 
@@ -1132,7 +1272,9 @@ test('candidate workflow gates every platform build on exact-tag tests', () => {
     )
   )
 
-  const unsignedProvenance = candidateWorkflow.replace(
+  const unsignedProvenance = replaceInNamedStep(
+    candidateWorkflow,
+    'Sign canonical candidate manifest',
     'yarn tauri signer sign',
     'echo unsigned'
   )
@@ -1182,13 +1324,105 @@ test('candidate workflow gates every platform build on exact-tag tests', () => {
     )
   )
 
-  const literalSigningSecret = candidateWorkflow.replace(
+  const literalSigningSecret = replaceInNamedStep(
+    candidateWorkflow,
+    'Sign canonical candidate manifest',
     'TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}',
     'TAURI_SIGNING_PRIVATE_KEY: literal'
   )
   assert.ok(
     validateCandidateWorkflow(literalSigningSecret).some((failure) =>
       failure.includes('both protected Tauri signing secrets')
+    )
+  )
+
+  for (const [label, mutated] of [
+    [
+      'missing final Linux signer',
+      candidateWorkflow.replace(
+        candidateWorkflow.slice(
+          candidateWorkflow.indexOf(
+            '      - name: Re-sign final Linux AppImage\n'
+          ),
+          candidateWorkflow.indexOf(
+            '\n      - uses: actions/checkout@v4',
+            candidateWorkflow.indexOf(
+              '      - name: Re-sign final Linux AppImage\n'
+            )
+          )
+        ),
+        ''
+      ),
+    ],
+    [
+      'wrong final Linux target',
+      replaceInNamedStep(
+        candidateWorkflow,
+        'Re-sign final Linux AppImage',
+        'bundle/appimage/Biyan_${VERSION}_amd64.AppImage',
+        'bundle/deb/Biyan_${VERSION}_amd64.deb'
+      ),
+    ],
+    [
+      'missing final Linux signing secret',
+      replaceInNamedStep(
+        candidateWorkflow,
+        'Re-sign final Linux AppImage',
+        'TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}',
+        'TAURI_SIGNING_PRIVATE_KEY_PASSWORD: missing'
+      ),
+    ],
+    [
+      'keeps stale final Linux signature',
+      replaceInNamedStep(
+        candidateWorkflow,
+        'Re-sign final Linux AppImage',
+        'rm -f "$appimage.sig"',
+        'echo keep-stale-signature'
+      ),
+    ],
+    [
+      'skips final Linux signature assertion',
+      replaceInNamedStep(
+        candidateWorkflow,
+        'Re-sign final Linux AppImage',
+        'test -s "$appimage.sig"',
+        'echo assumed-signature'
+      ),
+    ],
+    [
+      'skips final Linux cryptographic verification',
+      candidateWorkflow.replace(
+        'node harness/scripts/updater/verify-updater-asset-signature.mjs',
+        'echo skipped-final-linux-signature-verification'
+      ),
+    ],
+  ]) {
+    assert.ok(
+      validateCandidateWorkflow(mutated).some((failure) =>
+        failure.includes('re-sign the final canonical AppImage')
+      ),
+      label
+    )
+  }
+  const signerStart = candidateWorkflow.indexOf(
+    '      - name: Re-sign final Linux AppImage\n'
+  )
+  const signerEnd = candidateWorkflow.indexOf(
+    '\n      - uses: actions/checkout@v4',
+    signerStart
+  )
+  const signerBlock = candidateWorkflow.slice(signerStart, signerEnd)
+  const earlyFinalLinuxSigner = candidateWorkflow
+    .slice(0, signerStart)
+    .concat(candidateWorkflow.slice(signerEnd))
+    .replace(
+      '      - run: make build\n',
+      `${signerBlock}\n      - run: make build\n`
+    )
+  assert.ok(
+    validateCandidateWorkflow(earlyFinalLinuxSigner).some((failure) =>
+      failure.includes('re-sign the final canonical AppImage')
     )
   )
 
@@ -1321,10 +1555,7 @@ test('candidate workflow gates every platform build on exact-tag tests', () => {
     candidateReleasePin,
     freshSlotStart
   )
-  const freshSlotBlock = candidateWorkflow.slice(
-    freshSlotStart,
-    freshSlotEnd
-  )
+  const freshSlotBlock = candidateWorkflow.slice(freshSlotStart, freshSlotEnd)
   const withoutFreshSlot =
     candidateWorkflow.slice(0, freshSlotStart) +
     candidateWorkflow.slice(freshSlotEnd)
@@ -1386,8 +1617,12 @@ test('candidate workflow gates every platform build on exact-tag tests', () => {
   )
 
   const splitReleaseBuildEnvironment = candidateWorkflow.replace(
-    'environment: release-distribution',
-    'environment: release-build'
+    `  build-macos:
+    needs: [preflight, quality-gate]
+    environment: release-distribution`,
+    `  build-macos:
+    needs: [preflight, quality-gate]
+    environment: release-build`
   )
   assert.ok(
     validateCandidateWorkflow(splitReleaseBuildEnvironment).some((failure) =>
@@ -1442,10 +1677,9 @@ test('candidate workflow gates every platform build on exact-tag tests', () => {
 })
 
 test('candidate Draft mutations match reviewed execution envelopes', () => {
-  const workflow = fs.readFileSync(
-    '.github/workflows/desktop-release.yml',
-    'utf8'
-  ).replace(/\r\n?/g, '\n')
+  const workflow = fs
+    .readFileSync('.github/workflows/desktop-release.yml', 'utf8')
+    .replace(/\r\n?/g, '\n')
   assert.deepEqual(
     validateCandidateWorkflow(workflow, {
       requireReviewedEnvelope: true,
@@ -1569,9 +1803,7 @@ test('candidate Draft mutations match reviewed execution envelopes', () => {
   assert.ok(
     validateCandidateWorkflow(renamedWithMutation, {
       requireReviewedEnvelope: true,
-    }).some((failure) =>
-      failure.includes('exact reviewed workflow name')
-    )
+    }).some((failure) => failure.includes('exact reviewed workflow name'))
   )
 
   const extraSecretJob = `${workflow}
@@ -1587,9 +1819,7 @@ test('candidate Draft mutations match reviewed execution envelopes', () => {
   assert.ok(
     validateCandidateWorkflow(extraSecretJob, {
       requireReviewedEnvelope: true,
-    }).some((failure) =>
-      failure.includes('reviewed ordered job allowlist')
-    )
+    }).some((failure) => failure.includes('reviewed ordered job allowlist'))
   )
 
   const packageWrite = workflow.replace(
@@ -1603,16 +1833,17 @@ test('candidate Draft mutations match reviewed execution envelopes', () => {
     validateCandidateWorkflow(packageWrite, {
       requireReviewedEnvelope: true,
     }).some((failure) =>
-      failure.includes('only draft-release may request write permissions')
+      failure.includes(
+        'only tag-cut and draft-release may request write permissions'
+      )
     )
   )
 })
 
 test('candidate recovery authenticates exact artifacts and only resumes package to Draft', () => {
-  const workflow = fs.readFileSync(
-    '.github/workflows/desktop-release-recovery.yml',
-    'utf8'
-  ).replace(/\r\n?/g, '\n')
+  const workflow = fs
+    .readFileSync('.github/workflows/desktop-release-recovery.yml', 'utf8')
+    .replace(/\r\n?/g, '\n')
   assert.deepEqual(validateCandidateRecoveryWorkflow(workflow), [])
   const replaceInNamedStep = (source, stepName, needle, replacement) => {
     const marker = `      - name: ${stepName}\n`
@@ -1836,8 +2067,8 @@ test('candidate recovery authenticates exact artifacts and only resumes package 
     forgedReleaseId
   )
   assert.ok(
-    validateCandidateRecoveryWorkflow(forgedUploadReleaseId).some(
-      (failure) => failure.includes('byte-bound assets')
+    validateCandidateRecoveryWorkflow(forgedUploadReleaseId).some((failure) =>
+      failure.includes('byte-bound assets')
     )
   )
   const forgedBothReleaseIds = replaceInNamedStep(
@@ -1847,8 +2078,8 @@ test('candidate recovery authenticates exact artifacts and only resumes package 
     forgedReleaseId
   )
   assert.ok(
-    validateCandidateRecoveryWorkflow(forgedBothReleaseIds).some(
-      (failure) => failure.includes('byte-bound assets')
+    validateCandidateRecoveryWorkflow(forgedBothReleaseIds).some((failure) =>
+      failure.includes('byte-bound assets')
     )
   )
 
@@ -1922,8 +2153,7 @@ test('candidate recovery authenticates exact artifacts and only resumes package 
   )
   assert.ok(
     validateCandidateRecoveryWorkflow(waitsOnConflictingReadback).some(
-      (failure) =>
-        failure.includes('atomically POST a new empty Draft')
+      (failure) => failure.includes('atomically POST a new empty Draft')
     )
   )
 
@@ -1997,6 +2227,469 @@ test('candidate recovery authenticates exact artifacts and only resumes package 
   }
 })
 
+test('one-time Draft repair isolates signing and release mutation authority', () => {
+  const workflow = normalizeLineEndings(
+    fs.readFileSync(
+      '.github/workflows/desktop-release-draft-repair.yml',
+      'utf8'
+    )
+  )
+  const helper = normalizeLineEndings(
+    fs.readFileSync(
+      'scripts/release-distribution/draft-asset-repair-state.mjs',
+      'utf8'
+    )
+  )
+  assert.deepEqual(validateDraftAssetRepairWorkflow(workflow, helper), [])
+  assert.deepEqual(
+    validateDraftAssetRepairWorkflow(
+      withLineEndings(workflow, '\r\n'),
+      withLineEndings(helper, '\r\n')
+    ),
+    []
+  )
+  const replaceDraftStep = (stepName, needle, replacement) => {
+    const marker = `      - name: ${stepName}\n`
+    const start = workflow.indexOf(marker)
+    assert.notEqual(start, -1, stepName)
+    const next = workflow.indexOf('\n      - name: ', start + marker.length)
+    const end = next < 0 ? workflow.length : next
+    const step = workflow.slice(start, end)
+    assert.ok(step.includes(needle), `${stepName} mutation needle`)
+    return (
+      workflow.slice(0, start) +
+      step.replace(needle, replacement) +
+      workflow.slice(end)
+    )
+  }
+
+  for (const [label, mutated, expected] of [
+    [
+      'top-level write',
+      workflow.replace(
+        'permissions:\n  actions: read\n  contents: read',
+        'permissions:\n  actions: read\n  contents: write'
+      ),
+      'top-level permissions',
+    ],
+    [
+      'current workflow authority collapsed into prepared head',
+      workflow.replace(
+        'current_workflow_sha: ${{ steps.repair-authority.outputs.current_workflow_sha }}',
+        'current_workflow_sha: ${{ steps.repair-authority.outputs.prepared_head }}'
+      ),
+      'keep current workflow authority separate',
+    ],
+    [
+      'snapshot ancestry proof weakened',
+      replaceDraftStep(
+        'Resolve exact one-time repair authority',
+        '.merge_base_commit.sha == $base',
+        '.merge_base_commit.sha != $base'
+      ),
+      'revalidate live-main ancestry and exact workflow/helper Git blobs',
+    ],
+    [
+      'snapshot ancestry predicate made advisory',
+      replaceDraftStep(
+        'Resolve exact one-time repair authority',
+        '          jq -e \\\n',
+        '          jq \\\n'
+      ),
+      'revalidate live-main ancestry and exact workflow/helper Git blobs',
+    ],
+    [
+      'snapshot control blob lookup made nullable',
+      replaceDraftStep(
+        'Resolve exact one-time repair authority',
+        '                jq -er \\\n',
+        '                jq -r \\\n'
+      ),
+      'revalidate live-main ancestry and exact workflow/helper Git blobs',
+    ],
+    [
+      'snapshot control drift no longer exits',
+      replaceDraftStep(
+        'Resolve exact one-time repair authority',
+        '                echo "Protected control file drifted across $label: $path" >&2\n                exit 1',
+        '                echo "Protected control file drifted across $label: $path" >&2'
+      ),
+      'revalidate live-main ancestry and exact workflow/helper Git blobs',
+    ],
+    [
+      'mutation control blob equality removed',
+      replaceDraftStep(
+        'Execute fail-closed forward-only repair state machine',
+        'test "$base_blob" = "$head_blob"',
+        'test -n "$head_blob"'
+      ),
+      'revalidate live-main ancestry and exact workflow/helper Git blobs',
+    ],
+    [
+      'snapshot artifact detached from workflow SHA',
+      replaceDraftStep(
+        'Authenticate old Draft snapshot artifact',
+        'CURRENT_SHA: ${{ steps.authority.outputs.current_workflow_sha }}',
+        'CURRENT_SHA: ${{ github.sha }}'
+      ),
+      'bind exact current run, attempt, and workflow SHA metadata',
+    ],
+    [
+      'snapshot artifact predicate made advisory',
+      replaceDraftStep(
+        'Download exact authenticated old Draft snapshot',
+        '          jq -e \\\n',
+        '          jq \\\n'
+      ),
+      'enforce every run, artifact, ancestry, byte-binding, plan, and state jq predicate',
+    ],
+    [
+      'repair plan binding reads candidate metadata instead',
+      replaceDraftStep(
+        'Safely extract and pin the exact repair bundle',
+        "' dist/repair-bundle/repair-plan.json >/dev/null",
+        "' dist/repair-bundle/candidate.json >/dev/null"
+      ),
+      'bound to the authenticated prepared head',
+    ],
+    [
+      'snapshot download detached from authenticated workflow head',
+      replaceDraftStep(
+        'Download exact authenticated old Draft snapshot',
+        '.workflow_run.head_sha == $head',
+        '.workflow_run.head_sha != $head'
+      ),
+      'bind exact current run, attempt, and workflow SHA metadata',
+    ],
+    [
+      'secret leaked into mutation domain',
+      workflow.replace(
+        '  commit-resume:\n',
+        `  commit-resume:
+    env:
+      TAURI_SIGNING_PRIVATE_KEY: \${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+`
+      ),
+      'isolate only the two Tauri signing secrets',
+    ],
+    [
+      'native rebuild added',
+      workflow.replace(
+        '      - name: Build canonical corrected candidate\n',
+        `      - name: Unauthorized native rebuild
+        run: make build
+      - name: Build canonical corrected candidate
+`
+      ),
+      'without rebuilding native packages',
+    ],
+    [
+      'old snapshot unpinned',
+      workflow.replaceAll(
+        '1f5e60a7ed4107bcb11cf4dc0b7876ec97bad51cb6705678dc1fd15f192d917e',
+        'f'.repeat(64)
+      ),
+      'exact release, source, snapshot',
+    ],
+    [
+      'repair allowlist expanded',
+      workflow.replaceAll('SHA256SUMS', 'UNREVIEWED.bin'),
+      'five-file allowlist',
+    ],
+    [
+      'clobber mutation',
+      workflow.replace(
+        'for iteration in $(seq 0 80); do',
+        'gh release upload v0.6.643 --clobber surprise\n          for iteration in $(seq 0 80); do'
+      ),
+      'forward-resume state machine',
+    ],
+    [
+      'state transition bypassed',
+      workflow.replace(
+        'rename-old-to-backup|rename-stage-to-canonical)',
+        'rename-anything)'
+      ),
+      'forward-resume state machine',
+    ],
+    [
+      'starter cleanup removed',
+      workflow.replace('delete-starter-stage|delete-backup)', 'delete-backup)'),
+      'forward-resume state machine',
+    ],
+    [
+      'mutation retry bound shortened',
+      workflow.replace(
+        'for iteration in $(seq 0 80); do',
+        'for iteration in $(seq 0 8); do'
+      ),
+      'forward-resume state machine',
+    ],
+    [
+      'same-run preparation attempt discarded',
+      workflow.replace(
+        'prepared_run_attempt="$CURRENT_PREPARED_RUN_ATTEMPT"',
+        'prepared_run_attempt="$CURRENT_RUN_ATTEMPT"'
+      ),
+      'exact successful same-run preparation attempt',
+    ],
+    [
+      'same-run prepared head discarded',
+      replaceDraftStep(
+        'Resolve exact prepared repair artifact authority',
+        'test "$prepared_head" = "$CURRENT_PREPARED_HEAD"',
+        'test "$prepared_head" = "$WORKFLOW_SHA"'
+      ),
+      'exact successful same-run preparation attempt',
+    ],
+    [
+      'cross-run prepared ancestry skipped',
+      replaceDraftStep(
+        'Resolve exact prepared repair artifact authority',
+        '"prepared-execution"',
+        '"untrusted-prepared-execution"'
+      ),
+      'authenticate exact run-attempt provenance',
+    ],
+    [
+      'cross-run attempt provenance weakened',
+      replaceDraftStep(
+        'Resolve exact prepared repair artifact authority',
+        '.run_attempt >= $attempt',
+        '.run_attempt > 0'
+      ),
+      'authenticate exact run-attempt provenance',
+    ],
+    [
+      'cross-run repository provenance weakened',
+      workflow.replace(
+        '.head_repository.full_name == "realerikk0/Mita"',
+        '.head_repository.full_name != "realerikk0/Mita"'
+      ),
+      'authenticate exact run-attempt provenance',
+    ],
+    [
+      'prepared artifact detached from authenticated head',
+      replaceDraftStep(
+        'Download exact authenticated repair bundle',
+        '.workflow_run.head_sha == $head',
+        '.workflow_run.head_sha != $head'
+      ),
+      'authenticate exact run-attempt provenance',
+    ],
+    [
+      'repair plan rebound to current workflow head',
+      replaceDraftStep(
+        'Safely extract and pin the exact repair bundle',
+        '${{ steps.repair-authority.outputs.prepared_head }}',
+        '${{ steps.repair-authority.outputs.current_workflow_sha }}'
+      ),
+      'bound to the authenticated prepared head',
+    ],
+    [
+      'repair plan predicate made advisory',
+      replaceDraftStep(
+        'Safely extract and pin the exact repair bundle',
+        '          jq -e \\\n',
+        '          jq \\\n'
+      ),
+      'enforce every run, artifact, ancestry, byte-binding, plan, and state jq predicate',
+    ],
+    [
+      'final snapshot copies candidate metadata as repair plan',
+      replaceDraftStep(
+        'Read back exact committed Draft without repository code',
+        '          cp \\\n            dist/repair-bundle/repair-plan.json \\\n            dist/final-snapshot/metadata/repair-plan.json',
+        '          cp \\\n            dist/repair-bundle/candidate.json \\\n            dist/final-snapshot/metadata/repair-plan.json'
+      ),
+      'bound to the authenticated prepared head',
+    ],
+    [
+      'cross-run artifact ambiguity accepted',
+      workflow.replace(
+        'if [ "$count" = 1 ]; then',
+        'if [ "$count" -ge 1 ]; then'
+      ),
+      'authenticate exact run-attempt provenance',
+    ],
+    [
+      'prepared archive digest skipped',
+      (() => {
+        const needle = `          test "sha256:$(sha256sum "$archive" | awk '{ print $1 }')" = \\
+            "$ARTIFACT_DIGEST"`
+        const commitStart = workflow.indexOf('  commit-resume:\n')
+        const index = workflow.indexOf(needle, commitStart)
+        assert.notEqual(index, -1)
+        return (
+          workflow.slice(0, index) +
+          '          echo skipped-prepared-archive-digest' +
+          workflow.slice(index + needle.length)
+        )
+      })(),
+      'unique artifact identity, and archive bytes',
+    ],
+    [
+      'artifact name no longer attempt scoped',
+      workflow.replace(
+        'biyan-v0.6.643-draft-snapshot-360025177-attempt-${{ github.run_attempt }}',
+        'biyan-v0.6.643-draft-snapshot-360025177'
+      ),
+      'run-attempt-scope every immutable snapshot',
+    ],
+    [
+      'mutation domain checks out mutable code',
+      workflow.replace(
+        `    steps:
+      - name: Resolve exact prepared repair artifact authority`,
+        `    steps:
+      - uses: actions/checkout@v4
+      - name: Resolve exact prepared repair artifact authority`
+      ),
+      'mutation must not checkout repository code',
+    ],
+    [
+      'final verifier gains write authority',
+      workflow.replace(
+        `  final-verify:
+    name: Verify exact repaired Draft from read-only snapshot`,
+        `  final-verify:
+    name: Verify exact repaired Draft from read-only snapshot
+    permissions:
+      actions: read
+      contents: write`
+      ),
+      'final-verify must retain its exact release-distribution permission domain',
+    ],
+    [
+      'final harness checks out prepared rather than current controls',
+      replaceDraftStep(
+        'Checkout protected postflight harness',
+        '${{ needs.commit-resume.outputs.current_workflow_sha }}',
+        '${{ needs.commit-resume.outputs.prepared_head }}'
+      ),
+      'keep current workflow authority separate',
+    ],
+    [
+      'final snapshot detached from current workflow head',
+      replaceDraftStep(
+        'Download exact authenticated final Draft readback',
+        'EXPECTED_HEAD: ${{ needs.commit-resume.outputs.current_workflow_sha }}',
+        'EXPECTED_HEAD: ${{ needs.commit-resume.outputs.prepared_head }}'
+      ),
+      'authenticate the immutable current-run snapshot',
+    ],
+    [
+      'postflight reclassification reads the wrong plan',
+      replaceDraftStep(
+        'Validate frozen final Draft state and asset bytes',
+        '--plan dist/final/metadata/repair-plan.json',
+        '--plan dist/final/metadata/final-state.json'
+      ),
+      'bound to the authenticated prepared head',
+    ],
+    [
+      'committed readback state predicate made advisory',
+      replaceDraftStep(
+        'Read back exact committed Draft without repository code',
+        "          jq -e '\n",
+        "          jq '\n"
+      ),
+      'enforce every run, artifact, ancestry, byte-binding, plan, and state jq predicate',
+    ],
+    [
+      'postflight prepared-head state predicate made advisory',
+      replaceDraftStep(
+        'Validate frozen final Draft state and asset bytes',
+        '          jq -e \\\n            --arg head "${{ needs.commit-resume.outputs.prepared_head }}"',
+        '          jq \\\n            --arg head "${{ needs.commit-resume.outputs.prepared_head }}"'
+      ),
+      'enforce every run, artifact, ancestry, byte-binding, plan, and state jq predicate',
+    ],
+    [
+      'postflight reclassification comparison skipped',
+      replaceDraftStep(
+        'Validate frozen final Draft state and asset bytes',
+        '          cmp \\\n',
+        '          echo skipped-final-state-comparison \\\n'
+      ),
+      'bound to the authenticated prepared head',
+    ],
+    [
+      'final state rebound to current workflow head',
+      replaceDraftStep(
+        'Validate frozen final Draft state and asset bytes',
+        '${{ needs.commit-resume.outputs.prepared_head }}',
+        '${{ needs.commit-resume.outputs.current_workflow_sha }}'
+      ),
+      'bound to the authenticated prepared head',
+    ],
+    [
+      'postflight control blob equality removed',
+      replaceDraftStep(
+        'Validate frozen final Draft state and asset bytes',
+        'test "$base_blob" = "$head_blob"',
+        'test -n "$head_blob"'
+      ),
+      'revalidate live-main ancestry and exact workflow/helper Git blobs',
+    ],
+    [
+      'final verifier rereads mutable release',
+      workflow.replace(
+        `    steps:
+      - name: Checkout protected postflight harness`,
+        `    steps:
+      - name: Unauthorized mutable Draft reread
+        run: gh api "repos/$GITHUB_REPOSITORY/releases/360025177"
+      - name: Checkout protected postflight harness`
+      ),
+      'complete byte, signature, checksum',
+    ],
+    [
+      'postflight signature verification skipped',
+      (() => {
+        const needle = 'node harness/scripts/updater/verify-candidate.mjs'
+        const index = workflow.lastIndexOf(needle)
+        assert.notEqual(index, -1)
+        return (
+          workflow.slice(0, index) +
+          'echo skipped-complete-candidate-verification' +
+          workflow.slice(index + needle.length)
+        )
+      })(),
+      'complete byte, signature, checksum',
+    ],
+    [
+      'always evidence weakened',
+      workflow.replace('if: ${{ always() }}', 'if: ${{ success() }}'),
+      'two always-run evidence conditions',
+    ],
+    [
+      'publication added',
+      workflow.replace(
+        'printf \'%s\\n\' "verified-draft-only"',
+        'gh api --method PATCH releases/360025177 -f draft=false'
+      ),
+      'must not publish',
+    ],
+  ]) {
+    assert.ok(
+      validateDraftAssetRepairWorkflow(mutated, helper).some((failure) =>
+        failure.includes(expected)
+      ),
+      label
+    )
+  }
+
+  assert.ok(
+    validateDraftAssetRepairWorkflow(
+      workflow,
+      helper.replace('must contain exactly eight entries', 'accept anything')
+    ).some((failure) =>
+      failure.includes('pin the reviewed fail-closed state helper')
+    )
+  )
+})
+
 test(
   'Draft readback retries only empty successful listings and fails closed',
   { skip: process.platform === 'win32' },
@@ -2043,16 +2736,16 @@ test(
         'gh() {',
         '  COUNT=$((COUNT + 1))',
         '  case "$SCENARIO:$COUNT" in',
-        "    exact:1|empty_then_exact:3) printf '%s\\n' '[[{\"tag_name\":\"v0.6.643\",\"id\":123}]]' ;;",
+        '    exact:1|empty_then_exact:3) printf \'%s\\n\' \'[[{"tag_name":"v0.6.643","id":123}]]\' ;;',
         "    empty_then_exact:1|empty_then_exact:2|empty_timeout:*) printf '%s\\n' '[[]]' ;;",
-        "    wrong:*) printf '%s\\n' '[[{\"tag_name\":\"v0.6.643\",\"id\":999}]]' ;;",
-        "    duplicate:*) printf '%s\\n' '[[{\"tag_name\":\"v0.6.643\",\"id\":123},{\"tag_name\":\"v0.6.643\",\"id\":123}]]' ;;",
+        '    wrong:*) printf \'%s\\n\' \'[[{"tag_name":"v0.6.643","id":999}]]\' ;;',
+        '    duplicate:*) printf \'%s\\n\' \'[[{"tag_name":"v0.6.643","id":123},{"tag_name":"v0.6.643","id":123}]]\' ;;',
         '    api_fail:*) return 1 ;;',
         "    malformed:*) printf '%s\\n' '{' ;;",
         '    *) return 2 ;;',
         '  esac',
         '}',
-        "trap 'printf \"calls=%s sleeps=%s\\n\" \"$COUNT\" \"$SLEEPS\" >&2' EXIT",
+        'trap \'printf "calls=%s sleeps=%s\\n" "$COUNT" "$SLEEPS" >&2\' EXIT',
         formal,
       ].join('\n')
       const result = spawnSync('bash', ['-c', harness], {
@@ -2141,9 +2834,7 @@ test(
       assert.equal(lightweight.status, 0, lightweight.stderr)
       assert.equal(lightweight.stdout.trim(), direct)
 
-      const annotated = run(
-        `${direct}\t${tag}\n${peeled}\t${tag}^{}\n`
-      )
+      const annotated = run(`${direct}\t${tag}\n${peeled}\t${tag}^{}\n`)
       assert.ifError(annotated.error)
       assert.equal(annotated.status, 0, annotated.stderr)
       assert.equal(annotated.stdout.trim(), peeled)
@@ -2268,11 +2959,16 @@ test('formal build, release, and updater jobs share the release-distribution env
 })
 
 test('one-time Biyan alias bootstrap is manual, exact, and fail-closed', () => {
-  const workflow = fs.readFileSync(
-    '.github/workflows/release-distribution.yml',
-    'utf8'
+  const workflow = normalizeLineEndings(
+    fs.readFileSync('.github/workflows/release-distribution.yml', 'utf8')
   )
   assert.deepEqual(validateBiyanDownloadAliasBootstrapWorkflow(workflow), [])
+  assert.deepEqual(
+    validateBiyanDownloadAliasBootstrapWorkflow(
+      withLineEndings(workflow, '\r\n')
+    ),
+    []
+  )
   const bootstrapMarker = '  bootstrap-biyan-download-aliases:\n'
   const bootstrapIndex = workflow.indexOf(bootstrapMarker)
   assert.ok(bootstrapIndex > 0)
@@ -2319,10 +3015,7 @@ test('one-time Biyan alias bootstrap is manual, exact, and fail-closed', () => {
     ],
     [
       'protected main ref',
-      mutateBootstrap(
-        'refs/heads/mita-main',
-        'refs/heads/release/bootstrap'
-      ),
+      mutateBootstrap('refs/heads/mita-main', 'refs/heads/release/bootstrap'),
     ],
     [
       'frozen workflow dispatch SHA',
@@ -2404,10 +3097,7 @@ test('one-time Biyan alias bootstrap is manual, exact, and fail-closed', () => {
     ],
     [
       'canonical storage region',
-      mutateBootstrap(
-        'OSS_REGION: cn-hangzhou',
-        'OSS_REGION: cn-shanghai'
-      ),
+      mutateBootstrap('OSS_REGION: cn-hangzhou', 'OSS_REGION: cn-shanghai'),
     ],
     [
       'forbidden signing authority',
@@ -2728,10 +3418,7 @@ jobs:
     ),
   ].join('\n')
   assert.deepEqual(validateCiWorkflow(workflow), [])
-  assert.deepEqual(
-    validateCiWorkflow(withLineEndings(workflow, '\r\n')),
-    []
-  )
+  assert.deepEqual(validateCiWorkflow(withLineEndings(workflow, '\r\n')), [])
   assert.deepEqual(
     validateCiWorkflow(
       workflow.replace('\n  quick-pr-check:', '\n\n\n  quick-pr-check:')
@@ -3044,9 +3731,10 @@ jobs:
     ),
     workflow.replace(
       "          event='${{ github.event_name }}'",
-      ['          node() { :; }', "          event='${{ github.event_name }}'"].join(
-        '\n'
-      )
+      [
+        '          node() { :; }',
+        "          event='${{ github.event_name }}'",
+      ].join('\n')
     ),
     workflow.replace(
       "          event='${{ github.event_name }}'",
@@ -3196,7 +3884,10 @@ jobs:
       "        if: needs.ci-scope.outputs.build_windows == 'true'",
       "        if: needs.ci-scope.outputs.build_windows == 'false'"
     ),
-    workflow.replace('          make build', '          Write-Output make build'),
+    workflow.replace(
+      '          make build',
+      '          Write-Output make build'
+    ),
     workflow.replace(
       '          $env:BIYAN_DATA_SCHEMA = [string]$releaseMetadata.dataSchema',
       '          Write-Output $env:BIYAN_DATA_SCHEMA = [string]$releaseMetadata.dataSchema'
@@ -3285,19 +3976,24 @@ jobs:
 })
 
 test('PR CI is read-only and CI control paths require owner review', () => {
-  const workflow = fs.readFileSync(
-    '.github/workflows/biyan-linter-and-test.yml',
-    'utf8'
-  ).replace(/\r\n?/g, '\n')
+  const workflow = fs
+    .readFileSync('.github/workflows/biyan-linter-and-test.yml', 'utf8')
+    .replace(/\r\n?/g, '\n')
   assert.deepEqual(validateCiWorkflow(workflow), [])
   assert.ok(
     validateCiWorkflow(
-      workflow.replace('permissions:\n  contents: read', 'permissions:\n  contents: write')
+      workflow.replace(
+        'permissions:\n  contents: read',
+        'permissions:\n  contents: write'
+      )
     ).some((failure) => failure.includes('contents: read only'))
   )
   assert.ok(
     validateCiWorkflow(
-      workflow.replace('persist-credentials: false', 'persist-credentials: true')
+      workflow.replace(
+        'persist-credentials: false',
+        'persist-credentials: true'
+      )
     ).some((failure) => failure.includes('credential persistence'))
   )
   assert.ok(
@@ -3314,7 +4010,10 @@ test('PR CI is read-only and CI control paths require owner review', () => {
   for (const owner of ['@realerikk0', '@twokar']) {
     assert.ok(
       validateCiControlOwnership(
-        codeowners.replace(`/.github/ @realerikk0 @twokar`, `/.github/ ${owner}`)
+        codeowners.replace(
+          `/.github/ @realerikk0 @twokar`,
+          `/.github/ ${owner}`
+        )
       ).some(
         (failure) => failure.includes('/.github/') && !failure.endsWith(owner)
       )
@@ -3323,10 +4022,9 @@ test('PR CI is read-only and CI control paths require owner review', () => {
 })
 
 test('protected Windows verifier authenticates native EXE and MSI identity', () => {
-  const verifier = fs.readFileSync(
-    'scripts/ci/verify-windows-candidate.ps1',
-    'utf8'
-  ).replace(/\r\n?/g, '\n')
+  const verifier = fs
+    .readFileSync('scripts/ci/verify-windows-candidate.ps1', 'utf8')
+    .replace(/\r\n?/g, '\n')
   assert.deepEqual(validateWindowsCandidateVerifier(verifier), [])
   for (const [index, mutation] of [
     verifier.replaceAll('0x8664', '0x014C'),
@@ -3403,10 +4101,16 @@ test('protected macOS verifier authenticates the mounted DMG app bytes', () => {
   const verifier = fs.readFileSync('scripts/verify-macos-candidate.mjs', 'utf8')
   assert.deepEqual(validateMacOSCandidateVerifier(verifier), [])
   for (const mutation of [
-    verifier.replace("runCommand('hdiutil', ['verify'", "runCommand('echo', ['verify'"),
+    verifier.replace(
+      "runCommand('hdiutil', ['verify'",
+      "runCommand('echo', ['verify'"
+    ),
     verifier.replace("'attach',", "'inspect',"),
     verifier.replace('bundleSnapshot(mountedApp)', 'bundleSnapshot(appPath)'),
-    verifier.replace("runCommand('hdiutil', ['detach'", "runCommand('echo', ['detach'"),
+    verifier.replace(
+      "runCommand('hdiutil', ['detach'",
+      "runCommand('echo', ['detach'"
+    ),
   ]) {
     assert.notDeepEqual(validateMacOSCandidateVerifier(mutation), [])
   }

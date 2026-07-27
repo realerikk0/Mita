@@ -1,13 +1,10 @@
 name: Desktop Release Candidate
 
 on:
-  push:
-    tags:
-      - "v*"
   workflow_dispatch:
     inputs:
       version:
-        description: "Existing release tag to build, for example v0.6.637"
+        description: "Exact reviewed release tag: v0.6.643, v0.6.644, or v0.6.645"
         required: true
         type: string
 
@@ -15,7 +12,7 @@ permissions:
   contents: read
 
 concurrency:
-  group: desktop-candidate-${{ github.event.inputs.version || github.ref_name }}
+  group: desktop-candidate-${{ inputs.version }}
   cancel-in-progress: false
 
 env:
@@ -23,9 +20,178 @@ env:
   YARN_ENABLE_IMMUTABLE_INSTALLS: "true"
 
 jobs:
+  tag-cut:
+    name: Cut or verify exact immutable release tag
+    runs-on: ubuntu-latest
+    environment: release-distribution
+    permissions:
+      contents: write
+    outputs:
+      version: ${{ steps.tag.outputs.version }}
+      tag: ${{ steps.tag.outputs.tag }}
+      source_commit: ${{ steps.tag.outputs.source_commit }}
+      trusted_main_commit: ${{ steps.tag.outputs.trusted_main_commit }}
+    steps:
+      - name: Cut or verify exact lightweight release tag
+        id: tag
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_TAG: ${{ inputs.version }}
+          WORKFLOW_REF: ${{ github.ref }}
+          WORKFLOW_SHA: ${{ github.sha }}
+        run: |
+          set -euo pipefail
+
+          case "$RELEASE_TAG" in
+            v0.6.643)
+              source_commit="38e6d9290a8b9b0f152ff2a7eefb550e6ead7df5"
+              ;;
+            v0.6.644)
+              source_commit="d58f4e9141ee9dfc985171d13c993103dd763b01"
+              ;;
+            v0.6.645)
+              source_commit="a79c715a61057d7b78b440d90e3419dfc7e55d12"
+              ;;
+            *)
+              echo "Release tag is not an approved A/B/C checkpoint: $RELEASE_TAG" >&2
+              exit 1
+              ;;
+          esac
+
+          if [ "$WORKFLOW_REF" != "refs/heads/mita-main" ]; then
+            echo "Candidate dispatch must use protected mita-main" >&2
+            exit 1
+          fi
+          if [[ ! "$WORKFLOW_SHA" =~ ^[0-9a-f]{40}$ ]]; then
+            echo "Dispatch head is not a full commit SHA: $WORKFLOW_SHA" >&2
+            exit 1
+          fi
+
+          live_main="$(
+            gh api "repos/$GITHUB_REPOSITORY/branches/mita-main" --jq '.commit.sha'
+          )"
+          if [[ ! "$live_main" =~ ^[0-9a-f]{40}$ ]]; then
+            echo "Live mita-main is not a full commit SHA: $live_main" >&2
+            exit 1
+          fi
+          if [ "$WORKFLOW_SHA" != "$live_main" ]; then
+            echo "Dispatch head $WORKFLOW_SHA is not live mita-main $live_main" >&2
+            exit 1
+          fi
+
+          resolved_source="$(
+            gh api "repos/$GITHUB_REPOSITORY/commits/$source_commit" --jq '.sha'
+          )"
+          if [ "$resolved_source" != "$source_commit" ]; then
+            echo "Approved source did not resolve exactly: $resolved_source" >&2
+            exit 1
+          fi
+
+          compare_json="$RUNNER_TEMP/tag-cut-compare.json"
+          gh api \
+            "repos/$GITHUB_REPOSITORY/compare/$source_commit...$live_main" \
+            > "$compare_json"
+          if ! jq -e \
+            --arg source "$source_commit" \
+            --arg main "$live_main" \
+            '
+              .base_commit.sha == $source
+              and .merge_base_commit.sha == $source
+              and .status == (if $source == $main then "identical" else "ahead" end)
+              and .behind_by == 0
+            ' \
+            "$compare_json" >/dev/null; then
+            echo "Approved source $source_commit is not an ancestor of live mita-main $live_main" >&2
+            exit 1
+          fi
+
+          api_version="2022-11-28"
+          tag_endpoint="$GITHUB_API_URL/repos/$GITHUB_REPOSITORY/git/ref/tags/$RELEASE_TAG"
+          tag_json="$RUNNER_TEMP/tag-cut-current.json"
+          read_tag() {
+            curl --proto '=https' --tlsv1.2 --silent --show-error \
+              --output "$tag_json" \
+              --write-out '%{http_code}' \
+              --header "Accept: application/vnd.github+json" \
+              --header "Authorization: Bearer $GH_TOKEN" \
+              --header "X-GitHub-Api-Version: $api_version" \
+              "$tag_endpoint"
+          }
+
+          status="$(read_tag)"
+          case "$status" in
+            200)
+              if ! jq -e \
+                --arg ref "refs/tags/$RELEASE_TAG" \
+                --arg source "$source_commit" \
+                '
+                  .ref == $ref
+                  and .object.type == "commit"
+                  and .object.sha == $source
+                ' \
+                "$tag_json" >/dev/null; then
+                echo "Existing tag conflicts with approved lightweight ref: $RELEASE_TAG" >&2
+                exit 1
+              fi
+              echo "Exact tag already exists; no mutation required: $RELEASE_TAG"
+              ;;
+            404)
+              request_json="$RUNNER_TEMP/tag-cut-request.json"
+              created_json="$RUNNER_TEMP/tag-cut-created.json"
+              jq -n \
+                --arg ref "refs/tags/$RELEASE_TAG" \
+                --arg sha "$source_commit" \
+                '{ref: $ref, sha: $sha}' \
+                > "$request_json"
+              gh api \
+                --method POST \
+                "repos/$GITHUB_REPOSITORY/git/refs" \
+                --input "$request_json" \
+                > "$created_json"
+              jq -e \
+                --arg ref "refs/tags/$RELEASE_TAG" \
+                --arg source "$source_commit" \
+                '
+                  .ref == $ref
+                  and .object.type == "commit"
+                  and .object.sha == $source
+                ' \
+                "$created_json" >/dev/null
+              ;;
+            *)
+              echo "Unexpected tag lookup status $status for $RELEASE_TAG" >&2
+              jq . "$tag_json" >&2 || true
+              exit 1
+              ;;
+          esac
+
+          status="$(read_tag)"
+          if [ "$status" != "200" ] \
+            || ! jq -e \
+              --arg ref "refs/tags/$RELEASE_TAG" \
+              --arg source "$source_commit" \
+              '
+                .ref == $ref
+                and .object.type == "commit"
+                and .object.sha == $source
+              ' \
+              "$tag_json" >/dev/null; then
+            echo "Exact tag readback failed for $RELEASE_TAG" >&2
+            exit 1
+          fi
+
+          {
+            echo "version=${RELEASE_TAG#v}"
+            echo "tag=$RELEASE_TAG"
+            echo "source_commit=$source_commit"
+            echo "trusted_main_commit=$live_main"
+          } >> "$GITHUB_OUTPUT"
+
   preflight:
     name: Validate immutable release source
     runs-on: ubuntu-latest
+    needs: tag-cut
     outputs:
       version: ${{ steps.release.outputs.version }}
       tag: ${{ steps.release.outputs.tag }}
@@ -38,7 +204,7 @@ jobs:
       - name: Checkout protected release harness
         uses: actions/checkout@v4
         with:
-          ref: mita-main
+          ref: ${{ needs.tag-cut.outputs.trusted_main_commit }}
           path: harness
           fetch-depth: 0
           persist-credentials: false
@@ -46,7 +212,7 @@ jobs:
       - name: Checkout exact release target
         uses: actions/checkout@v4
         with:
-          ref: ${{ github.event.inputs.version || github.ref }}
+          ref: ${{ needs.tag-cut.outputs.tag }}
           path: target
           fetch-depth: 0
           persist-credentials: false
@@ -60,16 +226,11 @@ jobs:
         id: release
         shell: bash
         env:
-          EVENT_NAME: ${{ github.event_name }}
-          RELEASE_TAG: ${{ github.event.inputs.version || github.ref_name }}
-          WORKFLOW_REF: ${{ github.ref }}
+          RELEASE_TAG: ${{ needs.tag-cut.outputs.tag }}
+          EXPECTED_SOURCE: ${{ needs.tag-cut.outputs.source_commit }}
+          EXPECTED_MAIN: ${{ needs.tag-cut.outputs.trusted_main_commit }}
         run: |
           set -euo pipefail
-          if [ "$EVENT_NAME" = "workflow_dispatch" ] \
-            && [ "$WORKFLOW_REF" != "refs/heads/mita-main" ]; then
-            echo "Manual candidate dispatch must use protected mita-main" >&2
-            exit 1
-          fi
           if [[ ! "$RELEASE_TAG" =~ ^v[0-9]+\.[0-9]+\.[0-9]+([+-][0-9A-Za-z.-]+)?$ ]]; then
             echo "Release tag must be an exact semantic version prefixed with v" >&2
             exit 1
@@ -80,11 +241,13 @@ jobs:
             "+refs/tags/$RELEASE_TAG:refs/tags/$RELEASE_TAG"
           checkout_head="$(git -C harness rev-parse HEAD)"
           live_main="$(git -C harness rev-parse refs/remotes/origin/mita-main)"
-          if [ "$checkout_head" != "$live_main" ]; then
-            echo "Trusted release harness $checkout_head is not live origin/mita-main $live_main" >&2
+          if [ "$checkout_head" != "$EXPECTED_MAIN" ] \
+            || [ "$live_main" != "$EXPECTED_MAIN" ]; then
+            echo "Trusted release harness is no longer the exact dispatch-time mita-main" >&2
             exit 1
           fi
           source_commit="$(git -C harness rev-list -n 1 "refs/tags/$RELEASE_TAG")"
+          test "$source_commit" = "$EXPECTED_SOURCE"
           test "$source_commit" = "$(git -C target rev-parse HEAD)"
           test "$source_commit" = "$(git -C target rev-list -n 1 "refs/tags/$RELEASE_TAG")"
           git -C harness merge-base --is-ancestor \
@@ -593,6 +756,22 @@ jobs:
           TAURI_TRAY: libappindicator3
         run: make build
 
+      - name: Re-sign final Linux AppImage
+        env:
+          VERSION: ${{ needs.preflight.outputs.version }}
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+        run: |
+          set -euo pipefail
+          appimage="src-tauri/target/release/bundle/appimage/Biyan_${VERSION}_amd64.AppImage"
+          test -f "$appimage"
+          rm -f "$appimage.sig"
+          yarn tauri signer sign \
+            --private-key "$TAURI_SIGNING_PRIVATE_KEY" \
+            --password "$TAURI_SIGNING_PRIVATE_KEY_PASSWORD" \
+            "$appimage"
+          test -s "$appimage.sig"
+
       - name: Checkout protected candidate verifier
         uses: actions/checkout@v4
         with:
@@ -608,6 +787,15 @@ jobs:
           test -f "src-tauri/target/release/bundle/appimage/Biyan_${VERSION}_amd64.AppImage"
           test -f "src-tauri/target/release/bundle/appimage/Biyan_${VERSION}_amd64.AppImage.sig"
           test -f "src-tauri/target/release/bundle/deb/Biyan_${VERSION}_amd64.deb"
+          public_key="$(
+            jq -er '.plugins.updater.pubkey | select(type == "string" and length > 0)' \
+              harness/src-tauri/tauri.conf.json
+          )"
+          node harness/scripts/updater/verify-updater-asset-signature.mjs \
+            --asset "src-tauri/target/release/bundle/appimage/Biyan_${VERSION}_amd64.AppImage" \
+            --signature "src-tauri/target/release/bundle/appimage/Biyan_${VERSION}_amd64.AppImage.sig" \
+            --public-key "$public_key" \
+            --label linux-x86_64
           node harness/scripts/ci/candidate-path-policy.mjs \
             --root src-tauri/target/release/bundle
           appimage="$(realpath "src-tauri/target/release/bundle/appimage/Biyan_${VERSION}_amd64.AppImage")"

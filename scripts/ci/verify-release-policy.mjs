@@ -11,6 +11,7 @@ import {
   validateCiControlOwnership,
   validateCiWorkflow,
   validateDocsArchiveConfig,
+  validateDraftAssetRepairWorkflow,
   validateFlatpakMetadata,
   validateLinuxReleaseBuild,
   validateMacOSCandidateVerifier,
@@ -90,9 +91,9 @@ const releaseIdentity = {
   dataSchema: releaseMetadata.dataSchema,
   cargoLockVersion: cargoLockPackage,
 }
-for (const message of (requireActive
+for (const message of requireActive
   ? validateActiveReleaseIdentity(releaseIdentity)
-  : validateReleaseIdentity(releaseIdentity))) {
+  : validateReleaseIdentity(releaseIdentity)) {
   fail(message)
 }
 for (const message of validateLinuxReleaseBuild(
@@ -184,6 +185,12 @@ for (const message of validateCandidateWorkflow(desktopRelease, {
 }
 for (const message of validateCandidateRecoveryWorkflow(
   read('.github/workflows/desktop-release-recovery.yml')
+)) {
+  fail(message)
+}
+for (const message of validateDraftAssetRepairWorkflow(
+  read('.github/workflows/desktop-release-draft-repair.yml'),
+  read('scripts/release-distribution/draft-asset-repair-state.mjs')
 )) {
   fail(message)
 }
