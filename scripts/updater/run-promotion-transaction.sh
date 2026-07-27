@@ -396,9 +396,6 @@ rollback() {
         || rollback_failed=1
     fi
   fi
-  if [[ "${release_published:-false}" == true ]]; then
-    gh release edit "$target_tag" --draft --latest=false || rollback_failed=1
-  fi
   while IFS=$'\t' read -r provider key; do
     if [[ "$provider" == oss ]]; then
       ossutil api delete-object --bucket "$ALIYUN_OSS_BUCKET" --key "$key" \
@@ -614,10 +611,6 @@ else
   test "$(jq -r .version dist/state/probe-response.json)" = "$target_version"
 fi
 
-advance_journal committing before-release-publish
-release_published=false
-gh release edit "$target_tag" --draft=false --latest
-release_published=true
 if [[ "$update_legacy" == true ]]; then
   ossutil api delete-object --bucket "$ALIYUN_OSS_BUCKET" \
     --key "$legacy_staging_key" --endpoint "$oss_endpoint" \
@@ -625,6 +618,6 @@ if [[ "$update_legacy" == true ]]; then
   aws s3api delete-object --bucket "$CLOUDFLARE_R2_BUCKET" \
     --key "$legacy_staging_key" --endpoint-url "$r2_endpoint" >/dev/null
 fi
-advance_journal committed release-and-origins-verified
+advance_journal committed policy-and-origins-verified
 trap - ERR INT TERM
 delete_open_journal

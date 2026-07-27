@@ -49,7 +49,7 @@ on:
 
 permissions:
   actions: read
-  contents: write
+  contents: read
 
 concurrency:
   group: biyan-stable-updater-promotion
@@ -110,16 +110,19 @@ jobs:
             exit 1
           fi
 
-      - name: Download immutable candidate
+      - name: Download immutable published candidate
         env:
           TAG: ${{ inputs.tag }}
         run: |
           set -euo pipefail
           mkdir -p dist/candidate
-          gh release view "$TAG" --json tagName,isDraft,isPrerelease,targetCommitish > dist/release.json
+          gh release view "$TAG" \
+            --json tagName,isDraft,isPrerelease,targetCommitish,publishedAt \
+            > dist/release.json
           test "$(jq -r .tagName dist/release.json)" = "$TAG"
-          test "$(jq -r .isDraft dist/release.json)" = "true"
+          test "$(jq -r .isDraft dist/release.json)" = "false"
           test "$(jq -r .isPrerelease dist/release.json)" = "false"
+          jq -e '.publishedAt | strings | test("Z$")' dist/release.json >/dev/null
           for pattern in candidate.json candidate.json.sig latest.json SHA256SUMS \
             "Biyan.app.tar.gz*" "Biyan_*_universal.dmg" \
             "Biyan_*_x64-setup.exe*" "Biyan_*_x64_en-US.msi" \

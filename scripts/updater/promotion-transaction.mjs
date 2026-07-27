@@ -636,7 +636,6 @@ export function recoveryCommands(journalInput) {
     'oss_endpoint="${ALIYUN_OSS_ENDPOINT#https://}"',
     'oss_endpoint="https://${oss_endpoint#http://}"',
     `transaction_id='${journal.transactionId}'`,
-    `expected_tag='${journal.targetTag}'`,
   ]
   for (
     let index = journal.snapshots.length - 1;
@@ -717,7 +716,6 @@ export function recoveryCommands(journalInput) {
     'jq -e \'.success == true\' recovery-readback/cloudflare-cache-purge.json >/dev/null',
     `node scripts/updater/promotion-transaction.mjs poll-url --url "$LEGACY_ALIYUN_URL" --expected "recovery-readback/oss-${legacyOssIndex}" --timeout-seconds 600 --interval-seconds 10 --output recovery-readback/legacy-aliyun-cdn.json`,
     `node scripts/updater/promotion-transaction.mjs poll-url --url "$LEGACY_R2_URL" --expected "recovery-readback/r2-${legacyR2Index}" --timeout-seconds 600 --interval-seconds 10 --output recovery-readback/legacy-r2-cdn.json`,
-    'gh release edit "$expected_tag" --draft --latest=false',
     `aws s3api delete-object --bucket "$CLOUDFLARE_R2_BUCKET" --key '${OPEN_TRANSACTION_KEY}' --endpoint-url "$r2_endpoint" >/dev/null`,
     `ossutil api delete-object --bucket "$ALIYUN_OSS_BUCKET" --key '${OPEN_TRANSACTION_KEY}' --endpoint "$oss_endpoint" --region "$ALIYUN_REGION" --output-format json >/dev/null`
   )

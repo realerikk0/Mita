@@ -21,6 +21,7 @@ import {
 
 const sha = (character) => character.repeat(64)
 const sourceCommit = 'a'.repeat(40)
+const repoRoot = path.resolve(import.meta.dirname, '../../..')
 
 function snapshot(provider, key, existed = true) {
   return existed
@@ -276,6 +277,26 @@ test('initial A requires an exact reviewed approved-next manifest hash', () => {
   )
 })
 
+test('tracked initial A approval pins the accepted v0.6.643 manifest exactly', () => {
+  const policy = JSON.parse(
+    fs.readFileSync(
+      path.join(repoRoot, 'scripts/updater/legacy-a-transition-policy.json'),
+      'utf8'
+    )
+  )
+  assert.deepEqual(policy.approvedNext, {
+    version: '0.6.643',
+    manifestSha256:
+      'a0ad7721c74aa6ec7817bb1b9626dbad05226e7871f21cebb4976921d100c9fa',
+    requiredPlatforms: [
+      'darwin-aarch64',
+      'darwin-x86_64',
+      'windows-x86_64',
+      'linux-x86_64',
+    ],
+  })
+})
+
 test('journal validates restorable bytes, metadata, ACL, and immutable ledger', () => {
   const prepared = journal()
   assert.equal(validateJournal(prepared).state, 'prepared')
@@ -343,22 +364,18 @@ test('recovery commands are derived from durable snapshots and created-object le
   assert.match(commands, /cloudflare-cache-purge/)
   assert.match(commands, /poll-url[\s\S]*legacy-aliyun-cdn/)
   assert.match(commands, /poll-url[\s\S]*legacy-r2-cdn/)
-  assert.match(commands, /gh release edit "\$expected_tag" --draft --latest=false/)
+  assert.doesNotMatch(commands, /\bgh release edit\b|--draft/)
   assert.match(commands, new RegExp(OPEN_TRANSACTION_KEY.replaceAll('/', '\\/')))
-  assert.ok(
-    commands.indexOf('gh release edit') <
-      commands.indexOf(`--key '${OPEN_TRANSACTION_KEY}'`)
-  )
 })
 
-test('runner loss after GitHub publication remains recoverable before committed journal', () => {
-  const beforePublish = advanceJournal(journal(), {
+test('recovery leaves the already-published GitHub release immutable', () => {
+  const committing = advanceJournal(journal(), {
     state: 'committing',
-    checkpoint: 'before-release-publish',
+    checkpoint: 'before-policy-write',
     updatedAt: '2026-07-24T00:01:00.000Z',
   })
-  const commands = recoveryCommands(beforePublish)
-  assert.match(commands, /gh release edit "\$expected_tag" --draft --latest=false/)
+  const commands = recoveryCommands(committing)
+  assert.doesNotMatch(commands, /\bgh release edit\b|--draft/)
   assert.match(commands, /verify-snapshot-readback/)
   assert.match(commands, /poll-url/)
 })
@@ -421,7 +438,6 @@ test('CDN polling fails closed after bounded stale or transport responses', asyn
 })
 
 test('promotion workflows carry the fail-closed transaction controls', () => {
-  const repoRoot = path.resolve(import.meta.dirname, '../../..')
   const promotion = fs.readFileSync(
     path.join(repoRoot, '.github/workflows/promote-desktop-update.yml'),
     'utf8'
@@ -432,6 +448,7 @@ test('promotion workflows carry the fail-closed transaction controls', () => {
   )
   const promotionControl = `${promotion}\n${runner}`
   assert.match(promotion, /^  actions: read$/m)
+  assert.match(promotion, /^  contents: read$/m)
   assert.match(promotion, /group: biyan-stable-updater-promotion/)
   assert.match(promotion, /aliyun-cli-linux-3\.3\.22-amd64\.tgz/)
   assert.match(promotion, /ossutil-2\.3\.0-linux-amd64\.zip/)
@@ -449,6 +466,11 @@ test('promotion workflows carry the fail-closed transaction controls', () => {
   assert.match(promotion, /dry-run remote preflight/i)
   assert.match(promotion, /timeout-minutes: 90/)
   assert.match(
+    promotion,
+    /test "\$\(jq -r \.isDraft dist\/release\.json\)" = "false"/
+  )
+  assert.doesNotMatch(promotionControl, /\bgh release edit\b|--draft/)
+  assert.match(
     runner,
     /select\(\.createdByTransaction and \.verified\)/
   )
@@ -456,7 +478,6 @@ test('promotion workflows carry the fail-closed transaction controls', () => {
   assert.match(runner, /rollback-legacy-r2-cdn\.json/)
   assert.match(runner, /--if-match "\$policy_original_etag"/)
   assert.match(runner, /--if-none-match '\*'/)
-  assert.match(runner, /before-release-publish/)
   const attempted = runner.indexOf('policy_write_attempted=true')
   const putReturned = runner.indexOf('policy_write_completed=true', attempted)
   const parseEtag = runner.indexOf(
