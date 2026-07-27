@@ -37,7 +37,7 @@ jobs:
     environment: release-distribution
     permissions:
       actions: read
-      contents: read
+      contents: write
     outputs:
       current_workflow_sha: ${{ steps.authority.outputs.current_workflow_sha }}
       snapshot_artifact_id: ${{ steps.snapshot-upload.outputs.artifact-id }}
