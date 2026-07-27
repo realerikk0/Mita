@@ -2237,6 +2237,13 @@ test('one-time Draft repair isolates signing and release mutation authority', ()
     'utf8'
   )
   assert.deepEqual(validateDraftAssetRepairWorkflow(workflow, helper), [])
+  assert.deepEqual(
+    validateDraftAssetRepairWorkflow(
+      workflow.replace(/\n/g, '\r\n'),
+      helper.replace(/\n/g, '\r\n')
+    ),
+    []
+  )
   const replaceDraftStep = (stepName, needle, replacement) => {
     const marker = `      - name: ${stepName}\n`
     const start = workflow.indexOf(marker)
@@ -2953,6 +2960,12 @@ test('one-time Biyan alias bootstrap is manual, exact, and fail-closed', () => {
     'utf8'
   )
   assert.deepEqual(validateBiyanDownloadAliasBootstrapWorkflow(workflow), [])
+  assert.deepEqual(
+    validateBiyanDownloadAliasBootstrapWorkflow(
+      workflow.replace(/\n/g, '\r\n')
+    ),
+    []
+  )
   const bootstrapMarker = '  bootstrap-biyan-download-aliases:\n'
   const bootstrapIndex = workflow.indexOf(bootstrapMarker)
   assert.ok(bootstrapIndex > 0)

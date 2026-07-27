@@ -2358,7 +2358,7 @@ export function validateDraftAssetRepairWorkflow(source, stateHelperSource) {
     .update(normalizedYamlEnvelope(source))
     .digest('hex')
   const helperSha256 = createHash('sha256')
-    .update(stateHelperSource ?? '')
+    .update(normalizedYamlEnvelope(stateHelperSource))
     .digest('hex')
   if (workflowSha256 !== TRUSTED_DRAFT_REPAIR_WORKFLOW_SHA256) {
     failures.push(
@@ -3208,8 +3208,8 @@ export function validateBiyanDownloadAliasBootstrapWorkflow(source) {
       `release distribution must match the reviewed whole-workflow execution envelope (got ${workflowEnvelopeSha256})`
     )
   }
-  const bootstrap = jobBlock(source, 'bootstrap-biyan-download-aliases')
-  const distribute = jobBlock(source, 'distribute')
+  const bootstrap = jobBlock(active, 'bootstrap-biyan-download-aliases')
+  const distribute = jobBlock(active, 'distribute')
   const permissions = topLevelBlock(active, 'permissions')
   const topLevelPermissionsCount = [
     ...active.matchAll(/^permissions:\s*(?:#.*)?$/gm),
