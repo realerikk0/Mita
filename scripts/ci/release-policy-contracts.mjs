@@ -67,6 +67,12 @@ const TRUSTED_RECOVERY_WORKFLOW_ALLOWLIST = new Set([
   'adcea2c0c3548852f411ac578f8432cf127fd42e6cb46512de9a47823b12c251',
 ])
 
+const TRUSTED_BIYAN_DOWNLOAD_ALIAS_BOOTSTRAP_JOB_SHA256 =
+  '58cb636b6139af4f0be2a21dbc1a2df9dfdf8a9ba67940be46b70a5c8922d697'
+
+const TRUSTED_RELEASE_DISTRIBUTION_WORKFLOW_SHA256 =
+  'dd14e927f08226725ddde6f6a14eea87a2b72320fbfcfef3511715aa2200d9fc'
+
 function jobBlock(source, jobName) {
   const header = new RegExp(`^  ${escapeRegExp(jobName)}:\\s*$`, 'm')
   const match = header.exec(source)
@@ -2238,6 +2244,17 @@ export function validateReleaseEnvironmentWorkflows(workflows) {
 export function validateBiyanDownloadAliasBootstrapWorkflow(source) {
   const failures = []
   const active = uncommentedSource(source)
+  const workflowEnvelopeSha256 = createHash('sha256')
+    .update(normalizedYamlEnvelope(source))
+    .digest('hex')
+  if (
+    workflowEnvelopeSha256 !==
+    TRUSTED_RELEASE_DISTRIBUTION_WORKFLOW_SHA256
+  ) {
+    failures.push(
+      `release distribution must match the reviewed whole-workflow execution envelope (got ${workflowEnvelopeSha256})`
+    )
+  }
   const bootstrap = jobBlock(source, 'bootstrap-biyan-download-aliases')
   const distribute = jobBlock(source, 'distribute')
   const permissions = topLevelBlock(active, 'permissions')
@@ -2288,6 +2305,17 @@ export function validateBiyanDownloadAliasBootstrapWorkflow(source) {
     )
     return failures
   }
+  const bootstrapEnvelopeSha256 = createHash('sha256')
+    .update(normalizedYamlEnvelope(bootstrap))
+    .digest('hex')
+  if (
+    bootstrapEnvelopeSha256 !==
+    TRUSTED_BIYAN_DOWNLOAD_ALIAS_BOOTSTRAP_JOB_SHA256
+  ) {
+    failures.push(
+      `the Biyan alias bootstrap job must match the reviewed whole-job execution envelope (got ${bootstrapEnvelopeSha256})`
+    )
+  }
 
   if (
     !/^    if:\s*>-\n      github\.event_name == 'workflow_dispatch' &&\n      inputs\.operation == 'bootstrap-biyan-download-aliases'\s*$/m.test(
@@ -2298,6 +2326,16 @@ export function validateBiyanDownloadAliasBootstrapWorkflow(source) {
   ) {
     failures.push(
       'the Biyan alias bootstrap must be a bounded manual-only release-distribution environment job'
+    )
+  }
+  const bootstrapPermissions = jobPermissionBlocks(bootstrap)
+  if (
+    bootstrapPermissions.length !== 1 ||
+    normalizedYamlEnvelope(bootstrapPermissions[0]) !==
+      '    permissions:\n      contents: read\n'
+  ) {
+    failures.push(
+      'the Biyan alias bootstrap must use only contents: read GitHub authority'
     )
   }
   if (
@@ -2320,30 +2358,11 @@ export function validateBiyanDownloadAliasBootstrapWorkflow(source) {
     'Resolve exact one-time bootstrap request'
   )
   const provenanceSteps = namedBootstrapSteps(
-    'Verify protected harness, tag, checkpoint, and exact Draft'
+    'Verify protected harness, tag, and checkpoint'
   )
   const revalidationSteps = namedBootstrapSteps(
-    'Revalidate protected harness and Draft before OSS access'
+    'Revalidate protected harness before OSS access'
   )
-  const exactDraftReadAndGuard = (sourceVariable, outputName) => [
-    'gh api "repos/$GITHUB_REPOSITORY/releases/$DRAFT_RELEASE_ID" \\',
-    `> dist/biyan-download-alias-bootstrap/${outputName}`,
-    'jq -e \\',
-    '--argjson release_id "$DRAFT_RELEASE_ID" \\',
-    `--arg source "$${sourceVariable}" \\`,
-    "'.id == $release_id",
-    'and .tag_name == "v0.6.643"',
-    'and .target_commitish == $source',
-    'and .draft == true',
-    'and .prerelease == false',
-    'and .published_at == null',
-    'and (.assets | length) == 13',
-    'and all(.assets[];',
-    '.state == "uploaded"',
-    'and .size > 0',
-    `and (.digest | test("^sha256:[0-9a-f]{64}$")))' \\`,
-    `dist/biyan-download-alias-bootstrap/${outputName} >/dev/null`,
-  ]
   if (
     requestSteps.length !== 1 ||
     !requestSteps[0].includes('WORKFLOW_SHA: ${{ github.sha }}') ||
@@ -2369,45 +2388,9 @@ export function validateBiyanDownloadAliasBootstrapWorkflow(source) {
       'the Biyan alias bootstrap must require checkout HEAD, dispatch SHA, and live main to remain identical'
     )
   }
-  if (
-    provenanceSteps.length !== 1 ||
-    !provenanceSteps[0].includes("DRAFT_RELEASE_ID: '360025177'") ||
-    !hasCommandSequence(
-      provenanceSteps[0],
-      exactDraftReadAndGuard('SOURCE_COMMIT', 'draft-release.json')
-    )
-  ) {
+  if (revalidationSteps.length !== 1) {
     failures.push(
-      'the Biyan alias bootstrap must retain the exact reviewed first Draft read and complete identity and asset guard'
-    )
-  }
-  if (
-    revalidationSteps.length !== 1 ||
-    !revalidationSteps[0].includes("DRAFT_RELEASE_ID: '360025177'") ||
-    !hasCommandSequence(
-      revalidationSteps[0],
-      exactDraftReadAndGuard(
-        'EXPECTED_SOURCE',
-        'draft-release-current.json'
-      )
-    )
-  ) {
-    failures.push(
-      'the Biyan alias bootstrap must repeat the exact reviewed Draft read and complete identity and asset guard immediately before OSS access'
-    )
-  }
-  if (
-    revalidationSteps.length !== 1 ||
-    !hasCommandSequence(revalidationSteps[0], [
-      'diff -u \\',
-      "<(jq -S '[.assets[] | {id, name, size, digest, state}] | sort_by(.id)' \\",
-      'dist/biyan-download-alias-bootstrap/draft-release.json) \\',
-      "<(jq -S '[.assets[] | {id, name, size, digest, state}] | sort_by(.id)' \\",
-      'dist/biyan-download-alias-bootstrap/draft-release-current.json)',
-    ])
-  ) {
-    failures.push(
-      'the Biyan alias bootstrap must diff the normalized complete Draft asset snapshots before OSS access'
+      'the Biyan alias bootstrap must have one exact protected-harness revalidation immediately before OSS access'
     )
   }
   for (const exact of [
@@ -2416,7 +2399,6 @@ export function validateBiyanDownloadAliasBootstrapWorkflow(source) {
     'migration_phase=A',
     'data_schema=1',
     '[ "$INPUT_CONFIRM" != "BOOTSTRAP_BIYAN_ALIASES_V0633" ]',
-    "DRAFT_RELEASE_ID: '360025177'",
     'git merge-base --is-ancestor "$tag_commit" origin/mita-main',
   ]) {
     if (!bootstrap.includes(exact)) {
@@ -2444,7 +2426,7 @@ export function validateBiyanDownloadAliasBootstrapWorkflow(source) {
     )
   }
   const revalidationIndex = bootstrap.indexOf(
-    '- name: Revalidate protected harness and Draft before OSS access'
+    '- name: Revalidate protected harness before OSS access'
   )
   const executionIndex = bootstrap.indexOf(
     '- name: Execute allowlisted Biyan alias bootstrap'
@@ -2497,13 +2479,16 @@ export function validateBiyanDownloadAliasBootstrapWorkflow(source) {
     /\b(?:mita\/latest\.json|biyan\/updater\/|promote-desktop-update|deploy-updater-router)\b/.test(
       bootstrap
     ) ||
-    /\bgh\s+release\s+(?:create|edit|delete|upload)\b/.test(bootstrap) ||
-    /\bgh\s+api\b[^\n]*(?:--method|-X)\s+(?:POST|PUT|PATCH|DELETE)\b/i.test(
+    /\$\{\{\s*(?:github\.token|secrets\.GITHUB_TOKEN)\s*\}\}/.test(
       bootstrap
-    )
+    ) ||
+    /\b(?:GH_TOKEN|GITHUB_TOKEN)\s*:/.test(bootstrap) ||
+    /\bgh\s+(?:api|release)\b/.test(bootstrap) ||
+    /\bapi\.github\.com\b/.test(bootstrap) ||
+    /\breleases\/[0-9]+\b/.test(bootstrap)
   ) {
     failures.push(
-      'the Biyan alias bootstrap must not gain signing, updater, router, R2, or GitHub release mutation authority'
+      'the Biyan alias bootstrap must remain independent of Draft/GitHub API authority and must not gain signing, updater, router, or R2 authority'
     )
   }
   return failures

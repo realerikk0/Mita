@@ -465,8 +465,8 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 45
     environment: release-distribution
-    env:
-      GH_TOKEN: ${{ github.token }}
+    permissions:
+      contents: read
     steps:
       - name: Checkout protected distribution harness
         uses: actions/checkout@v4
@@ -534,14 +534,13 @@ jobs:
             echo "dry_run=$INPUT_DRY_RUN"
           } >> "$GITHUB_OUTPUT"
 
-      - name: Verify protected harness, tag, checkpoint, and exact Draft
+      - name: Verify protected harness, tag, and checkpoint
         id: provenance
         shell: bash
         env:
           TAG: ${{ steps.bootstrap.outputs.tag }}
           WORKFLOW_SHA: ${{ steps.bootstrap.outputs.workflow_sha }}
           SOURCE_COMMIT: ${{ steps.bootstrap.outputs.source_commit }}
-          DRAFT_RELEASE_ID: '360025177'
         run: |
           set -euo pipefail
           git fetch --force --no-tags origin \
@@ -571,23 +570,6 @@ jobs:
             dist/biyan-download-alias-bootstrap/tag-biyan-release.json >/dev/null
           jq -e '.version == "0.6.643"' \
             dist/biyan-download-alias-bootstrap/tag-tauri.conf.json >/dev/null
-          gh api "repos/$GITHUB_REPOSITORY/releases/$DRAFT_RELEASE_ID" \
-            > dist/biyan-download-alias-bootstrap/draft-release.json
-          jq -e \
-            --argjson release_id "$DRAFT_RELEASE_ID" \
-            --arg source "$SOURCE_COMMIT" \
-            '.id == $release_id
-              and .tag_name == "v0.6.643"
-              and .target_commitish == $source
-              and .draft == true
-              and .prerelease == false
-              and .published_at == null
-              and (.assets | length) == 13
-              and all(.assets[];
-                .state == "uploaded"
-                and .size > 0
-                and (.digest | test("^sha256:[0-9a-f]{64}$")))' \
-            dist/biyan-download-alias-bootstrap/draft-release.json >/dev/null
           {
             echo "trusted_main_commit=$live_main"
             echo "source_commit=$tag_commit"
@@ -651,13 +633,12 @@ jobs:
             --access-key-id "$ALIYUN_ACCESS_KEY_ID" \
             --access-key-secret "$ALIYUN_ACCESS_KEY_SECRET"
 
-      - name: Revalidate protected harness and Draft before OSS access
+      - name: Revalidate protected harness before OSS access
         shell: bash
         env:
           EXPECTED_MAIN: ${{ steps.provenance.outputs.trusted_main_commit }}
           EXPECTED_SOURCE: ${{ steps.provenance.outputs.source_commit }}
           TAG: ${{ steps.bootstrap.outputs.tag }}
-          DRAFT_RELEASE_ID: '360025177'
         run: |
           set -euo pipefail
           live_main="$(git ls-remote --exit-code origin refs/heads/mita-main | awk 'NF == 2 { print $1 }')"
@@ -674,28 +655,6 @@ jobs:
             echo "Protected tag moved before the reviewed bootstrap" >&2
             exit 1
           fi
-          gh api "repos/$GITHUB_REPOSITORY/releases/$DRAFT_RELEASE_ID" \
-            > dist/biyan-download-alias-bootstrap/draft-release-current.json
-          jq -e \
-            --argjson release_id "$DRAFT_RELEASE_ID" \
-            --arg source "$EXPECTED_SOURCE" \
-            '.id == $release_id
-              and .tag_name == "v0.6.643"
-              and .target_commitish == $source
-              and .draft == true
-              and .prerelease == false
-              and .published_at == null
-              and (.assets | length) == 13
-              and all(.assets[];
-                .state == "uploaded"
-                and .size > 0
-                and (.digest | test("^sha256:[0-9a-f]{64}$")))' \
-            dist/biyan-download-alias-bootstrap/draft-release-current.json >/dev/null
-          diff -u \
-            <(jq -S '[.assets[] | {id, name, size, digest, state}] | sort_by(.id)' \
-              dist/biyan-download-alias-bootstrap/draft-release.json) \
-            <(jq -S '[.assets[] | {id, name, size, digest, state}] | sort_by(.id)' \
-              dist/biyan-download-alias-bootstrap/draft-release-current.json)
 
       - name: Execute allowlisted Biyan alias bootstrap
         shell: bash
