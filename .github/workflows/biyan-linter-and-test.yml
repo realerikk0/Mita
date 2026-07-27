@@ -322,6 +322,7 @@ jobs:
           node --test scripts/ci/__tests__/run-untrusted-qualification-verifier.test.mjs
           node --test scripts/ci/__tests__/verify-qualification-artifacts.test.mjs
           node --test scripts/ci/__tests__/verify-qualification-recovery.test.mjs
+          node --test scripts/release-distribution/__tests__/bootstrap-biyan-download-aliases.test.mjs
           node --test scripts/release-distribution/__tests__/release-distribution.test.mjs
 
       - name: Exercise unprivileged qualification verifier boundary

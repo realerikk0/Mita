@@ -1,0 +1,127 @@
+{
+  "schema": 1,
+  "operation": "biyan-download-alias-bootstrap",
+  "oneTime": true,
+  "release": {
+    "tagName": "v0.6.643",
+    "version": "0.6.643",
+    "sourceCommit": "38e6d9290a8b9b0f152ff2a7eefb550e6ead7df5",
+    "migrationPhase": "A",
+    "dataSchema": 1
+  },
+  "storage": {
+    "provider": "aliyun",
+    "bucket": "mita-static",
+    "endpoint": "https://oss-cn-hangzhou.aliyuncs.com",
+    "region": "cn-hangzhou",
+    "cdnOrigin": "https://static.mitapp.cn"
+  },
+  "stagingRoot": "biyan/download/bootstrap/v0.6.643-38e6d9290a8b9b0f152ff2a7eefb550e6ead7df5/staging",
+  "activeJournalKey": "biyan/download/transactions/active.json",
+  "forbiddenStableUpdaterKeys": [
+    "mita/latest.json",
+    "biyan/stable/latest.json",
+    "biyan/updater/current.json"
+  ],
+  "entries": [
+    {
+      "id": "manifest",
+      "source": {
+        "key": "mita/download/latest.json",
+        "publicUrl": "https://static.mitapp.cn/mita/download/latest.json",
+        "size": 1722,
+        "sha256": "e06a40b5acfb7db05d2930a71d347006afc7ddd4f47a6b4071d4048df2d08c93",
+        "metadata": {
+          "cacheControl": "public, max-age=60, must-revalidate",
+          "contentType": "application/json",
+          "contentEncoding": null,
+          "contentDisposition": null,
+          "expires": null,
+          "acl": "default",
+          "storageClass": "Standard",
+          "customMetadata": {}
+        },
+        "jsonIdentity": {
+          "schemaVersion": 2,
+          "product": "Biyan",
+          "channel": "stable",
+          "tagName": "v0.6.633",
+          "version": "0.6.633"
+        }
+      },
+      "target": {
+        "key": "biyan/download/latest.json",
+        "publicUrl": "https://static.mitapp.cn/biyan/download/latest.json",
+        "metadata": {
+          "cacheControl": "public, max-age=60, must-revalidate",
+          "contentType": "application/json",
+          "contentEncoding": null,
+          "contentDisposition": null,
+          "expires": null,
+          "acl": "default",
+          "storageClass": "Standard",
+          "customMetadata": {}
+        }
+      },
+      "staging": {
+        "key": "biyan/download/bootstrap/v0.6.643-38e6d9290a8b9b0f152ff2a7eefb550e6ead7df5/staging/manifest",
+        "metadata": {
+          "cacheControl": "private, no-store",
+          "contentType": "application/json",
+          "contentEncoding": null,
+          "contentDisposition": null,
+          "expires": null,
+          "acl": "private",
+          "storageClass": "Standard",
+          "customMetadata": {}
+        }
+      }
+    },
+    {
+      "id": "page",
+      "source": {
+        "key": "mita/download",
+        "publicUrl": "https://static.mitapp.cn/mita/download",
+        "size": 1542,
+        "sha256": "642e82b242fa9018bd05d5b0ad51248120a4f174e52bde560a0beb86769f2856",
+        "metadata": {
+          "cacheControl": "public, max-age=60, must-revalidate",
+          "contentType": "text/html; charset=utf-8",
+          "contentEncoding": null,
+          "contentDisposition": null,
+          "expires": null,
+          "acl": "default",
+          "storageClass": "Standard",
+          "customMetadata": {}
+        }
+      },
+      "target": {
+        "key": "biyan/download",
+        "publicUrl": "https://static.mitapp.cn/biyan/download",
+        "metadata": {
+          "cacheControl": "public, max-age=60, must-revalidate",
+          "contentType": "text/html; charset=utf-8",
+          "contentEncoding": null,
+          "contentDisposition": null,
+          "expires": null,
+          "acl": "default",
+          "storageClass": "Standard",
+          "customMetadata": {}
+        }
+      },
+      "staging": {
+        "key": "biyan/download/bootstrap/v0.6.643-38e6d9290a8b9b0f152ff2a7eefb550e6ead7df5/staging/page",
+        "metadata": {
+          "cacheControl": "private, no-store",
+          "contentType": "text/html; charset=utf-8",
+          "contentEncoding": null,
+          "contentDisposition": null,
+          "expires": null,
+          "acl": "private",
+          "storageClass": "Standard",
+          "customMetadata": {}
+        }
+      }
+    }
+  ]
+}

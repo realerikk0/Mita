@@ -10,6 +10,7 @@ import { fileURLToPath } from 'node:url'
 const CANONICAL_DOWNLOAD_ORIGIN = 'https://static.mitapp.cn'
 const CANONICAL_OSS_BUCKET = 'mita-static'
 const CANONICAL_OSS_ENDPOINT = 'https://oss-cn-hangzhou.aliyuncs.com'
+const CANONICAL_OSS_REGION = 'cn-hangzhou'
 const OSS_PROBE_TIMEOUT_MS = 120_000
 const OSS_TRANSFER_TIMEOUT_MS = 900_000
 
@@ -1624,7 +1625,12 @@ export function parseAliyunObjectMetadata(output, entry) {
 }
 
 export function createAliyunAdapter(
-  { bucket, endpoint, profile = 'release' },
+  {
+    bucket,
+    endpoint,
+    profile = 'release',
+    region = CANONICAL_OSS_REGION,
+  },
   {
     runCommand = run,
     publicReadbackAttempts = 60,
@@ -1634,10 +1640,11 @@ export function createAliyunAdapter(
 ) {
   if (
     bucket !== CANONICAL_OSS_BUCKET ||
-    endpoint !== CANONICAL_OSS_ENDPOINT
+    endpoint !== CANONICAL_OSS_ENDPOINT ||
+    region !== CANONICAL_OSS_REGION
   ) {
     throw new Error(
-      `Aliyun OSS adapter requires ${CANONICAL_OSS_BUCKET} at ${CANONICAL_OSS_ENDPOINT}`
+      `Aliyun OSS adapter requires ${CANONICAL_OSS_BUCKET} at ${CANONICAL_OSS_ENDPOINT} in ${CANONICAL_OSS_REGION}`
     )
   }
   if (
@@ -1653,6 +1660,26 @@ export function createAliyunAdapter(
   }
   const objectUrl = (entry) => `oss://${bucket}/${entry.key}`
   const ossutilFlags = ['--endpoint', endpoint]
+  const assertConditionalWriteSafety = async () => {
+    const result = runCommand(
+      'ossutil',
+      [
+        'api',
+        'get-bucket-versioning',
+        '--bucket',
+        bucket,
+        '--endpoint',
+        endpoint,
+        '--region',
+        region,
+        '--output-format',
+        'json',
+      ],
+      'read OSS bucket versioning',
+      { timeoutMs: OSS_PROBE_TIMEOUT_MS }
+    )
+    return parseAliyunBucketVersioning(result.output)
+  }
   return {
     publicReadbackAttempts,
     publicReadbackTimeoutMs,
@@ -1712,6 +1739,56 @@ export function createAliyunAdapter(
         timeoutMs: OSS_TRANSFER_TIMEOUT_MS,
       })
     },
+    async uploadIfAbsent(
+      entry,
+      source,
+      metadata = objectMetadata(entry)
+    ) {
+      const exactMetadata = objectMetadata({ id: entry.id, ...metadata })
+      if (
+        exactMetadata.contentEncoding !== null ||
+        exactMetadata.contentDisposition !== null ||
+        exactMetadata.expires !== null ||
+        Object.keys(exactMetadata.customMetadata).length !== 0
+      ) {
+        throw new Error(
+          `conditional upload metadata is unsupported for ${entry.key}`
+        )
+      }
+      await assertConditionalWriteSafety()
+      runCommand(
+        'ossutil',
+        [
+          'api',
+          'put-object',
+          '--bucket',
+          bucket,
+          '--key',
+          entry.key,
+          '--body',
+          `file://${source}`,
+          '--content-type',
+          exactMetadata.contentType,
+          '--cache-control',
+          exactMetadata.cacheControl,
+          '--object-acl',
+          exactMetadata.acl,
+          '--storage-class',
+          exactMetadata.storageClass,
+          '--forbid-overwrite',
+          'true',
+          '--endpoint',
+          endpoint,
+          '--region',
+          region,
+          '--output-format',
+          'json',
+        ],
+        `conditional upload ${entry.key}`,
+        { timeoutMs: OSS_TRANSFER_TIMEOUT_MS }
+      )
+    },
+    assertConditionalWriteSafety,
     async readMetadata(entry) {
       const result = runCommand(
         'ossutil',
@@ -1773,6 +1850,142 @@ export function createAliyunAdapter(
         `read public URL ${entry.publicUrl}`
       )
     },
+    async downloadPublicOptional(entry, destination) {
+      ensureDirectory(destination)
+      const marker = '__BIYAN_PUBLIC_READBACK__'
+      const headerFile = `${destination}.headers`
+      fs.rmSync(headerFile, { force: true })
+      const result = runCommand(
+        'curl',
+        [
+          '--silent',
+          '--show-error',
+          '--location',
+          '--connect-timeout',
+          '5',
+          '--max-time',
+          '15',
+          '--header',
+          'Cache-Control: no-cache',
+          '--output',
+          destination,
+          '--dump-header',
+          headerFile,
+          '--write-out',
+          `${marker}%{http_code}\\n%{url_effective}`,
+          entry.publicUrl,
+        ],
+        `probe public URL ${entry.publicUrl}`
+      )
+      const markerIndex = result.output.lastIndexOf(marker)
+      if (markerIndex < 0) {
+        throw new Error(
+          `Public URL probe returned no status for ${entry.publicUrl}`
+        )
+      }
+      const [status, effectiveUrl] = result.output
+        .slice(markerIndex + marker.length)
+        .trim()
+        .split(/\r?\n/, 2)
+      if (effectiveUrl !== entry.publicUrl) {
+        throw new Error(
+          `Public URL redirected unexpectedly: ${entry.publicUrl} -> ${effectiveUrl}`
+        )
+      }
+      if (status === '404') {
+        fs.rmSync(destination, { force: true })
+        fs.rmSync(headerFile, { force: true })
+        return {
+          exists: false,
+          status: 404,
+          effectiveUrl,
+          headers: null,
+        }
+      }
+      if (status !== '200') {
+        throw new Error(
+          `Public URL returned HTTP ${status || 'unknown'}: ${entry.publicUrl}`
+        )
+      }
+      let headerText
+      try {
+        headerText = fs.readFileSync(headerFile, 'utf8')
+      } finally {
+        fs.rmSync(headerFile, { force: true })
+      }
+      const blocks = headerText
+        .split(/\r?\n\r?\n/)
+        .map((block) => block.trim())
+        .filter((block) => /^HTTP\/\S+\s+\d{3}\b/i.test(block))
+      const finalBlock = blocks.at(-1)
+      if (!finalBlock) {
+        throw new Error(
+          `Public URL probe returned no response headers for ${entry.publicUrl}`
+        )
+      }
+      const headers = {}
+      for (const line of finalBlock.split(/\r?\n/).slice(1)) {
+        const separator = line.indexOf(':')
+        if (separator < 1) continue
+        const name = line.slice(0, separator).trim().toLowerCase()
+        const value = line.slice(separator + 1).trim()
+        if (headers[name] !== undefined) {
+          throw new Error(
+            `Public URL returned duplicate ${name} headers: ${entry.publicUrl}`
+          )
+        }
+        headers[name] = value
+      }
+      return {
+        exists: true,
+        status: 200,
+        effectiveUrl,
+        headers: {
+          cacheControl: headers['cache-control'] ?? null,
+          contentType: headers['content-type'] ?? null,
+        },
+      }
+    },
+  }
+}
+
+export function parseAliyunBucketVersioning(output) {
+  const start = output.indexOf('{')
+  const end = output.lastIndexOf('}')
+  if (start < 0 || end < start) {
+    throw new Error('OSS bucket versioning response is not JSON')
+  }
+  let document
+  try {
+    document = JSON.parse(output.slice(start, end + 1))
+  } catch {
+    throw new Error('OSS bucket versioning response is malformed')
+  }
+  const statuses = []
+  const visit = (value) => {
+    if (!value || typeof value !== 'object') return
+    for (const [name, child] of Object.entries(value)) {
+      if (
+        name.toLowerCase() === 'status' &&
+        typeof child === 'string' &&
+        child.trim()
+      ) {
+        statuses.push(child.trim())
+      }
+      visit(child)
+    }
+  }
+  visit(document)
+  if (statuses.length > 1) {
+    throw new Error('OSS bucket versioning response has multiple statuses')
+  }
+  if (statuses.length === 1) {
+    throw new Error(
+      `Conditional OSS writes are unsafe while bucket versioning is ${statuses[0]}`
+    )
+  }
+  return {
+    status: 'Unversioned',
   }
 }
 

@@ -656,11 +656,19 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          test_file="scripts/release-distribution/__tests__/release-distribution.test.mjs"
-          if [ -f "$test_file" ]; then
-            node --test "$test_file"
-          else
-            echo "No release-distribution contract test at this target SHA"
+          test_files=(
+            "scripts/release-distribution/__tests__/bootstrap-biyan-download-aliases.test.mjs"
+            "scripts/release-distribution/__tests__/release-distribution.test.mjs"
+          )
+          found=false
+          for test_file in "${test_files[@]}"; do
+            if [ -f "$test_file" ]; then
+              node --test "$test_file"
+              found=true
+            fi
+          done
+          if [ "$found" != "true" ]; then
+            echo "No release-distribution contract tests at this target SHA"
           fi
 
   docs-build:
