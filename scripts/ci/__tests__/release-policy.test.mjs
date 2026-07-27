@@ -2297,6 +2297,20 @@ test('one-time Biyan alias bootstrap is manual, exact, and fail-closed', () => {
       ),
     ],
     [
+      'read-only bootstrap GitHub authority',
+      mutateBootstrap(
+        'permissions:\n      contents: read',
+        'permissions:\n      contents: write'
+      ),
+    ],
+    [
+      'no additional job authority',
+      mutateBootstrap(
+        'permissions:\n      contents: read',
+        'permissions:\n      contents: read\n      actions: read'
+      ),
+    ],
+    [
       'non-persistent checkout credentials',
       mutateBootstrap(
         'persist-credentials: false',
@@ -2347,71 +2361,32 @@ test('one-time Biyan alias bootstrap is manual, exact, and fail-closed', () => {
       ),
     ],
     [
-      'exact Draft release id',
-      mutateBootstrap(/'360025177'/g, "'360025178'"),
-    ],
-    [
-      'Draft id guard',
-      mutateBootstrap('.id == $release_id', '.id > 0'),
-    ],
-    [
-      'Draft tag guard',
+      'no GitHub token authority',
       mutateBootstrap(
-        '.tag_name == "v0.6.643"',
-        '.tag_name == "v0.6.644"'
+        '      - name: Execute allowlisted Biyan alias bootstrap\n        shell: bash',
+        '      - name: Execute allowlisted Biyan alias bootstrap\n        shell: bash\n        env:\n          GH_TOKEN: ${{ github.token }}'
       ),
     ],
     [
-      'Draft target guard',
+      'no GitHub token alias authority',
       mutateBootstrap(
-        '.target_commitish == $source',
-        '.target_commitish == "unexpected-commit"'
+        '      - name: Execute allowlisted Biyan alias bootstrap\n        shell: bash',
+        '      - name: Execute allowlisted Biyan alias bootstrap\n        shell: bash\n        env:\n          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}'
       ),
     ],
     [
-      'Draft state guard',
-      mutateBootstrap('.draft == true', '.draft == false'),
-    ],
-    [
-      'Draft prerelease guard',
-      mutateBootstrap('.prerelease == false', '.prerelease == true'),
-    ],
-    [
-      'Draft publication guard',
-      mutateBootstrap('.published_at == null', '.published_at != null'),
-    ],
-    [
-      'Draft asset count guard',
+      'no Draft Release API coupling',
       mutateBootstrap(
-        'and (.assets | length) == 13',
-        'and (.assets | length) > 0'
+        '          set -euo pipefail\n          args=(',
+        '          set -euo pipefail\n          gh api --method GET repos/realerikk0/Mita/releases/360025177\n          args=('
       ),
     ],
     [
-      'Draft asset state guard',
-      mutateBootstrap('.state == "uploaded"', '.state != "deleted"'),
-    ],
-    [
-      'Draft asset size guard',
-      mutateBootstrap('and .size > 0', 'and .size >= 0'),
-    ],
-    [
-      'Draft asset digest guard',
+      'no direct GitHub API coupling',
       mutateBootstrap(
-        'test("^sha256:[0-9a-f]{64}$")',
-        'test("^sha256:")'
+        '          set -euo pipefail\n          args=(',
+        '          set -euo pipefail\n          curl https://api.github.com/repos/realerikk0/Mita/releases/360025177\n          args=('
       ),
-    ],
-    [
-      'second Draft read',
-      mutateBootstrap(
-        '> dist/biyan-download-alias-bootstrap/draft-release-current.json',
-        '> dist/biyan-download-alias-bootstrap/draft-release-reused.json'
-      ),
-    ],
-    [
-      'normalized Draft asset diff',
-      mutateBootstrap('diff -u \\', 'diff --brief \\'),
     ],
     [
       'exact bootstrap invocation',
@@ -2437,8 +2412,8 @@ test('one-time Biyan alias bootstrap is manual, exact, and fail-closed', () => {
     [
       'forbidden signing authority',
       mutateBootstrap(
-        'GH_TOKEN: ${{ github.token }}',
-        'BIYAN_SIGNING_KEY: ${{ secrets.BIYAN_SIGNING_KEY }}'
+        '          OSS_REGION: cn-hangzhou',
+        '          OSS_REGION: cn-hangzhou\n          BIYAN_SIGNING_KEY: ${{ secrets.BIYAN_SIGNING_KEY }}'
       ),
     ],
     [
@@ -2447,6 +2422,35 @@ test('one-time Biyan alias bootstrap is manual, exact, and fail-closed', () => {
         'permissions:\n  contents: read',
         'permissions:\n  contents: read\n  actions: read'
       ),
+    ],
+    [
+      'no inherited GitHub token environment',
+      workflow.replace(
+        'permissions:\n  contents: read',
+        'env:\n  GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}\npermissions:\n  contents: read'
+      ),
+    ],
+    [
+      'no inherited shell defaults',
+      workflow.replace(
+        'permissions:\n  contents: read',
+        'defaults:\n  run:\n    shell: ./unreviewed-shell {0}\npermissions:\n  contents: read'
+      ),
+    ],
+    [
+      'no sibling bootstrap release mutation job',
+      `${workflow}
+  bootstrap-release-mutation-bypass:
+    if: >-
+      github.event_name == 'workflow_dispatch' &&
+      inputs.operation == 'bootstrap-biyan-download-aliases'
+    runs-on: ubuntu-latest
+    environment: release-distribution
+    permissions:
+      contents: write
+    steps:
+      - run: gh api --method PATCH repos/realerikk0/Mita/releases/360025177 -f draft=false
+`,
     ],
   ]
   for (const [label, mutation] of mutations) {
