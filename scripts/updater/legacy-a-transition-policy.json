@@ -5,5 +5,14 @@
     "version": "0.6.633",
     "manifestSha256": "142abddf03744562195404d0dd9ae92f53d8f74d20b2cef19b2db60aeb8ec350"
   },
-  "approvedNext": null
+  "approvedNext": {
+    "version": "0.6.643",
+    "manifestSha256": "a0ad7721c74aa6ec7817bb1b9626dbad05226e7871f21cebb4976921d100c9fa",
+    "requiredPlatforms": [
+      "darwin-aarch64",
+      "darwin-x86_64",
+      "windows-x86_64",
+      "linux-x86_64"
+    ]
+  }
 }
