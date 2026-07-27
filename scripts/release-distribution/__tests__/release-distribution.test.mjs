@@ -26,6 +26,7 @@ import {
 } from '../build-download-manifest.mjs'
 import {
   buildBoundedPublicReadbackCommand,
+  buildPublicationPlan,
   createAliyunAdapter,
   executePublicationTransaction,
   parseAliyunObjectMetadata,
@@ -2348,6 +2349,31 @@ test('release-distribution workflow gates every external mutation on protected p
     workflow,
     /node scripts\/release-distribution\/publish-download-transaction\.mjs/
   )
+  const transactionStepStart = workflow.indexOf(
+    '- name: Execute recoverable download publication transaction'
+  )
+  const transactionStepEnd = workflow.indexOf(
+    '- name: Revalidate protected harness before Feishu mutation',
+    transactionStepStart
+  )
+  assert.ok(
+    transactionStepStart > validationIndex &&
+      transactionStepEnd > transactionStepStart
+  )
+  const transactionStep = workflow.slice(
+    transactionStepStart,
+    transactionStepEnd
+  )
+  const assetDirectoryContract =
+    /args=\(\n\s+--release-json dist\/release-assets\.json\n\s+--assets-dir dist\/release-assets\n\s+--payload-dir dist\/biyan-download/
+  assert.match(transactionStep, assetDirectoryContract)
+  assert.doesNotMatch(
+    transactionStep.replace(
+      '\n            --assets-dir dist/release-assets',
+      ''
+    ),
+    assetDirectoryContract
+  )
   assert.match(
     workflow,
     /--evidence dist\/distribution-transaction\/state\.json/
@@ -2401,6 +2427,132 @@ test('release-distribution workflow gates every external mutation on protected p
   )
   assert.match(workflow, /if-no-files-found: error/)
   assert.match(workflow, /dist\/distribution-transaction\/\*\*/)
+})
+
+test('publication plan resolves installers from the explicit release asset directory and fails before remote access when they are absent', async (t) => {
+  const dir = fs.mkdtempSync(
+    path.join(os.tmpdir(), 'biyan-release-asset-directory-')
+  )
+  const metadataDirectory = path.join(dir, 'metadata')
+  const assetsDirectory = path.join(dir, 'release-assets')
+  const payloadDirectory = path.join(dir, 'payload')
+  fs.mkdirSync(metadataDirectory)
+  fs.mkdirSync(assetsDirectory)
+  fs.mkdirSync(payloadDirectory)
+
+  const releasePath = path.join(metadataDirectory, 'release-assets.json')
+  fs.writeFileSync(
+    releasePath,
+    `${JSON.stringify(collectReleaseAssets(sampleRelease()), null, 2)}\n`
+  )
+
+  const savedEnvironment = {
+    ALIYUN_OSS_BUCKET: process.env.ALIYUN_OSS_BUCKET,
+    ALIYUN_OSS_ENDPOINT: process.env.ALIYUN_OSS_ENDPOINT,
+    UPDATES_CDN_BASE_URL: process.env.UPDATES_CDN_BASE_URL,
+  }
+  Object.assign(process.env, {
+    ALIYUN_OSS_BUCKET: 'mita-static',
+    ALIYUN_OSS_ENDPOINT: 'https://oss-cn-hangzhou.aliyuncs.com',
+    UPDATES_CDN_BASE_URL: 'https://static.mitapp.cn',
+  })
+  t.after(() => {
+    for (const [name, value] of Object.entries(savedEnvironment)) {
+      if (value === undefined) delete process.env[name]
+      else process.env[name] = value
+    }
+  })
+
+  const plan = buildPublicationPlan({
+    '--release-json': releasePath,
+    '--assets-dir': assetsDirectory,
+    '--payload-dir': payloadDirectory,
+    '--tag': 'v1.2.3',
+  })
+  const expectedNames = [
+    'Biyan_1.2.3_universal.dmg',
+    'Biyan_1.2.3_x64-setup.exe',
+    'Biyan_1.2.3_x64_en-US.msi',
+    'Biyan_1.2.3_amd64.AppImage',
+    'Biyan_1.2.3_amd64.deb',
+  ]
+
+  assert.deepEqual(
+    plan.immutable.slice(0, expectedNames.length).map(({ file }) => file),
+    expectedNames.map((name) => path.join(assetsDirectory, name))
+  )
+  assert.ok(
+    plan.immutable
+      .slice(0, expectedNames.length)
+      .every(({ file }) => path.dirname(file) === assetsDirectory)
+  )
+  assert.notEqual(metadataDirectory, assetsDirectory)
+
+  let remoteCalls = 0
+  const noRemoteAdapter = Object.fromEntries(
+    [
+      'download',
+      'upload',
+      'remove',
+      'purge',
+      'downloadPublic',
+      'readMetadata',
+    ].map((name) => [
+      name,
+      async () => {
+        remoteCalls += 1
+        throw new Error(`unexpected remote ${name}`)
+      },
+    ])
+  )
+  const evidenceFile = path.join(dir, 'evidence.json')
+  const recoveryFile = path.join(dir, 'recovery.json')
+
+  await assert.rejects(
+    () =>
+      executePublicationTransaction(plan, {
+        adapters: { aliyun: noRemoteAdapter },
+        workspace: path.join(dir, 'transaction-work'),
+        evidenceFile,
+        recoveryFile,
+      }),
+    (error) =>
+      error instanceof PublicationTransactionError &&
+      error.evidence.status === 'preflight-failed' &&
+      /immutable macos-dmg source file is missing/.test(error.message)
+  )
+  assert.equal(remoteCalls, 0)
+  assert.deepEqual(
+    JSON.parse(fs.readFileSync(evidenceFile, 'utf8')).immutable,
+    []
+  )
+  assert.deepEqual(
+    JSON.parse(fs.readFileSync(evidenceFile, 'utf8')).mutable,
+    []
+  )
+})
+
+test('publication transaction CLI requires an explicit release asset directory', () => {
+  const result = spawnSync(
+    process.execPath,
+    [
+      transactionScriptPath,
+      '--release-json',
+      'release-assets.json',
+      '--payload-dir',
+      'payload',
+      '--tag',
+      'v1.2.3',
+      '--evidence',
+      'evidence.json',
+      '--recovery',
+      'recovery.json',
+    ],
+    { encoding: 'utf8' }
+  )
+
+  assert.notEqual(result.status, 0)
+  assert.match(result.stderr, /Missing required argument: --assets-dir/)
 })
 
 test('buildFeishuReleasePayloads keeps card image-free and appends poster messages', () => {
