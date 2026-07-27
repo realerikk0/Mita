@@ -483,6 +483,26 @@ test('router deployment keeps the rendered config beside its worker entrypoint',
   assert.doesNotMatch(workflow, /\/tmp\/wrangler\.toml/)
 })
 
+test('router deployment isolates its least-privilege Cloudflare credential', () => {
+  const repoRoot = path.resolve(import.meta.dirname, '../../..')
+  const workflow = fs.readFileSync(
+    path.join(repoRoot, '.github/workflows/deploy-updater-router.yml'),
+    'utf8',
+  )
+  assert.match(
+    workflow,
+    /CLOUDFLARE_API_TOKEN: \$\{\{ secrets\.CLOUDFLARE_WORKERS_API_TOKEN \}\}/,
+  )
+  assert.doesNotMatch(
+    workflow,
+    /CLOUDFLARE_API_TOKEN: \$\{\{ secrets\.CLOUDFLARE_API_TOKEN \}\}/,
+  )
+  assert.match(
+    workflow,
+    /\[ -n "\$CLOUDFLARE_API_TOKEN" \] && \[ -n "\$CLOUDFLARE_ACCOUNT_ID" \]/,
+  )
+})
+
 test('router deployment fails closed unless unsigned and signed pre-A probes pass', () => {
   const repoRoot = path.resolve(import.meta.dirname, '../../..')
   const workflow = fs.readFileSync(
