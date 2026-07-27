@@ -2228,19 +2228,23 @@ test('candidate recovery authenticates exact artifacts and only resumes package 
 })
 
 test('one-time Draft repair isolates signing and release mutation authority', () => {
-  const workflow = fs.readFileSync(
-    '.github/workflows/desktop-release-draft-repair.yml',
-    'utf8'
+  const workflow = normalizeLineEndings(
+    fs.readFileSync(
+      '.github/workflows/desktop-release-draft-repair.yml',
+      'utf8'
+    )
   )
-  const helper = fs.readFileSync(
-    'scripts/release-distribution/draft-asset-repair-state.mjs',
-    'utf8'
+  const helper = normalizeLineEndings(
+    fs.readFileSync(
+      'scripts/release-distribution/draft-asset-repair-state.mjs',
+      'utf8'
+    )
   )
   assert.deepEqual(validateDraftAssetRepairWorkflow(workflow, helper), [])
   assert.deepEqual(
     validateDraftAssetRepairWorkflow(
-      workflow.replace(/\r\n?/g, '\n').replace(/\n/g, '\r\n'),
-      helper.replace(/\r\n?/g, '\n').replace(/\n/g, '\r\n')
+      withLineEndings(workflow, '\r\n'),
+      withLineEndings(helper, '\r\n')
     ),
     []
   )
@@ -2955,14 +2959,13 @@ test('formal build, release, and updater jobs share the release-distribution env
 })
 
 test('one-time Biyan alias bootstrap is manual, exact, and fail-closed', () => {
-  const workflow = fs.readFileSync(
-    '.github/workflows/release-distribution.yml',
-    'utf8'
+  const workflow = normalizeLineEndings(
+    fs.readFileSync('.github/workflows/release-distribution.yml', 'utf8')
   )
   assert.deepEqual(validateBiyanDownloadAliasBootstrapWorkflow(workflow), [])
   assert.deepEqual(
     validateBiyanDownloadAliasBootstrapWorkflow(
-      workflow.replace(/\r\n?/g, '\n').replace(/\n/g, '\r\n')
+      withLineEndings(workflow, '\r\n')
     ),
     []
   )
