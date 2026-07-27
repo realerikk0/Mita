@@ -2239,8 +2239,8 @@ test('one-time Draft repair isolates signing and release mutation authority', ()
   assert.deepEqual(validateDraftAssetRepairWorkflow(workflow, helper), [])
   assert.deepEqual(
     validateDraftAssetRepairWorkflow(
-      workflow.replace(/\n/g, '\r\n'),
-      helper.replace(/\n/g, '\r\n')
+      workflow.replace(/\r\n?/g, '\n').replace(/\n/g, '\r\n'),
+      helper.replace(/\r\n?/g, '\n').replace(/\n/g, '\r\n')
     ),
     []
   )
@@ -2962,7 +2962,7 @@ test('one-time Biyan alias bootstrap is manual, exact, and fail-closed', () => {
   assert.deepEqual(validateBiyanDownloadAliasBootstrapWorkflow(workflow), [])
   assert.deepEqual(
     validateBiyanDownloadAliasBootstrapWorkflow(
-      workflow.replace(/\n/g, '\r\n')
+      workflow.replace(/\r\n?/g, '\n').replace(/\n/g, '\r\n')
     ),
     []
   )
