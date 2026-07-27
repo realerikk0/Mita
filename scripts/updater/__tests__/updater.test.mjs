@@ -483,6 +483,70 @@ test('router deployment keeps the rendered config beside its worker entrypoint',
   assert.doesNotMatch(workflow, /\/tmp\/wrangler\.toml/)
 })
 
+test('router deployment fails closed unless unsigned and signed pre-A probes pass', () => {
+  const repoRoot = path.resolve(import.meta.dirname, '../../..')
+  const workflow = fs.readFileSync(
+    path.join(repoRoot, '.github/workflows/deploy-updater-router.yml'),
+    'utf8',
+  )
+  assert.match(
+    workflow,
+    /ENDPOINT="https:\/\/updates\.mita\.so\/biyan\/v1\/stable\/windows\/x86_64\/0\.6\.633"/,
+  )
+  assert.equal(workflow.match(/for attempt in \$\(seq 1 24\)/g)?.length, 2)
+  assert.match(workflow, /test "\$unsigned_status" = "401"/)
+  assert.match(workflow, /\. == \{"error":"unauthorized"\}/)
+  assert.match(workflow, /node scripts\/updater\/sign-request\.mjs/)
+  assert.match(workflow, /--current-version 0\.6\.633/)
+  assert.match(workflow, /--target-version 0\.6\.643/)
+  assert.match(workflow, /--rollout 0/)
+  assert.doesNotMatch(workflow, /--salt/)
+  assert.match(workflow, /umask 077/)
+  assert.match(
+    workflow,
+    /SIGNED_HEADERS="\$\{RUNNER_TEMP:\?\}\/biyan-updater-signed-headers-\$\{GITHUB_RUN_ID\}\.json"/,
+  )
+  assert.match(
+    workflow,
+    /UNSIGNED_BODY="\$\{RUNNER_TEMP:\?\}\/biyan-updater-unsigned-body-\$\{GITHUB_RUN_ID\}\.json"/,
+  )
+  assert.match(
+    workflow,
+    /SIGNED_BODY="\$\{RUNNER_TEMP:\?\}\/biyan-updater-signed-body-\$\{GITHUB_RUN_ID\}"/,
+  )
+  assert.match(
+    workflow,
+    /signed_status="000"[\s\S]*for attempt in \$\(seq 1 24\); do[\s\S]*node scripts\/updater\/sign-request\.mjs[\s\S]*curl --silent/,
+  )
+  assert.match(
+    workflow,
+    /\(keys \| sort\) == \[[\s\S]*"X-Client-Session"[\s\S]*"X-Request-Token"[\s\S]*\]\s+and \.\["X-Client-Version"\] == "0\.6\.633"/,
+  )
+  assert.match(workflow, /test "\$signed_status" = "204"/)
+  assert.match(workflow, /test ! -s "\$SIGNED_BODY"/)
+  assert.match(
+    workflow,
+    /schema: \$schema,[\s\S]*sourceCommit: \$sourceCommit,[\s\S]*unsignedStatus: \$unsignedStatus,[\s\S]*signedPreAStatus: \$signedPreAStatus/,
+  )
+
+  const uploadStep = workflow.match(
+    /      - name: Upload router deployment evidence[\s\S]*$/,
+  )?.[0]
+  assert.ok(uploadStep)
+  assert.match(uploadStep, /if: inputs\.dry_run != true && success\(\)/)
+  assert.match(
+    uploadStep,
+    /path: dist\/router-verification\/evidence\.json/,
+  )
+  assert.match(uploadStep, /if-no-files-found: error/)
+  assert.match(
+    uploadStep,
+    /name: updater-router-deployment-\$\{\{ github\.run_id \}\}-\$\{\{ github\.run_attempt \}\}/,
+  )
+  assert.doesNotMatch(uploadStep, /signed-headers\.json/)
+  assert.doesNotMatch(uploadStep, /unsigned-body|signed-body/)
+})
+
 test('health gate pauses on P0/P1, data loss, or migration failures above 0.5%', () => {
   const healthy = {
     status: 'healthy', p0Incidents: 0, p1Incidents: 0, dataLossIncidents: 0,

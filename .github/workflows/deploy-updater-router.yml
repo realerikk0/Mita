@@ -67,3 +67,113 @@ jobs:
           printf '%s' "$ROLLOUT_SALT" \
             | npx --yes wrangler@4 secret put ROLLOUT_SALT --config "$WRANGLER_CONFIG"
           npx --yes wrangler@4 deploy --config "$WRANGLER_CONFIG"
+
+          VERIFY_DIR="dist/router-verification"
+          ENDPOINT="https://updates.mita.so/biyan/v1/stable/windows/x86_64/0.6.633"
+          UNSIGNED_BODY="${RUNNER_TEMP:?}/biyan-updater-unsigned-body-${GITHUB_RUN_ID}.json"
+          SIGNED_BODY="${RUNNER_TEMP:?}/biyan-updater-signed-body-${GITHUB_RUN_ID}"
+          SIGNED_HEADERS="${RUNNER_TEMP:?}/biyan-updater-signed-headers-${GITHUB_RUN_ID}.json"
+          EVIDENCE_FILE="$VERIFY_DIR/evidence.json"
+          umask 077
+          mkdir -p "$VERIFY_DIR"
+          trap 'rm -f "$SIGNED_HEADERS" "$UNSIGNED_BODY" "$SIGNED_BODY"' EXIT
+
+          unsigned_status="000"
+          for attempt in $(seq 1 24); do
+            if unsigned_status="$(
+              curl --silent --show-error --connect-timeout 10 --max-time 20 \
+                --output "$UNSIGNED_BODY" --write-out '%{http_code}' "$ENDPOINT"
+            )"; then
+              if [ "$unsigned_status" = "401" ] \
+                && jq -e '. == {"error":"unauthorized"}' "$UNSIGNED_BODY" >/dev/null 2>&1; then
+                break
+              fi
+            else
+              unsigned_status="000"
+            fi
+            [ "$attempt" -eq 24 ] || sleep 5
+          done
+          test "$unsigned_status" = "401"
+          jq -e '. == {"error":"unauthorized"}' "$UNSIGNED_BODY" >/dev/null
+
+          signed_status="000"
+          for attempt in $(seq 1 24); do
+            node scripts/updater/sign-request.mjs \
+              --current-version 0.6.633 \
+              --target-version 0.6.643 \
+              --rollout 0 \
+              --output "$SIGNED_HEADERS"
+            jq -e '
+              (keys | sort) == [
+                "X-Client-Session",
+                "X-Client-Version",
+                "X-Request-Id",
+                "X-Request-Time",
+                "X-Request-Token"
+              ]
+              and .["X-Client-Version"] == "0.6.633"
+              and (.["X-Client-Session"] | test("^[0-9A-Za-z._:-]{8,200}$"))
+              and (.["X-Request-Id"] | test("^[0-9a-f]{64}$"))
+              and (.["X-Request-Time"] | test("^[0-9]+$"))
+              and (.["X-Request-Token"] | test("^[0-9a-f]{64}$"))
+            ' "$SIGNED_HEADERS" >/dev/null
+            signed_headers=()
+            while IFS= read -r header; do
+              signed_headers+=(--header "$header")
+            done < <(jq -r 'to_entries[] | "\(.key): \(.value)"' "$SIGNED_HEADERS")
+            if signed_status="$(
+              curl --silent --show-error --connect-timeout 10 --max-time 20 \
+                "${signed_headers[@]}" \
+                --output "$SIGNED_BODY" --write-out '%{http_code}' "$ENDPOINT"
+            )"; then
+              if [ "$signed_status" = "204" ] && [ ! -s "$SIGNED_BODY" ]; then
+                break
+              fi
+            else
+              signed_status="000"
+            fi
+            [ "$attempt" -eq 24 ] || sleep 5
+          done
+          test "$signed_status" = "204"
+          test ! -s "$SIGNED_BODY"
+
+          jq -n \
+            --arg schema "biyan-updater-router-deployment-evidence/v1" \
+            --arg endpoint "$ENDPOINT" \
+            --arg sourceCommit "$GITHUB_SHA" \
+            --arg unsignedStatus "$unsigned_status" \
+            --arg signedPreAStatus "$signed_status" \
+            --arg verifiedAt "$(date -u +'%Y-%m-%dT%H:%M:%SZ')" \
+            '{
+              schema: $schema,
+              endpoint: $endpoint,
+              sourceCommit: $sourceCommit,
+              unsignedStatus: $unsignedStatus,
+              signedPreAStatus: $signedPreAStatus,
+              verifiedAt: $verifiedAt
+            }' > "$EVIDENCE_FILE"
+          jq -e --arg sourceCommit "$GITHUB_SHA" '
+            (keys | sort) == [
+              "endpoint",
+              "schema",
+              "signedPreAStatus",
+              "sourceCommit",
+              "unsignedStatus",
+              "verifiedAt"
+            ]
+            and .schema == "biyan-updater-router-deployment-evidence/v1"
+            and .sourceCommit == $sourceCommit
+            and .unsignedStatus == "401"
+            and .signedPreAStatus == "204"
+          ' "$EVIDENCE_FILE" >/dev/null
+          rm -f "$SIGNED_HEADERS" "$UNSIGNED_BODY" "$SIGNED_BODY"
+          trap - EXIT
+
+      - name: Upload router deployment evidence
+        if: inputs.dry_run != true && success()
+        uses: actions/upload-artifact@v4
+        with:
+          name: updater-router-deployment-${{ github.run_id }}-${{ github.run_attempt }}
+          path: dist/router-verification/evidence.json
+          if-no-files-found: error
+          retention-days: 30
