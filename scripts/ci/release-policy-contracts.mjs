@@ -16,8 +16,7 @@ const LEGACY_BROAD_CANDIDATE_VERIFIER =
   /(?:grep\s+-Ei|-match\s+)[^\n]*(?:llama|mlx|foundation|rag|vector)/i
 const YAML_CONTINUE_ON_ERROR =
   /^\s*(?:-\s*)?(?:"continue-on-error"|'continue-on-error'|continue-on-error)\s*:/m
-const YAML_IF =
-  /^\s*(?:-\s*)?(?:"if"|'if'|if)\s*:/m
+const YAML_IF = /^\s*(?:-\s*)?(?:"if"|'if'|if)\s*:/m
 
 const TRUSTED_CI_SCOPE_COMMAND_ALLOWLIST = new Set([
   // Reviewed active-command sequence for the fail-closed ci-scope detector.
@@ -44,6 +43,7 @@ const TRUSTED_CI_JOB_KEY_ALLOWLIST = new Set([
 ])
 
 const TRUSTED_CANDIDATE_JOB_ORDER = [
+  'tag-cut',
   'preflight',
   'quality-gate',
   'build-macos',
@@ -60,12 +60,18 @@ const TRUSTED_RECOVERY_JOB_ORDER = [
 ]
 
 const TRUSTED_CANDIDATE_WORKFLOW_ALLOWLIST = new Set([
-  '96c8d8f3b0856dddcb87582381d6bd72ae6359b445905fde6a5cc06cd9597bb1',
+  '76c67ee0b9a06adc6c4d4d52ecbdf9634b522992334812c830d4367fefb11214',
 ])
 
 const TRUSTED_RECOVERY_WORKFLOW_ALLOWLIST = new Set([
   'adcea2c0c3548852f411ac578f8432cf127fd42e6cb46512de9a47823b12c251',
 ])
+
+const TRUSTED_DRAFT_REPAIR_WORKFLOW_SHA256 =
+  'ab8c1f9dbf22fd0079f8facb15ebf4c3baf7326365d06291d3ea7de549456e10'
+
+const TRUSTED_DRAFT_REPAIR_STATE_HELPER_SHA256 =
+  '70c7ebc91c2227e818b4843425ca234ef6a53b39bd3e9231cfd9fc3d5fc212f2'
 
 const TRUSTED_BIYAN_DOWNLOAD_ALIAS_BOOTSTRAP_JOB_SHA256 =
   '58cb636b6139af4f0be2a21dbc1a2df9dfdf8a9ba67940be46b70a5c8922d697'
@@ -209,9 +215,9 @@ function actionStepBlocks(source, action) {
   const escaped = escapeRegExp(action)
   const blocks = []
   for (let index = 0; index < lines.length; index += 1) {
-    const match = new RegExp(
-      `^(\\s*)(-\\s*)?uses:\\s*${escaped}\\s*$`
-    ).exec(lines[index])
+    const match = new RegExp(`^(\\s*)(-\\s*)?uses:\\s*${escaped}\\s*$`).exec(
+      lines[index]
+    )
     if (!match) continue
     const stepIndent = match[2]
       ? match[1].length
@@ -233,7 +239,9 @@ function actionStepBlocks(source, action) {
 function workflowStepBlocks(source) {
   const normalized = source.replace(/\r\n?/g, '\n')
   const lines = normalized.split('\n')
-  const stepsHeaderIndex = lines.findIndex((line) => /^(\s*)steps:\s*$/.test(line))
+  const stepsHeaderIndex = lines.findIndex((line) =>
+    /^(\s*)steps:\s*$/.test(line)
+  )
   if (stepsHeaderIndex < 0) return []
 
   const headerIndent = /^(\s*)/.exec(lines[stepsHeaderIndex])?.[1].length ?? 0
@@ -304,7 +312,10 @@ function validateReleaseWorkflowControlPlane(
   expectedJobOrder,
   trustedWorkflowHashes,
   workflowLabel,
-  { requireReviewedEnvelope = false } = {}
+  {
+    requireReviewedEnvelope = false,
+    writePermissionJobs = new Set(['draft-release']),
+  } = {}
 ) {
   const failures = []
   const jobKeys = workflowJobKeys(source)
@@ -319,13 +330,15 @@ function validateReleaseWorkflowControlPlane(
 
   for (const jobName of jobKeys) {
     if (
-      jobName !== 'draft-release' &&
+      !writePermissionJobs.has(jobName) &&
       jobPermissionBlocks(jobBlock(source, jobName)).some((permissions) =>
         /\bwrite(?:-all)?\b/.test(permissions)
       )
     ) {
       failures.push(
-        `${workflowLabel} only draft-release may request write permissions`
+        `${workflowLabel} only ${[...writePermissionJobs].join(
+          ' and '
+        )} may request write permissions`
       )
     }
   }
@@ -347,8 +360,7 @@ function validateReleaseWorkflowControlPlane(
 const LIVE_MAIN_RELEASE_PROBE =
   'git ls-remote --exit-code origin refs/heads/mita-main'
 const LIVE_TAG_RELEASE_PROBE = '"refs/tags/$RELEASE_TAG^{}"'
-const LIVE_MAIN_RELEASE_RESOLVER =
-  `live_main="$(${LIVE_MAIN_RELEASE_PROBE} | awk 'NF == 2 { print $1 }')"`
+const LIVE_MAIN_RELEASE_RESOLVER = `live_main="$(${LIVE_MAIN_RELEASE_PROBE} | awk 'NF == 2 { print $1 }')"`
 const LIVE_TAG_RELEASE_RESOLVER = [
   'tag_refs="$(git ls-remote --exit-code origin',
   `"refs/tags/$RELEASE_TAG" ${LIVE_TAG_RELEASE_PROBE})"`,
@@ -412,11 +424,9 @@ function stepLoadsCreatedDraftId(step) {
   const commands = runBlocks(step).flat()
   const assignmentIndex = commands.indexOf('release_id="$(')
   const selectorIndex = commands.indexOf(
-    "jq -er '.id | select(type == \"number\" and . > 0)' \\"
+    'jq -er \'.id | select(type == "number" and . > 0)\' \\'
   )
-  const sourceIndex = commands.indexOf(
-    '"$RUNNER_TEMP/created-draft.json"'
-  )
+  const sourceIndex = commands.indexOf('"$RUNNER_TEMP/created-draft.json"')
   const closeIndex = commands.indexOf(')"')
   return (
     commands.filter((command) => /^release_id=/.test(command)).length === 1 &&
@@ -441,9 +451,7 @@ function stepWaitsForCreatedDraftReadback(step) {
     ]) &&
     step.includes('Unable to enumerate the newly created Draft') &&
     step.includes('matching_ids="$(') &&
-    step.includes(
-      '[.[][] | select(.tag_name == $tag) | .id]'
-    ) &&
+    step.includes('[.[][] | select(.tag_name == $tag) | .id]') &&
     step.includes('[ "$matching_ids" = "[$release_id]" ]') &&
     step.includes('draft_visible=1') &&
     step.includes('[ "$matching_ids" != "[]" ]') &&
@@ -537,10 +545,7 @@ export function validateReleaseTrainPolicy(policy) {
     ids.add(train.id)
 
     const releases = train.releases
-    if (
-      !releases ||
-      Object.keys(releases).sort().join(',') !== 'A,B,C'
-    ) {
+    if (!releases || Object.keys(releases).sort().join(',') !== 'A,B,C') {
       failures.push(`release train ${train.id} must contain exactly A, B, C`)
       continue
     }
@@ -641,8 +646,8 @@ export function validateReleaseIdentity({
     return failures
   }
   if (
-    (migrationPhase !== bridgeTrain.migrationPhase ||
-      dataSchema !== bridgeTrain.dataSchema)
+    migrationPhase !== bridgeTrain.migrationPhase ||
+    dataSchema !== bridgeTrain.dataSchema
   ) {
     failures.push(
       `bridge release ${version} in ${bridgeTrain.trainId} must attest ${bridgeTrain.migrationPhase}/${bridgeTrain.dataSchema}`
@@ -666,8 +671,7 @@ export function validateActiveReleaseIdentity({
     trainPolicy,
   })
   const activeTrain = trainPolicy?.trains?.find(
-    (train) =>
-      train.id === trainPolicy.activeTrain && train.status === 'active'
+    (train) => train.id === trainPolicy.activeTrain && train.status === 'active'
   )
   const activeRelease = activeTrain?.releases?.[migrationPhase]
   if (
@@ -839,30 +843,49 @@ export function validateCandidateWorkflow(
 ) {
   const failures = []
   const activeSource = uncommentedSource(source)
+  const on = topLevelBlock(activeSource, 'on')
+  const tagCut = jobBlock(activeSource, 'tag-cut')
   const preflight = jobBlock(activeSource, 'preflight')
   const qualityGate = jobBlock(activeSource, 'quality-gate')
   const packageCandidate = jobBlock(activeSource, 'package-candidate')
   const draftRelease = jobBlock(activeSource, 'draft-release')
   const permissions = topLevelBlock(activeSource, 'permissions')
   const concurrency = topLevelBlock(activeSource, 'concurrency')
-  const checkoutSteps = actionStepBlocks(
-    activeSource,
-    'actions/checkout@v4'
-  )
+  const checkoutSteps = actionStepBlocks(activeSource, 'actions/checkout@v4')
+  const diagnosticBestEffort = 'jq . "$tag_json" >&2 || true'
+  const diagnosticBestEffortCount =
+    activeSource.split(diagnosticBestEffort).length - 1
+  const bypassCheckedSource = activeSource.replace(diagnosticBestEffort, '')
+
+  const triggerKeys = on
+    ? [...on.matchAll(/^  ([A-Za-z0-9_-]+):\s*$/gm)].map((match) => match[1])
+    : []
+  if (
+    triggerKeys.length !== 1 ||
+    triggerKeys[0] !== 'workflow_dispatch' ||
+    !on.includes('version:') ||
+    !/^\s{8}required:\s*true\s*$/m.test(on) ||
+    !/^\s{8}type:\s*string\s*$/m.test(on) ||
+    /\b(?:push|pull_request|release|schedule):/.test(on) ||
+    /github\.(?:ref_name|event\.inputs)/.test(activeSource)
+  ) {
+    failures.push(
+      'desktop release must be workflow_dispatch-only with one required exact version input'
+    )
+  }
 
   if (
     requireReviewedEnvelope &&
     !/^name:\s*Desktop Release Candidate\s*$/m.test(activeSource)
   ) {
-    failures.push(
-      'desktop release must keep the exact reviewed workflow name'
-    )
+    failures.push('desktop release must keep the exact reviewed workflow name')
   }
 
   if (
     YAML_CONTINUE_ON_ERROR.test(activeSource) ||
     YAML_IF.test(activeSource) ||
-    /\|\|\s*true\b/.test(activeSource)
+    diagnosticBestEffortCount > 1 ||
+    /\|\|\s*true\b/.test(bypassCheckedSource)
   ) {
     failures.push(
       'desktop release jobs and steps must be unconditional and must not use advisory bypasses'
@@ -871,13 +894,12 @@ export function validateCandidateWorkflow(
 
   if (
     !concurrency ||
-    !concurrency.includes(
-      'group: desktop-candidate-${{ github.event.inputs.version || github.ref_name }}'
-    ) ||
-    !concurrency.includes('cancel-in-progress: false')
+    normalizedYamlEnvelope(concurrency) !==
+      'concurrency:\n  group: desktop-candidate-${{ inputs.version }}\n  cancel-in-progress: false\n' ||
+    /\|\||github\.ref_name|github\.event\.inputs/.test(concurrency)
   ) {
     failures.push(
-      'desktop release must serialize tag-push and manual runs for the same exact candidate tag'
+      'desktop release must serialize only the exact manually requested candidate tag without a ref fallback'
     )
   }
   if (
@@ -907,6 +929,104 @@ export function validateCandidateWorkflow(
     failures.push(
       'only the draft release job may request actions: read plus contents: write permission'
     )
+  }
+  if (!tagCut) {
+    failures.push('desktop release is missing the protected exact tag-cut job')
+  } else {
+    const tagCutPermissions = jobPermissionBlocks(tagCut)
+    const tagCutUses = tagCut.match(/^\s*(?:-\s*)?uses:\s*.+$/gm) ?? []
+    const tokenReferences = tagCut.match(/\$\{\{\s*github\.token\s*\}\}/g) ?? []
+    const exactMappings = [
+      ['v0.6.643', '38e6d9290a8b9b0f152ff2a7eefb550e6ead7df5'],
+      ['v0.6.644', 'd58f4e9141ee9dfc985171d13c993103dd763b01'],
+      ['v0.6.645', 'a79c715a61057d7b78b440d90e3419dfc7e55d12'],
+    ]
+    if (
+      !/^    environment:\s*release-distribution\s*$/m.test(tagCut) ||
+      tagCutPermissions.length !== 1 ||
+      normalizedYamlEnvelope(tagCutPermissions[0]) !==
+        '    permissions:\n      contents: write\n'
+    ) {
+      failures.push(
+        'tag-cut must be the exact contents: write release-distribution permission domain'
+      )
+    }
+    if (
+      tagCutUses.length !== 0 ||
+      /\$\{\{\s*secrets\./.test(tagCut) ||
+      /\b(?:TAURI_SIGNING_PRIVATE_KEY|BIYAN_SIGNING_KEY)\b/.test(tagCut) ||
+      tokenReferences.length !== 1 ||
+      !tagCut.includes('GH_TOKEN: ${{ github.token }}')
+    ) {
+      failures.push(
+        'tag-cut must use no action, checkout, or secret and only the current github.token'
+      )
+    }
+    if (
+      exactMappings.some(
+        ([tag, commit]) =>
+          !new RegExp(
+            `${escapeRegExp(tag)}\\)\\s*\\n\\s*source_commit="${commit}"`
+          ).test(tagCut)
+      ) ||
+      !tagCut.includes(
+        'echo "Release tag is not an approved A/B/C checkpoint: $RELEASE_TAG"'
+      )
+    ) {
+      failures.push(
+        'tag-cut must map only v0.6.643, v0.6.644, and v0.6.645 to the reviewed A/B/C checkpoints'
+      )
+    }
+    if (
+      !tagCut.includes('RELEASE_TAG: ${{ inputs.version }}') ||
+      !tagCut.includes('WORKFLOW_REF: ${{ github.ref }}') ||
+      !tagCut.includes('WORKFLOW_SHA: ${{ github.sha }}') ||
+      !tagCut.includes(
+        `if [ "$WORKFLOW_REF" != "refs/heads/mita-main" ]; then
+            echo "Candidate dispatch must use protected mita-main" >&2
+            exit 1
+          fi`
+      ) ||
+      !tagCut.includes(
+        '"repos/$GITHUB_REPOSITORY/branches/mita-main" --jq \'.commit.sha\''
+      ) ||
+      !tagCut.includes('[ "$WORKFLOW_SHA" != "$live_main" ]') ||
+      !tagCut.includes(
+        '"repos/$GITHUB_REPOSITORY/commits/$source_commit" --jq \'.sha\''
+      ) ||
+      !tagCut.includes(
+        '"repos/$GITHUB_REPOSITORY/compare/$source_commit...$live_main"'
+      ) ||
+      !tagCut.includes('.base_commit.sha == $source') ||
+      !tagCut.includes('.merge_base_commit.sha == $source') ||
+      !tagCut.includes(
+        '.status == (if $source == $main then "identical" else "ahead" end)'
+      ) ||
+      !tagCut.includes('and .behind_by == 0')
+    ) {
+      failures.push(
+        'tag-cut must bind the dispatch SHA to live mita-main and prove the exact source checkpoint is its ancestor'
+      )
+    }
+    if (
+      !tagCut.includes(
+        'tag_endpoint="$GITHUB_API_URL/repos/$GITHUB_REPOSITORY/git/ref/tags/$RELEASE_TAG"'
+      ) ||
+      !tagCut.includes('case "$status" in') ||
+      !tagCut.includes('            200)') ||
+      !tagCut.includes('            404)') ||
+      !tagCut.includes('            *)') ||
+      !tagCut.includes('.object.type == "commit"') ||
+      !tagCut.includes('.object.sha == $source') ||
+      !tagCut.includes('"repos/$GITHUB_REPOSITORY/git/refs"') ||
+      !tagCut.includes('{ref: $ref, sha: $sha}') ||
+      !tagCut.includes('status="$(read_tag)"') ||
+      !tagCut.includes('[ "$status" != "200" ]')
+    ) {
+      failures.push(
+        'tag-cut must fail closed across exact existing, absent-and-create, and unexpected REST tag states with final readback'
+      )
+    }
   }
   if (!packageCandidate) {
     failures.push('desktop release is missing the immutable package job')
@@ -1032,8 +1152,7 @@ export function validateCandidateWorkflow(
       !hasRunInvocation(verifyManifest, /^sha256sum(?:\s|\\|$)/) ||
       !verifyManifest.includes('candidate.json.sig') ||
       !verifyManifest.includes('SHA256SUMS') ||
-      packageSteps.indexOf(signManifest) >=
-        packageSteps.indexOf(verifyManifest)
+      packageSteps.indexOf(signManifest) >= packageSteps.indexOf(verifyManifest)
     ) {
       failures.push(
         'package-candidate must verify candidate.json with the pinned updater key before checksumming the detached signature'
@@ -1082,21 +1201,25 @@ export function validateCandidateWorkflow(
       step.includes('node harness/scripts/ci/verify-release-target.mjs')
     )
     if (
+      !jobNeeds(preflight, 'tag-cut') ||
       !checkoutSteps.some(
         (step) =>
-          /^\s*ref:\s*mita-main\s*$/m.test(step) &&
-          /^\s*path:\s*harness\s*$/m.test(step)
+          step.includes(
+            'ref: ${{ needs.tag-cut.outputs.trusted_main_commit }}'
+          ) && /^\s*path:\s*harness\s*$/m.test(step)
       ) ||
-      !checkoutSteps.some((step) => /^\s*path:\s*target\s*$/m.test(step))
+      !checkoutSteps.some(
+        (step) =>
+          step.includes('ref: ${{ needs.tag-cut.outputs.tag }}') &&
+          /^\s*path:\s*target\s*$/m.test(step)
+      )
     ) {
       failures.push(
-        'desktop release preflight must separate the protected mita-main harness from the exact target checkout'
+        'desktop release preflight must depend on tag-cut and separate its exact protected-main harness from its exact target checkout'
       )
     }
     if (
-      !preflight.includes(
-        'git -C harness merge-base --is-ancestor'
-      ) ||
+      !preflight.includes('git -C harness merge-base --is-ancestor') ||
       !preflight.includes('refs/remotes/origin/mita-main')
     ) {
       failures.push(
@@ -1108,7 +1231,8 @@ export function validateCandidateWorkflow(
       !preflight.includes(
         'live_main="$(git -C harness rev-parse refs/remotes/origin/mita-main)"'
       ) ||
-      !preflight.includes('[ "$checkout_head" != "$live_main" ]') ||
+      !preflight.includes('[ "$checkout_head" != "$EXPECTED_MAIN" ]') ||
+      !preflight.includes('[ "$live_main" != "$EXPECTED_MAIN" ]') ||
       !preflight.includes('echo "trusted_main_commit=$live_main"')
     ) {
       failures.push(
@@ -1138,16 +1262,20 @@ export function validateCandidateWorkflow(
     }
     if (
       !resolverStep ||
-      !resolverStep.includes('EVENT_NAME: ${{ github.event_name }}') ||
-      !resolverStep.includes('WORKFLOW_REF: ${{ github.ref }}') ||
-      !resolverStep.includes('[ "$EVENT_NAME" = "workflow_dispatch" ]') ||
-      !resolverStep.includes('[ "$WORKFLOW_REF" != "refs/heads/mita-main" ]') ||
-      !/\[ "\$WORKFLOW_REF" != "refs\/heads\/mita-main" \]\s*;\s*then(?:(?!\bfi\b)[\s\S])*\bexit 1\b(?:(?!\bfi\b)[\s\S])*\bfi\b/.test(
-        resolverStep
+      !resolverStep.includes('RELEASE_TAG: ${{ needs.tag-cut.outputs.tag }}') ||
+      !resolverStep.includes(
+        'EXPECTED_SOURCE: ${{ needs.tag-cut.outputs.source_commit }}'
+      ) ||
+      !resolverStep.includes(
+        'EXPECTED_MAIN: ${{ needs.tag-cut.outputs.trusted_main_commit }}'
+      ) ||
+      !resolverStep.includes('test "$source_commit" = "$EXPECTED_SOURCE"') ||
+      !resolverStep.includes(
+        'test "$source_commit" = "$(git -C target rev-parse HEAD)"'
       )
     ) {
       failures.push(
-        'manual candidate dispatch must use the workflow from protected mita-main'
+        'candidate preflight must consume only the exact tag-cut source, tag, and protected-main outputs'
       )
     }
     if (
@@ -1274,9 +1402,7 @@ export function validateCandidateWorkflow(
         failures.push(
           `${buildJob} must run the token-aware candidate path policy`
         )
-      } else if (
-        /--runtime-only/.test(candidatePolicy.commands.join('\n'))
-      ) {
+      } else if (/--runtime-only/.test(candidatePolicy.commands.join('\n'))) {
         failures.push(
           `${buildJob} candidate path policy must check product and runtime names`
         )
@@ -1288,9 +1414,7 @@ export function validateCandidateWorkflow(
       }
       if (
         buildJob === 'build-windows' &&
-        !block.includes(
-          './harness/scripts/ci/verify-windows-candidate.ps1'
-        )
+        !block.includes('./harness/scripts/ci/verify-windows-candidate.ps1')
       ) {
         failures.push(
           'build-windows must use the protected Windows candidate verifier'
@@ -1298,13 +1422,75 @@ export function validateCandidateWorkflow(
       }
       if (
         buildJob === 'build-linux' &&
-        !block.includes(
-          'node harness/scripts/ci/candidate-content-policy.mjs'
-        )
+        !block.includes('node harness/scripts/ci/candidate-content-policy.mjs')
       ) {
         failures.push(
           'build-linux must use the protected candidate content policy'
         )
+      }
+      if (buildJob === 'build-linux') {
+        const steps = workflowStepBlocks(block)
+        const finalSigner = steps.find((step) =>
+          step.includes('name: Re-sign final Linux AppImage')
+        )
+        const finalVerifier = steps.find((step) =>
+          step.includes(
+            'node harness/scripts/updater/verify-updater-asset-signature.mjs'
+          )
+        )
+        const upload = steps.find((step) =>
+          step.includes('uses: actions/upload-artifact@v4')
+        )
+        if (
+          !finalSigner ||
+          !finalSigner.includes(
+            'VERSION: ${{ needs.preflight.outputs.version }}'
+          ) ||
+          !finalSigner.includes(
+            'TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}'
+          ) ||
+          !finalSigner.includes(
+            'TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}'
+          ) ||
+          !finalSigner.includes(
+            'appimage="src-tauri/target/release/bundle/appimage/Biyan_${VERSION}_amd64.AppImage"'
+          ) ||
+          !hasRunInvocation(finalSigner, /^test\s+-f\s+"\$appimage"$/) ||
+          !hasRunInvocation(finalSigner, /^rm\s+-f\s+"\$appimage\.sig"$/) ||
+          !hasRunInvocation(
+            finalSigner,
+            /^yarn\s+tauri\s+signer\s+sign(?:\s|\\|$)/,
+            [
+              /--private-key\s+"\$TAURI_SIGNING_PRIVATE_KEY"/,
+              /--password\s+"\$TAURI_SIGNING_PRIVATE_KEY_PASSWORD"/,
+              /"\$appimage"/,
+            ]
+          ) ||
+          !hasRunInvocation(finalSigner, /^test\s+-s\s+"\$appimage\.sig"$/) ||
+          !finalVerifier ||
+          !finalVerifier.includes(
+            'jq -er \'.plugins.updater.pubkey | select(type == "string" and length > 0)\''
+          ) ||
+          !hasRunInvocation(
+            finalVerifier,
+            /^node\s+harness\/scripts\/updater\/verify-updater-asset-signature\.mjs(?:\s|\\|$)/,
+            [
+              /--asset\s+"src-tauri\/target\/release\/bundle\/appimage\/Biyan_\$\{VERSION\}_amd64\.AppImage"/,
+              /--signature\s+"src-tauri\/target\/release\/bundle\/appimage\/Biyan_\$\{VERSION\}_amd64\.AppImage\.sig"/,
+              /--public-key\s+"\$public_key"/,
+              /--label\s+linux-x86_64/,
+            ]
+          ) ||
+          steps.indexOf(finalSigner) <=
+            steps.findIndex((step) => step.includes('run: make build')) ||
+          steps.indexOf(finalVerifier) <= steps.indexOf(finalSigner) ||
+          !upload ||
+          steps.indexOf(upload) <= steps.indexOf(finalVerifier)
+        ) {
+          failures.push(
+            'build-linux must delete the stale signature, re-sign the final canonical AppImage, and cryptographically verify it with the protected updater key before upload'
+          )
+        }
       }
     }
   }
@@ -1317,9 +1503,7 @@ export function validateCandidateWorkflow(
       block,
       'actions/checkout@v4'
     ).some((step) =>
-      step.includes(
-        'ref: ${{ needs.preflight.outputs.trusted_main_commit }}'
-      )
+      step.includes('ref: ${{ needs.preflight.outputs.trusted_main_commit }}')
     )
     if (block && !protectedCheckout) {
       failures.push(
@@ -1359,9 +1543,7 @@ export function validateCandidateWorkflow(
     }
     const draftSteps = workflowStepBlocks(draftRelease)
     const updaterDownload = draftSteps.find((step) =>
-      step.includes(
-        'name: Download exact updater archive by authenticated ID'
-      )
+      step.includes('name: Download exact updater archive by authenticated ID')
     )
     const updaterExtract = draftSteps.find((step) =>
       step.includes('name: Extract exact updater candidate')
@@ -1369,8 +1551,7 @@ export function validateCandidateWorkflow(
     const freshSlotIndex = draftSteps.findIndex((step) =>
       step.includes('Require a fresh draft release slot')
     )
-    const freshSlot =
-      freshSlotIndex >= 0 ? draftSteps[freshSlotIndex] : ''
+    const freshSlot = freshSlotIndex >= 0 ? draftSteps[freshSlotIndex] : ''
     const createDraftIndex = draftSteps.findIndex((step) =>
       step.includes('name: Atomically create an empty Draft')
     )
@@ -1404,10 +1585,8 @@ export function validateCandidateWorkflow(
     ]
 
     if (
-      actionStepBlocks(
-        draftRelease,
-        'actions/download-artifact@v4'
-      ).length !== 0 ||
+      actionStepBlocks(draftRelease, 'actions/download-artifact@v4').length !==
+        0 ||
       !updaterDownload ||
       !updaterDownload.includes(
         'ARTIFACT_ID: ${{ needs.package-candidate.outputs.updater_artifact_id }}'
@@ -1467,9 +1646,7 @@ export function validateCandidateWorkflow(
       !createDraft.includes('prerelease: false') ||
       !createDraft.includes('.published_at == null') ||
       !createDraft.includes('and (.assets | length == 0)') ||
-      !createDraft.includes(
-        '/releases/tag/untagged-[0-9a-f]{20}$'
-      ) ||
+      !createDraft.includes('/releases/tag/untagged-[0-9a-f]{20}$') ||
       !stepLoadsCreatedDraftId(createDraft) ||
       !stepWaitsForCreatedDraftReadback(createDraft)
     ) {
@@ -1508,9 +1685,7 @@ export function validateCandidateWorkflow(
       !exactDraft.includes('.prerelease == false') ||
       !exactDraft.includes('.published_at == null') ||
       !exactDraft.includes('{ name, size, digest }') ||
-      !exactDraft.includes(
-        '"/releases/download/" + $draft_slug + "/"'
-      ) ||
+      !exactDraft.includes('"/releases/download/" + $draft_slug + "/"') ||
       !exactDraft.includes(
         '[.[][] | select(.tag_name == $tag) | .id] == [$release_id]'
       )
@@ -1531,6 +1706,7 @@ export function validateCandidateWorkflow(
         requireReviewedEnvelope:
           requireReviewedEnvelope ||
           /^name:\s*Desktop Release Candidate\s*$/m.test(activeSource),
+        writePermissionJobs: new Set(['tag-cut', 'draft-release']),
       }
     )
   )
@@ -1546,10 +1722,7 @@ export function validateCandidateRecoveryWorkflow(source) {
   const preflight = jobBlock(activeSource, 'preflight')
   const packageCandidate = jobBlock(activeSource, 'package-candidate')
   const draftRelease = jobBlock(activeSource, 'draft-release')
-  const checkoutSteps = actionStepBlocks(
-    activeSource,
-    'actions/checkout@v4'
-  )
+  const checkoutSteps = actionStepBlocks(activeSource, 'actions/checkout@v4')
 
   if (
     !activeSource.includes('name: Desktop Release Candidate Recovery') ||
@@ -1644,18 +1817,12 @@ export function validateCandidateRecoveryWorkflow(source) {
       !resolver ||
       !resolver.includes('WORKFLOW_REF: ${{ github.ref }}') ||
       !resolver.includes('[ "$WORKFLOW_REF" != "refs/heads/mita-main" ]') ||
-      !resolver.includes(
-        '[[ ! "$SOURCE_RUN_ID" =~ ^[1-9][0-9]*$ ]]'
-      ) ||
-      !resolver.includes(
-        '[ "$SOURCE_RUN_ID" != "30195339449" ]'
-      ) ||
+      !resolver.includes('[[ ! "$SOURCE_RUN_ID" =~ ^[1-9][0-9]*$ ]]') ||
+      !resolver.includes('[ "$SOURCE_RUN_ID" != "30195339449" ]') ||
       !resolver.includes(
         '[[ ! "$RELEASE_TAG" =~ ^v(0|[1-9][0-9]*)\\.(0|[1-9][0-9]*)\\.(0|[1-9][0-9]*)$ ]]'
       ) ||
-      !resolver.includes(
-        'git -C harness merge-base --is-ancestor'
-      ) ||
+      !resolver.includes('git -C harness merge-base --is-ancestor') ||
       !resolver.includes('checkout_head') ||
       !resolver.includes('live_main')
     ) {
@@ -1678,9 +1845,7 @@ export function validateCandidateRecoveryWorkflow(source) {
     if (
       !metadataFetch ||
       !metadataFetch.includes('GH_TOKEN: ${{ github.token }}') ||
-      !metadataFetch.includes(
-        'actions/runs/$SOURCE_RUN_ID"'
-      ) ||
+      !metadataFetch.includes('actions/runs/$SOURCE_RUN_ID"') ||
       !metadataFetch.includes(
         'actions/runs/$SOURCE_RUN_ID/jobs?per_page=100'
       ) ||
@@ -1694,7 +1859,9 @@ export function validateCandidateRecoveryWorkflow(source) {
     }
     if (
       !recoveryAuth ||
-      !recoveryAuth.includes('--run "$RUNNER_TEMP/recovery-metadata/run.json"') ||
+      !recoveryAuth.includes(
+        '--run "$RUNNER_TEMP/recovery-metadata/run.json"'
+      ) ||
       !recoveryAuth.includes(
         '--jobs "$RUNNER_TEMP/recovery-metadata/jobs.json"'
       ) ||
@@ -1714,12 +1881,8 @@ export function validateCandidateRecoveryWorkflow(source) {
       !recoveryAuth.includes(
         '"$source_head" \\\n            "$TRUSTED_MAIN"'
       ) ||
-      !recoveryAuth.includes(
-        'expected-control-drift.txt'
-      ) ||
-      !recoveryAuth.includes(
-        'actual-control-drift.txt'
-      ) ||
+      !recoveryAuth.includes('expected-control-drift.txt') ||
+      !recoveryAuth.includes('actual-control-drift.txt') ||
       !recoveryAuth.includes('diff -u') ||
       ![
         '.github/workflows/biyan-linter-and-test.yml',
@@ -1739,9 +1902,7 @@ export function validateCandidateRecoveryWorkflow(source) {
       !recoveryAuth.includes('source_run_id=$SOURCE_RUN_ID') ||
       !recoveryAuth.includes('source_run_head=$source_head') ||
       !recoveryAuth.includes('echo "${platform}_artifact_id=$id"') ||
-      !recoveryAuth.includes(
-        'echo "${platform}_artifact_digest=$digest"'
-      ) ||
+      !recoveryAuth.includes('echo "${platform}_artifact_digest=$digest"') ||
       !recoveryAuth.includes('echo "${platform}_artifact_size=$size"') ||
       !['linux', 'macos', 'windows'].every((platform) =>
         recoveryAuth.includes(`emit_artifact \\\n            ${platform} \\`)
@@ -1780,9 +1941,7 @@ export function validateCandidateRecoveryWorkflow(source) {
         '"repos/$GITHUB_REPOSITORY/releases?per_page=100" \\',
         '>"$RUNNER_TEMP/existing-release-pages.json"',
       ]) ||
-      !freshSlot.includes(
-        '[.[][] | select(.tag_name == $tag)] | length == 0'
-      )
+      !freshSlot.includes('[.[][] | select(.tag_name == $tag)] | length == 0')
     ) {
       failures.push(
         'candidate recovery preflight must enumerate published and Draft releases and prove the tag is unused'
@@ -1824,9 +1983,7 @@ export function validateCandidateRecoveryWorkflow(source) {
     )
     if (
       !jobNeeds(packageCandidate, 'preflight') ||
-      !/^    environment:\s*release-distribution\s*$/m.test(
-        packageCandidate
-      ) ||
+      !/^    environment:\s*release-distribution\s*$/m.test(packageCandidate) ||
       !packageCandidate.includes(
         'updater_artifact_id: ${{ steps.updater.outputs.artifact-id }}'
       ) ||
@@ -1842,11 +1999,8 @@ export function validateCandidateRecoveryWorkflow(source) {
       )
     }
     if (
-      !actionStepBlocks(packageCandidate, 'actions/checkout@v4').some(
-        (step) =>
-          step.includes(
-            'ref: ${{ needs.preflight.outputs.trusted_main_commit }}'
-          )
+      !actionStepBlocks(packageCandidate, 'actions/checkout@v4').some((step) =>
+        step.includes('ref: ${{ needs.preflight.outputs.trusted_main_commit }}')
       )
     ) {
       failures.push(
@@ -1871,15 +2025,11 @@ export function validateCandidateRecoveryWorkflow(source) {
       )
     }
     if (
-      actionStepBlocks(
-        packageCandidate,
-        'actions/download-artifact@v4'
-      ).length !== 0 ||
+      actionStepBlocks(packageCandidate, 'actions/download-artifact@v4')
+        .length !== 0 ||
       !archiveDownload ||
       !archiveDownload.includes('GH_TOKEN: ${{ github.token }}') ||
-      !archiveDownload.includes(
-        'actions/artifacts/$artifact_id/zip'
-      ) ||
+      !archiveDownload.includes('actions/artifacts/$artifact_id/zip') ||
       !hasRunInvocation(archiveDownload, /^gh\s+api(?:\s|\\|$)/) ||
       !hasRunInvocation(archiveDownload, /^test\s+"\$\(stat\s+-c/) ||
       !hasRunInvocation(
@@ -1976,11 +2126,9 @@ export function validateCandidateRecoveryWorkflow(source) {
       !updaterMetadata.includes(
         'artifact_digest="sha256:$ACTION_ARTIFACT_DIGEST"'
       ) ||
-      !hasRunInvocation(
-        updaterMetadata,
-        /^gh\s+api(?:\s|\\|$)/,
-        [/actions\/artifacts\/\$ARTIFACT_ID/]
-      ) ||
+      !hasRunInvocation(updaterMetadata, /^gh\s+api(?:\s|\\|$)/, [
+        /actions\/artifacts\/\$ARTIFACT_ID/,
+      ]) ||
       !updaterMetadata.includes('.workflow_run.id == $run_id') ||
       !updaterMetadata.includes('.workflow_run.head_sha == $head') ||
       !updaterMetadata.includes('.digest == $digest') ||
@@ -2002,9 +2150,7 @@ export function validateCandidateRecoveryWorkflow(source) {
   } else {
     const steps = workflowStepBlocks(draftRelease)
     const updaterDownload = steps.find((step) =>
-      step.includes(
-        'name: Download exact updater archive by authenticated ID'
-      )
+      step.includes('name: Download exact updater archive by authenticated ID')
     )
     const updaterExtract = steps.find((step) =>
       step.includes('name: Extract exact recovered updater candidate')
@@ -2012,20 +2158,17 @@ export function validateCandidateRecoveryWorkflow(source) {
     const freshSlotIndex = steps.findIndex((step) =>
       step.includes('name: Require a fresh draft release slot')
     )
-    const freshSlot =
-      freshSlotIndex >= 0 ? steps[freshSlotIndex] : ''
+    const freshSlot = freshSlotIndex >= 0 ? steps[freshSlotIndex] : ''
     const createDraftIndex = steps.findIndex((step) =>
       step.includes('name: Atomically create an empty recovered Draft')
     )
-    const createDraft =
-      createDraftIndex >= 0 ? steps[createDraftIndex] : ''
+    const createDraft = createDraftIndex >= 0 ? steps[createDraftIndex] : ''
     const uploadAssetsIndex = steps.findIndex((step) =>
       step.includes(
         'name: Upload exact assets only to the newly created Draft ID'
       )
     )
-    const uploadAssets =
-      uploadAssetsIndex >= 0 ? steps[uploadAssetsIndex] : ''
+    const uploadAssets = uploadAssetsIndex >= 0 ? steps[uploadAssetsIndex] : ''
     const verifyDraftIndex = steps.findIndex((step) =>
       step.includes('name: Verify exact recovered draft release')
     )
@@ -2042,16 +2185,11 @@ export function validateCandidateRecoveryWorkflow(source) {
       )
     }
     if (
-      !actionStepBlocks(draftRelease, 'actions/checkout@v4').some(
-        (step) =>
-          step.includes(
-            'ref: ${{ needs.preflight.outputs.trusted_main_commit }}'
-          )
+      !actionStepBlocks(draftRelease, 'actions/checkout@v4').some((step) =>
+        step.includes('ref: ${{ needs.preflight.outputs.trusted_main_commit }}')
       ) ||
-      actionStepBlocks(
-        draftRelease,
-        'actions/download-artifact@v4'
-      ).length !== 0 ||
+      actionStepBlocks(draftRelease, 'actions/download-artifact@v4').length !==
+        0 ||
       !updaterDownload ||
       !updaterDownload.includes(
         'ARTIFACT_ID: ${{ needs.package-candidate.outputs.updater_artifact_id }}'
@@ -2062,11 +2200,9 @@ export function validateCandidateRecoveryWorkflow(source) {
       !updaterDownload.includes(
         'ARTIFACT_SIZE: ${{ needs.package-candidate.outputs.updater_artifact_size }}'
       ) ||
-      !hasRunInvocation(
-        updaterDownload,
-        /^gh\s+api(?:\s|\\|$)/,
-        [/actions\/artifacts\/\$ARTIFACT_ID\/zip/]
-      ) ||
+      !hasRunInvocation(updaterDownload, /^gh\s+api(?:\s|\\|$)/, [
+        /actions\/artifacts\/\$ARTIFACT_ID\/zip/,
+      ]) ||
       !hasRunInvocation(updaterDownload, /^test\s+"\$\(stat\s+-c/) ||
       !updaterDownload.includes(
         'if [ "$actual_digest" != "$ARTIFACT_DIGEST" ]'
@@ -2124,9 +2260,7 @@ export function validateCandidateRecoveryWorkflow(source) {
       !createDraft.includes('prerelease: false') ||
       !createDraft.includes('.published_at == null') ||
       !createDraft.includes('and (.assets | length == 0)') ||
-      !createDraft.includes(
-        '/releases/tag/untagged-[0-9a-f]{20}$'
-      ) ||
+      !createDraft.includes('/releases/tag/untagged-[0-9a-f]{20}$') ||
       !stepLoadsCreatedDraftId(createDraft) ||
       !stepWaitsForCreatedDraftReadback(createDraft)
     ) {
@@ -2183,9 +2317,7 @@ export function validateCandidateRecoveryWorkflow(source) {
       !verifyDraft.includes('.prerelease == false') ||
       !verifyDraft.includes('.published_at == null') ||
       !verifyDraft.includes('{ name, size, digest }') ||
-      !verifyDraft.includes(
-        '"/releases/download/" + $draft_slug + "/"'
-      ) ||
+      !verifyDraft.includes('"/releases/download/" + $draft_slug + "/"') ||
       !verifyDraft.includes('.state == "uploaded"') ||
       !verifyDraft.includes('.size > 0') ||
       !verifyDraft.includes('^sha256:[0-9a-f]{64}$') ||
@@ -2219,6 +2351,830 @@ export function validateCandidateRecoveryWorkflow(source) {
   return failures
 }
 
+export function validateDraftAssetRepairWorkflow(source, stateHelperSource) {
+  const failures = []
+  const active = uncommentedSource(source)
+  const workflowSha256 = createHash('sha256')
+    .update(normalizedYamlEnvelope(source))
+    .digest('hex')
+  const helperSha256 = createHash('sha256')
+    .update(stateHelperSource ?? '')
+    .digest('hex')
+  if (workflowSha256 !== TRUSTED_DRAFT_REPAIR_WORKFLOW_SHA256) {
+    failures.push(
+      `Draft asset repair must match the reviewed whole-workflow execution envelope (got ${workflowSha256})`
+    )
+  }
+  if (
+    helperSha256 !== TRUSTED_DRAFT_REPAIR_STATE_HELPER_SHA256 ||
+    (active.match(new RegExp(TRUSTED_DRAFT_REPAIR_STATE_HELPER_SHA256, 'g'))
+      ?.length ?? 0) !== 2
+  ) {
+    failures.push(
+      'Draft asset repair must pin the reviewed fail-closed state helper in every permission domain'
+    )
+  }
+
+  const jobs = workflowJobKeys(active)
+  const expectedJobs = [
+    'snapshot',
+    'prepare-sign',
+    'commit-resume',
+    'final-verify',
+  ]
+  if (
+    jobs.length !== expectedJobs.length ||
+    jobs.some((job, index) => job !== expectedJobs[index])
+  ) {
+    failures.push(
+      'Draft asset repair jobs must match the reviewed ordered permission-domain allowlist'
+    )
+  }
+  const snapshot = jobBlock(active, 'snapshot')
+  const prepare = jobBlock(active, 'prepare-sign')
+  const commit = jobBlock(active, 'commit-resume')
+  const finalVerify = jobBlock(active, 'final-verify')
+  const namedStep = (block, name) =>
+    workflowStepBlocks(block).find((step) => step.includes(`name: ${name}`)) ??
+    ''
+  const snapshotAuthority = namedStep(
+    snapshot,
+    'Resolve exact one-time repair authority'
+  )
+  const snapshotArtifactMetadata = namedStep(
+    snapshot,
+    'Authenticate old Draft snapshot artifact'
+  )
+  const preparedArtifactMetadata = namedStep(
+    prepare,
+    'Authenticate prepared repair artifact'
+  )
+  const prepareHarnessCheckout = namedStep(
+    prepare,
+    'Checkout protected repair harness'
+  )
+  const snapshotArtifactDownload = namedStep(
+    prepare,
+    'Download exact authenticated old Draft snapshot'
+  )
+  const repairAuthority = namedStep(
+    commit,
+    'Resolve exact prepared repair artifact authority'
+  )
+  const repairDownload = namedStep(
+    commit,
+    'Download exact authenticated repair bundle'
+  )
+  const repairBundlePin = namedStep(
+    commit,
+    'Safely extract and pin the exact repair bundle'
+  )
+  const mutation = namedStep(
+    commit,
+    'Execute fail-closed forward-only repair state machine'
+  )
+  const committedReadback = namedStep(
+    commit,
+    'Read back exact committed Draft without repository code'
+  )
+  const finalArtifactMetadata = namedStep(
+    commit,
+    'Authenticate final Draft readback artifact'
+  )
+  const finalArtifactDownload = namedStep(
+    finalVerify,
+    'Download exact authenticated final Draft readback'
+  )
+  const finalHarnessCheckout = namedStep(
+    finalVerify,
+    'Checkout protected postflight harness'
+  )
+  const finalPostflight = namedStep(
+    finalVerify,
+    'Validate frozen final Draft state and asset bytes'
+  )
+  const finalAcceptance = namedStep(
+    finalVerify,
+    'Run complete updater and release acceptance'
+  )
+  const permissions = topLevelBlock(active, 'permissions')
+  const concurrency = topLevelBlock(active, 'concurrency')
+  if (
+    !/^name:\s*Desktop Release Draft Asset Repair\s*$/m.test(active) ||
+    !active.includes('workflow_dispatch:') ||
+    !active.includes('confirm:') ||
+    /(?:^|\n)\s+(?:push|release):\s*(?:\n|$)/m.test(
+      topLevelBlock(active, 'on') ?? ''
+    )
+  ) {
+    failures.push(
+      'Draft asset repair must be an exact-confirmation manual-only workflow'
+    )
+  }
+  if (
+    !permissions ||
+    normalizedYamlEnvelope(permissions) !==
+      'permissions:\n  actions: read\n  contents: read\n'
+  ) {
+    failures.push(
+      'Draft asset repair top-level permissions must be actions: read and contents: read only'
+    )
+  }
+  if (
+    !concurrency ||
+    !concurrency.includes('group: release-distribution-live-keys') ||
+    !concurrency.includes('cancel-in-progress: false')
+  ) {
+    failures.push(
+      'Draft asset repair must serialize against live release distribution'
+    )
+  }
+
+  const expectedJobPermissions = new Map([
+    [
+      'snapshot',
+      '    permissions:\n      actions: read\n      contents: read\n',
+    ],
+    [
+      'prepare-sign',
+      '    permissions:\n      actions: read\n      contents: read\n',
+    ],
+    [
+      'commit-resume',
+      '    permissions:\n      actions: read\n      contents: write\n',
+    ],
+    [
+      'final-verify',
+      '    permissions:\n      actions: read\n      contents: read\n',
+    ],
+  ])
+  for (const [jobName, expected] of expectedJobPermissions) {
+    const block = jobBlock(active, jobName)
+    const jobPermissions = jobPermissionBlocks(block)
+    if (
+      !block ||
+      (jobName === 'final-verify'
+        ? /^    environment:\s*/m.test(block)
+        : !/^    environment:\s*release-distribution\s*$/m.test(block)) ||
+      jobPermissions.length !== 1 ||
+      normalizedYamlEnvelope(jobPermissions[0]) !== expected
+    ) {
+      failures.push(
+        `Draft asset repair ${jobName} must retain its exact release-distribution permission domain`
+      )
+    }
+  }
+  if (
+    !snapshot?.includes(
+      'current_workflow_sha: ${{ steps.authority.outputs.current_workflow_sha }}'
+    ) ||
+    !prepare?.includes(
+      'prepared_head: ${{ steps.repair-metadata.outputs.prepared_head }}'
+    ) ||
+    !prepare.includes(
+      'repair_run_attempt: ${{ steps.repair-metadata.outputs.run_attempt }}'
+    ) ||
+    !commit?.includes(
+      'current_workflow_sha: ${{ steps.repair-authority.outputs.current_workflow_sha }}'
+    ) ||
+    !commit.includes(
+      'prepared_head: ${{ steps.repair-authority.outputs.prepared_head }}'
+    ) ||
+    !snapshotAuthority.includes(
+      'echo "current_workflow_sha=$WORKFLOW_SHA" >>"$GITHUB_OUTPUT"'
+    ) ||
+    !prepareHarnessCheckout.includes(
+      'ref: ${{ needs.snapshot.outputs.current_workflow_sha }}'
+    ) ||
+    !snapshotArtifactDownload.includes(
+      'EXPECTED_HEAD: ${{ needs.snapshot.outputs.current_workflow_sha }}'
+    ) ||
+    !mutation.includes(
+      'EXPECTED_MAIN: ${{ steps.repair-authority.outputs.current_workflow_sha }}'
+    ) ||
+    !committedReadback.includes(
+      'EXPECTED_MAIN: ${{ steps.repair-authority.outputs.current_workflow_sha }}'
+    ) ||
+    !finalHarnessCheckout.includes(
+      'ref: ${{ needs.commit-resume.outputs.current_workflow_sha }}'
+    ) ||
+    !finalPostflight.includes(
+      'EXPECTED_MAIN: ${{ needs.commit-resume.outputs.current_workflow_sha }}'
+    )
+  ) {
+    failures.push(
+      'Draft asset repair must keep current workflow authority separate from authenticated prepared-head provenance'
+    )
+  }
+
+  const protectedControlSteps = [
+    [
+      snapshotAuthority,
+      '"$WORKFLOW_SHA" \\\n            "$live_main" \\\n            "snapshot-execution-live"',
+    ],
+    [
+      repairAuthority,
+      '"$WORKFLOW_SHA" \\\n            "$live_main" \\\n            "commit-execution-live"',
+    ],
+    [
+      mutation,
+      '"$EXPECTED_MAIN" \\\n              "$live_main" \\\n              "mutation-execution-live"',
+    ],
+    [
+      committedReadback,
+      '"$EXPECTED_MAIN" \\\n            "$live_main" \\\n            "readback-execution-live"',
+    ],
+    [
+      finalPostflight,
+      '"$EXPECTED_MAIN" \\\n            "$live_main" \\\n            "postflight-execution-live"',
+    ],
+  ]
+  const hasProtectedControlProof = (step, invocation) => {
+    const functionStart = step.indexOf('verify_ancestor_and_control_blobs()')
+    const functionEnd =
+      functionStart < 0 ? -1 : step.indexOf('\n          }\n', functionStart)
+    const proof =
+      functionEnd < 0
+        ? ''
+        : step.slice(functionStart, functionEnd + '\n          }\n'.length)
+    return (
+      proof.includes('"repos/$GITHUB_REPOSITORY/compare/$base...$head"') &&
+      (proof.match(/^\s+jq -e \\\s*$/gm)?.length ?? 0) === 1 &&
+      proof.includes(`' "$compare_json" >/dev/null`) &&
+      proof.includes('.base_commit.sha == $base') &&
+      proof.includes('.merge_base_commit.sha == $base') &&
+      proof.includes('.behind_by == 0') &&
+      proof.includes('$base == $head') &&
+      proof.includes('.status == "identical"') &&
+      proof.includes('.ahead_by == 0') &&
+      proof.includes('.total_commits == 0') &&
+      proof.includes('$base != $head') &&
+      proof.includes('.status == "ahead"') &&
+      proof.includes('.ahead_by > 0') &&
+      proof.includes('.total_commits == .ahead_by') &&
+      proof.includes('.commits[-1].sha == $head') &&
+      (proof.match(/for control_key in workflow helper; do/g)?.length ?? 0) ===
+        1 &&
+      proof.includes(
+        'path=".github/workflows/desktop-release-draft-repair.yml"'
+      ) &&
+      proof.includes(
+        'path="scripts/release-distribution/draft-asset-repair-state.mjs"'
+      ) &&
+      proof.includes('"repos/$GITHUB_REPOSITORY/contents/$path?ref=$base"') &&
+      proof.includes('"repos/$GITHUB_REPOSITORY/contents/$path?ref=$head"') &&
+      (proof.match(/select\(\.type == "file" and \.path == \$path\)/g)
+        ?.length ?? 0) === 2 &&
+      (proof.match(/^\s+jq -er \\\s*$/gm)?.length ?? 0) === 2 &&
+      (proof.match(/and test\("\^\[0-9a-f\]\{40\}\$"\)/g)?.length ?? 0) === 2 &&
+      (proof.includes('test "$base_blob" = "$head_blob"') ||
+        (proof.includes('if [ "$base_blob" != "$head_blob" ]; then') &&
+          proof.includes(
+            'echo "Protected control file drifted across $label: $path" >&2'
+          ) &&
+          proof.includes('exit 1'))) &&
+      step.includes(invocation)
+    )
+  }
+  if (
+    protectedControlSteps.some(
+      ([step, invocation]) => !hasProtectedControlProof(step, invocation)
+    )
+  ) {
+    failures.push(
+      'Draft asset repair must revalidate live-main ancestry and exact workflow/helper Git blobs before every authority, mutation, readback, and postflight boundary'
+    )
+  }
+  const enforcedArtifactPredicates = [
+    [snapshotArtifactMetadata, 1],
+    [snapshotArtifactDownload, 1],
+    [preparedArtifactMetadata, 1],
+    [repairAuthority, 3],
+    [repairDownload, 1],
+    [finalArtifactMetadata, 1],
+    [finalArtifactDownload, 1],
+    [repairBundlePin, 1],
+    [committedReadback, 2],
+    [finalPostflight, 2],
+  ]
+  if (
+    enforcedArtifactPredicates.some(
+      ([step, expected]) =>
+        (step.match(/^\s+jq -e(?:\s|$)/gm)?.length ?? 0) !== expected
+    )
+  ) {
+    failures.push(
+      'Draft asset repair must enforce every run, artifact, ancestry, byte-binding, plan, and state jq predicate'
+    )
+  }
+
+  const pinnedCheckout =
+    'actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683'
+  const checkouts = actionStepBlocks(active, `${pinnedCheckout} # v4.2.2`)
+  const allUses = active.match(/^\s*(?:-\s*)?uses:\s*([^\s#]+)/gm) ?? []
+  const approvedPinnedActions =
+    /^\s*(?:-\s*)?uses:\s*(?:actions\/checkout@11bd71901bbe5b1630ceea73d27597364c9af683|actions\/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020|actions\/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02)(?:\s|#|$)/
+  if (
+    checkouts.length !== 4 ||
+    checkouts.some(
+      (step) => !/^\s*persist-credentials:\s*false\s*$/m.test(step)
+    ) ||
+    allUses.length !== 11 ||
+    allUses.some((line) => !approvedPinnedActions.test(line)) ||
+    (commit?.match(/^\s*(?:-\s*)?uses:\s*.+$/gm) ?? []).length !== 2 ||
+    (commit?.match(new RegExp(escapeRegExp(pinnedCheckout), 'g')) ?? [])
+      .length !== 0
+  ) {
+    failures.push(
+      'Draft asset repair actions must be exact SHA-pinned, checkouts read-only, and mutation must not checkout repository code'
+    )
+  }
+  const signingSecretPattern =
+    /\$\{\{\s*secrets\.TAURI_SIGNING_PRIVATE_KEY(?:_PASSWORD)?\s*\}\}/g
+  const signingSecrets = active.match(signingSecretPattern) ?? []
+  if (
+    signingSecrets.length !== 4 ||
+    !prepare ||
+    (prepare.match(signingSecretPattern) ?? []).length !== 4 ||
+    [snapshot, commit, finalVerify].some(
+      (block) => (block?.match(signingSecretPattern) ?? []).length > 0
+    ) ||
+    /\bBIYAN_SIGNING_KEY\b/.test(active) ||
+    /\$\{\{\s*secrets\.(?!TAURI_SIGNING_PRIVATE_KEY(?:_PASSWORD)?\b)/.test(
+      active
+    )
+  ) {
+    failures.push(
+      'Draft asset repair must isolate only the two Tauri signing secrets inside prepare-sign'
+    )
+  }
+  const alwaysConditions = active.match(
+    /^\s*if:\s*\$\{\{\s*always\(\)\s*\}\}\s*$/gm
+  )
+  const allConditions = active.match(/^\s*if:\s*/gm)
+  if (
+    YAML_CONTINUE_ON_ERROR.test(active) ||
+    /\|\|\s*true\b/.test(active) ||
+    (alwaysConditions?.length ?? 0) !== 2 ||
+    (allConditions?.length ?? 0) !== 5 ||
+    !snapshot?.includes(
+      "if: ${{ inputs.prepared_run_id == '' && inputs.prepared_run_attempt == '' }}"
+    ) ||
+    !commit?.includes('always() &&') ||
+    !commit.includes("inputs.prepared_run_id == '' &&") ||
+    !commit.includes("inputs.prepared_run_attempt == '' &&") ||
+    !commit.includes("needs.snapshot.result == 'success' &&") ||
+    !commit.includes("needs.prepare-sign.result == 'success'") ||
+    !commit.includes("inputs.prepared_run_id != '' ||") ||
+    !commit.includes("inputs.prepared_run_attempt != ''") ||
+    !finalVerify?.includes("needs.commit-resume.result == 'success'") ||
+    !finalVerify.includes(
+      "needs.commit-resume.outputs.final_state == 'committed'"
+    )
+  ) {
+    failures.push(
+      'Draft asset repair must keep the exact fail-closed prepare, resume, committed-postflight, and two always-run evidence conditions'
+    )
+  }
+
+  const requiredExactStrings = [
+    'REPAIR_V0643_LINUX_UPDATER_SIGNATURE',
+    '360025177',
+    'v0.6.643',
+    '38e6d9290a8b9b0f152ff2a7eefb550e6ead7df5',
+    '2026-07-27T07:05:00Z',
+    '2026-07-24T11:53:21.000Z',
+    '2026-07-24T11:53:21Z',
+    'Biyan v0.6.643',
+    'github-actions[bot]',
+    'd87e2105473786d9b0277ed05eb466c8cd5e14e28b89c13ffd10b3d3ca801c52',
+    '1f5e60a7ed4107bcb11cf4dc0b7876ec97bad51cb6705678dc1fd15f192d917e',
+    '803568bd4c04ba5f3cd7144b000f0d27ad8f4c63a7af9084a5762b679d047fe3',
+    'Biyan_0.6.643_amd64.AppImage.sig',
+    'candidate.json',
+    'candidate.json.sig',
+    'latest.json',
+    'SHA256SUMS',
+  ]
+  if (requiredExactStrings.some((value) => !active.includes(value))) {
+    failures.push(
+      'Draft asset repair must retain the exact release, source, snapshot, AppImage, and five-file allowlist'
+    )
+  }
+  if (
+    !snapshot?.includes('name: Snapshot exact mutable Draft') ||
+    !snapshot.includes('contents: read') ||
+    !snapshot.includes('releases/360025177') ||
+    !snapshot.includes('releases/assets/$id') ||
+    !snapshot.includes('compression-level: 0') ||
+    !snapshot.includes('.author.login == "github-actions[bot]"') ||
+    !snapshot.includes('and .created_at == "2026-07-24T11:53:21Z"') ||
+    !snapshot.includes(
+      '"d87e2105473786d9b0277ed05eb466c8cd5e14e28b89c13ffd10b3d3ca801c52"'
+    ) ||
+    !snapshot.includes(
+      'name: biyan-v0.6.643-draft-snapshot-360025177-attempt-${{ github.run_attempt }}'
+    ) ||
+    !prepare?.includes('name: Re-sign exact retained Linux AppImage') ||
+    !prepare.includes('rm -f "$signature"') ||
+    !prepare.includes('yarn tauri signer sign') ||
+    !prepare.includes('name: Sign corrected candidate provenance') ||
+    !prepare.includes('node harness/scripts/updater/verify-candidate.mjs') ||
+    !prepare.includes(
+      'node harness/scripts/release-distribution/collect-release-assets.mjs'
+    ) ||
+    !prepare.includes('schema: 2') ||
+    !prepare.includes(
+      'WORKFLOW_SHA: ${{ needs.snapshot.outputs.current_workflow_sha }}'
+    ) ||
+    !prepare.includes('workflowSha: process.env.WORKFLOW_SHA') ||
+    !prepare.includes(
+      'name: biyan-v0.6.643-draft-repair-360025177-attempt-${{ github.run_attempt }}'
+    ) ||
+    /\b(?:make|yarn)\s+build\b/.test(prepare)
+  ) {
+    failures.push(
+      'Draft asset repair must snapshot exact old bytes and only re-sign/rebuild derivative metadata without rebuilding native packages'
+    )
+  }
+  if (
+    !commit?.includes('node "$helper"') ||
+    !commit.includes('env -u GH_TOKEN') ||
+    !commit.includes('rename-old-to-backup|rename-stage-to-canonical') ||
+    !commit.includes('delete-starter-stage|delete-backup)') ||
+    !commit.includes('releases/assets/$asset_id') ||
+    !commit.includes('assets?name=$encoded_name') ||
+    !commit.includes('for iteration in $(seq 0 80)') ||
+    !commit.includes('for read_attempt in $(seq 1 5)') ||
+    !commit.includes('sleep $((read_attempt * 2))') ||
+    !commit.includes('sleep 2') ||
+    !commit.includes('final_state=committed') ||
+    /--clobber\b/.test(commit)
+  ) {
+    failures.push(
+      'Draft asset repair must use the reviewed stage-all, rename, backup, delete, and forward-resume state machine'
+    )
+  }
+  const pinnedUpload =
+    'actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2'
+  const uploadSteps = actionStepBlocks(active, pinnedUpload)
+  const expectedAttemptScopedArtifacts = [
+    'biyan-v0.6.643-draft-snapshot-360025177-attempt-${{ github.run_attempt }}',
+    'biyan-v0.6.643-draft-repair-360025177-attempt-${{ github.run_attempt }}',
+    'biyan-v0.6.643-draft-repair-final-snapshot-attempt-${{ github.run_attempt }}',
+    'biyan-v0.6.643-draft-repair-mutation-evidence-attempt-${{ github.run_attempt }}',
+    'biyan-v0.6.643-draft-repair-postflight-evidence-attempt-${{ github.run_attempt }}',
+  ]
+  if (
+    uploadSteps.length !== expectedAttemptScopedArtifacts.length ||
+    expectedAttemptScopedArtifacts.some(
+      (name) =>
+        uploadSteps.filter((step) => step.includes(`name: ${name}`)).length !==
+        1
+    )
+  ) {
+    failures.push(
+      'Draft asset repair must SHA-pin and run-attempt-scope every immutable snapshot, repair, and evidence artifact'
+    )
+  }
+  if (
+    !snapshotArtifactMetadata.includes(
+      'CURRENT_SHA: ${{ steps.authority.outputs.current_workflow_sha }}'
+    ) ||
+    !snapshotArtifactMetadata.includes(
+      '--arg name "biyan-v0.6.643-draft-snapshot-360025177-attempt-$CURRENT_RUN_ATTEMPT"'
+    ) ||
+    !snapshotArtifactMetadata.includes('.id == $artifact_id') ||
+    !snapshotArtifactMetadata.includes('.name == $name') ||
+    !snapshotArtifactMetadata.includes('.expired == false') ||
+    !snapshotArtifactMetadata.includes('.size_in_bytes > 0') ||
+    !snapshotArtifactMetadata.includes('.digest == $digest') ||
+    !snapshotArtifactMetadata.includes('.workflow_run.id == $run_id') ||
+    !snapshotArtifactMetadata.includes('.workflow_run.head_sha == $head') ||
+    !snapshotArtifactDownload.includes('.id == $artifact_id') ||
+    !snapshotArtifactDownload.includes('.expired == false') ||
+    !snapshotArtifactDownload.includes('.size_in_bytes > 0') ||
+    !snapshotArtifactDownload.includes('.digest == $digest') ||
+    !snapshotArtifactDownload.includes('.workflow_run.id == $run_id') ||
+    !snapshotArtifactDownload.includes('.workflow_run.head_sha == $head') ||
+    !snapshotArtifactDownload.includes(
+      'test "$(stat -c \'%s\' "$archive")" = "$ARTIFACT_SIZE"'
+    ) ||
+    !snapshotArtifactDownload.includes(
+      'test "sha256:$(sha256sum "$archive" | awk \'{ print $1 }\')" ='
+    ) ||
+    !preparedArtifactMetadata.includes(
+      'CURRENT_SHA: ${{ needs.snapshot.outputs.current_workflow_sha }}'
+    ) ||
+    !preparedArtifactMetadata.includes(
+      '--arg name "biyan-v0.6.643-draft-repair-360025177-attempt-$CURRENT_RUN_ATTEMPT"'
+    ) ||
+    !preparedArtifactMetadata.includes('.id == $artifact_id') ||
+    !preparedArtifactMetadata.includes('.name == $name') ||
+    !preparedArtifactMetadata.includes('.expired == false') ||
+    !preparedArtifactMetadata.includes('.size_in_bytes > 0') ||
+    !preparedArtifactMetadata.includes('.digest == $digest') ||
+    !preparedArtifactMetadata.includes('.workflow_run.id == $run_id') ||
+    !preparedArtifactMetadata.includes('.workflow_run.head_sha == $head')
+  ) {
+    failures.push(
+      'Draft asset repair snapshot and prepared artifacts must bind exact current run, attempt, and workflow SHA metadata'
+    )
+  }
+  if (
+    !prepare?.includes(
+      'repair_run_attempt: ${{ steps.repair-metadata.outputs.run_attempt }}'
+    ) ||
+    !prepare.includes(
+      'prepared_head: ${{ steps.repair-metadata.outputs.prepared_head }}'
+    ) ||
+    !prepare.includes('echo "prepared_head=$CURRENT_SHA"') ||
+    !prepare.includes('echo "run_attempt=$CURRENT_RUN_ATTEMPT"') ||
+    !commit?.includes(
+      'CURRENT_PREPARED_HEAD: ${{ needs.prepare-sign.outputs.prepared_head }}'
+    ) ||
+    !commit?.includes(
+      'CURRENT_PREPARED_RUN_ATTEMPT: ${{ needs.prepare-sign.outputs.repair_run_attempt }}'
+    ) ||
+    !commit.includes('prepared_run_id="$CURRENT_RUN_ID"') ||
+    !commit.includes('prepared_run_attempt="$CURRENT_PREPARED_RUN_ATTEMPT"') ||
+    !commit.includes(
+      '[[ ! "$CURRENT_PREPARED_RUN_ATTEMPT" =~ ^[1-9][0-9]*$ ]]'
+    ) ||
+    !commit.includes(
+      '[ "$CURRENT_PREPARED_RUN_ATTEMPT" -gt "$CURRENT_RUN_ATTEMPT" ]'
+    ) ||
+    !commit.includes('[[ ! "$CURRENT_PREPARED_HEAD" =~ ^[0-9a-f]{40}$ ]]') ||
+    !commit.includes('[ "$CURRENT_PREPARED_HEAD" != "$WORKFLOW_SHA" ]') ||
+    !commit.includes('[[ "$INPUT_PREPARED_RUN_ID" =~ ^[1-9][0-9]*$ ]]') ||
+    !commit.includes('[[ "$INPUT_PREPARED_RUN_ATTEMPT" =~ ^[1-9][0-9]*$ ]]') ||
+    !commit.includes('[ "$INPUT_PREPARED_RUN_ID" != "$CURRENT_RUN_ID" ]') ||
+    !commit.includes('test "$prepared_head" = "$CURRENT_PREPARED_HEAD"') ||
+    !commit.includes('test "$prepared_head" = "$WORKFLOW_SHA"') ||
+    !commit.includes(
+      'Prepared run ID and attempt must be an exact external pair'
+    )
+  ) {
+    failures.push(
+      'Draft asset repair must retain the exact successful same-run preparation attempt and require an explicit external run-attempt pair for resume'
+    )
+  }
+  if (
+    !repairAuthority.includes(
+      '"repos/$GITHUB_REPOSITORY/actions/runs/$prepared_run_id"'
+    ) ||
+    !repairAuthority.includes('.id == $run_id') ||
+    !repairAuthority.includes('.repository.full_name == "realerikk0/Mita"') ||
+    !repairAuthority.includes(
+      '.head_repository.full_name == "realerikk0/Mita"'
+    ) ||
+    !repairAuthority.includes('.event == "workflow_dispatch"') ||
+    !repairAuthority.includes('.head_branch == "mita-main"') ||
+    !repairAuthority.includes('and (.head_sha | test("^[0-9a-f]{40}$"))') ||
+    !repairAuthority.includes(
+      '.path ==\n                ".github/workflows/desktop-release-draft-repair.yml"'
+    ) ||
+    !repairAuthority.includes(
+      '.name == "Desktop Release Draft Asset Repair"'
+    ) ||
+    !repairAuthority.includes('.run_attempt >= $attempt') ||
+    !repairAuthority.includes('($current and .status == "in_progress")') ||
+    !repairAuthority.includes(
+      '(($current | not) and .status == "completed")'
+    ) ||
+    !repairAuthority.includes(
+      '\'.head_sha | select(test("^[0-9a-f]{40}$"))\''
+    ) ||
+    !repairAuthority.includes(
+      '"$prepared_head" \\\n              "$WORKFLOW_SHA" \\\n              "prepared-execution"'
+    ) ||
+    !repairAuthority.includes(
+      'artifact_name="biyan-v0.6.643-draft-repair-360025177-attempt-$prepared_run_attempt"'
+    ) ||
+    !repairAuthority.includes('for lookup_attempt in $(seq 1 8)') ||
+    !repairAuthority.includes(
+      '"repos/$GITHUB_REPOSITORY/actions/runs/$prepared_run_id/artifacts?per_page=100"'
+    ) ||
+    !repairAuthority.includes(
+      '[.artifacts[] | select(.name == $name)] | length'
+    ) ||
+    !repairAuthority.includes('if [ "$count" = 1 ]; then') ||
+    !repairAuthority.includes('.workflow_run.id == $run_id') ||
+    !repairAuthority.includes('.workflow_run.head_sha == $head') ||
+    !repairAuthority.includes(
+      'and (.digest | test("^sha256:[0-9a-f]{64}$"))'
+    ) ||
+    !repairAuthority.includes('echo "current_workflow_sha=$WORKFLOW_SHA"') ||
+    !repairAuthority.includes('echo "prepared_head=$prepared_head"') ||
+    !repairAuthority.includes('echo "prepared_run_id=$prepared_run_id"') ||
+    !repairAuthority.includes(
+      'echo "prepared_run_attempt=$prepared_run_attempt"'
+    ) ||
+    !repairDownload.includes(
+      'EXPECTED_HEAD: ${{ steps.repair-authority.outputs.prepared_head }}'
+    ) ||
+    !repairDownload.includes(
+      'EXPECTED_RUN: ${{ steps.repair-authority.outputs.prepared_run_id }}'
+    ) ||
+    !repairDownload.includes('.id == $artifact_id') ||
+    !repairDownload.includes('.name == $name') ||
+    !repairDownload.includes('.expired == false') ||
+    !repairDownload.includes('.size_in_bytes > 0') ||
+    !repairDownload.includes('.digest == $digest') ||
+    !repairDownload.includes('.workflow_run.id == $run_id') ||
+    !repairDownload.includes('.workflow_run.head_sha == $head') ||
+    !repairDownload.includes(
+      'test "$(stat -c \'%s\' "$archive")" = "$ARTIFACT_SIZE"'
+    ) ||
+    !repairDownload.includes(
+      'test "sha256:$(sha256sum "$archive" | awk \'{ print $1 }\')" ='
+    )
+  ) {
+    failures.push(
+      'Draft asset repair cross-run resume must authenticate exact run-attempt provenance, prepared-head ancestry, unique artifact identity, and archive bytes'
+    )
+  }
+  if (
+    !repairBundlePin.includes(
+      '--arg head "${{ steps.repair-authority.outputs.prepared_head }}"'
+    ) ||
+    !repairBundlePin.includes('.schema == 2') ||
+    !repairBundlePin.includes('.workflowSha == $head') ||
+    !repairBundlePin.includes(
+      "' dist/repair-bundle/repair-plan.json >/dev/null"
+    ) ||
+    !hasCommandSequence(committedReadback, [
+      'cp \\',
+      'dist/repair-bundle/repair-plan.json \\',
+      'dist/final-snapshot/metadata/repair-plan.json',
+    ]) ||
+    !finalPostflight.includes(
+      '--arg head "${{ needs.commit-resume.outputs.prepared_head }}"'
+    ) ||
+    !finalPostflight.includes('.schema == 2') ||
+    !finalPostflight.includes('.workflowSha == $head') ||
+    !hasCommandSequence(finalPostflight, [
+      'node harness/scripts/release-distribution/draft-asset-repair-state.mjs \\',
+      '--plan dist/final/metadata/repair-plan.json \\',
+      '--release dist/final/metadata/final-release.json \\',
+      '--output dist/final/reclassified-state.json \\',
+      '>/dev/null',
+      'cmp \\',
+      'dist/final/metadata/final-state.json \\',
+      'dist/final/reclassified-state.json',
+    ])
+  ) {
+    failures.push(
+      'Draft asset repair plan and final state must remain bound to the authenticated prepared head'
+    )
+  }
+  if (
+    !commit?.includes(
+      'final_artifact_id: ${{ steps.final-upload.outputs.artifact-id }}'
+    ) ||
+    !commit.includes(
+      'final_artifact_digest: ${{ steps.final-metadata.outputs.artifact_digest }}'
+    ) ||
+    !commit.includes(
+      'final_artifact_name: ${{ steps.final-metadata.outputs.artifact_name }}'
+    ) ||
+    !commit.includes(
+      'final_artifact_size: ${{ steps.final-metadata.outputs.artifact_size }}'
+    ) ||
+    !commit.includes('dist/final-snapshot/metadata/final-release.json') ||
+    !commit.includes('dist/final-snapshot/metadata/final-state.json') ||
+    !commit.includes(
+      'find dist/final-snapshot/assets -maxdepth 1 -type f | wc -l'
+    ) ||
+    !commit.includes(')" -eq 13') ||
+    !commit.includes(
+      'name: biyan-v0.6.643-draft-repair-final-snapshot-attempt-${{ github.run_attempt }}'
+    ) ||
+    !finalArtifactMetadata.includes(
+      'ACTION_ARTIFACT_DIGEST: ${{ steps.final-upload.outputs.artifact-digest }}'
+    ) ||
+    !finalArtifactMetadata.includes(
+      'CURRENT_SHA: ${{ steps.repair-authority.outputs.current_workflow_sha }}'
+    ) ||
+    !finalArtifactMetadata.includes(
+      '--arg name "biyan-v0.6.643-draft-repair-final-snapshot-attempt-$CURRENT_RUN_ATTEMPT"'
+    ) ||
+    !finalArtifactMetadata.includes('.id == $artifact_id') ||
+    !finalArtifactMetadata.includes('.name == $name') ||
+    !finalArtifactMetadata.includes('.expired == false') ||
+    !finalArtifactMetadata.includes('.size_in_bytes > 0') ||
+    !finalArtifactMetadata.includes('.digest == $digest') ||
+    !finalArtifactMetadata.includes('.workflow_run.id == $run_id') ||
+    !finalArtifactMetadata.includes('.workflow_run.head_sha == $head')
+  ) {
+    failures.push(
+      'Draft asset repair mutation domain must byte-bind all 13 committed assets into an authenticated immutable final snapshot'
+    )
+  }
+  if (
+    !finalArtifactDownload.includes(
+      'EXPECTED_HEAD: ${{ needs.commit-resume.outputs.current_workflow_sha }}'
+    ) ||
+    !finalArtifactDownload.includes('EXPECTED_RUN: ${{ github.run_id }}') ||
+    !finalArtifactDownload.includes('.id == $artifact_id') ||
+    !finalArtifactDownload.includes('.name == $name') ||
+    !finalArtifactDownload.includes('.expired == false') ||
+    !finalArtifactDownload.includes('.size_in_bytes > 0') ||
+    !finalArtifactDownload.includes('.digest == $digest') ||
+    !finalArtifactDownload.includes('.workflow_run.id == $run_id') ||
+    !finalArtifactDownload.includes('.workflow_run.head_sha == $head') ||
+    !finalArtifactDownload.includes(
+      'test "$(stat -c \'%s\' "$archive")" = "$ARTIFACT_SIZE"'
+    ) ||
+    !finalArtifactDownload.includes(
+      'test "sha256:$(sha256sum "$archive" | awk \'{ print $1 }\')" ='
+    ) ||
+    !finalAcceptance.includes(
+      'node harness/scripts/updater/verify-candidate.mjs'
+    ) ||
+    !finalAcceptance.includes('sha256sum --check SHA256SUMS') ||
+    !finalAcceptance.includes(
+      'node harness/scripts/release-distribution/collect-release-assets.mjs'
+    ) ||
+    !finalAcceptance.includes('printf \'%s\\n\' "verified-draft-only"')
+  ) {
+    failures.push(
+      'Draft asset repair final verifier must authenticate the immutable current-run snapshot and run complete signatures, checksum, and release acceptance'
+    )
+  }
+  if (
+    !finalVerify?.includes(
+      'name: Verify exact repaired Draft from read-only snapshot'
+    ) ||
+    !jobNeeds(finalVerify, 'commit-resume') ||
+    !finalVerify.includes('state == "committed"') ||
+    !finalVerify.includes(
+      'ARTIFACT_DIGEST: ${{ needs.commit-resume.outputs.final_artifact_digest }}'
+    ) ||
+    !finalVerify.includes(
+      'ARTIFACT_ID: ${{ needs.commit-resume.outputs.final_artifact_id }}'
+    ) ||
+    !finalVerify.includes(
+      'ARTIFACT_NAME: ${{ needs.commit-resume.outputs.final_artifact_name }}'
+    ) ||
+    !finalVerify.includes(
+      'ARTIFACT_SIZE: ${{ needs.commit-resume.outputs.final_artifact_size }}'
+    ) ||
+    !finalVerify.includes(
+      'EXPECTED_HEAD: ${{ needs.commit-resume.outputs.current_workflow_sha }}'
+    ) ||
+    !finalVerify.includes('EXPECTED_RUN: ${{ github.run_id }}') ||
+    !finalVerify.includes(
+      '[[ "$ARTIFACT_NAME" =~ ^biyan-v0\\.6\\.643-draft-repair-final-snapshot-attempt-[1-9][0-9]*$ ]]'
+    ) ||
+    !finalVerify.includes('.id == $artifact_id') ||
+    !finalVerify.includes('.name == $name') ||
+    !finalVerify.includes('.size_in_bytes > 0') ||
+    !finalVerify.includes('.digest == $digest') ||
+    !finalVerify.includes('.workflow_run.id == $run_id') ||
+    !finalVerify.includes('.workflow_run.head_sha == $head') ||
+    !finalVerify.includes(
+      'test "$(stat -c \'%s\' "$archive")" = "$ARTIFACT_SIZE"'
+    ) ||
+    !finalVerify.includes(
+      'test "sha256:$(sha256sum "$archive" | awk \'{ print $1 }\')" ='
+    ) ||
+    !finalVerify.includes(
+      'if found != expected:\n              raise ValueError("final snapshot inventory is incomplete")'
+    ) ||
+    !finalVerify.includes(
+      'node harness/scripts/updater/verify-candidate.mjs'
+    ) ||
+    !finalVerify.includes('sha256sum --check SHA256SUMS') ||
+    !finalVerify.includes(
+      'node harness/scripts/release-distribution/collect-release-assets.mjs'
+    ) ||
+    !finalVerify.includes('verified-draft-only') ||
+    finalVerify.includes(
+      'gh api "repos/$GITHUB_REPOSITORY/releases/360025177"'
+    ) ||
+    finalVerify.includes('"repos/$GITHUB_REPOSITORY/releases/assets/$id"')
+  ) {
+    failures.push(
+      'Draft asset repair must finish with complete byte, signature, checksum, provenance, and still-Draft verification'
+    )
+  }
+  if (
+    /\bgh\s+release\b/.test(active) ||
+    /\bdraft\s*=\s*false\b/.test(active) ||
+    /\b(?:ossutil|wrangler|feishu|promote-desktop-update|deploy-updater-router)\b/i.test(
+      active
+    ) ||
+    /\b(?:git\s+push|gh\s+api[^\n]*\/git\/refs)\b/.test(active)
+  ) {
+    failures.push(
+      'Draft asset repair must not publish, retag, distribute, notify, promote, or mutate updater storage'
+    )
+  }
+
+  return failures
+}
+
 export function validateReleaseEnvironmentWorkflows(workflows) {
   const failures = []
   for (const [workflow, { jobName, jobNames, source }] of Object.entries(
@@ -2247,10 +3203,7 @@ export function validateBiyanDownloadAliasBootstrapWorkflow(source) {
   const workflowEnvelopeSha256 = createHash('sha256')
     .update(normalizedYamlEnvelope(source))
     .digest('hex')
-  if (
-    workflowEnvelopeSha256 !==
-    TRUSTED_RELEASE_DISTRIBUTION_WORKFLOW_SHA256
-  ) {
+  if (workflowEnvelopeSha256 !== TRUSTED_RELEASE_DISTRIBUTION_WORKFLOW_SHA256) {
     failures.push(
       `release distribution must match the reviewed whole-workflow execution envelope (got ${workflowEnvelopeSha256})`
     )
@@ -2264,8 +3217,7 @@ export function validateBiyanDownloadAliasBootstrapWorkflow(source) {
 
   if (
     topLevelPermissionsCount !== 1 ||
-    normalizedYamlEnvelope(permissions) !==
-      'permissions:\n  contents: read\n'
+    normalizedYamlEnvelope(permissions) !== 'permissions:\n  contents: read\n'
   ) {
     failures.push(
       'release distribution top-level permissions must be exactly contents: read'
@@ -2366,9 +3318,7 @@ export function validateBiyanDownloadAliasBootstrapWorkflow(source) {
   if (
     requestSteps.length !== 1 ||
     !requestSteps[0].includes('WORKFLOW_SHA: ${{ github.sha }}') ||
-    !requestSteps[0].includes(
-      '[[ ! "$WORKFLOW_SHA" =~ ^[0-9a-f]{40}$ ]]'
-    ) ||
+    !requestSteps[0].includes('[[ ! "$WORKFLOW_SHA" =~ ^[0-9a-f]{40}$ ]]') ||
     !requestSteps[0].includes('echo "workflow_sha=$WORKFLOW_SHA"')
   ) {
     failures.push(
@@ -2462,9 +3412,7 @@ export function validateBiyanDownloadAliasBootstrapWorkflow(source) {
     !/- name: Require bootstrap evidence\n\s+if:\s*always\(\)/.test(
       bootstrap
     ) ||
-    !/- name: Upload bootstrap evidence\n\s+if:\s*always\(\)/.test(
-      bootstrap
-    ) ||
+    !/- name: Upload bootstrap evidence\n\s+if:\s*always\(\)/.test(bootstrap) ||
     !bootstrap.includes('if-no-files-found: error') ||
     !bootstrap.includes('dist/biyan-download-alias-bootstrap/**')
   ) {
@@ -2479,9 +3427,7 @@ export function validateBiyanDownloadAliasBootstrapWorkflow(source) {
     /\b(?:mita\/latest\.json|biyan\/updater\/|promote-desktop-update|deploy-updater-router)\b/.test(
       bootstrap
     ) ||
-    /\$\{\{\s*(?:github\.token|secrets\.GITHUB_TOKEN)\s*\}\}/.test(
-      bootstrap
-    ) ||
+    /\$\{\{\s*(?:github\.token|secrets\.GITHUB_TOKEN)\s*\}\}/.test(bootstrap) ||
     /\b(?:GH_TOKEN|GITHUB_TOKEN)\s*:/.test(bootstrap) ||
     /\bgh\s+(?:api|release)\b/.test(bootstrap) ||
     /\bapi\.github\.com\b/.test(bootstrap) ||
@@ -2515,7 +3461,9 @@ export function validateCiWorkflow(source) {
       (key) => key === null || !allowedTopLevelKeys.has(key)
     ) ||
     [...allowedTopLevelKeys].some(
-      (key) => canonicalTopLevelKeys.filter((candidate) => candidate === key).length !== 1
+      (key) =>
+        canonicalTopLevelKeys.filter((candidate) => candidate === key)
+          .length !== 1
     )
   ) {
     failures.push(
@@ -2535,7 +3483,9 @@ export function validateCiWorkflow(source) {
       ),
     ].length
   if (topLevelKeyCount('permissions') !== 1) {
-    failures.push('Biyan CI must define exactly one top-level permissions block')
+    failures.push(
+      'Biyan CI must define exactly one top-level permissions block'
+    )
   }
   if (topLevelKeyCount('jobs') !== 1) {
     failures.push('Biyan CI must define exactly one top-level jobs block')
@@ -2549,19 +3499,13 @@ export function validateCiWorkflow(source) {
     (line) => /^  ([A-Za-z0-9_-]+):\s*(?:#.*)?$/.exec(line)?.[1] ?? null
   )
   if (canonicalJobKeys.some((key) => key === null)) {
-    failures.push(
-      'Biyan CI jobs must use canonical unquoted job keys'
-    )
+    failures.push('Biyan CI jobs must use canonical unquoted job keys')
   }
   if (
     canonicalJobKeys.length !== TRUSTED_CI_JOB_KEY_ALLOWLIST.size ||
-    canonicalJobKeys.some(
-      (key) => !TRUSTED_CI_JOB_KEY_ALLOWLIST.has(key)
-    )
+    canonicalJobKeys.some((key) => !TRUSTED_CI_JOB_KEY_ALLOWLIST.has(key))
   ) {
-    failures.push(
-      'Biyan CI jobs must match the reviewed job-key allowlist'
-    )
+    failures.push('Biyan CI jobs must match the reviewed job-key allowlist')
   }
   const jobsLines = jobsBlock?.replace(/\r\n?/g, '\n').split('\n') ?? []
   const noncanonicalJobField = jobsLines.find(
@@ -2587,9 +3531,7 @@ export function validateCiWorkflow(source) {
       normalizedYamlEnvelope(block.join('\n')) !==
       '    permissions:\n      contents: read\n'
     ) {
-      failures.push(
-        'Biyan CI job permissions must be exactly contents: read'
-      )
+      failures.push('Biyan CI job permissions must be exactly contents: read')
     }
   }
   for (const inheritedControl of ['env', 'defaults']) {
@@ -2600,8 +3542,7 @@ export function validateCiWorkflow(source) {
     }
   }
   if (
-    normalizedYamlEnvelope(permissions) !==
-    'permissions:\n  contents: read\n'
+    normalizedYamlEnvelope(permissions) !== 'permissions:\n  contents: read\n'
   ) {
     failures.push('Biyan CI top-level permissions must be contents: read only')
   }
@@ -2618,9 +3559,7 @@ export function validateCiWorkflow(source) {
   }
   const ciScope = jobBlock(source, 'ci-scope')
   const ciScopeDefinitions = [
-    ...normalizedSource.matchAll(
-      /^  (?:ci-scope|["']ci-scope["'])\s*:/gm
-    ),
+    ...normalizedSource.matchAll(/^  (?:ci-scope|["']ci-scope["'])\s*:/gm),
   ].length
   if (ciScopeDefinitions !== 1) {
     failures.push('Biyan CI must define exactly one ci-scope job')
@@ -2848,7 +3787,9 @@ export function validateCiWorkflow(source) {
         `["']${axis}=\\$${variable}["']`
       ).test(validationText)
       if (!mapsOutput || !validatesBoolean) {
-        failures.push(`Biyan CI scope must validate ${axis} as a boolean output`)
+        failures.push(
+          `Biyan CI scope must validate ${axis} as a boolean output`
+        )
       }
     }
     for (const axis of ['build_macos', 'build_windows', 'build_linux']) {
@@ -2868,11 +3809,11 @@ export function validateCiWorkflow(source) {
       !/^\s+BLOCKED:\s*\$\{\{\s*steps\.scope\.outputs\.blocked\s*\}\}\s*$/m.test(
         ciScope
       ) ||
-      !/\[\s*["']?\$BLOCKED["']?\s*!=\s*["']false["']\s*\]/.test(
-        validationText
-      )
+      !/\[\s*["']?\$BLOCKED["']?\s*!=\s*["']false["']\s*\]/.test(validationText)
     ) {
-      failures.push('Biyan CI scope must reject missing or blocked classifier output')
+      failures.push(
+        'Biyan CI scope must reject missing or blocked classifier output'
+      )
     }
     if (
       !/^\s+PLAN_SHA256:\s*\$\{\{\s*steps\.scope\.outputs\.plan_sha256\s*\}\}\s*$/m.test(
@@ -2953,11 +3894,9 @@ export function validateCiWorkflow(source) {
           /--write-keys\s+"\$signer_probe\/test\.key"/,
         ]
       ) ||
-      !hasRunInvocation(
-        signerSmoke,
-        /^yarn\s+tauri\s+signer\s+sign(?:\s|$)/,
-        [/"\$signer_probe\/payload\.txt"/]
-      ) ||
+      !hasRunInvocation(signerSmoke, /^yarn\s+tauri\s+signer\s+sign(?:\s|$)/, [
+        /"\$signer_probe\/payload\.txt"/,
+      ]) ||
       !hasRunInvocation(
         signerSmoke,
         /^test\s+-s\s+"\$signer_probe\/payload\.txt\.sig"$/
@@ -3017,9 +3956,7 @@ export function validateCiWorkflow(source) {
   if (windowsPr) {
     const windowsPrSteps = workflowStepBlocks(windowsPr)
     const buildStep = windowsPrSteps.find((step) =>
-      /^\s*-\s+name:\s*Build focused unsigned Windows candidate\s*$/m.test(
-        step
-      )
+      /^\s*-\s+name:\s*Build focused unsigned Windows candidate\s*$/m.test(step)
     )
     const verifyStep = windowsPrSteps.find((step) =>
       /^\s*-\s+name:\s*Verify focused unsigned Windows candidate\s*$/m.test(
@@ -3138,7 +4075,9 @@ export function validateCiControlOwnership(source) {
     const owners = ownersByPattern.get(pattern) ?? []
     for (const owner of ['@realerikk0', '@twokar']) {
       if (!owners.includes(owner)) {
-        failures.push(`CI control path ${pattern} must require review from ${owner}`)
+        failures.push(
+          `CI control path ${pattern} must require review from ${owner}`
+        )
       }
     }
   }
@@ -3150,7 +4089,10 @@ export function validateWindowsCandidateVerifier(source) {
   const failures = []
   for (const [pattern, message] of [
     [/ReadUInt16\(\)[\s\S]*0x5A4D/, 'must validate the DOS PE signature'],
-    [/ReadUInt32\(\)[\s\S]*0x00004550/, 'must validate the PE header signature'],
+    [
+      /ReadUInt32\(\)[\s\S]*0x00004550/,
+      'must validate the PE header signature',
+    ],
     [/0x8664/, 'must require an AMD64 application payload'],
     [/Get-Command\s+7z/, 'must extract and inspect the NSIS payload'],
     [/["']Biyan\.exe["']/, 'must locate the packaged Biyan executable'],
@@ -3244,12 +4186,21 @@ export function validateMacOSCandidateVerifier(source) {
   const active = uncommentedSource(source)
   const failures = []
   for (const [pattern, message] of [
-    [/runCommand\(["']hdiutil["'],\s*\[["']verify["']/, 'must verify the DMG container'],
-    [/["']attach["'][\s\S]*["']-readonly["'][\s\S]*["']-mountpoint["']/, 'must mount the DMG read-only'],
+    [
+      /runCommand\(["']hdiutil["'],\s*\[["']verify["']/,
+      'must verify the DMG container',
+    ],
+    [
+      /["']attach["'][\s\S]*["']-readonly["'][\s\S]*["']-mountpoint["']/,
+      'must mount the DMG read-only',
+    ],
     [/bundleSnapshot\(appPath\)/, 'must snapshot the accepted app'],
     [/bundleSnapshot\(mountedApp\)/, 'must snapshot the DMG app'],
     [/sha256File\(/, 'must hash bundle files'],
-    [/sourceSnapshot[\s\S]*mountedSnapshot/, 'must compare source and DMG app snapshots'],
+    [
+      /sourceSnapshot[\s\S]*mountedSnapshot/,
+      'must compare source and DMG app snapshots',
+    ],
     [/runCommand\(["']hdiutil["'],\s*\[["']detach["']/, 'must detach the DMG'],
   ]) {
     if (!pattern.test(active)) {
@@ -3559,9 +4510,7 @@ export function validateQualificationWorkflow(source) {
       recoveryAuth,
       'actions/github-script@v7'
     )[0]
-    const metadataSource = metadataStep
-      ? uncommentedSource(metadataStep)
-      : ''
+    const metadataSource = metadataStep ? uncommentedSource(metadataStep) : ''
     const sameRepositoryOwnerCount =
       metadataSource.match(/\bowner:\s*context\.repo\.owner\b/g)?.length ?? 0
     const sameRepositoryRepoCount =
@@ -3606,9 +4555,7 @@ export function validateQualificationWorkflow(source) {
       )
     }
     if (
-      !/\.sourceHeadSha[\s\S]*\^\[0-9a-f\]\{40\}\$/.test(
-        activeRecoveryAuth
-      ) ||
+      !/\.sourceHeadSha[\s\S]*\^\[0-9a-f\]\{40\}\$/.test(activeRecoveryAuth) ||
       !hasRunInvocation(
         recoveryAuth,
         /^git\s+-C\s+harness\s+cat-file\s+-e\s+["']?\$\{source_head_sha\}\^\{commit\}["']?$/
@@ -3692,7 +4639,9 @@ export function validateQualificationWorkflow(source) {
         ) && /^\s*path:\s*harness\s*$/m.test(step)
     )
     if (!protectedCheckout) {
-      failures.push(`${jobName} must checkout the protected qualification harness`)
+      failures.push(
+        `${jobName} must checkout the protected qualification harness`
+      )
     }
   }
   if (linux) {
@@ -3707,14 +4656,14 @@ export function validateQualificationWorkflow(source) {
         !/^\s*(?:-\s*)?if:\s*/m.test(step) &&
         !/^\s*(?:-\s*)?continue-on-error:\s*/m.test(step) &&
         [
-        /tool-cache:\s*false/,
-        /android:\s*true/,
-        /dotnet:\s*true/,
-        /haskell:\s*true/,
-        /large-packages:\s*true/,
-        /docker-images:\s*true/,
-        /swap-storage:\s*true/,
-      ].every((pattern) => pattern.test(step))
+          /tool-cache:\s*false/,
+          /android:\s*true/,
+          /dotnet:\s*true/,
+          /haskell:\s*true/,
+          /large-packages:\s*true/,
+          /docker-images:\s*true/,
+          /swap-storage:\s*true/,
+        ].every((pattern) => pattern.test(step))
     )
     if (!freeDiskAction) {
       failures.push(
@@ -3791,9 +4740,7 @@ export function validateQualificationWorkflow(source) {
     ['native-windows', windows],
   ]) {
     if (block && LEGACY_BROAD_CANDIDATE_VERIFIER.test(block)) {
-      failures.push(
-        `${jobName} must not use a broad retired-runtime verifier`
-      )
+      failures.push(`${jobName} must not use a broad retired-runtime verifier`)
     }
   }
   if (

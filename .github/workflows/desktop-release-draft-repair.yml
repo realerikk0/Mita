@@ -1,0 +1,2061 @@
+name: Desktop Release Draft Asset Repair
+
+on:
+  workflow_dispatch:
+    inputs:
+      confirm:
+        description: 'Type REPAIR_V0643_LINUX_UPDATER_SIGNATURE'
+        required: true
+        type: string
+      prepared_run_id:
+        description: 'Optional original preparation run ID for cross-run resume'
+        required: false
+        type: string
+      prepared_run_attempt:
+        description: 'Optional original preparation run attempt for cross-run resume'
+        required: false
+        type: string
+
+permissions:
+  actions: read
+  contents: read
+
+concurrency:
+  group: release-distribution-live-keys
+  cancel-in-progress: false
+
+env:
+  NODE_OPTIONS: '--max-old-space-size=4196'
+  YARN_ENABLE_IMMUTABLE_INSTALLS: 'true'
+
+jobs:
+  snapshot:
+    name: Snapshot exact mutable Draft
+    if: ${{ inputs.prepared_run_id == '' && inputs.prepared_run_attempt == '' }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    environment: release-distribution
+    permissions:
+      actions: read
+      contents: read
+    outputs:
+      current_workflow_sha: ${{ steps.authority.outputs.current_workflow_sha }}
+      snapshot_artifact_id: ${{ steps.snapshot-upload.outputs.artifact-id }}
+      snapshot_artifact_digest: ${{ steps.snapshot-metadata.outputs.artifact_digest }}
+      snapshot_artifact_size: ${{ steps.snapshot-metadata.outputs.artifact_size }}
+    steps:
+      - name: Resolve exact one-time repair authority
+        id: authority
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          INPUT_CONFIRM: ${{ inputs.confirm }}
+          WORKFLOW_REF: ${{ github.ref }}
+          WORKFLOW_SHA: ${{ github.sha }}
+        run: |
+          set -euo pipefail
+          if [ "$INPUT_CONFIRM" != "REPAIR_V0643_LINUX_UPDATER_SIGNATURE" ]; then
+            echo "Exact repair confirmation is required" >&2
+            exit 1
+          fi
+          if [ "$WORKFLOW_REF" != "refs/heads/mita-main" ]; then
+            echo "Draft repair must run from protected mita-main" >&2
+            exit 1
+          fi
+          if [[ ! "$WORKFLOW_SHA" =~ ^[0-9a-f]{40}$ ]]; then
+            echo "Workflow SHA must be an exact commit" >&2
+            exit 1
+          fi
+
+          verify_ancestor_and_control_blobs() {
+            local base="$1"
+            local head="$2"
+            local label="$3"
+            local base_blob
+            local base_json
+            local compare_json
+            local control_key
+            local head_blob
+            local head_json
+            local path
+
+            compare_json="$RUNNER_TEMP/$label-compare.json"
+            gh api \
+              "repos/$GITHUB_REPOSITORY/compare/$base...$head" \
+              >"$compare_json"
+            jq -e \
+              --arg base "$base" \
+              --arg head "$head" '
+                .base_commit.sha == $base
+                and .merge_base_commit.sha == $base
+                and .behind_by == 0
+                and (
+                  (
+                    $base == $head
+                    and .status == "identical"
+                    and .ahead_by == 0
+                    and .total_commits == 0
+                  )
+                  or
+                  (
+                    $base != $head
+                    and .status == "ahead"
+                    and .ahead_by > 0
+                    and .total_commits == .ahead_by
+                    and .commits[-1].sha == $head
+                  )
+                )
+              ' "$compare_json" >/dev/null
+
+            for control_key in workflow helper; do
+              case "$control_key" in
+                workflow)
+                  path=".github/workflows/desktop-release-draft-repair.yml"
+                  ;;
+                helper)
+                  path="scripts/release-distribution/draft-asset-repair-state.mjs"
+                  ;;
+              esac
+              base_json="$RUNNER_TEMP/$label-$control_key-base.json"
+              head_json="$RUNNER_TEMP/$label-$control_key-head.json"
+              gh api \
+                "repos/$GITHUB_REPOSITORY/contents/$path?ref=$base" \
+                >"$base_json"
+              gh api \
+                "repos/$GITHUB_REPOSITORY/contents/$path?ref=$head" \
+                >"$head_json"
+              base_blob="$(
+                jq -er \
+                  --arg path "$path" '
+                    select(.type == "file" and .path == $path)
+                    | .sha
+                    | select(
+                        type == "string"
+                        and test("^[0-9a-f]{40}$")
+                      )
+                  ' "$base_json"
+              )"
+              head_blob="$(
+                jq -er \
+                  --arg path "$path" '
+                    select(.type == "file" and .path == $path)
+                    | .sha
+                    | select(
+                        type == "string"
+                        and test("^[0-9a-f]{40}$")
+                      )
+                  ' "$head_json"
+              )"
+              if [ "$base_blob" != "$head_blob" ]; then
+                echo "Protected control file drifted across $label: $path" >&2
+                exit 1
+              fi
+            done
+          }
+
+          live_main="$(
+            gh api "repos/$GITHUB_REPOSITORY/branches/mita-main" \
+              --jq '.commit.sha'
+          )"
+          live_tag="$(
+            gh api "repos/$GITHUB_REPOSITORY/commits/v0.6.643" \
+              --jq '.sha'
+          )"
+          [[ "$live_main" =~ ^[0-9a-f]{40}$ ]]
+          verify_ancestor_and_control_blobs \
+            "$WORKFLOW_SHA" \
+            "$live_main" \
+            "snapshot-execution-live"
+          if [ "$live_tag" != "38e6d9290a8b9b0f152ff2a7eefb550e6ead7df5" ]; then
+            echo "v0.6.643 no longer resolves to accepted A13" >&2
+            exit 1
+          fi
+          gh api \
+            "repos/$GITHUB_REPOSITORY/compare/$live_tag...$live_main" \
+            >"$RUNNER_TEMP/source-main-compare.json"
+          jq -e \
+            --arg base "$live_tag" \
+            --arg head "$live_main" '
+              .base_commit.sha == $base
+              and .merge_base_commit.sha == $base
+              and .status == "ahead"
+              and .ahead_by > 0
+              and .behind_by == 0
+              and .total_commits == .ahead_by
+              and .commits[-1].sha == $head
+            ' "$RUNNER_TEMP/source-main-compare.json" >/dev/null
+          echo "current_workflow_sha=$WORKFLOW_SHA" >>"$GITHUB_OUTPUT"
+
+      - name: Read and pin the exact old Draft inventory
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          install -d -m 700 \
+            dist/draft-snapshot/assets \
+            dist/draft-snapshot/metadata
+          gh api "repos/$GITHUB_REPOSITORY/releases/360025177" \
+            >dist/draft-snapshot/metadata/release.json
+          jq -e '
+            .id == 360025177
+            and .name == "Biyan v0.6.643"
+            and .created_at == "2026-07-24T11:53:21Z"
+            and .author.id == 41898282
+            and .author.login == "github-actions[bot]"
+            and .author.type == "Bot"
+            and .tag_name == "v0.6.643"
+            and .target_commitish ==
+              "38e6d9290a8b9b0f152ff2a7eefb550e6ead7df5"
+            and .draft == true
+            and .prerelease == false
+            and .published_at == "2026-07-27T07:05:00Z"
+            and .immutable == false
+            and (.assets | length) == 13
+            and all(.assets[];
+              .state == "uploaded"
+              and .size > 0
+              and .content_type == "application/octet-stream"
+              and (.digest | test("^sha256:[0-9a-f]{64}$")))
+          ' dist/draft-snapshot/metadata/release.json >/dev/null
+          body_sha="$(
+            jq -j '.body' dist/draft-snapshot/metadata/release.json \
+              | sha256sum \
+              | awk '{ print $1 }'
+          )"
+          test "$body_sha" = \
+            "d87e2105473786d9b0277ed05eb466c8cd5e14e28b89c13ffd10b3d3ca801c52"
+          snapshot="$(
+            jq -cS \
+              '[.assets[] |
+                {id,name,size,digest,state,content_type}] |
+                sort_by(.id)' \
+              dist/draft-snapshot/metadata/release.json
+          )"
+          snapshot_sha="$(printf '%s\n' "$snapshot" | sha256sum | awk '{ print $1 }')"
+          if [ "$snapshot_sha" != "1f5e60a7ed4107bcb11cf4dc0b7876ec97bad51cb6705678dc1fd15f192d917e" ]; then
+            echo "Draft asset inventory no longer matches the accepted snapshot" >&2
+            exit 1
+          fi
+          printf '%s\n' "$snapshot" \
+            >dist/draft-snapshot/metadata/old-assets.json
+          printf '%s\n' "$snapshot_sha" \
+            >dist/draft-snapshot/metadata/snapshot-sha256.txt
+
+      - name: Download and hash every old Draft asset by exact ID
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          while IFS=$'\t' read -r id name size digest; do
+            if [[ ! "$id" =~ ^[1-9][0-9]*$ ]] ||
+               [[ ! "$size" =~ ^[1-9][0-9]*$ ]] ||
+               [[ ! "$digest" =~ ^sha256:[0-9a-f]{64}$ ]] ||
+               [[ "$name" == */* ]] ||
+               [[ "$name" == *\\* ]]; then
+              echo "Unsafe accepted Draft asset metadata" >&2
+              exit 1
+            fi
+            file="dist/draft-snapshot/assets/$name"
+            gh api \
+              -H "Accept: application/octet-stream" \
+              "repos/$GITHUB_REPOSITORY/releases/assets/$id" \
+              >"$file"
+            actual_size="$(stat -c '%s' "$file")"
+            actual_digest="sha256:$(sha256sum "$file" | awk '{ print $1 }')"
+            if [ "$actual_size" != "$size" ] || [ "$actual_digest" != "$digest" ]; then
+              echo "Draft asset bytes do not match REST metadata: $name" >&2
+              exit 1
+            fi
+          done < <(
+            jq -r \
+              '.assets | sort_by(.name)[] |
+                [.id,.name,.size,.digest] | @tsv' \
+              dist/draft-snapshot/metadata/release.json
+          )
+          test "$(
+            find dist/draft-snapshot/assets -maxdepth 1 -type f | wc -l
+          )" -eq 13
+
+      - name: Upload immutable old Draft snapshot
+        id: snapshot-upload
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: biyan-v0.6.643-draft-snapshot-360025177-attempt-${{ github.run_attempt }}
+          compression-level: 0
+          if-no-files-found: error
+          retention-days: 14
+          path: dist/draft-snapshot/*
+
+      - name: Authenticate old Draft snapshot artifact
+        id: snapshot-metadata
+        shell: bash
+        env:
+          ACTION_ARTIFACT_DIGEST: ${{ steps.snapshot-upload.outputs.artifact-digest }}
+          ARTIFACT_ID: ${{ steps.snapshot-upload.outputs.artifact-id }}
+          CURRENT_RUN_ID: ${{ github.run_id }}
+          CURRENT_RUN_ATTEMPT: ${{ github.run_attempt }}
+          CURRENT_SHA: ${{ steps.authority.outputs.current_workflow_sha }}
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          [[ "$ARTIFACT_ID" =~ ^[1-9][0-9]*$ ]]
+          [[ "$ACTION_ARTIFACT_DIGEST" =~ ^[0-9a-f]{64}$ ]]
+          artifact_digest="sha256:$ACTION_ARTIFACT_DIGEST"
+          gh api \
+            "repos/$GITHUB_REPOSITORY/actions/artifacts/$ARTIFACT_ID" \
+            >"$RUNNER_TEMP/snapshot-artifact.json"
+          jq -e \
+            --arg digest "$artifact_digest" \
+            --arg head "$CURRENT_SHA" \
+            --arg name "biyan-v0.6.643-draft-snapshot-360025177-attempt-$CURRENT_RUN_ATTEMPT" \
+            --argjson artifact_id "$ARTIFACT_ID" \
+            --argjson run_id "$CURRENT_RUN_ID" '
+              .id == $artifact_id
+              and .name == $name
+              and .expired == false
+              and .size_in_bytes > 0
+              and .digest == $digest
+              and .workflow_run.id == $run_id
+              and .workflow_run.head_sha == $head
+            ' "$RUNNER_TEMP/snapshot-artifact.json" >/dev/null
+          artifact_size="$(
+            jq -er '.size_in_bytes | select(. > 0)' \
+              "$RUNNER_TEMP/snapshot-artifact.json"
+          )"
+          {
+            echo "artifact_digest=$artifact_digest"
+            echo "artifact_size=$artifact_size"
+          } >>"$GITHUB_OUTPUT"
+
+  prepare-sign:
+    name: Prepare corrected signed derivative assets
+    runs-on: ubuntu-24.04
+    needs: snapshot
+    timeout-minutes: 90
+    environment: release-distribution
+    permissions:
+      actions: read
+      contents: read
+    outputs:
+      repair_artifact_id: ${{ steps.repair-upload.outputs.artifact-id }}
+      repair_artifact_digest: ${{ steps.repair-metadata.outputs.artifact_digest }}
+      repair_artifact_size: ${{ steps.repair-metadata.outputs.artifact_size }}
+      prepared_head: ${{ steps.repair-metadata.outputs.prepared_head }}
+      repair_run_attempt: ${{ steps.repair-metadata.outputs.run_attempt }}
+    steps:
+      - name: Checkout protected repair harness
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          ref: ${{ needs.snapshot.outputs.current_workflow_sha }}
+          path: harness
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Checkout exact accepted A13 target
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          ref: 38e6d9290a8b9b0f152ff2a7eefb550e6ead7df5
+          path: target
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Setup Node
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: '20'
+
+      - name: Install locked Tauri signer
+        working-directory: harness
+        run: |
+          corepack enable
+          corepack prepare yarn@4.5.3 --activate
+          yarn install --immutable --mode=skip-build
+
+      - name: Download exact authenticated old Draft snapshot
+        shell: bash
+        env:
+          ARTIFACT_DIGEST: ${{ needs.snapshot.outputs.snapshot_artifact_digest }}
+          ARTIFACT_ID: ${{ needs.snapshot.outputs.snapshot_artifact_id }}
+          ARTIFACT_SIZE: ${{ needs.snapshot.outputs.snapshot_artifact_size }}
+          EXPECTED_HEAD: ${{ needs.snapshot.outputs.current_workflow_sha }}
+          EXPECTED_RUN: ${{ github.run_id }}
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          [[ "$ARTIFACT_ID" =~ ^[1-9][0-9]*$ ]]
+          [[ "$ARTIFACT_DIGEST" =~ ^sha256:[0-9a-f]{64}$ ]]
+          [[ "$ARTIFACT_SIZE" =~ ^[1-9][0-9]*$ ]]
+          install -d -m 700 dist/snapshot-download
+          gh api \
+            "repos/$GITHUB_REPOSITORY/actions/artifacts/$ARTIFACT_ID" \
+            >"$RUNNER_TEMP/snapshot-artifact.json"
+          jq -e \
+            --arg digest "$ARTIFACT_DIGEST" \
+            --arg head "$EXPECTED_HEAD" \
+            --argjson artifact_id "$ARTIFACT_ID" \
+            --argjson run_id "$EXPECTED_RUN" '
+              .id == $artifact_id
+              and .expired == false
+              and .size_in_bytes > 0
+              and .digest == $digest
+              and .workflow_run.id == $run_id
+              and .workflow_run.head_sha == $head
+            ' "$RUNNER_TEMP/snapshot-artifact.json" >/dev/null
+          archive="dist/snapshot-download/snapshot.zip"
+          gh api \
+            "repos/$GITHUB_REPOSITORY/actions/artifacts/$ARTIFACT_ID/zip" \
+            >"$archive"
+          test "$(stat -c '%s' "$archive")" = "$ARTIFACT_SIZE"
+          test "sha256:$(sha256sum "$archive" | awk '{ print $1 }')" = \
+            "$ARTIFACT_DIGEST"
+
+      - name: Safely extract exact old Draft snapshot
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          from pathlib import Path, PurePosixPath
+          import stat
+          import zipfile
+
+          version = "0.6.643"
+          assets = {
+              "Biyan.app.tar.gz",
+              "Biyan.app.tar.gz.sig",
+              f"Biyan_{version}_amd64.AppImage",
+              f"Biyan_{version}_amd64.AppImage.sig",
+              f"Biyan_{version}_amd64.deb",
+              f"Biyan_{version}_universal.dmg",
+              f"Biyan_{version}_x64-setup.exe",
+              f"Biyan_{version}_x64-setup.exe.sig",
+              f"Biyan_{version}_x64_en-US.msi",
+              "candidate.json",
+              "candidate.json.sig",
+              "latest.json",
+              "SHA256SUMS",
+          }
+          expected = {f"assets/{name}" for name in assets} | {
+              "metadata/release.json",
+              "metadata/old-assets.json",
+              "metadata/snapshot-sha256.txt",
+          }
+          archive = Path("dist/snapshot-download/snapshot.zip")
+          output = Path("dist/snapshot")
+          output.mkdir(mode=0o700)
+          found = set()
+          with zipfile.ZipFile(archive) as source:
+              for item in source.infolist():
+                  if item.is_dir():
+                      continue
+                  name = item.filename
+                  pure = PurePosixPath(name)
+                  mode = item.external_attr >> 16
+                  if (
+                      pure.as_posix() != name
+                      or pure.is_absolute()
+                      or any(part in {"", ".", ".."} for part in pure.parts)
+                      or "\\" in name
+                      or stat.S_IFMT(mode) not in {0, stat.S_IFREG}
+                      or name not in expected
+                      or item.file_size <= 0
+                      or name in found
+                  ):
+                      raise ValueError(f"unsafe snapshot artifact member: {name!r}")
+                  found.add(name)
+                  target = output.joinpath(*pure.parts)
+                  target.parent.mkdir(parents=True, exist_ok=True)
+                  with source.open(item) as source_file, target.open("xb") as sink:
+                      while chunk := source_file.read(1024 * 1024):
+                          sink.write(chunk)
+                  target.chmod(0o600)
+          if found != expected:
+              raise ValueError("snapshot artifact inventory is incomplete")
+          PY
+
+      - name: Revalidate every extracted old Draft byte
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(
+            cat dist/snapshot/metadata/snapshot-sha256.txt
+          )" = "1f5e60a7ed4107bcb11cf4dc0b7876ec97bad51cb6705678dc1fd15f192d917e"
+          while IFS=$'\t' read -r name size digest; do
+            file="dist/snapshot/assets/$name"
+            test -f "$file"
+            test "$(stat -c '%s' "$file")" = "$size"
+            test "sha256:$(sha256sum "$file" | awk '{ print $1 }')" = "$digest"
+          done < <(
+            jq -r '.[] | [.name,.size,.digest] | @tsv' \
+              dist/snapshot/metadata/old-assets.json
+          )
+          install -d -m 700 dist/repaired-inputs
+          for name in \
+            "Biyan.app.tar.gz" \
+            "Biyan.app.tar.gz.sig" \
+            "Biyan_0.6.643_amd64.AppImage" \
+            "Biyan_0.6.643_amd64.AppImage.sig" \
+            "Biyan_0.6.643_amd64.deb" \
+            "Biyan_0.6.643_universal.dmg" \
+            "Biyan_0.6.643_x64-setup.exe" \
+            "Biyan_0.6.643_x64-setup.exe.sig" \
+            "Biyan_0.6.643_x64_en-US.msi"; do
+            cp "dist/snapshot/assets/$name" "dist/repaired-inputs/$name"
+          done
+
+      - name: Re-sign exact retained Linux AppImage
+        shell: bash
+        env:
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+        run: |
+          set -euo pipefail
+          appimage="$GITHUB_WORKSPACE/dist/repaired-inputs/Biyan_0.6.643_amd64.AppImage"
+          signature="$appimage.sig"
+          test "sha256:$(sha256sum "$appimage" | awk '{ print $1 }')" = \
+            "sha256:803568bd4c04ba5f3cd7144b000f0d27ad8f4c63a7af9084a5762b679d047fe3"
+          rm -f "$signature"
+          (
+            cd harness
+            yarn tauri signer sign \
+              --private-key "$TAURI_SIGNING_PRIVATE_KEY" \
+              --password "$TAURI_SIGNING_PRIVATE_KEY_PASSWORD" \
+              "$appimage"
+          )
+          test -s "$signature"
+          test "sha256:$(sha256sum "$appimage" | awk '{ print $1 }')" = \
+            "sha256:803568bd4c04ba5f3cd7144b000f0d27ad8f4c63a7af9084a5762b679d047fe3"
+
+      - name: Build canonical corrected candidate
+        shell: bash
+        run: |
+          set -euo pipefail
+          node harness/scripts/updater/build-candidate.mjs \
+            --version "0.6.643" \
+            --tag "v0.6.643" \
+            --artifacts-dir dist/repaired-inputs \
+            --output-dir dist/updater-candidate \
+            --asset-base-url "https://static.mitapp.cn" \
+            --published-at "2026-07-24T11:53:21.000Z" \
+            --source-commit "38e6d9290a8b9b0f152ff2a7eefb550e6ead7df5" \
+            --migration-phase "A" \
+            --data-schema "1"
+
+      - name: Sign corrected candidate provenance
+        shell: bash
+        env:
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+        run: |
+          set -euo pipefail
+          candidate="$GITHUB_WORKSPACE/dist/updater-candidate/candidate.json"
+          rm -f "$candidate.sig"
+          (
+            cd harness
+            yarn tauri signer sign \
+              --private-key "$TAURI_SIGNING_PRIVATE_KEY" \
+              --password "$TAURI_SIGNING_PRIVATE_KEY_PASSWORD" \
+              "$candidate"
+          )
+          test -s "$candidate.sig"
+
+      - name: Verify corrected signatures, structure, and hashes
+        shell: bash
+        run: |
+          set -euo pipefail
+          (
+            cd dist/updater-candidate
+            LC_ALL=C sha256sum \
+              Biyan* candidate.json candidate.json.sig latest.json \
+              >SHA256SUMS
+            sha256sum --check SHA256SUMS
+          )
+          node harness/scripts/updater/verify-candidate.mjs \
+            dist/updater-candidate \
+            "v0.6.643"
+          node --input-type=module <<'NODE'
+          import assert from 'node:assert/strict'
+          import { createHash } from 'node:crypto'
+          import fs from 'node:fs'
+          import path from 'node:path'
+
+          const oldRoot = 'dist/snapshot/assets'
+          const newRoot = 'dist/updater-candidate'
+          const sha = (file) =>
+            createHash('sha256').update(fs.readFileSync(file)).digest('hex')
+          const replacements = new Set([
+            'Biyan_0.6.643_amd64.AppImage.sig',
+            'candidate.json',
+            'candidate.json.sig',
+            'latest.json',
+            'SHA256SUMS',
+          ])
+          for (const name of fs.readdirSync(oldRoot)) {
+            if (replacements.has(name)) continue
+            assert.equal(
+              sha(path.join(newRoot, name)),
+              sha(path.join(oldRoot, name)),
+              `${name} changed outside the five-file repair allowlist`,
+            )
+          }
+          for (const name of replacements) {
+            assert.notEqual(
+              sha(path.join(newRoot, name)),
+              sha(path.join(oldRoot, name)),
+              `${name} did not change`,
+            )
+          }
+
+          const oldCandidate = JSON.parse(
+            fs.readFileSync(path.join(oldRoot, 'candidate.json'), 'utf8'),
+          )
+          const newCandidate = JSON.parse(
+            fs.readFileSync(path.join(newRoot, 'candidate.json'), 'utf8'),
+          )
+          const normalizedCandidate = structuredClone(newCandidate)
+          normalizedCandidate.manifestSha256 = oldCandidate.manifestSha256
+          normalizedCandidate.assets.find(
+            ({ platform }) => platform === 'linux-x86_64',
+          ).signatureSha256 = oldCandidate.assets.find(
+            ({ platform }) => platform === 'linux-x86_64',
+          ).signatureSha256
+          assert.deepEqual(normalizedCandidate, oldCandidate)
+
+          const oldManifest = JSON.parse(
+            fs.readFileSync(path.join(oldRoot, 'latest.json'), 'utf8'),
+          )
+          const newManifest = JSON.parse(
+            fs.readFileSync(path.join(newRoot, 'latest.json'), 'utf8'),
+          )
+          const normalizedManifest = structuredClone(newManifest)
+          normalizedManifest.platforms['linux-x86_64'].signature =
+            oldManifest.platforms['linux-x86_64'].signature
+          assert.deepEqual(normalizedManifest, oldManifest)
+          NODE
+
+      - name: Exercise the real release acceptance verifier
+        shell: bash
+        run: |
+          set -euo pipefail
+          node --input-type=module <<'NODE'
+          import { createHash } from 'node:crypto'
+          import fs from 'node:fs'
+          import path from 'node:path'
+
+          const root = 'dist/updater-candidate'
+          const acceptedRelease = JSON.parse(
+            fs.readFileSync('dist/snapshot/metadata/release.json', 'utf8'),
+          )
+          const sha = (file) =>
+            `sha256:${createHash('sha256').update(fs.readFileSync(file)).digest('hex')}`
+          const assets = fs.readdirSync(root).sort().map((name) => {
+            const file = path.join(root, name)
+            return {
+              name,
+              size: fs.statSync(file).size,
+              digest: sha(file),
+              contentType: 'application/octet-stream',
+              downloadUrl:
+                `https://github.com/realerikk0/Mita/releases/download/v0.6.643/${name}`,
+            }
+          })
+          const release = {
+            tagName: 'v0.6.643',
+            name: 'Biyan v0.6.643',
+            url: 'https://github.com/realerikk0/Mita/releases/tag/v0.6.643',
+            publishedAt: '2026-07-27T07:05:00Z',
+            body: acceptedRelease.body,
+            isDraft: false,
+            isPrerelease: false,
+            assets,
+          }
+          fs.writeFileSync(
+            'dist/synthetic-published-release.json',
+            `${JSON.stringify(release, null, 2)}\n`,
+          )
+          NODE
+          node harness/scripts/release-distribution/collect-release-assets.mjs \
+            --release-json dist/synthetic-published-release.json \
+            --assets-dir dist/updater-candidate \
+            --candidate-dir dist/updater-candidate \
+            --expected-source-commit \
+              "38e6d9290a8b9b0f152ff2a7eefb550e6ead7df5" \
+            --tag-release-json target/biyan-release.json \
+            --tag-tauri-config target/src-tauri/tauri.conf.json \
+            --tag-cargo-lock target/src-tauri/Cargo.lock \
+            --output dist/prepared-release-assets.json
+
+      - name: Freeze exact five-file repair plan
+        shell: bash
+        env:
+          WORKFLOW_SHA: ${{ needs.snapshot.outputs.current_workflow_sha }}
+        run: |
+          set -euo pipefail
+          node --input-type=module <<'NODE'
+          import { createHash } from 'node:crypto'
+          import fs from 'node:fs'
+          import path from 'node:path'
+          import { validateDraftAssetRepairPlan } from './harness/scripts/release-distribution/draft-asset-repair-state.mjs'
+
+          const oldAssets = JSON.parse(
+            fs.readFileSync('dist/snapshot/metadata/old-assets.json', 'utf8'),
+          )
+          const byName = new Map(oldAssets.map((asset) => [asset.name, asset]))
+          const root = 'dist/updater-candidate'
+          const replacementNames = [
+            'Biyan_0.6.643_amd64.AppImage.sig',
+            'candidate.json',
+            'candidate.json.sig',
+            'latest.json',
+            'SHA256SUMS',
+          ]
+          const sha = (file) =>
+            `sha256:${createHash('sha256').update(fs.readFileSync(file)).digest('hex')}`
+          const identity = (name) => {
+            const file = path.join(root, name)
+            return { size: fs.statSync(file).size, digest: sha(file) }
+          }
+          const plan = {
+            schema: 2,
+            repository: process.env.GITHUB_REPOSITORY,
+            workflowSha: process.env.WORKFLOW_SHA,
+            release: {
+              id: 360025177,
+              name: 'Biyan v0.6.643',
+              tag: 'v0.6.643',
+              targetCommit: '38e6d9290a8b9b0f152ff2a7eefb550e6ead7df5',
+              draft: true,
+              prerelease: false,
+              publishedAt: '2026-07-27T07:05:00Z',
+              bodySha256:
+                'd87e2105473786d9b0277ed05eb466c8cd5e14e28b89c13ffd10b3d3ca801c52',
+              createdAt: '2026-07-24T11:53:21Z',
+              author: {
+                id: 41898282,
+                login: 'github-actions[bot]',
+                type: 'Bot',
+              },
+            },
+            preserve: oldAssets
+              .filter(({ name }) => !replacementNames.includes(name))
+              .map(({ id, name, size, digest }) => ({ id, name, size, digest }))
+              .sort((left, right) => left.name.localeCompare(right.name)),
+            replacements: replacementNames.map((name, index) => {
+              const old = byName.get(name)
+              return {
+                name,
+                old: { id: old.id, size: old.size, digest: old.digest },
+                new: identity(name),
+                stagingName: `Biyan-repair-v0.6.643-${index}-staging--${name}`,
+                backupName:
+                  `Biyan-repair-v0.6.643-${index}-backup-${old.id}--${name}`,
+              }
+            }),
+          }
+          validateDraftAssetRepairPlan(plan)
+          fs.writeFileSync(
+            'dist/repair-plan.json',
+            `${JSON.stringify(plan, null, 2)}\n`,
+            { flag: 'wx', mode: 0o600 },
+          )
+          NODE
+          install -d -m 700 dist/repair-bundle
+          for name in \
+            "Biyan_0.6.643_amd64.AppImage.sig" \
+            "candidate.json" \
+            "candidate.json.sig" \
+            "latest.json" \
+            "SHA256SUMS"; do
+            cp "dist/updater-candidate/$name" "dist/repair-bundle/$name"
+          done
+          cp dist/repair-plan.json dist/repair-bundle/repair-plan.json
+          cp \
+            harness/scripts/release-distribution/draft-asset-repair-state.mjs \
+            dist/repair-bundle/draft-asset-repair-state.mjs
+          test "$(
+            find dist/repair-bundle -maxdepth 1 -type f | wc -l
+          )" -eq 7
+
+      - name: Verify pinned repair state helper
+        shell: bash
+        run: |
+          set -euo pipefail
+          printf '%s  %s\n' \
+            "70c7ebc91c2227e818b4843425ca234ef6a53b39bd3e9231cfd9fc3d5fc212f2" \
+            "dist/repair-bundle/draft-asset-repair-state.mjs" \
+            | sha256sum --check -
+
+      - name: Upload exact prepared repair bundle
+        id: repair-upload
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: biyan-v0.6.643-draft-repair-360025177-attempt-${{ github.run_attempt }}
+          compression-level: 0
+          if-no-files-found: error
+          retention-days: 90
+          path: dist/repair-bundle/*
+
+      - name: Authenticate prepared repair artifact
+        id: repair-metadata
+        shell: bash
+        env:
+          ACTION_ARTIFACT_DIGEST: ${{ steps.repair-upload.outputs.artifact-digest }}
+          ARTIFACT_ID: ${{ steps.repair-upload.outputs.artifact-id }}
+          CURRENT_RUN_ID: ${{ github.run_id }}
+          CURRENT_RUN_ATTEMPT: ${{ github.run_attempt }}
+          CURRENT_SHA: ${{ needs.snapshot.outputs.current_workflow_sha }}
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          [[ "$ARTIFACT_ID" =~ ^[1-9][0-9]*$ ]]
+          [[ "$ACTION_ARTIFACT_DIGEST" =~ ^[0-9a-f]{64}$ ]]
+          artifact_digest="sha256:$ACTION_ARTIFACT_DIGEST"
+          gh api \
+            "repos/$GITHUB_REPOSITORY/actions/artifacts/$ARTIFACT_ID" \
+            >"$RUNNER_TEMP/repair-artifact.json"
+          jq -e \
+            --arg digest "$artifact_digest" \
+            --arg head "$CURRENT_SHA" \
+            --arg name "biyan-v0.6.643-draft-repair-360025177-attempt-$CURRENT_RUN_ATTEMPT" \
+            --argjson artifact_id "$ARTIFACT_ID" \
+            --argjson run_id "$CURRENT_RUN_ID" '
+              .id == $artifact_id
+              and .name == $name
+              and .expired == false
+              and .size_in_bytes > 0
+              and .digest == $digest
+              and .workflow_run.id == $run_id
+              and .workflow_run.head_sha == $head
+            ' "$RUNNER_TEMP/repair-artifact.json" >/dev/null
+          artifact_size="$(
+            jq -er '.size_in_bytes | select(. > 0)' \
+              "$RUNNER_TEMP/repair-artifact.json"
+          )"
+          {
+            echo "artifact_digest=$artifact_digest"
+            echo "artifact_size=$artifact_size"
+            echo "prepared_head=$CURRENT_SHA"
+            echo "run_attempt=$CURRENT_RUN_ATTEMPT"
+          } >>"$GITHUB_OUTPUT"
+
+  commit-resume:
+    name: Commit or resume exact Draft repair
+    if: >-
+      ${{
+        always() &&
+        (
+          (
+            inputs.prepared_run_id == '' &&
+            inputs.prepared_run_attempt == '' &&
+            needs.snapshot.result == 'success' &&
+            needs.prepare-sign.result == 'success'
+          ) ||
+          (
+            inputs.prepared_run_id != '' ||
+            inputs.prepared_run_attempt != ''
+          )
+        )
+      }}
+    runs-on: ubuntu-24.04
+    needs: [snapshot, prepare-sign]
+    timeout-minutes: 90
+    environment: release-distribution
+    permissions:
+      actions: read
+      contents: write
+    outputs:
+      final_state: ${{ steps.commit.outputs.final_state }}
+      current_workflow_sha: ${{ steps.repair-authority.outputs.current_workflow_sha }}
+      prepared_head: ${{ steps.repair-authority.outputs.prepared_head }}
+      final_artifact_id: ${{ steps.final-upload.outputs.artifact-id }}
+      final_artifact_digest: ${{ steps.final-metadata.outputs.artifact_digest }}
+      final_artifact_name: ${{ steps.final-metadata.outputs.artifact_name }}
+      final_artifact_size: ${{ steps.final-metadata.outputs.artifact_size }}
+    steps:
+      - name: Resolve exact prepared repair artifact authority
+        id: repair-authority
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          INPUT_CONFIRM: ${{ inputs.confirm }}
+          INPUT_PREPARED_RUN_ID: ${{ inputs.prepared_run_id }}
+          INPUT_PREPARED_RUN_ATTEMPT: ${{ inputs.prepared_run_attempt }}
+          CURRENT_RUN_ID: ${{ github.run_id }}
+          CURRENT_RUN_ATTEMPT: ${{ github.run_attempt }}
+          CURRENT_PREPARED_HEAD: ${{ needs.prepare-sign.outputs.prepared_head }}
+          CURRENT_PREPARED_RUN_ATTEMPT: ${{ needs.prepare-sign.outputs.repair_run_attempt }}
+          WORKFLOW_REF: ${{ github.ref }}
+          WORKFLOW_SHA: ${{ github.sha }}
+        run: |
+          set -euo pipefail
+          if [ "$INPUT_CONFIRM" != "REPAIR_V0643_LINUX_UPDATER_SIGNATURE" ]; then
+            echo "Exact repair confirmation is required" >&2
+            exit 1
+          fi
+          if [ "$WORKFLOW_REF" != "refs/heads/mita-main" ] ||
+             [[ ! "$WORKFLOW_SHA" =~ ^[0-9a-f]{40}$ ]]; then
+            echo "Draft repair must run from exact protected mita-main" >&2
+            exit 1
+          fi
+
+          verify_ancestor_and_control_blobs() {
+            local base="$1"
+            local head="$2"
+            local label="$3"
+            local base_blob
+            local base_json
+            local compare_json
+            local control_key
+            local head_blob
+            local head_json
+            local path
+
+            compare_json="$RUNNER_TEMP/$label-compare.json"
+            gh api \
+              "repos/$GITHUB_REPOSITORY/compare/$base...$head" \
+              >"$compare_json"
+            jq -e \
+              --arg base "$base" \
+              --arg head "$head" '
+                .base_commit.sha == $base
+                and .merge_base_commit.sha == $base
+                and .behind_by == 0
+                and (
+                  (
+                    $base == $head
+                    and .status == "identical"
+                    and .ahead_by == 0
+                    and .total_commits == 0
+                  )
+                  or
+                  (
+                    $base != $head
+                    and .status == "ahead"
+                    and .ahead_by > 0
+                    and .total_commits == .ahead_by
+                    and .commits[-1].sha == $head
+                  )
+                )
+              ' "$compare_json" >/dev/null
+
+            for control_key in workflow helper; do
+              case "$control_key" in
+                workflow)
+                  path=".github/workflows/desktop-release-draft-repair.yml"
+                  ;;
+                helper)
+                  path="scripts/release-distribution/draft-asset-repair-state.mjs"
+                  ;;
+              esac
+              base_json="$RUNNER_TEMP/$label-$control_key-base.json"
+              head_json="$RUNNER_TEMP/$label-$control_key-head.json"
+              gh api \
+                "repos/$GITHUB_REPOSITORY/contents/$path?ref=$base" \
+                >"$base_json"
+              gh api \
+                "repos/$GITHUB_REPOSITORY/contents/$path?ref=$head" \
+                >"$head_json"
+              base_blob="$(
+                jq -er \
+                  --arg path "$path" '
+                    select(.type == "file" and .path == $path)
+                    | .sha
+                    | select(
+                        type == "string"
+                        and test("^[0-9a-f]{40}$")
+                      )
+                  ' "$base_json"
+              )"
+              head_blob="$(
+                jq -er \
+                  --arg path "$path" '
+                    select(.type == "file" and .path == $path)
+                    | .sha
+                    | select(
+                        type == "string"
+                        and test("^[0-9a-f]{40}$")
+                      )
+                  ' "$head_json"
+              )"
+              if [ "$base_blob" != "$head_blob" ]; then
+                echo "Protected control file drifted across $label: $path" >&2
+                exit 1
+              fi
+            done
+          }
+
+          live_main="$(
+            gh api "repos/$GITHUB_REPOSITORY/branches/mita-main" \
+              --jq '.commit.sha'
+          )"
+          live_tag="$(
+            gh api "repos/$GITHUB_REPOSITORY/commits/v0.6.643" \
+              --jq '.sha'
+          )"
+          [[ "$live_main" =~ ^[0-9a-f]{40}$ ]]
+          verify_ancestor_and_control_blobs \
+            "$WORKFLOW_SHA" \
+            "$live_main" \
+            "commit-execution-live"
+          test "$live_tag" = \
+            "38e6d9290a8b9b0f152ff2a7eefb550e6ead7df5"
+
+          if [ -z "$INPUT_PREPARED_RUN_ID" ] &&
+             [ -z "$INPUT_PREPARED_RUN_ATTEMPT" ]; then
+            prepared_run_id="$CURRENT_RUN_ID"
+            if [[ ! "$CURRENT_PREPARED_RUN_ATTEMPT" =~ ^[1-9][0-9]*$ ]] ||
+               [ "$CURRENT_PREPARED_RUN_ATTEMPT" -gt "$CURRENT_RUN_ATTEMPT" ]; then
+              echo "Current run lost its exact preparation attempt output" >&2
+              exit 1
+            fi
+            if [[ ! "$CURRENT_PREPARED_HEAD" =~ ^[0-9a-f]{40}$ ]] ||
+               [ "$CURRENT_PREPARED_HEAD" != "$WORKFLOW_SHA" ]; then
+              echo "Current run lost its exact prepared head output" >&2
+              exit 1
+            fi
+            prepared_run_attempt="$CURRENT_PREPARED_RUN_ATTEMPT"
+            source_is_current=true
+          elif [[ "$INPUT_PREPARED_RUN_ID" =~ ^[1-9][0-9]*$ ]] &&
+               [[ "$INPUT_PREPARED_RUN_ATTEMPT" =~ ^[1-9][0-9]*$ ]] &&
+               [ "$INPUT_PREPARED_RUN_ID" != "$CURRENT_RUN_ID" ]; then
+            prepared_run_id="$INPUT_PREPARED_RUN_ID"
+            prepared_run_attempt="$INPUT_PREPARED_RUN_ATTEMPT"
+            source_is_current=false
+          else
+            echo "Prepared run ID and attempt must be an exact external pair" >&2
+            exit 1
+          fi
+
+          gh api \
+            "repos/$GITHUB_REPOSITORY/actions/runs/$prepared_run_id" \
+            >"$RUNNER_TEMP/prepared-run.json"
+          jq -e \
+            --argjson attempt "$prepared_run_attempt" \
+            --argjson current "$source_is_current" \
+            --argjson run_id "$prepared_run_id" '
+              .id == $run_id
+              and .repository.full_name == "realerikk0/Mita"
+              and .head_repository.full_name == "realerikk0/Mita"
+              and .event == "workflow_dispatch"
+              and .head_branch == "mita-main"
+              and (.head_sha | test("^[0-9a-f]{40}$"))
+              and .path ==
+                ".github/workflows/desktop-release-draft-repair.yml"
+              and .name == "Desktop Release Draft Asset Repair"
+              and .run_attempt >= $attempt
+              and (
+                ($current and .status == "in_progress")
+                or
+                (($current | not) and .status == "completed")
+              )
+            ' "$RUNNER_TEMP/prepared-run.json" >/dev/null
+          prepared_head="$(
+            jq -er \
+              '.head_sha | select(test("^[0-9a-f]{40}$"))' \
+              "$RUNNER_TEMP/prepared-run.json"
+          )"
+          if [ "$source_is_current" = true ]; then
+            test "$prepared_head" = "$CURRENT_PREPARED_HEAD"
+            test "$prepared_head" = "$WORKFLOW_SHA"
+          else
+            verify_ancestor_and_control_blobs \
+              "$prepared_head" \
+              "$WORKFLOW_SHA" \
+              "prepared-execution"
+          fi
+
+          artifact_name="biyan-v0.6.643-draft-repair-360025177-attempt-$prepared_run_attempt"
+          for lookup_attempt in $(seq 1 8); do
+            gh api \
+              "repos/$GITHUB_REPOSITORY/actions/runs/$prepared_run_id/artifacts?per_page=100" \
+              >"$RUNNER_TEMP/prepared-artifacts.json"
+            count="$(
+              jq \
+                --arg name "$artifact_name" \
+                '[.artifacts[] | select(.name == $name)] | length' \
+                "$RUNNER_TEMP/prepared-artifacts.json"
+            )"
+            if [ "$count" = 1 ]; then
+              break
+            fi
+            if [ "$lookup_attempt" = 8 ]; then
+              echo "Exact prepared repair artifact is unavailable or ambiguous" >&2
+              exit 1
+            fi
+            sleep $((lookup_attempt * 2))
+          done
+          jq \
+            --arg name "$artifact_name" \
+            '.artifacts[] | select(.name == $name)' \
+            "$RUNNER_TEMP/prepared-artifacts.json" \
+            >"$RUNNER_TEMP/prepared-artifact.json"
+          jq -e \
+            --arg head "$prepared_head" \
+            --arg name "$artifact_name" \
+            --argjson run_id "$prepared_run_id" '
+              .name == $name
+              and .expired == false
+              and .size_in_bytes > 0
+              and (.digest | test("^sha256:[0-9a-f]{64}$"))
+              and .workflow_run.id == $run_id
+              and .workflow_run.head_sha == $head
+            ' "$RUNNER_TEMP/prepared-artifact.json" >/dev/null
+          {
+            echo "current_workflow_sha=$WORKFLOW_SHA"
+            echo "prepared_head=$prepared_head"
+            echo "prepared_run_id=$prepared_run_id"
+            echo "prepared_run_attempt=$prepared_run_attempt"
+            echo "artifact_name=$artifact_name"
+            echo "artifact_id=$(jq -er '.id' "$RUNNER_TEMP/prepared-artifact.json")"
+            echo "artifact_digest=$(jq -er '.digest' "$RUNNER_TEMP/prepared-artifact.json")"
+            echo "artifact_size=$(jq -er '.size_in_bytes' "$RUNNER_TEMP/prepared-artifact.json")"
+          } >>"$GITHUB_OUTPUT"
+
+      - name: Download exact authenticated repair bundle
+        shell: bash
+        env:
+          ARTIFACT_DIGEST: ${{ steps.repair-authority.outputs.artifact_digest }}
+          ARTIFACT_ID: ${{ steps.repair-authority.outputs.artifact_id }}
+          ARTIFACT_NAME: ${{ steps.repair-authority.outputs.artifact_name }}
+          ARTIFACT_SIZE: ${{ steps.repair-authority.outputs.artifact_size }}
+          EXPECTED_HEAD: ${{ steps.repair-authority.outputs.prepared_head }}
+          EXPECTED_RUN: ${{ steps.repair-authority.outputs.prepared_run_id }}
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          [[ "$ARTIFACT_ID" =~ ^[1-9][0-9]*$ ]]
+          [[ "$ARTIFACT_DIGEST" =~ ^sha256:[0-9a-f]{64}$ ]]
+          [[ "$ARTIFACT_SIZE" =~ ^[1-9][0-9]*$ ]]
+          install -d -m 700 dist/repair-download
+          gh api \
+            "repos/$GITHUB_REPOSITORY/actions/artifacts/$ARTIFACT_ID" \
+            >"$RUNNER_TEMP/repair-artifact.json"
+          jq -e \
+            --arg digest "$ARTIFACT_DIGEST" \
+            --arg head "$EXPECTED_HEAD" \
+            --arg name "$ARTIFACT_NAME" \
+            --argjson artifact_id "$ARTIFACT_ID" \
+            --argjson run_id "$EXPECTED_RUN" '
+              .id == $artifact_id
+              and .name == $name
+              and .expired == false
+              and .size_in_bytes > 0
+              and .digest == $digest
+              and .workflow_run.id == $run_id
+              and .workflow_run.head_sha == $head
+            ' "$RUNNER_TEMP/repair-artifact.json" >/dev/null
+          archive="dist/repair-download/repair.zip"
+          gh api \
+            "repos/$GITHUB_REPOSITORY/actions/artifacts/$ARTIFACT_ID/zip" \
+            >"$archive"
+          test "$(stat -c '%s' "$archive")" = "$ARTIFACT_SIZE"
+          test "sha256:$(sha256sum "$archive" | awk '{ print $1 }')" = \
+            "$ARTIFACT_DIGEST"
+
+      - name: Safely extract and pin the exact repair bundle
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          from pathlib import Path, PurePosixPath
+          import stat
+          import zipfile
+
+          expected = {
+              "Biyan_0.6.643_amd64.AppImage.sig",
+              "candidate.json",
+              "candidate.json.sig",
+              "latest.json",
+              "SHA256SUMS",
+              "repair-plan.json",
+              "draft-asset-repair-state.mjs",
+          }
+          archive = Path("dist/repair-download/repair.zip")
+          output = Path("dist/repair-bundle")
+          output.mkdir(mode=0o700)
+          found = set()
+          with zipfile.ZipFile(archive) as source:
+              for item in source.infolist():
+                  if item.is_dir():
+                      continue
+                  name = item.filename
+                  pure = PurePosixPath(name)
+                  mode = item.external_attr >> 16
+                  if (
+                      pure.as_posix() != name
+                      or len(pure.parts) != 1
+                      or "\\" in name
+                      or stat.S_IFMT(mode) not in {0, stat.S_IFREG}
+                      or name not in expected
+                      or item.file_size <= 0
+                      or name in found
+                  ):
+                      raise ValueError(f"unsafe repair artifact member: {name!r}")
+                  found.add(name)
+                  target = output / name
+                  with source.open(item) as source_file, target.open("xb") as sink:
+                      while chunk := source_file.read(1024 * 1024):
+                          sink.write(chunk)
+                  target.chmod(0o600)
+          if found != expected:
+              raise ValueError("repair artifact inventory is incomplete")
+          PY
+          printf '%s  %s\n' \
+            "70c7ebc91c2227e818b4843425ca234ef6a53b39bd3e9231cfd9fc3d5fc212f2" \
+            "dist/repair-bundle/draft-asset-repair-state.mjs" \
+            | sha256sum --check -
+          jq -e \
+            --arg head "${{ steps.repair-authority.outputs.prepared_head }}" '
+              .schema == 2
+              and .repository == "realerikk0/Mita"
+              and .workflowSha == $head
+              and .release.id == 360025177
+              and .release.name == "Biyan v0.6.643"
+              and .release.tag == "v0.6.643"
+              and .release.targetCommit ==
+                "38e6d9290a8b9b0f152ff2a7eefb550e6ead7df5"
+              and .release.draft == true
+              and .release.prerelease == false
+              and .release.publishedAt == "2026-07-27T07:05:00Z"
+              and .release.bodySha256 ==
+                "d87e2105473786d9b0277ed05eb466c8cd5e14e28b89c13ffd10b3d3ca801c52"
+              and .release.createdAt == "2026-07-24T11:53:21Z"
+              and .release.author == {
+                id: 41898282,
+                login: "github-actions[bot]",
+                type: "Bot"
+              }
+              and (.preserve | length) == 8
+              and ([.replacements[].name] == [
+                "Biyan_0.6.643_amd64.AppImage.sig",
+                "candidate.json",
+                "candidate.json.sig",
+                "latest.json",
+                "SHA256SUMS"
+              ])
+            ' dist/repair-bundle/repair-plan.json >/dev/null
+          while IFS=$'\t' read -r name size digest; do
+            file="dist/repair-bundle/$name"
+            test -f "$file"
+            test "$(stat -c '%s' "$file")" = "$size"
+            test "sha256:$(sha256sum "$file" | awk '{ print $1 }')" = "$digest"
+          done < <(
+            jq -r '.replacements[] | [.name,.new.size,.new.digest] | @tsv' \
+              dist/repair-bundle/repair-plan.json
+          )
+
+      - name: Initialize mutation evidence
+        shell: bash
+        run: |
+          set -euo pipefail
+          install -d -m 700 dist/repair-evidence
+          cp \
+            dist/repair-bundle/repair-plan.json \
+            dist/repair-evidence/repair-plan.json
+          : >dist/repair-evidence/mutation-journal.ndjson
+          printf '%s\n' "not-started" >dist/repair-evidence/state.txt
+
+      - name: Execute fail-closed forward-only repair state machine
+        id: commit
+        shell: bash
+        env:
+          EXPECTED_MAIN: ${{ steps.repair-authority.outputs.current_workflow_sha }}
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          plan="dist/repair-bundle/repair-plan.json"
+          helper="dist/repair-bundle/draft-asset-repair-state.mjs"
+          evidence="dist/repair-evidence"
+
+          verify_ancestor_and_control_blobs() {
+            local base="$1"
+            local head="$2"
+            local label="$3"
+            local base_blob
+            local base_json
+            local compare_json
+            local control_key
+            local head_blob
+            local head_json
+            local path
+
+            compare_json="$RUNNER_TEMP/$label-compare.json"
+            gh api \
+              "repos/$GITHUB_REPOSITORY/compare/$base...$head" \
+              >"$compare_json"
+            jq -e \
+              --arg base "$base" \
+              --arg head "$head" '
+                .base_commit.sha == $base
+                and .merge_base_commit.sha == $base
+                and .behind_by == 0
+                and (
+                  (
+                    $base == $head
+                    and .status == "identical"
+                    and .ahead_by == 0
+                    and .total_commits == 0
+                  )
+                  or
+                  (
+                    $base != $head
+                    and .status == "ahead"
+                    and .ahead_by > 0
+                    and .total_commits == .ahead_by
+                    and .commits[-1].sha == $head
+                  )
+                )
+              ' "$compare_json" >/dev/null
+
+            for control_key in workflow helper; do
+              case "$control_key" in
+                workflow)
+                  path=".github/workflows/desktop-release-draft-repair.yml"
+                  ;;
+                helper)
+                  path="scripts/release-distribution/draft-asset-repair-state.mjs"
+                  ;;
+              esac
+              base_json="$RUNNER_TEMP/$label-$control_key-base.json"
+              head_json="$RUNNER_TEMP/$label-$control_key-head.json"
+              gh api \
+                "repos/$GITHUB_REPOSITORY/contents/$path?ref=$base" \
+                >"$base_json"
+              gh api \
+                "repos/$GITHUB_REPOSITORY/contents/$path?ref=$head" \
+                >"$head_json"
+              base_blob="$(
+                jq -er \
+                  --arg path "$path" '
+                    select(.type == "file" and .path == $path)
+                    | .sha
+                    | select(
+                        type == "string"
+                        and test("^[0-9a-f]{40}$")
+                      )
+                  ' "$base_json"
+              )"
+              head_blob="$(
+                jq -er \
+                  --arg path "$path" '
+                    select(.type == "file" and .path == $path)
+                    | .sha
+                    | select(
+                        type == "string"
+                        and test("^[0-9a-f]{40}$")
+                      )
+                  ' "$head_json"
+              )"
+              test "$base_blob" = "$head_blob"
+            done
+          }
+
+          revalidate_control() {
+            local live_main
+            local live_tag
+
+            live_main="$(
+              gh api "repos/$GITHUB_REPOSITORY/branches/mita-main" \
+                --jq '.commit.sha'
+            )"
+            live_tag="$(
+              gh api "repos/$GITHUB_REPOSITORY/commits/v0.6.643" \
+                --jq '.sha'
+            )"
+            [[ "$live_main" =~ ^[0-9a-f]{40}$ ]]
+            verify_ancestor_and_control_blobs \
+              "$EXPECTED_MAIN" \
+              "$live_main" \
+              "mutation-execution-live"
+            test "$live_tag" = \
+              "38e6d9290a8b9b0f152ff2a7eefb550e6ead7df5"
+          }
+
+          read_state() {
+            local iteration="$1"
+            for read_attempt in $(seq 1 5); do
+              if revalidate_control &&
+                 gh api "repos/$GITHUB_REPOSITORY/releases/360025177" \
+                   >"$evidence/release-$iteration.json" &&
+                 env -u GH_TOKEN node "$helper" \
+                   --plan "$plan" \
+                   --release "$evidence/release-$iteration.json" \
+                   --output "$evidence/state-$iteration.json" \
+                   >/dev/null; then
+                return 0
+              fi
+              rm -f "$evidence/state-$iteration.json"
+              if [ "$read_attempt" = 5 ]; then
+                return 1
+              fi
+              sleep $((read_attempt * 2))
+            done
+          }
+
+          journal() {
+            local iteration="$1"
+            local action="$2"
+            local replacement="$3"
+            local status="$4"
+            jq -cn \
+              --arg action "$action" \
+              --arg replacement "$replacement" \
+              --arg status "$status" \
+              --argjson iteration "$iteration" \
+              --arg time "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
+              '{
+                iteration: $iteration,
+                action: $action,
+                replacement: $replacement,
+                status: $status,
+                time: $time
+              }' >>"$evidence/mutation-journal.ndjson"
+          }
+
+          for iteration in $(seq 0 80); do
+            read_state "$iteration"
+            state_file="$evidence/state-$iteration.json"
+            action="$(jq -er '.next.action' "$state_file")"
+            replacement="$(jq -r '.next.replacement // ""' "$state_file")"
+            if [ "$action" = "none" ]; then
+              cp "$state_file" "$evidence/final-state.json"
+              printf '%s\n' "committed" >"$evidence/state.txt"
+              echo "final_state=committed" >>"$GITHUB_OUTPUT"
+              exit 0
+            fi
+
+            case "$action" in
+              stage)
+                staging_name="$(jq -er '.next.toName' "$state_file")"
+                file="dist/repair-bundle/$replacement"
+                encoded_name="$(
+                  jq -rn --arg name "$staging_name" '$name | @uri'
+                )"
+                if http_status="$(
+                  curl \
+                    --silent \
+                    --show-error \
+                    --output "$evidence/response-$iteration.json" \
+                    --write-out '%{http_code}' \
+                    --request POST \
+                    --header "Accept: application/vnd.github+json" \
+                    --header "Authorization: Bearer $GH_TOKEN" \
+                    --header "Content-Type: application/octet-stream" \
+                    --header "X-GitHub-Api-Version: 2022-11-28" \
+                    --data-binary "@$file" \
+                    "https://uploads.github.com/repos/$GITHUB_REPOSITORY/releases/360025177/assets?name=$encoded_name"
+                )"; then
+                  :
+                else
+                  http_status="transport-error"
+                fi
+                journal "$iteration" "$action" "$replacement" "$http_status"
+                ;;
+              rename-old-to-backup|rename-stage-to-canonical)
+                asset_id="$(jq -er '.next.assetId' "$state_file")"
+                target_name="$(jq -er '.next.toName' "$state_file")"
+                if gh api \
+                  --method PATCH \
+                  "repos/$GITHUB_REPOSITORY/releases/assets/$asset_id" \
+                  -f "name=$target_name" \
+                  >"$evidence/response-$iteration.json"; then
+                  status="patched"
+                else
+                  status="patch-error"
+                fi
+                journal "$iteration" "$action" "$replacement" "$status"
+                ;;
+              delete-starter-stage|delete-backup)
+                asset_id="$(jq -er '.next.assetId' "$state_file")"
+                if gh api \
+                  --method DELETE \
+                  "repos/$GITHUB_REPOSITORY/releases/assets/$asset_id"; then
+                  status="deleted"
+                else
+                  status="delete-error"
+                fi
+                journal "$iteration" "$action" "$replacement" "$status"
+                ;;
+              *)
+                echo "Unsupported repair action: $action" >&2
+                exit 1
+                ;;
+            esac
+            sleep 2
+          done
+          echo "Repair did not converge within the exact mutation bound" >&2
+          exit 1
+
+      - name: Read back exact committed Draft without repository code
+        shell: bash
+        env:
+          EXPECTED_MAIN: ${{ steps.repair-authority.outputs.current_workflow_sha }}
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+
+          verify_ancestor_and_control_blobs() {
+            local base="$1"
+            local head="$2"
+            local label="$3"
+            local base_blob
+            local base_json
+            local compare_json
+            local control_key
+            local head_blob
+            local head_json
+            local path
+
+            compare_json="$RUNNER_TEMP/$label-compare.json"
+            gh api \
+              "repos/$GITHUB_REPOSITORY/compare/$base...$head" \
+              >"$compare_json"
+            jq -e \
+              --arg base "$base" \
+              --arg head "$head" '
+                .base_commit.sha == $base
+                and .merge_base_commit.sha == $base
+                and .behind_by == 0
+                and (
+                  (
+                    $base == $head
+                    and .status == "identical"
+                    and .ahead_by == 0
+                    and .total_commits == 0
+                  )
+                  or
+                  (
+                    $base != $head
+                    and .status == "ahead"
+                    and .ahead_by > 0
+                    and .total_commits == .ahead_by
+                    and .commits[-1].sha == $head
+                  )
+                )
+              ' "$compare_json" >/dev/null
+
+            for control_key in workflow helper; do
+              case "$control_key" in
+                workflow)
+                  path=".github/workflows/desktop-release-draft-repair.yml"
+                  ;;
+                helper)
+                  path="scripts/release-distribution/draft-asset-repair-state.mjs"
+                  ;;
+              esac
+              base_json="$RUNNER_TEMP/$label-$control_key-base.json"
+              head_json="$RUNNER_TEMP/$label-$control_key-head.json"
+              gh api \
+                "repos/$GITHUB_REPOSITORY/contents/$path?ref=$base" \
+                >"$base_json"
+              gh api \
+                "repos/$GITHUB_REPOSITORY/contents/$path?ref=$head" \
+                >"$head_json"
+              base_blob="$(
+                jq -er \
+                  --arg path "$path" '
+                    select(.type == "file" and .path == $path)
+                    | .sha
+                    | select(
+                        type == "string"
+                        and test("^[0-9a-f]{40}$")
+                      )
+                  ' "$base_json"
+              )"
+              head_blob="$(
+                jq -er \
+                  --arg path "$path" '
+                    select(.type == "file" and .path == $path)
+                    | .sha
+                    | select(
+                        type == "string"
+                        and test("^[0-9a-f]{40}$")
+                      )
+                  ' "$head_json"
+              )"
+              test "$base_blob" = "$head_blob"
+            done
+          }
+
+          live_main="$(
+            gh api "repos/$GITHUB_REPOSITORY/branches/mita-main" \
+              --jq '.commit.sha'
+          )"
+          live_tag="$(
+            gh api "repos/$GITHUB_REPOSITORY/commits/v0.6.643" \
+              --jq '.sha'
+          )"
+          [[ "$live_main" =~ ^[0-9a-f]{40}$ ]]
+          verify_ancestor_and_control_blobs \
+            "$EXPECTED_MAIN" \
+            "$live_main" \
+            "readback-execution-live"
+          test "$live_tag" = \
+            "38e6d9290a8b9b0f152ff2a7eefb550e6ead7df5"
+          install -d -m 700 \
+            dist/final-snapshot/assets \
+            dist/final-snapshot/metadata
+          gh api "repos/$GITHUB_REPOSITORY/releases/360025177" \
+            >dist/final-snapshot/metadata/final-release.json
+          env -u GH_TOKEN node \
+            dist/repair-bundle/draft-asset-repair-state.mjs \
+            --plan dist/repair-bundle/repair-plan.json \
+            --release dist/final-snapshot/metadata/final-release.json \
+            --output dist/final-snapshot/metadata/final-state.json \
+            >/dev/null
+          jq -e '
+            .schema == 2
+            and .state == "committed"
+            and .next.action == "none"
+            and all(.replacements[];
+              .state == "committed"
+              and .canonicalId > 0
+              and .stagingId == null
+              and .backupId == null)
+          ' dist/final-snapshot/metadata/final-state.json >/dev/null
+          cp \
+            dist/repair-bundle/repair-plan.json \
+            dist/final-snapshot/metadata/repair-plan.json
+          cp \
+            "$RUNNER_TEMP/prepared-run.json" \
+            dist/final-snapshot/metadata/prepared-run.json
+          cp \
+            "$RUNNER_TEMP/prepared-artifact.json" \
+            dist/final-snapshot/metadata/prepared-artifact.json
+
+      - name: Download and byte-bind all 13 final canonical assets
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          while IFS=$'\t' read -r id name size digest state; do
+            if [[ ! "$id" =~ ^[1-9][0-9]*$ ]] ||
+               [[ ! "$size" =~ ^[1-9][0-9]*$ ]] ||
+               [[ ! "$digest" =~ ^sha256:[0-9a-f]{64}$ ]] ||
+               [ "$state" != "uploaded" ] ||
+               [[ "$name" == */* ]] ||
+               [[ "$name" == *\\* ]]; then
+              echo "Unsafe final Draft asset metadata" >&2
+              exit 1
+            fi
+            file="dist/final-snapshot/assets/$name"
+            gh api \
+              -H "Accept: application/octet-stream" \
+              "repos/$GITHUB_REPOSITORY/releases/assets/$id" \
+              >"$file"
+            test "$(stat -c '%s' "$file")" = "$size"
+            test "sha256:$(sha256sum "$file" | awk '{ print $1 }')" = "$digest"
+          done < <(
+            jq -r \
+              '.assets | sort_by(.name)[] |
+                [.id,.name,.size,.digest,.state] | @tsv' \
+              dist/final-snapshot/metadata/final-release.json
+          )
+          test "$(
+            find dist/final-snapshot/assets -maxdepth 1 -type f | wc -l
+          )" -eq 13
+
+      - name: Upload immutable final Draft readback
+        id: final-upload
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: biyan-v0.6.643-draft-repair-final-snapshot-attempt-${{ github.run_attempt }}
+          compression-level: 0
+          if-no-files-found: error
+          retention-days: 90
+          path: dist/final-snapshot/*
+
+      - name: Authenticate final Draft readback artifact
+        id: final-metadata
+        shell: bash
+        env:
+          ACTION_ARTIFACT_DIGEST: ${{ steps.final-upload.outputs.artifact-digest }}
+          ARTIFACT_ID: ${{ steps.final-upload.outputs.artifact-id }}
+          CURRENT_RUN_ID: ${{ github.run_id }}
+          CURRENT_RUN_ATTEMPT: ${{ github.run_attempt }}
+          CURRENT_SHA: ${{ steps.repair-authority.outputs.current_workflow_sha }}
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          [[ "$ARTIFACT_ID" =~ ^[1-9][0-9]*$ ]]
+          [[ "$ACTION_ARTIFACT_DIGEST" =~ ^[0-9a-f]{64}$ ]]
+          artifact_digest="sha256:$ACTION_ARTIFACT_DIGEST"
+          gh api \
+            "repos/$GITHUB_REPOSITORY/actions/artifacts/$ARTIFACT_ID" \
+            >"$RUNNER_TEMP/final-artifact.json"
+          jq -e \
+            --arg digest "$artifact_digest" \
+            --arg head "$CURRENT_SHA" \
+            --arg name "biyan-v0.6.643-draft-repair-final-snapshot-attempt-$CURRENT_RUN_ATTEMPT" \
+            --argjson artifact_id "$ARTIFACT_ID" \
+            --argjson run_id "$CURRENT_RUN_ID" '
+              .id == $artifact_id
+              and .name == $name
+              and .expired == false
+              and .size_in_bytes > 0
+              and .digest == $digest
+              and .workflow_run.id == $run_id
+              and .workflow_run.head_sha == $head
+            ' "$RUNNER_TEMP/final-artifact.json" >/dev/null
+          artifact_size="$(
+            jq -er '.size_in_bytes | select(. > 0)' \
+              "$RUNNER_TEMP/final-artifact.json"
+          )"
+          {
+            echo "artifact_digest=$artifact_digest"
+            echo "artifact_name=biyan-v0.6.643-draft-repair-final-snapshot-attempt-$CURRENT_RUN_ATTEMPT"
+            echo "artifact_size=$artifact_size"
+          } >>"$GITHUB_OUTPUT"
+
+      - name: Upload mutation evidence
+        if: ${{ always() }}
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: biyan-v0.6.643-draft-repair-mutation-evidence-attempt-${{ github.run_attempt }}
+          if-no-files-found: warn
+          retention-days: 90
+          path: dist/repair-evidence/*
+
+  final-verify:
+    name: Verify exact repaired Draft from read-only snapshot
+    if: >-
+      ${{
+        always() &&
+        needs.commit-resume.result == 'success' &&
+        needs.commit-resume.outputs.final_state == 'committed'
+      }}
+    runs-on: ubuntu-24.04
+    needs: commit-resume
+    timeout-minutes: 60
+    permissions:
+      actions: read
+      contents: read
+    steps:
+      - name: Checkout protected postflight harness
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          ref: ${{ needs.commit-resume.outputs.current_workflow_sha }}
+          path: harness
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Checkout exact accepted A13 target
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          ref: 38e6d9290a8b9b0f152ff2a7eefb550e6ead7df5
+          path: target
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Setup Node
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: '20'
+
+      - name: Download exact authenticated final Draft readback
+        shell: bash
+        env:
+          ARTIFACT_DIGEST: ${{ needs.commit-resume.outputs.final_artifact_digest }}
+          ARTIFACT_ID: ${{ needs.commit-resume.outputs.final_artifact_id }}
+          ARTIFACT_NAME: ${{ needs.commit-resume.outputs.final_artifact_name }}
+          ARTIFACT_SIZE: ${{ needs.commit-resume.outputs.final_artifact_size }}
+          EXPECTED_HEAD: ${{ needs.commit-resume.outputs.current_workflow_sha }}
+          EXPECTED_RUN: ${{ github.run_id }}
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          [[ "$ARTIFACT_ID" =~ ^[1-9][0-9]*$ ]]
+          [[ "$ARTIFACT_DIGEST" =~ ^sha256:[0-9a-f]{64}$ ]]
+          [[ "$ARTIFACT_NAME" =~ ^biyan-v0\.6\.643-draft-repair-final-snapshot-attempt-[1-9][0-9]*$ ]]
+          [[ "$ARTIFACT_SIZE" =~ ^[1-9][0-9]*$ ]]
+          install -d -m 700 dist/final-download
+          gh api \
+            "repos/$GITHUB_REPOSITORY/actions/artifacts/$ARTIFACT_ID" \
+            >"$RUNNER_TEMP/final-artifact.json"
+          jq -e \
+            --arg digest "$ARTIFACT_DIGEST" \
+            --arg head "$EXPECTED_HEAD" \
+            --arg name "$ARTIFACT_NAME" \
+            --argjson artifact_id "$ARTIFACT_ID" \
+            --argjson run_id "$EXPECTED_RUN" '
+              .id == $artifact_id
+              and .name == $name
+              and .expired == false
+              and .size_in_bytes > 0
+              and .digest == $digest
+              and .workflow_run.id == $run_id
+              and .workflow_run.head_sha == $head
+            ' "$RUNNER_TEMP/final-artifact.json" >/dev/null
+          archive="dist/final-download/final.zip"
+          gh api \
+            "repos/$GITHUB_REPOSITORY/actions/artifacts/$ARTIFACT_ID/zip" \
+            >"$archive"
+          test "$(stat -c '%s' "$archive")" = "$ARTIFACT_SIZE"
+          test "sha256:$(sha256sum "$archive" | awk '{ print $1 }')" = \
+            "$ARTIFACT_DIGEST"
+          python3 - <<'PY'
+          from pathlib import Path, PurePosixPath
+          import stat
+          import zipfile
+
+          version = "0.6.643"
+          assets = {
+              "Biyan.app.tar.gz",
+              "Biyan.app.tar.gz.sig",
+              f"Biyan_{version}_amd64.AppImage",
+              f"Biyan_{version}_amd64.AppImage.sig",
+              f"Biyan_{version}_amd64.deb",
+              f"Biyan_{version}_universal.dmg",
+              f"Biyan_{version}_x64-setup.exe",
+              f"Biyan_{version}_x64-setup.exe.sig",
+              f"Biyan_{version}_x64_en-US.msi",
+              "candidate.json",
+              "candidate.json.sig",
+              "latest.json",
+              "SHA256SUMS",
+          }
+          expected = {f"assets/{name}" for name in assets} | {
+              "metadata/final-release.json",
+              "metadata/final-state.json",
+              "metadata/repair-plan.json",
+              "metadata/prepared-run.json",
+              "metadata/prepared-artifact.json",
+          }
+          archive = Path("dist/final-download/final.zip")
+          output = Path("dist/final")
+          output.mkdir(mode=0o700)
+          found = set()
+          with zipfile.ZipFile(archive) as source:
+              for item in source.infolist():
+                  if item.is_dir():
+                      continue
+                  name = item.filename
+                  pure = PurePosixPath(name)
+                  mode = item.external_attr >> 16
+                  if (
+                      pure.as_posix() != name
+                      or pure.is_absolute()
+                      or any(part in {"", ".", ".."} for part in pure.parts)
+                      or "\\" in name
+                      or stat.S_IFMT(mode) not in {0, stat.S_IFREG}
+                      or name not in expected
+                      or item.file_size <= 0
+                      or name in found
+                  ):
+                      raise ValueError(f"unsafe final snapshot member: {name!r}")
+                  found.add(name)
+                  target = output.joinpath(*pure.parts)
+                  target.parent.mkdir(parents=True, exist_ok=True)
+                  with source.open(item) as source_file, target.open("xb") as sink:
+                      while chunk := source_file.read(1024 * 1024):
+                          sink.write(chunk)
+                  target.chmod(0o600)
+          if found != expected:
+              raise ValueError("final snapshot inventory is incomplete")
+          PY
+
+      - name: Validate frozen final Draft state and asset bytes
+        shell: bash
+        env:
+          EXPECTED_MAIN: ${{ needs.commit-resume.outputs.current_workflow_sha }}
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+
+          verify_ancestor_and_control_blobs() {
+            local base="$1"
+            local head="$2"
+            local label="$3"
+            local base_blob
+            local base_json
+            local compare_json
+            local control_key
+            local head_blob
+            local head_json
+            local path
+
+            compare_json="$RUNNER_TEMP/$label-compare.json"
+            gh api \
+              "repos/$GITHUB_REPOSITORY/compare/$base...$head" \
+              >"$compare_json"
+            jq -e \
+              --arg base "$base" \
+              --arg head "$head" '
+                .base_commit.sha == $base
+                and .merge_base_commit.sha == $base
+                and .behind_by == 0
+                and (
+                  (
+                    $base == $head
+                    and .status == "identical"
+                    and .ahead_by == 0
+                    and .total_commits == 0
+                  )
+                  or
+                  (
+                    $base != $head
+                    and .status == "ahead"
+                    and .ahead_by > 0
+                    and .total_commits == .ahead_by
+                    and .commits[-1].sha == $head
+                  )
+                )
+              ' "$compare_json" >/dev/null
+
+            for control_key in workflow helper; do
+              case "$control_key" in
+                workflow)
+                  path=".github/workflows/desktop-release-draft-repair.yml"
+                  ;;
+                helper)
+                  path="scripts/release-distribution/draft-asset-repair-state.mjs"
+                  ;;
+              esac
+              base_json="$RUNNER_TEMP/$label-$control_key-base.json"
+              head_json="$RUNNER_TEMP/$label-$control_key-head.json"
+              gh api \
+                "repos/$GITHUB_REPOSITORY/contents/$path?ref=$base" \
+                >"$base_json"
+              gh api \
+                "repos/$GITHUB_REPOSITORY/contents/$path?ref=$head" \
+                >"$head_json"
+              base_blob="$(
+                jq -er \
+                  --arg path "$path" '
+                    select(.type == "file" and .path == $path)
+                    | .sha
+                    | select(
+                        type == "string"
+                        and test("^[0-9a-f]{40}$")
+                      )
+                  ' "$base_json"
+              )"
+              head_blob="$(
+                jq -er \
+                  --arg path "$path" '
+                    select(.type == "file" and .path == $path)
+                    | .sha
+                    | select(
+                        type == "string"
+                        and test("^[0-9a-f]{40}$")
+                      )
+                  ' "$head_json"
+              )"
+              test "$base_blob" = "$head_blob"
+            done
+          }
+
+          live_main="$(
+            gh api "repos/$GITHUB_REPOSITORY/branches/mita-main" \
+              --jq '.commit.sha'
+          )"
+          [[ "$live_main" =~ ^[0-9a-f]{40}$ ]]
+          verify_ancestor_and_control_blobs \
+            "$EXPECTED_MAIN" \
+            "$live_main" \
+            "postflight-execution-live"
+          test "$(
+            gh api "repos/$GITHUB_REPOSITORY/commits/v0.6.643" \
+              --jq '.sha'
+          )" = "38e6d9290a8b9b0f152ff2a7eefb550e6ead7df5"
+          node harness/scripts/release-distribution/draft-asset-repair-state.mjs \
+            --plan dist/final/metadata/repair-plan.json \
+            --release dist/final/metadata/final-release.json \
+            --output dist/final/reclassified-state.json \
+            >/dev/null
+          cmp \
+            dist/final/metadata/final-state.json \
+            dist/final/reclassified-state.json
+          jq -e \
+            --arg head "${{ needs.commit-resume.outputs.prepared_head }}" '
+            .schema == 2
+            and .workflowSha == $head
+            and .state == "committed"
+            and .next.action == "none"
+            and all(.replacements[];
+              .state == "committed"
+              and .canonicalId > 0
+              and .stagingId == null
+              and .backupId == null)
+          ' dist/final/metadata/final-state.json >/dev/null
+          while IFS=$'\t' read -r name size digest; do
+            file="dist/final/assets/$name"
+            test "$(stat -c '%s' "$file")" = "$size"
+            test "sha256:$(sha256sum "$file" | awk '{ print $1 }')" = "$digest"
+          done < <(
+            jq -r \
+              '.assets | sort_by(.name)[] |
+                [.name,.size,.digest] | @tsv' \
+              dist/final/metadata/final-release.json
+          )
+          test "$(
+            find dist/final/assets -maxdepth 1 -type f | wc -l
+          )" -eq 13
+
+      - name: Run complete updater and release acceptance
+        shell: bash
+        run: |
+          set -euo pipefail
+          node harness/scripts/updater/verify-candidate.mjs \
+            dist/final/assets \
+            "v0.6.643"
+          (
+            cd dist/final/assets
+            sha256sum --check SHA256SUMS
+          )
+          node --input-type=module <<'NODE'
+          import fs from 'node:fs'
+
+          const release = JSON.parse(
+            fs.readFileSync('dist/final/metadata/final-release.json', 'utf8'),
+          )
+          const synthetic = {
+            tagName: release.tag_name,
+            name: release.name,
+            url: 'https://github.com/realerikk0/Mita/releases/tag/v0.6.643',
+            publishedAt: release.published_at,
+            body: release.body,
+            isDraft: false,
+            isPrerelease: release.prerelease,
+            assets: release.assets.map((asset) => ({
+              name: asset.name,
+              size: asset.size,
+              digest: asset.digest,
+              contentType: asset.content_type,
+              downloadUrl:
+                `https://github.com/realerikk0/Mita/releases/download/v0.6.643/${asset.name}`,
+            })),
+          }
+          fs.writeFileSync(
+            'dist/final/synthetic-published-release.json',
+            `${JSON.stringify(synthetic, null, 2)}\n`,
+          )
+          NODE
+          node harness/scripts/release-distribution/collect-release-assets.mjs \
+            --release-json dist/final/synthetic-published-release.json \
+            --assets-dir dist/final/assets \
+            --candidate-dir dist/final/assets \
+            --expected-source-commit \
+              "38e6d9290a8b9b0f152ff2a7eefb550e6ead7df5" \
+            --tag-release-json target/biyan-release.json \
+            --tag-tauri-config target/src-tauri/tauri.conf.json \
+            --tag-cargo-lock target/src-tauri/Cargo.lock \
+            --output dist/final/release-assets.json
+          printf '%s\n' "verified-draft-only" \
+            >dist/final/result.txt
+
+      - name: Upload final Draft repair evidence
+        if: ${{ always() }}
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: biyan-v0.6.643-draft-repair-postflight-evidence-attempt-${{ github.run_attempt }}
+          if-no-files-found: warn
+          retention-days: 90
+          path: |
+            dist/final/metadata/final-release.json
+            dist/final/metadata/final-state.json
+            dist/final/metadata/repair-plan.json
+            dist/final/release-assets.json
+            dist/final/result.txt

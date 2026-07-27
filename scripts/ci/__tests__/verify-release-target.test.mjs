@@ -66,22 +66,14 @@ function createReleaseFixture(t) {
     git(harnessRoot, ['config', 'commit.gpgsign', 'false'])
 
     for (const relativePath of CHECKPOINT_FILES) {
-      writeFixtureFile(
-        harnessRoot,
-        relativePath,
-        `parent:${relativePath}\n`
-      )
+      writeFixtureFile(harnessRoot, relativePath, `parent:${relativePath}\n`)
     }
     writeFixtureFile(
       harnessRoot,
       '.github/workflows/desktop-release.yml',
       'tag-control\n'
     )
-    writeFixtureFile(
-      harnessRoot,
-      'src-tauri/src/main.rs',
-      'product-source\n'
-    )
+    writeFixtureFile(harnessRoot, 'src-tauri/src/main.rs', 'product-source\n')
     writeFixtureFile(
       harnessRoot,
       'scripts/ci/qualification-impact.mjs',
@@ -145,13 +137,7 @@ if (
       'protected-main-control\n'
     )
     const trustedMain = commitFixture(harnessRoot, 'protected controls')
-    git(harnessRoot, [
-      'worktree',
-      'add',
-      '--detach',
-      targetRoot,
-      sourceCommit,
-    ])
+    git(harnessRoot, ['worktree', 'add', '--detach', targetRoot, sourceCommit])
 
     t.after(() => {
       try {
@@ -313,16 +299,13 @@ test('NUL-delimited diff parsing preserves status and rejects malformed data', (
       },
     ]
   )
-  assert.deepEqual(
-    parseNameStatus(Buffer.from('R100\0old.mjs\0new.mjs\0')),
-    [
-      {
-        path: 'old.mjs',
-        pathAfter: 'new.mjs',
-        status: 'R100',
-      },
-    ]
-  )
+  assert.deepEqual(parseNameStatus(Buffer.from('R100\0old.mjs\0new.mjs\0')), [
+    {
+      path: 'old.mjs',
+      pathAfter: 'new.mjs',
+      status: 'R100',
+    },
+  ])
   assert.throws(() => parseNameStatus(Buffer.from('M\0')))
   assert.throws(() => parseNameStatus(Buffer.from('R100\0old.mjs\0')))
 })
@@ -422,30 +405,63 @@ test('release drift accepts only exact checkpoint and reviewed control files', (
 })
 
 test('the control-plane drift policy is an exact path allowlist', () => {
-  assert.deepEqual([...REVIEWED_CONTROL_PLANE_DRIFT], [
-    ['.github/workflows/biyan-exact-sha-qualification.yml', 'M'],
-    ['.github/workflows/biyan-linter-and-test.yml', 'M'],
-    ['.github/workflows/desktop-release-recovery.yml', 'A'],
-    ['.github/workflows/desktop-release.yml', 'M'],
-    ['scripts/ci/__tests__/candidate-content-policy.test.mjs', 'M'],
-    ['scripts/ci/__tests__/extract-release-candidate-recovery.test.py', 'A'],
-    ['scripts/ci/__tests__/qualification-impact.test.mjs', 'M'],
-    ['scripts/ci/__tests__/release-policy.test.mjs', 'M'],
-    ['scripts/ci/__tests__/run-untrusted-qualification-verifier.test.mjs', 'A'],
-    ['scripts/ci/__tests__/verify-qualification-recovery.test.mjs', 'A'],
-    ['scripts/ci/__tests__/verify-release-candidate-recovery.test.mjs', 'A'],
-    ['scripts/ci/__tests__/verify-release-target.test.mjs', 'A'],
-    ['scripts/ci/extract-release-candidate-recovery.py', 'A'],
-    ['scripts/ci/legacy-compatibility-allowlist.json', 'M'],
-    ['scripts/ci/qualification-impact.mjs', 'M'],
-    ['scripts/ci/release-policy-contracts.mjs', 'M'],
-    ['scripts/ci/run-untrusted-qualification-verifier.sh', 'A'],
-    ['scripts/ci/verify-qualification-recovery.mjs', 'A'],
-    ['scripts/ci/verify-release-candidate-recovery.mjs', 'A'],
-    ['scripts/ci/verify-release-policy.mjs', 'M'],
-    ['scripts/ci/verify-release-target.mjs', 'A'],
-    ['scripts/ci/verify-windows-candidate.ps1', 'M'],
-  ])
+  assert.deepEqual(
+    [...REVIEWED_CONTROL_PLANE_DRIFT],
+    [
+      ['.github/workflows/biyan-exact-sha-qualification.yml', 'M'],
+      ['.github/workflows/biyan-linter-and-test.yml', 'M'],
+      ['.github/workflows/desktop-release-draft-repair.yml', 'A'],
+      ['.github/workflows/desktop-release-recovery.yml', 'A'],
+      ['.github/workflows/desktop-release.yml', 'M'],
+      ['.github/workflows/release-distribution.yml', 'M'],
+      ['docs/release-distribution.md', 'M'],
+      ['scripts/ci/__tests__/candidate-content-policy.test.mjs', 'M'],
+      ['scripts/ci/__tests__/extract-release-candidate-recovery.test.py', 'A'],
+      ['scripts/ci/__tests__/qualification-impact.test.mjs', 'M'],
+      ['scripts/ci/__tests__/release-policy.test.mjs', 'M'],
+      [
+        'scripts/ci/__tests__/run-untrusted-qualification-verifier.test.mjs',
+        'A',
+      ],
+      ['scripts/ci/__tests__/verify-qualification-recovery.test.mjs', 'A'],
+      ['scripts/ci/__tests__/verify-release-candidate-recovery.test.mjs', 'A'],
+      ['scripts/ci/__tests__/verify-release-target.test.mjs', 'A'],
+      ['scripts/ci/extract-release-candidate-recovery.py', 'A'],
+      ['scripts/ci/legacy-compatibility-allowlist.json', 'M'],
+      ['scripts/ci/qualification-impact.mjs', 'M'],
+      ['scripts/ci/release-policy-contracts.mjs', 'M'],
+      ['scripts/ci/run-untrusted-qualification-verifier.sh', 'A'],
+      ['scripts/ci/verify-qualification-recovery.mjs', 'A'],
+      ['scripts/ci/verify-release-candidate-recovery.mjs', 'A'],
+      ['scripts/ci/verify-release-policy.mjs', 'M'],
+      ['scripts/ci/verify-release-target.mjs', 'A'],
+      ['scripts/ci/verify-windows-candidate.ps1', 'M'],
+      [
+        'scripts/release-distribution/__tests__/bootstrap-biyan-download-aliases.test.mjs',
+        'A',
+      ],
+      [
+        'scripts/release-distribution/__tests__/draft-asset-repair-state.test.mjs',
+        'A',
+      ],
+      [
+        'scripts/release-distribution/biyan-download-alias-bootstrap-allowlist.json',
+        'A',
+      ],
+      [
+        'scripts/release-distribution/bootstrap-biyan-download-aliases.mjs',
+        'A',
+      ],
+      ['scripts/release-distribution/draft-asset-repair-state.mjs', 'A'],
+      ['scripts/release-distribution/publish-download-transaction.mjs', 'M'],
+      [
+        'scripts/updater/__tests__/verify-updater-asset-signature.test.mjs',
+        'A',
+      ],
+      ['scripts/updater/verify-candidate.mjs', 'M'],
+      ['scripts/updater/verify-updater-asset-signature.mjs', 'A'],
+    ]
+  )
 })
 
 test('release target composes source checkpoints with protected controls', (t) => {
@@ -541,11 +557,7 @@ test('release target rejects a merge commit as the release source', (t) => {
     'trusted after merge',
     { allowEmpty: true }
   )
-  git(fixture.targetRoot, [
-    'checkout',
-    '--detach',
-    fixture.sourceCommit,
-  ])
+  git(fixture.targetRoot, ['checkout', '--detach', fixture.sourceCommit])
 
   assert.throws(
     () => verifyReleaseTarget(fixture),
