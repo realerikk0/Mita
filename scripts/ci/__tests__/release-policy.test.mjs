@@ -2273,6 +2273,41 @@ test('one-time Draft repair isolates signing and release mutation authority', ()
       'top-level permissions',
     ],
     [
+      'snapshot loses Draft push access',
+      workflow.replace(
+        `  snapshot:
+    name: Snapshot exact mutable Draft
+    if: \${{ inputs.prepared_run_id == '' && inputs.prepared_run_attempt == '' }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    environment: release-distribution
+    permissions:
+      actions: read
+      contents: write`,
+        `  snapshot:
+    name: Snapshot exact mutable Draft
+    if: \${{ inputs.prepared_run_id == '' && inputs.prepared_run_attempt == '' }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    environment: release-distribution
+    permissions:
+      actions: read
+      contents: read`
+      ),
+      'snapshot must retain its exact release-distribution permission domain',
+    ],
+    [
+      'snapshot gains release mutation',
+      replaceDraftStep(
+        'Download and hash every old Draft asset by exact ID',
+        '          set -euo pipefail\n',
+        `          set -euo pipefail
+          gh api --method DELETE "repos/$GITHUB_REPOSITORY/releases/assets/490389038"
+`
+      ),
+      'snapshot must remain free of release mutation authority',
+    ],
+    [
       'current workflow authority collapsed into prepared head',
       workflow.replace(
         'current_workflow_sha: ${{ steps.repair-authority.outputs.current_workflow_sha }}',

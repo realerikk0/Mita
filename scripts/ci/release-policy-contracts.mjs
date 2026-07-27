@@ -68,7 +68,7 @@ const TRUSTED_RECOVERY_WORKFLOW_ALLOWLIST = new Set([
 ])
 
 const TRUSTED_DRAFT_REPAIR_WORKFLOW_SHA256 =
-  'ab8c1f9dbf22fd0079f8facb15ebf4c3baf7326365d06291d3ea7de549456e10'
+  'b10a7cc43b50e320cbfdecb6802354ff9b2b10971f61f168a9930c405fb737ff'
 
 const TRUSTED_DRAFT_REPAIR_STATE_HELPER_SHA256 =
   '70c7ebc91c2227e818b4843425ca234ef6a53b39bd3e9231cfd9fc3d5fc212f2'
@@ -2493,7 +2493,7 @@ export function validateDraftAssetRepairWorkflow(source, stateHelperSource) {
   const expectedJobPermissions = new Map([
     [
       'snapshot',
-      '    permissions:\n      actions: read\n      contents: read\n',
+      '    permissions:\n      actions: read\n      contents: write\n',
     ],
     [
       'prepare-sign',
@@ -2763,7 +2763,7 @@ export function validateDraftAssetRepairWorkflow(source, stateHelperSource) {
   }
   if (
     !snapshot?.includes('name: Snapshot exact mutable Draft') ||
-    !snapshot.includes('contents: read') ||
+    !snapshot.includes('contents: write') ||
     !snapshot.includes('releases/360025177') ||
     !snapshot.includes('releases/assets/$id') ||
     !snapshot.includes('compression-level: 0') ||
@@ -2795,6 +2795,16 @@ export function validateDraftAssetRepairWorkflow(source, stateHelperSource) {
   ) {
     failures.push(
       'Draft asset repair must snapshot exact old bytes and only re-sign/rebuild derivative metadata without rebuilding native packages'
+    )
+  }
+  if (
+    /(?:--method|-X)\s+(?:POST|PUT|PATCH|DELETE)\b/i.test(snapshot) ||
+    /\bgh\s+release\s+(?:create|delete|edit|upload)\b/i.test(snapshot) ||
+    /uploads\.github\.com/i.test(snapshot) ||
+    /\bmutation\s*\{/i.test(snapshot)
+  ) {
+    failures.push(
+      'Draft asset repair snapshot must remain free of release mutation authority'
     )
   }
   if (

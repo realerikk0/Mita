@@ -128,6 +128,12 @@ impact scope selected by protected-branch policy. If control-plane validation
 reveals a product blocker, stop qualification and wait for the audited product
 fix before cutting the single required replacement train.
 
+GitHub exposes Draft releases only to principals with push access. A workflow
+job that snapshots accepted Draft assets therefore needs `contents: write`
+even though every step in that job is read-only. Keep that authority isolated
+from signing secrets and release mutation steps, and lock the job's exact
+permissions and command envelope in release-policy tests.
+
 ## Promotion
 
 Use `.github/workflows/promote-desktop-update.yml` only after environment
