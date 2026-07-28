@@ -501,6 +501,15 @@ test('router deployment isolates its least-privilege Cloudflare credential', () 
     workflow,
     /\[ -n "\$CLOUDFLARE_API_TOKEN" \] && \[ -n "\$CLOUDFLARE_ACCOUNT_ID" \]/,
   )
+  assert.equal(workflow.match(/npx --yes wrangler@4\.114\.0/g)?.length, 5)
+  assert.doesNotMatch(workflow, /wrangler@4(?!\.114\.0)/)
+  assert.equal(
+    workflow.match(
+      /wrangler@4\.114\.0 deploy --no-x-provision \\\n\s+--config "\$WRANGLER_CONFIG"/g,
+    )?.length,
+    2,
+  )
+  assert.doesNotMatch(workflow, /wrangler@4\.114\.0 r2\b/)
 })
 
 test('router deployment fails closed unless unsigned and signed pre-A probes pass', () => {

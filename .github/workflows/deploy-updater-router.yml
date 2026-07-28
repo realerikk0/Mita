@@ -45,7 +45,8 @@ jobs:
           sed -e "s/__UPDATER_BUCKET__/$R2_BUCKET/" \
             scripts/updater/wrangler.toml > "$WRANGLER_CONFIG"
           test -f "$(dirname "$WRANGLER_CONFIG")/worker.mjs"
-          npx --yes wrangler@4 deploy --dry-run --config "$WRANGLER_CONFIG"
+          npx --yes wrangler@4.114.0 deploy --dry-run \
+            --config "$WRANGLER_CONFIG"
 
       - name: Deploy Worker and signing secret
         if: inputs.dry_run != true
@@ -62,12 +63,17 @@ jobs:
           [ -n "$BIYAN_SIGNING_KEY" ] && [ -n "$ROLLOUT_SALT" ]
           # A first deploy has no secrets yet and therefore fails closed with
           # 401/503. Existing Worker secrets are retained during redeploys.
-          npx --yes wrangler@4 deploy --config "$WRANGLER_CONFIG"
+          # The bucket already exists. Disable Wrangler's automatic resource
+          # provisioning so this least-privilege deploy never probes the R2
+          # management API.
+          npx --yes wrangler@4.114.0 deploy --no-x-provision \
+            --config "$WRANGLER_CONFIG"
           printf '%s' "$BIYAN_SIGNING_KEY" \
-            | npx --yes wrangler@4 secret put BIYAN_SIGNING_KEY --config "$WRANGLER_CONFIG"
+            | npx --yes wrangler@4.114.0 secret put BIYAN_SIGNING_KEY --config "$WRANGLER_CONFIG"
           printf '%s' "$ROLLOUT_SALT" \
-            | npx --yes wrangler@4 secret put ROLLOUT_SALT --config "$WRANGLER_CONFIG"
-          npx --yes wrangler@4 deploy --config "$WRANGLER_CONFIG"
+            | npx --yes wrangler@4.114.0 secret put ROLLOUT_SALT --config "$WRANGLER_CONFIG"
+          npx --yes wrangler@4.114.0 deploy --no-x-provision \
+            --config "$WRANGLER_CONFIG"
 
           VERIFY_DIR="dist/router-verification"
           ENDPOINT="https://updates.mita.so/biyan/v1/stable/windows/x86_64/0.6.633"
