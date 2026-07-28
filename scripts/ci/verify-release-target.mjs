@@ -17,9 +17,11 @@ export const REVIEWED_CONTROL_PLANE_DRIFT = Object.freeze(
   new Map([
     ['.github/workflows/biyan-exact-sha-qualification.yml', 'M'],
     ['.github/workflows/biyan-linter-and-test.yml', 'M'],
+    ['.github/workflows/deploy-updater-router.yml', 'M'],
     ['.github/workflows/desktop-release-draft-repair.yml', 'A'],
     ['.github/workflows/desktop-release-recovery.yml', 'A'],
     ['.github/workflows/desktop-release.yml', 'M'],
+    ['.github/workflows/promote-desktop-update.yml', 'M'],
     ['.github/workflows/release-distribution.yml', 'M'],
     ['docs/release-distribution.md', 'M'],
     ['scripts/ci/__tests__/candidate-content-policy.test.mjs', 'M'],
@@ -48,6 +50,7 @@ export const REVIEWED_CONTROL_PLANE_DRIFT = Object.freeze(
       'scripts/release-distribution/__tests__/draft-asset-repair-state.test.mjs',
       'A',
     ],
+    ['scripts/release-distribution/__tests__/release-distribution.test.mjs', 'M'],
     [
       'scripts/release-distribution/biyan-download-alias-bootstrap-allowlist.json',
       'A',
@@ -55,7 +58,12 @@ export const REVIEWED_CONTROL_PLANE_DRIFT = Object.freeze(
     ['scripts/release-distribution/bootstrap-biyan-download-aliases.mjs', 'A'],
     ['scripts/release-distribution/draft-asset-repair-state.mjs', 'A'],
     ['scripts/release-distribution/publish-download-transaction.mjs', 'M'],
+    ['scripts/updater/__tests__/promotion-transaction.test.mjs', 'M'],
+    ['scripts/updater/__tests__/updater.test.mjs', 'M'],
     ['scripts/updater/__tests__/verify-updater-asset-signature.test.mjs', 'A'],
+    ['scripts/updater/legacy-a-transition-policy.json', 'M'],
+    ['scripts/updater/promotion-transaction.mjs', 'M'],
+    ['scripts/updater/run-promotion-transaction.sh', 'M'],
     ['scripts/updater/verify-candidate.mjs', 'M'],
     ['scripts/updater/verify-updater-asset-signature.mjs', 'A'],
   ])
