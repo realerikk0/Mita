@@ -20,6 +20,10 @@ const smokeScenarios = {
   RECOVERY: ['source-to-recovery'],
 }
 
+function readText(file) {
+  return fs.readFileSync(file, 'utf8').replace(/\r\n?/g, '\n')
+}
+
 function promote(options, evidenceOverrides = {}) {
   const migrationPhase = options.candidate.migrationPhase
     ?? (options.phase === 'RECOVERY' ? 'C' : options.phase)
@@ -100,6 +104,39 @@ function bucket(entries) {
   }
 }
 
+test('text fixtures are equivalent with LF and CRLF checkouts', () => {
+  const root = fs.mkdtempSync(
+    path.join(os.tmpdir(), 'biyan-updater-newlines-')
+  )
+  try {
+    const lf = `jobs:
+  deploy:
+    if: github.event_name == 'workflow_dispatch'
+      npx --yes wrangler@4.114.0 deploy --no-x-provision \\
+        --config "$WRANGLER_CONFIG"
+`
+    const lfFile = path.join(root, 'lf.yml')
+    const crlfFile = path.join(root, 'crlf.yml')
+    fs.writeFileSync(lfFile, lf)
+    fs.writeFileSync(crlfFile, lf.replace(/\n/g, '\r\n'))
+
+    const lfText = readText(lfFile)
+    const crlfText = readText(crlfFile)
+    assert.equal(crlfText, lfText)
+    assert.doesNotMatch(crlfText, /\r/)
+    assert.match(crlfText, /jobs:\n  deploy:\n/)
+    const commands = (source) =>
+      source
+        .replace(/\\\n\s+/g, ' ')
+        .split('\n')
+        .filter((line) => line.includes('npx --yes wrangler@'))
+    assert.deepEqual(commands(crlfText), commands(lfText))
+    assert.equal(commands(crlfText).length, 1)
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true })
+  }
+})
+
 test('candidate builder emits Biyan-only immutable assets and canonical manifest', () => {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'biyan-updater-'))
   const source = path.join(root, 'source')
@@ -132,7 +169,7 @@ test('candidate builder emits Biyan-only immutable assets and canonical manifest
     Object.keys(candidate.distributionAssets).sort(),
     ['linuxAppImage', 'linuxDeb', 'macosDmg', 'windowsExe', 'windowsMsi'],
   )
-  assert.match(fs.readFileSync(path.join(output, 'latest.json'), 'utf8'), /Biyan_0\.6\.637/)
+  assert.match(readText(path.join(output, 'latest.json')), /Biyan_0\.6\.637/)
 
   const wrongAssetOrigin = structuredClone(candidate)
   wrongAssetOrigin.assets[0].url =
@@ -569,9 +606,8 @@ test('worker never admits a pre-A client through the dynamic route', async () =>
 
 test('router deployment keeps the rendered config beside its worker entrypoint', () => {
   const repoRoot = path.resolve(import.meta.dirname, '../../..')
-  const workflow = fs.readFileSync(
-    path.join(repoRoot, '.github/workflows/deploy-updater-router.yml'),
-    'utf8',
+  const workflow = readText(
+    path.join(repoRoot, '.github/workflows/deploy-updater-router.yml')
   )
   assert.match(
     workflow,
@@ -591,9 +627,8 @@ test('router deployment keeps the rendered config beside its worker entrypoint',
 
 test('router deployment exposes release secrets only from exact live mita-main', () => {
   const repoRoot = path.resolve(import.meta.dirname, '../../..')
-  const workflow = fs.readFileSync(
-    path.join(repoRoot, '.github/workflows/deploy-updater-router.yml'),
-    'utf8',
+  const workflow = readText(
+    path.join(repoRoot, '.github/workflows/deploy-updater-router.yml')
   )
   assert.match(
     workflow,
@@ -640,9 +675,8 @@ test('router deployment exposes release secrets only from exact live mita-main',
 
 test('router deployment isolates its least-privilege Cloudflare credential', () => {
   const repoRoot = path.resolve(import.meta.dirname, '../../..')
-  const workflow = fs.readFileSync(
-    path.join(repoRoot, '.github/workflows/deploy-updater-router.yml'),
-    'utf8',
+  const workflow = readText(
+    path.join(repoRoot, '.github/workflows/deploy-updater-router.yml')
   )
   assert.match(
     workflow,
@@ -675,9 +709,8 @@ test('router deployment isolates its least-privilege Cloudflare credential', () 
 
 test('router deployment fails closed unless unsigned and signed pre-A probes pass', () => {
   const repoRoot = path.resolve(import.meta.dirname, '../../..')
-  const workflow = fs.readFileSync(
-    path.join(repoRoot, '.github/workflows/deploy-updater-router.yml'),
-    'utf8',
+  const workflow = readText(
+    path.join(repoRoot, '.github/workflows/deploy-updater-router.yml')
   )
   assert.match(
     workflow,
