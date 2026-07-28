@@ -27,6 +27,41 @@ const sha = (character) => character.repeat(64)
 const sourceCommit = 'a'.repeat(40)
 const repoRoot = path.resolve(import.meta.dirname, '../../..')
 
+function readText(file) {
+  return fs.readFileSync(file, 'utf8').replace(/\r\n?/g, '\n')
+}
+
+function pathForBash(nativePath) {
+  if (process.platform !== 'win32') return nativePath
+  const converted = spawnSync(
+    'bash',
+    ['-c', 'cygpath -u "$1"', 'bash', nativePath],
+    { encoding: 'utf8' }
+  )
+  assert.equal(
+    converted.status,
+    0,
+    `could not convert Windows path for Git Bash: ${converted.stderr}`
+  )
+  const result = converted.stdout.trim()
+  assert.ok(result.startsWith('/') && !result.includes('\\'))
+  return result
+}
+
+function spawnBashWithPathPrefix(pathPrefix, args, options) {
+  return spawnSync(
+    'bash',
+    [
+      '-c',
+      'export PATH="$1:$PATH"; shift; exec bash "$@"',
+      'bash',
+      pathForBash(pathPrefix),
+      ...args,
+    ],
+    options
+  )
+}
+
 function shellFunction(source, name) {
   const start = source.indexOf(`${name}() {`)
   const end = source.indexOf('\n}\n', start)
@@ -630,16 +665,18 @@ printf '%s' "$FAKE_ROUTER_STATUS"
     fs.chmodSync(curl, 0o755)
 
     const mutations = path.join(temp, 'mutations.log')
-    const result = spawnSync(
-      'bash',
-      ['scripts/updater/run-promotion-transaction.sh', '--recover-terminal-only'],
+    const result = spawnBashWithPathPrefix(
+      fakeBin,
+      [
+        'scripts/updater/run-promotion-transaction.sh',
+        '--recover-terminal-only',
+      ],
       {
         cwd: temp,
         encoding: 'utf8',
         env: {
           ...process.env,
-          PATH: `${fakeBin}:${process.env.PATH}`,
-          REAL_NODE: process.execPath,
+          REAL_NODE: pathForBash(process.execPath),
           FAKE_CLOUD_CLI: cloudCli,
           FAKE_CLOUD_STORE: store,
           FAKE_MUTATIONS: mutations,
@@ -713,6 +750,44 @@ printf '%s' "$FAKE_ROUTER_STATUS"
     fs.rmSync(temp, { recursive: true, force: true })
   }
 }
+
+test('test harness normalizes checkout text and fake-bin paths for Bash', () => {
+  const temp = fs.mkdtempSync(
+    path.join(os.tmpdir(), 'biyan-test-portability-')
+  )
+  try {
+    const sourceFile = path.join(temp, 'runner.sh')
+    fs.writeFileSync(
+      sourceFile,
+      'portable_probe() {\r\n  printf portable\r\n}\r\n'
+    )
+    const source = readText(sourceFile)
+    assert.doesNotMatch(source, /\r/)
+    assert.match(shellFunction(source, 'portable_probe'), /\n}\n$/)
+
+    const fakeBin = path.join(temp, 'fake-bin')
+    fs.mkdirSync(fakeBin)
+    const probe = path.join(fakeBin, 'portable-probe')
+    fs.writeFileSync(
+      probe,
+      '#!/usr/bin/env bash\nprintf fake-bin-hit\n'
+    )
+    fs.chmodSync(probe, 0o755)
+
+    const bashPath = pathForBash(fakeBin)
+    assert.ok(bashPath.startsWith('/'))
+    assert.doesNotMatch(bashPath, /\\/)
+    const result = spawnBashWithPathPrefix(
+      fakeBin,
+      ['-c', 'portable-probe'],
+      { encoding: 'utf8', env: { ...process.env } }
+    )
+    assert.equal(result.status, 0, result.stderr)
+    assert.equal(result.stdout, 'fake-bin-hit')
+  } finally {
+    fs.rmSync(temp, { recursive: true, force: true })
+  }
+})
 
 test('journal schema binds the exact content-addressed next policy', () => {
   const prepared = journal()
@@ -1241,9 +1316,8 @@ test('initial A requires an exact reviewed approved-next manifest hash', () => {
 
 test('tracked initial A approval pins the accepted v0.6.643 manifest exactly', () => {
   const policy = JSON.parse(
-    fs.readFileSync(
-      path.join(repoRoot, 'scripts/updater/legacy-a-transition-policy.json'),
-      'utf8'
+    readText(
+      path.join(repoRoot, 'scripts/updater/legacy-a-transition-policy.json')
     )
   )
   assert.deepEqual(policy.approvedNext, {
@@ -1663,9 +1737,8 @@ ${block}
   }
 
   for (const runnerName of runnerNames) {
-    const source = fs.readFileSync(
-      path.join(repoRoot, 'scripts/updater', runnerName),
-      'utf8'
+    const source = readText(
+      path.join(repoRoot, 'scripts/updater', runnerName)
     )
     const functionStart = source.indexOf(
       'assert_aws_conditional_capabilities() {'
@@ -1712,9 +1785,8 @@ test('probe helpers preserve caller errexit mode', () => {
     'run-promotion-transaction.sh',
     'run-pause-transaction.sh',
   ]) {
-    const source = fs.readFileSync(
-      path.join(repoRoot, 'scripts/updater', runnerName),
-      'utf8'
+    const source = readText(
+      path.join(repoRoot, 'scripts/updater', runnerName)
     )
     const probe = shellFunction(source, 'probe_r2')
     const base = `
@@ -1760,9 +1832,8 @@ test('open-journal cleanup resumes when R2 is absent and OSS remains', () => {
     'run-promotion-transaction.sh',
     'run-pause-transaction.sh',
   ]) {
-    const source = fs.readFileSync(
-      path.join(repoRoot, 'scripts/updater', runnerName),
-      'utf8'
+    const source = readText(
+      path.join(repoRoot, 'scripts/updater', runnerName)
     )
     const cleanup = shellFunction(source, 'delete_open_journal')
     const result = spawnSync(
@@ -1837,9 +1908,8 @@ test "$(wc -l <"$tmp/oss-deletes.log" | tr -d ' ')" = 1
 })
 
 test('generated ledger cleanup skips an absent subset and deletes nothing on unknown', () => {
-  const automaticRunner = fs.readFileSync(
-    path.join(repoRoot, 'scripts/updater/run-promotion-transaction.sh'),
-    'utf8'
+  const automaticRunner = readText(
+    path.join(repoRoot, 'scripts/updater/run-promotion-transaction.sh')
   )
   const automaticClassifier = shellFunction(
     automaticRunner,
@@ -1978,9 +2048,8 @@ cat "$tmp/mutations.log"
 })
 
 test('promotion journal artifacts are create-only, read back, and CAS-deleted', () => {
-  const runner = fs.readFileSync(
-    path.join(repoRoot, 'scripts/updater/run-promotion-transaction.sh'),
-    'utf8'
+  const runner = readText(
+    path.join(repoRoot, 'scripts/updater/run-promotion-transaction.sh')
   )
   const persist = runner.slice(
     runner.indexOf('persist_journal() {'),
@@ -2027,9 +2096,8 @@ test('promotion journal artifacts are create-only, read back, and CAS-deleted', 
     'run-promotion-transaction.sh',
     'run-pause-transaction.sh',
   ]) {
-    const source = fs.readFileSync(
-      path.join(repoRoot, 'scripts/updater', runnerName),
-      'utf8'
+    const source = readText(
+      path.join(repoRoot, 'scripts/updater', runnerName)
     )
     const deleteFunction = source.slice(
       source.indexOf('delete_open_journal() {'),
@@ -2051,9 +2119,8 @@ test('promotion journal artifacts are create-only, read back, and CAS-deleted', 
 })
 
 test('mutable snapshots are backed up create-only and fully read back before writes', () => {
-  const runner = fs.readFileSync(
-    path.join(repoRoot, 'scripts/updater/run-promotion-transaction.sh'),
-    'utf8'
+  const runner = readText(
+    path.join(repoRoot, 'scripts/updater/run-promotion-transaction.sh')
   )
   const r2Start = runner.indexOf('publish_snapshot_backup_r2()')
   const ossStart = runner.indexOf('publish_snapshot_backup_oss()')
@@ -2091,9 +2158,8 @@ test('mutable snapshots are backed up create-only and fully read back before wri
 })
 
 test('legacy forward CAS and rollback preserve a classify-before-write boundary', () => {
-  const runner = fs.readFileSync(
-    path.join(repoRoot, 'scripts/updater/run-promotion-transaction.sh'),
-    'utf8'
+  const runner = readText(
+    path.join(repoRoot, 'scripts/updater/run-promotion-transaction.sh')
   )
 
   const forwardStart = runner.indexOf(
@@ -2232,9 +2298,8 @@ test('legacy forward CAS and rollback preserve a classify-before-write boundary'
 })
 
 test('pause runner proves Router state before mutation and after pause', () => {
-  const runner = fs.readFileSync(
-    path.join(repoRoot, 'scripts/updater/run-pause-transaction.sh'),
-    'utf8'
+  const runner = readText(
+    path.join(repoRoot, 'scripts/updater/run-pause-transaction.sh')
   )
   const preProbe = runner.indexOf('probe_router_state before')
   const preState = runner.indexOf(
@@ -2336,17 +2401,14 @@ test('pause runner proves Router state before mutation and after pause', () => {
 })
 
 test('promotion workflows carry the fail-closed transaction controls', () => {
-  const promotion = fs.readFileSync(
-    path.join(repoRoot, '.github/workflows/promote-desktop-update.yml'),
-    'utf8'
+  const promotion = readText(
+    path.join(repoRoot, '.github/workflows/promote-desktop-update.yml')
   )
-  const runner = fs.readFileSync(
-    path.join(repoRoot, 'scripts/updater/run-promotion-transaction.sh'),
-    'utf8'
+  const runner = readText(
+    path.join(repoRoot, 'scripts/updater/run-promotion-transaction.sh')
   )
-  const pauseRunner = fs.readFileSync(
-    path.join(repoRoot, 'scripts/updater/run-pause-transaction.sh'),
-    'utf8'
+  const pauseRunner = readText(
+    path.join(repoRoot, 'scripts/updater/run-pause-transaction.sh')
   )
   const promotionControl = `${promotion}\n${runner}`
   assert.match(promotion, /^  actions: read$/m)
@@ -2455,9 +2517,8 @@ test('promotion workflows carry the fail-closed transaction controls', () => {
     'updater-health-gate.yml',
     'updater-kill-switch.yml',
   ]) {
-    const source = fs.readFileSync(
-      path.join(repoRoot, '.github/workflows', writer),
-      'utf8'
+    const source = readText(
+      path.join(repoRoot, '.github/workflows', writer)
     )
     assert.match(source, new RegExp(OPEN_TRANSACTION_KEY.replaceAll('/', '\\/')))
     assert.match(source, /ref: mita-main/)
@@ -2480,19 +2541,15 @@ test('promotion workflows carry the fail-closed transaction controls', () => {
   assert.match(pauseRunner, /legacy-a-oss-acl/)
   assert.match(pauseRunner, /validate-readback/)
   assert.match(pauseRunner, /purge_legacy_caches/)
-  const health = fs.readFileSync(
-    path.join(repoRoot, '.github/workflows/updater-health-gate.yml'),
-    'utf8'
+  const health = readText(
+    path.join(repoRoot, '.github/workflows/updater-health-gate.yml')
   )
   assert.match(health, /validate-health-evidence-url/)
 })
 
 test('updater workflows expose production secrets only to required read or mutation steps', () => {
   const workflow = (name) =>
-    fs.readFileSync(
-      path.join(repoRoot, '.github/workflows', name),
-      'utf8'
-    )
+    readText(path.join(repoRoot, '.github/workflows', name))
   const jobEnvironment = (source) => {
     const match = source.match(
       /\n    environment: release-distribution\n    env:\n([\s\S]*?)\n    steps:/
