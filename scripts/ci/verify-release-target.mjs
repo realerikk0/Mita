@@ -15,6 +15,7 @@ export const CHECKPOINT_FILES = Object.freeze([
 
 export const REVIEWED_CONTROL_PLANE_DRIFT = Object.freeze(
   new Map([
+    ['.github/workflows/biyan-a-canary.yml', 'A'],
     ['.github/workflows/biyan-exact-sha-qualification.yml', 'M'],
     ['.github/workflows/biyan-linter-and-test.yml', 'M'],
     ['.github/workflows/deploy-updater-router.yml', 'M'],
@@ -23,6 +24,11 @@ export const REVIEWED_CONTROL_PLANE_DRIFT = Object.freeze(
     ['.github/workflows/desktop-release.yml', 'M'],
     ['.github/workflows/promote-desktop-update.yml', 'M'],
     ['.github/workflows/release-distribution.yml', 'M'],
+    ['.github/workflows/updater-health-gate.yml', 'M'],
+    ['.github/workflows/updater-kill-switch.yml', 'M'],
+    ['DEVELOPMENT_PLAN.md', 'M'],
+    ['autoqa/migration_runner.py', 'M'],
+    ['autoqa/tests/test_migration_runner.py', 'M'],
     ['docs/release-distribution.md', 'M'],
     ['scripts/ci/__tests__/candidate-content-policy.test.mjs', 'M'],
     ['scripts/ci/__tests__/extract-release-candidate-recovery.test.py', 'A'],
@@ -58,14 +64,24 @@ export const REVIEWED_CONTROL_PLANE_DRIFT = Object.freeze(
     ['scripts/release-distribution/bootstrap-biyan-download-aliases.mjs', 'A'],
     ['scripts/release-distribution/draft-asset-repair-state.mjs', 'A'],
     ['scripts/release-distribution/publish-download-transaction.mjs', 'M'],
+    ['scripts/updater/__tests__/a-canary-evidence.test.mjs', 'A'],
+    ['scripts/updater/__tests__/legacy-pause-transaction.test.mjs', 'A'],
     ['scripts/updater/__tests__/promotion-transaction.test.mjs', 'M'],
+    ['scripts/updater/__tests__/test_prepare_a_canary_inputs.py', 'A'],
     ['scripts/updater/__tests__/updater.test.mjs', 'M'],
     ['scripts/updater/__tests__/verify-updater-asset-signature.test.mjs', 'A'],
+    ['scripts/updater/a-canary-evidence.mjs', 'A'],
+    ['scripts/updater/a-canary-policy.json', 'A'],
     ['scripts/updater/legacy-a-transition-policy.json', 'M'],
+    ['scripts/updater/legacy-pause-transaction.mjs', 'A'],
+    ['scripts/updater/prepare-a-canary-inputs.py', 'A'],
+    ['scripts/updater/prepare-promotion.mjs', 'M'],
     ['scripts/updater/promotion-transaction.mjs', 'M'],
+    ['scripts/updater/run-pause-transaction.sh', 'A'],
     ['scripts/updater/run-promotion-transaction.sh', 'M'],
     ['scripts/updater/verify-candidate.mjs', 'M'],
     ['scripts/updater/verify-updater-asset-signature.mjs', 'A'],
+    ['scripts/updater/worker.mjs', 'M'],
   ])
 )
 
@@ -86,6 +102,11 @@ const CONTROL_PLANE_ROOTS = Object.freeze([
   'scripts/release-distribution/',
   'scripts/updater/',
 ])
+const EXACT_CONTROL_PLANE_PATHS = new Set([
+  'DEVELOPMENT_PLAN.md',
+  'autoqa/migration_runner.py',
+  'autoqa/tests/test_migration_runner.py',
+])
 
 function isExactControlPlanePath(relativePath) {
   if (
@@ -103,8 +124,12 @@ function isExactControlPlanePath(relativePath) {
   ) {
     return false
   }
-  return CONTROL_PLANE_ROOTS.some(
-    (root) => relativePath.startsWith(root) && relativePath.length > root.length
+  return (
+    EXACT_CONTROL_PLANE_PATHS.has(relativePath) ||
+    CONTROL_PLANE_ROOTS.some(
+      (root) =>
+        relativePath.startsWith(root) && relativePath.length > root.length
+    )
   )
 }
 

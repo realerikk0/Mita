@@ -35,7 +35,7 @@ on:
         required: false
         type: string
       smoke_run_id:
-        description: "Successful Biyan Upgrade Smoke workflow run ID"
+        description: "Successful A Canary finish run, or B/C Upgrade Smoke run ID"
         required: true
         type: string
       smoke_evidence_sha256:
@@ -63,19 +63,7 @@ jobs:
     timeout-minutes: 90
     environment: release-distribution
     env:
-      GH_TOKEN: ${{ github.token }}
-      AWS_ACCESS_KEY_ID: ${{ secrets.CLOUDFLARE_R2_ACCESS_KEY_ID }}
-      AWS_SECRET_ACCESS_KEY: ${{ secrets.CLOUDFLARE_R2_SECRET_ACCESS_KEY }}
       AWS_DEFAULT_REGION: auto
-      CLOUDFLARE_R2_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_R2_ACCOUNT_ID }}
-      CLOUDFLARE_R2_BUCKET: ${{ secrets.CLOUDFLARE_R2_BUCKET }}
-      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
-      CLOUDFLARE_ZONE_ID: ${{ secrets.CLOUDFLARE_ZONE_ID }}
-      ALIYUN_ACCESS_KEY_ID: ${{ secrets.ALIYUN_ACCESS_KEY_ID }}
-      ALIYUN_ACCESS_KEY_SECRET: ${{ secrets.ALIYUN_ACCESS_KEY_SECRET }}
-      OSS_ACCESS_KEY_ID: ${{ secrets.ALIYUN_ACCESS_KEY_ID }}
-      OSS_ACCESS_KEY_SECRET: ${{ secrets.ALIYUN_ACCESS_KEY_SECRET }}
-      ALIYUN_OSS_BUCKET: ${{ secrets.ALIYUN_OSS_BUCKET || vars.ALIYUN_OSS_BUCKET || 'mita-static' }}
       ALIYUN_OSS_ENDPOINT: ${{ vars.ALIYUN_OSS_ENDPOINT || 'oss-cn-hangzhou.aliyuncs.com' }}
       ALIYUN_REGION: ${{ vars.ALIYUN_REGION || 'cn-hangzhou' }}
       OSS_ENDPOINT: ${{ vars.ALIYUN_OSS_ENDPOINT || 'oss-cn-hangzhou.aliyuncs.com' }}
@@ -87,8 +75,6 @@ jobs:
       LEGACY_R2_URL: "https://updates.mita.so/mita/latest.json"
       POLICY_KEY: "biyan/updater/stable/policy.json"
       OPEN_TRANSACTION_KEY: "biyan/updater/transactions/open.json"
-      BIYAN_SIGNING_KEY: ${{ secrets.BIYAN_SIGNING_KEY }}
-      ROLLOUT_SALT: ${{ secrets.BIYAN_UPDATER_ROLLOUT_SALT }}
     steps:
       - name: Checkout trusted promotion tooling
         uses: actions/checkout@v4
@@ -112,6 +98,7 @@ jobs:
 
       - name: Download immutable published candidate
         env:
+          GH_TOKEN: ${{ github.token }}
           TAG: ${{ inputs.tag }}
         run: |
           set -euo pipefail
@@ -139,20 +126,31 @@ jobs:
             "$(jq -r .sourceCommit dist/candidate/candidate.json)" \
             refs/remotes/origin/mita-main
 
-      - name: Require successful upgrade smoke and health evidence
+      - name: Require successful phase-specific canary and health evidence
         env:
+          GH_TOKEN: ${{ github.token }}
           SMOKE_RUN_ID: ${{ inputs.smoke_run_id }}
           SMOKE_SHA256: ${{ inputs.smoke_evidence_sha256 }}
           HEALTH_SHA256: ${{ inputs.health_evidence_sha256 }}
+          PHASE: ${{ inputs.phase }}
         run: |
           set -euo pipefail
           [[ "$SMOKE_RUN_ID" =~ ^[0-9]+$ ]]
           gh run view "$SMOKE_RUN_ID" \
             --json conclusion,headSha,workflowName,url > dist/smoke-run.json
           test "$(jq -r .conclusion dist/smoke-run.json)" = "success"
-          test "$(jq -r .workflowName dist/smoke-run.json)" = "Biyan Upgrade Smoke"
-          test "$(jq -r .headSha dist/smoke-run.json)" = \
-            "$(jq -r .sourceCommit dist/candidate/candidate.json)"
+          if [ "$PHASE" = "A" ]; then
+            test "$(jq -r .workflowName dist/smoke-run.json)" = \
+              "Biyan A Canary"
+            git merge-base --is-ancestor \
+              "$(jq -r .headSha dist/smoke-run.json)" \
+              refs/remotes/origin/mita-main
+          else
+            test "$(jq -r .workflowName dist/smoke-run.json)" = \
+              "Biyan Upgrade Smoke"
+            test "$(jq -r .headSha dist/smoke-run.json)" = \
+              "$(jq -r .sourceCommit dist/candidate/candidate.json)"
+          fi
           mkdir -p dist/evidence
           gh run download "$SMOKE_RUN_ID" --name biyan-promotion-evidence --dir dist/evidence
           node scripts/updater/verify-promotion-evidence.mjs \
@@ -161,21 +159,40 @@ jobs:
             --health dist/evidence/rollout-health.json \
             --health-sha256 "$HEALTH_SHA256" \
             --output-dir dist/state
+          if [ "$PHASE" = "A" ]; then
+            jq -e \
+              --argjson run "$SMOKE_RUN_ID" \
+              --arg tag "$(jq -r .tag dist/candidate/candidate.json)" \
+              --arg commit "$(jq -r .sourceCommit dist/candidate/candidate.json)" '
+                .observationScope == "github-native-two-point-canary"
+                and .candidateTag == $tag
+                and .sourceCommit == $commit
+                and .platforms == ["windows", "macos", "linux"]
+                and .scenarios == ["current-to-a", "fresh-a"]
+                and .sampleSize == 6
+                and .attempts == 6
+                and .passedAttempts == 6
+                and .failedAttempts == 0
+                and .workflow.name == "Biyan A Canary"
+                and .workflow.path == ".github/workflows/biyan-a-canary.yml"
+                and .workflow.finishRunId == $run
+              ' dist/state/verified-smoke.json >/dev/null
+            jq -e \
+              --arg tag "$(jq -r .tag dist/candidate/candidate.json)" \
+              --arg commit "$(jq -r .sourceCommit dist/candidate/candidate.json)" '
+                .observationScope == "github-native-two-point-canary"
+                and .candidateTag == $tag
+                and .sourceCommit == $commit
+                and .sampleSize == 6
+                and .attempts == 6
+                and .passedAttempts == 6
+                and .failedAttempts == 0
+              ' dist/state/verified-health.json >/dev/null
+          fi
 
       - name: Install exact production store clients
         run: |
           set -euo pipefail
-          required=(
-            AWS_ACCESS_KEY_ID AWS_SECRET_ACCESS_KEY CLOUDFLARE_R2_ACCOUNT_ID
-            CLOUDFLARE_R2_BUCKET ALIYUN_ACCESS_KEY_ID ALIYUN_ACCESS_KEY_SECRET
-            ALIYUN_OSS_BUCKET ALIYUN_OSS_ENDPOINT ALIYUN_REGION
-          )
-          if [ "${{ inputs.dry_run }}" != "true" ]; then
-            required+=(CLOUDFLARE_API_TOKEN CLOUDFLARE_ZONE_ID BIYAN_SIGNING_KEY ROLLOUT_SALT)
-          fi
-          for name in "${required[@]}"; do
-            [ -n "${!name:-}" ] || { echo "Missing production setting: $name" >&2; exit 1; }
-          done
           mkdir -p dist/tools
           curl --proto '=https' --tlsv1.2 -fsSL \
             https://aliyuncli.alicdn.com/aliyun-cli-linux-3.3.22-amd64.tgz \
@@ -199,8 +216,34 @@ jobs:
           ossutil version | tee dist/tools/ossutil-version.txt
           grep -Eq '(^|[^0-9])2\.3\.0([^0-9]|$)' dist/tools/ossutil-version.txt
 
+      - name: Revalidate exact live main before release secrets
+        run: |
+          set -euo pipefail
+          test "$GITHUB_REF" = "refs/heads/mita-main"
+          git fetch --force --no-tags origin \
+            "+refs/heads/mita-main:refs/remotes/origin/mita-main"
+          test "$GITHUB_SHA" = "$(git rev-parse HEAD)"
+          test "$GITHUB_SHA" = \
+            "$(git rev-parse refs/remotes/origin/mita-main)"
+
       - name: Dry-run remote preflight and unfinished transaction gate
+        id: remote_preflight
         env:
+          AWS_ACCESS_KEY_ID: ${{ secrets.CLOUDFLARE_R2_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.CLOUDFLARE_R2_SECRET_ACCESS_KEY }}
+          CLOUDFLARE_R2_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_R2_ACCOUNT_ID }}
+          CLOUDFLARE_R2_BUCKET: ${{ secrets.CLOUDFLARE_R2_BUCKET }}
+          ALIYUN_ACCESS_KEY_ID: ${{ secrets.ALIYUN_ACCESS_KEY_ID }}
+          ALIYUN_ACCESS_KEY_SECRET: ${{ secrets.ALIYUN_ACCESS_KEY_SECRET }}
+          OSS_ACCESS_KEY_ID: ${{ secrets.ALIYUN_ACCESS_KEY_ID }}
+          OSS_ACCESS_KEY_SECRET: ${{ secrets.ALIYUN_ACCESS_KEY_SECRET }}
+          ALIYUN_OSS_BUCKET: ${{ secrets.ALIYUN_OSS_BUCKET || vars.ALIYUN_OSS_BUCKET || 'mita-static' }}
+          BIYAN_SIGNING_KEY: ${{ secrets.BIYAN_SIGNING_KEY }}
+          ROLLOUT_SALT: ${{ secrets.BIYAN_UPDATER_ROLLOUT_SALT }}
+          PHASE: ${{ inputs.phase }}
+          FROM_VERSION: ${{ inputs.from_version }}
+          EXPECTED_CURRENT: ${{ inputs.expected_current }}
+          ROLLOUT: ${{ inputs.rollout }}
           DRY_RUN: ${{ inputs.dry_run }}
         run: |
           set -euo pipefail
@@ -208,6 +251,11 @@ jobs:
           r2_endpoint="https://${CLOUDFLARE_R2_ACCOUNT_ID}.r2.cloudflarestorage.com"
           oss_endpoint="${ALIYUN_OSS_ENDPOINT#https://}"
           oss_endpoint="https://${oss_endpoint#http://}"
+
+          bash scripts/updater/run-promotion-transaction.sh \
+            --recover-terminal-only
+          echo "committed_same_request=$(jq -er .sameRequest \
+            dist/state/terminal-promotion-recovery.json)" >>"$GITHUB_OUTPUT"
 
           probe_r2() {
             local key="$1" name="$2" rc
@@ -294,7 +342,17 @@ jobs:
           fi
 
       - name: Build logical CAS proposal
+        if: steps.remote_preflight.outputs.committed_same_request != 'true'
         env:
+          AWS_ACCESS_KEY_ID: ${{ secrets.CLOUDFLARE_R2_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.CLOUDFLARE_R2_SECRET_ACCESS_KEY }}
+          CLOUDFLARE_R2_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_R2_ACCOUNT_ID }}
+          CLOUDFLARE_R2_BUCKET: ${{ secrets.CLOUDFLARE_R2_BUCKET }}
+          ALIYUN_ACCESS_KEY_ID: ${{ secrets.ALIYUN_ACCESS_KEY_ID }}
+          ALIYUN_ACCESS_KEY_SECRET: ${{ secrets.ALIYUN_ACCESS_KEY_SECRET }}
+          OSS_ACCESS_KEY_ID: ${{ secrets.ALIYUN_ACCESS_KEY_ID }}
+          OSS_ACCESS_KEY_SECRET: ${{ secrets.ALIYUN_ACCESS_KEY_SECRET }}
+          ALIYUN_OSS_BUCKET: ${{ secrets.ALIYUN_OSS_BUCKET || vars.ALIYUN_OSS_BUCKET || 'mita-static' }}
           PHASE: ${{ inputs.phase }}
           FROM_VERSION: ${{ inputs.from_version }}
           EXPECTED_CURRENT: ${{ inputs.expected_current }}
@@ -313,17 +371,44 @@ jobs:
             echo "Unclassified R2 policy state" >&2
             exit 1
           fi
-          node scripts/updater/prepare-promotion.mjs \
-            --candidate dist/candidate/candidate.json \
-            --policy dist/state/current-policy.json \
-            --phase "$PHASE" \
-            --from-version "$FROM_VERSION" \
-            --expected-current "$EXPECTED_CURRENT" \
-            --rollout "$ROLLOUT" \
-            --promoted-at "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
-            --smoke-evidence dist/state/verified-smoke.json \
-            --health-evidence dist/state/verified-health.json \
+          prepare_args=(
+            --candidate dist/candidate/candidate.json
+            --policy dist/state/current-policy.json
+            --phase "$PHASE"
+            --from-version "$FROM_VERSION"
+            --expected-current "$EXPECTED_CURRENT"
+            --rollout "$ROLLOUT"
+            --promoted-at "$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+            --smoke-evidence dist/state/verified-smoke.json
+            --health-evidence dist/state/verified-health.json
             --output dist/state/next-policy.json
+          )
+          if [ "$PHASE" = "A" ] \
+            && [ "$(jq -r '.legacyBridgeVersion // empty' dist/state/current-policy.json 2>/dev/null || true)" = "" ]; then
+            oss_endpoint="${ALIYUN_OSS_ENDPOINT#https://}"
+            oss_endpoint="https://${oss_endpoint#http://}"
+            ossutil cp "oss://${ALIYUN_OSS_BUCKET}/${LEGACY_ALIYUN_KEY}" \
+              dist/state/pre-a-legacy-oss.json --force \
+              --endpoint "$oss_endpoint" --region "$ALIYUN_REGION"
+            aws s3 cp "s3://${CLOUDFLARE_R2_BUCKET}/${LEGACY_R2_KEY}" \
+              dist/state/pre-a-legacy-r2.json --endpoint-url "$r2_endpoint"
+            cmp dist/state/pre-a-legacy-oss.json dist/state/pre-a-legacy-r2.json
+            node scripts/updater/legacy-manifest-policy.mjs \
+              --aliyun dist/state/pre-a-legacy-oss.json \
+              --r2 dist/state/pre-a-legacy-r2.json \
+              --evidence dist/state/pre-a-legacy-evidence.json
+            test "$(jq -er .expectedVersion \
+              dist/state/pre-a-legacy-evidence.json)" = "$EXPECTED_CURRENT"
+            node scripts/updater/legacy-pause-transaction.mjs create-fallback \
+              --version "$EXPECTED_CURRENT" \
+              --manifest-sha256 "$(sha256sum dist/state/pre-a-legacy-oss.json | cut -d' ' -f1)" \
+              --transaction-id "${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}" \
+              --output dist/state/legacy-pause-fallback.json
+            prepare_args+=(
+              --legacy-pause-fallback dist/state/legacy-pause-fallback.json
+            )
+          fi
+          node scripts/updater/prepare-promotion.mjs "${prepare_args[@]}"
           node scripts/updater/legacy-manifest-policy.mjs validate-promotion \
             --candidate dist/candidate/candidate.json \
             --manifest dist/candidate/latest.json \
@@ -347,8 +432,23 @@ jobs:
           cat dist/state/next-policy.json
 
       - name: Publish with rollback protection
-        if: inputs.dry_run != true
+        if: >-
+          inputs.dry_run != true &&
+          steps.remote_preflight.outputs.committed_same_request != 'true'
         env:
+          AWS_ACCESS_KEY_ID: ${{ secrets.CLOUDFLARE_R2_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.CLOUDFLARE_R2_SECRET_ACCESS_KEY }}
+          CLOUDFLARE_R2_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_R2_ACCOUNT_ID }}
+          CLOUDFLARE_R2_BUCKET: ${{ secrets.CLOUDFLARE_R2_BUCKET }}
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ZONE_ID: ${{ secrets.CLOUDFLARE_ZONE_ID }}
+          ALIYUN_ACCESS_KEY_ID: ${{ secrets.ALIYUN_ACCESS_KEY_ID }}
+          ALIYUN_ACCESS_KEY_SECRET: ${{ secrets.ALIYUN_ACCESS_KEY_SECRET }}
+          OSS_ACCESS_KEY_ID: ${{ secrets.ALIYUN_ACCESS_KEY_ID }}
+          OSS_ACCESS_KEY_SECRET: ${{ secrets.ALIYUN_ACCESS_KEY_SECRET }}
+          ALIYUN_OSS_BUCKET: ${{ secrets.ALIYUN_OSS_BUCKET || vars.ALIYUN_OSS_BUCKET || 'mita-static' }}
+          BIYAN_SIGNING_KEY: ${{ secrets.BIYAN_SIGNING_KEY }}
+          ROLLOUT_SALT: ${{ secrets.BIYAN_UPDATER_ROLLOUT_SALT }}
           PHASE: ${{ inputs.phase }}
           FROM_VERSION: ${{ inputs.from_version }}
           ROLLOUT: ${{ inputs.rollout }}
@@ -375,3 +475,7 @@ jobs:
             dist/state/RECOVERY_COMMANDS.sh
             dist/state/probes/*
             dist/state/snapshots/*
+            dist/state/ledger-cleanup/*
+            dist/state/terminal-recovery/*
+            dist/state/terminal-recovery/backups/*
+            dist/state/terminal-recovery/live/*

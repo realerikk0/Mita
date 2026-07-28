@@ -12,8 +12,14 @@ function json(body, status = 200) {
   })
 }
 
-function empty() {
-  return new Response(null, { status: 204, headers: { 'cache-control': 'no-store' } })
+function empty(state) {
+  return new Response(null, {
+    status: 204,
+    headers: {
+      'cache-control': 'no-store',
+      'x-biyan-updater-state': state,
+    },
+  })
 }
 
 function hex(bytes) {
@@ -99,17 +105,25 @@ export async function handleRequest(request, env) {
   }
 
   const policy = await readR2Json(env.UPDATER_BUCKET, env.POLICY_KEY ?? DEFAULT_POLICY_KEY)
-  if (!policy || policy.schema !== 1 || policy.channel !== 'stable' || policy.paused) return empty()
+  if (!policy || policy.schema !== 1 || policy.channel !== 'stable') {
+    return empty('policy-unavailable')
+  }
+  if (policy.paused) return empty('paused')
   const transition = policy.transitions?.[currentVersion]
-  if (!transition || !Number.isInteger(transition.rollout) || transition.rollout <= 0) return empty()
-  if (!isAllowedTransition(policy, currentVersion, transition)) return empty()
+  if (!transition) return empty('no-transition')
+  if (!Number.isInteger(transition.rollout) || transition.rollout <= 0) {
+    return empty('phase-closed')
+  }
+  if (!isAllowedTransition(policy, currentVersion, transition)) {
+    return empty('invalid-transition')
+  }
 
   const session = request.headers.get('x-client-session')
   const salt = env.ROLLOUT_SALT
   if (!salt) return json({ error: 'router_not_configured' }, 503)
   if (transition.rollout < 100) {
     const bucket = await rolloutBucket(salt, session, transition.to)
-    if (bucket >= transition.rollout * 100) return empty()
+    if (bucket >= transition.rollout * 100) return empty('outside-cohort')
   }
 
   const manifest = await readR2Json(env.UPDATER_BUCKET, transition.manifestKey)

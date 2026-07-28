@@ -22,12 +22,31 @@ concurrency:
 
 jobs:
   deploy:
+    if: github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/mita-main'
     runs-on: ubuntu-latest
     environment: release-distribution
     env:
       WRANGLER_CONFIG: scripts/updater/wrangler.generated.toml
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: mita-main
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Verify exact live mita-main source
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$GITHUB_EVENT_NAME" = "workflow_dispatch"
+          test "$GITHUB_REF" = "refs/heads/mita-main"
+          git fetch --no-tags --force origin \
+            "+refs/heads/mita-main:refs/remotes/origin/mita-main"
+          head_sha="$(git rev-parse --verify 'HEAD^{commit}')"
+          remote_sha="$(git rev-parse --verify 'refs/remotes/origin/mita-main^{commit}')"
+          test "$GITHUB_SHA" = "$head_sha"
+          test "$GITHUB_SHA" = "$remote_sha"
+          test "$head_sha" = "$remote_sha"
 
       - uses: actions/setup-node@v4
         with:
@@ -80,10 +99,11 @@ jobs:
           UNSIGNED_BODY="${RUNNER_TEMP:?}/biyan-updater-unsigned-body-${GITHUB_RUN_ID}.json"
           SIGNED_BODY="${RUNNER_TEMP:?}/biyan-updater-signed-body-${GITHUB_RUN_ID}"
           SIGNED_HEADERS="${RUNNER_TEMP:?}/biyan-updater-signed-headers-${GITHUB_RUN_ID}.json"
+          SIGNED_RESPONSE_HEADERS="${RUNNER_TEMP:?}/biyan-updater-signed-response-${GITHUB_RUN_ID}.headers"
           EVIDENCE_FILE="$VERIFY_DIR/evidence.json"
           umask 077
           mkdir -p "$VERIFY_DIR"
-          trap 'rm -f "$SIGNED_HEADERS" "$UNSIGNED_BODY" "$SIGNED_BODY"' EXIT
+          trap 'rm -f "$SIGNED_HEADERS" "$SIGNED_RESPONSE_HEADERS" "$UNSIGNED_BODY" "$SIGNED_BODY"' EXIT
 
           unsigned_status="000"
           for attempt in $(seq 1 24); do
@@ -104,6 +124,7 @@ jobs:
           jq -e '. == {"error":"unauthorized"}' "$UNSIGNED_BODY" >/dev/null
 
           signed_status="000"
+          signed_state=""
           for attempt in $(seq 1 24); do
             node scripts/updater/sign-request.mjs \
               --current-version 0.6.633 \
@@ -131,9 +152,19 @@ jobs:
             if signed_status="$(
               curl --silent --show-error --connect-timeout 10 --max-time 20 \
                 "${signed_headers[@]}" \
+                --dump-header "$SIGNED_RESPONSE_HEADERS" \
                 --output "$SIGNED_BODY" --write-out '%{http_code}' "$ENDPOINT"
             )"; then
-              if [ "$signed_status" = "204" ] && [ ! -s "$SIGNED_BODY" ]; then
+              signed_state="$(awk -F ': *' '
+                tolower($1) == "x-biyan-updater-state" {
+                  gsub(/\r/, "", $2)
+                  value = $2
+                }
+                END { print value }
+              ' "$SIGNED_RESPONSE_HEADERS")"
+              if [ "$signed_status" = "204" ] \
+                && [ "$signed_state" = "no-transition" ] \
+                && [ ! -s "$SIGNED_BODY" ]; then
                 break
               fi
             else
@@ -142,6 +173,7 @@ jobs:
             [ "$attempt" -eq 24 ] || sleep 5
           done
           test "$signed_status" = "204"
+          test "$signed_state" = "no-transition"
           test ! -s "$SIGNED_BODY"
 
           jq -n \
@@ -150,6 +182,7 @@ jobs:
             --arg sourceCommit "$GITHUB_SHA" \
             --arg unsignedStatus "$unsigned_status" \
             --arg signedPreAStatus "$signed_status" \
+            --arg signedPreAState "$signed_state" \
             --arg verifiedAt "$(date -u +'%Y-%m-%dT%H:%M:%SZ')" \
             '{
               schema: $schema,
@@ -157,12 +190,14 @@ jobs:
               sourceCommit: $sourceCommit,
               unsignedStatus: $unsignedStatus,
               signedPreAStatus: $signedPreAStatus,
+              signedPreAState: $signedPreAState,
               verifiedAt: $verifiedAt
             }' > "$EVIDENCE_FILE"
           jq -e --arg sourceCommit "$GITHUB_SHA" '
             (keys | sort) == [
               "endpoint",
               "schema",
+              "signedPreAState",
               "signedPreAStatus",
               "sourceCommit",
               "unsignedStatus",
@@ -172,8 +207,9 @@ jobs:
             and .sourceCommit == $sourceCommit
             and .unsignedStatus == "401"
             and .signedPreAStatus == "204"
+            and .signedPreAState == "no-transition"
           ' "$EVIDENCE_FILE" >/dev/null
-          rm -f "$SIGNED_HEADERS" "$UNSIGNED_BODY" "$SIGNED_BODY"
+          rm -f "$SIGNED_HEADERS" "$SIGNED_RESPONSE_HEADERS" "$UNSIGNED_BODY" "$SIGNED_BODY"
           trap - EXIT
 
       - name: Upload router deployment evidence

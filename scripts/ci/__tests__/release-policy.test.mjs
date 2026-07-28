@@ -10,6 +10,7 @@ import {
   findCandidatePathViolation,
 } from '../candidate-path-policy.mjs'
 import {
+  TRUSTED_SENSITIVE_UPDATER_WORKFLOW_CONTRACTS,
   validateBiyanDownloadAliasBootstrapWorkflow,
   validateBundledLegalResources,
   validateCandidateRecoveryWorkflow,
@@ -2879,6 +2880,15 @@ test(
 
 test('formal build, release, and updater jobs share the release-distribution environment', () => {
   const workflows = {
+    '.github/workflows/biyan-a-canary.yml': {
+      ...TRUSTED_SENSITIVE_UPDATER_WORKFLOW_CONTRACTS[
+        '.github/workflows/biyan-a-canary.yml'
+      ],
+      source: fs.readFileSync(
+        '.github/workflows/biyan-a-canary.yml',
+        'utf8'
+      ),
+    },
     '.github/workflows/release-distribution.yml': {
       jobNames: ['distribute', 'bootstrap-biyan-download-aliases'],
       source: fs.readFileSync(
@@ -2908,14 +2918,18 @@ test('formal build, release, and updater jobs share the release-distribution env
       ),
     },
     '.github/workflows/updater-health-gate.yml': {
-      jobName: 'evaluate',
+      ...TRUSTED_SENSITIVE_UPDATER_WORKFLOW_CONTRACTS[
+        '.github/workflows/updater-health-gate.yml'
+      ],
       source: fs.readFileSync(
         '.github/workflows/updater-health-gate.yml',
         'utf8'
       ),
     },
     '.github/workflows/updater-kill-switch.yml': {
-      jobName: 'update',
+      ...TRUSTED_SENSITIVE_UPDATER_WORKFLOW_CONTRACTS[
+        '.github/workflows/updater-kill-switch.yml'
+      ],
       source: fs.readFileSync(
         '.github/workflows/updater-kill-switch.yml',
         'utf8'
@@ -2951,6 +2965,108 @@ test('formal build, release, and updater jobs share the release-distribution env
     },
   }
   assert.deepEqual(validateReleaseEnvironmentWorkflows(workflows), [])
+
+  for (const [permission, access] of [
+    ['actions', 'write'],
+    ['contents', 'write'],
+  ]) {
+    const expandedCanaryPermissions = structuredClone(workflows)
+    expandedCanaryPermissions[
+      '.github/workflows/biyan-a-canary.yml'
+    ].source = expandedCanaryPermissions[
+      '.github/workflows/biyan-a-canary.yml'
+    ].source.replace(
+      `  ${permission}: read`,
+      `  ${permission}: ${access}`
+    )
+    assert.ok(
+      validateReleaseEnvironmentWorkflows(expandedCanaryPermissions).some(
+        (failure) =>
+          failure.includes('.github/workflows/biyan-a-canary.yml') &&
+          failure.includes('exact top-level permission domain')
+      )
+    )
+  }
+
+  const sensitiveWorkflowMutations = [
+    [
+      '.github/workflows/biyan-a-canary.yml',
+      (source) =>
+        `${source}\n  unreviewed-cloud-writer:\n    runs-on: ubuntu-24.04\n    environment: release-distribution\n    steps:\n      - run: echo unreviewed\n`,
+      'job allowlist',
+    ],
+    [
+      '.github/workflows/biyan-a-canary.yml',
+      (source) =>
+        source.replace(
+          'runs-on: ${{ matrix.runner }}',
+          'runs-on: ubuntu-24.04'
+        ),
+      'execution envelope',
+    ],
+    [
+      '.github/workflows/biyan-a-canary.yml',
+      (source) =>
+        source.replace(
+          'node scripts/updater/a-canary-evidence.mjs aggregate',
+          'echo skipped-a-canary-evidence-aggregate'
+        ),
+      'execution envelope',
+    ],
+    [
+      '.github/workflows/biyan-a-canary.yml',
+      (source) =>
+        source.replace(
+          'publish_r2 dist/evidence/upgrade-smoke.json "$smoke_key" smoke',
+          'echo skipped-r2-evidence-writer'
+        ),
+      'execution envelope',
+    ],
+    [
+      '.github/workflows/updater-health-gate.yml',
+      (source) =>
+        source.replace(
+          'run: bash scripts/updater/run-pause-transaction.sh',
+          'run: echo skipped-shared-pause-runner'
+        ),
+      'execution envelope',
+    ],
+    [
+      '.github/workflows/updater-kill-switch.yml',
+      (source) =>
+        source.replace(
+          'run: bash scripts/updater/run-pause-transaction.sh',
+          'run: echo skipped-shared-pause-runner'
+        ),
+      'execution envelope',
+    ],
+  ]
+  for (const [workflow, mutate, expectedFailure] of sensitiveWorkflowMutations) {
+    const mutation = structuredClone(workflows)
+    const original = mutation[workflow].source
+    mutation[workflow].source = mutate(original)
+    assert.notEqual(mutation[workflow].source, original)
+    assert.ok(
+      validateReleaseEnvironmentWorkflows(mutation).some((failure) =>
+        failure.includes(expectedFailure)
+      ),
+      workflow
+    )
+  }
+
+  const crlfSensitiveWorkflows = structuredClone(workflows)
+  for (const workflow of Object.keys(
+    TRUSTED_SENSITIVE_UPDATER_WORKFLOW_CONTRACTS
+  )) {
+    crlfSensitiveWorkflows[workflow].source = withLineEndings(
+      crlfSensitiveWorkflows[workflow].source,
+      '\r\n'
+    )
+  }
+  assert.deepEqual(
+    validateReleaseEnvironmentWorkflows(crlfSensitiveWorkflows),
+    []
+  )
 
   for (const invalidEnvironment of [
     'release-build',
@@ -3356,7 +3472,16 @@ jobs:
       - run: node --test scripts/ci/__tests__/verify-qualification-recovery.test.mjs
       - run: python3 scripts/ci/__tests__/extract-release-candidate-recovery.test.py
       - run: node --test scripts/ci/__tests__/verify-release-candidate-recovery.test.mjs
-      - run: node --test scripts/updater/__tests__/updater.test.mjs
+      - name: Test updater candidate, promotion, and routing contracts
+        run: |
+          node --test scripts/updater/__tests__/a-canary-evidence.test.mjs
+          node --test scripts/updater/__tests__/legacy-manifest-policy.test.mjs
+          node --test scripts/updater/__tests__/legacy-pause-transaction.test.mjs
+          node --test scripts/updater/__tests__/promotion-transaction.test.mjs
+          node --test scripts/updater/__tests__/updater.test.mjs
+          python3 -m unittest \\
+            autoqa/tests/test_migration_runner.py \\
+            scripts/updater/__tests__/test_prepare_a_canary_inputs.py
       - run: node --test scripts/release-distribution/__tests__/bootstrap-biyan-download-aliases.test.mjs
       - run: node --test scripts/release-distribution/__tests__/release-distribution.test.mjs
       - name: Exercise unprivileged qualification verifier boundary
@@ -3957,6 +4082,11 @@ jobs:
   }
 
   for (const command of [
+    'node --test scripts/updater/__tests__/a-canary-evidence.test.mjs',
+    'node --test scripts/updater/__tests__/legacy-manifest-policy.test.mjs',
+    'node --test scripts/updater/__tests__/legacy-pause-transaction.test.mjs',
+    'node --test scripts/updater/__tests__/promotion-transaction.test.mjs',
+    'node --test scripts/updater/__tests__/updater.test.mjs',
     'node --test scripts/ci/__tests__/qualification-impact.test.mjs',
     'node --test scripts/ci/__tests__/run-untrusted-qualification-verifier.test.mjs',
     'node --test scripts/ci/__tests__/verify-qualification-artifacts.test.mjs',
@@ -3975,6 +4105,29 @@ jobs:
       validateCiWorkflow(commentedContract).some((failure) =>
         failure.includes(`does not run: ${command}`)
       )
+    )
+    if (command.startsWith('node --test scripts/updater/')) {
+      const advisoryContract = workflow.replace(command, `${command} || true`)
+      assert.ok(
+        validateCiWorkflow(advisoryContract).some((failure) =>
+          failure.includes(`does not run: ${command}`)
+        )
+      )
+    }
+  }
+  for (const testPath of [
+    'autoqa/tests/test_migration_runner.py',
+    'scripts/updater/__tests__/test_prepare_a_canary_inputs.py',
+  ]) {
+    const missingPythonContract = workflow.replace(
+      testPath,
+      `${testPath}.disabled`
+    )
+    assert.ok(
+      validateCiWorkflow(missingPythonContract).some((failure) =>
+        failure.includes('exact Python updater contract tests')
+      ),
+      testPath
     )
   }
   for (const [index, helperMutation] of [
@@ -4215,7 +4368,15 @@ jobs:
           node --test scripts/ci/__tests__/release-policy.test.mjs
       - if: steps.classification.outputs.updater == 'true'
         working-directory: target
-        run: node --test scripts/updater/__tests__/updater.test.mjs
+        run: |
+          node --test scripts/updater/__tests__/a-canary-evidence.test.mjs
+          node --test scripts/updater/__tests__/legacy-manifest-policy.test.mjs
+          node --test scripts/updater/__tests__/legacy-pause-transaction.test.mjs
+          node --test scripts/updater/__tests__/promotion-transaction.test.mjs
+          node --test scripts/updater/__tests__/updater.test.mjs
+          python3 -m unittest \\
+            autoqa/tests/test_migration_runner.py \\
+            scripts/updater/__tests__/test_prepare_a_canary_inputs.py
       - working-directory: target
         run: |
           test_files=(
@@ -4495,6 +4656,38 @@ test('exact-SHA qualification keeps the harness trusted and has no production au
       'if true; then'
     ),
     qualificationWorkflow.replace('$bootstrap_full --format', '--format'),
+    qualificationWorkflow.replace(
+      'node --test scripts/updater/__tests__/a-canary-evidence.test.mjs',
+      'echo skipped-a-canary-contracts'
+    ),
+    qualificationWorkflow.replace(
+      'node --test scripts/updater/__tests__/a-canary-evidence.test.mjs',
+      'node --test scripts/updater/__tests__/a-canary-evidence.test.mjs || true'
+    ),
+    qualificationWorkflow.replace(
+      'node --test scripts/updater/__tests__/legacy-manifest-policy.test.mjs',
+      'echo skipped-legacy-manifest-contracts'
+    ),
+    qualificationWorkflow.replace(
+      'node --test scripts/updater/__tests__/legacy-pause-transaction.test.mjs',
+      'echo skipped-pause-contracts'
+    ),
+    qualificationWorkflow.replace(
+      'node --test scripts/updater/__tests__/promotion-transaction.test.mjs',
+      'echo skipped-promotion-contracts'
+    ),
+    qualificationWorkflow.replace(
+      'node --test scripts/updater/__tests__/updater.test.mjs',
+      'echo skipped-updater-contracts'
+    ),
+    qualificationWorkflow.replace(
+      'autoqa/tests/test_migration_runner.py',
+      'autoqa/tests/test_migration_runner.py.disabled'
+    ),
+    qualificationWorkflow.replace(
+      'scripts/updater/__tests__/test_prepare_a_canary_inputs.py',
+      'scripts/updater/__tests__/test_prepare_a_canary_inputs.py.disabled'
+    ),
     qualificationWorkflow.replace(
       'node harness/scripts/ci/verify-qualification-artifacts.mjs verify',
       'echo node harness/scripts/ci/verify-qualification-artifacts.mjs verify'

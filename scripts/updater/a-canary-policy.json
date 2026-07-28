@@ -1,0 +1,63 @@
+{
+  "schema": 1,
+  "workflow": {
+    "path": ".github/workflows/biyan-a-canary.yml",
+    "name": "Biyan A Canary",
+    "minimumHours": 48,
+    "harnessPaths": [
+      ".github/workflows/biyan-a-canary.yml",
+      "scripts/updater/a-canary-policy.json",
+      "scripts/updater/a-canary-evidence.mjs",
+      "scripts/updater/prepare-a-canary-inputs.py",
+      "autoqa/migration_runner.py"
+    ]
+  },
+  "current": {
+    "version": "0.6.633",
+    "tag": "v0.6.633",
+    "sourceCommit": "97d5f734b472f0b65e141614f047e405f1ba1c0b",
+    "manifestSha256": "142abddf03744562195404d0dd9ae92f53d8f74d20b2cef19b2db60aeb8ec350"
+  },
+  "candidate": {
+    "version": "0.6.643",
+    "tag": "v0.6.643",
+    "sourceCommit": "38e6d9290a8b9b0f152ff2a7eefb550e6ead7df5",
+    "manifestSha256": "a0ad7721c74aa6ec7817bb1b9626dbad05226e7871f21cebb4976921d100c9fa"
+  },
+  "platforms": {
+    "windows": {
+      "scenario": "current-to-a",
+      "currentAsset": {
+        "name": "Biyan_0.6.633_x64-setup.exe",
+        "sha256": "d7369543669a0f9ebd1b5503556cd177d3dcf2e74f7660e0625221d5c33c8c4a"
+      },
+      "candidateAsset": {
+        "name": "Biyan_0.6.643_x64-setup.exe",
+        "sha256": "a25d32b43028b90c4ed7ffd8c835106a925bcc72684dbd2b689d5e371fb123ee"
+      }
+    },
+    "macos": {
+      "scenario": "current-to-a",
+      "currentAsset": {
+        "name": "Biyan_0.6.633_universal.dmg",
+        "sha256": "ca6997370e64b7455acc247438f736ddc89b2f8708a417082190a14498a29511"
+      },
+      "candidateAsset": {
+        "name": "Biyan_0.6.643_universal.dmg",
+        "sha256": "c9abe462da067b15c9764a395f6b2b356e624cb714a5029cdcf165eb62c53268"
+      }
+    },
+    "linux": {
+      "scenario": "fresh-a",
+      "compatibilityException": {
+        "code": "no-production-current-linux-artifact",
+        "currentVersion": "0.6.633",
+        "currentManifestSha256": "142abddf03744562195404d0dd9ae92f53d8f74d20b2cef19b2db60aeb8ec350"
+      },
+      "candidateAsset": {
+        "name": "Biyan_0.6.643_amd64.AppImage",
+        "sha256": "803568bd4c04ba5f3cd7144b000f0d27ad8f4c63a7af9084a5762b679d047fe3"
+      }
+    }
+  }
+}

@@ -52,6 +52,7 @@ const CONTROL_CHARACTER_PATTERN = /[\u0000-\u001f\u007f]/
 const SELF_PATH = 'scripts/ci/qualification-impact.mjs'
 const ALLOWED_CHECKPOINT_TRANSITIONS = new Set(['C->A', 'A->B', 'B->C'])
 const UPDATER_WORKFLOW_NAMES = new Set([
+  'biyan-a-canary.yml',
   'biyan-upgrade-smoke.yml',
   'deploy-updater-router.yml',
   'promote-desktop-update.yml',
@@ -246,6 +247,8 @@ function isPolicyVerifierPath(file) {
 
 function isUpdaterDistributionPath(file) {
   return (
+    file === 'autoqa/migration_runner.py' ||
+    file === 'autoqa/tests/test_migration_runner.py' ||
     file.startsWith('scripts/updater/') ||
     file.startsWith('scripts/release-distribution/')
   )
@@ -273,6 +276,13 @@ function candidateVerifierImpact(file) {
 function workflowImpact(file) {
   if (!file.startsWith('.github/workflows/')) return null
   const name = file.slice('.github/workflows/'.length)
+  const normalizedName = name.toLowerCase().replace(/[^a-z0-9]/g, '')
+  if (
+    name !== 'biyan-a-canary.yml' &&
+    normalizedName.includes('biyanacanary')
+  ) {
+    return { kind: 'unknown' }
+  }
   if (FULL_QUALIFICATION_WORKFLOW_NAMES.has(name)) {
     return { kind: 'formal-release' }
   }

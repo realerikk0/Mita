@@ -134,6 +134,37 @@ even though every step in that job is read-only. Keep that authority isolated
 from signing secrets and release mutation steps, and lock the job's exact
 permissions and command envelope in release-policy tests.
 
+## GitHub-native A canary
+
+Run `.github/workflows/biyan-a-canary.yml` twice from protected `mita-main`.
+The `start` run executes one GitHub-hosted x86_64 attempt on each platform and
+uploads only GitHub Actions artifacts; it does not write updater policy,
+manifests, evidence, or any other object to either distribution cloud.
+Windows and macOS run the exact `current-to-a` upgrade. The accepted current
+release has no production Linux artifact, so Linux may run only the exact
+`fresh-a` compatibility exception recorded in
+`scripts/updater/a-canary-policy.json`; fabricating a Linux current installer
+or widening that exception fails closed.
+
+The later `finish` run repeats the same matrix and binds both points to their
+exact workflow runs, attempts, harness tree, reports, and Actions artifact API
+receipts. The observation starts at the latest `artifact.created_at` among the
+three start platform artifacts and completes at the latest
+`artifact.created_at` among the three finish platform artifacts. The interval
+must be at least 48 hours; workflow dispatch time, runner-local clocks, and
+operator-entered counters cannot shorten it. Only a valid finish aggregate may
+publish the content-addressed `upgrade-smoke.json` and
+`rollout-health.json` evidence objects. Those objects are immutable and must
+read back byte-identically from both distribution clouds. A start run never
+publishes them and cannot be used as promotion evidence.
+
+The canary accepts only already-published, non-prerelease GitHub releases and
+keeps `actions: read` plus `contents: read` as its exact token boundary. The
+canary, Health Gate, and Kill Switch retain an exact reviewed job set and
+whole-workflow execution-envelope digest in release-policy tests; changing a
+runner, cloud writer, shared pause runner, evidence command, permission,
+environment, or job requires an explicit CODEOWNER-reviewed contract update.
+
 ## Promotion
 
 Use `.github/workflows/promote-desktop-update.yml` only after environment
@@ -163,6 +194,17 @@ The two compatibility manifests are generated from one canonical byte stream,
 published together, and verified byte-identical with the same SHA-256. Existing
 updater and CDN paths remain compatibility infrastructure; product names,
 installer filenames, process names, and the CLI are Biyan-branded.
+
+The updater kill switch and automatic health gate use the same fail-closed
+pause transaction. They require the exact pre-A compatibility backups already
+persisted and authenticated by the initial A promotion, then pause the Router
+policy and replace both legacy origins with those bytes. Policy
+compare-and-swap, dual-cloud journals, byte readback, and CDN purge verification
+are one recovery boundary; an unknown or partially applied state leaves the
+journal open and blocks later promotion. Resuming does not merely clear
+`paused`: the transaction must first restore the active A compatibility
+manifest to both legacy origins and verify public readback. B or C promotion
+cannot bypass that recovery step.
 
 ## Rollout gates
 

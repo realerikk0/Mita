@@ -4,6 +4,7 @@ import fs from 'node:fs'
 import path from 'node:path'
 
 import {
+  TRUSTED_SENSITIVE_UPDATER_WORKFLOW_CONTRACTS,
   validateBiyanDownloadAliasBootstrapWorkflow,
   validateBundledLegalResources,
   validateCandidateRecoveryWorkflow,
@@ -196,6 +197,12 @@ for (const message of validateDraftAssetRepairWorkflow(
 }
 
 const releaseEnvironmentWorkflows = {
+  '.github/workflows/biyan-a-canary.yml': {
+    ...TRUSTED_SENSITIVE_UPDATER_WORKFLOW_CONTRACTS[
+      '.github/workflows/biyan-a-canary.yml'
+    ],
+    source: read('.github/workflows/biyan-a-canary.yml'),
+  },
   '.github/workflows/release-distribution.yml': {
     jobNames: ['distribute', 'bootstrap-biyan-download-aliases'],
     source: read('.github/workflows/release-distribution.yml'),
@@ -213,11 +220,15 @@ const releaseEnvironmentWorkflows = {
     source: read('.github/workflows/promote-desktop-update.yml'),
   },
   '.github/workflows/updater-health-gate.yml': {
-    jobName: 'evaluate',
+    ...TRUSTED_SENSITIVE_UPDATER_WORKFLOW_CONTRACTS[
+      '.github/workflows/updater-health-gate.yml'
+    ],
     source: read('.github/workflows/updater-health-gate.yml'),
   },
   '.github/workflows/updater-kill-switch.yml': {
-    jobName: 'update',
+    ...TRUSTED_SENSITIVE_UPDATER_WORKFLOW_CONTRACTS[
+      '.github/workflows/updater-kill-switch.yml'
+    ],
     source: read('.github/workflows/updater-kill-switch.yml'),
   },
   '.github/workflows/template-tauri-build-macos.yml': {

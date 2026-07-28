@@ -62,6 +62,16 @@ product fix is audited and the one required replacement train is cut.
   `scripts/updater/legacy-a-transition-policy.json`; this approval does not
   recut the product train.
 - Promotion is gated by health evidence, rollout timing, and a kill switch.
+- The A canary is a two-point GitHub-native matrix. Windows and macOS verify
+  current → A; the exact Linux compatibility exception permits only fresh A
+  because the accepted current release has no production Linux artifact.
+  Start writes only GitHub Actions artifacts. Finish must prove at least 48
+  hours between the latest start and finish `artifact.created_at` receipts
+  before immutable dual-cloud smoke and health evidence may be published.
+- Kill Switch and Health Gate pause the Router and restore both legacy updater
+  origins from the exact persisted pre-A backup in one journaled transaction.
+  Promotion may resume only after the active A compatibility manifest is
+  restored and read back; B or C cannot bypass that recovery step.
 - User-owned retired data is deleted only after explicit confirmation.
 
 ## Phase C source closure

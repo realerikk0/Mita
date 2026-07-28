@@ -26,22 +26,23 @@ concurrency:
 
 jobs:
   update:
+    name: Atomically pause Router and legacy updater origins
     if: github.ref == 'refs/heads/mita-main'
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
+    timeout-minutes: 90
     environment: release-distribution
     env:
-      AWS_ACCESS_KEY_ID: ${{ secrets.CLOUDFLARE_R2_ACCESS_KEY_ID }}
-      AWS_SECRET_ACCESS_KEY: ${{ secrets.CLOUDFLARE_R2_SECRET_ACCESS_KEY }}
       AWS_DEFAULT_REGION: auto
-      R2_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_R2_ACCOUNT_ID }}
-      R2_BUCKET: ${{ secrets.CLOUDFLARE_R2_BUCKET }}
-      OSS_ACCESS_KEY_ID: ${{ secrets.ALIYUN_ACCESS_KEY_ID }}
-      OSS_ACCESS_KEY_SECRET: ${{ secrets.ALIYUN_ACCESS_KEY_SECRET }}
-      ALIYUN_OSS_BUCKET: ${{ secrets.ALIYUN_OSS_BUCKET || vars.ALIYUN_OSS_BUCKET || 'mita-static' }}
       ALIYUN_OSS_ENDPOINT: ${{ vars.ALIYUN_OSS_ENDPOINT || 'oss-cn-hangzhou.aliyuncs.com' }}
       ALIYUN_REGION: ${{ vars.ALIYUN_REGION || 'cn-hangzhou' }}
       POLICY_KEY: biyan/updater/stable/policy.json
       OPEN_TRANSACTION_KEY: biyan/updater/transactions/open.json
+      DYNAMIC_UPDATER_BASE_URL: https://updates.mita.so/biyan/v1/stable
+      LEGACY_ALIYUN_KEY: mita/latest.json
+      LEGACY_R2_KEY: mita/latest.json
+      LEGACY_ALIYUN_URL: https://static.mitapp.cn/mita/latest.json
+      LEGACY_R2_URL: https://updates.mita.so/mita/latest.json
+      EXPECTED_CURRENT: ${{ inputs.expected_current }}
     steps:
       - name: Check out trusted policy writer
         uses: actions/checkout@v4
@@ -50,29 +51,34 @@ jobs:
           fetch-depth: 0
           persist-credentials: false
 
-      - name: Verify exact live trusted control plane
+      - name: Verify exact live trusted control plane and operator intent
+        env:
+          STATE: ${{ inputs.state }}
+          CONFIRMATION: ${{ inputs.confirmation }}
         run: |
           set -euo pipefail
+          test "$STATE" = paused
+          test "$CONFIRMATION" = APPLY
           git fetch --force --no-tags origin \
             "+refs/heads/mita-main:refs/remotes/origin/mita-main"
           test "$(git rev-parse HEAD)" = \
             "$(git rev-parse refs/remotes/origin/mita-main)"
 
-      - name: Install exact OSS journal client
+      - name: Install pinned production store and CDN clients
         run: |
           set -euo pipefail
-          required=(
-            AWS_ACCESS_KEY_ID AWS_SECRET_ACCESS_KEY R2_ACCOUNT_ID R2_BUCKET
-            OSS_ACCESS_KEY_ID OSS_ACCESS_KEY_SECRET ALIYUN_OSS_BUCKET
-            ALIYUN_OSS_ENDPOINT ALIYUN_REGION
-          )
-          for name in "${required[@]}"; do
-            test -n "${!name:-}" || {
-              echo "Missing release-distribution setting: $name" >&2
-              exit 1
-            }
-          done
           mkdir -p dist/tools
+          curl --proto '=https' --tlsv1.2 -fsSL \
+            https://aliyuncli.alicdn.com/aliyun-cli-linux-3.3.22-amd64.tgz \
+            -o dist/tools/aliyun-cli.tgz
+          echo "41a67dfd2f44c00eb628d9f91fa7c4807222de54ebe44fac3477fb9c70b3b0bc  dist/tools/aliyun-cli.tgz" \
+            | sha256sum --check -
+          tar -xzf dist/tools/aliyun-cli.tgz -C dist/tools
+          sudo install -m 0755 dist/tools/aliyun /usr/local/bin/aliyun
+          aliyun version | tee dist/tools/aliyun-version.txt
+          grep -Eq '(^|[^0-9])3\.3\.22([^0-9]|$)' \
+            dist/tools/aliyun-version.txt
+
           curl --proto '=https' --tlsv1.2 -fsSL \
             https://gosspublic.alicdn.com/ossutil/v2/2.3.0/ossutil-2.3.0-linux-amd64.zip \
             -o dist/tools/ossutil.zip
@@ -86,112 +92,29 @@ jobs:
           grep -Eq '(^|[^0-9])2\.3\.0([^0-9]|$)' \
             dist/tools/ossutil-version.txt
 
-      - name: Refuse an unfinished dual-cloud promotion transaction
-        run: |
-          set -euo pipefail
-          mkdir -p dist/journal-gate
-          endpoint="https://${R2_ACCOUNT_ID}.r2.cloudflarestorage.com"
-          oss_endpoint="${ALIYUN_OSS_ENDPOINT#https://}"
-          oss_endpoint="https://${oss_endpoint#http://}"
-          set +e
-          aws s3api head-object --bucket "$R2_BUCKET" --key "$OPEN_TRANSACTION_KEY" \
-            --endpoint-url "$endpoint" \
-            >dist/journal-gate/probe.stdout 2>dist/journal-gate/probe.stderr
-          rc=$?
-          set -e
-          node scripts/updater/promotion-transaction.mjs classify-probe \
-            --provider r2 --key "$OPEN_TRANSACTION_KEY" --exit-code "$rc" \
-            --stdout dist/journal-gate/probe.stdout \
-            --stderr dist/journal-gate/probe.stderr \
-            --output dist/journal-gate/probe.json
-          jq -e '.state == "absent"' dist/journal-gate/probe.json >/dev/null
-          set +e
-          ossutil api head-object --bucket "$ALIYUN_OSS_BUCKET" \
-            --key "$OPEN_TRANSACTION_KEY" --endpoint "$oss_endpoint" \
-            --region "$ALIYUN_REGION" --output-format json \
-            >dist/journal-gate/probe-oss.stdout \
-            2>dist/journal-gate/probe-oss.stderr
-          rc=$?
-          set -e
-          node scripts/updater/promotion-transaction.mjs classify-probe \
-            --provider oss --key "$OPEN_TRANSACTION_KEY" --exit-code "$rc" \
-            --stdout dist/journal-gate/probe-oss.stdout \
-            --stderr dist/journal-gate/probe-oss.stderr \
-            --output dist/journal-gate/probe-oss.json
-          jq -e '.state == "absent"' \
-            dist/journal-gate/probe-oss.json >/dev/null
-
-      - name: Apply fail-closed policy state
+      - name: Apply fail-closed dual-cloud pause transaction
         env:
-          EXPECTED_CURRENT: ${{ inputs.expected_current }}
-          STATE: ${{ inputs.state }}
-          CONFIRMATION: ${{ inputs.confirmation }}
-        run: |
-          set -euo pipefail
-          test "$CONFIRMATION" = "APPLY"
-          git fetch --force --no-tags origin \
-            "+refs/heads/mita-main:refs/remotes/origin/mita-main"
-          test "$(git rev-parse HEAD)" = \
-            "$(git rev-parse refs/remotes/origin/mita-main)"
-          endpoint="https://${R2_ACCOUNT_ID}.r2.cloudflarestorage.com"
-          oss_endpoint="${ALIYUN_OSS_ENDPOINT#https://}"
-          oss_endpoint="https://${oss_endpoint#http://}"
-          mkdir -p dist
-          mkdir -p dist/live-journal-recheck
-          set +e
-          aws s3api head-object --bucket "$R2_BUCKET" \
-            --key "$OPEN_TRANSACTION_KEY" --endpoint-url "$endpoint" \
-            >dist/live-journal-recheck/r2.stdout \
-            2>dist/live-journal-recheck/r2.stderr
-          r2_rc=$?
-          ossutil api head-object --bucket "$ALIYUN_OSS_BUCKET" \
-            --key "$OPEN_TRANSACTION_KEY" --endpoint "$oss_endpoint" \
-            --region "$ALIYUN_REGION" --output-format json \
-            >dist/live-journal-recheck/oss.stdout \
-            2>dist/live-journal-recheck/oss.stderr
-          oss_rc=$?
-          set -e
-          node scripts/updater/promotion-transaction.mjs classify-probe \
-            --provider r2 --key "$OPEN_TRANSACTION_KEY" --exit-code "$r2_rc" \
-            --stdout dist/live-journal-recheck/r2.stdout \
-            --stderr dist/live-journal-recheck/r2.stderr \
-            --output dist/live-journal-recheck/r2.json
-          node scripts/updater/promotion-transaction.mjs classify-probe \
-            --provider oss --key "$OPEN_TRANSACTION_KEY" --exit-code "$oss_rc" \
-            --stdout dist/live-journal-recheck/oss.stdout \
-            --stderr dist/live-journal-recheck/oss.stderr \
-            --output dist/live-journal-recheck/oss.json
-          jq -e '.state == "absent"' dist/live-journal-recheck/r2.json >/dev/null
-          jq -e '.state == "absent"' dist/live-journal-recheck/oss.json >/dev/null
-          aws s3api get-object --bucket "$R2_BUCKET" --key "$POLICY_KEY" \
-            --endpoint-url "$endpoint" dist/policy-before.json \
-            > dist/policy-before-metadata.json
-          policy_etag="$(node scripts/updater/promotion-transaction.mjs \
-            extract-r2-etag --metadata dist/policy-before-metadata.json)"
-          node scripts/updater/set-policy-state.mjs \
-            dist/policy-before.json dist/policy-after.json "$EXPECTED_CURRENT" "$STATE"
-          snapshot="biyan/updater/backups/$(date -u +%Y%m%dT%H%M%SZ)-kill-switch-${GITHUB_RUN_ID}.json"
-          aws s3api put-object --bucket "$R2_BUCKET" --key "$snapshot" \
-            --body dist/policy-before.json --content-type application/json \
-            --if-none-match '*' --endpoint-url "$endpoint" \
-            > dist/snapshot-put-result.json
-          aws s3api put-object --bucket "$R2_BUCKET" --key "$POLICY_KEY" \
-            --body dist/policy-after.json --content-type application/json \
-            --cache-control no-store --if-match "$policy_etag" \
-            --endpoint-url "$endpoint" > dist/policy-put-result.json
-          written_etag="$(node scripts/updater/promotion-transaction.mjs \
-            extract-r2-etag --metadata dist/policy-put-result.json)"
-          aws s3api get-object --bucket "$R2_BUCKET" --key "$POLICY_KEY" \
-            --endpoint-url "$endpoint" dist/policy-verified.json \
-            > dist/policy-verified-metadata.json
-          cmp dist/policy-after.json dist/policy-verified.json
-          test "$(node scripts/updater/promotion-transaction.mjs \
-            extract-r2-etag --metadata dist/policy-verified-metadata.json)" \
-            = "$written_etag"
+          AWS_ACCESS_KEY_ID: ${{ secrets.CLOUDFLARE_R2_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.CLOUDFLARE_R2_SECRET_ACCESS_KEY }}
+          CLOUDFLARE_R2_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_R2_ACCOUNT_ID }}
+          CLOUDFLARE_R2_BUCKET: ${{ secrets.CLOUDFLARE_R2_BUCKET }}
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ZONE_ID: ${{ secrets.CLOUDFLARE_ZONE_ID }}
+          ALIYUN_ACCESS_KEY_ID: ${{ secrets.ALIYUN_ACCESS_KEY_ID }}
+          ALIYUN_ACCESS_KEY_SECRET: ${{ secrets.ALIYUN_ACCESS_KEY_SECRET }}
+          OSS_ACCESS_KEY_ID: ${{ secrets.ALIYUN_ACCESS_KEY_ID }}
+          OSS_ACCESS_KEY_SECRET: ${{ secrets.ALIYUN_ACCESS_KEY_SECRET }}
+          ALIYUN_OSS_BUCKET: ${{ secrets.ALIYUN_OSS_BUCKET || vars.ALIYUN_OSS_BUCKET || 'mita-static' }}
+          BIYAN_SIGNING_KEY: ${{ secrets.BIYAN_SIGNING_KEY }}
+        run: bash scripts/updater/run-pause-transaction.sh
 
-      - name: Upload kill-switch evidence
+      - name: Upload kill-switch transaction evidence
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: updater-kill-switch-${{ github.run_id }}
-          path: dist/*.json
+          name: updater-kill-switch-${{ github.run_id }}-${{ github.run_attempt }}
+          path: |
+            dist/pause/
+            dist/tools/*-version.txt
+          if-no-files-found: error
+          retention-days: 30

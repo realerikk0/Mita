@@ -62,8 +62,27 @@ def migration_matrix() -> Tuple[MigrationCase, ...]:
         MigrationCase("current-to-c", "current", ("current", "c"), "c"),
         MigrationCase("a-to-c", "a", ("a", "c"), "c"),
         MigrationCase("b-to-c", "b", ("b", "c"), "c"),
+        MigrationCase("fresh-a", "fresh", ("a",), "a"),
         MigrationCase("fresh-c", "fresh", ("c",), "c"),
     )
+
+
+def select_migration_cases(scenarios: Sequence[str] | None = None) -> Tuple[MigrationCase, ...]:
+    matrix = migration_matrix()
+    if not scenarios:
+        return matrix
+
+    cases_by_name = {case.name: case for case in matrix}
+    unknown = [name for name in scenarios if name not in cases_by_name]
+    if unknown:
+        raise ValueError(f"unknown migration scenario: {unknown[0]}")
+
+    seen = set()
+    for name in scenarios:
+        if name in seen:
+            raise ValueError(f"duplicate migration scenario: {name}")
+        seen.add(name)
+    return tuple(cases_by_name[name] for name in scenarios)
 
 
 def _sha256(path: Path) -> str:
@@ -111,8 +130,15 @@ def _require_digest(path: Path, expected: str, label: str) -> None:
 
 
 def validate_inputs(
-    installer_paths: Mapping[str, Path], manifest_path: Path, platform: str
+    installer_paths: Mapping[str, Path],
+    manifest_path: Path,
+    platform: str,
+    cases: Sequence[MigrationCase] | None = None,
 ) -> ValidatedInputs:
+    selected_cases = tuple(cases) if cases is not None else migration_matrix()
+    if not selected_cases:
+        raise ValueError("at least one migration scenario is required")
+
     _require_file(manifest_path, "snapshot manifest")
     manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
     if manifest.get("schema") != 1:
@@ -128,7 +154,12 @@ def validate_inputs(
     if not isinstance(installer_manifest, dict):
         raise ValueError("snapshot manifest is missing installer digests")
     validated_installers: Dict[str, Path] = {}
-    for phase in PHASES:
+    required_phases = tuple(
+        phase
+        for phase in PHASES
+        if any(phase in case.install_sequence for case in selected_cases)
+    )
+    for phase in required_phases:
         if phase not in installer_paths:
             raise FileNotFoundError(f"missing installer argument for phase {phase}")
         path = Path(installer_paths[phase]).resolve()
@@ -143,7 +174,12 @@ def validate_inputs(
     if not isinstance(snapshot_manifest, dict):
         raise ValueError("snapshot manifest is missing snapshots")
     snapshots: Dict[str, SnapshotSpec] = {}
-    for name in SNAPSHOTS:
+    required_snapshots = tuple(
+        name
+        for name in SNAPSHOTS
+        if any(case.snapshot == name for case in selected_cases)
+    )
+    for name in required_snapshots:
         entry = snapshot_manifest.get(name)
         if not isinstance(entry, dict):
             raise FileNotFoundError(f"snapshot manifest is missing required snapshot: {name}")
@@ -167,7 +203,8 @@ def validate_inputs(
     if not isinstance(expectation_manifest, dict):
         raise ValueError("snapshot manifest is missing post-migration expectations")
     expectations: Dict[str, Tuple[Path, ...]] = {}
-    for phase in ("a", "b", "c"):
+    required_expectations = tuple(phase for phase in ("a", "b", "c") if phase in required_phases)
+    for phase in required_expectations:
         values = expectation_manifest.get(phase)
         if not isinstance(values, list) or not values or not all(isinstance(item, str) for item in values):
             raise ValueError(f"snapshot manifest must define non-empty expectations.{phase}")
@@ -178,7 +215,7 @@ def validate_inputs(
 
     # This also guards future edits to the matrix from silently introducing an
     # unvalidated installer or snapshot key.
-    for case in migration_matrix():
+    for case in selected_cases:
         if case.snapshot not in snapshots:
             raise FileNotFoundError(f"missing snapshot for scenario {case.name}: {case.snapshot}")
         for phase in case.install_sequence:
@@ -246,11 +283,24 @@ class PlatformExecutor:
             for name in ("Biyan", "Biyan-nightly", "Mita", "Silence", "Jan"):
                 shutil.rmtree(local / "Programs" / name, ignore_errors=True)
         elif self.platform == "macos":
-            subprocess.run(["pkill", "-f", "Biyan|Mita|Silence|Jan"], check=False)
+            for name in ("Biyan", "Biyan-nightly", "Mita", "Silence", "Jan"):
+                subprocess.run(["pkill", "-x", name], check=False)
             for name in ("Biyan", "Biyan-nightly", "Mita", "Silence", "Jan"):
                 shutil.rmtree(Path("/Applications") / f"{name}.app", ignore_errors=True)
         else:
-            subprocess.run(["pkill", "-f", "Biyan|Mita|Silence|Jan"], check=False)
+            for name in (
+                "Biyan",
+                "biyan",
+                "Biyan-nightly",
+                "biyan-nightly",
+                "Mita",
+                "mita",
+                "Silence",
+                "silence",
+                "Jan",
+                "jan",
+            ):
+                subprocess.run(["pkill", "-x", name], check=False)
             subprocess.run(
                 [
                     "sudo",
@@ -333,6 +383,35 @@ class PlatformExecutor:
 
     def startup_probe(self, executable: Path, scenario: str, phase: str) -> None:
         env = os.environ.copy()
+        secret_prefixes = (
+            "ACTIONS_",
+            "ALIYUN_",
+            "APPLE_",
+            "AWS_",
+            "AZURE_",
+            "BIYAN_",
+            "CLOUDFLARE_",
+            "GCP_",
+            "GITHUB_",
+            "GOOGLE_",
+            "OSS_",
+            "TAURI_SIGNING_",
+        )
+        secret_names = {
+            "GH_TOKEN",
+            "NODE_AUTH_TOKEN",
+            "NPM_TOKEN",
+        }
+        secret_fragments = ("PASSWORD", "PRIVATE_KEY", "SECRET", "TOKEN")
+        for name in tuple(env):
+            upper = name.upper()
+            if (
+                upper in secret_names
+                or upper.startswith(secret_prefixes)
+                or upper.endswith("_KEY")
+                or any(fragment in upper for fragment in secret_fragments)
+            ):
+                env.pop(name, None)
         env.update(
             {
                 "BIYAN_AUTOQA_MIGRATION_SCENARIO": scenario,
@@ -433,11 +512,13 @@ def run_matrix(
     platform: str,
     work_dir: Path,
     startup_seconds: int,
+    cases: Sequence[MigrationCase] | None = None,
 ) -> List[dict]:
+    selected_cases = tuple(cases) if cases is not None else migration_matrix()
     executor = PlatformExecutor(platform, startup_seconds)
     results: List[dict] = []
     try:
-        for case in migration_matrix():
+        for case in selected_cases:
             case_dir = work_dir / case.name
             shutil.rmtree(case_dir, ignore_errors=True)
             case_dir.mkdir(parents=True, exist_ok=True)
@@ -455,6 +536,7 @@ def run_matrix(
             results.append(
                 {
                     "scenario": case.name,
+                    "platform": platform,
                     "snapshot": case.snapshot,
                     "installSequence": list(case.install_sequence),
                     "expectedPhase": case.expected_phase,
@@ -472,7 +554,12 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Run the fail-closed Biyan migration matrix")
     parser.add_argument("--platform", choices=("windows", "linux", "macos"), required=True)
     for phase in PHASES:
-        parser.add_argument(f"--{phase}-installer", required=True)
+        parser.add_argument(f"--{phase}-installer")
+    parser.add_argument(
+        "--scenario",
+        action="append",
+        help="Run only this named scenario; repeat for multiple scenarios (default: full matrix)",
+    )
     parser.add_argument("--snapshot-manifest", required=True)
     parser.add_argument("--report", required=True)
     parser.add_argument("--work-dir", default="")
@@ -492,25 +579,33 @@ def main(argv: Sequence[str] | None = None) -> int:
         print("--startup-seconds must be greater than zero", file=sys.stderr)
         return 2
     installers = {
-        phase: Path(getattr(args, f"{phase}_installer"))
+        phase: Path(value)
         for phase in PHASES
+        if (value := getattr(args, f"{phase}_installer")) is not None
     }
     report_path = Path(args.report).resolve()
     report_path.parent.mkdir(parents=True, exist_ok=True)
+    scenario_names = list(args.scenario or (case.name for case in migration_matrix()))
     try:
+        cases = select_migration_cases(args.scenario)
+        scenario_names = [case.name for case in cases]
         validated = validate_inputs(
-            installers, Path(args.snapshot_manifest).resolve(), args.platform
+            installers,
+            Path(args.snapshot_manifest).resolve(),
+            args.platform,
+            cases,
         )
         if args.validate_only:
             results = [
                 {
                     "scenario": case.name,
+                    "platform": args.platform,
                     "snapshot": case.snapshot,
                     "installSequence": list(case.install_sequence),
                     "expectedPhase": case.expected_phase,
                     "status": "validated",
                 }
-                for case in migration_matrix()
+                for case in cases
             ]
         else:
             if args.allow_destructive_autoqa != "AUTOQA":
@@ -521,10 +616,17 @@ def main(argv: Sequence[str] | None = None) -> int:
                 else Path(tempfile.mkdtemp(prefix="biyan-migration-autoqa-"))
             )
             work_dir.mkdir(parents=True, exist_ok=True)
-            results = run_matrix(validated, args.platform, work_dir, args.startup_seconds)
+            results = run_matrix(
+                validated,
+                args.platform,
+                work_dir,
+                args.startup_seconds,
+                cases,
+            )
         report = {
             "schema": 1,
             "platform": args.platform,
+            "scenarios": scenario_names,
             "status": "passed",
             "matrix": results,
         }
@@ -537,6 +639,7 @@ def main(argv: Sequence[str] | None = None) -> int:
                 {
                     "schema": 1,
                     "platform": args.platform,
+                    "scenarios": scenario_names,
                     "status": "failed",
                     "error": str(error),
                 },
