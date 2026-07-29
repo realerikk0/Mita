@@ -38,13 +38,52 @@ jobs:
           mkdir -p dist/direct-preflight/manifests
           cp scripts/updater/direct-qualification-policy.json \
             dist/direct-preflight/policy.json
-          test "$GITHUB_REF" = "refs/heads/mita-main"
+          diagnostic_branch="codex/biyan-dq-windows-diagnostic-20260730"
+          base_sha="64e6cdcbf2b55811aabcba80ebedc6cdfeedaf8f"
+          test "$GITHUB_REPOSITORY" = "realerikk0/Mita"
+          test "$GITHUB_REF" = "refs/heads/${diagnostic_branch}"
           test "$RUNNER_ARCH" = "X64"
           test "$(git rev-parse HEAD)" = "$GITHUB_SHA"
           git fetch --force --no-tags origin \
+            "+refs/heads/${diagnostic_branch}:refs/remotes/origin/${diagnostic_branch}" \
             "+refs/heads/mita-main:refs/remotes/origin/mita-main"
           test "$(git rev-parse HEAD)" = \
-            "$(git rev-parse refs/remotes/origin/mita-main)"
+            "$(git rev-parse "refs/remotes/origin/${diagnostic_branch}")"
+          test "$(git rev-parse refs/remotes/origin/mita-main)" = "$base_sha"
+          test "$(git merge-base HEAD refs/remotes/origin/mita-main)" = "$base_sha"
+
+          python - <<'PY'
+          import subprocess
+
+          base = "64e6cdcbf2b55811aabcba80ebedc6cdfeedaf8f"
+          expected = {
+              ".github/workflows/biyan-direct-qualification.yml",
+              "autoqa/migration_runner.py",
+              "autoqa/tests/test_migration_runner.py",
+              "scripts/ci/legacy-compatibility-allowlist.json",
+              "scripts/updater/__tests__/direct-qualification.test.mjs",
+              "scripts/updater/__tests__/test_prepare_direct_qualification_inputs.py",
+              "scripts/updater/direct-qualification-evidence.mjs",
+              "scripts/updater/prepare-direct-qualification-inputs.py",
+          }
+          output = subprocess.check_output(
+              [
+                  "git",
+                  "diff",
+                  "--name-status",
+                  "--no-renames",
+                  f"{base}...HEAD",
+              ],
+              text=True,
+          )
+          entries = [line.split("\t", 1) for line in output.splitlines()]
+          actual = {path for status, path in entries if status == "M"}
+          if len(entries) != len(expected) or actual != expected:
+              raise SystemExit(
+                  "diagnostic branch must modify exactly the pinned eight files as M"
+              )
+          PY
+
           node scripts/updater/direct-qualification-evidence.mjs validate-policy \
             --policy scripts/updater/direct-qualification-policy.json
 
@@ -260,12 +299,13 @@ jobs:
           mkdir -p dist/direct-candidate/assets dist/direct-candidate/evidence
           cp scripts/updater/direct-qualification-policy.json \
             dist/direct-candidate/evidence/policy.json
-          test "$GITHUB_REF" = "refs/heads/mita-main"
+          diagnostic_branch="codex/biyan-dq-windows-diagnostic-20260730"
+          test "$GITHUB_REF" = "refs/heads/${diagnostic_branch}"
           test "$(git rev-parse HEAD)" = "$GITHUB_SHA"
           git fetch --force --no-tags origin \
-            "+refs/heads/mita-main:refs/remotes/origin/mita-main"
+            "+refs/heads/${diagnostic_branch}:refs/remotes/origin/${diagnostic_branch}"
           test "$(git rev-parse HEAD)" = \
-            "$(git rev-parse refs/remotes/origin/mita-main)"
+            "$(git rev-parse "refs/remotes/origin/${diagnostic_branch}")"
           node scripts/updater/direct-qualification-evidence.mjs validate-policy \
             --policy scripts/updater/direct-qualification-policy.json
 
@@ -437,116 +477,11 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - lane: legacy-manual-to-c-windows
-            platform: windows
-            runner: windows-2022
-            scenario: legacy-manual-to-c
-            source_version: 0.6.608
-            source_role: current
-            snapshot: current
-          - lane: legacy-manual-to-c-macos
-            platform: macos
-            runner: macos-15-intel
-            scenario: legacy-manual-to-c
-            source_version: 0.6.608
-            source_role: current
-            snapshot: current
-          - lane: legacy-auto-to-c-windows
-            platform: windows
-            runner: windows-2022
-            scenario: legacy-auto-to-c
-            source_version: 0.6.611
-            source_role: current
-            snapshot: current
-          - lane: legacy-auto-to-c-macos
-            platform: macos
-            runner: macos-15-intel
-            scenario: legacy-auto-to-c
-            source_version: 0.6.611
-            source_role: current
-            snapshot: current
           - lane: current-to-c-windows
             platform: windows
             runner: windows-2022
             scenario: current-to-c
             source_version: 0.6.633
-            source_role: current
-            snapshot: current
-          - lane: current-to-c-macos
-            platform: macos
-            runner: macos-15-intel
-            scenario: current-to-c
-            source_version: 0.6.633
-            source_role: current
-            snapshot: current
-          - lane: fresh-c-linux
-            platform: linux
-            runner: ubuntu-24.04
-            scenario: fresh-c
-            source_version: ""
-            source_role: ""
-            snapshot: fresh
-          - lane: a-to-c-windows
-            platform: windows
-            runner: windows-2022
-            scenario: a-to-c
-            source_version: 0.6.643
-            source_role: a
-            snapshot: a
-          - lane: a-to-c-macos
-            platform: macos
-            runner: macos-15-intel
-            scenario: a-to-c
-            source_version: 0.6.643
-            source_role: a
-            snapshot: a
-          - lane: a-to-c-linux
-            platform: linux
-            runner: ubuntu-24.04
-            scenario: a-to-c
-            source_version: 0.6.643
-            source_role: a
-            snapshot: a
-          - lane: b-to-c-windows
-            platform: windows
-            runner: windows-2022
-            scenario: b-to-c
-            source_version: 0.6.644
-            source_role: b
-            snapshot: b
-          - lane: b-to-c-macos
-            platform: macos
-            runner: macos-15-intel
-            scenario: b-to-c
-            source_version: 0.6.644
-            source_role: b
-            snapshot: b
-          - lane: b-to-c-linux
-            platform: linux
-            runner: ubuntu-24.04
-            scenario: b-to-c
-            source_version: 0.6.644
-            source_role: b
-            snapshot: b
-          - lane: c-to-c-windows
-            platform: windows
-            runner: windows-2022
-            scenario: c-to-c
-            source_version: 0.6.645
-            source_role: current
-            snapshot: current
-          - lane: c-to-c-macos
-            platform: macos
-            runner: macos-15-intel
-            scenario: c-to-c
-            source_version: 0.6.645
-            source_role: current
-            snapshot: current
-          - lane: c-to-c-linux
-            platform: linux
-            runner: ubuntu-24.04
-            scenario: c-to-c
-            source_version: 0.6.645
             source_role: current
             snapshot: current
     env:
@@ -581,13 +516,14 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          test "$GITHUB_REF" = "refs/heads/mita-main"
+          diagnostic_branch="codex/biyan-dq-windows-diagnostic-20260730"
+          test "$GITHUB_REF" = "refs/heads/${diagnostic_branch}"
           test "$RUNNER_ARCH" = "X64"
           test "$(git rev-parse HEAD)" = "$GITHUB_SHA"
           git fetch --force --no-tags origin \
-            "+refs/heads/mita-main:refs/remotes/origin/mita-main"
+            "+refs/heads/${diagnostic_branch}:refs/remotes/origin/${diagnostic_branch}"
           test "$(git rev-parse HEAD)" = \
-            "$(git rev-parse refs/remotes/origin/mita-main)"
+            "$(git rev-parse "refs/remotes/origin/${diagnostic_branch}")"
           node scripts/updater/direct-qualification-evidence.mjs validate-policy \
             --policy scripts/updater/direct-qualification-policy.json
           mkdir -p dist/direct-evidence
@@ -888,6 +824,7 @@ jobs:
   aggregate:
     name: Bind exact 16 of 16 evidence for promotion
     needs: [preflight, stage-candidate, qualification]
+    if: ${{ github.repository != 'realerikk0/Mita' }}
     runs-on: ubuntu-24.04
     timeout-minutes: 20
     steps:
