@@ -172,6 +172,10 @@ test('Windows NSIS installer cleans retired product resources before copying an 
   assert.ok(mainCopy < resourceCopy)
   assert.ok(resourceCopy < binaryCopy)
   assert.ok(binaryCopy < verify)
+  assert.match(
+    install,
+    /\$\{If\} \$OwnedExistingInstall = 1[\s\S]*?!insertmacro CheckIfAppIsRunning "\$\{LEGACY_PRODUCTNAME\}\.exe"[\s\S]*?!insertmacro CheckIfAppIsRunning "\$\{LEGACY_MAINBINARYNAME\}-cli\.exe"[\s\S]*?!insertmacro CheckIfAppIsRunning "\$\{LEGACY_MAINBINARYNAME\}-computer-agent-runner\.exe"[\s\S]*?Call RemoveRetiredBiyanInstallResources\s+\$\{Else\}\s+Call RejectUnownedRetiredBiyanResources\s+\$\{EndIf\}/,
+  )
 
   const cleanupBody = functionBody('RemoveRetiredBiyanInstallResources')
   assert.match(cleanupBody, /RMDir \/r "\$INSTDIR\\resources\\pre-install"/)

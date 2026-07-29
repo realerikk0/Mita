@@ -405,7 +405,7 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: direct-candidate-windows-${{ github.run_id }}-${{ github.run_attempt }}
-          path: dist/direct-candidate/assets/Biyan_0.6.646_x64-setup.exe
+          path: dist/direct-candidate/assets/Biyan_0.6.647_x64-setup.exe
           if-no-files-found: error
           compression-level: 0
           retention-days: 3
@@ -414,7 +414,7 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: direct-candidate-macos-${{ github.run_id }}-${{ github.run_attempt }}
-          path: dist/direct-candidate/assets/Biyan_0.6.646_universal.dmg
+          path: dist/direct-candidate/assets/Biyan_0.6.647_universal.dmg
           if-no-files-found: error
           compression-level: 0
           retention-days: 3
@@ -423,7 +423,7 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: direct-candidate-linux-${{ github.run_id }}-${{ github.run_attempt }}
-          path: dist/direct-candidate/assets/Biyan_0.6.646_amd64.AppImage
+          path: dist/direct-candidate/assets/Biyan_0.6.647_amd64.AppImage
           if-no-files-found: error
           compression-level: 0
           retention-days: 3

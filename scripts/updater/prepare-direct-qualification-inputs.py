@@ -114,16 +114,16 @@ def prepare_inputs(
 
     candidate = require_object(policy.get("candidate"), "policy.candidate")
     if (
-        candidate.get("version") != "0.6.646"
-        or candidate.get("tag") != "v0.6.646"
+        candidate.get("version") != "0.6.647"
+        or candidate.get("tag") != "v0.6.647"
         or candidate.get("sourceCommit")
-        != "581ebf6b19ef407a9645d0b318792f1012f8f75b"
+        != "ef963bc606366220db4589352afb25aa7d1785bf"
         or candidate.get("migrationPhase") != "C"
         or candidate.get("dataSchema") != 3
         or candidate.get("manifestKey")
-        != "biyan/updater/releases/v0.6.646/latest.json"
+        != "biyan/updater/releases/v0.6.647/latest.json"
     ):
-        raise ValueError("candidate identity must be exact v0.6.646/C/schema 3")
+        raise ValueError("candidate identity must be exact v0.6.647/C/schema 3")
     require_sha256(
         candidate.get("manifestSha256"),
         "candidate manifest SHA-256",

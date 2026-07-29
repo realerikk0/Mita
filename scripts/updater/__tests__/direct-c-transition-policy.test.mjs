@@ -72,7 +72,7 @@ function initialPolicy() {
 }
 
 function canonicalManifest() {
-  const version = '0.6.646'
+  const version = '0.6.647'
   const prefix =
     `https://static.mitapp.cn/biyan/updater/releases/v${version}`
   return {
@@ -252,7 +252,7 @@ function snapshot({
   }
 }
 
-test('tracked DIRECT_C policy pins the accepted candidate and every reviewed source', () => {
+test('tracked DIRECT_C policy awaits approval and pins every reviewed source', () => {
   const tracked = loadDirectCTransitionPolicy()
   const qualification = JSON.parse(
     fs.readFileSync(
@@ -263,16 +263,12 @@ test('tracked DIRECT_C policy pins the accepted candidate and every reviewed sou
       'utf8',
     ),
   )
-  assert.deepEqual(tracked.approvedNext, {
-    version: qualification.candidate.version,
-    tag: qualification.candidate.tag,
-    sourceCommit: qualification.candidate.sourceCommit,
-    migrationPhase: qualification.candidate.migrationPhase,
-    dataSchema: qualification.candidate.dataSchema,
-    manifestKey: qualification.candidate.manifestKey,
-    manifestSha256: qualification.candidate.manifestSha256,
-    requiredPlatforms: DIRECT_C_CANONICAL_UPDATER_PLATFORMS,
-  })
+  assert.equal(tracked.approvedNext, null)
+  assert.equal(qualification.state, 'awaiting-candidate-pin')
+  assert.equal(qualification.candidate.manifestSha256, null)
+  for (const platform of ['windows', 'macos', 'linux']) {
+    assert.equal(qualification.candidate.assets[platform].sha256, null)
+  }
   assert.deepEqual(tracked.current, DIRECT_C_CURRENT)
   assert.deepEqual(tracked.routerSources, DIRECT_C_ROUTER_SOURCES)
   assert.equal(
@@ -296,16 +292,8 @@ test('tracked DIRECT_C policy pins the accepted candidate and every reviewed sou
       },
     )
   }
-  assert.doesNotThrow(() =>
+  assert.throws(() =>
     validateDirectCTransitionPolicy(tracked, {
-      requireApprovedNext: true,
-    }),
-  )
-
-  const awaiting = structuredClone(tracked)
-  awaiting.approvedNext = null
-  assert.throws(
-    () => validateDirectCTransitionPolicy(awaiting, {
       requireApprovedNext: true,
     }),
     /approvedNext is still fail-closed/,
@@ -367,7 +355,7 @@ test('DIRECT_C prepares one exact 100% policy for legacy and three Router source
     }),
     {
       currentVersion: '0.6.633',
-      targetVersion: '0.6.646',
+      targetVersion: '0.6.647',
       routerSources: ['0.6.643', '0.6.644', '0.6.645'],
     },
   )
@@ -437,7 +425,7 @@ test('legacy bridge validation, pause, and resume accept DIRECT_C C lineage', ()
       directTransitionPolicy: fixture.directTransitionPolicy,
     }),
     {
-      activeAVersion: '0.6.646',
+      activeAVersion: '0.6.647',
       effectivePhase: 'C',
       trackedState: 'pre-direct-c',
     },
@@ -445,23 +433,23 @@ test('legacy bridge validation, pause, and resume accept DIRECT_C C lineage', ()
 
   const live = validateLivePauseInputs({
     policyBytes: jsonBytes(fixture.nextPolicy),
-    expectedCurrentVersion: '0.6.646',
+    expectedCurrentVersion: '0.6.647',
     ossLegacyBytes: fixture.manifestBytes,
     r2LegacyBytes: fixture.manifestBytes,
   })
-  assert.equal(live.activeAVersion, '0.6.646')
+  assert.equal(live.activeAVersion, '0.6.647')
   assert.equal(live.activeAManifestSha256, fixture.candidate.manifestSha256)
 
   const fallbackBytes = legacy633Bytes()
   assert.equal(sha256(fallbackBytes), DIRECT_C_CURRENT.manifestSha256)
   const resumed = validateLegacyResumeInputs({
     policyBytes: jsonBytes({ ...fixture.nextPolicy, paused: true }),
-    expectedCurrentVersion: '0.6.646',
+    expectedCurrentVersion: '0.6.647',
     ossLegacyBytes: fallbackBytes,
     r2LegacyBytes: fallbackBytes,
     activeABytes: fixture.manifestBytes,
   })
-  assert.equal(resumed.activeAVersion, '0.6.646')
+  assert.equal(resumed.activeAVersion, '0.6.647')
   assert.equal(resumed.fallback.version, '0.6.633')
 
   const policyBeforeBytes = jsonBytes(fixture.nextPolicy)
@@ -473,7 +461,7 @@ test('legacy bridge validation, pause, and resume accept DIRECT_C C lineage', ()
   const pauseJournal = createLegacyPauseJournal({
     transactionId: '880-1',
     createdAt: promotedAt,
-    expectedCurrentVersion: '0.6.646',
+    expectedCurrentVersion: '0.6.647',
     policyBeforeBytes,
     ossLegacyBeforeBytes: fixture.manifestBytes,
     r2LegacyBeforeBytes: fixture.manifestBytes,
@@ -482,7 +470,7 @@ test('legacy bridge validation, pause, and resume accept DIRECT_C C lineage', ()
     ossFallbackBytes: fallbackBytes,
     r2FallbackBytes: fallbackBytes,
   })
-  assert.equal(pauseJournal.legacySnapshots.oss.version, '0.6.646')
+  assert.equal(pauseJournal.legacySnapshots.oss.version, '0.6.647')
   assert.deepEqual(
     classifyLegacyPauseRollback({
       objectKind: 'policy',
@@ -529,7 +517,7 @@ test('post-promotion legacy monitoring pins only the exact DIRECT_C target', () 
       r2Bytes: fixture.manifestBytes,
       directTransitionPolicy: fixture.directTransitionPolicy,
     }).expectedVersion,
-    '0.6.646',
+    '0.6.647',
   )
   assert.throws(
     () =>
@@ -558,9 +546,9 @@ test('Router admits only exact A/B/C sources and keeps legacy current out of dyn
   for (const version of ['0.6.643', '0.6.644', '0.6.645']) {
     const response = await handleRequest(signedRequest(version), env)
     assert.equal(response.status, 200)
-    assert.equal((await response.json()).version, '0.6.646')
+    assert.equal((await response.json()).version, '0.6.647')
   }
-  for (const version of ['0.6.633', '0.6.646']) {
+  for (const version of ['0.6.633', '0.6.646', '0.6.647']) {
     const response = await handleRequest(signedRequest(version), env)
     assert.equal(response.status, 204)
     assert.equal(
@@ -640,10 +628,10 @@ test('terminal recovery derives all five DIRECT_C Router probes atomically', () 
     ]),
     [
       ['0.6.633', 204, '0.6.633'],
-      ['0.6.643', 200, '0.6.646'],
-      ['0.6.644', 200, '0.6.646'],
-      ['0.6.645', 200, '0.6.646'],
-      ['0.6.646', 204, '0.6.646'],
+      ['0.6.643', 200, '0.6.647'],
+      ['0.6.644', 200, '0.6.647'],
+      ['0.6.645', 200, '0.6.647'],
+      ['0.6.647', 204, '0.6.647'],
     ],
   )
 

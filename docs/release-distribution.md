@@ -31,12 +31,18 @@ Only manually dispatch `Desktop Release Candidate` from protected
 
 | Release | Tag | Source commit | Phase/schema |
 | --- | --- | --- | --- |
-| Complete | `v0.6.646` | `581ebf6b19ef407a9645d0b318792f1012f8f75b` | `C/3` |
+| Complete | `v0.6.647` | `ef963bc606366220db4589352afb25aa7d1785bf` | `C/3` |
 
 The retired A/B/C mappings remain immutable history, not an authorized
 automatic upgrade sequence. The trusted control plane must read the active
 terminal identity from the reviewed release policy and prove that the exact
 source commit is an ancestor of live `mita-main`.
+
+The `v0.6.646` tag, Draft release, uploaded assets, and failed direct
+qualification are immutable blocked-before-publication evidence. That
+candidate was never published or promoted; preserve it exactly, do not retag
+or reuse it, and do not recut A/B/C. `v0.6.647` is the single higher cumulative
+complete release.
 
 `tag-cut` uses only the repository `GITHUB_TOKEN`; do not provide an operator
 PAT or GitHub App secret and do not directly push the tag. A missing tag is
@@ -51,7 +57,7 @@ Distribution run; do not dispatch a second non-dry-run distribution in
 parallel. Use manual non-dry-run distribution only as an explicit recovery for
 a failed or absent publication-triggered run.
 
-There is no A or B dispatch. One accepted `v0.6.646/C/3` candidate is the only
+There is no A or B dispatch. One accepted `v0.6.647/C/3` candidate is the only
 product package in this release.
 
 ## Pre-tag exact-SHA qualification
@@ -133,14 +139,14 @@ Run `.github/workflows/biyan-direct-qualification.yml` once from protected
 are pinned by a CODEOWNER-reviewed control-plane commit. The workflow performs
 real installs on GitHub-hosted x86_64 runners:
 
-- Windows and macOS: `0.6.608 → 0.6.646` as manual-installer compatibility
+- Windows and macOS: `0.6.608 → 0.6.647` as manual-installer compatibility
   only, with the retired endpoint and old public-key generation kept explicit;
-- Windows and macOS: `0.6.611 → 0.6.646` as the lowest public stable
+- Windows and macOS: `0.6.611 → 0.6.647` as the lowest public stable
   automatic-updater path;
-- Windows and macOS: `0.6.633 → 0.6.646`;
-- Linux: fresh `0.6.646`, under the exact no-current-Linux-artifact exception;
+- Windows and macOS: `0.6.633 → 0.6.647`;
+- Linux: fresh `0.6.647`, under the exact no-current-Linux-artifact exception;
 - Windows, macOS, and Linux: each of public `0.6.643`, `0.6.644`, and
-  `0.6.645` → `0.6.646`.
+  `0.6.645` → `0.6.647`.
 
 All sixteen expected attempts must pass. Windows pins both installers to one
 scenario-local NSIS destination, with `/D=...` as the final argument. Every
@@ -166,7 +172,7 @@ approval. Promotion requires:
 - a recoverable snapshot of the previous policy and manifests.
 
 Direct-C promotion also requires the tracked transition policy to name the
-exact reviewed `0.6.646` manifest SHA-256 and four-platform set. It remains
+exact reviewed `0.6.647` manifest SHA-256 and four-platform set. It remains
 `approvedNext: null` until the signed candidate exists and passes source,
 candidate, and artifact acceptance. Populate that identity through a
 CODEOWNER-reviewed control-plane pull request; this verifier-only change does
@@ -176,9 +182,9 @@ blocks qualification and promotion before any production mutation.
 The dynamic Biyan route returns `204` when a phase is closed, paused, outside
 its cohort, or covered by the kill switch. The one production transaction
 publishes three exact 100% Router transitions:
-`0.6.643 → 0.6.646`, `0.6.644 → 0.6.646`, and
-`0.6.645 → 0.6.646`. It also replaces both legacy manifests byte-identically,
-so clients `0.6.609–0.6.633` receive `0.6.646` directly. `0.6.609` and
+`0.6.643 → 0.6.647`, `0.6.644 → 0.6.647`, and
+`0.6.645 → 0.6.647`. It also replaces both legacy manifests byte-identically,
+so clients `0.6.609–0.6.633` receive `0.6.647` directly. `0.6.609` and
 `0.6.610` were Draft releases; the lowest public stable automatic source is
 `0.6.611`. The target is always
 the same signed C/schema-3 manifest; no client is routed through A or B.
@@ -209,7 +215,7 @@ Public stable versions `0.6.605–0.6.608` contain
 DNS. They cannot automatically discover any release until its DNS/route is
 restored under separately authorized `jingxing.uk` control. Do not claim an
 automatic-upgrade floor below `0.6.611` without live DNS, route, and
-old-private-key proof. The `0.6.608 → 0.6.646` lanes prove manual installation
+old-private-key proof. The `0.6.608 → 0.6.647` lanes prove manual installation
 compatibility only.
 
 Never downgrade an installed client. Pause routing and publish a higher

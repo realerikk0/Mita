@@ -51,6 +51,7 @@ function historicalActiveTrainPolicy() {
     fs.readFileSync('scripts/ci/release-train-policy.json', 'utf8')
   )
   policy.activeTerminalRelease = null
+  policy.supersededTerminalReleases = []
   policy.activeTrain = 'closure-20260724'
   policy.trains.at(-1).status = 'active'
   return policy
@@ -274,10 +275,10 @@ test('bridge release trains lock version, phase, schema, and Cargo.lock together
   )
   assert.ok(
     validateReleaseIdentity({
-      version: '0.6.646',
+      version: '0.6.647',
       migrationPhase: 'A',
       dataSchema: 1,
-      cargoLockVersion: '0.6.646',
+      cargoLockVersion: '0.6.647',
     }).some((failure) => failure.includes('must attest C/3'))
   )
 })
@@ -316,8 +317,8 @@ test('formal release identity switches fail-closed to the exact pinned terminal 
     fs.readFileSync('scripts/ci/release-train-policy.json', 'utf8')
   )
   policy.activeTerminalRelease = {
-    tag: 'v0.6.646',
-    version: '0.6.646',
+    tag: 'v0.6.647',
+    version: '0.6.647',
     migrationPhase: 'C',
     dataSchema: 3,
     sourceCommit: 'a'.repeat(40),
@@ -325,10 +326,10 @@ test('formal release identity switches fail-closed to the exact pinned terminal 
 
   assert.deepEqual(
     validateActiveReleaseIdentity({
-      version: '0.6.646',
+      version: '0.6.647',
       migrationPhase: 'C',
       dataSchema: 3,
-      cargoLockVersion: '0.6.646',
+      cargoLockVersion: '0.6.647',
       trainPolicy: policy,
     }),
     []
@@ -435,8 +436,8 @@ test('release train and terminal policy is unique, contiguous, and fail-closed',
 
   const pinned = structuredClone(policy)
   pinned.activeTerminalRelease = {
-    tag: 'v0.6.646',
-    version: '0.6.646',
+    tag: 'v0.6.647',
+    version: '0.6.647',
     migrationPhase: 'C',
     dataSchema: 3,
     sourceCommit: 'a'.repeat(40),
@@ -447,8 +448,8 @@ test('release train and terminal policy is unique, contiguous, and fail-closed',
     [
       'wrong version',
       (value) => {
-        value.activeTerminalRelease.version = '0.6.647'
-        value.activeTerminalRelease.tag = 'v0.6.647'
+        value.activeTerminalRelease.version = '0.6.648'
+        value.activeTerminalRelease.tag = 'v0.6.648'
       },
     ],
     [
@@ -476,6 +477,43 @@ test('release train and terminal policy is unique, contiguous, and fail-closed',
     assert.ok(
       validateReleaseTrainPolicy(invalid).length > 0,
       `terminal policy must reject ${label}`
+    )
+  }
+
+  for (const [label, mutate] of [
+    [
+      'wrong preserved version',
+      (value) => {
+        value.supersededTerminalReleases[0].version = '0.6.644'
+        value.supersededTerminalReleases[0].tag = 'v0.6.644'
+      },
+    ],
+    [
+      'wrong preserved status',
+      (value) => {
+        value.supersededTerminalReleases[0].status = 'published'
+      },
+    ],
+    [
+      'wrong preserved source',
+      (value) => {
+        value.supersededTerminalReleases[0].sourceCommit = 'b'.repeat(40)
+      },
+    ],
+    [
+      'extra preserved terminal',
+      (value) => {
+        value.supersededTerminalReleases.push(
+          structuredClone(value.supersededTerminalReleases[0]),
+        )
+      },
+    ],
+  ]) {
+    const invalid = structuredClone(pinned)
+    mutate(invalid)
+    assert.ok(
+      validateReleaseTrainPolicy(invalid).length > 0,
+      `terminal policy must reject ${label}`,
     )
   }
 })

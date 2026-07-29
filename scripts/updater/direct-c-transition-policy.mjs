@@ -127,13 +127,13 @@ function validateApprovedNext(value) {
     ],
     'DIRECT_C approvedNext',
   )
-  if (value.version !== '0.6.646' || value.tag !== 'v0.6.646') {
-    throw new Error('DIRECT_C approvedNext must be exact version v0.6.646')
+  if (value.version !== '0.6.647' || value.tag !== 'v0.6.647') {
+    throw new Error('DIRECT_C approvedNext must be exact version v0.6.647')
   }
   if (value.migrationPhase !== 'C' || value.dataSchema !== 3) {
     throw new Error('DIRECT_C approvedNext must attest migration phase C/data schema 3')
   }
-  if (value.manifestKey !== 'biyan/updater/releases/v0.6.646/latest.json') {
+  if (value.manifestKey !== 'biyan/updater/releases/v0.6.647/latest.json') {
     throw new Error('DIRECT_C approvedNext manifestKey is not canonical')
   }
   requireCommit(value.sourceCommit, 'DIRECT_C approvedNext sourceCommit')

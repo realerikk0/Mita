@@ -35,10 +35,10 @@ const TERMINAL_SOURCE_CONTENTS = Object.freeze({
   'biyan-release.json':
     '{"schema":1,"migrationPhase":"C","dataSchema":3}\n',
   'src-tauri/Cargo.lock':
-    '[[package]]\nname = "Biyan"\nversion = "0.6.646"\n',
+    '[[package]]\nname = "Biyan"\nversion = "0.6.647"\n',
   'src-tauri/Cargo.toml':
-    '[package]\nname = "Biyan"\nversion = "0.6.646"\n',
-  'src-tauri/tauri.conf.json': '{"version":"0.6.646"}\n',
+    '[package]\nname = "Biyan"\nversion = "0.6.647"\n',
+  'src-tauri/tauri.conf.json': '{"version":"0.6.647"}\n',
 })
 
 function trainPolicy(sourceCommit = null) {
@@ -52,13 +52,14 @@ function trainPolicy(sourceCommit = null) {
     sourceCommit === null
       ? null
       : {
-          tag: 'v0.6.646',
-          version: '0.6.646',
+          tag: 'v0.6.647',
+          version: '0.6.647',
           migrationPhase: 'C',
           dataSchema: 3,
           sourceCommit,
         }
   if (sourceCommit === null) {
+    policy.supersededTerminalReleases = []
     policy.activeTrain = 'closure-20260724'
     policy.trains.at(-1).status = 'active'
   }
@@ -225,7 +226,7 @@ if (
     return {
       harnessRoot,
       parentCommit,
-      releaseTag: terminal ? 'v0.6.646' : releaseTag,
+      releaseTag: terminal ? 'v0.6.647' : releaseTag,
       sourceCommit,
       targetRoot,
       trustedMain,
@@ -480,46 +481,27 @@ test('release drift accepts only exact checkpoint and reviewed control files', (
 
 test('terminal drift accepts only the exact reviewed Q control-plane paths', () => {
   assert.deepEqual([...TERMINAL_CONTROL_PLANE_DRIFT], [
-    ['.github/workflows/biyan-a-canary.yml', 'M'],
-    ['.github/workflows/biyan-direct-qualification.yml', 'A'],
-    ['.github/workflows/desktop-release-draft-repair.yml', 'M'],
+    ['.github/workflows/biyan-direct-qualification.yml', 'M'],
     ['.github/workflows/desktop-release.yml', 'M'],
-    ['.github/workflows/promote-desktop-update.yml', 'M'],
-    ['.github/workflows/release-distribution.yml', 'M'],
     ['DEVELOPMENT_PLAN.md', 'M'],
-    ['autoqa/migration_runner.py', 'M'],
-    ['autoqa/tests/test_migration_runner.py', 'M'],
-    ['docs/README.md', 'M'],
     ['docs/release-distribution.md', 'M'],
     ['docs/src/pages/docs/desktop/data-folder.mdx', 'M'],
-    ['scripts/ci/__tests__/qualification-impact.test.mjs', 'M'],
+    ['scripts/__tests__/windows-installer-template.test.mjs', 'M'],
     ['scripts/ci/__tests__/release-policy.test.mjs', 'M'],
     ['scripts/ci/__tests__/verify-release-target.test.mjs', 'M'],
-    ['scripts/ci/legacy-compatibility-allowlist.json', 'M'],
     ['scripts/ci/release-policy-contracts.mjs', 'M'],
     ['scripts/ci/release-train-policy.json', 'M'],
-    ['scripts/ci/verify-release-policy.mjs', 'M'],
     ['scripts/ci/verify-release-target.mjs', 'M'],
     ['scripts/release-distribution/__tests__/release-distribution.test.mjs', 'M'],
-    ['scripts/release-distribution/collect-release-assets.mjs', 'M'],
-    ['scripts/updater/__tests__/direct-c-transition-policy.test.mjs', 'A'],
-    ['scripts/updater/__tests__/direct-qualification.test.mjs', 'A'],
-    ['scripts/updater/__tests__/fixtures/v0.6.633-latest.json', 'A'],
-    ['scripts/updater/__tests__/legacy-manifest-policy.test.mjs', 'M'],
-    ['scripts/updater/__tests__/promotion-transaction.test.mjs', 'M'],
-    ['scripts/updater/__tests__/test_prepare_direct_qualification_inputs.py', 'A'],
-    ['scripts/updater/__tests__/updater.test.mjs', 'M'],
-    ['scripts/updater/direct-c-contract.mjs', 'A'],
-    ['scripts/updater/direct-c-transition-policy.json', 'A'],
-    ['scripts/updater/direct-c-transition-policy.mjs', 'A'],
-    ['scripts/updater/direct-qualification-evidence.mjs', 'A'],
-    ['scripts/updater/direct-qualification-policy.json', 'A'],
-    ['scripts/updater/legacy-manifest-policy.mjs', 'M'],
-    ['scripts/updater/legacy-pause-transaction.mjs', 'M'],
-    ['scripts/updater/prepare-direct-qualification-inputs.py', 'A'],
-    ['scripts/updater/prepare-promotion.mjs', 'M'],
-    ['scripts/updater/promotion-transaction.mjs', 'M'],
-    ['scripts/updater/run-promotion-transaction.sh', 'M'],
+    ['scripts/updater/__tests__/direct-c-transition-policy.test.mjs', 'M'],
+    ['scripts/updater/__tests__/direct-qualification.test.mjs', 'M'],
+    ['scripts/updater/__tests__/test_prepare_direct_qualification_inputs.py', 'M'],
+    ['scripts/updater/direct-c-contract.mjs', 'M'],
+    ['scripts/updater/direct-c-transition-policy.json', 'M'],
+    ['scripts/updater/direct-c-transition-policy.mjs', 'M'],
+    ['scripts/updater/direct-qualification-evidence.mjs', 'M'],
+    ['scripts/updater/direct-qualification-policy.json', 'M'],
+    ['scripts/updater/prepare-direct-qualification-inputs.py', 'M'],
     ['scripts/updater/worker.mjs', 'M'],
   ])
 
@@ -558,11 +540,11 @@ test('terminal drift accepts only the exact reviewed Q control-plane paths', () 
       'status drift',
       {
         path: 'scripts/updater/direct-c-transition-policy.json',
-        status: 'M',
-        oldMode: '100644',
+        status: 'A',
+        oldMode: null,
         newMode: '100644',
       },
-      /expected A, found M/,
+      /expected M, found A/,
     ],
     [
       'rename drift',
@@ -789,8 +771,8 @@ test('terminal release target authenticates a full product source P through poli
 
   assert.equal(result.parentCommit, fixture.parentCommit)
   assert.equal(result.releaseKind, 'terminal')
-  assert.equal(result.releaseTag, 'v0.6.646')
-  assert.equal(result.releaseVersion, '0.6.646')
+  assert.equal(result.releaseTag, 'v0.6.647')
+  assert.equal(result.releaseVersion, '0.6.647')
   assert.equal(result.sourceCommit, fixture.sourceCommit)
   assert.equal(result.trustedMain, fixture.trustedMain)
   assert.equal(result.checkpoint, null)
@@ -844,7 +826,7 @@ test('terminal release target rejects product or source identity drift after P',
   writeFixtureFile(
     identity.harnessRoot,
     'src-tauri/tauri.conf.json',
-    '{"version":"0.6.647"}\n'
+    '{"version":"0.6.648"}\n'
   )
   identity.trustedMain = commitFixture(
     identity.harnessRoot,
