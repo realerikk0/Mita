@@ -595,6 +595,33 @@ test('worker fails closed when the stable policy is unavailable', async () => {
   assert.equal(await response.text(), '')
 })
 
+test('worker distinguishes malformed stable policies from an absent policy', async () => {
+  for (const invalidPolicy of [
+    null,
+    [],
+    { schema: 2, channel: 'stable' },
+    { schema: 1, channel: 'preview' },
+  ]) {
+    const response = await handleRequest(
+      signedRequest('/biyan/v1/stable/windows/x86_64/0.6.633', '0.6.633'),
+      {
+        BIYAN_SIGNING_KEY: signingKey,
+        ROLLOUT_SALT: 'test-salt',
+        UPDATER_BUCKET: bucket({
+          'biyan/updater/stable/policy.json': invalidPolicy,
+        }),
+      },
+    )
+    assert.equal(response.status, 204)
+    assert.equal(
+      response.headers.get('x-biyan-updater-state'),
+      'policy-invalid',
+    )
+    assert.equal(response.headers.get('cache-control'), 'no-store')
+    assert.equal(await response.text(), '')
+  }
+})
+
 test('worker never admits a pre-A client through the dynamic route', async () => {
   const manifestKey = 'biyan/updater/releases/v0.6.634/latest.json'
   const response = await handleRequest(
@@ -627,6 +654,9 @@ test('router deployment keeps the rendered config beside its worker entrypoint',
   const workflow = readText(
     path.join(repoRoot, '.github/workflows/deploy-updater-router.yml')
   )
+  const config = readText(
+    path.join(repoRoot, 'scripts/updater/wrangler.toml')
+  )
   assert.match(
     workflow,
     /WRANGLER_CONFIG: scripts\/updater\/wrangler\.generated\.toml/,
@@ -641,6 +671,21 @@ test('router deployment keeps the rendered config beside its worker entrypoint',
     5,
   )
   assert.doesNotMatch(workflow, /\/tmp\/wrangler\.toml/)
+  assert.match(
+    workflow,
+    /R2_BUCKET: \$\{\{ secrets\.CLOUDFLARE_R2_BUCKET \}\}/,
+  )
+  assert.match(
+    workflow,
+    /sed -e "s\/__UPDATER_BUCKET__\/\$R2_BUCKET\/" \\\n\s+scripts\/updater\/wrangler\.toml > "\$WRANGLER_CONFIG"/,
+  )
+  assert.match(config, /\nbinding = "UPDATER_BUCKET"\n/)
+  assert.match(config, /\nbucket_name = "__UPDATER_BUCKET__"\n/)
+  assert.match(
+    config,
+    /\n\[vars\]\nPOLICY_KEY = "biyan\/updater\/stable\/policy\.json"\n/,
+  )
+  assert.equal(config.match(/__UPDATER_BUCKET__/g)?.length, 1)
 })
 
 test('router deployment exposes release secrets only from exact live mita-main', () => {

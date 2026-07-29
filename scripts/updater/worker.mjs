@@ -55,7 +55,7 @@ async function verifySignedRequest(request, secret, currentVersion) {
 
 async function readR2Json(bucket, key) {
   const object = await bucket.get(key)
-  if (!object) return null
+  if (!object) return undefined
   if (typeof object.json === 'function') return object.json()
   return JSON.parse(await object.text())
 }
@@ -105,9 +105,16 @@ export async function handleRequest(request, env) {
   }
 
   const policy = await readR2Json(env.UPDATER_BUCKET, env.POLICY_KEY ?? DEFAULT_POLICY_KEY)
-  if (!policy || policy.schema !== 1 || policy.channel !== 'stable') {
+  if (policy === undefined) {
     return empty('policy-unavailable')
   }
+  if (
+    policy === null
+    || typeof policy !== 'object'
+    || Array.isArray(policy)
+    || policy.schema !== 1
+    || policy.channel !== 'stable'
+  ) return empty('policy-invalid')
   if (policy.paused) return empty('paused')
   const transition = policy.transitions?.[currentVersion]
   if (!transition) return empty('no-transition')
