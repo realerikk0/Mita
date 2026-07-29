@@ -1,6 +1,13 @@
 {
-  "schema": 1,
-  "activeTrain": "closure-20260724",
+  "schema": 2,
+  "activeTrain": null,
+  "activeTerminalRelease": {
+    "tag": "v0.6.646",
+    "version": "0.6.646",
+    "migrationPhase": "C",
+    "dataSchema": 3,
+    "sourceCommit": "581ebf6b19ef407a9645d0b318792f1012f8f75b"
+  },
   "trains": [
     {
       "id": "generation-10",
@@ -31,7 +38,7 @@
     },
     {
       "id": "closure-20260724",
-      "status": "active",
+      "status": "superseded-by-terminal",
       "releases": {
         "A": { "version": "0.6.643", "dataSchema": 1 },
         "B": { "version": "0.6.644", "dataSchema": 2 },

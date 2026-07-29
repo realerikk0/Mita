@@ -6,6 +6,11 @@ import os from 'node:os'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 
+import {
+  validateActiveTerminalReleaseBinding,
+  validateReleaseTrainPolicy,
+} from './release-policy-contracts.mjs'
+
 export const CHECKPOINT_FILES = Object.freeze([
   'biyan-release.json',
   'src-tauri/Cargo.lock',
@@ -85,6 +90,52 @@ export const REVIEWED_CONTROL_PLANE_DRIFT = Object.freeze(
   ])
 )
 
+export const TERMINAL_CONTROL_PLANE_DRIFT = Object.freeze(
+  new Map([
+    ['.github/workflows/biyan-a-canary.yml', 'M'],
+    ['.github/workflows/biyan-direct-qualification.yml', 'A'],
+    ['.github/workflows/desktop-release-draft-repair.yml', 'M'],
+    ['.github/workflows/desktop-release.yml', 'M'],
+    ['.github/workflows/promote-desktop-update.yml', 'M'],
+    ['.github/workflows/release-distribution.yml', 'M'],
+    ['DEVELOPMENT_PLAN.md', 'M'],
+    ['autoqa/migration_runner.py', 'M'],
+    ['autoqa/tests/test_migration_runner.py', 'M'],
+    ['docs/README.md', 'M'],
+    ['docs/release-distribution.md', 'M'],
+    ['docs/src/pages/docs/desktop/data-folder.mdx', 'M'],
+    ['scripts/ci/__tests__/qualification-impact.test.mjs', 'M'],
+    ['scripts/ci/__tests__/release-policy.test.mjs', 'M'],
+    ['scripts/ci/__tests__/verify-release-target.test.mjs', 'M'],
+    ['scripts/ci/legacy-compatibility-allowlist.json', 'M'],
+    ['scripts/ci/release-policy-contracts.mjs', 'M'],
+    ['scripts/ci/release-train-policy.json', 'M'],
+    ['scripts/ci/verify-release-policy.mjs', 'M'],
+    ['scripts/ci/verify-release-target.mjs', 'M'],
+    ['scripts/release-distribution/__tests__/release-distribution.test.mjs', 'M'],
+    ['scripts/release-distribution/collect-release-assets.mjs', 'M'],
+    ['scripts/updater/__tests__/direct-c-transition-policy.test.mjs', 'A'],
+    ['scripts/updater/__tests__/direct-qualification.test.mjs', 'A'],
+    ['scripts/updater/__tests__/fixtures/v0.6.633-latest.json', 'A'],
+    ['scripts/updater/__tests__/legacy-manifest-policy.test.mjs', 'M'],
+    ['scripts/updater/__tests__/promotion-transaction.test.mjs', 'M'],
+    ['scripts/updater/__tests__/test_prepare_direct_qualification_inputs.py', 'A'],
+    ['scripts/updater/__tests__/updater.test.mjs', 'M'],
+    ['scripts/updater/direct-c-contract.mjs', 'A'],
+    ['scripts/updater/direct-c-transition-policy.json', 'A'],
+    ['scripts/updater/direct-c-transition-policy.mjs', 'A'],
+    ['scripts/updater/direct-qualification-evidence.mjs', 'A'],
+    ['scripts/updater/direct-qualification-policy.json', 'A'],
+    ['scripts/updater/legacy-manifest-policy.mjs', 'M'],
+    ['scripts/updater/legacy-pause-transaction.mjs', 'M'],
+    ['scripts/updater/prepare-direct-qualification-inputs.py', 'A'],
+    ['scripts/updater/prepare-promotion.mjs', 'M'],
+    ['scripts/updater/promotion-transaction.mjs', 'M'],
+    ['scripts/updater/run-promotion-transaction.sh', 'M'],
+    ['scripts/updater/worker.mjs', 'M'],
+  ])
+)
+
 const EXACT_COMMIT = /^[0-9a-f]{40}$/
 const SEMVER_NUMBER = '(?:0|[1-9][0-9]*)'
 const SEMVER_PRERELEASE_IDENTIFIER =
@@ -133,16 +184,21 @@ function isExactControlPlanePath(relativePath) {
   )
 }
 
-for (const [relativePath, status] of REVIEWED_CONTROL_PLANE_DRIFT) {
-  if (!isExactControlPlanePath(relativePath)) {
-    throw new Error(
-      `reviewed release drift escaped the control-plane path domain: ${relativePath}`
-    )
-  }
-  if (!/^[AM]$/.test(status)) {
-    throw new Error(
-      `reviewed release drift has unsupported status ${status}: ${relativePath}`
-    )
+for (const [label, allowlist] of [
+  ['reviewed release', REVIEWED_CONTROL_PLANE_DRIFT],
+  ['terminal release', TERMINAL_CONTROL_PLANE_DRIFT],
+]) {
+  for (const [relativePath, status] of allowlist) {
+    if (!isExactControlPlanePath(relativePath)) {
+      throw new Error(
+        `${label} drift escaped the control-plane path domain: ${relativePath}`
+      )
+    }
+    if (!/^[AM]$/.test(status)) {
+      throw new Error(
+        `${label} drift has unsupported status ${status}: ${relativePath}`
+      )
+    }
   }
 }
 
@@ -345,6 +401,72 @@ export function validateReleaseDrift(entries) {
   return failures
 }
 
+export function validateTerminalReleaseDrift(entries) {
+  const failures = []
+  const checkpointFiles = new Set(CHECKPOINT_FILES)
+
+  for (const entry of entries) {
+    if (/^[RC]/.test(entry.status)) {
+      failures.push(
+        `terminal release drift must not rename or copy paths: ${entry.path}`
+      )
+      continue
+    }
+    if (!/^[AMD]$/.test(entry.status)) {
+      failures.push(
+        `terminal release drift has unsupported status ${entry.status}: ${entry.path}`
+      )
+      continue
+    }
+    if (checkpointFiles.has(entry.path)) {
+      failures.push(
+        `terminal control-plane commit must not modify source identity: ${entry.path}`
+      )
+      continue
+    }
+
+    const expectedStatus = TERMINAL_CONTROL_PLANE_DRIFT.get(entry.path)
+    if (!expectedStatus) {
+      failures.push(`unreviewed terminal release drift: ${entry.path}`)
+      continue
+    }
+    if (!isExactControlPlanePath(entry.path)) {
+      failures.push(
+        `terminal release drift escaped the control-plane path domain: ${entry.path}`
+      )
+      continue
+    }
+    if (entry.status !== expectedStatus) {
+      failures.push(
+        `terminal control-plane drift status changed for ${entry.path}: expected ${expectedStatus}, found ${entry.status}`
+      )
+    }
+
+    const oldMode = entry.oldMode
+    const newMode = entry.newMode
+    if (
+      (oldMode && !REGULAR_MODES.has(oldMode)) ||
+      (newMode && !REGULAR_MODES.has(newMode))
+    ) {
+      failures.push(
+        `terminal control-plane drift must use regular files: ${entry.path}`
+      )
+      continue
+    }
+    if (
+      (entry.status === 'M' && (!oldMode || oldMode !== newMode)) ||
+      (entry.status === 'A' && (oldMode !== null || !newMode)) ||
+      (entry.status === 'D' && (!oldMode || newMode !== null))
+    ) {
+      failures.push(
+        `terminal control-plane file mode drift is invalid: ${entry.path}`
+      )
+    }
+  }
+
+  return failures
+}
+
 function verifyCheckpoint({
   harnessRoot,
   parentCommit,
@@ -435,6 +557,48 @@ function verifyPolicyView({
   return { sourceCommit, trustedMain }
 }
 
+function readProtectedTrainPolicy(harnessRoot) {
+  const policyPath = path.join(
+    harnessRoot,
+    'scripts/ci/release-train-policy.json'
+  )
+  let policy
+  try {
+    policy = JSON.parse(fs.readFileSync(policyPath, 'utf8'))
+  } catch (error) {
+    throw new Error(
+      `protected release train policy is unreadable: ${error instanceof Error ? error.message : String(error)}`
+    )
+  }
+  const failures = validateReleaseTrainPolicy(policy)
+  if (failures.length > 0) {
+    throw new Error(
+      `protected release train policy is invalid: ${failures.join('; ')}`
+    )
+  }
+  return policy
+}
+
+function readTaggedReleaseMetadata(targetRoot) {
+  const metadataPath = path.join(targetRoot, 'biyan-release.json')
+  let metadata
+  try {
+    metadata = JSON.parse(fs.readFileSync(metadataPath, 'utf8'))
+  } catch (error) {
+    throw new Error(
+      `tagged release metadata is unreadable: ${error instanceof Error ? error.message : String(error)}`
+    )
+  }
+  if (
+    metadata?.schema !== 1 ||
+    !['A', 'B', 'C'].includes(metadata?.migrationPhase) ||
+    !Number.isSafeInteger(metadata?.dataSchema)
+  ) {
+    throw new Error('tagged release metadata is invalid')
+  }
+  return metadata
+}
+
 export function verifyReleaseTarget(options) {
   const { harnessRoot, releaseTag, sourceCommit, targetRoot, trustedMain } =
     options
@@ -468,15 +632,39 @@ export function verifyReleaseTarget(options) {
   ]).stdout.trim()
   const parents = parentLine.split(/\s+/)
   if (parents.length !== 2 || parents[0] !== sourceCommit) {
-    throw new Error('release checkpoint must have exactly one parent')
+    throw new Error('release source must have exactly one parent')
   }
   const parentCommit = parents[1]
-  const checkpoint = verifyCheckpoint({
-    harnessRoot,
-    parentCommit,
-    releaseVersion,
-    sourceCommit,
-  })
+  const trainPolicy = readProtectedTrainPolicy(harnessRoot)
+  const terminalRelease = trainPolicy.activeTerminalRelease
+  let checkpoint = null
+  let releaseKind
+
+  if (terminalRelease !== null) {
+    const releaseMetadata = readTaggedReleaseMetadata(targetRoot)
+    const terminalFailures = validateActiveTerminalReleaseBinding({
+      releaseTag,
+      version: releaseVersion,
+      migrationPhase: releaseMetadata.migrationPhase,
+      dataSchema: releaseMetadata.dataSchema,
+      sourceCommit,
+      trainPolicy,
+    })
+    if (terminalFailures.length > 0) {
+      throw new Error(
+        `terminal release binding is invalid: ${terminalFailures.join('; ')}`
+      )
+    }
+    releaseKind = 'terminal'
+  } else {
+    checkpoint = verifyCheckpoint({
+      harnessRoot,
+      parentCommit,
+      releaseVersion,
+      sourceCommit,
+    })
+    releaseKind = 'bridge-checkpoint'
+  }
 
   const entries = parseNameStatus(
     git(
@@ -497,7 +685,10 @@ export function verifyReleaseTarget(options) {
     oldMode: treeMode(harnessRoot, sourceCommit, entry.path)?.mode ?? null,
   }))
 
-  const driftFailures = validateReleaseDrift(entries)
+  const driftFailures =
+    releaseKind === 'terminal'
+      ? validateTerminalReleaseDrift(entries)
+      : validateReleaseDrift(entries)
   if (driftFailures.length > 0) {
     throw new Error(driftFailures.join('\n'))
   }
@@ -518,6 +709,7 @@ export function verifyReleaseTarget(options) {
         status,
       })),
     parentCommit,
+    releaseKind,
     releaseTag,
     releaseVersion,
     sourceCommit,

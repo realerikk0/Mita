@@ -6,47 +6,42 @@ bundle local model runtimes, model catalogs, embeddings, RAG, or vector stores.
 
 ## Versioned migration
 
-The bridge releases use cumulative forward-only data migrations:
+The supported release is one cumulative, forward-only terminal update:
 
-| Release | App version | Data schema | Purpose |
-| --- | --- | --- | --- |
-| A | 0.6.643 | 1 | Establish the migration substrate and activate Biyan storage |
-| B | 0.6.644 | 2 | Remove retired runtime payloads and finish package branding |
-| C | 0.6.645 | 3 | Restrict legacy aliases to isolated ingress and migration code |
+| Release | App version | Migration phase | Data schema | Purpose |
+| --- | --- | --- | --- | --- |
+| Complete | 0.6.646 | C | 3 | Deliver the full Biyan source, branding, packaging, and migration closure in one update |
 
-The superseded `0.6.634` candidate failed before a GitHub Release was created;
-its public tag remains immutable release evidence. Versions `0.6.635` and
-`0.6.636` were never tagged. All earlier train refs, checkpoints, and
-qualification evidence remain immutable audit history. The authoritative
-active closure train is `0.6.643/A/1` → `0.6.644/B/2` → `0.6.645/C/3`.
+The former `0.6.643/A/1` → `0.6.644/B/2` → `0.6.645/C/3` train is
+preserved as immutable audit and compatibility history, but it is not an
+automatic rollout sequence. The `v0.6.646` tag is bound to the exact terminal
+product source commit; later control-plane commits may qualify or distribute
+that source but may not change the tagged product tree.
 
 Every later release carries all earlier migration steps. Sources remain
 read-only, conversion happens in staging, integrity checks run before the
 atomic switch, and failures do not advance migration markers. See
 `docs/src/pages/docs/desktop/data-folder.mdx` for the user-facing contract.
 
-The A, B, and C tags share one audited remote-only source baseline. Their
-immutable checkpoint commits differ only in release attestation and product
-version (`biyan-release.json`, `src-tauri/tauri.conf.json`,
-`src-tauri/Cargo.toml`, and `src-tauri/Cargo.lock`). `BIYAN_DATA_SCHEMA`
-compiles the attested target schema into each candidate. Do not resurrect
-retired runtime source or package graphs to manufacture artificial phase
-diffs: release policy forbids those paths for every phase.
+`BIYAN_DATA_SCHEMA` compiles the attested terminal schema into the candidate.
+Do not resurrect retired runtime source or package graphs, and do not create
+artificial A/B/C checkpoints: release policy accepts only the exact reviewed
+terminal source identity.
 
-## Closure recut boundary
+## Terminal release boundary
 
-Cut one new Shared → A → B → C train only when product source, product
+Cut one new complete terminal version only when product source, product
 dependencies, bundled resources, or packaged product content changes. Finish
-the concentrated source and artifact audit, clear every product blocker, and
-then cut that single train from one audited Shared/C source tree. Preserve all
-prior checkpoint commits, refs, and evidence.
+the concentrated source and artifact audit and clear every product blocker
+before fixing the exact terminal source commit. Preserve all prior checkpoint
+commits, refs, tags, and evidence.
 
 Workflow-, test-, verifier-, and distribution-only changes must use an
-independent control-plane pull request. They preserve the existing checkpoint
-commits, do not recut the train, and revalidate only the fail-closed impact
-scope selected by protected-branch policy. If a control-plane change exposes a
-product blocker, stop qualification; merge no release checkpoint until the
-product fix is audited and the one required replacement train is cut.
+independent control-plane pull request. They preserve the terminal product
+commit and revalidate only the fail-closed impact scope selected by
+protected-branch policy. If a control-plane change exposes a product blocker,
+stop qualification and create a higher complete version; never retag or amend
+the accepted source.
 
 ## Release invariants
 
@@ -57,21 +52,20 @@ product fix is audited and the one required replacement train is cut.
   hostnames may remain only as documented upgrade/ingress infrastructure; they
   must never surface as the product name or re-enable retired behavior.
 - The updater installs the exact signed update object that was checked.
-- Initial A promotion stays fail-closed until a control-plane pull request
-  records the accepted `0.6.643` manifest SHA-256 in
-  `scripts/updater/legacy-a-transition-policy.json`; this approval does not
-  recut the product train.
-- Promotion is gated by health evidence, rollout timing, and a kill switch.
-- The A canary is a two-point GitHub-native matrix. Windows and macOS verify
-  current → A; the exact Linux compatibility exception permits only fresh A
-  because the accepted current release has no production Linux artifact.
-  Start writes only GitHub Actions artifacts. Finish must prove at least 48
-  hours between the latest start and finish `artifact.created_at` receipts
-  before immutable dual-cloud smoke and health evidence may be published.
+- Direct-C promotion stays fail-closed until a control-plane pull request pins
+  the accepted `0.6.646` source, manifest, platform assets, and the exact
+  published compatibility sources.
+- Promotion is one 100% transaction gated by signed-candidate verification,
+  GitHub-native upgrade evidence, a healthy report, compare-and-swap, and a
+  kill switch. It does not create intermediate A or B cohorts.
+- The direct qualification matrix verifies Windows and macOS
+  `0.6.633 → 0.6.646`, Linux fresh `0.6.646` under the exact no-current-Linux
+  exception, and all three platforms from public `0.6.643`, `0.6.644`, and
+  `0.6.645` to `0.6.646`.
 - Kill Switch and Health Gate pause the Router and restore both legacy updater
-  origins from the exact persisted pre-A backup in one journaled transaction.
-  Promotion may resume only after the active A compatibility manifest is
-  restored and read back; B or C cannot bypass that recovery step.
+  origins from the exact persisted pre-update backup in one journaled
+  transaction. Promotion may resume only after the active complete
+  compatibility manifest is restored and read back.
 - User-owned retired data is deleted only after explicit confirmation.
 
 ## Phase C source closure
@@ -90,9 +84,9 @@ product fix is audited and the one required replacement train is cut.
 Run the TypeScript/Rust test suites, updater contract tests, release policy
 scan, package build, and platform upgrade matrix before promotion. Production
 promotion is a separate approved operation and is never performed by a tag
-build alone. Signed package builds, the A/B/C upgrade matrix, observation
-windows, and production promotion remain release-qualification work; they are
-not satisfied by source completion alone.
+build alone. Signed package builds, direct upgrade qualification, download
+distribution, and production promotion remain release-qualification work;
+they are not satisfied by source completion alone.
 
 ### Exact-SHA scoped qualification
 
@@ -105,29 +99,27 @@ native runners, and uses fixed GitHub-hosted x86_64 labels. It does not publish
 or promote anything and does not consume a production environment or secret.
 
 The minimum revalidation is impact-based: documentation builds only the docs;
-the exact four checkpoint files run identity/topology contracts; isolated
-tests and CI policy run focused checks; verifier and distribution changes must
-replay a hash-pinned retained artifact set; platform packaging changes rebuild
-only that platform. Platform candidate-verifier changes rebuild their affected
-platform rather than authenticating only a stale filename/hash set; runtime,
-bundled legal/resource inputs, dependency, migration, classifier, unknown, or
-unsafe changes fail closed to full native qualification. Missing or mismatched
-replay evidence fails before native work is allocated; establish fresh
-evidence with an explicit `bootstrap-full` run rather than silently passing or
-implicitly widening the dispatch.
+isolated tests and CI policy run focused checks; verifier and distribution
+changes must replay a hash-pinned retained artifact set; platform packaging
+changes rebuild only that platform. Platform candidate-verifier changes
+rebuild their affected platform rather than authenticating only a stale
+filename/hash set; runtime, bundled legal/resource inputs, dependency,
+migration, classifier, unknown, or unsafe changes fail closed to full native
+qualification. Missing or mismatched replay evidence fails before native work
+is allocated; establish fresh evidence with an explicit `bootstrap-full` run
+rather than silently passing or implicitly widening the dispatch.
 
 Every `auto` hop authenticates the exact base through the previous successful
 run and hash-pinned manifest, carries the complete three-platform evidence set
-forward, and replaces only rebuilt axes. A four-file checkpoint carry-forward
-is marked `checkpoint-continuity-only`; it does not claim that reused packages
-have the checkpoint's new embedded version or schema, and cannot replace the
-exact-tag candidate build. Checkpoint phases may cycle from C to A only when
-the target also has strictly higher SemVer precedence.
+forward, and replaces only rebuilt axes. Control-plane carry-forward never
+claims that reused packages contain a new product version and cannot replace
+the exact-tag terminal candidate build.
 
 The first run after this workflow lands must use `bootstrap-full` against the
-accepted C checkpoint. This scoped workflow never substitutes for the exact-tag
-candidate contract: every release tag still runs `make test`, all three signed
-platform builds, candidate verification, and immutable updater packaging.
+accepted terminal source. This scoped workflow never substitutes for the
+exact-tag candidate contract: every release tag still runs `make test`, all
+three signed platform builds, candidate verification, and immutable updater
+packaging.
 The protected branch ruleset must additionally enforce CODEOWNER review and
 dismiss stale approvals for CI-control paths; a required check name alone does
 not bind the result to an immutable workflow definition.

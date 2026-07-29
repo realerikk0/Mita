@@ -514,10 +514,11 @@ test('worker returns 204 when paused and a flat signed manifest when active', as
   const policy = {
     schema: 1,
     channel: 'stable',
+    currentVersion: '0.6.635',
     paused: true,
     releases: {
       '0.6.634': { phase: 'A' },
-      '0.6.635': { phase: 'B' },
+      '0.6.635': { phase: 'B', manifestKey },
     },
     transitions: {
       '0.6.634': { to: '0.6.635', phase: 'B', rollout: 100, manifestKey },

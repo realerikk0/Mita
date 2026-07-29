@@ -60,7 +60,7 @@ const TRUSTED_RECOVERY_JOB_ORDER = [
 ]
 
 const TRUSTED_CANDIDATE_WORKFLOW_ALLOWLIST = new Set([
-  '76c67ee0b9a06adc6c4d4d52ecbdf9634b522992334812c830d4367fefb11214',
+  '22530342c62be3e2372476d04a4e4e63a53356740e8122bab2794ac638f3ff85',
 ])
 
 const TRUSTED_RECOVERY_WORKFLOW_ALLOWLIST = new Set([
@@ -68,22 +68,34 @@ const TRUSTED_RECOVERY_WORKFLOW_ALLOWLIST = new Set([
 ])
 
 const TRUSTED_DRAFT_REPAIR_WORKFLOW_SHA256 =
-  'b10a7cc43b50e320cbfdecb6802354ff9b2b10971f61f168a9930c405fb737ff'
+  '9cdecb3d08ce892ef9d09eb9fe2458c83ee0f32751b4c9607fb87d048d6e4ac1'
 
 const TRUSTED_DRAFT_REPAIR_STATE_HELPER_SHA256 =
   '70c7ebc91c2227e818b4843425ca234ef6a53b39bd3e9231cfd9fc3d5fc212f2'
 
 const TRUSTED_BIYAN_DOWNLOAD_ALIAS_BOOTSTRAP_JOB_SHA256 =
-  '58cb636b6139af4f0be2a21dbc1a2df9dfdf8a9ba67940be46b70a5c8922d697'
+  'da3f0b7869f3b7e0229af9775a9d4f0bb52c3845a9910d21139bd472d70640fb'
 
 const TRUSTED_RELEASE_DISTRIBUTION_WORKFLOW_SHA256 =
-  'ee114cca6ddccdcd359ce66482cd61244ae37b865f5a24af6be9f78c18f92135'
+  'c780b58de80c07962f42c43fc658b74b2f7c2734df01fd356cefb80f5480ca76'
+
+const TRUSTED_DIRECT_QUALIFICATION_WORKFLOW_SHA256 =
+  '5a585fe65bd0d29708cba1f00e697a20288008e8f38d45fa5740f77520a1e835'
 
 export const TRUSTED_SENSITIVE_UPDATER_WORKFLOW_CONTRACTS = Object.freeze({
   '.github/workflows/biyan-a-canary.yml': Object.freeze({
     exactJobNames: Object.freeze(['preflight', 'platform-canary', 'aggregate']),
     expectedEnvelopeSha256:
-      'e6c7e9dfef2db315d9f69435a19c1a336ad587c8f039f84aa7d32775a756b484',
+      'aa14fbadc416e78eb02eff33b54941191ad071b148c4f58f836c69d9c98d5dd9',
+    expectedPermissions: Object.freeze({
+      actions: 'read',
+      contents: 'read',
+    }),
+  }),
+  '.github/workflows/promote-desktop-update.yml': Object.freeze({
+    exactJobNames: Object.freeze(['promote']),
+    expectedEnvelopeSha256:
+      '3c9c72fc42456c08ad7b846ec95bcd08b5f38ceb7dbb0b977dfe097a18eb0417',
     expectedPermissions: Object.freeze({
       actions: 'read',
       contents: 'read',
@@ -566,17 +578,29 @@ export function validateReleaseTrainPolicy(policy) {
       )
     }
   }
-  exactKeys(policy, ['schema', 'activeTrain', 'trains'], 'release train policy')
-  if (policy?.schema !== 1) {
-    failures.push('release train policy must use schema 1')
+  exactKeys(
+    policy,
+    ['schema', 'activeTrain', 'activeTerminalRelease', 'trains'],
+    'release train policy'
+  )
+  if (policy?.schema !== 2) {
+    failures.push('release train policy must use schema 2')
   }
   if (!Array.isArray(policy?.trains) || policy.trains.length === 0) {
     failures.push('release train policy must declare at least one train')
     return failures
   }
 
+  const terminal = policy.activeTerminalRelease
+  const terminalMode = terminal !== null && terminal !== undefined
   const active = policy.trains.filter((train) => train?.status === 'active')
-  if (
+  if (terminalMode) {
+    if (active.length !== 0 || policy.activeTrain !== null) {
+      failures.push(
+        'terminal release policy must retire every active train and set activeTrain to null'
+      )
+    }
+  } else if (
     active.length !== 1 ||
     typeof policy.activeTrain !== 'string' ||
     active[0]?.id !== policy.activeTrain
@@ -592,6 +616,7 @@ export function validateReleaseTrainPolicy(policy) {
     'failed-preserved',
     'accepted-pretag-superseded',
     'active',
+    'superseded-by-terminal',
   ])
   let previousC = null
   for (const [trainIndex, train] of policy.trains.entries()) {
@@ -605,10 +630,16 @@ export function validateReleaseTrainPolicy(policy) {
         `release train ${train.id} has unsupported status ${train.status}`
       )
     }
-    if (
-      (train.status === 'active') !==
-      (trainIndex === policy.trains.length - 1)
-    ) {
+    const isFinalTrain = trainIndex === policy.trains.length - 1
+    if (terminalMode) {
+      if (
+        (train.status === 'superseded-by-terminal') !== isFinalTrain
+      ) {
+        failures.push(
+          'terminal release policy must mark only the final history train superseded-by-terminal'
+        )
+      }
+    } else if ((train.status === 'active') !== isFinalTrain) {
       failures.push('the active release train must be the final history entry')
     }
     if (ids.has(train.id)) {
@@ -679,6 +710,46 @@ export function validateReleaseTrainPolicy(policy) {
       previousC = activeC
     }
   }
+
+  if (terminal !== null && terminal !== undefined) {
+    exactKeys(
+      terminal,
+      [
+        'tag',
+        'version',
+        'migrationPhase',
+        'dataSchema',
+        'sourceCommit',
+      ],
+      'active terminal release'
+    )
+    if (
+      terminal?.tag !== 'v0.6.646' ||
+      terminal?.version !== '0.6.646' ||
+      terminal?.migrationPhase !== 'C' ||
+      terminal?.dataSchema !== 3 ||
+      terminal?.tag !== `v${terminal?.version}` ||
+      !/^[0-9a-f]{40}$/.test(terminal?.sourceCommit ?? '')
+    ) {
+      failures.push(
+        'active terminal release must exactly bind v0.6.646/C/3 to one lowercase 40-hex source commit'
+      )
+    }
+    if (versions.has(terminal?.version)) {
+      failures.push(`duplicate release version: ${terminal.version}`)
+    }
+    if (
+      previousC &&
+      (previousC[0] !== 0 ||
+        previousC[1] !== 6 ||
+        previousC[2] !== 645 ||
+        terminal?.version !== '0.6.646')
+    ) {
+      failures.push(
+        'active terminal release must immediately follow the final preserved train C 0.6.645'
+      )
+    }
+  }
   return failures
 }
 
@@ -702,7 +773,14 @@ export function validateReleaseIdentity({
     )
   }
 
-  const bridgeTrain = trainPolicy?.trains
+  const terminalRelease =
+    trainPolicy?.activeTerminalRelease?.version === version
+      ? {
+          ...trainPolicy.activeTerminalRelease,
+          trainId: 'activeTerminalRelease',
+        }
+      : null
+  const bridgeTrain = terminalRelease ?? trainPolicy?.trains
     ?.flatMap((train) =>
       Object.entries(train.releases ?? {}).map(([phase, release]) => ({
         ...release,
@@ -722,7 +800,7 @@ export function validateReleaseIdentity({
     dataSchema !== bridgeTrain.dataSchema
   ) {
     failures.push(
-      `bridge release ${version} in ${bridgeTrain.trainId} must attest ${bridgeTrain.migrationPhase}/${bridgeTrain.dataSchema}`
+      `release ${version} in ${bridgeTrain.trainId} must attest ${bridgeTrain.migrationPhase}/${bridgeTrain.dataSchema}`
     )
   }
   return failures
@@ -742,6 +820,19 @@ export function validateActiveReleaseIdentity({
     cargoLockVersion,
     trainPolicy,
   })
+  const terminalRelease = trainPolicy?.activeTerminalRelease
+  if (terminalRelease !== null && terminalRelease !== undefined) {
+    if (
+      terminalRelease.version !== version ||
+      terminalRelease.migrationPhase !== migrationPhase ||
+      terminalRelease.dataSchema !== dataSchema
+    ) {
+      failures.push(
+        `release ${version} ${migrationPhase}/${dataSchema} is not the declared active terminal release ${terminalRelease.version}/${terminalRelease.migrationPhase}/${terminalRelease.dataSchema}`
+      )
+    }
+    return failures
+  }
   const activeTrain = trainPolicy?.trains?.find(
     (train) => train.id === trainPolicy.activeTrain && train.status === 'active'
   )
@@ -753,6 +844,34 @@ export function validateActiveReleaseIdentity({
   ) {
     failures.push(
       `release ${version} ${migrationPhase}/${dataSchema} is not the declared active train ${trainPolicy?.activeTrain ?? 'missing'} release`
+    )
+  }
+  return failures
+}
+
+export function validateActiveTerminalReleaseBinding({
+  releaseTag,
+  version,
+  migrationPhase,
+  dataSchema,
+  sourceCommit,
+  trainPolicy = releaseTrainPolicy,
+}) {
+  const failures = validateReleaseTrainPolicy(trainPolicy)
+  const terminal = trainPolicy?.activeTerminalRelease
+  if (terminal === null || terminal === undefined) {
+    failures.push('release policy has no active terminal release binding')
+    return failures
+  }
+  if (
+    terminal.tag !== releaseTag ||
+    terminal.version !== version ||
+    terminal.migrationPhase !== migrationPhase ||
+    terminal.dataSchema !== dataSchema ||
+    terminal.sourceCommit !== sourceCommit
+  ) {
+    failures.push(
+      `release ${releaseTag}/${sourceCommit}/${migrationPhase}/${dataSchema} does not match the active terminal release binding`
     )
   }
   return failures
@@ -1008,11 +1127,6 @@ export function validateCandidateWorkflow(
     const tagCutPermissions = jobPermissionBlocks(tagCut)
     const tagCutUses = tagCut.match(/^\s*(?:-\s*)?uses:\s*.+$/gm) ?? []
     const tokenReferences = tagCut.match(/\$\{\{\s*github\.token\s*\}\}/g) ?? []
-    const exactMappings = [
-      ['v0.6.643', '38e6d9290a8b9b0f152ff2a7eefb550e6ead7df5'],
-      ['v0.6.644', 'd58f4e9141ee9dfc985171d13c993103dd763b01'],
-      ['v0.6.645', 'a79c715a61057d7b78b440d90e3419dfc7e55d12'],
-    ]
     if (
       !/^    environment:\s*release-distribution\s*$/m.test(tagCut) ||
       tagCutPermissions.length !== 1 ||
@@ -1035,18 +1149,38 @@ export function validateCandidateWorkflow(
       )
     }
     if (
-      exactMappings.some(
-        ([tag, commit]) =>
-          !new RegExp(
-            `${escapeRegExp(tag)}\\)\\s*\\n\\s*source_commit="${commit}"`
-          ).test(tagCut)
+      !tagCut.includes(
+        'contents/scripts/ci/release-train-policy.json?ref=$live_main'
+      ) ||
+      !tagCut.includes("--jq '.content'") ||
+      !tagCut.includes('| base64 --decode') ||
+      !tagCut.includes('.schema == 2') ||
+      !tagCut.includes('.activeTrain == null') ||
+      !/\(\[\.trains\[\]\s*\|\s*select\(\.status == "active"\)\]\s*\|\s*length\)\s*== 0/.test(
+        tagCut
+      ) ||
+      !/\(\[\.trains\[\]\s*\|\s*select\(\.status == "superseded-by-terminal"\)\]\s*\|\s*length\)\s*== 1/.test(
+        tagCut
       ) ||
       !tagCut.includes(
-        'echo "Release tag is not an approved A/B/C checkpoint: $RELEASE_TAG"'
-      )
+        '.trains[-1].status == "superseded-by-terminal"'
+      ) ||
+      !tagCut.includes('.activeTerminalRelease.tag == $tag') ||
+      !tagCut.includes('.activeTerminalRelease.tag == "v0.6.646"') ||
+      !tagCut.includes('.activeTerminalRelease.version == "0.6.646"') ||
+      !tagCut.includes('.activeTerminalRelease.migrationPhase == "C"') ||
+      !tagCut.includes('.activeTerminalRelease.dataSchema == 3') ||
+      !tagCut.includes('test("^[0-9a-f]{40}$")') ||
+      !tagCut.includes(
+        `jq -er '.activeTerminalRelease.sourceCommit' "$policy_json"`
+      ) ||
+      !tagCut.includes(
+        'echo "Release tag is not the exact active terminal policy binding: $RELEASE_TAG"'
+      ) ||
+      /\bv0\.6\.(?:643|644|645)\b/.test(tagCut)
     ) {
       failures.push(
-        'tag-cut must map only v0.6.643, v0.6.644, and v0.6.645 to the reviewed A/B/C checkpoints'
+        'tag-cut must resolve only the exact v0.6.646/C/3 terminal source binding from protected live-main policy'
       )
     }
     if (
@@ -1077,7 +1211,7 @@ export function validateCandidateWorkflow(
       !tagCut.includes('and .behind_by == 0')
     ) {
       failures.push(
-        'tag-cut must bind the dispatch SHA to live mita-main and prove the exact source checkpoint is its ancestor'
+        'tag-cut must bind the dispatch SHA to live mita-main and prove the exact terminal source is its ancestor'
       )
     }
     if (
@@ -2790,8 +2924,9 @@ export function validateDraftAssetRepairWorkflow(source, stateHelperSource) {
     (alwaysConditions?.length ?? 0) !== 2 ||
     (allConditions?.length ?? 0) !== 5 ||
     !snapshot?.includes(
-      "if: ${{ inputs.prepared_run_id == '' && inputs.prepared_run_attempt == '' }}"
+      "if: ${{ false && inputs.prepared_run_id == '' && inputs.prepared_run_attempt == '' }}"
     ) ||
+    !commit?.includes('false &&\n        always() &&') ||
     !commit?.includes('always() &&') ||
     !commit.includes("inputs.prepared_run_id == '' &&") ||
     !commit.includes("inputs.prepared_run_attempt == '' &&") ||
@@ -2805,7 +2940,7 @@ export function validateDraftAssetRepairWorkflow(source, stateHelperSource) {
     )
   ) {
     failures.push(
-      'Draft asset repair must keep the exact fail-closed prepare, resume, committed-postflight, and two always-run evidence conditions'
+      'Retired Draft asset repair must stay permanently disabled while preserving the exact fail-closed prepare, resume, committed-postflight, and two always-run evidence conditions'
     )
   }
 
@@ -3320,6 +3455,172 @@ export function validateReleaseEnvironmentWorkflows(workflows) {
         )
       }
     }
+    if (workflow === '.github/workflows/biyan-a-canary.yml') {
+      for (const retiredJob of ['preflight', 'platform-canary', 'aggregate']) {
+        const block = jobBlock(source, retiredJob)
+        const retiredGates =
+          block?.match(
+            /^    if:\s*\$\{\{\s*false && inputs\.mode != ''\s*\}\}\s*$/gm
+          ) ?? []
+        if (retiredGates.length !== 1) {
+          failures.push(
+            `${workflow} ${retiredJob} must remain permanently disabled as retired evidence`
+          )
+        }
+      }
+    }
+    if (workflow === '.github/workflows/promote-desktop-update.yml') {
+      const active = uncommentedSource(source)
+      const trigger = topLevelBlock(active, 'on')
+      const triggerKeys = trigger
+        ? [
+            ...trigger.matchAll(/^  ([A-Za-z0-9_-]+):\s*$/gm),
+          ].map((match) => match[1])
+        : []
+      if (
+        triggerKeys.length !== 1 ||
+        triggerKeys[0] !== 'workflow_dispatch' ||
+        !/^      phase:\s*$/m.test(trigger ?? '') ||
+        !/^        options:\s*\[DIRECT_C, RECOVERY\]\s*$/m.test(
+          trigger ?? ''
+        )
+      ) {
+        failures.push(
+          `${workflow} must expose only the reviewed manual DIRECT_C and RECOVERY promotion modes`
+        )
+      }
+      if (
+        !active.includes('"Biyan Direct Qualification"') ||
+        !active.includes(
+          'scripts/updater/direct-qualification-evidence.mjs validate-policy'
+        ) ||
+        !active.includes(
+          '--policy scripts/updater/direct-qualification-policy.json'
+        ) ||
+        !active.includes('.deploymentMode == "direct-c"') ||
+        !active.includes('.sampleSize == 16') ||
+        !active.includes(
+          'node scripts/updater/prepare-promotion.mjs "${prepare_args[@]}"'
+        ) ||
+        !active.includes('--phase "$PHASE"') ||
+        active.includes('"Biyan A Canary"') ||
+        active.includes('validate-approved-a') ||
+        active.includes('legacy-a-transition-policy.json')
+      ) {
+        failures.push(
+          `${workflow} must bind DIRECT_C to exact direct qualification evidence and the fail-closed one-shot promotion contract`
+        )
+      }
+    }
+  }
+  return failures
+}
+
+export function validateDirectQualificationWorkflow(source) {
+  const failures = []
+  const active = uncommentedSource(source)
+  const envelopeSha256 = createHash('sha256')
+    .update(normalizedYamlEnvelope(source))
+    .digest('hex')
+  if (envelopeSha256 !== TRUSTED_DIRECT_QUALIFICATION_WORKFLOW_SHA256) {
+    failures.push(
+      `direct qualification must match the reviewed whole-workflow execution envelope (got ${envelopeSha256})`
+    )
+  }
+
+  const jobs = workflowJobKeys(active)
+  const expectedJobs = [
+    'preflight',
+    'stage-candidate',
+    'qualification',
+    'aggregate',
+  ]
+  if (
+    jobs.length !== expectedJobs.length ||
+    jobs.some((job, index) => job !== expectedJobs[index])
+  ) {
+    failures.push(
+      'direct qualification jobs must match the reviewed ordered read-only job allowlist'
+    )
+  }
+  if (
+    !/^name:\s*Biyan Direct Qualification\s*$/m.test(active) ||
+    normalizedYamlEnvelope(topLevelBlock(active, 'on')) !==
+      'on:\n  workflow_dispatch:\n' ||
+    normalizedYamlEnvelope(topLevelBlock(active, 'permissions')) !==
+      'permissions:\n  actions: read\n  contents: read\n' ||
+    normalizedYamlEnvelope(topLevelBlock(active, 'concurrency')) !==
+      'concurrency:\n  group: biyan-direct-qualification\n  cancel-in-progress: false\n'
+  ) {
+    failures.push(
+      'direct qualification must remain exact manual-only read-only serialized evidence'
+    )
+  }
+  const stage = jobBlock(active, 'stage-candidate')
+  const stagePermissions = jobPermissionBlocks(stage)
+  if (
+    stagePermissions.length !== 1 ||
+    normalizedYamlEnvelope(stagePermissions[0]) !==
+      '    permissions:\n      actions: read\n      contents: write\n' ||
+    expectedJobs
+      .filter((job) => job !== 'stage-candidate')
+      .some((job) => jobPermissionBlocks(jobBlock(active, job)).length !== 0)
+  ) {
+    failures.push(
+      'only direct qualification Draft staging may request exact actions: read plus contents: write'
+    )
+  }
+  const expectedLanes = [
+    'legacy-manual-to-c-windows',
+    'legacy-manual-to-c-macos',
+    'legacy-auto-to-c-windows',
+    'legacy-auto-to-c-macos',
+    'current-to-c-windows',
+    'current-to-c-macos',
+    'fresh-c-linux',
+    'a-to-c-windows',
+    'a-to-c-macos',
+    'a-to-c-linux',
+    'b-to-c-windows',
+    'b-to-c-macos',
+    'b-to-c-linux',
+    'c-to-c-windows',
+    'c-to-c-macos',
+    'c-to-c-linux',
+  ]
+  const lanes = [
+    ...(jobBlock(active, 'qualification')?.matchAll(
+      /^\s{10}- lane:\s*([a-z0-9-]+)\s*$/gm
+    ) ?? []),
+  ].map((match) => match[1])
+  if (
+    lanes.length !== expectedLanes.length ||
+    lanes.some((lane, index) => lane !== expectedLanes[index])
+  ) {
+    failures.push(
+      'direct qualification must preserve the exact reviewed 16-lane upgrade matrix'
+    )
+  }
+  if (
+    /^\s+environment:\s*/m.test(active) ||
+    /\$\{\{\s*secrets\./.test(active) ||
+    /\b(?:ossutil|wrangler|feishu)\b/i.test(active) ||
+    /\bgh\s+release\s+(?:create|delete|edit|upload)\b/.test(active) ||
+    /\bgh\s+api\b[^\n]*(?:--method|-X)\s+(?:POST|PATCH|PUT|DELETE)\b/i.test(
+      active
+    ) ||
+    /uploads\.github\.com/.test(active)
+  ) {
+    failures.push(
+      'direct qualification must have no environment, secret, release mutation, or production writer'
+    )
+  }
+  for (const step of actionStepBlocks(active, 'actions/checkout@v4')) {
+    if (!step.includes('persist-credentials: false')) {
+      failures.push(
+        'direct qualification checkouts must disable persisted credentials'
+      )
+    }
   }
   return failures
 }
@@ -3397,14 +3698,14 @@ export function validateBiyanDownloadAliasBootstrapWorkflow(source) {
   }
 
   if (
-    !/^    if:\s*>-\n      github\.event_name == 'workflow_dispatch' &&\n      inputs\.operation == 'bootstrap-biyan-download-aliases'\s*$/m.test(
+    !/^    if:\s*>-\n      false &&\n      github\.event_name == 'workflow_dispatch' &&\n      inputs\.operation == 'bootstrap-biyan-download-aliases'\s*$/m.test(
       bootstrap
     ) ||
     !/^    environment:\s*release-distribution\s*$/m.test(bootstrap) ||
     !/^    timeout-minutes:\s*45\s*$/m.test(bootstrap)
   ) {
     failures.push(
-      'the Biyan alias bootstrap must be a bounded manual-only release-distribution environment job'
+      'the historical Biyan alias bootstrap must remain permanently disabled in the bounded release-distribution environment job'
     )
   }
   const bootstrapPermissions = jobPermissionBlocks(bootstrap)

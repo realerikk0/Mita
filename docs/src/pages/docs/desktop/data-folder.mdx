@@ -1,6 +1,6 @@
 ---
 title: Biyan Data and Migration
-description: Biyan's local data layout and cumulative current → A → B → C migration.
+description: Biyan's local data layout and one-step cumulative migration to the complete release.
 keywords: [Biyan, migration, data folder, backup]
 ---
 
@@ -30,20 +30,18 @@ If you configured a custom data folder, Biyan keeps that path and migrates the d
 
 ## Upgrade path
 
-The supported stable release train is:
+The supported automatic upgrade goes directly to the complete release:
 
-| Stage | App version | Data schema | Purpose |
+| Source | Target | Data schema | Purpose |
 | --- | --- | --- | --- |
-| Current | 0.6.633 | 0 | Earlier Mita/Jan-compatible layout |
-| A | 0.6.637 | 1 | Establish Biyan layout and stop retired runtimes |
-| B | 0.6.638 | 2 | Remove local/RAG components and finish package branding |
-| C | 0.6.639 | 3 | Remove normal-path legacy aliases |
+| 0.6.611 or later public stable releases | 0.6.646 | 3 | Upgrade automatically and apply the complete Biyan layout, remote-only cleanup, branding, and compatibility migration |
+| 0.6.605–0.6.608 | 0.6.646 | 3 | Install the latest package manually; the retired updater hostname and old signing-key generation are not an automatic route |
 
-The superseded 0.6.634 candidate failed before a GitHub Release or artifacts were published and is not part of the supported upgrade path. Its tag remains only as release evidence. Versions 0.6.635 and 0.6.636 were not released.
-
-Patch releases may increase these application versions. The data schema, not the app version string, decides which migration steps are missing.
-
-Every later release contains the complete cumulative migrator. A direct Current→C installation therefore executes the same missing steps in order rather than skipping them.
+There are no intermediate A or B installations. The target contains the
+complete cumulative migrator and executes only the missing steps, in order.
+The data schema, not the app version string, decides which steps are missing,
+so an existing schema-1, schema-2, or schema-3 installation can move directly
+to the same signed schema-3 target.
 
 ## Source selection
 

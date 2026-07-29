@@ -805,52 +805,63 @@ recover_terminal_open_journal() {
   : "${BIYAN_SIGNING_KEY:?}"
   : "${ROLLOUT_SALT:?}"
   : "${DYNAMIC_UPDATER_BASE_URL:?}"
-  local router_current router_target router_rollout expected_status
-  local expected_state endpoint status signed_state
-  router_current="$(jq -er .router.currentVersion \
+  local router_count router_index router_current router_target router_rollout
+  local expected_status expected_state endpoint status signed_state key value
+  local -a curl_args
+  router_count="$(jq -er '(.routers // [.router]) | length' \
     dist/state/terminal-recovery/plan.json)"
-  router_target="$(jq -er .router.targetVersion \
-    dist/state/terminal-recovery/plan.json)"
-  router_rollout="$(jq -er .router.rollout \
-    dist/state/terminal-recovery/plan.json)"
-  expected_status="$(jq -er .router.expectedStatus \
-    dist/state/terminal-recovery/plan.json)"
-  expected_state="$(jq -r '.router.expectedState // ""' \
-    dist/state/terminal-recovery/plan.json)"
-  node scripts/updater/sign-request.mjs \
-    --current-version "$router_current" \
-    --target-version "$router_target" \
-    --rollout "$router_rollout" --salt "$ROLLOUT_SALT" \
-    --output dist/state/terminal-recovery/router-request-headers.json
-  endpoint="${DYNAMIC_UPDATER_BASE_URL}/windows/x86_64/${router_current}"
-  local curl_args
-  curl_args=(
-    --proto '=https' --tlsv1.2 --silent --show-error
-    --connect-timeout 10 --max-time 120
-    --dump-header dist/state/terminal-recovery/router-response.headers
-    --output dist/state/terminal-recovery/router-response.json
-    --write-out '%{http_code}' "$endpoint"
-  )
-  while IFS=$'\t' read -r key value; do
-    curl_args+=(--header "$key: $value")
-  done < <(jq -r 'to_entries[] | [.key, .value] | @tsv' \
-    dist/state/terminal-recovery/router-request-headers.json)
-  status="$(curl "${curl_args[@]}")"
-  test "$status" = "$expected_status"
-  if [[ "$expected_status" == 200 ]]; then
-    test "$(jq -er .version \
-      dist/state/terminal-recovery/router-response.json)" = "$router_target"
-  else
-    test ! -s dist/state/terminal-recovery/router-response.json
-    signed_state="$(awk -F ': *' '
-      tolower($1) == "x-biyan-updater-state" {
-        gsub(/\r/, "", $2)
-        value = $2
-      }
-      END { print value }
-    ' dist/state/terminal-recovery/router-response.headers)"
-    test "$signed_state" = "$expected_state"
-  fi
+  for ((router_index = 0; router_index < router_count; router_index += 1)); do
+    router_current="$(jq -er --argjson index "$router_index" \
+      '(.routers // [.router])[$index].currentVersion' \
+      dist/state/terminal-recovery/plan.json)"
+    router_target="$(jq -er --argjson index "$router_index" \
+      '(.routers // [.router])[$index].targetVersion' \
+      dist/state/terminal-recovery/plan.json)"
+    router_rollout="$(jq -er --argjson index "$router_index" \
+      '(.routers // [.router])[$index].rollout' \
+      dist/state/terminal-recovery/plan.json)"
+    expected_status="$(jq -er --argjson index "$router_index" \
+      '(.routers // [.router])[$index].expectedStatus' \
+      dist/state/terminal-recovery/plan.json)"
+    expected_state="$(jq -r --argjson index "$router_index" \
+      '(.routers // [.router])[$index].expectedState // ""' \
+      dist/state/terminal-recovery/plan.json)"
+    node scripts/updater/sign-request.mjs \
+      --current-version "$router_current" \
+      --target-version "$router_target" \
+      --rollout "$router_rollout" --salt "$ROLLOUT_SALT" \
+      --output "dist/state/terminal-recovery/router-${router_index}-request-headers.json"
+    endpoint="${DYNAMIC_UPDATER_BASE_URL}/windows/x86_64/${router_current}"
+    curl_args=(
+      --proto '=https' --tlsv1.2 --silent --show-error
+      --connect-timeout 10 --max-time 120
+      --dump-header "dist/state/terminal-recovery/router-${router_index}-response.headers"
+      --output "dist/state/terminal-recovery/router-${router_index}-response.json"
+      --write-out '%{http_code}' "$endpoint"
+    )
+    while IFS=$'\t' read -r key value; do
+      curl_args+=(--header "$key: $value")
+    done < <(jq -r 'to_entries[] | [.key, .value] | @tsv' \
+      "dist/state/terminal-recovery/router-${router_index}-request-headers.json")
+    status="$(curl "${curl_args[@]}")"
+    test "$status" = "$expected_status"
+    if [[ "$expected_status" == 200 ]]; then
+      test "$(jq -er .version \
+        "dist/state/terminal-recovery/router-${router_index}-response.json")" \
+        = "$router_target"
+    else
+      test ! -s \
+        "dist/state/terminal-recovery/router-${router_index}-response.json"
+      signed_state="$(awk -F ': *' '
+        tolower($1) == "x-biyan-updater-state" {
+          gsub(/\r/, "", $2)
+          value = $2
+        }
+        END { print value }
+      ' "dist/state/terminal-recovery/router-${router_index}-response.headers")"
+      test "$signed_state" = "$expected_state"
+    fi
+  done
 
   if [[ "$DRY_RUN" == true ]]; then
     echo "Dry-run verified a terminal journal but will not delete it" >&2
@@ -878,24 +889,28 @@ if [[ "$terminal_recovery_only" == true ]]; then
   exit 0
 fi
 
-effective_phase="$(jq -er --arg version "$target_version" \
-  '.releases[$version].effectivePhase' dist/state/next-policy.json)"
 resume_from_pause=false
 if [[ -f dist/state/current-policy.json ]] \
   && jq -e '.paused == true' dist/state/current-policy.json >/dev/null; then
   resume_from_pause=true
 fi
-first_a_promotion=false
-if [[ "$effective_phase" == "A" ]] \
-  && [[ "$(jq -r '.legacyBridgeVersion // empty' \
-    dist/state/current-policy.json 2>/dev/null || true)" == "" ]]; then
-  first_a_promotion=true
+current_legacy_version="$(jq -r '.legacyBridgeVersion // empty' \
+  dist/state/current-policy.json 2>/dev/null || true)"
+next_legacy_version="$(jq -er .legacyBridgeVersion \
+  dist/state/next-policy.json)"
+first_legacy_promotion=false
+if [[ "$current_legacy_version" == "" ]]; then
+  first_legacy_promotion=true
 fi
 update_legacy=false
-if [[ "$effective_phase" == "A" || "$resume_from_pause" == true ]]; then
+if [[ "$current_legacy_version" != "$next_legacy_version" ]] \
+  || [[ "$resume_from_pause" == true ]]; then
   update_legacy=true
 fi
 legacy_publish_source=dist/candidate/latest.json
+if [[ "$current_legacy_version" != "$next_legacy_version" ]]; then
+  test "$next_legacy_version" = "$target_version"
+fi
 
 probe_r2 "$OPEN_TRANSACTION_KEY" open-r2-commit
 probe_oss "$OPEN_TRANSACTION_KEY" open-oss-commit
@@ -939,7 +954,7 @@ if [[ "$resume_from_pause" == true ]]; then
     --r2-legacy dist/state/snapshots/legacy-r2.json \
     --active-a dist/state/resume-active-a.json \
     --output dist/state/resume-validation.json
-  if [[ "$effective_phase" != "A" ]]; then
+  if [[ "$next_legacy_version" == "$current_legacy_version" ]]; then
     legacy_publish_source=dist/state/resume-active-a.json
   fi
 fi
@@ -1026,7 +1041,7 @@ publish_snapshot_backup_oss 1 dist/state/snapshots/legacy-oss.json \
 publish_snapshot_backup_r2 2 dist/state/snapshots/legacy-r2.json \
   "$legacy_r2_backup" legacy-r2-backup \
   dist/state/legacy-r2-backup-metadata-plan.json
-if [[ "$first_a_promotion" == true ]]; then
+if [[ "$first_legacy_promotion" == true ]]; then
   test "$(jq -er .legacyPauseFallback.transactionId \
     dist/state/next-policy.json)" = "$transaction_id"
   ossutil cp "oss://${ALIYUN_OSS_BUCKET}/${legacy_oss_backup}" \
@@ -1756,22 +1771,54 @@ test "$(node scripts/updater/promotion-transaction.mjs extract-r2-etag \
   --metadata dist/state/policy-readback-metadata.json)" \
   = "$policy_written_etag"
 
-node scripts/updater/sign-request.mjs --current-version "$FROM_VERSION" \
-  --target-version "$target_version" --rollout "$ROLLOUT" --salt "$ROLLOUT_SALT" \
-  --output dist/state/probe-headers.json
-endpoint="${DYNAMIC_UPDATER_BASE_URL}/windows/x86_64/${FROM_VERSION}"
-curl_args=(--proto '=https' --tlsv1.2 -sS --connect-timeout 10 --max-time 120 \
-  -o dist/state/probe-response.json -w '%{http_code}' "$endpoint")
-while IFS=$'\t' read -r key value; do curl_args+=(-H "$key: $value"); done \
-  < <(jq -r 'to_entries[] | [.key, .value] | @tsv' dist/state/probe-headers.json)
-status="$(curl "${curl_args[@]}")"
-if ! jq -e --arg from "$FROM_VERSION" '.transitions[$from]' \
-  dist/state/next-policy.json >/dev/null || [[ "$ROLLOUT" == "0" ]]; then
-  test "$status" = "204"
-else
-  test "$status" = "200"
-  test "$(jq -r .version dist/state/probe-response.json)" = "$target_version"
-fi
+probe_index=0
+while IFS= read -r probe_from; do
+  probe_target="$(jq -r --arg from "$probe_from" \
+    '.transitions[$from].to // $from' dist/state/next-policy.json)"
+  probe_rollout="$(jq -r --arg from "$probe_from" \
+    '.transitions[$from].rollout // 0' dist/state/next-policy.json)"
+  node scripts/updater/sign-request.mjs --current-version "$probe_from" \
+    --target-version "$probe_target" --rollout "$probe_rollout" \
+    --salt "$ROLLOUT_SALT" \
+    --output "dist/state/probe-${probe_index}-headers.json"
+  endpoint="${DYNAMIC_UPDATER_BASE_URL}/windows/x86_64/${probe_from}"
+  curl_args=(
+    --proto '=https' --tlsv1.2 -sS --connect-timeout 10 --max-time 120
+    -D "dist/state/probe-${probe_index}-response.headers"
+    -o "dist/state/probe-${probe_index}-response.json"
+    -w '%{http_code}' "$endpoint"
+  )
+  while IFS=$'\t' read -r key value; do
+    curl_args+=(-H "$key: $value")
+  done < <(jq -r 'to_entries[] | [.key, .value] | @tsv' \
+    "dist/state/probe-${probe_index}-headers.json")
+  status="$(curl "${curl_args[@]}")"
+  if [[ "$probe_rollout" == "0" ]]; then
+    test "$status" = "204"
+    test ! -s "dist/state/probe-${probe_index}-response.json"
+    probe_state="$(awk -F ': *' '
+      tolower($1) == "x-biyan-updater-state" {
+        gsub(/\r/, "", $2)
+        value = $2
+      }
+      END { print value }
+    ' "dist/state/probe-${probe_index}-response.headers")"
+    test "$probe_state" = "no-transition"
+  else
+    test "$status" = "200"
+    test "$(jq -er .version \
+      "dist/state/probe-${probe_index}-response.json")" = "$probe_target"
+  fi
+  probe_index=$((probe_index + 1))
+done < <(
+  if [[ "$PHASE" == DIRECT_C ]]; then
+    jq -nr --arg from "$FROM_VERSION" --arg target "$target_version" \
+      --slurpfile policy dist/state/next-policy.json \
+      '([$from] + ($policy[0].transitions | keys) + [$target]) | unique[]'
+  else
+    printf '%s\n' "$FROM_VERSION"
+  fi
+)
 
 if [[ "$update_legacy" == true ]]; then
   ossutil api delete-object --bucket "$ALIYUN_OSS_BUCKET" \

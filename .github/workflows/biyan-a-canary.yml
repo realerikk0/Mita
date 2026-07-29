@@ -25,6 +25,7 @@ concurrency:
 jobs:
   preflight:
     name: Validate trusted canary control plane
+    if: ${{ false && inputs.mode != '' }}
     runs-on: ubuntu-24.04
     timeout-minutes: 15
     environment: release-distribution
@@ -282,6 +283,7 @@ jobs:
 
   platform-canary:
     name: Canary ${{ matrix.platform }} on ${{ matrix.runner }}
+    if: ${{ false && inputs.mode != '' }}
     needs: preflight
     runs-on: ${{ matrix.runner }}
     timeout-minutes: 90
@@ -581,6 +583,7 @@ jobs:
 
   aggregate:
     name: Bind two-point evidence and publish only on finish
+    if: ${{ false && inputs.mode != '' }}
     needs: [preflight, platform-canary]
     runs-on: ubuntu-24.04
     timeout-minutes: 90

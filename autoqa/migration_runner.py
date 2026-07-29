@@ -59,9 +59,15 @@ def migration_matrix() -> Tuple[MigrationCase, ...]:
         MigrationCase("a-to-b", "a", ("a", "b"), "b"),
         MigrationCase("current-to-a-to-b-to-c", "current", ("current", "a", "b", "c"), "c"),
         MigrationCase("current-to-b", "current", ("current", "b"), "b"),
+        MigrationCase("legacy-manual-to-c", "current", ("current", "c"), "c"),
+        MigrationCase("legacy-auto-to-c", "current", ("current", "c"), "c"),
         MigrationCase("current-to-c", "current", ("current", "c"), "c"),
         MigrationCase("a-to-c", "a", ("a", "c"), "c"),
         MigrationCase("b-to-c", "b", ("b", "c"), "c"),
+        # The source installer is passed through the generic "current" slot so
+        # a terminal C patch can be exercised without weakening the fixed
+        # A/B/C schema vocabulary used by the migration assertions.
+        MigrationCase("c-to-c", "current", ("current", "c"), "c"),
         MigrationCase("fresh-a", "fresh", ("a",), "a"),
         MigrationCase("fresh-c", "fresh", ("c",), "c"),
     )
@@ -261,6 +267,94 @@ def _safe_extract(archive: Path, destination: Path) -> None:
     raise ValueError(f"unsupported snapshot archive format: {archive}")
 
 
+def _windows_install_diagnostics(install_root: Path) -> dict:
+    """Return bounded, credential-free evidence for a silent-install failure."""
+
+    local = Path(os.environ.get("LOCALAPPDATA", Path.home() / "AppData/Local"))
+    roots = [
+        install_root,
+        *(
+            local / "Programs" / product
+            for product in ("Biyan", "Biyan-nightly", "Mita", "Silence", "Jan")
+        ),
+    ]
+    snapshots = []
+    for root in roots:
+        entries = []
+        truncated = False
+        if root.is_dir():
+            discovered = sorted(root.rglob("*"), key=lambda value: str(value).lower())
+            truncated = len(discovered) > 200
+            for entry in discovered[:200]:
+                try:
+                    relative = str(entry.relative_to(root))
+                    entries.append(
+                        {
+                            "path": relative,
+                            "kind": "file" if entry.is_file() else "directory",
+                            "size": entry.stat().st_size if entry.is_file() else 0,
+                        }
+                    )
+                except OSError as error:
+                    entries.append({"path": str(entry), "error": error.__class__.__name__})
+        snapshots.append(
+            {
+                "root": str(root),
+                "exists": root.exists(),
+                "entries": entries,
+                "truncated": truncated,
+            }
+        )
+
+    system = {"status": "unavailable-non-windows-test-host"}
+    if sys.platform == "win32":
+        script = r"""
+$ErrorActionPreference = 'SilentlyContinue'
+$uninstallRoots = @(
+  'HKCU:\Software\Microsoft\Windows\CurrentVersion\Uninstall\*',
+  'HKLM:\Software\Microsoft\Windows\CurrentVersion\Uninstall\*',
+  'HKLM:\Software\WOW6432Node\Microsoft\Windows\CurrentVersion\Uninstall\*'
+)
+$uninstall = Get-ItemProperty $uninstallRoots |
+  Where-Object {
+    $_.DisplayName -match '^(Biyan|Mita|Silence|Jan)(\s|$)'
+  } |
+  Select-Object -First 40 DisplayName, DisplayVersion, InstallLocation,
+    Publisher, PSPath
+$defender = Get-MpComputerStatus |
+  Select-Object AMServiceEnabled, AntivirusEnabled, RealTimeProtectionEnabled,
+    AntivirusSignatureLastUpdated
+[ordered]@{
+  uninstall = @($uninstall)
+  defender = $defender
+} | ConvertTo-Json -Depth 5 -Compress
+"""
+        try:
+            completed = subprocess.run(
+                [
+                    "powershell",
+                    "-NoProfile",
+                    "-NonInteractive",
+                    "-Command",
+                    script,
+                ],
+                check=False,
+                capture_output=True,
+                text=True,
+                timeout=30,
+            )
+            stdout = completed.stdout[:20_000]
+            system = {
+                "status": "captured" if completed.returncode == 0 else "command-failed",
+                "returnCode": completed.returncode,
+                "data": json.loads(stdout) if stdout.strip() else None,
+                "stderrClass": "present" if completed.stderr else "empty",
+            }
+        except (OSError, subprocess.SubprocessError, json.JSONDecodeError) as error:
+            system = {"status": "capture-error", "error": error.__class__.__name__}
+    return {"schema": 1, "roots": snapshots, "system": system}
+
+
 class PlatformExecutor:
     def __init__(self, platform: str, startup_seconds: int) -> None:
         self.platform = platform
@@ -319,10 +413,22 @@ class PlatformExecutor:
 
     def install(self, installer: Path, phase: str, case_dir: Path) -> Path:
         if self.platform == "windows":
-            subprocess.run([str(installer), "/S"], check=True, timeout=300)
-            local = Path(os.environ.get("LOCALAPPDATA", Path.home() / "AppData/Local"))
+            # NSIS requires /D=... to be the final argument. Pinning both the
+            # source and candidate into one per-scenario root removes registry
+            # and runner-image default-path ambiguity from upgrade evidence.
+            install_root = case_dir / "windows-install"
+            install_root.mkdir(parents=True, exist_ok=True)
+            command = [str(installer), "/S", f"/D={install_root}"]
+            try:
+                subprocess.run(command, check=True, timeout=300)
+            except subprocess.CalledProcessError as error:
+                diagnostics = _windows_install_diagnostics(install_root)
+                raise RuntimeError(
+                    f"Windows installer failed for {phase} with exit "
+                    f"{error.returncode}: {json.dumps(diagnostics, sort_keys=True)}"
+                ) from error
             candidates = [
-                local / "Programs" / product / f"{product}.exe"
+                install_root / f"{product}.exe"
                 for product in ("Biyan", "Mita", "Silence", "Jan")
             ]
         elif self.platform == "macos":
@@ -375,6 +481,12 @@ class PlatformExecutor:
 
         executable = next((path for path in candidates if path.is_file() and os.access(path, os.X_OK)), None)
         if executable is None:
+            if self.platform == "windows":
+                diagnostics = _windows_install_diagnostics(case_dir / "windows-install")
+                raise FileNotFoundError(
+                    f"installed executable not found after {phase}: {installer}; "
+                    f"diagnostics={json.dumps(diagnostics, sort_keys=True)}"
+                )
             raise FileNotFoundError(f"installed executable not found after {phase}: {installer}")
         if phase != "current" and "biyan" not in executable.name.lower():
             raise RuntimeError(f"phase {phase} did not install a Biyan executable: {executable}")

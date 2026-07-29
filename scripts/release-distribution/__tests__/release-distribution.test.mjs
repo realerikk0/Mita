@@ -70,6 +70,30 @@ const verifiedProvenance = {
     'abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789',
 }
 
+function releaseTrainPolicy(terminalSourceCommit = null) {
+  const policy = JSON.parse(
+    fs.readFileSync(
+      new URL('../../ci/release-train-policy.json', import.meta.url),
+      'utf8'
+    )
+  )
+  policy.activeTerminalRelease =
+    terminalSourceCommit === null
+      ? null
+      : {
+          tag: 'v0.6.646',
+          version: '0.6.646',
+          migrationPhase: 'C',
+          dataSchema: 3,
+          sourceCommit: terminalSourceCommit,
+        }
+  if (terminalSourceCommit === null) {
+    policy.activeTrain = 'closure-20260724'
+    policy.trains.at(-1).status = 'active'
+  }
+  return policy
+}
+
 function sampleRelease() {
   return {
     tagName: 'v1.2.3',
@@ -613,6 +637,7 @@ function candidateFixture({
         plugins: { updater: { pubkey: signing.pubkey } },
       },
       cargoLock: `[[package]]\nname = "Biyan"\nversion = "${version}"\n`,
+      trainPolicy: releaseTrainPolicy(),
     },
   }
 }
@@ -665,6 +690,7 @@ function provenanceOptions(fixture) {
     tauriConfig: fixture.options.tauriConfig,
     cargoLock: fixture.options.cargoLock,
     releasePublishedAt: fixture.release.publishedAt,
+    trainPolicy: fixture.options.trainPolicy,
   }
 }
 
@@ -1670,7 +1696,7 @@ test('collectReleaseAssets requires the exact 13-file GitHub Release asset set',
   }
 })
 
-test('candidate provenance accepts only the active A/B/C release train identities', () => {
+test('candidate provenance preserves the historical active A/B/C identities before terminal pinning', () => {
   for (const [version, migrationPhase, dataSchema] of [
     ['0.6.643', 'A', 1],
     ['0.6.644', 'B', 2],
@@ -1692,7 +1718,58 @@ test('candidate provenance accepts only the active A/B/C release train identitie
         superseded.candidateDir,
         provenanceOptions(superseded)
       ),
-    /is not in the active closure-20260724 train/
+    /not the declared active train closure-20260724 release/
+  )
+})
+
+test('candidate provenance switches fail-closed to exact v0.6.646 terminal tag and source', () => {
+  const fixture = candidateFixture({
+    version: '0.6.646',
+    migrationPhase: 'C',
+    dataSchema: 3,
+  })
+  fixture.options.trainPolicy = releaseTrainPolicy(sourceCommit)
+  const result = validateCandidateProvenance(
+    fixture.candidateDir,
+    provenanceOptions(fixture)
+  )
+  assert.equal(result.sourceCommit, sourceCommit)
+  assert.equal(result.migrationPhase, 'C')
+  assert.equal(result.dataSchema, 3)
+  assert.equal(
+    collectReleaseAssets(fixture.release, fixture.options).provenance
+      .sourceCommit,
+    sourceCommit
+  )
+
+  const wrongPin = candidateFixture({
+    version: '0.6.646',
+    migrationPhase: 'C',
+    dataSchema: 3,
+  })
+  wrongPin.options.trainPolicy = releaseTrainPolicy('f'.repeat(40))
+  assert.throws(
+    () =>
+      validateCandidateProvenance(
+        wrongPin.candidateDir,
+        provenanceOptions(wrongPin)
+      ),
+    /does not match the active terminal release/
+  )
+
+  const oldC = candidateFixture({
+    version: '0.6.645',
+    migrationPhase: 'C',
+    dataSchema: 3,
+  })
+  oldC.options.trainPolicy = releaseTrainPolicy(sourceCommit)
+  assert.throws(
+    () =>
+      validateCandidateProvenance(
+        oldC.candidateDir,
+        provenanceOptions(oldC)
+      ),
+    /not the declared active terminal release/
   )
 })
 

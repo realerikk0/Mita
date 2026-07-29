@@ -1,0 +1,19 @@
+{
+  "version": "0.6.633",
+  "notes": "",
+  "pub_date": "2026-07-10T05:37:19.221Z",
+  "platforms": {
+    "darwin-aarch64": {
+      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVTc1lYdE5Dam1Wa1VlTjU2TEFzaVZXcmZjS0RCYmRRaFozazgvaXhNZDJIUUp2UXVGa3Z2NVhxOFFiQVdMWjI2M3I2MzN5VEwwa2prbmxVZ0xwRUU2cGZ3RlJZdml6OUFJPQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzgzNjYxNjgyCWZpbGU6Qml5YW4uYXBwLnRhci5negpFUC9yYTRJMlg1OGl6TnQvSjM2WW54U2V0RWlWZUNhWUthRVRiRno5L3RVQTFreFEvOTBTaUdzVDFtcDAyK0t4cG5vaExxU0pNNVBoZmNoRnBwVVFEZz09Cg==",
+      "url": "https://static.mitapp.cn/mita/stable/v0.6.633/Biyan.app.tar.gz"
+    },
+    "darwin-x86_64": {
+      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVTc1lYdE5Dam1Wa1VlTjU2TEFzaVZXcmZjS0RCYmRRaFozazgvaXhNZDJIUUp2UXVGa3Z2NVhxOFFiQVdMWjI2M3I2MzN5VEwwa2prbmxVZ0xwRUU2cGZ3RlJZdml6OUFJPQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzgzNjYxNjgyCWZpbGU6Qml5YW4uYXBwLnRhci5negpFUC9yYTRJMlg1OGl6TnQvSjM2WW54U2V0RWlWZUNhWUthRVRiRno5L3RVQTFreFEvOTBTaUdzVDFtcDAyK0t4cG5vaExxU0pNNVBoZmNoRnBwVVFEZz09Cg==",
+      "url": "https://static.mitapp.cn/mita/stable/v0.6.633/Biyan.app.tar.gz"
+    },
+    "windows-x86_64": {
+      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVTc1lYdE5Dam1Wa1U2aGdvK1V3QW1TWktGVWQzaHhwYTJwT0h3VTZJOU1ERlBoaHBkcTdUaGVSTGgwNHVDR09wRlZtVDF2eGZBWkc0U3hjbUcxcTlqemR5QmRJeGJGb1FFPQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzgzNjYxMzA2CWZpbGU6Qml5YW5fMC42LjYzM194NjQtc2V0dXAuZXhlCjhwRWVzQitoalh5MFA3NVJEL2x3bk5oR1dvNnhHTzVIMFBpbWw0bDBxSVNUQVNXUWc2aVJxbkZWdnBER0liQzBFQXYzL1g3d3Y3UTlTZFZZcCtxZkJnPT0K",
+      "url": "https://static.mitapp.cn/mita/stable/v0.6.633/Biyan_0.6.633_x64-setup.exe"
+    }
+  }
+}

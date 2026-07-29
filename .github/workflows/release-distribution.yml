@@ -460,6 +460,7 @@ jobs:
 
   bootstrap-biyan-download-aliases:
     if: >-
+      false &&
       github.event_name == 'workflow_dispatch' &&
       inputs.operation == 'bootstrap-biyan-download-aliases'
     name: Bootstrap the reviewed Biyan v0.6.633 compatibility aliases

@@ -12,6 +12,7 @@ import {
   validateCiControlOwnership,
   validateCiWorkflow,
   validateDocsArchiveConfig,
+  validateDirectQualificationWorkflow,
   validateDraftAssetRepairWorkflow,
   validateFlatpakMetadata,
   validateLinuxReleaseBuild,
@@ -195,6 +196,11 @@ for (const message of validateDraftAssetRepairWorkflow(
 )) {
   fail(message)
 }
+for (const message of validateDirectQualificationWorkflow(
+  read('.github/workflows/biyan-direct-qualification.yml')
+)) {
+  fail(message)
+}
 
 const releaseEnvironmentWorkflows = {
   '.github/workflows/biyan-a-canary.yml': {
@@ -216,7 +222,9 @@ const releaseEnvironmentWorkflows = {
     source: read('.github/workflows/biyan-upgrade-smoke.yml'),
   },
   '.github/workflows/promote-desktop-update.yml': {
-    jobName: 'promote',
+    ...TRUSTED_SENSITIVE_UPDATER_WORKFLOW_CONTRACTS[
+      '.github/workflows/promote-desktop-update.yml'
+    ],
     source: read('.github/workflows/promote-desktop-update.yml'),
   },
   '.github/workflows/updater-health-gate.yml': {

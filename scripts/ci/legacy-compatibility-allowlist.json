@@ -62,9 +62,9 @@
   ],
   "rules": [
     {
-      "expectedMatches": 36,
+      "expectedMatches": 42,
       "id": "autoqa-upgrade-scenarios",
-      "matchesSha256": "f84396174f7dda0ca6273a57d8767c9f917b890e85be38f1667dfa25c421fd17",
+      "matchesSha256": "586988c6b352836463ac6e0efdd82db794b6c683f9b428ceb73bfe4e7b83c211",
       "pathRegex": "^(?:autoqa/checklist\\.md|autoqa/migration_runner\\.py|autoqa/scripts/macos_cleanup\\.sh|autoqa/scripts/macos_post_cleanup\\.sh)$",
       "pattern": "(?:catalog\\.jan\\.ai|apps(?:-nightly)?\\.jan\\.ai|janhq|latest[_-]jan[_-]model|model[-_]catalog|(?<![a-z0-9])(?:jan|mita|silence)(?![a-z0-9]))",
       "reason": "AutoQA retains exact legacy identities only to build and verify upgrade or cleanup scenarios.",
@@ -77,6 +77,15 @@
       "pathRegex": "^(?:scripts/__tests__/flatpak-manifest\\.test\\.mjs|scripts/__tests__/thinking-content-windows-verifier\\.test\\.mjs|scripts/__tests__/verify-macos-candidate\\.test\\.mjs|scripts/__tests__/windows-installer-template\\.test\\.mjs|scripts/ci/__tests__/candidate-content-policy\\.test\\.mjs|scripts/ci/__tests__/cloudflare-preview-cleanup\\.test\\.mjs|scripts/ci/__tests__/legacy-compatibility-policy\\.test\\.mjs|scripts/ci/__tests__/qualification-impact\\.test\\.mjs|scripts/ci/__tests__/release-policy\\.test\\.mjs|scripts/ci/__tests__/verify-release-target\\.test\\.mjs|scripts/release-distribution/__tests__/bootstrap-biyan-download-aliases\\.test\\.mjs|scripts/release-distribution/__tests__/draft-asset-repair-state\\.test\\.mjs|scripts/release-distribution/__tests__/release-distribution\\.test\\.mjs|scripts/updater/__tests__/a-canary-evidence\\.test\\.mjs|scripts/updater/__tests__/legacy-manifest-policy\\.test\\.mjs|scripts/updater/__tests__/legacy-pause-transaction\\.test\\.mjs|scripts/updater/__tests__/promotion-transaction\\.test\\.mjs|scripts/updater/__tests__/updater\\.test\\.mjs|scripts/updater/__tests__/verify-updater-asset-signature\\.test\\.mjs|src-tauri/src/core/downloads/tests\\.rs|src-tauri/src/core/filesystem/tests\\.rs|src-tauri/src/core/image_assets/tests\\.rs|src-tauri/src/core/mcp/tests\\.rs|tests/checklist\\.md|web-app/src/containers/dialogs/__tests__/LegacyLocalDataCleanupDialog\\.test\\.tsx|web-app/src/hooks/__tests__/useAssistant\\.coverage\\.test\\.ts|web-app/src/hooks/__tests__/useAssistant\\.test\\.ts|web-app/src/hooks/__tests__/useMCPServers\\.test\\.ts|web-app/src/hooks/__tests__/useModelProvider\\.legacy-provider\\.test\\.ts|web-app/src/hooks/__tests__/useReleaseNotes\\.test\\.ts|web-app/src/hooks/__tests__/useThreads\\.coverage\\.test\\.ts|web-app/src/lib/__tests__/biyan-prompt\\.test\\.ts|web-app/src/lib/__tests__/integration/compaction\\.integration\\.test\\.ts|web-app/src/lib/__tests__/integration/integration-helpers\\.ts|web-app/src/lib/__tests__/provider-connection-import\\.test\\.ts|web-app/src/providers/__tests__/DataProvider\\.test\\.tsx|web-app/src/routes/__tests__/images\\.test\\.tsx|web-app/src/routes/__tests__/index\\.test\\.tsx|web-app/src/services/__tests__/app\\.test\\.ts|web-app/src/services/__tests__/path\\.test\\.ts|web-app/src/services/__tests__/serviceHub\\.integration\\.test\\.ts|web-app/src/services/deeplink/__tests__/tauri\\.test\\.ts|web-app/src/services/image-generation/__tests__/tauri\\.test\\.ts|web-app/src/services/video-generation/__tests__/default\\.test\\.ts|web-app/src/services/video-generation/__tests__/tauri\\.test\\.ts|web-app/src/types/__tests__/biyan-teams\\.test\\.ts|web-app/src/utils/__tests__/formatDate\\.test\\.ts)$",
       "pattern": "(?:static\\.mitapp\\.cn|catalog\\.jan\\.ai|apps(?:-nightly)?\\.jan\\.ai|janhq|latest[_-]jan[_-]model|model[-_]catalog|(?<![a-z0-9])(?:jan|mita|silence)(?![a-z0-9]))",
       "reason": "Exact automated test fixtures exercise legacy migration, stable identity, or fail-closed rejection behavior.",
+      "scope": "content"
+    },
+    {
+      "expectedMatches": 54,
+      "id": "direct-c-release-qualification-anchors",
+      "matchesSha256": "9761fe304374f1d060423f02e3f4d3997a6a76ac77abd0a1367b1ea373e948b1",
+      "pathRegex": "^(?:\\.github/workflows/biyan-direct-qualification\\.yml|scripts/updater/__tests__/direct-c-transition-policy\\.test\\.mjs|scripts/updater/__tests__/direct-qualification\\.test\\.mjs|scripts/updater/__tests__/fixtures/v0\\.6\\.633-latest\\.json|scripts/updater/__tests__/test_prepare_direct_qualification_inputs\\.py|scripts/updater/direct-qualification-evidence\\.mjs|scripts/updater/direct-qualification-policy\\.json)$",
+      "pattern": "(?:static\\.mitapp\\.cn|catalog\\.jan\\.ai|apps(?:-nightly)?\\.jan\\.ai|janhq|latest[_-]jan[_-]model|model[-_]catalog|(?<![a-z0-9])(?:jan|mita|silence)(?![a-z0-9]))",
+      "reason": "Exact one-shot DIRECT_C qualification fixtures retain reviewed legacy updater hosts and identities only to prove upgrades from every supported installed version.",
       "scope": "content"
     },
     {
@@ -143,9 +152,9 @@
       "scope": "content"
     },
     {
-      "expectedMatches": 14,
+      "expectedMatches": 12,
       "id": "published-migration-guidance",
-      "matchesSha256": "38ac307ccbc7b9ed5b2421ff907b0df169d5d3ac61edb20cce3811fd03c20a3a",
+      "matchesSha256": "b3a4a10dd9efb5666cb0e39334774b70884bcfe2b3553dff54d453c193c92c26",
       "pathRegex": "^(?:docs/src/pages/docs/desktop/cli\\.mdx|docs/src/pages/docs/desktop/data-folder\\.mdx|docs/src/pages/docs/desktop/index\\.mdx|docs/src/pages/docs/desktop/settings\\.mdx)$",
       "pattern": "(?:catalog\\.jan\\.ai|apps(?:-nightly)?\\.jan\\.ai|janhq|latest[_-]jan[_-]model|model[-_]catalog|(?<![a-z0-9])(?:jan|mita|silence)(?![a-z0-9]))",
       "reason": "Published migration documentation names prior products solely to explain supported upgrade and cleanup behavior.",
@@ -190,16 +199,16 @@
     {
       "expectedMatches": 78,
       "id": "release-policy-deny-needles",
-      "matchesSha256": "29cd79daf040d28dcb0e6a4152fd778615edf65b2eff1f0428fdb49b8da7f9c7",
+      "matchesSha256": "ae1c3d1f85eb318a1dd7407695730cd2d3a2d752723352a7a2941811dd96d25e",
       "pathRegex": "^(?:scripts/ci/candidate-content-policy\\.mjs|scripts/ci/candidate-path-policy\\.mjs|scripts/ci/legacy-compatibility-policy\\.mjs|scripts/ci/release-policy-contracts\\.mjs|scripts/ci/verify-release-policy\\.mjs|scripts/smoke-preinstall-extension-imports\\.mjs|scripts/verify-macos-candidate\\.mjs)$",
       "pattern": "(?:static\\.mitapp\\.cn|catalog\\.jan\\.ai|apps(?:-nightly)?\\.jan\\.ai|janhq|latest[_-]jan[_-]model|model[-_]catalog|(?<![a-z0-9])(?:jan|mita|silence)(?![a-z0-9]))",
       "reason": "Fail-closed release policy names retired identities only as forbidden needles or compatibility assertions.",
       "scope": "content"
     },
     {
-      "expectedMatches": 38,
+      "expectedMatches": 40,
       "id": "repository-provenance",
-      "matchesSha256": "6960dd0d8705018d2360318c9e176f38754854127c12c965b6a85a9f05eff189",
+      "matchesSha256": "973274d2d7308ea24e418e085cc9696af0aac6ac04d8496553fd378e1b01b801",
       "pathRegex": "^(?:DEVELOPMENT_PLAN\\.md|README\\.ja\\.md|README\\.md|README\\.zh\\.md|UPSTREAM_JAN_COMMIT\\.md|docs/README\\.md|docs/release-distribution\\.md)$",
       "pattern": "(?:catalog\\.jan\\.ai|apps(?:-nightly)?\\.jan\\.ai|janhq|latest[_-]jan[_-]model|model[-_]catalog|(?<![a-z0-9])(?:jan|mita|silence)(?![a-z0-9]))",
       "reason": "Repository provenance and release documentation records the exact upstream lineage and supported compatibility anchors.",

@@ -16,6 +16,21 @@ const endpoints = {
   r2: 'https://updates.mita.so/mita/latest.json',
 }
 const repoRoot = path.resolve(import.meta.dirname, '../../..')
+const legacyTrainPolicy = {
+  schema: 1,
+  activeTrain: 'legacy-test-train',
+  trains: [
+    {
+      id: 'legacy-test-train',
+      status: 'active',
+      releases: {
+        A: { version: '0.6.643', dataSchema: 1 },
+        B: { version: '0.6.644', dataSchema: 2 },
+        C: { version: '0.6.645', dataSchema: 3 },
+      },
+    },
+  ],
+}
 
 function manifest({
   version = '0.6.633',
@@ -181,7 +196,7 @@ test('byte-identical manifests must also match the reviewed candidate hash', () 
 test('policy rejects unknown states and a-pinned without the exact four platforms', () => {
   assert.throws(
     () => validateLegacyBridgePolicy({ ...preAPolicy, state: 'transitioning' }),
-    /state must be pre-a or a-pinned/,
+    /state must be pre-a, a-pinned, or direct-c-pinned/,
   )
   assert.throws(
     () => validateLegacyBridgePolicy({
@@ -211,21 +226,30 @@ test('a-pinned accepts only active train A and requires Linux plus immutable Biy
       'linux-x86_64',
     ],
   }
-  assert.equal(validateLegacyManifest(pinned, policy), pinned)
+  assert.equal(
+    validateLegacyManifest(pinned, policy, {
+      trainPolicy: legacyTrainPolicy,
+    }),
+    pinned,
+  )
   assert.equal(
     verifyLegacyManifestPair({
       policy,
       aliyunBytes: bytes(pinned),
       r2Bytes: bytes(pinned),
+      trainPolicy: legacyTrainPolicy,
     }).expectedManifestSha256,
     policy.expectedManifestSha256
   )
   assert.throws(
     () =>
-      validateLegacyBridgePolicy({
-        ...policy,
-        expectedVersion: '0.6.644',
-      }),
+      validateLegacyBridgePolicy(
+        {
+          ...policy,
+          expectedVersion: '0.6.644',
+        },
+        { trainPolicy: legacyTrainPolicy },
+      ),
     /active train A version 0\.6\.643/,
   )
 })
@@ -261,6 +285,7 @@ test('promotion policy mechanically preserves the active A legacy bridge', () =>
       currentPolicy: { legacyBridgeVersion: null },
       nextPolicy: nextA,
       trackedPolicy: preAPolicy,
+      trainPolicy: legacyTrainPolicy,
     }),
     {
       activeAVersion: '0.6.643',
@@ -286,6 +311,7 @@ test('promotion policy mechanically preserves the active A legacy bridge', () =>
       currentPolicy: { legacyBridgeVersion: '0.6.643' },
       nextPolicy: nextB,
       trackedPolicy: pinnedPolicy,
+      trainPolicy: legacyTrainPolicy,
     }).activeAVersion,
     '0.6.643',
   )
@@ -297,6 +323,7 @@ test('promotion policy mechanically preserves the active A legacy bridge', () =>
         currentPolicy: { legacyBridgeVersion: '0.6.643' },
         nextPolicy: { ...nextB, legacyBridgeVersion: '0.6.644' },
         trackedPolicy: pinnedPolicy,
+        trainPolicy: legacyTrainPolicy,
       }),
     /must remain active train A 0\.6\.643/,
   )
@@ -315,6 +342,7 @@ test('promotion policy mechanically preserves the active A legacy bridge', () =>
           releases: { '0.6.646': { effectivePhase: 'A' } },
         },
         trackedPolicy: pinnedPolicy,
+        trainPolicy: legacyTrainPolicy,
       }),
     /must be the active train A release/,
   )
@@ -326,6 +354,7 @@ test('promotion policy mechanically preserves the active A legacy bridge', () =>
         currentPolicy: { legacyBridgeVersion: '0.6.643' },
         nextPolicy: nextB,
         trackedPolicy: preAPolicy,
+        trainPolicy: legacyTrainPolicy,
       }),
     /requires tracked a-pinned policy 0\.6\.643/,
   )
@@ -345,6 +374,7 @@ test('promotion policy mechanically preserves the active A legacy bridge', () =>
         currentPolicy: { legacyBridgeVersion: null },
         nextPolicy: nextA,
         trackedPolicy: preAPolicy,
+        trainPolicy: legacyTrainPolicy,
       }),
     /URL must be exactly https:\/\/static\.mitapp\.cn/
   )
@@ -362,6 +392,7 @@ test('promotion policy mechanically preserves the active A legacy bridge', () =>
         currentPolicy: { legacyBridgeVersion: null },
         nextPolicy: nextA,
         trackedPolicy: preAPolicy,
+        trainPolicy: legacyTrainPolicy,
       }),
     /latest\.json SHA-256 does not match/
   )
