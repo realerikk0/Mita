@@ -78,9 +78,15 @@ function promote(options, evidenceOverrides = {}) {
   })
 }
 
-function signedRequest(pathname, currentVersion = '0.6.634', session = 'stable-install-id-1234') {
-  const timestamp = Math.floor(Date.now() / 1000).toString()
-  const nonce = randomBytes(32).toString('hex')
+function signedRequest(
+  pathname,
+  currentVersion = '0.6.634',
+  session = 'stable-install-id-1234',
+  overrides = {},
+) {
+  const timestamp = overrides.timestamp
+    ?? Math.floor(Date.now() / 1000).toString()
+  const nonce = overrides.nonce ?? randomBytes(32).toString('hex')
   const token = createHmac('sha256', signingKey)
     .update(`${session}:${timestamp}:${nonce}`)
     .digest('hex')
@@ -569,12 +575,142 @@ test('worker returns 204 when paused and a flat signed manifest when active', as
   assert.equal(await response.text(), '')
 })
 
-test('worker rejects unsigned requests', async () => {
+test('worker rejects unsigned requests before reading updater state', async () => {
+  let bucketReads = 0
   const response = await handleRequest(
     new Request('https://updates.mita.so/biyan/v1/stable/windows/x86_64/0.6.634'),
-    { BIYAN_SIGNING_KEY: signingKey, UPDATER_BUCKET: bucket({}) },
+    {
+      BIYAN_SIGNING_KEY: signingKey,
+      UPDATER_BUCKET: {
+        async get() {
+          bucketReads += 1
+          return null
+        },
+      },
+    },
   )
   assert.equal(response.status, 401)
+  assert.deepEqual(await response.json(), { error: 'unauthorized' })
+  assert.equal(bucketReads, 0)
+})
+
+test('worker rejects malformed signed requests before reading updater state', async () => {
+  const cases = [
+    ['bad HMAC', () => {
+      const request = signedRequest(
+        '/biyan/v1/stable/windows/x86_64/0.6.633',
+        '0.6.633',
+      )
+      request.headers.set('X-Request-Token', '0'.repeat(64))
+      return request
+    }],
+    ['stale timestamp', () => signedRequest(
+      '/biyan/v1/stable/windows/x86_64/0.6.633',
+      '0.6.633',
+      'stable-install-id-1234',
+      { timestamp: String(Math.floor(Date.now() / 1000) - 301) },
+    )],
+    ['bad nonce', () => signedRequest(
+      '/biyan/v1/stable/windows/x86_64/0.6.633',
+      '0.6.633',
+      'stable-install-id-1234',
+      { nonce: 'invalid' },
+    )],
+    ['bad session', () => signedRequest(
+      '/biyan/v1/stable/windows/x86_64/0.6.633',
+      '0.6.633',
+      'short',
+    )],
+    ['version mismatch', () => signedRequest(
+      '/biyan/v1/stable/windows/x86_64/0.6.633',
+      '0.6.634',
+    )],
+  ]
+  for (const [name, buildRequest] of cases) {
+    let bucketReads = 0
+    const response = await handleRequest(buildRequest(), {
+      BIYAN_SIGNING_KEY: signingKey,
+      UPDATER_BUCKET: {
+        async get() {
+          bucketReads += 1
+          return null
+        },
+      },
+    })
+    assert.equal(response.status, 401, name)
+    assert.deepEqual(await response.json(), { error: 'unauthorized' }, name)
+    assert.equal(bucketReads, 0, name)
+  }
+})
+
+test('worker fails closed when the stable policy is unavailable', async () => {
+  const response = await handleRequest(
+    signedRequest('/biyan/v1/stable/windows/x86_64/0.6.633', '0.6.633'),
+    {
+      BIYAN_SIGNING_KEY: signingKey,
+      ROLLOUT_SALT: 'test-salt',
+      UPDATER_BUCKET: bucket({}),
+    },
+  )
+  assert.equal(response.status, 204)
+  assert.equal(
+    response.headers.get('x-biyan-updater-state'),
+    'policy-unavailable',
+  )
+  assert.equal(response.headers.get('cache-control'), 'no-store')
+  assert.equal(await response.text(), '')
+})
+
+test('worker rejects a noncanonical policy key before reading the bucket', async () => {
+  let bucketReads = 0
+  const response = await handleRequest(
+    signedRequest('/biyan/v1/stable/windows/x86_64/0.6.633', '0.6.633'),
+    {
+      BIYAN_SIGNING_KEY: signingKey,
+      POLICY_KEY: 'biyan/updater/preview/policy.json',
+      UPDATER_BUCKET: {
+        async get() {
+          bucketReads += 1
+          return null
+        },
+      },
+    },
+  )
+  assert.equal(response.status, 204)
+  assert.equal(
+    response.headers.get('x-biyan-updater-state'),
+    'policy-invalid',
+  )
+  assert.equal(response.headers.get('cache-control'), 'no-store')
+  assert.equal(await response.text(), '')
+  assert.equal(bucketReads, 0)
+})
+
+test('worker distinguishes malformed stable policies from an absent policy', async () => {
+  for (const invalidPolicy of [
+    null,
+    [],
+    { schema: 2, channel: 'stable' },
+    { schema: 1, channel: 'preview' },
+  ]) {
+    const response = await handleRequest(
+      signedRequest('/biyan/v1/stable/windows/x86_64/0.6.633', '0.6.633'),
+      {
+        BIYAN_SIGNING_KEY: signingKey,
+        ROLLOUT_SALT: 'test-salt',
+        UPDATER_BUCKET: bucket({
+          'biyan/updater/stable/policy.json': invalidPolicy,
+        }),
+      },
+    )
+    assert.equal(response.status, 204)
+    assert.equal(
+      response.headers.get('x-biyan-updater-state'),
+      'policy-invalid',
+    )
+    assert.equal(response.headers.get('cache-control'), 'no-store')
+    assert.equal(await response.text(), '')
+  }
 })
 
 test('worker never admits a pre-A client through the dynamic route', async () => {
@@ -609,6 +745,9 @@ test('router deployment keeps the rendered config beside its worker entrypoint',
   const workflow = readText(
     path.join(repoRoot, '.github/workflows/deploy-updater-router.yml')
   )
+  const config = readText(
+    path.join(repoRoot, 'scripts/updater/wrangler.toml')
+  )
   assert.match(
     workflow,
     /WRANGLER_CONFIG: scripts\/updater\/wrangler\.generated\.toml/,
@@ -623,6 +762,21 @@ test('router deployment keeps the rendered config beside its worker entrypoint',
     5,
   )
   assert.doesNotMatch(workflow, /\/tmp\/wrangler\.toml/)
+  assert.match(
+    workflow,
+    /R2_BUCKET: \$\{\{ secrets\.CLOUDFLARE_R2_BUCKET \}\}/,
+  )
+  assert.match(
+    workflow,
+    /sed -e "s\/__UPDATER_BUCKET__\/\$R2_BUCKET\/" \\\n\s+scripts\/updater\/wrangler\.toml > "\$WRANGLER_CONFIG"/,
+  )
+  assert.match(config, /\nbinding = "UPDATER_BUCKET"\n/)
+  assert.match(config, /\nbucket_name = "__UPDATER_BUCKET__"\n/)
+  assert.match(
+    config,
+    /\n\[vars\]\nPOLICY_KEY = "biyan\/updater\/stable\/policy\.json"\n/,
+  )
+  assert.equal(config.match(/__UPDATER_BUCKET__/g)?.length, 1)
 })
 
 test('router deployment exposes release secrets only from exact live mita-main', () => {
@@ -707,7 +861,7 @@ test('router deployment isolates its least-privilege Cloudflare credential', () 
   )
 })
 
-test('router deployment fails closed unless unsigned and signed pre-A probes pass', () => {
+test('router deployment requires unsigned and signed pre-A fail-closed probes', () => {
   const repoRoot = path.resolve(import.meta.dirname, '../../..')
   const workflow = readText(
     path.join(repoRoot, '.github/workflows/deploy-updater-router.yml')
@@ -746,7 +900,12 @@ test('router deployment fails closed unless unsigned and signed pre-A probes pas
     /\(keys \| sort\) == \[[\s\S]*"X-Client-Session"[\s\S]*"X-Request-Token"[\s\S]*\]\s+and \.\["X-Client-Version"\] == "0\.6\.633"/,
   )
   assert.match(workflow, /test "\$signed_status" = "204"/)
-  assert.match(workflow, /test "\$signed_state" = "no-transition"/)
+  assert.match(workflow, /test "\$signed_state" = "policy-unavailable"/)
+  assert.equal(
+    workflow.match(/"\$signed_state" = "policy-unavailable"/g)?.length,
+    2,
+  )
+  assert.doesNotMatch(workflow, /"\$signed_state" = "no-transition"/)
   assert.match(workflow, /test ! -s "\$SIGNED_BODY"/)
   assert.match(
     workflow,
@@ -763,7 +922,7 @@ test('router deployment fails closed unless unsigned and signed pre-A probes pas
   )
   assert.match(
     workflow,
-    /and \.signedPreAStatus == "204"[\s\S]*and \.signedPreAState == "no-transition"/,
+    /and \.signedPreAStatus == "204"[\s\S]*and \.signedPreAState == "policy-unavailable"/,
   )
 
   const uploadStep = workflow.match(
