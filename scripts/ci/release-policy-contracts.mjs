@@ -79,6 +79,47 @@ const TRUSTED_BIYAN_DOWNLOAD_ALIAS_BOOTSTRAP_JOB_SHA256 =
 const TRUSTED_RELEASE_DISTRIBUTION_WORKFLOW_SHA256 =
   'ee114cca6ddccdcd359ce66482cd61244ae37b865f5a24af6be9f78c18f92135'
 
+export const TRUSTED_SENSITIVE_UPDATER_WORKFLOW_CONTRACTS = Object.freeze({
+  '.github/workflows/biyan-a-canary.yml': Object.freeze({
+    exactJobNames: Object.freeze(['preflight', 'platform-canary', 'aggregate']),
+    expectedEnvelopeSha256:
+      'e6c7e9dfef2db315d9f69435a19c1a336ad587c8f039f84aa7d32775a756b484',
+    expectedPermissions: Object.freeze({
+      actions: 'read',
+      contents: 'read',
+    }),
+  }),
+  '.github/workflows/updater-health-gate.yml': Object.freeze({
+    exactJobNames: Object.freeze(['evaluate']),
+    expectedEnvelopeSha256:
+      '2f9a7f09dc1fad4528dcaf83e7b601dad8cff8fae47e6bc4c570077e0cc96b52',
+    expectedPermissions: Object.freeze({
+      contents: 'read',
+    }),
+  }),
+  '.github/workflows/updater-kill-switch.yml': Object.freeze({
+    exactJobNames: Object.freeze(['update']),
+    expectedEnvelopeSha256:
+      '8c21ea7002200a82d2485ee9a71cb494d742094e5672202201d13f1139505d8c',
+    expectedPermissions: Object.freeze({
+      contents: 'read',
+    }),
+  }),
+})
+
+const UPDATER_CONTRACT_TEST_COMMANDS = Object.freeze([
+  'node --test scripts/updater/__tests__/a-canary-evidence.test.mjs',
+  'node --test scripts/updater/__tests__/legacy-manifest-policy.test.mjs',
+  'node --test scripts/updater/__tests__/legacy-pause-transaction.test.mjs',
+  'node --test scripts/updater/__tests__/promotion-transaction.test.mjs',
+  'node --test scripts/updater/__tests__/updater.test.mjs',
+])
+
+const UPDATER_PYTHON_CONTRACT_TESTS = Object.freeze([
+  'autoqa/tests/test_migration_runner.py',
+  'scripts/updater/__tests__/test_prepare_a_canary_inputs.py',
+])
+
 function jobBlock(source, jobName) {
   const header = new RegExp(`^  ${escapeRegExp(jobName)}:\\s*$`, 'm')
   const match = header.exec(source)
@@ -207,6 +248,37 @@ function findRunInvocation(block, invocation) {
     if (command) return { command, commands }
   }
   return null
+}
+
+function validateUpdaterContractTestStep(block, label) {
+  const failures = []
+  if (!block) {
+    return [`${label} is missing the updater contract test step`]
+  }
+  for (const command of UPDATER_CONTRACT_TEST_COMMANDS) {
+    if (
+      !hasRunInvocation(
+        block,
+        new RegExp(`^${escapeRegExp(command)}$`)
+      )
+    ) {
+      failures.push(`${label} does not run: ${command}`)
+    }
+  }
+  if (
+    !hasCommandSequence(block, [
+      'python3 -m unittest \\',
+      `${UPDATER_PYTHON_CONTRACT_TESTS[0]} \\`,
+      UPDATER_PYTHON_CONTRACT_TESTS[1],
+    ])
+  ) {
+    failures.push(
+      `${label} does not run the exact Python updater contract tests: ${UPDATER_PYTHON_CONTRACT_TESTS.join(
+        ', '
+      )}`
+    )
+  }
+  return failures
 }
 
 function actionStepBlocks(source, action) {
@@ -3187,10 +3259,55 @@ export function validateDraftAssetRepairWorkflow(source, stateHelperSource) {
 
 export function validateReleaseEnvironmentWorkflows(workflows) {
   const failures = []
-  for (const [workflow, { jobName, jobNames, source }] of Object.entries(
-    workflows
-  )) {
-    const requiredJobs = Array.isArray(jobNames) ? jobNames : [jobName]
+  for (const [
+    workflow,
+    {
+      exactJobNames,
+      expectedEnvelopeSha256,
+      expectedPermissions,
+      jobName,
+      jobNames,
+      source,
+    },
+  ] of Object.entries(workflows)) {
+    if (expectedEnvelopeSha256) {
+      const actualEnvelopeSha256 = createHash('sha256')
+        .update(normalizedYamlEnvelope(source))
+        .digest('hex')
+      if (actualEnvelopeSha256 !== expectedEnvelopeSha256) {
+        failures.push(
+          `${workflow} must match the reviewed whole-workflow execution envelope (got ${actualEnvelopeSha256})`
+        )
+      }
+    }
+    if (expectedPermissions) {
+      const expected = `permissions:\n${Object.entries(expectedPermissions)
+        .map(([permission, access]) => `  ${permission}: ${access}`)
+        .join('\n')}\n`
+      const actual = normalizedYamlEnvelope(
+        topLevelBlock(uncommentedSource(source), 'permissions')
+      )
+      if (actual !== expected) {
+        failures.push(
+          `${workflow} must retain its exact top-level permission domain`
+        )
+      }
+    }
+    if (exactJobNames) {
+      const actualJobNames = workflowJobKeys(uncommentedSource(source))
+      if (
+        actualJobNames.length !== exactJobNames.length ||
+        actualJobNames.some(
+          (actualJobName, index) => actualJobName !== exactJobNames[index]
+        )
+      ) {
+        failures.push(
+          `${workflow} jobs must match the reviewed ordered job allowlist`
+        )
+      }
+    }
+    const requiredJobs =
+      exactJobNames ?? (Array.isArray(jobNames) ? jobNames : [jobName])
     for (const requiredJob of requiredJobs) {
       const block = jobBlock(source, requiredJob)
       if (!block) {
@@ -3867,7 +3984,6 @@ export function validateCiWorkflow(source) {
       'node --test scripts/ci/__tests__/verify-qualification-recovery.test.mjs',
       'python3 scripts/ci/__tests__/extract-release-candidate-recovery.test.py',
       'node --test scripts/ci/__tests__/verify-release-candidate-recovery.test.mjs',
-      'node --test scripts/updater/__tests__/updater.test.mjs',
       'node --test scripts/release-distribution/__tests__/bootstrap-biyan-download-aliases.test.mjs',
       'node --test scripts/release-distribution/__tests__/release-distribution.test.mjs',
     ]) {
@@ -3880,6 +3996,17 @@ export function validateCiWorkflow(source) {
         failures.push(`Biyan CI release-safety job does not run: ${command}`)
       }
     }
+    const updaterContractStep = workflowStepBlocks(releaseSafety).find((step) =>
+      step.includes(
+        'name: Test updater candidate, promotion, and routing contracts'
+      )
+    )
+    failures.push(
+      ...validateUpdaterContractTestStep(
+        updaterContractStep,
+        'Biyan CI release-safety job'
+      )
+    )
     const signerSmoke = workflowStepBlocks(releaseSafety).find((step) =>
       step.includes('name: Exercise locked candidate signer install')
     )
@@ -4443,7 +4570,6 @@ export function validateQualificationWorkflow(source) {
     for (const [command, condition] of [
       ['node scripts/ci/verify-release-policy.mjs', 'policy'],
       ['node --test scripts/ci/__tests__/release-policy.test.mjs', 'policy'],
-      ['node --test scripts/updater/__tests__/updater.test.mjs', 'updater'],
     ]) {
       if (
         !hasRunInvocation(
@@ -4459,6 +4585,18 @@ export function validateQualificationWorkflow(source) {
         )
       }
     }
+    const updaterContractStep = workflowStepBlocks(activePreflight).find(
+      (step) =>
+        /^\s*(?:-\s*)?if:\s*steps\.classification\.outputs\.updater\s*==\s*['"]true['"]\s*$/m.test(
+          step
+        )
+    )
+    failures.push(
+      ...validateUpdaterContractTestStep(
+        updaterContractStep,
+        'qualification focused preflight'
+      )
+    )
     if (
       ![
         /scripts\/release-distribution\/__tests__\/bootstrap-biyan-download-aliases\.test\.mjs/,

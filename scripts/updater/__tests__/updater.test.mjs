@@ -20,6 +20,10 @@ const smokeScenarios = {
   RECOVERY: ['source-to-recovery'],
 }
 
+function readText(file) {
+  return fs.readFileSync(file, 'utf8').replace(/\r\n?/g, '\n')
+}
+
 function promote(options, evidenceOverrides = {}) {
   const migrationPhase = options.candidate.migrationPhase
     ?? (options.phase === 'RECOVERY' ? 'C' : options.phase)
@@ -50,7 +54,28 @@ function promote(options, evidenceOverrides = {}) {
     sha256: 'b'.repeat(64),
     ...evidenceOverrides.health,
   }
-  return preparePromotion({ ...options, candidate, smokeEvidence, healthEvidence })
+  const firstPhaseA = options.phase === 'A'
+    && !(options.currentPolicy.completedPhases ?? []).includes('A')
+  const legacyPauseFallback = Object.hasOwn(options, 'legacyPauseFallback')
+    ? options.legacyPauseFallback
+    : firstPhaseA
+      ? {
+          version: options.currentPolicy.currentVersion,
+          manifestSha256: 'c'.repeat(64),
+          transactionId: '123-1',
+          backups: {
+            oss: 'biyan/updater/transactions/123-1/backups/legacy-oss.json',
+            r2: 'biyan/updater/transactions/123-1/backups/legacy-r2.json',
+          },
+        }
+      : undefined
+  return preparePromotion({
+    ...options,
+    candidate,
+    smokeEvidence,
+    healthEvidence,
+    legacyPauseFallback,
+  })
 }
 
 function signedRequest(pathname, currentVersion = '0.6.634', session = 'stable-install-id-1234') {
@@ -78,6 +103,39 @@ function bucket(entries) {
     },
   }
 }
+
+test('text fixtures are equivalent with LF and CRLF checkouts', () => {
+  const root = fs.mkdtempSync(
+    path.join(os.tmpdir(), 'biyan-updater-newlines-')
+  )
+  try {
+    const lf = `jobs:
+  deploy:
+    if: github.event_name == 'workflow_dispatch'
+      npx --yes wrangler@4.114.0 deploy --no-x-provision \\
+        --config "$WRANGLER_CONFIG"
+`
+    const lfFile = path.join(root, 'lf.yml')
+    const crlfFile = path.join(root, 'crlf.yml')
+    fs.writeFileSync(lfFile, lf)
+    fs.writeFileSync(crlfFile, lf.replace(/\n/g, '\r\n'))
+
+    const lfText = readText(lfFile)
+    const crlfText = readText(crlfFile)
+    assert.equal(crlfText, lfText)
+    assert.doesNotMatch(crlfText, /\r/)
+    assert.match(crlfText, /jobs:\n  deploy:\n/)
+    const commands = (source) =>
+      source
+        .replace(/\\\n\s+/g, ' ')
+        .split('\n')
+        .filter((line) => line.includes('npx --yes wrangler@'))
+    assert.deepEqual(commands(crlfText), commands(lfText))
+    assert.equal(commands(crlfText).length, 1)
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true })
+  }
+})
 
 test('candidate builder emits Biyan-only immutable assets and canonical manifest', () => {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'biyan-updater-'))
@@ -111,7 +169,7 @@ test('candidate builder emits Biyan-only immutable assets and canonical manifest
     Object.keys(candidate.distributionAssets).sort(),
     ['linuxAppImage', 'linuxDeb', 'macosDmg', 'windowsExe', 'windowsMsi'],
   )
-  assert.match(fs.readFileSync(path.join(output, 'latest.json'), 'utf8'), /Biyan_0\.6\.637/)
+  assert.match(readText(path.join(output, 'latest.json')), /Biyan_0\.6\.637/)
 
   const wrongAssetOrigin = structuredClone(candidate)
   wrongAssetOrigin.assets[0].url =
@@ -184,6 +242,7 @@ test('promotion is forward-only, phase-gated, and supports rollout increases', (
     promotedAt: '2026-07-14T00:00:00Z',
   })
   assert.equal(policyA.legacyBridgeVersion, '0.6.634')
+  assert.equal(policyA.legacyPauseFallback.version, '0.6.633')
   assert.deepEqual(policyA.completedPhases, ['A'])
   assert.equal(policyA.transitions['0.6.633'], undefined)
   const candidateAPatch = {
@@ -199,6 +258,10 @@ test('promotion is forward-only, phase-gated, and supports rollout increases', (
     promotedAt: '2026-07-15T00:00:00Z',
   })
   assert.equal(policyAPatch.legacyBridgeVersion, '0.6.635')
+  assert.deepEqual(
+    policyAPatch.legacyPauseFallback,
+    policyA.legacyPauseFallback
+  )
   assert.equal(policyAPatch.transitions['0.6.634'].to, '0.6.635')
   const candidateB = {
     tag: 'v0.6.636', version: '0.6.636', manifestKey: 'b/latest.json', manifestSha256: 'b',
@@ -213,6 +276,7 @@ test('promotion is forward-only, phase-gated, and supports rollout increases', (
     promotedAt: '2026-07-22T00:00:00Z',
   })
   assert.equal(policyB.transitions['0.6.635'].rollout, 5)
+  assert.deepEqual(policyB.legacyPauseFallback, policyA.legacyPauseFallback)
   assert.equal(policyB.completedPhases.includes('B'), false)
   assert.throws(() => promote({
     candidate: candidateB,
@@ -232,6 +296,66 @@ test('promotion is forward-only, phase-gated, and supports rollout increases', (
     rollout: 100,
     promotedAt: '2026-07-22T00:00:00Z',
   }), /Forward-only/)
+})
+
+test('initial A requires one immutable pre-A fallback pointer', () => {
+  const options = {
+    candidate: {
+      tag: 'v0.6.634',
+      version: '0.6.634',
+      manifestKey: 'a/latest.json',
+      manifestSha256: 'a',
+    },
+    currentPolicy: initialPolicy(),
+    phase: 'A',
+    fromVersion: '0.6.633',
+    expectedCurrent: '0.6.633',
+    rollout: 100,
+    promotedAt: '2026-07-14T00:00:00Z',
+  }
+  assert.throws(
+    () => promote({ ...options, legacyPauseFallback: undefined }),
+    /Initial A legacy pause fallback is required/
+  )
+  assert.throws(
+    () =>
+      promote({
+        ...options,
+        legacyPauseFallback: {
+          version: '0.6.632',
+          manifestSha256: 'c'.repeat(64),
+          transactionId: '123-1',
+          backups: {
+            oss: 'biyan/updater/transactions/123-1/backups/legacy-oss.json',
+            r2: 'biyan/updater/transactions/123-1/backups/legacy-r2.json',
+          },
+        },
+      }),
+    /must match the pre-A current version/
+  )
+  const policyA = promote(options)
+  assert.throws(
+    () =>
+      promote({
+        candidate: {
+          tag: 'v0.6.635',
+          version: '0.6.635',
+          manifestKey: 'a2/latest.json',
+          manifestSha256: 'a2',
+        },
+        currentPolicy: policyA,
+        phase: 'A',
+        fromVersion: '0.6.634',
+        expectedCurrent: '0.6.634',
+        rollout: 100,
+        promotedAt: '2026-07-15T00:00:00Z',
+        legacyPauseFallback: {
+          ...policyA.legacyPauseFallback,
+          manifestSha256: 'd'.repeat(64),
+        },
+      }),
+    /immutable after the initial A promotion/
+  )
 })
 
 test('promotion enforces observation windows, stable cycles, and health limits', () => {
@@ -414,6 +538,9 @@ test('worker returns 204 when paused and a flat signed manifest when active', as
     env,
   )
   assert.equal(response.status, 204)
+  assert.equal(response.headers.get('x-biyan-updater-state'), 'paused')
+  assert.equal(response.headers.get('cache-control'), 'no-store')
+  assert.equal(await response.text(), '')
 
   policy.paused = false
   response = await handleRequest(
@@ -428,6 +555,18 @@ test('worker returns 204 when paused and a flat signed manifest when active', as
     url: 'https://static.mitapp.cn/Biyan.exe',
     signature: 'signed',
   })
+  assert.equal(response.headers.get('x-biyan-updater-state'), null)
+
+  response = await handleRequest(
+    signedRequest(
+      '/biyan/v1/stable/windows/x86_64/0.6.636',
+      '0.6.636',
+    ),
+    env,
+  )
+  assert.equal(response.status, 204)
+  assert.equal(response.headers.get('x-biyan-updater-state'), 'no-transition')
+  assert.equal(await response.text(), '')
 })
 
 test('worker rejects unsigned requests', async () => {
@@ -459,13 +598,16 @@ test('worker never admits a pre-A client through the dynamic route', async () =>
     },
   )
   assert.equal(response.status, 204)
+  assert.equal(
+    response.headers.get('x-biyan-updater-state'),
+    'invalid-transition',
+  )
 })
 
 test('router deployment keeps the rendered config beside its worker entrypoint', () => {
   const repoRoot = path.resolve(import.meta.dirname, '../../..')
-  const workflow = fs.readFileSync(
-    path.join(repoRoot, '.github/workflows/deploy-updater-router.yml'),
-    'utf8',
+  const workflow = readText(
+    path.join(repoRoot, '.github/workflows/deploy-updater-router.yml')
   )
   assert.match(
     workflow,
@@ -483,11 +625,58 @@ test('router deployment keeps the rendered config beside its worker entrypoint',
   assert.doesNotMatch(workflow, /\/tmp\/wrangler\.toml/)
 })
 
+test('router deployment exposes release secrets only from exact live mita-main', () => {
+  const repoRoot = path.resolve(import.meta.dirname, '../../..')
+  const workflow = readText(
+    path.join(repoRoot, '.github/workflows/deploy-updater-router.yml')
+  )
+  assert.match(
+    workflow,
+    /jobs:\n  deploy:\n    if: github\.event_name == 'workflow_dispatch' && github\.ref == 'refs\/heads\/mita-main'/,
+  )
+
+  const checkoutStep = workflow.match(
+    /      - uses: actions\/checkout@v4[\s\S]*?(?=\n      - )/,
+  )?.[0]
+  assert.ok(checkoutStep)
+  assert.match(checkoutStep, /\n          ref: mita-main/)
+  assert.match(checkoutStep, /\n          fetch-depth: 0/)
+  assert.match(checkoutStep, /\n          persist-credentials: false/)
+
+  const sourceGuard = workflow.match(
+    /      - name: Verify exact live mita-main source[\s\S]*?(?=\n      - )/,
+  )?.[0]
+  assert.ok(sourceGuard)
+  assert.match(sourceGuard, /test "\$GITHUB_EVENT_NAME" = "workflow_dispatch"/)
+  assert.match(sourceGuard, /test "\$GITHUB_REF" = "refs\/heads\/mita-main"/)
+  assert.match(
+    sourceGuard,
+    /git fetch --no-tags --force origin \\\n\s+"\+refs\/heads\/mita-main:refs\/remotes\/origin\/mita-main"/,
+  )
+  assert.match(
+    sourceGuard,
+    /head_sha="\$\(git rev-parse --verify 'HEAD\^\{commit\}'\)"/,
+  )
+  assert.match(
+    sourceGuard,
+    /remote_sha="\$\(git rev-parse --verify 'refs\/remotes\/origin\/mita-main\^\{commit\}'\)"/,
+  )
+  assert.match(sourceGuard, /test "\$GITHUB_SHA" = "\$head_sha"/)
+  assert.match(sourceGuard, /test "\$GITHUB_SHA" = "\$remote_sha"/)
+  assert.match(sourceGuard, /test "\$head_sha" = "\$remote_sha"/)
+
+  const guardIndex = workflow.indexOf('- name: Verify exact live mita-main source')
+  const firstSecretIndex = workflow.indexOf('${{ secrets.')
+  const liveDeployIndex = workflow.indexOf('- name: Deploy Worker and signing secret')
+  assert.ok(guardIndex > workflow.indexOf('- uses: actions/checkout@v4'))
+  assert.ok(firstSecretIndex > guardIndex)
+  assert.ok(liveDeployIndex > guardIndex)
+})
+
 test('router deployment isolates its least-privilege Cloudflare credential', () => {
   const repoRoot = path.resolve(import.meta.dirname, '../../..')
-  const workflow = fs.readFileSync(
-    path.join(repoRoot, '.github/workflows/deploy-updater-router.yml'),
-    'utf8',
+  const workflow = readText(
+    path.join(repoRoot, '.github/workflows/deploy-updater-router.yml')
   )
   assert.match(
     workflow,
@@ -520,9 +709,8 @@ test('router deployment isolates its least-privilege Cloudflare credential', () 
 
 test('router deployment fails closed unless unsigned and signed pre-A probes pass', () => {
   const repoRoot = path.resolve(import.meta.dirname, '../../..')
-  const workflow = fs.readFileSync(
-    path.join(repoRoot, '.github/workflows/deploy-updater-router.yml'),
-    'utf8',
+  const workflow = readText(
+    path.join(repoRoot, '.github/workflows/deploy-updater-router.yml')
   )
   assert.match(
     workflow,
@@ -558,10 +746,24 @@ test('router deployment fails closed unless unsigned and signed pre-A probes pas
     /\(keys \| sort\) == \[[\s\S]*"X-Client-Session"[\s\S]*"X-Request-Token"[\s\S]*\]\s+and \.\["X-Client-Version"\] == "0\.6\.633"/,
   )
   assert.match(workflow, /test "\$signed_status" = "204"/)
+  assert.match(workflow, /test "\$signed_state" = "no-transition"/)
   assert.match(workflow, /test ! -s "\$SIGNED_BODY"/)
   assert.match(
     workflow,
-    /schema: \$schema,[\s\S]*sourceCommit: \$sourceCommit,[\s\S]*unsignedStatus: \$unsignedStatus,[\s\S]*signedPreAStatus: \$signedPreAStatus/,
+    /SIGNED_RESPONSE_HEADERS="\$\{RUNNER_TEMP:\?\}\/biyan-updater-signed-response-\$\{GITHUB_RUN_ID\}\.headers"/,
+  )
+  assert.match(
+    workflow,
+    /--dump-header "\$SIGNED_RESPONSE_HEADERS"[\s\S]*x-biyan-updater-state/,
+  )
+  assert.match(workflow, /--arg signedPreAState "\$signed_state"/)
+  assert.match(
+    workflow,
+    /schema: \$schema,[\s\S]*sourceCommit: \$sourceCommit,[\s\S]*unsignedStatus: \$unsignedStatus,[\s\S]*signedPreAStatus: \$signedPreAStatus,[\s\S]*signedPreAState: \$signedPreAState/,
+  )
+  assert.match(
+    workflow,
+    /and \.signedPreAStatus == "204"[\s\S]*and \.signedPreAState == "no-transition"/,
   )
 
   const uploadStep = workflow.match(

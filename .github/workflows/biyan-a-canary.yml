@@ -1,0 +1,1004 @@
+name: Biyan A Canary
+
+on:
+  workflow_dispatch:
+    inputs:
+      mode:
+        description: "Start the two-point canary or finish it after the exact 48-hour gate"
+        required: true
+        type: choice
+        options: [start, finish]
+      start_run_id:
+        description: "Exact successful start-mode run ID; required only for finish"
+        required: false
+        default: ""
+        type: string
+
+permissions:
+  actions: read
+  contents: read
+
+concurrency:
+  group: biyan-a-canary
+  cancel-in-progress: false
+
+jobs:
+  preflight:
+    name: Validate trusted canary control plane
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    environment: release-distribution
+    env:
+      GH_TOKEN: ${{ github.token }}
+      MODE: ${{ inputs.mode }}
+      START_RUN_ID: ${{ inputs.start_run_id }}
+    steps:
+      - name: Check out the exact dispatched commit
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+
+      - name: Verify exact live main, policy, releases, and harness
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$GITHUB_REF" = "refs/heads/mita-main"
+          test "$RUNNER_ARCH" = "X64"
+          test "$(git rev-parse HEAD)" = "$GITHUB_SHA"
+          git fetch --force --no-tags origin \
+            "+refs/heads/mita-main:refs/remotes/origin/mita-main"
+          test "$(git rev-parse HEAD)" = \
+            "$(git rev-parse refs/remotes/origin/mita-main)"
+
+          mkdir -p dist/canary-preflight
+          node --input-type=module <<'NODE'
+          import { loadACanaryPolicy } from './scripts/updater/a-canary-evidence.mjs'
+          loadACanaryPolicy('scripts/updater/a-canary-policy.json')
+          NODE
+
+          python - <<'PY'
+          import hashlib
+          import json
+          import os
+          import pathlib
+          import subprocess
+
+          policy = json.loads(
+              pathlib.Path("scripts/updater/a-canary-policy.json").read_text(
+                  encoding="utf-8"
+              )
+          )
+          paths = policy["workflow"]["harnessPaths"]
+          tree = subprocess.check_output(
+              ["git", "ls-tree", "HEAD", "--", *paths],
+          )
+          listing = tree.decode("utf-8").splitlines()
+          actual_paths = [line.split("\t", 1)[1] for line in listing]
+          if sorted(actual_paths) != sorted(paths) or len(actual_paths) != len(paths):
+              raise SystemExit("A canary harness paths are missing, duplicated, or untracked")
+          pathlib.Path("dist/canary-preflight/harness-tree.txt").write_bytes(tree)
+          digest = hashlib.sha256(tree).hexdigest()
+          pathlib.Path("dist/canary-preflight/harness.sha256").write_text(
+              digest + "\n", encoding="utf-8"
+          )
+          with pathlib.Path(os.environ["GITHUB_ENV"]).open("a", encoding="utf-8") as out:
+              out.write(f"HARNESS_SHA256={digest}\n")
+          PY
+
+          for release in current candidate; do
+            tag="$(jq -er --arg release "$release" '.[$release].tag' \
+              scripts/updater/a-canary-policy.json)"
+            commit="$(jq -er --arg release "$release" '.[$release].sourceCommit' \
+              scripts/updater/a-canary-policy.json)"
+            git fetch --force --no-tags origin \
+              "refs/tags/${tag}:refs/tags/${tag}"
+            test "$(git rev-parse "refs/tags/${tag}^{commit}")" = "$commit"
+            git merge-base --is-ancestor "$commit" HEAD
+            gh api "repos/${GITHUB_REPOSITORY}/releases/tags/${tag}" \
+              > "dist/canary-preflight/${release}-release.json"
+            jq -e --arg tag "$tag" '
+              .tag_name == $tag
+              and .draft == false
+              and .prerelease == false
+              and (.published_at | type == "string")
+            ' "dist/canary-preflight/${release}-release.json" >/dev/null
+            if [ "$release" = "current" ]; then
+              jq -r '.platforms | to_entries[]
+                | .value.currentAsset.name? // empty' \
+                scripts/updater/a-canary-policy.json
+            else
+              jq -r '.platforms | to_entries[]
+                | .value.candidateAsset.name' \
+                scripts/updater/a-canary-policy.json
+            fi | sort -u > "dist/canary-preflight/${release}-assets.txt"
+            while IFS= read -r asset; do
+              jq -e --arg asset "$asset" '
+                [.assets[] | select(
+                  .name == $asset
+                  and .state == "uploaded"
+                  and (.size | type == "number" and . > 0)
+                )] | length == 1
+              ' "dist/canary-preflight/${release}-release.json" >/dev/null
+            done < "dist/canary-preflight/${release}-assets.txt"
+          done
+
+          # v0.6.633 predates candidate.json/latest.json release assets. Bind
+          # its approved manifest to both live legacy origins instead of
+          # inventing a GitHub asset that does not exist. A's latest.json is an
+          # immutable asset of the exact candidate release.
+          mkdir -p \
+            dist/canary-preflight/manifests/current \
+            dist/canary-preflight/manifests/candidate
+          curl --proto '=https' --tlsv1.2 --fail --location --retry 3 \
+            --connect-timeout 10 --max-time 60 \
+            https://static.mitapp.cn/mita/latest.json \
+            -o dist/canary-preflight/manifests/current/latest-oss.json
+          curl --proto '=https' --tlsv1.2 --fail --location --retry 3 \
+            --connect-timeout 10 --max-time 60 \
+            https://updates.mita.so/mita/latest.json \
+            -o dist/canary-preflight/manifests/current/latest-r2.json
+          cmp \
+            dist/canary-preflight/manifests/current/latest-oss.json \
+            dist/canary-preflight/manifests/current/latest-r2.json
+          cp dist/canary-preflight/manifests/current/latest-oss.json \
+            dist/canary-preflight/manifests/current/latest.json
+          candidate_tag="$(jq -er .candidate.tag \
+            scripts/updater/a-canary-policy.json)"
+          gh release download "$candidate_tag" --repo "$GITHUB_REPOSITORY" \
+            --pattern latest.json \
+            --dir dist/canary-preflight/manifests/candidate
+
+          for release in current candidate; do
+            manifest="dist/canary-preflight/manifests/${release}/latest.json"
+            expected_sha="$(jq -er --arg release "$release" \
+              '.[$release].manifestSha256' \
+              scripts/updater/a-canary-policy.json)"
+            expected_version="$(jq -er --arg release "$release" \
+              '.[$release].version' scripts/updater/a-canary-policy.json)"
+            expected_tag="$(jq -er --arg release "$release" \
+              '.[$release].tag' scripts/updater/a-canary-policy.json)"
+            echo "${expected_sha}  ${manifest}" | sha256sum --check -
+            test "$(jq -er .version "$manifest")" = "$expected_version"
+            test "$expected_tag" = "v${expected_version}"
+          done
+
+      - name: Validate exact start run and conservative 48-hour gate
+        if: inputs.mode == 'finish'
+        shell: bash
+        run: |
+          set -euo pipefail
+          [[ "$START_RUN_ID" =~ ^[1-9][0-9]*$ ]]
+          test "$START_RUN_ID" != "$GITHUB_RUN_ID"
+          mkdir -p dist/canary-preflight/start-receipt
+
+          gh api "repos/${GITHUB_REPOSITORY}/actions/runs/${START_RUN_ID}" \
+            > dist/canary-preflight/start-run.json
+          jq -e \
+            --argjson id "$START_RUN_ID" \
+            --arg workflow "Biyan A Canary" \
+            --arg path ".github/workflows/biyan-a-canary.yml" \
+            --arg repo "$GITHUB_REPOSITORY" '
+              .id == $id
+              and .name == $workflow
+              and .path == $path
+              and .event == "workflow_dispatch"
+              and .head_branch == "mita-main"
+              and .status == "completed"
+              and .conclusion == "success"
+              and .repository.full_name == $repo
+              and .head_repository.full_name == $repo
+              and .repository.id == .head_repository.id
+              and (.run_attempt | type == "number" and . > 0)
+            ' dist/canary-preflight/start-run.json >/dev/null
+          start_attempt="$(jq -er .run_attempt \
+            dist/canary-preflight/start-run.json)"
+
+          gh api \
+            "repos/${GITHUB_REPOSITORY}/actions/runs/${START_RUN_ID}/artifacts?per_page=100" \
+            > dist/canary-preflight/start-artifacts.json
+          for platform in windows macos linux; do
+            name="a-canary-start-${platform}-${START_RUN_ID}-${start_attempt}"
+            jq -e --arg name "$name" '
+              [.artifacts[] | select(
+                .name == $name
+                and .expired == false
+                and (.size_in_bytes | type == "number" and . > 0)
+                and (.digest | test("^sha256:[0-9a-f]{64}$"))
+              )] | length == 1
+            ' dist/canary-preflight/start-artifacts.json >/dev/null
+          done
+          receipt_name="a-canary-start-receipt-${START_RUN_ID}-${start_attempt}"
+          jq -e --arg name "$receipt_name" '
+            [.artifacts[] | select(
+              .name == $name
+              and .expired == false
+              and (.size_in_bytes | type == "number" and . > 0)
+              and (.digest | test("^sha256:[0-9a-f]{64}$"))
+            )] | length == 1
+          ' dist/canary-preflight/start-artifacts.json >/dev/null
+          gh run download "$START_RUN_ID" --repo "$GITHUB_REPOSITORY" \
+            --name "$receipt_name" \
+            --dir dist/canary-preflight/start-receipt
+          jq -e \
+            --argjson id "$START_RUN_ID" \
+            --argjson attempt "$start_attempt" \
+            --arg harness "$HARNESS_SHA256" '
+              keys == ["harnessSha256", "run"]
+              and .harnessSha256 == $harness
+              and .run.id == $id
+              and .run.run_attempt == $attempt
+              and .run.name == "Biyan A Canary"
+              and .run.path == ".github/workflows/biyan-a-canary.yml"
+            ' dist/canary-preflight/start-receipt/start-receipt.json >/dev/null
+
+          gh api "repos/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}" \
+            > dist/canary-preflight/finish-run.json
+          python - <<'PY'
+          import datetime
+          import json
+          import pathlib
+
+          root = pathlib.Path("dist/canary-preflight")
+          start_run = json.loads((root / "start-run.json").read_text())
+          artifacts = json.loads((root / "start-artifacts.json").read_text())["artifacts"]
+          expected = {
+              f"a-canary-start-{platform}-{start_run['id']}-{start_run['run_attempt']}"
+              for platform in ("windows", "macos", "linux")
+          }
+          matched = [item for item in artifacts if item["name"] in expected]
+          if len(matched) != 3:
+              raise SystemExit("start run does not have exactly three platform artifacts")
+
+          def timestamp(value: str) -> datetime.datetime:
+              return datetime.datetime.fromisoformat(value.replace("Z", "+00:00"))
+
+          start_anchor = max(timestamp(item["created_at"]) for item in matched)
+          finish_run = json.loads((root / "finish-run.json").read_text())
+          finish_started = timestamp(finish_run["run_started_at"])
+          minimum = datetime.timedelta(hours=48)
+          if finish_started - start_anchor < minimum:
+              raise SystemExit(
+                  "finish run started before the exact 48-hour GitHub artifact gate"
+              )
+          (root / "start-anchor.txt").write_text(
+              start_anchor.isoformat().replace("+00:00", "Z") + "\n",
+              encoding="utf-8",
+          )
+          PY
+
+      - name: Reject a start run ID in start mode
+        if: inputs.mode == 'start'
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -z "$START_RUN_ID"
+
+  platform-canary:
+    name: Canary ${{ matrix.platform }} on ${{ matrix.runner }}
+    needs: preflight
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 90
+    environment: release-distribution
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - platform: windows
+            runner: windows-2025
+          - platform: linux
+            runner: ubuntu-24.04
+          - platform: macos
+            runner: macos-15-intel
+    env:
+      POINT: ${{ inputs.mode }}
+      PLATFORM: ${{ matrix.platform }}
+      APPIMAGE_EXTRACT_AND_RUN: "1"
+    steps:
+      - name: Check out the exact dispatched commit
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+
+      - name: Verify exact live main and derive pinned inputs
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$GITHUB_REF" = "refs/heads/mita-main"
+          test "$RUNNER_ARCH" = "X64"
+          test "$(git rev-parse HEAD)" = "$GITHUB_SHA"
+          git fetch --force --no-tags origin \
+            "+refs/heads/mita-main:refs/remotes/origin/mita-main"
+          test "$(git rev-parse HEAD)" = \
+            "$(git rev-parse refs/remotes/origin/mita-main)"
+          node --input-type=module <<'NODE'
+          import { loadACanaryPolicy } from './scripts/updater/a-canary-evidence.mjs'
+          loadACanaryPolicy('scripts/updater/a-canary-policy.json')
+          NODE
+
+          python - <<'PY'
+          import hashlib
+          import json
+          import os
+          import pathlib
+          import subprocess
+
+          policy = json.loads(
+              pathlib.Path("scripts/updater/a-canary-policy.json").read_text(
+                  encoding="utf-8"
+              )
+          )
+          platform = os.environ["PLATFORM"]
+          paths = policy["workflow"]["harnessPaths"]
+          tree = subprocess.check_output(["git", "ls-tree", "HEAD", "--", *paths])
+          actual_paths = [
+              line.split("\t", 1)[1] for line in tree.decode("utf-8").splitlines()
+          ]
+          if sorted(actual_paths) != sorted(paths) or len(actual_paths) != len(paths):
+              raise SystemExit("A canary harness paths are missing, duplicated, or untracked")
+          digest = hashlib.sha256(tree).hexdigest()
+          root = pathlib.Path(os.environ["RUNNER_TEMP"]) / (
+              f"biyan-a-canary-{os.environ['POINT']}-{platform}"
+          )
+          asset = policy["platforms"][platform]
+          values = {
+              "HARNESS_SHA256": digest,
+              "CANARY_ROOT": str(root),
+              "CURRENT_TAG": policy["current"]["tag"],
+              "CANDIDATE_TAG": policy["candidate"]["tag"],
+              "CANDIDATE_ASSET_NAME": asset["candidateAsset"]["name"],
+              "SCENARIO": asset["scenario"],
+          }
+          if "currentAsset" in asset:
+              values["CURRENT_ASSET_NAME"] = asset["currentAsset"]["name"]
+          with pathlib.Path(os.environ["GITHUB_ENV"]).open("a", encoding="utf-8") as out:
+              for key, value in values.items():
+                  if "\n" in value or "\r" in value:
+                      raise SystemExit(f"unsafe newline in {key}")
+                  out.write(f"{key}={value}\n")
+          PY
+
+      - name: Download exact Windows release assets
+        if: matrix.platform == 'windows'
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $assets = Join-Path $env:CANARY_ROOT 'assets'
+          New-Item -ItemType Directory -Path $assets -Force | Out-Null
+          gh release download $env:CURRENT_TAG `
+            --repo $env:GITHUB_REPOSITORY `
+            --pattern $env:CURRENT_ASSET_NAME `
+            --dir $assets --clobber
+          if ($LASTEXITCODE -ne 0) { throw 'current release download failed' }
+          gh release download $env:CANDIDATE_TAG `
+            --repo $env:GITHUB_REPOSITORY `
+            --pattern $env:CANDIDATE_ASSET_NAME `
+            --dir $assets --clobber
+          if ($LASTEXITCODE -ne 0) { throw 'candidate release download failed' }
+
+      - name: Download exact macOS release assets
+        if: matrix.platform == 'macos'
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          mkdir -p "$CANARY_ROOT/assets"
+          gh release download "$CURRENT_TAG" --repo "$GITHUB_REPOSITORY" \
+            --pattern "$CURRENT_ASSET_NAME" --dir "$CANARY_ROOT/assets" --clobber
+          gh release download "$CANDIDATE_TAG" --repo "$GITHUB_REPOSITORY" \
+            --pattern "$CANDIDATE_ASSET_NAME" --dir "$CANARY_ROOT/assets" --clobber
+
+      - name: Download exact Linux release asset
+        if: matrix.platform == 'linux'
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          mkdir -p "$CANARY_ROOT/assets"
+          gh release download "$CANDIDATE_TAG" --repo "$GITHUB_REPOSITORY" \
+            --pattern "$CANDIDATE_ASSET_NAME" --dir "$CANARY_ROOT/assets" --clobber
+
+      - name: Install Linux desktop runtime dependencies
+        if: matrix.platform == 'linux'
+        shell: bash
+        run: |
+          set -euo pipefail
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            libglib2.0-dev libatk1.0-dev libpango1.0-dev libgtk-3-dev \
+            libsoup-3.0-dev libwebkit2gtk-4.1-dev librsvg2-dev \
+            libappindicator3-dev webkit2gtk-driver xvfb
+
+      - name: Run focused Windows migration canary
+        if: matrix.platform == 'windows'
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $assets = Join-Path $env:CANARY_ROOT 'assets'
+          $inputs = Join-Path $env:CANARY_ROOT 'inputs'
+          $work = Join-Path $env:CANARY_ROOT 'work'
+          $report = Join-Path $env:CANARY_ROOT 'migration.json'
+          $current = Join-Path $assets $env:CURRENT_ASSET_NAME
+          $candidate = Join-Path $assets $env:CANDIDATE_ASSET_NAME
+          $startedAt = [DateTime]::UtcNow.ToString('o')
+
+          python scripts/updater/prepare-a-canary-inputs.py `
+            --policy scripts/updater/a-canary-policy.json `
+            --platform $env:PLATFORM `
+            --current-installer $current `
+            --candidate-installer $candidate `
+            --output-dir $inputs
+          if ($LASTEXITCODE -ne 0) { throw 'canary input preparation failed' }
+          python autoqa/migration_runner.py `
+            --platform $env:PLATFORM `
+            --scenario $env:SCENARIO `
+            --current-installer $current `
+            --a-installer $candidate `
+            --snapshot-manifest (Join-Path $inputs 'manifest.json') `
+            --report $report `
+            --work-dir $work `
+            --startup-seconds 10 `
+            --allow-destructive-autoqa AUTOQA
+          if ($LASTEXITCODE -ne 0) { throw 'focused migration canary failed' }
+
+          $completedAt = [DateTime]::UtcNow.ToString('o')
+          New-Item -ItemType Directory -Path dist/canary-evidence -Force | Out-Null
+          $resultOutput = "dist/canary-evidence/{0}-{1}.json" -f `
+            $env:POINT, $env:PLATFORM
+          $migrationOutput = "dist/canary-evidence/{0}-{1}-migration.json" -f `
+            $env:POINT, $env:PLATFORM
+          $manifestOutput = "dist/canary-evidence/{0}-{1}-manifest.json" -f `
+            $env:POINT, $env:PLATFORM
+          $snapshotOutput = "dist/canary-evidence/{0}-{1}-snapshot.zip" -f `
+            $env:POINT, $env:PLATFORM
+          $inputManifest = Join-Path $inputs 'manifest.json'
+          $snapshot = Join-Path $inputs 'snapshots/current.zip'
+          node scripts/updater/a-canary-evidence.mjs platform-result `
+            --policy scripts/updater/a-canary-policy.json `
+            --platform $env:PLATFORM `
+            --migration-report $report `
+            --input-manifest $inputManifest `
+            --snapshot $snapshot `
+            --run-id $env:GITHUB_RUN_ID `
+            --run-attempt $env:GITHUB_RUN_ATTEMPT `
+            --harness-sha256 $env:HARNESS_SHA256 `
+            --started-at $startedAt `
+            --completed-at $completedAt `
+            --output $resultOutput
+          if ($LASTEXITCODE -ne 0) { throw 'platform result validation failed' }
+          Copy-Item $report $migrationOutput
+          Copy-Item $inputManifest $manifestOutput
+          Copy-Item $snapshot $snapshotOutput
+
+      - name: Run focused Unix migration canary
+        if: matrix.platform != 'windows'
+        shell: bash
+        run: |
+          set -euo pipefail
+          assets="$CANARY_ROOT/assets"
+          inputs_dir="$CANARY_ROOT/inputs"
+          work_dir="$CANARY_ROOT/work"
+          report="$CANARY_ROOT/migration.json"
+          candidate="$assets/$CANDIDATE_ASSET_NAME"
+          started_at="$(python -c \
+            'import datetime; print(datetime.datetime.now(datetime.timezone.utc).isoformat())')"
+
+          prepare_args=(
+            --policy scripts/updater/a-canary-policy.json
+            --platform "$PLATFORM"
+            --candidate-installer "$candidate"
+            --output-dir "$inputs_dir"
+          )
+          runner_args=(
+            --platform "$PLATFORM"
+            --scenario "$SCENARIO"
+            --a-installer "$candidate"
+            --snapshot-manifest "$inputs_dir/manifest.json"
+            --report "$report"
+            --work-dir "$work_dir"
+            --startup-seconds 10
+            --allow-destructive-autoqa AUTOQA
+          )
+          if [ "$PLATFORM" = "macos" ]; then
+            current="$assets/$CURRENT_ASSET_NAME"
+            prepare_args+=(--current-installer "$current")
+            runner_args+=(--current-installer "$current")
+          else
+            chmod +x "$candidate"
+          fi
+
+          python scripts/updater/prepare-a-canary-inputs.py "${prepare_args[@]}"
+          python autoqa/migration_runner.py "${runner_args[@]}"
+          completed_at="$(python -c \
+            'import datetime; print(datetime.datetime.now(datetime.timezone.utc).isoformat())')"
+          if [ "$SCENARIO" = "fresh-a" ]; then
+            snapshot="$inputs_dir/snapshots/fresh.zip"
+          else
+            snapshot="$inputs_dir/snapshots/current.zip"
+          fi
+
+          mkdir -p dist/canary-evidence
+          node scripts/updater/a-canary-evidence.mjs platform-result \
+            --policy scripts/updater/a-canary-policy.json \
+            --platform "$PLATFORM" \
+            --migration-report "$report" \
+            --input-manifest "$inputs_dir/manifest.json" \
+            --snapshot "$snapshot" \
+            --run-id "$GITHUB_RUN_ID" \
+            --run-attempt "$GITHUB_RUN_ATTEMPT" \
+            --harness-sha256 "$HARNESS_SHA256" \
+            --started-at "$started_at" \
+            --completed-at "$completed_at" \
+            --output "dist/canary-evidence/${POINT}-${PLATFORM}.json"
+          cp "$report" \
+            "dist/canary-evidence/${POINT}-${PLATFORM}-migration.json"
+          cp "$inputs_dir/manifest.json" \
+            "dist/canary-evidence/${POINT}-${PLATFORM}-manifest.json"
+          cp "$snapshot" \
+            "dist/canary-evidence/${POINT}-${PLATFORM}-snapshot.zip"
+
+      - name: Upload immutable platform evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: a-canary-${{ inputs.mode }}-${{ matrix.platform }}-${{ github.run_id }}-${{ github.run_attempt }}
+          path: dist/canary-evidence/
+          if-no-files-found: error
+          retention-days: 30
+
+      - name: Remove staged Windows installers and snapshots
+        if: always() && matrix.platform == 'windows'
+        shell: pwsh
+        run: |
+          if ($env:CANARY_ROOT) {
+            Remove-Item -LiteralPath $env:CANARY_ROOT -Recurse -Force `
+              -ErrorAction SilentlyContinue
+          }
+
+      - name: Remove staged Unix installers and snapshots
+        if: always() && matrix.platform != 'windows'
+        shell: bash
+        run: |
+          python -c \
+            'import os, shutil; shutil.rmtree(os.environ.get("CANARY_ROOT", ""), ignore_errors=True)'
+
+  aggregate:
+    name: Bind two-point evidence and publish only on finish
+    needs: [preflight, platform-canary]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 90
+    environment: release-distribution
+    env:
+      GH_TOKEN: ${{ github.token }}
+      POINT: ${{ inputs.mode }}
+      START_RUN_ID: ${{ inputs.start_run_id }}
+    steps:
+      - name: Check out the exact dispatched commit
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+
+      - name: Verify exact live main and harness
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$GITHUB_REF" = "refs/heads/mita-main"
+          test "$(git rev-parse HEAD)" = "$GITHUB_SHA"
+          git fetch --force --no-tags origin \
+            "+refs/heads/mita-main:refs/remotes/origin/mita-main"
+          test "$(git rev-parse HEAD)" = \
+            "$(git rev-parse refs/remotes/origin/mita-main)"
+          mkdir -p dist/aggregate-inputs dist/run-receipts dist/evidence
+          python - <<'PY'
+          import hashlib
+          import json
+          import os
+          import pathlib
+          import subprocess
+
+          policy = json.loads(
+              pathlib.Path("scripts/updater/a-canary-policy.json").read_text(
+                  encoding="utf-8"
+              )
+          )
+          paths = policy["workflow"]["harnessPaths"]
+          tree = subprocess.check_output(["git", "ls-tree", "HEAD", "--", *paths])
+          actual_paths = [
+              line.split("\t", 1)[1] for line in tree.decode("utf-8").splitlines()
+          ]
+          if sorted(actual_paths) != sorted(paths) or len(actual_paths) != len(paths):
+              raise SystemExit("A canary harness paths are missing, duplicated, or untracked")
+          digest = hashlib.sha256(tree).hexdigest()
+          with pathlib.Path(os.environ["GITHUB_ENV"]).open("a", encoding="utf-8") as out:
+              out.write(f"HARNESS_SHA256={digest}\n")
+          PY
+
+      - name: Download this run's platform evidence
+        uses: actions/download-artifact@v4
+        with:
+          pattern: a-canary-${{ inputs.mode }}-*-${{ github.run_id }}-${{ github.run_attempt }}
+          path: dist/aggregate-inputs
+          merge-multiple: true
+
+      - name: Bind current run and artifact API receipts
+        shell: bash
+        run: |
+          set -euo pipefail
+          for platform in windows macos linux; do
+            for suffix in .json -migration.json -manifest.json -snapshot.zip; do
+              test -s "dist/aggregate-inputs/${POINT}-${platform}${suffix}"
+            done
+            migration_sha="$(jq -er .migrationReportSha256 \
+              "dist/aggregate-inputs/${POINT}-${platform}.json")"
+            echo "${migration_sha}  dist/aggregate-inputs/${POINT}-${platform}-migration.json" \
+              | sha256sum --check -
+          done
+          gh api "repos/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}" \
+            > "dist/run-receipts/${POINT}-run-api.json"
+          jq -n --arg harness "$HARNESS_SHA256" \
+            --slurpfile run "dist/run-receipts/${POINT}-run-api.json" \
+            '{harnessSha256: $harness, run: $run[0]}' \
+            > "dist/run-receipts/${POINT}-run-receipt.json"
+          gh api \
+            "repos/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}/artifacts?per_page=100" \
+            > "dist/run-receipts/${POINT}-artifacts.json"
+          for platform in windows macos linux; do
+            name="a-canary-${POINT}-${platform}-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
+            jq -e --arg name "$name" '
+              ([.artifacts[] | select(.name == $name)]) as $items
+              | if ($items | length) == 1
+                  and $items[0].expired == false
+                  and ($items[0].size_in_bytes | type == "number" and . > 0)
+                  and ($items[0].digest | test("^sha256:[0-9a-f]{64}$"))
+                then $items[0]
+                else error("missing, duplicate, expired, or invalid platform artifact")
+                end
+            ' "dist/run-receipts/${POINT}-artifacts.json" \
+              > "dist/aggregate-inputs/${POINT}-${platform}-artifact.json"
+          done
+
+      - name: Create the immutable start receipt
+        if: inputs.mode == 'start'
+        shell: bash
+        run: |
+          set -euo pipefail
+          cp dist/run-receipts/start-run-receipt.json \
+            dist/run-receipts/start-receipt.json
+          jq -e \
+            --argjson id "$GITHUB_RUN_ID" \
+            --argjson attempt "$GITHUB_RUN_ATTEMPT" \
+            --arg harness "$HARNESS_SHA256" '
+              keys == ["harnessSha256", "run"]
+              and .harnessSha256 == $harness
+              and .run.id == $id
+              and .run.run_attempt == $attempt
+              and .run.name == "Biyan A Canary"
+              and .run.path == ".github/workflows/biyan-a-canary.yml"
+              and .run.event == "workflow_dispatch"
+              and .run.head_branch == "mita-main"
+            ' dist/run-receipts/start-receipt.json >/dev/null
+
+      - name: Upload start receipt without cloud writes
+        if: inputs.mode == 'start'
+        uses: actions/upload-artifact@v4
+        with:
+          name: a-canary-start-receipt-${{ github.run_id }}-${{ github.run_attempt }}
+          path: dist/run-receipts/start-receipt.json
+          if-no-files-found: error
+          retention-days: 30
+
+      - name: Assemble exact completed start and in-progress finish evidence
+        if: inputs.mode == 'finish'
+        shell: bash
+        run: |
+          set -euo pipefail
+          [[ "$START_RUN_ID" =~ ^[1-9][0-9]*$ ]]
+          gh api "repos/${GITHUB_REPOSITORY}/actions/runs/${START_RUN_ID}" \
+            > dist/run-receipts/start-run-api-live.json
+          jq -e \
+            --argjson id "$START_RUN_ID" \
+            --arg repo "$GITHUB_REPOSITORY" '
+              .id == $id
+              and .name == "Biyan A Canary"
+              and .path == ".github/workflows/biyan-a-canary.yml"
+              and .event == "workflow_dispatch"
+              and .head_branch == "mita-main"
+              and .status == "completed"
+              and .conclusion == "success"
+              and .repository.full_name == $repo
+              and .head_repository.full_name == $repo
+              and .repository.id == .head_repository.id
+            ' dist/run-receipts/start-run-api-live.json >/dev/null
+          start_attempt="$(jq -er .run_attempt \
+            dist/run-receipts/start-run-api-live.json)"
+          receipt_name="a-canary-start-receipt-${START_RUN_ID}-${start_attempt}"
+          mkdir -p dist/start-receipt-download
+          gh run download "$START_RUN_ID" --repo "$GITHUB_REPOSITORY" \
+            --name "$receipt_name" --dir dist/start-receipt-download
+          jq -e \
+            --argjson id "$START_RUN_ID" \
+            --argjson attempt "$start_attempt" \
+            --arg harness "$HARNESS_SHA256" '
+              keys == ["harnessSha256", "run"]
+              and .harnessSha256 == $harness
+              and .run.id == $id
+              and .run.run_attempt == $attempt
+              and .run.name == "Biyan A Canary"
+              and .run.path == ".github/workflows/biyan-a-canary.yml"
+            ' dist/start-receipt-download/start-receipt.json >/dev/null
+          jq -n --arg harness "$HARNESS_SHA256" \
+            --slurpfile run dist/run-receipts/start-run-api-live.json \
+            '{harnessSha256: $harness, run: $run[0]}' \
+            > dist/run-receipts/start-run-receipt.json
+
+          gh api \
+            "repos/${GITHUB_REPOSITORY}/actions/runs/${START_RUN_ID}/artifacts?per_page=100" \
+            > dist/run-receipts/start-artifacts.json
+          for platform in windows macos linux; do
+            name="a-canary-start-${platform}-${START_RUN_ID}-${start_attempt}"
+            gh run download "$START_RUN_ID" --repo "$GITHUB_REPOSITORY" \
+              --name "$name" --dir dist/aggregate-inputs
+            jq -e --arg name "$name" '
+              ([.artifacts[] | select(.name == $name)]) as $items
+              | if ($items | length) == 1
+                  and $items[0].expired == false
+                  and ($items[0].size_in_bytes | type == "number" and . > 0)
+                  and ($items[0].digest | test("^sha256:[0-9a-f]{64}$"))
+                then $items[0]
+                else error("missing, duplicate, expired, or invalid start artifact")
+                end
+            ' dist/run-receipts/start-artifacts.json \
+              > "dist/aggregate-inputs/start-${platform}-artifact.json"
+            for suffix in .json -migration.json -manifest.json -snapshot.zip; do
+              test -s "dist/aggregate-inputs/start-${platform}${suffix}"
+            done
+            migration_sha="$(jq -er .migrationReportSha256 \
+              "dist/aggregate-inputs/start-${platform}.json")"
+            echo "${migration_sha}  dist/aggregate-inputs/start-${platform}-migration.json" \
+              | sha256sum --check -
+          done
+
+          start_anchor="$(jq --slurp --raw-output 'map(.created_at) | max' \
+            dist/aggregate-inputs/start-*-artifact.json)"
+          finish_anchor="$(jq --slurp --raw-output 'map(.created_at) | max' \
+            dist/aggregate-inputs/finish-*-artifact.json)"
+          node scripts/updater/a-canary-evidence.mjs aggregate \
+            --policy scripts/updater/a-canary-policy.json \
+            --input-dir dist/aggregate-inputs \
+            --start-receipt dist/run-receipts/start-run-receipt.json \
+            --finish-receipt dist/run-receipts/finish-run-receipt.json \
+            --started-at "$start_anchor" \
+            --completed-at "$finish_anchor" \
+            --start-run-id "$START_RUN_ID" \
+            --finish-run-id "$GITHUB_RUN_ID" \
+            --output-dir dist/evidence
+
+      - name: Install exact production object-store clients
+        if: inputs.mode == 'finish'
+        shell: bash
+        run: |
+          set -euo pipefail
+          command -v aws >/dev/null
+          aws --version
+          mkdir -p dist/tools
+          curl --proto '=https' --tlsv1.2 -fsSL \
+            https://gosspublic.alicdn.com/ossutil/v2/2.3.0/ossutil-2.3.0-linux-amd64.zip \
+            -o dist/tools/ossutil.zip
+          echo "3ae4d9fc85a7a6e9f5654d1599766f1a3a42a3692870887b5ae9338d582ef65a  dist/tools/ossutil.zip" \
+            | sha256sum --check -
+          unzip -q dist/tools/ossutil.zip -d dist/tools
+          sudo install -m 0755 \
+            dist/tools/ossutil-2.3.0-linux-amd64/ossutil \
+            /usr/local/bin/ossutil
+          ossutil version | tee dist/tools/ossutil-version.txt
+          grep -Eq '(^|[^0-9])2\.3\.0([^0-9]|$)' \
+            dist/tools/ossutil-version.txt
+
+      - name: Publish immutable content-addressed evidence to both clouds
+        if: inputs.mode == 'finish'
+        shell: bash
+        env:
+          AWS_ACCESS_KEY_ID: ${{ secrets.CLOUDFLARE_R2_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.CLOUDFLARE_R2_SECRET_ACCESS_KEY }}
+          AWS_DEFAULT_REGION: auto
+          CLOUDFLARE_R2_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_R2_ACCOUNT_ID }}
+          CLOUDFLARE_R2_BUCKET: ${{ secrets.CLOUDFLARE_R2_BUCKET }}
+          OSS_ACCESS_KEY_ID: ${{ secrets.ALIYUN_ACCESS_KEY_ID }}
+          OSS_ACCESS_KEY_SECRET: ${{ secrets.ALIYUN_ACCESS_KEY_SECRET }}
+          ALIYUN_OSS_BUCKET: ${{ secrets.ALIYUN_OSS_BUCKET || vars.ALIYUN_OSS_BUCKET || 'mita-static' }}
+          ALIYUN_OSS_ENDPOINT: ${{ vars.ALIYUN_OSS_ENDPOINT || 'oss-cn-hangzhou.aliyuncs.com' }}
+          ALIYUN_REGION: ${{ vars.ALIYUN_REGION || 'cn-hangzhou' }}
+        run: |
+          set -euo pipefail
+          required=(
+            AWS_ACCESS_KEY_ID AWS_SECRET_ACCESS_KEY
+            CLOUDFLARE_R2_ACCOUNT_ID CLOUDFLARE_R2_BUCKET
+            OSS_ACCESS_KEY_ID OSS_ACCESS_KEY_SECRET
+            ALIYUN_OSS_BUCKET ALIYUN_OSS_ENDPOINT ALIYUN_REGION
+          )
+          for name in "${required[@]}"; do
+            test -n "${!name:-}" || {
+              echo "Missing release-distribution setting: $name" >&2
+              exit 1
+            }
+          done
+          r2_endpoint="https://${CLOUDFLARE_R2_ACCOUNT_ID}.r2.cloudflarestorage.com"
+          oss_endpoint="${ALIYUN_OSS_ENDPOINT#https://}"
+          oss_endpoint="https://${oss_endpoint#http://}"
+          mkdir -p dist/evidence/probes dist/evidence/readback
+
+          probe_r2() {
+            local key="$1" name="$2" rc
+            set +e
+            aws s3api head-object --bucket "$CLOUDFLARE_R2_BUCKET" \
+              --key "$key" --endpoint-url "$r2_endpoint" \
+              >"dist/evidence/probes/${name}.stdout" \
+              2>"dist/evidence/probes/${name}.stderr"
+            rc=$?
+            set -e
+            node scripts/updater/promotion-transaction.mjs classify-probe \
+              --provider r2 --key "$key" --exit-code "$rc" \
+              --stdout "dist/evidence/probes/${name}.stdout" \
+              --stderr "dist/evidence/probes/${name}.stderr" \
+              --output "dist/evidence/probes/${name}.json"
+          }
+
+          probe_oss() {
+            local key="$1" name="$2" rc
+            set +e
+            ossutil api head-object --bucket "$ALIYUN_OSS_BUCKET" \
+              --key "$key" --endpoint "$oss_endpoint" \
+              --region "$ALIYUN_REGION" --output-format json \
+              >"dist/evidence/probes/${name}.stdout" \
+              2>"dist/evidence/probes/${name}.stderr"
+            rc=$?
+            set -e
+            node scripts/updater/promotion-transaction.mjs classify-probe \
+              --provider oss --key "$key" --exit-code "$rc" \
+              --stdout "dist/evidence/probes/${name}.stdout" \
+              --stderr "dist/evidence/probes/${name}.stderr" \
+              --output "dist/evidence/probes/${name}.json"
+          }
+
+          publish_r2() {
+            local file="$1" key="$2" name="$3"
+            probe_r2 "$key" "${name}-r2"
+            if jq -e '.state == "absent"' \
+              "dist/evidence/probes/${name}-r2.json" >/dev/null; then
+              aws s3api put-object --bucket "$CLOUDFLARE_R2_BUCKET" \
+                --key "$key" --body "$file" \
+                --content-type application/json \
+                --cache-control "public, max-age=31536000, immutable" \
+                --if-none-match '*' --endpoint-url "$r2_endpoint" >/dev/null
+            else
+              jq -e '.state == "exists"' \
+                "dist/evidence/probes/${name}-r2.json" >/dev/null
+            fi
+            aws s3api get-object --bucket "$CLOUDFLARE_R2_BUCKET" \
+              --key "$key" --endpoint-url "$r2_endpoint" \
+              "dist/evidence/readback/${name}-r2.json" \
+              > "dist/evidence/readback/${name}-r2-metadata.json"
+            cmp "$file" "dist/evidence/readback/${name}-r2.json"
+          }
+
+          publish_oss() {
+            local file="$1" key="$2" name="$3"
+            probe_oss "$key" "${name}-oss"
+            if jq -e '.state == "absent"' \
+              "dist/evidence/probes/${name}-oss.json" >/dev/null; then
+              ossutil api put-object --bucket "$ALIYUN_OSS_BUCKET" \
+                --key "$key" --body "file://${file}" \
+                --content-type application/json \
+                --cache-control "public, max-age=31536000, immutable" \
+                --object-acl default --forbid-overwrite true \
+                --endpoint "$oss_endpoint" --region "$ALIYUN_REGION" \
+                --output-format json >/dev/null
+            else
+              jq -e '.state == "exists"' \
+                "dist/evidence/probes/${name}-oss.json" >/dev/null
+            fi
+            ossutil cp "oss://${ALIYUN_OSS_BUCKET}/${key}" \
+              "dist/evidence/readback/${name}-oss.json" --force \
+              --endpoint "$oss_endpoint" --region "$ALIYUN_REGION"
+            cmp "$file" "dist/evidence/readback/${name}-oss.json"
+          }
+
+          smoke_sha="$(sha256sum dist/evidence/upgrade-smoke.json | awk '{print $1}')"
+          health_sha="$(sha256sum dist/evidence/rollout-health.json | awk '{print $1}')"
+          smoke_key="biyan/updater/evidence/${smoke_sha}/upgrade-smoke.json"
+          health_key="biyan/updater/evidence/${health_sha}/rollout-health.json"
+
+          publish_r2 dist/evidence/upgrade-smoke.json "$smoke_key" smoke
+          publish_oss dist/evidence/upgrade-smoke.json "$smoke_key" smoke
+          publish_r2 dist/evidence/rollout-health.json "$health_key" health
+          publish_oss dist/evidence/rollout-health.json "$health_key" health
+
+          for provider in oss r2; do
+            if [ "$provider" = "oss" ]; then
+              origin="https://static.mitapp.cn"
+            else
+              origin="https://updates.mita.so"
+            fi
+            node scripts/updater/promotion-transaction.mjs poll-url \
+              --url "${origin}/${smoke_key}" \
+              --expected dist/evidence/upgrade-smoke.json \
+              --timeout-seconds 600 --interval-seconds 10 \
+              --output "dist/evidence/readback/smoke-${provider}-public.json"
+            node scripts/updater/promotion-transaction.mjs poll-url \
+              --url "${origin}/${health_key}" \
+              --expected dist/evidence/rollout-health.json \
+              --timeout-seconds 600 --interval-seconds 10 \
+              --output "dist/evidence/readback/health-${provider}-public.json"
+          done
+
+          jq -n \
+            --arg smokeSha256 "$smoke_sha" \
+            --arg healthSha256 "$health_sha" \
+            --arg smokeUrl "https://static.mitapp.cn/${smoke_key}" \
+            --arg healthUrl "https://static.mitapp.cn/${health_key}" \
+            --arg r2SmokeUrl "https://updates.mita.so/${smoke_key}" \
+            --arg r2HealthUrl "https://updates.mita.so/${health_key}" \
+            '{
+              smokeSha256: $smokeSha256,
+              healthSha256: $healthSha256,
+              smokeUrl: $smokeUrl,
+              healthUrl: $healthUrl,
+              r2SmokeUrl: $r2SmokeUrl,
+              r2HealthUrl: $r2HealthUrl
+            }' > dist/evidence/publish-summary.json
+          {
+            echo "### Biyan A canary evidence"
+            echo
+            echo "- start run: ${START_RUN_ID}"
+            echo "- finish run: ${GITHUB_RUN_ID}"
+            echo "- smoke SHA-256: ${smoke_sha}"
+            echo "- health SHA-256: ${health_sha}"
+            echo "- health URL: https://static.mitapp.cn/${health_key}"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload exact promotion evidence contract
+        if: inputs.mode == 'finish'
+        uses: actions/upload-artifact@v4
+        with:
+          name: biyan-promotion-evidence
+          path: |
+            dist/evidence/upgrade-smoke.json
+            dist/evidence/rollout-health.json
+          if-no-files-found: error
+          retention-days: 90
+
+      - name: Upload finish evidence and public readbacks
+        if: inputs.mode == 'finish' && always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: a-canary-finish-evidence-${{ github.run_id }}-${{ github.run_attempt }}
+          path: |
+            dist/aggregate-inputs/
+            dist/run-receipts/
+            dist/evidence/
+          if-no-files-found: error
+          retention-days: 90

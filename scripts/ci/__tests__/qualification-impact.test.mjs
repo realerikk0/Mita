@@ -266,6 +266,68 @@ test('policy/verifier and updater/distribution changes replay artifacts without 
   assert.equal(updater.flags.buildWindows, false)
 })
 
+test('A canary workflow and exact migration harness paths stay updater-scoped', () => {
+  const result = classifyChangedFiles([
+    '.github/workflows/biyan-a-canary.yml',
+    'autoqa/migration_runner.py',
+    'autoqa/tests/test_migration_runner.py',
+    'scripts/updater/a-canary-evidence.mjs',
+    'scripts/updater/__tests__/test_prepare_a_canary_inputs.py',
+  ])
+  assert.equal(result.classification, 'updater/distribution-only')
+  assert.equal(result.flags.focused, true)
+  assert.equal(result.flags.policy, true)
+  assert.equal(result.flags.updater, true)
+  assert.equal(result.flags.artifactReplay, true)
+  assert.equal(result.flags.nativeTests, false)
+  assert.equal(result.flags.testLinux, false)
+  assert.equal(result.flags.buildMacos, false)
+  assert.equal(result.flags.buildWindows, false)
+  assert.equal(result.flags.buildLinux, false)
+  assert.equal(result.flags.full, false)
+})
+
+test('A canary workflow near-matches fail closed to full qualification', () => {
+  for (const file of [
+    '.github/workflows/biyan-a-canary.yaml',
+    '.github/workflows/biyan-a-canary-copy.yml',
+    '.github/workflows/copy-biyan_a_canary.yml',
+    '.github/workflows/BIYAN.A.CANARY.yml',
+  ]) {
+    const result = classifyChangedFiles([file])
+    assert.equal(result.classification, 'unknown', file)
+    assert.equal(result.categories.unknown, true, file)
+    assert.equal(result.flags.full, true, file)
+    assert.equal(result.flags.testMacos, true, file)
+    assert.equal(result.flags.testWindows, true, file)
+    assert.equal(result.flags.testLinux, true, file)
+    assert.equal(result.flags.buildMacos, true, file)
+    assert.equal(result.flags.buildWindows, true, file)
+    assert.equal(result.flags.buildLinux, true, file)
+  }
+})
+
+test('near-match migration harness paths retain conservative generic handling', () => {
+  for (const file of [
+    'autoqa/migration_runner.py.bak',
+    'autoqa/migration-runner.py',
+  ]) {
+    const result = classifyChangedFiles([file])
+    assert.equal(result.classification, 'unknown')
+    assert.equal(result.categories.unknown, true)
+    assert.equal(result.flags.full, true)
+  }
+
+  const otherTest = classifyChangedFiles([
+    'autoqa/tests/test_migration_runner.py.bak',
+    'autoqa/tests/test_other_runner.py',
+  ])
+  assert.equal(otherTest.classification, 'test-only')
+  assert.equal(otherTest.flags.updater, false)
+  assert.equal(otherTest.flags.nativeTests, true)
+  assert.equal(otherTest.flags.testLinux, true)
+})
+
 test('platform packaging changes select only affected native test and build axes', () => {
   const macos = classifyChangedFiles(['src-tauri/tauri.macos.conf.json'])
   assert.equal(macos.classification, 'platform-packaging')

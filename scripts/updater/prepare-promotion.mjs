@@ -3,6 +3,8 @@
 import fs from 'node:fs'
 import path from 'node:path'
 
+import { validateLegacyPauseFallback } from './legacy-pause-transaction.mjs'
+
 const HOUR_MS = 60 * 60 * 1000
 const DAY_MS = 24 * HOUR_MS
 const REQUIRED_SMOKE_SCENARIOS = {
@@ -73,6 +75,24 @@ function initialPolicy() {
     phaseMilestones: {},
     stableCyclesAfterB: [],
   }
+}
+
+function normalizedLegacyPauseFallback(value, description) {
+  if (!value) throw new Error(`${description} is required`)
+  try {
+    return validateLegacyPauseFallback({ legacyPauseFallback: value })
+  } catch (error) {
+    const detail = error instanceof Error ? error.message : String(error)
+    throw new Error(`${description} is invalid: ${detail}`)
+  }
+}
+
+function sameLegacyPauseFallback(left, right) {
+  return left.version === right.version
+    && left.manifestSha256 === right.manifestSha256
+    && left.transactionId === right.transactionId
+    && left.backups.oss === right.backups.oss
+    && left.backups.r2 === right.backups.r2
 }
 
 function parseDate(value, label) {
@@ -147,6 +167,7 @@ export function preparePromotion({
   promotedAt,
   smokeEvidence,
   healthEvidence,
+  legacyPauseFallback,
 }) {
   if (!['A', 'B', 'C', 'RECOVERY'].includes(phase)) throw new Error(`Invalid phase: ${phase}`)
   const expectedSchema = { A: 1, B: 2, C: 3 }[candidate.migrationPhase]
@@ -195,6 +216,48 @@ export function preparePromotion({
   if (phase === 'A' && percentage !== 100) {
     throw new Error('Phase A legacy bridge must be promoted at 100% after manual canary')
   }
+
+  let stableLegacyPauseFallback
+  if (firstPhaseA) {
+    if (currentPolicy.legacyPauseFallback !== undefined) {
+      throw new Error(
+        'Initial A promotion requires a policy without legacyPauseFallback'
+      )
+    }
+    stableLegacyPauseFallback = normalizedLegacyPauseFallback(
+      legacyPauseFallback,
+      'Initial A legacy pause fallback'
+    )
+    if (stableLegacyPauseFallback.version !== currentPolicy.currentVersion) {
+      throw new Error(
+        'Initial A legacy pause fallback version must match the pre-A current version'
+      )
+    }
+    if (compareSemver(stableLegacyPauseFallback.version, targetVersion) >= 0) {
+      throw new Error(
+        'Initial A legacy pause fallback must be older than the A candidate'
+      )
+    }
+  } else {
+    stableLegacyPauseFallback = normalizedLegacyPauseFallback(
+      currentPolicy.legacyPauseFallback,
+      'Current policy legacy pause fallback'
+    )
+    if (legacyPauseFallback !== undefined) {
+      const proposedFallback = normalizedLegacyPauseFallback(
+        legacyPauseFallback,
+        'Proposed legacy pause fallback'
+      )
+      if (!sameLegacyPauseFallback(
+        stableLegacyPauseFallback,
+        proposedFallback
+      )) {
+        throw new Error(
+          'Legacy pause fallback is immutable after the initial A promotion'
+        )
+      }
+    }
+  }
   if (!rolloutOnly && ['B', 'C'].includes(phase) && ![0, 5].includes(percentage)) {
     throw new Error(`Phase ${phase} must start at 0% or 5%`)
   }
@@ -242,6 +305,7 @@ export function preparePromotion({
   const next = structuredClone(currentPolicy)
   next.currentVersion = targetVersion
   next.paused = false
+  next.legacyPauseFallback = structuredClone(stableLegacyPauseFallback)
   next.completedPhases = [...completed]
   next.releases ??= {}
   next.transitions ??= {}
@@ -327,6 +391,9 @@ if (import.meta.url === `file://${process.argv[1]}`) {
       promotedAt: args['promoted-at'],
       smokeEvidence: readJson(path.resolve(args['smoke-evidence'])),
       healthEvidence: readJson(path.resolve(args['health-evidence'])),
+      legacyPauseFallback: args['legacy-pause-fallback']
+        ? readJson(path.resolve(args['legacy-pause-fallback']))
+        : undefined,
     })
     fs.writeFileSync(path.resolve(args.output), `${JSON.stringify(next, null, 2)}\n`)
     console.log(`Prepared ${args.phase} promotion to ${candidate.version} at ${args.rollout}%`)
