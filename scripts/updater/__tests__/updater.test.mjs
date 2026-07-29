@@ -577,6 +577,24 @@ test('worker rejects unsigned requests', async () => {
   assert.equal(response.status, 401)
 })
 
+test('worker fails closed when the stable policy is unavailable', async () => {
+  const response = await handleRequest(
+    signedRequest('/biyan/v1/stable/windows/x86_64/0.6.633', '0.6.633'),
+    {
+      BIYAN_SIGNING_KEY: signingKey,
+      ROLLOUT_SALT: 'test-salt',
+      UPDATER_BUCKET: bucket({}),
+    },
+  )
+  assert.equal(response.status, 204)
+  assert.equal(
+    response.headers.get('x-biyan-updater-state'),
+    'policy-unavailable',
+  )
+  assert.equal(response.headers.get('cache-control'), 'no-store')
+  assert.equal(await response.text(), '')
+})
+
 test('worker never admits a pre-A client through the dynamic route', async () => {
   const manifestKey = 'biyan/updater/releases/v0.6.634/latest.json'
   const response = await handleRequest(
@@ -707,7 +725,7 @@ test('router deployment isolates its least-privilege Cloudflare credential', () 
   )
 })
 
-test('router deployment fails closed unless unsigned and signed pre-A probes pass', () => {
+test('router deployment requires unsigned and signed pre-A fail-closed probes', () => {
   const repoRoot = path.resolve(import.meta.dirname, '../../..')
   const workflow = readText(
     path.join(repoRoot, '.github/workflows/deploy-updater-router.yml')
@@ -746,7 +764,12 @@ test('router deployment fails closed unless unsigned and signed pre-A probes pas
     /\(keys \| sort\) == \[[\s\S]*"X-Client-Session"[\s\S]*"X-Request-Token"[\s\S]*\]\s+and \.\["X-Client-Version"\] == "0\.6\.633"/,
   )
   assert.match(workflow, /test "\$signed_status" = "204"/)
-  assert.match(workflow, /test "\$signed_state" = "no-transition"/)
+  assert.match(workflow, /test "\$signed_state" = "policy-unavailable"/)
+  assert.equal(
+    workflow.match(/"\$signed_state" = "policy-unavailable"/g)?.length,
+    2,
+  )
+  assert.doesNotMatch(workflow, /"\$signed_state" = "no-transition"/)
   assert.match(workflow, /test ! -s "\$SIGNED_BODY"/)
   assert.match(
     workflow,
@@ -763,7 +786,7 @@ test('router deployment fails closed unless unsigned and signed pre-A probes pas
   )
   assert.match(
     workflow,
-    /and \.signedPreAStatus == "204"[\s\S]*and \.signedPreAState == "no-transition"/,
+    /and \.signedPreAStatus == "204"[\s\S]*and \.signedPreAState == "policy-unavailable"/,
   )
 
   const uploadStep = workflow.match(

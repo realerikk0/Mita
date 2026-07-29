@@ -125,6 +125,9 @@ jobs:
 
           signed_status="000"
           signed_state=""
+          # Before phase A starts, the stable policy is intentionally absent.
+          # A signed request must therefore fail closed as policy-unavailable,
+          # which is distinct from an existing policy with no transition.
           for attempt in $(seq 1 24); do
             node scripts/updater/sign-request.mjs \
               --current-version 0.6.633 \
@@ -163,7 +166,7 @@ jobs:
                 END { print value }
               ' "$SIGNED_RESPONSE_HEADERS")"
               if [ "$signed_status" = "204" ] \
-                && [ "$signed_state" = "no-transition" ] \
+                && [ "$signed_state" = "policy-unavailable" ] \
                 && [ ! -s "$SIGNED_BODY" ]; then
                 break
               fi
@@ -173,7 +176,7 @@ jobs:
             [ "$attempt" -eq 24 ] || sleep 5
           done
           test "$signed_status" = "204"
-          test "$signed_state" = "no-transition"
+          test "$signed_state" = "policy-unavailable"
           test ! -s "$SIGNED_BODY"
 
           jq -n \
@@ -207,7 +210,7 @@ jobs:
             and .sourceCommit == $sourceCommit
             and .unsignedStatus == "401"
             and .signedPreAStatus == "204"
-            and .signedPreAState == "no-transition"
+            and .signedPreAState == "policy-unavailable"
           ' "$EVIDENCE_FILE" >/dev/null
           rm -f "$SIGNED_HEADERS" "$SIGNED_RESPONSE_HEADERS" "$UNSIGNED_BODY" "$SIGNED_BODY"
           trap - EXIT
