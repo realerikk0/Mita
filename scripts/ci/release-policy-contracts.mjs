@@ -80,7 +80,7 @@ const TRUSTED_RELEASE_DISTRIBUTION_WORKFLOW_SHA256 =
   'c780b58de80c07962f42c43fc658b74b2f7c2734df01fd356cefb80f5480ca76'
 
 const TRUSTED_DIRECT_QUALIFICATION_WORKFLOW_SHA256 =
-  'e152d197f6f5cb140f8391c98c5082ced1def8cda5cc961bc7963b2a46fd9145'
+  '3479f368bf0817f4832bc36ed36b1cfddf1c381636e90edec52a3bba3f34dd17'
 
 export const TRUSTED_SENSITIVE_UPDATER_WORKFLOW_CONTRACTS = Object.freeze({
   '.github/workflows/biyan-a-canary.yml': Object.freeze({
@@ -3599,6 +3599,15 @@ export function validateDirectQualificationWorkflow(source) {
   ) {
     failures.push(
       'direct qualification must preserve the exact reviewed 16-lane upgrade matrix'
+    )
+  }
+  if (
+    (active.match(/--startup-seconds(?:',)?\s+'?10'?/g) ?? []).length !== 2 ||
+    (active.match(/--migration-timeout-seconds(?:',)?\s+'?90'?/g) ?? [])
+      .length !== 2
+  ) {
+    failures.push(
+      'direct qualification must retain the exact 10-second startup and 90-second migration readiness bounds on both runner shells'
     )
   }
   if (

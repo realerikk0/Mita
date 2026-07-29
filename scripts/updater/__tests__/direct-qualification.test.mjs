@@ -84,12 +84,22 @@ function inputManifest(policy, lane, snapshotSha256) {
       sha256: policy.sources[lane.sourceVersion].assets[lane.platform].sha256,
     }
   }
-  const roots = {
+  const configRoots = {
     windows: '%APPDATA%/Biyan',
     macos: '$HOME/Library/Application Support/Biyan',
     linux: '$HOME/.local/share/Biyan',
   }
-  const restoreRoot = roots[lane.platform]
+  const legacyDataRoots = {
+    windows: '%APPDATA%/Mita/data',
+    macos: '$HOME/Library/Application Support/Mita/data',
+    linux: '$HOME/.local/share/Mita/data',
+  }
+  const biyanDataRoot = `${configRoots[lane.platform]}/data`
+  const restoreRoot = ['0.6.608', '0.6.611', '0.6.633'].includes(
+    lane.sourceVersion,
+  )
+    ? legacyDataRoots[lane.platform]
+    : biyanDataRoot
   const qualificationMode =
     lane.scenario === 'fresh-c'
       ? 'fresh-install'
@@ -110,14 +120,22 @@ function inputManifest(policy, lane, snapshotSha256) {
         restore_to: restoreRoot,
       },
     },
-    expectations: {
-      c: [
-        `${restoreRoot}/migration-state.json`,
-        ...(lane.scenario === 'fresh-c'
-          ? []
-          : [`${restoreRoot}/direct-qualification-preserved.txt`]),
-      ],
-    },
+    expectations: Object.fromEntries(
+      [
+        ...(['a', 'b'].includes(lane.sourceRole) ? [lane.sourceRole] : []),
+        'c',
+      ].map((phase) => [
+        phase,
+        [
+          `${configRoots[lane.platform]}/migration-state.json`,
+          ...(lane.scenario === 'fresh-c'
+            ? []
+            : [
+                `${biyanDataRoot}/agent-workspaces/direct-qualification-preserved.txt`,
+              ]),
+        ],
+      ]),
+    ),
   }
 }
 
@@ -279,6 +297,38 @@ test('aggregation requires exactly the reviewed 16 GitHub-native lanes', () => {
       }),
     /exactly one GitHub artifact/,
   )
+})
+
+test('A and B lanes require source-aware data roots and both phase expectations', () => {
+  const policy = pinnedPolicy()
+  for (const phase of ['a', 'b']) {
+    const lane = policy.lanes.find(
+      (entry) => entry.id === `${phase}-to-c-windows`,
+    )
+    const snapshotSha256 = 'd'.repeat(64)
+    const manifest = inputManifest(policy, lane, snapshotSha256)
+    assert.equal(manifest.snapshots[phase].restore_to, '%APPDATA%/Biyan/data')
+    assert.deepEqual(Object.keys(manifest.expectations), [phase, 'c'])
+
+    const build = () =>
+      buildDirectQualificationLaneResult({
+        policy,
+        laneId: lane.id,
+        migrationReport: migrationReport(lane),
+        migrationReportSha256: 'e'.repeat(64),
+        inputManifest: manifest,
+        inputManifestSha256: 'f'.repeat(64),
+        snapshotSha256,
+        runId: 777,
+        runAttempt: 1,
+        harnessSha256,
+        startedAt: '2026-07-29T00:00:00Z',
+        completedAt: '2026-07-29T00:01:00Z',
+      })
+    assert.doesNotThrow(build)
+    delete manifest.expectations[phase]
+    assert.throws(build, /expectations/)
+  }
 })
 
 test('workflow confines Draft read authority to one read-only command envelope', () => {

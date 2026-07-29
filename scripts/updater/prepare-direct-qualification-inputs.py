@@ -13,13 +13,23 @@ from typing import Any, Mapping, Sequence
 
 
 PLATFORMS = ("windows", "macos", "linux")
-RESTORE_ROOTS = {
+BIYAN_CONFIG_ROOTS = {
     "windows": "%APPDATA%/Biyan",
     "macos": "$HOME/Library/Application Support/Biyan",
     "linux": "$HOME/.local/share/Biyan",
 }
-MARKER_NAME = "direct-qualification-preserved.txt"
+LEGACY_DATA_ROOTS = {
+    "windows": "%APPDATA%/Mita/data",
+    "macos": "$HOME/Library/Application Support/Mita/data",
+    "linux": "$HOME/.local/share/Mita/data",
+}
+BIYAN_DATA_ROOTS = {
+    platform: f"{root}/data" for platform, root in BIYAN_CONFIG_ROOTS.items()
+}
+MARKER_PATH = "agent-workspaces/direct-qualification-preserved.txt"
 MARKER_CONTENT = "sanitized Biyan direct-qualification preservation marker\n"
+MCP_CONFIG_NAME = "mcp_config.json"
+MCP_CONFIG_CONTENT = '{"mcpServers":{}}\n'
 
 
 def sha256(path: Path) -> str:
@@ -60,10 +70,14 @@ def write_snapshot(path: Path, marker: bool) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     with zipfile.ZipFile(path, "w", compression=zipfile.ZIP_DEFLATED) as archive:
         if marker:
-            entry = zipfile.ZipInfo(MARKER_NAME, date_time=(2026, 1, 1, 0, 0, 0))
-            entry.compress_type = zipfile.ZIP_DEFLATED
-            entry.external_attr = 0o100600 << 16
-            archive.writestr(entry, MARKER_CONTENT)
+            for name, content in (
+                (MARKER_PATH, MARKER_CONTENT),
+                (MCP_CONFIG_NAME, MCP_CONFIG_CONTENT),
+            ):
+                entry = zipfile.ZipInfo(name, date_time=(2026, 1, 1, 0, 0, 0))
+                entry.compress_type = zipfile.ZIP_DEFLATED
+                entry.external_attr = 0o100600 << 16
+                archive.writestr(entry, content)
 
 
 def prepare_inputs(
@@ -234,10 +248,21 @@ def prepare_inputs(
     snapshot_path = output_dir / "snapshots" / f"{snapshot_name}.zip"
     marker = scenario != "fresh-c"
     write_snapshot(snapshot_path, marker=marker)
-    restore_root = RESTORE_ROOTS[platform]
-    expectations = [f"{restore_root}/migration-state.json"]
-    if marker:
-        expectations.append(f"{restore_root}/{MARKER_NAME}")
+    restore_root = (
+        LEGACY_DATA_ROOTS[platform]
+        if source_version in ("0.6.608", "0.6.611", "0.6.633")
+        else BIYAN_DATA_ROOTS[platform]
+    )
+    state_path = f"{BIYAN_CONFIG_ROOTS[platform]}/migration-state.json"
+    marker_path = f"{BIYAN_DATA_ROOTS[platform]}/{MARKER_PATH}"
+    required_phases = [
+        *([source_role] if source_role in ("a", "b") else []),
+        "c",
+    ]
+    expectations = {
+        phase: [state_path, *([marker_path] if marker else [])]
+        for phase in required_phases
+    }
 
     manifest = {
         "schema": 1,
@@ -254,7 +279,7 @@ def prepare_inputs(
                 "restore_to": restore_root,
             }
         },
-        "expectations": {"c": expectations},
+        "expectations": expectations,
     }
     manifest_path = output_dir / "manifest.json"
     manifest_path.write_text(
