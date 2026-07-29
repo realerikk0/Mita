@@ -286,6 +286,34 @@ fn install_extensions_atomically<R: Runtime>(app: tauri::AppHandle<R>) -> Result
     Ok(())
 }
 
+fn prepare_mcp_config_for_migration(config_path: &Path) -> Result<(), String> {
+    let contents = match fs::read(config_path) {
+        Ok(contents) => contents,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+            return crate::core::legacy_migrations::atomic_write(
+                config_path,
+                DEFAULT_MCP_CONFIG.as_bytes(),
+            )
+            .map_err(|error| format!("mcp_config_create_default:{error}"));
+        }
+        Err(error) => return Err(format!("mcp_config_read:{error}")),
+    };
+
+    let config: serde_json::Value = serde_json::from_slice(&contents)
+        .map_err(|error| format!("mcp_config_invalid_json:{error}"))?;
+    let config = config
+        .as_object()
+        .ok_or_else(|| "mcp_config_root_not_object".to_string())?;
+    if config
+        .get("mcpServers")
+        .is_some_and(|servers| !servers.is_object())
+    {
+        return Err("mcp_config_servers_not_object".to_string());
+    }
+
+    Ok(())
+}
+
 // Migrate MCP servers configuration
 pub fn migrate_mcp_servers(
     app_handle: tauri::AppHandle,
@@ -300,6 +328,9 @@ pub fn migrate_mcp_servers(
     mark_component_migration_running(&config_dir, MCP_MIGRATION_STEP, 1)?;
 
     let result: Result<(), String> = (|| -> Result<(), String> {
+        let config_path = get_biyan_data_folder_path(app_handle.clone()).join("mcp_config.json");
+        prepare_mcp_config_for_migration(&config_path)?;
+
         let mcp_version = store
             .get("mcp_version")
             .and_then(|v| v.as_i64())
@@ -497,16 +528,10 @@ pub fn setup_mcp<R: Runtime>(app: &App<R>) {
     tauri::async_runtime::spawn(async move {
         use crate::core::mcp::lockfile::cleanup_all_stale_locks;
 
-        // Create default mcp_config.json if it doesn't exist
         let config_path = get_biyan_data_folder_path(app_handle.clone()).join("mcp_config.json");
-        if !config_path.exists() {
-            log::info!("mcp_config.json not found, creating default config");
-            if let Err(e) = crate::core::legacy_migrations::atomic_write(
-                &config_path,
-                DEFAULT_MCP_CONFIG.as_bytes(),
-            ) {
-                log::error!("Failed to create default MCP config: {e}");
-            }
+        if let Err(error) = prepare_mcp_config_for_migration(&config_path) {
+            log::error!("Failed to prepare MCP config: {error}");
+            return;
         }
 
         if let Err(e) = cleanup_all_stale_locks(&app_handle).await {
@@ -657,4 +682,92 @@ fn setup_window_theme_listener<R: Runtime>(
             let _ = app_handle_clone.emit("theme-changed", theme_str);
         }
     });
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use tempfile::TempDir;
+
+    #[test]
+    fn missing_mcp_config_is_created_atomically() {
+        let temp = TempDir::new().unwrap();
+        let config_path = temp.path().join("nested").join("mcp_config.json");
+
+        prepare_mcp_config_for_migration(&config_path).unwrap();
+
+        assert_eq!(
+            fs::read_to_string(&config_path).unwrap(),
+            DEFAULT_MCP_CONFIG
+        );
+        let parent = config_path.parent().unwrap();
+        assert!(
+            fs::read_dir(parent)
+                .unwrap()
+                .filter_map(Result::ok)
+                .all(|entry| !entry
+                    .file_name()
+                    .to_string_lossy()
+                    .starts_with(".mcp_config.json.")),
+            "atomic MCP config creation must not leave a temporary file"
+        );
+    }
+
+    #[test]
+    fn existing_mcp_config_is_not_rewritten() {
+        let temp = TempDir::new().unwrap();
+        let config_path = temp.path().join("mcp_config.json");
+        let custom_config = br#"{
+  "customTopLevel": "keep-this-value",
+  "mcpServers": {
+    "Private MCP": {
+      "command": "private-mcp",
+      "env": {"PRIVATE_TOKEN": "keep-this-secret"},
+      "active": true
+    }
+  }
+}
+"#;
+        fs::write(&config_path, custom_config).unwrap();
+
+        prepare_mcp_config_for_migration(&config_path).unwrap();
+
+        assert_eq!(fs::read(&config_path).unwrap(), custom_config);
+    }
+
+    #[test]
+    fn invalid_json_mcp_config_fails_closed_without_replacement() {
+        let temp = TempDir::new().unwrap();
+        let config_path = temp.path().join("mcp_config.json");
+        let malformed = br#"{"mcpServers":{"Private MCP":"#;
+        fs::write(&config_path, malformed).unwrap();
+
+        let error = prepare_mcp_config_for_migration(&config_path).unwrap_err();
+
+        assert!(error.starts_with("mcp_config_invalid_json:"));
+        assert_eq!(fs::read(&config_path).unwrap(), malformed);
+    }
+
+    #[test]
+    fn invalid_mcp_config_structure_fails_closed_without_replacement() {
+        let temp = TempDir::new().unwrap();
+        let config_path = temp.path().join("mcp_config.json");
+        for (contents, expected_error) in [
+            (
+                br#"["not", "an", "object"]"#.as_slice(),
+                "mcp_config_root_not_object",
+            ),
+            (
+                br#"{"mcpServers":["not","an","object"]}"#.as_slice(),
+                "mcp_config_servers_not_object",
+            ),
+        ] {
+            fs::write(&config_path, contents).unwrap();
+
+            let error = prepare_mcp_config_for_migration(&config_path).unwrap_err();
+
+            assert_eq!(error, expected_error);
+            assert_eq!(fs::read(&config_path).unwrap(), contents);
+        }
+    }
 }
