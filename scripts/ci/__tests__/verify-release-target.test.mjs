@@ -482,6 +482,7 @@ test('release drift accepts only exact checkpoint and reviewed control files', (
 test('terminal drift accepts only the exact reviewed Q control-plane paths', () => {
   assert.deepEqual([...TERMINAL_CONTROL_PLANE_DRIFT], [
     ['.github/workflows/biyan-direct-qualification.yml', 'M'],
+    ['.github/workflows/biyan-exact-sha-qualification.yml', 'M'],
     ['.github/workflows/desktop-release.yml', 'M'],
     ['DEVELOPMENT_PLAN.md', 'M'],
     ['docs/release-distribution.md', 'M'],

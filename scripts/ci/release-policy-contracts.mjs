@@ -4970,29 +4970,35 @@ export function validateQualificationWorkflow(source) {
       !/^\s*working-directory:\s*harness\s*$/m.test(releasePolicyStep) ||
       !/^\s*if:\s*steps\.classification\.outputs\.policy\s*==\s*['"]true['"]\s*$/m.test(
         releasePolicyStep
-      )
+      ) ||
+      !releasePolicyStep.includes(
+        'VERSION: ${{ steps.metadata.outputs.version }}'
+      ) ||
+      !releasePolicyStep.includes(
+        'TARGET_SHA: ${{ steps.source.outputs.target_sha }}'
+      ) ||
+      !releasePolicyStep.includes(
+        'WORKFLOW_SHA: ${{ steps.source.outputs.workflow_sha }}'
+      ) ||
+      !hasRunInvocation(
+        releasePolicyStep,
+        /^node\s+scripts\/ci\/verify-release-target\.mjs(?:\s|\\|$)/,
+        [
+          /--harness-root\s+\.\s*\\/,
+          /--release-tag\s+"v\$VERSION"\s*\\/,
+          /--target-root\s+\.\.\/target\s*\\/,
+          /--source-commit\s+"\$TARGET_SHA"\s*\\/,
+          /--trusted-main\s+"\$WORKFLOW_SHA"(?:\s|$)/,
+        ]
+      ) ||
+      !hasRunInvocation(releasePolicyStep, /^node\s+--test(?:\s|\\|$)/, [
+        /scripts\/ci\/__tests__\/release-policy\.test\.mjs(?:\s|\\|$)/,
+        /scripts\/ci\/__tests__\/verify-release-target\.test\.mjs(?:\s|\\|$)/,
+      ])
     ) {
       failures.push(
-        'qualification release policy contracts must run from the protected harness'
+        'qualification release policy contracts must compose the exact target with the protected harness'
       )
-    }
-    for (const [command, condition] of [
-      ['node scripts/ci/verify-release-policy.mjs', 'policy'],
-      ['node --test scripts/ci/__tests__/release-policy.test.mjs', 'policy'],
-    ]) {
-      if (
-        !hasRunInvocation(
-          releasePolicyStep ?? '',
-          new RegExp(`^${escapeRegExp(command)}(?:\\s|$)`)
-        ) ||
-        !new RegExp(`steps\\.classification\\.outputs\\.${condition}`).test(
-          activePreflight
-        )
-      ) {
-        failures.push(
-          `qualification focused preflight does not run: ${command}`
-        )
-      }
     }
     const updaterContractStep = workflowStepBlocks(activePreflight).find(
       (step) =>

@@ -93,6 +93,7 @@ export const REVIEWED_CONTROL_PLANE_DRIFT = Object.freeze(
 export const TERMINAL_CONTROL_PLANE_DRIFT = Object.freeze(
   new Map([
     ['.github/workflows/biyan-direct-qualification.yml', 'M'],
+    ['.github/workflows/biyan-exact-sha-qualification.yml', 'M'],
     ['.github/workflows/desktop-release.yml', 'M'],
     ['DEVELOPMENT_PLAN.md', 'M'],
     ['docs/release-distribution.md', 'M'],
