@@ -4605,11 +4605,23 @@ jobs:
           harness/scripts/ci/run-untrusted-qualification-verifier.sh \
             --read-root "$probe_root" "$verifier" \
             verify-platforms --root "$probe_root"
-      - if: steps.classification.outputs.policy == 'true'
-        working-directory: target
+      - name: Run release policy contracts
+        if: steps.classification.outputs.policy == 'true'
+        working-directory: harness
+        env:
+          VERSION: \${{ steps.metadata.outputs.version }}
+          TARGET_SHA: \${{ steps.source.outputs.target_sha }}
+          WORKFLOW_SHA: \${{ steps.source.outputs.workflow_sha }}
         run: |
-          node scripts/ci/verify-release-policy.mjs
-          node --test scripts/ci/__tests__/release-policy.test.mjs
+          node scripts/ci/verify-release-target.mjs \\
+            --harness-root . \\
+            --release-tag "v$VERSION" \\
+            --target-root ../target \\
+            --source-commit "$TARGET_SHA" \\
+            --trusted-main "$WORKFLOW_SHA"
+          node --test \\
+            scripts/ci/__tests__/release-policy.test.mjs \\
+            scripts/ci/__tests__/verify-release-target.test.mjs
       - if: steps.classification.outputs.updater == 'true'
         working-directory: target
         run: |
@@ -4849,6 +4861,30 @@ test('exact-SHA qualification keeps the harness trusted and has no production au
   assert.deepEqual(validateQualificationWorkflow(qualificationWorkflow), [])
 
   for (const [index, mutation] of [
+    qualificationWorkflow.replace(
+      '      - name: Run release policy contracts\n        if: steps.classification.outputs.policy == \'true\'\n        working-directory: harness',
+      '      - name: Run release policy contracts\n        if: steps.classification.outputs.policy == \'true\'\n        working-directory: target'
+    ),
+    qualificationWorkflow.replace(
+      'node scripts/ci/verify-release-target.mjs',
+      'node scripts/ci/verify-release-policy.mjs'
+    ),
+    qualificationWorkflow.replace(
+      '--target-root ../target',
+      '--target-root .'
+    ),
+    qualificationWorkflow.replace(
+      '--source-commit "$TARGET_SHA"',
+      '--source-commit "$WORKFLOW_SHA"'
+    ),
+    qualificationWorkflow.replace(
+      '--trusted-main "$WORKFLOW_SHA"',
+      '--trusted-main "$TARGET_SHA"'
+    ),
+    qualificationWorkflow.replace(
+      'scripts/ci/__tests__/verify-release-target.test.mjs',
+      'scripts/ci/__tests__/verify-release-target.test.mjs.disabled'
+    ),
     qualificationWorkflow.replace('  workflow_dispatch:', '  push:'),
     qualificationWorkflow.replace(
       '  workflow_dispatch:',
