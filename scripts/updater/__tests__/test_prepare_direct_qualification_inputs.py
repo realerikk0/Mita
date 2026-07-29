@@ -235,6 +235,26 @@ class PrepareDirectQualificationInputsTests(unittest.TestCase):
                 },
             )
             self.assertEqual(
+                manifest["sourceReadiness"],
+                {
+                    "phase": "current",
+                    "version": "0.6.633",
+                    "settings": "%APPDATA%/Mita/settings.json",
+                    "dataRoot": "%APPDATA%/Biyan/data",
+                    "store": "%APPDATA%/Biyan/data/store.json",
+                    "mcpConfig": "%APPDATA%/Biyan/data/mcp_config.json",
+                    "marker": (
+                        "%APPDATA%/Biyan/data/agent-workspaces/"
+                        "direct-qualification-preserved.txt"
+                    ),
+                    "requiredStore": {
+                        "version": "0.6.633",
+                        "mcp_version": 5,
+                        "windows_biyan_migrated": True,
+                    },
+                },
+            )
+            self.assertEqual(
                 digest(first / "snapshots/current.zip"),
                 digest(second / "snapshots/current.zip"),
             )
@@ -282,6 +302,7 @@ class PrepareDirectQualificationInputsTests(unittest.TestCase):
                     "%APPDATA%/Biyan/data",
                 )
                 self.assertEqual(set(manifest["expectations"]), {phase, "c"})
+                self.assertIsNone(manifest["sourceReadiness"])
                 self.assertEqual(
                     manifest["expectations"][phase],
                     [

@@ -11,8 +11,15 @@ from autoqa.migration_runner import (
     PHASES,
     PlatformExecutor,
     _assert_migration_state,
+    _assert_reversible_directory_rename,
+    _assert_source_readiness,
+    _bounded_migration_state,
+    _bounded_windows_install_inventory,
     _clear_qualification_roots,
     _windows_install_diagnostics,
+    ReadinessFailed,
+    ProbeShutdownError,
+    SourceReadinessSpec,
     main,
     migration_matrix,
     select_migration_cases,
@@ -252,9 +259,12 @@ class MigrationRunnerTests(unittest.TestCase):
                             name: {"status": "completed"}
                             for name in (
                                 "layout_v1",
+                                "mobile_db_v1",
                                 "assistant_ids_v1",
                                 "mcp_names_v1",
                                 "extensions_manifest_v1",
+                                "cli_v1",
+                                "assistant_db_refs_v1",
                                 "remote_only_v2",
                                 "cleanup_v3",
                             )
@@ -272,6 +282,233 @@ class MigrationRunnerTests(unittest.TestCase):
             state.write_text(json.dumps(payload), encoding="utf-8")
             with self.assertRaisesRegex(RuntimeError, "cleanup_v3"):
                 _assert_migration_state(state, "current-to-c", "c")
+
+    def test_failed_reviewed_step_is_terminal_and_report_is_bounded(self):
+        with tempfile.TemporaryDirectory(dir=Path.home()) as directory:
+            state = Path(directory) / "migration-state.json"
+            state.write_text(
+                json.dumps(
+                    {
+                        "data_schema": 0,
+                        "steps": {
+                            "extensions_manifest_v1": {
+                                "status": "failed",
+                                "error_code": "extension_id_not_allowed",
+                                "message": "secret user message",
+                                "path": "C:/Users/private/AppData/Roaming/Biyan",
+                                "manifest_digest": "deadbeef",
+                            },
+                            "unreviewed_step": {
+                                "status": "failed",
+                                "error_code": "private",
+                            },
+                        },
+                    }
+                ),
+                encoding="utf-8",
+            )
+
+            with self.assertRaisesRegex(
+                ReadinessFailed,
+                "extensions_manifest_v1/extension_id_not_allowed",
+            ):
+                _assert_migration_state(state, "current-to-c", "c")
+
+            reviewed = _bounded_migration_state(state)
+            encoded = json.dumps(reviewed)
+            self.assertEqual(set(reviewed["steps"]), {
+                "layout_v1",
+                "assistant_ids_v1",
+                "mcp_names_v1",
+                "extensions_manifest_v1",
+                "mobile_db_v1",
+                "cli_v1",
+                "assistant_db_refs_v1",
+                "remote_only_v2",
+                "cleanup_v3",
+            })
+            self.assertIn("extension_id_not_allowed", encoded)
+            for forbidden in (
+                "secret user message",
+                "C:/Users/private",
+                "deadbeef",
+                "unreviewed_step",
+            ):
+                self.assertNotIn(forbidden, encoded)
+
+    def test_migration_state_rejects_symlink_and_oversize_before_reading(self):
+        with tempfile.TemporaryDirectory(dir=Path.home()) as directory:
+            root = Path(directory)
+            target = root / "target.json"
+            target.write_text('{"data_schema":3}', encoding="utf-8")
+            link = root / "migration-state.json"
+            link.symlink_to(target)
+            self.assertEqual(
+                _bounded_migration_state(link)["readStatus"],
+                "symlink-rejected",
+            )
+            with self.assertRaisesRegex(ReadinessFailed, "bounded regular file"):
+                _assert_migration_state(link, "current-to-c", "c")
+
+            link.unlink()
+            link.write_bytes(b" " * (64 * 1024 + 1))
+            self.assertEqual(
+                _bounded_migration_state(link)["readStatus"],
+                "oversize-rejected",
+            )
+
+    def test_source_readiness_requires_exact_reviewed_files(self):
+        with tempfile.TemporaryDirectory(dir=Path.home()) as directory:
+            root = Path(directory)
+            data = root / "Biyan/data"
+            data.mkdir(parents=True)
+            settings = root / "Mita/settings.json"
+            settings.parent.mkdir()
+            store = data / "store.json"
+            mcp = data / "mcp_config.json"
+            marker = data / "agent-workspaces/direct-qualification-preserved.txt"
+            marker.parent.mkdir()
+            settings.write_text(
+                json.dumps({"data_folder": str(data)}),
+                encoding="utf-8",
+            )
+            store.write_text(
+                json.dumps(
+                    {
+                        "version": "0.6.633",
+                        "mcp_version": 5,
+                        "windows_biyan_migrated": True,
+                    }
+                ),
+                encoding="utf-8",
+            )
+            mcp.write_text('{"mcpServers":{}}', encoding="utf-8")
+            marker.write_text("preserved", encoding="utf-8")
+            spec = SourceReadinessSpec(
+                "current",
+                "0.6.633",
+                settings,
+                data,
+                store,
+                mcp,
+                marker,
+                {
+                    "version": "0.6.633",
+                    "mcp_version": 5,
+                    "windows_biyan_migrated": True,
+                },
+            )
+            self.assertEqual(len(_assert_source_readiness(spec)), 64)
+
+            store.write_text(
+                json.dumps(
+                    {
+                        "version": "0.6.633",
+                        "mcp_version": 5,
+                        "windows_biyan_migrated": 1,
+                    }
+                ),
+                encoding="utf-8",
+            )
+            with self.assertRaisesRegex(RuntimeError, "windows_biyan_migrated"):
+                _assert_source_readiness(spec)
+
+    def test_windows_install_inventory_is_fixed_and_path_free(self):
+        with tempfile.TemporaryDirectory(dir=Path.home()) as directory:
+            install = Path(directory) / "windows-install"
+            package = (
+                install
+                / "resources/pre-install/biyan-assistant-extension-1.0.2.tgz"
+            )
+            package.parent.mkdir(parents=True)
+            package.write_bytes(b"reviewed package")
+            secret = Path(directory) / "secret.txt"
+            secret.write_text("do not hash through links", encoding="utf-8")
+            (install / "Biyan.exe").symlink_to(secret)
+            oversized = (
+                install
+                / "resources/pre-install/biyan-download-extension-1.0.0.tgz"
+            )
+            with oversized.open("wb") as stream:
+                stream.truncate(512 * 1024 * 1024 + 1)
+            inventory = _bounded_windows_install_inventory(install)
+            encoded = json.dumps(inventory)
+            self.assertEqual(
+                inventory["assistantExtension"]["sha256"],
+                hashlib.sha256(b"reviewed package").hexdigest(),
+            )
+            self.assertEqual(
+                inventory["biyanExecutable"]["kind"],
+                "reparse-rejected",
+            )
+            self.assertEqual(
+                inventory["downloadExtension"]["kind"],
+                "oversize-rejected",
+            )
+            self.assertNotIn(str(install), encoded)
+
+    def test_source_data_root_rename_probe_is_reversible_and_conflict_closed(self):
+        with tempfile.TemporaryDirectory(dir=Path.home()) as directory:
+            data = Path(directory) / "data"
+            data.mkdir()
+            marker = data / "marker.txt"
+            marker.write_text("preserved", encoding="utf-8")
+            _assert_reversible_directory_rename(data)
+            self.assertEqual(marker.read_text(encoding="utf-8"), "preserved")
+
+            conflict = data.parent / ".data.biyan-legacy-backup"
+            conflict.mkdir()
+            with self.assertRaisesRegex(ReadinessFailed, "conflict"):
+                _assert_reversible_directory_rename(data)
+
+    def test_windows_residual_process_check_is_bounded_and_fail_closed(self):
+        executor = PlatformExecutor("windows", 1)
+        executor.reset_case_evidence()
+        with mock.patch(
+            "autoqa.migration_runner.subprocess.run",
+            return_value=mock.Mock(returncode=0, stdout="0\n"),
+        ):
+            executor.assert_no_residual_product_processes(Path("C:/AutoQA/install"))
+        self.assertEqual(executor.source_guards["residualProcesses"], "clear")
+
+        with (
+            mock.patch(
+                "autoqa.migration_runner.subprocess.run",
+                return_value=mock.Mock(returncode=0, stdout="2\n"),
+            ),
+            self.assertRaisesRegex(ReadinessFailed, "source_residual_processes"),
+        ):
+            executor.assert_no_residual_product_processes(Path("C:/AutoQA/install"))
+
+    def test_probe_and_shutdown_failures_remain_distinct(self):
+        process = mock.Mock(pid=1111)
+        process.poll.return_value = None
+        executor = PlatformExecutor("linux", 1)
+        with (
+            mock.patch(
+                "autoqa.migration_runner.subprocess.Popen",
+                return_value=process,
+            ),
+            mock.patch("autoqa.migration_runner.time.sleep"),
+            mock.patch(
+                "autoqa.migration_runner.time.monotonic",
+                return_value=0.0,
+            ),
+            mock.patch.object(
+                executor,
+                "_terminate_process_tree",
+                side_effect=RuntimeError("shutdown"),
+            ),
+            self.assertRaises(ProbeShutdownError) as raised,
+        ):
+            executor.startup_probe(
+                Path("/tmp/Biyan.AppImage"),
+                "current-to-c",
+                "c",
+                mock.Mock(side_effect=ReadinessFailed("migration step failed")),
+            )
+        self.assertIsInstance(raised.exception.probe_error, ReadinessFailed)
+        self.assertIsInstance(raised.exception.shutdown_error, RuntimeError)
 
     def test_unix_cleanup_never_matches_the_runner_command_line(self):
         runner_command = (

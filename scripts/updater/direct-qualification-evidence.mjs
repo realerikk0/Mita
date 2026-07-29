@@ -247,6 +247,21 @@ const BIYAN_DATA_ROOTS = Object.freeze(
   ),
 )
 const MARKER_PATH = 'agent-workspaces/direct-qualification-preserved.txt'
+const CURRENT_WINDOWS_SOURCE_READINESS = Object.freeze({
+  phase: 'current',
+  version: '0.6.633',
+  settings: '%APPDATA%/Mita/settings.json',
+  dataRoot: '%APPDATA%/Biyan/data',
+  store: '%APPDATA%/Biyan/data/store.json',
+  mcpConfig: '%APPDATA%/Biyan/data/mcp_config.json',
+  marker:
+    '%APPDATA%/Biyan/data/agent-workspaces/direct-qualification-preserved.txt',
+  requiredStore: Object.freeze({
+    version: '0.6.633',
+    mcp_version: 5,
+    windows_biyan_migrated: true,
+  }),
+})
 
 function fail(message) {
   throw new Error(message)
@@ -459,6 +474,37 @@ function laneById(policy, laneId) {
   return matches[0]
 }
 
+function workflowMatrixLane(lane) {
+  return {
+    lane: lane.id,
+    platform: lane.platform,
+    runner: lane.runner,
+    scenario: lane.scenario,
+    source_version: lane.sourceVersion ?? '',
+    source_role: lane.sourceRole ?? '',
+    snapshot: lane.snapshot,
+  }
+}
+
+export function resolveDirectQualificationScope(policy, focusedLane) {
+  validateDirectQualificationPolicy(policy, { requirePinned: true })
+  if (!['full', 'current-to-c-windows'].includes(focusedLane)) {
+    fail(
+      'focused qualification lane must be exactly full or current-to-c-windows',
+    )
+  }
+  const lanes =
+    focusedLane === 'full'
+      ? policy.lanes
+      : [laneById(policy, 'current-to-c-windows')]
+  return {
+    qualificationMatrix: {
+      include: lanes.map(workflowMatrixLane),
+    },
+    fullMode: focusedLane === 'full',
+  }
+}
+
 function expectedInstallSequence(lane) {
   if (lane.scenario === 'fresh-c') return ['c']
   return [lane.sourceRole, 'c']
@@ -555,6 +601,12 @@ function expectedPhaseExpectations(lane) {
   return Object.fromEntries(phases.map((phase) => [phase, values]))
 }
 
+function expectedSourceReadiness(lane) {
+  return lane.id === 'current-to-c-windows'
+    ? CURRENT_WINDOWS_SOURCE_READINESS
+    : null
+}
+
 function validateInputManifest(manifest, snapshotSha256, policy, lane) {
   requireExactKeys(
     manifest,
@@ -568,6 +620,7 @@ function validateInputManifest(manifest, snapshotSha256, policy, lane) {
       'installers',
       'snapshots',
       'expectations',
+      'sourceReadiness',
     ],
     `${lane.id} input manifest`,
   )
@@ -604,6 +657,11 @@ function validateInputManifest(manifest, snapshotSha256, policy, lane) {
     manifest.expectations,
     expectedPhaseExpectations(lane),
     `${lane.id} expectations`,
+  )
+  sameJson(
+    manifest.sourceReadiness,
+    expectedSourceReadiness(lane),
+    `${lane.id} sourceReadiness`,
   )
 }
 
@@ -656,6 +714,45 @@ export function buildDirectQualificationLaneResult({
     migrationReportSha256,
     inputManifestSha256,
     snapshotSha256,
+  }
+}
+
+export function buildFocusedDiagnosticSummary({
+  policy,
+  laneId,
+  runId,
+  runAttempt,
+  qualificationOutcome,
+}) {
+  validateDirectQualificationPolicy(policy, { requirePinned: true })
+  const lane = laneById(policy, laneId)
+  if (lane.id !== 'current-to-c-windows') {
+    fail('focused diagnostic summary is restricted to current-to-c-windows')
+  }
+  if (
+    !['success', 'failure', 'cancelled', 'skipped'].includes(
+      qualificationOutcome,
+    )
+  ) {
+    fail('focused diagnostic qualification outcome is unsupported')
+  }
+  return {
+    schema: 1,
+    type: 'biyan-direct-qualification-focused-diagnostic',
+    lane: lane.id,
+    platform: lane.platform,
+    scenario: lane.scenario,
+    sourceVersion: lane.sourceVersion,
+    candidateTag: policy.candidate.tag,
+    candidateVersion: policy.candidate.version,
+    sourceCommit: policy.candidate.sourceCommit,
+    runId: requirePositiveInteger(runId, 'focused diagnostic run ID'),
+    runAttempt: requirePositiveInteger(
+      runAttempt,
+      'focused diagnostic run attempt',
+    ),
+    qualificationOutcome,
+    promotionEligible: false,
   }
 }
 
@@ -1029,6 +1126,51 @@ function aggregateCommand(values) {
   })}\n`)
 }
 
+function qualificationScopeCommand(values) {
+  const options = parseOptions(
+    values,
+    ['policy', 'focused-lane'],
+    ['policy', 'focused-lane'],
+  )
+  const scope = resolveDirectQualificationScope(
+    loadDirectQualificationPolicy(options.policy, { requirePinned: true }),
+    options['focused-lane'],
+  )
+  process.stdout.write(
+    `qualification_matrix=${JSON.stringify(scope.qualificationMatrix)}\n`,
+  )
+  process.stdout.write(`full_mode=${scope.fullMode ? 'true' : 'false'}\n`)
+}
+
+function diagnosticSummaryCommand(values) {
+  const required = [
+    'policy',
+    'lane',
+    'run-id',
+    'run-attempt',
+    'qualification-outcome',
+    'output',
+  ]
+  const options = parseOptions(values, required, required)
+  const summary = buildFocusedDiagnosticSummary({
+    policy: loadDirectQualificationPolicy(options.policy, {
+      requirePinned: true,
+    }),
+    laneId: options.lane,
+    runId: options['run-id'],
+    runAttempt: options['run-attempt'],
+    qualificationOutcome: options['qualification-outcome'],
+  })
+  writeCanonical(options.output, summary)
+  process.stdout.write(
+    `${JSON.stringify({
+      lane: summary.lane,
+      qualificationOutcome: summary.qualificationOutcome,
+      promotionEligible: summary.promotionEligible,
+    })}\n`,
+  )
+}
+
 function main(argv) {
   const [command, ...values] = argv
   if (command === 'validate-policy') {
@@ -1036,10 +1178,16 @@ function main(argv) {
     loadDirectQualificationPolicy(options.policy, { requirePinned: true })
     return
   }
+  if (command === 'qualification-scope') {
+    return qualificationScopeCommand(values)
+  }
+  if (command === 'diagnostic-summary') {
+    return diagnosticSummaryCommand(values)
+  }
   if (command === 'lane-result') return laneResultCommand(values)
   if (command === 'aggregate') return aggregateCommand(values)
   fail(
-    'Usage: direct-qualification-evidence.mjs <validate-policy|lane-result|aggregate> [options]',
+    'Usage: direct-qualification-evidence.mjs <validate-policy|qualification-scope|diagnostic-summary|lane-result|aggregate> [options]',
   )
 }
 

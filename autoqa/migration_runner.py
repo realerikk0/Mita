@@ -30,6 +30,19 @@ from typing import Callable, Dict, Iterable, List, Mapping, Sequence, Tuple
 
 PHASES: Tuple[str, ...] = ("current", "a", "b", "c")
 SNAPSHOTS: Tuple[str, ...] = ("current", "a", "b", "fresh")
+REVIEWED_MIGRATION_STEPS: Tuple[str, ...] = (
+    "layout_v1",
+    "assistant_ids_v1",
+    "mcp_names_v1",
+    "extensions_manifest_v1",
+    "mobile_db_v1",
+    "cli_v1",
+    "assistant_db_refs_v1",
+    "remote_only_v2",
+    "cleanup_v3",
+)
+REVIEWED_STEP_STATUSES = frozenset(("pending", "running", "completed", "failed"))
+WINDOWS_EXECUTABLE_NAMES = frozenset(("Biyan.exe", "Mita.exe", "Silence.exe", "Jan.exe"))
 
 
 @dataclass(frozen=True)
@@ -49,10 +62,48 @@ class SnapshotSpec:
 
 
 @dataclass(frozen=True)
+class SourceReadinessSpec:
+    phase: str
+    version: str
+    settings: Path
+    data_root: Path
+    store: Path
+    mcp_config: Path
+    marker: Path
+    required_store: Mapping[str, object]
+
+
+@dataclass(frozen=True)
 class ValidatedInputs:
     installers: Mapping[str, Path]
     snapshots: Mapping[str, SnapshotSpec]
     expectations: Mapping[str, Tuple[Path, ...]]
+    source_readiness: SourceReadinessSpec | None = None
+
+
+class MigrationRunError(RuntimeError):
+    """Carry only bounded diagnostics captured before destructive cleanup."""
+
+    def __init__(self, diagnostics: Mapping[str, object]) -> None:
+        super().__init__("qualification_failed")
+        self.diagnostics = dict(diagnostics)
+
+
+class ReadinessFailed(RuntimeError):
+    """Terminal readiness state which must not be retried."""
+
+
+class ReadinessPending(RuntimeError):
+    """Transient readiness state which may be retried until the deadline."""
+
+
+class ProbeShutdownError(RuntimeError):
+    """Keep probe and shutdown failures distinct without exposing messages."""
+
+    def __init__(self, probe_error: Exception, shutdown_error: Exception) -> None:
+        super().__init__("probe_and_shutdown_failed")
+        self.probe_error = probe_error
+        self.shutdown_error = shutdown_error
 
 
 def migration_matrix() -> Tuple[MigrationCase, ...]:
@@ -135,6 +186,95 @@ def _require_digest(path: Path, expected: str, label: str) -> None:
     actual = _sha256(path)
     if actual != expected.lower():
         raise ValueError(f"SHA-256 mismatch for {label}: expected {expected}, got {actual}")
+
+
+def _require_exact_keys(
+    value: Mapping[str, object],
+    expected: Iterable[str],
+    label: str,
+) -> None:
+    if set(value) != set(expected):
+        raise ValueError(f"{label} keys are not exact")
+
+
+def _validate_source_readiness(
+    value: object,
+    manifest: Mapping[str, object],
+    platform: str,
+    selected_cases: Sequence[MigrationCase],
+    snapshots: Mapping[str, SnapshotSpec],
+) -> SourceReadinessSpec | None:
+    exact_lane = (
+        platform == "windows"
+        and manifest.get("lane") == "current-to-c-windows"
+        and manifest.get("scenario") == "current-to-c"
+        and [case.name for case in selected_cases] == ["current-to-c"]
+    )
+    if value is None:
+        if exact_lane:
+            raise ValueError("current-to-c-windows requires sourceReadiness")
+        return None
+    if not isinstance(value, dict):
+        raise ValueError("sourceReadiness must be an object or null")
+
+    expected = {
+        "phase": "current",
+        "version": "0.6.633",
+        "settings": "%APPDATA%/Mita/settings.json",
+        "dataRoot": "%APPDATA%/Biyan/data",
+        "store": "%APPDATA%/Biyan/data/store.json",
+        "mcpConfig": "%APPDATA%/Biyan/data/mcp_config.json",
+        "marker": (
+            "%APPDATA%/Biyan/data/agent-workspaces/"
+            "direct-qualification-preserved.txt"
+        ),
+        "requiredStore": {
+            "version": "0.6.633",
+            "mcp_version": 5,
+            "windows_biyan_migrated": True,
+        },
+    }
+    _require_exact_keys(value, expected, "sourceReadiness")
+    required_store = value.get("requiredStore")
+    if not isinstance(required_store, dict):
+        raise ValueError("sourceReadiness.requiredStore must be an object")
+    _require_exact_keys(
+        required_store,
+        ("version", "mcp_version", "windows_biyan_migrated"),
+        "sourceReadiness.requiredStore",
+    )
+    exact_types = all(
+        type(required_store.get(key)) is type(wanted)
+        for key, wanted in expected["requiredStore"].items()
+    )
+    if not exact_lane or value != expected or not exact_types:
+        raise ValueError(
+            "sourceReadiness is allowed only for current-to-c-windows v0.6.633"
+        )
+
+    paths = {
+        name: _expand_path(str(value[name]))
+        for name in ("settings", "dataRoot", "store", "mcpConfig", "marker")
+    }
+    for path in paths.values():
+        _require_safe_restore_root(path)
+    current = snapshots.get("current")
+    if current is None or paths["dataRoot"] != current.restore_to:
+        raise ValueError("sourceReadiness.dataRoot must equal current restore root")
+    for name in ("store", "mcpConfig", "marker"):
+        if paths["dataRoot"] not in paths[name].parents:
+            raise ValueError(f"sourceReadiness.{name} must remain inside dataRoot")
+
+    return SourceReadinessSpec(
+        phase="current",
+        version="0.6.633",
+        settings=paths["settings"],
+        data_root=paths["dataRoot"],
+        store=paths["store"],
+        mcp_config=paths["mcpConfig"],
+        marker=paths["marker"],
+        required_store=dict(required_store),
+    )
 
 
 def validate_inputs(
@@ -230,7 +370,19 @@ def validate_inputs(
             if phase not in validated_installers:
                 raise FileNotFoundError(f"missing installer for scenario {case.name}: {phase}")
 
-    return ValidatedInputs(validated_installers, snapshots, expectations)
+    source_readiness = _validate_source_readiness(
+        manifest.get("sourceReadiness"),
+        manifest,
+        platform,
+        selected_cases,
+        snapshots,
+    )
+    return ValidatedInputs(
+        validated_installers,
+        snapshots,
+        expectations,
+        source_readiness,
+    )
 
 
 def _safe_extract(archive: Path, destination: Path) -> None:
@@ -357,6 +509,67 @@ $defender = Get-MpComputerStatus |
     return {"schema": 1, "roots": snapshots, "system": system}
 
 
+def _bounded_windows_install_inventory(install_root: Path) -> dict:
+    """Inspect a fixed allowlist without exposing paths or discovered names."""
+
+    controlled = {
+        "biyanExecutable": "Biyan.exe",
+        "legacyMitaExecutable": "Mita.exe",
+        "legacySilenceExecutable": "Silence.exe",
+        "legacyJanExecutable": "Jan.exe",
+        "legacyCliExecutable": "mita-cli.exe",
+        "legacyRunnerExecutable": "mita-computer-agent-runner.exe",
+        "legacyResourceMain": "resources/bin/mita.exe",
+        "legacyResourceCli": "resources/bin/mita-cli.exe",
+        "legacyResourceWebResearch": "resources/bin/mita-web-research-mcp.mjs",
+        "legacyResourceRunner": (
+            "resources/computer-agent-runner/mita-computer-agent-runner.exe"
+        ),
+        "preInstallDirectory": "resources/pre-install",
+        "embeddingModelsDirectory": "resources/embedding-models",
+        "assistantExtension": (
+            "resources/pre-install/biyan-assistant-extension-1.0.2.tgz"
+        ),
+        "conversationalExtension": (
+            "resources/pre-install/biyan-conversational-extension-1.0.0.tgz"
+        ),
+        "downloadExtension": (
+            "resources/pre-install/biyan-download-extension-1.0.0.tgz"
+        ),
+    }
+    inventory: dict[str, object] = {}
+    for identifier, relative in controlled.items():
+        path = install_root / relative
+        try:
+            metadata = path.lstat()
+        except FileNotFoundError:
+            inventory[identifier] = {"exists": False, "kind": "missing"}
+            continue
+        except OSError:
+            inventory[identifier] = {"exists": None, "kind": "unavailable"}
+            continue
+        try:
+            is_junction = path.is_junction()
+        except OSError:
+            is_junction = True
+        if stat.S_ISLNK(metadata.st_mode) or is_junction:
+            inventory[identifier] = {"exists": True, "kind": "reparse-rejected"}
+        elif stat.S_ISREG(metadata.st_mode) and metadata.st_size <= 512 * 1024 * 1024:
+            inventory[identifier] = {
+                "exists": True,
+                "kind": "file",
+                "size": metadata.st_size,
+                "sha256": _sha256(path),
+            }
+        elif stat.S_ISREG(metadata.st_mode):
+            inventory[identifier] = {"exists": True, "kind": "oversize-rejected"}
+        elif stat.S_ISDIR(metadata.st_mode):
+            inventory[identifier] = {"exists": True, "kind": "directory"}
+        else:
+            inventory[identifier] = {"exists": True, "kind": "nonregular-rejected"}
+    return inventory
+
+
 class PlatformExecutor:
     def __init__(
         self,
@@ -368,6 +581,22 @@ class PlatformExecutor:
         self.startup_seconds = startup_seconds
         self.migration_timeout_seconds = migration_timeout_seconds
         self.last_executable: Path | None = None
+        self.process_evidence: List[dict] = []
+        self.last_shutdown: dict | None = None
+        self.source_guards: dict[str, str] = {}
+
+    def reset_case_evidence(self) -> None:
+        self.process_evidence = []
+        self.last_shutdown = None
+        self.source_guards = {
+            "readiness": "not-run",
+            "shutdown": "not-run",
+            "residualProcesses": "not-run",
+            "renameProbe": "not-run",
+        }
+
+    def bounded_process_evidence(self) -> List[dict]:
+        return [dict(item) for item in self.process_evidence[:4]]
 
     def cleanup_installation(self) -> None:
         if self.platform == "windows":
@@ -501,30 +730,68 @@ class PlatformExecutor:
         self.last_executable = executable
         return executable
 
-    def _terminate_process_tree(self, process: subprocess.Popen) -> None:
-        if self.platform == "windows":
+    def _force_terminate_windows_process_tree(self, process: subprocess.Popen) -> None:
+        completed = subprocess.run(
+            ["taskkill", "/PID", str(process.pid), "/T", "/F"],
+            check=False,
+            capture_output=True,
+            timeout=30,
+        )
+        if completed.returncode != 0:
+            raise RuntimeError(f"taskkill exit {completed.returncode}")
+        try:
+            process.wait(timeout=10)
+        except subprocess.TimeoutExpired:
+            process.kill()
+            process.wait(timeout=5)
+
+    def _gracefully_close_windows_process_tree(
+        self,
+        process: subprocess.Popen,
+    ) -> None:
+        if process.poll() is not None:
+            self.last_shutdown = {"method": "wm-close", "status": "early-exit"}
+            raise RuntimeError("source_shutdown_failed")
+        script = (
+            "$ErrorActionPreference = 'Stop'; "
+            f"$p = Get-Process -Id {process.pid}; "
+            "if (-not $p.CloseMainWindow()) { exit 3 }; "
+            "if (-not $p.WaitForExit(30000)) { exit 4 }"
+        )
+        try:
             completed = subprocess.run(
-                [
-                    "taskkill",
-                    "/PID",
-                    str(process.pid),
-                    "/T",
-                    "/F",
-                ],
+                ["powershell", "-NoProfile", "-NonInteractive", "-Command", script],
                 check=False,
                 capture_output=True,
-                timeout=30,
+                timeout=40,
             )
-            if completed.returncode != 0:
-                raise RuntimeError(
-                    f"failed to terminate Windows process tree {process.pid}: "
-                    f"taskkill exit {completed.returncode}"
-                )
+        except (OSError, subprocess.SubprocessError):
+            completed = None
+        if completed is not None and completed.returncode == 0:
             try:
-                process.wait(timeout=10)
-            except subprocess.TimeoutExpired:
-                process.kill()
                 process.wait(timeout=5)
+                self.last_shutdown = {"method": "wm-close", "status": "graceful"}
+                return
+            except subprocess.TimeoutExpired:
+                pass
+        try:
+            self._force_terminate_windows_process_tree(process)
+        finally:
+            self.last_shutdown = {"method": "wm-close", "status": "forced-cleanup"}
+        raise RuntimeError("source_shutdown_failed")
+
+    def _terminate_process_tree(
+        self,
+        process: subprocess.Popen,
+        *,
+        require_graceful: bool = False,
+    ) -> None:
+        if self.platform == "windows":
+            if require_graceful:
+                self._gracefully_close_windows_process_tree(process)
+            else:
+                self._force_terminate_windows_process_tree(process)
+                self.last_shutdown = {"method": "force", "status": "forced-cleanup"}
             return
 
         process_group = process.pid
@@ -549,12 +816,55 @@ class PlatformExecutor:
             process.kill()
             process.wait(timeout=5)
 
+    def assert_no_residual_product_processes(self, install_root: Path) -> None:
+        if self.platform != "windows":
+            return
+        escaped_root = str(install_root).replace("'", "''")
+        script = (
+            "$ErrorActionPreference = 'Stop'; "
+            f"$root = [IO.Path]::GetFullPath('{escaped_root}').TrimEnd('\\'); "
+            "$count = @(Get-CimInstance Win32_Process | Where-Object { "
+            "$_.ExecutablePath -and [IO.Path]::GetFullPath($_.ExecutablePath)."
+            "StartsWith($root, [StringComparison]::OrdinalIgnoreCase) }).Count; "
+            "Write-Output $count"
+        )
+        try:
+            completed = subprocess.run(
+                [
+                    "powershell",
+                    "-NoProfile",
+                    "-NonInteractive",
+                    "-Command",
+                    script,
+                ],
+                check=False,
+                capture_output=True,
+                text=True,
+                timeout=30,
+            )
+            stdout = completed.stdout.strip()
+            if (
+                completed.returncode != 0
+                or not stdout.isascii()
+                or not stdout.isdigit()
+            ):
+                raise ValueError("invalid residual process count")
+            count = int(stdout)
+        except (OSError, subprocess.SubprocessError, ValueError) as error:
+            self.source_guards["residualProcesses"] = "check-failed"
+            raise ReadinessFailed("source_residual_process_check_failed") from error
+        if count:
+            self.source_guards["residualProcesses"] = "residual"
+            raise ReadinessFailed("source_residual_processes")
+        self.source_guards["residualProcesses"] = "clear"
+
     def startup_probe(
         self,
         executable: Path,
         scenario: str,
         phase: str,
         readiness_check: Callable[[], None] | None = None,
+        require_graceful_shutdown: bool = False,
     ) -> None:
         env = os.environ.copy()
         secret_prefixes = (
@@ -606,6 +916,21 @@ class PlatformExecutor:
             process_kwargs["start_new_session"] = True
         started = time.monotonic()
         process = subprocess.Popen(command, **process_kwargs)
+        executable_name = (
+            executable.name
+            if self.platform == "windows" and executable.name in WINDOWS_EXECUTABLE_NAMES
+            else "unrecognized"
+            if self.platform == "windows"
+            else executable.name
+        )
+        process_entry = {
+            "phase": phase if phase in PHASES else "invalid",
+            "pid": process.pid if type(process.pid) is int and process.pid > 0 else None,
+            "executableName": executable_name,
+            "executableSha256": _sha256(executable) if executable.is_file() else None,
+        }
+        self.process_evidence.append(process_entry)
+        probe_error: Exception | None = None
         try:
             time.sleep(self.startup_seconds)
             exit_code = process.poll()
@@ -613,35 +938,61 @@ class PlatformExecutor:
                 raise RuntimeError(
                     f"startup probe exited early for {scenario}/{phase} with code {exit_code}"
                 )
-            if readiness_check is None:
-                return
+            if readiness_check is not None:
+                deadline = started + self.migration_timeout_seconds
+                last_error: Exception | None = None
+                while True:
+                    exit_code = process.poll()
+                    if exit_code is not None:
+                        raise RuntimeError(
+                            f"startup probe exited before migration readiness for "
+                            f"{scenario}/{phase} with code {exit_code}; "
+                            f"last readiness error: {last_error}"
+                        )
+                    try:
+                        readiness_check()
+                        if require_graceful_shutdown:
+                            self.source_guards["readiness"] = "passed"
+                        break
+                    except (FileNotFoundError, ReadinessPending) as error:
+                        last_error = error
+                    except RuntimeError as error:
+                        if isinstance(error, ReadinessFailed):
+                            raise
+                        # Backward-compatible transient callbacks are still
+                        # accepted; reviewed state failures use ReadinessFailed.
+                        last_error = error
 
-            deadline = started + self.migration_timeout_seconds
-            last_error: Exception | None = None
-            while True:
-                exit_code = process.poll()
-                if exit_code is not None:
-                    raise RuntimeError(
-                        f"startup probe exited before migration readiness for "
-                        f"{scenario}/{phase} with code {exit_code}; "
-                        f"last readiness error: {last_error}"
-                    )
-                try:
-                    readiness_check()
-                    return
-                except (FileNotFoundError, RuntimeError) as error:
-                    last_error = error
+                    remaining = deadline - time.monotonic()
+                    if remaining <= 0:
+                        raise RuntimeError(
+                            f"migration readiness timed out after "
+                            f"{self.migration_timeout_seconds}s for {scenario}/{phase}; "
+                            f"last readiness error: {last_error}"
+                        )
+                    time.sleep(min(1.0, remaining))
+        except Exception as error:
+            probe_error = error
 
-                remaining = deadline - time.monotonic()
-                if remaining <= 0:
-                    raise RuntimeError(
-                        f"migration readiness timed out after "
-                        f"{self.migration_timeout_seconds}s for {scenario}/{phase}; "
-                        f"last readiness error: {last_error}"
-                    )
-                time.sleep(min(1.0, remaining))
-        finally:
-            self._terminate_process_tree(process)
+        shutdown_error: Exception | None = None
+        try:
+            self._terminate_process_tree(
+                process,
+                require_graceful=require_graceful_shutdown,
+            )
+        except Exception as error:
+            shutdown_error = error
+        process_entry["shutdown"] = dict(self.last_shutdown or {})
+        if require_graceful_shutdown:
+            self.source_guards["shutdown"] = (
+                "graceful" if shutdown_error is None else "failed"
+            )
+        if probe_error is not None and shutdown_error is not None:
+            raise ProbeShutdownError(probe_error, shutdown_error) from probe_error
+        if probe_error is not None:
+            raise probe_error
+        if shutdown_error is not None:
+            raise shutdown_error
 
 
 def _restore_snapshot(spec: SnapshotSpec) -> None:
@@ -658,6 +1009,8 @@ def _clear_qualification_roots(
     # snapshots name their exact restore roots; the only additional mutable
     # root is the platform's fixed Biyan configuration directory.
     roots.add(_migration_state_path(platform).parent)
+    if validated.source_readiness is not None:
+        roots.add(validated.source_readiness.settings.parent)
     for root in sorted(roots, key=lambda value: len(value.parts), reverse=True):
         shutil.rmtree(root, ignore_errors=True)
 
@@ -685,25 +1038,114 @@ def _migration_state_path(platform: str) -> Path:
     return base / "Biyan/migration-state.json"
 
 
+def _safe_error_code(value: object) -> str | None:
+    if (
+        isinstance(value, str)
+        and 1 <= len(value) <= 64
+        and value[0] in "abcdefghijklmnopqrstuvwxyz"
+        and all(
+            character in "abcdefghijklmnopqrstuvwxyz0123456789_"
+            for character in value
+        )
+    ):
+        return value
+    return None
+
+
+def _bounded_migration_state(state_path: Path) -> dict:
+    """Return only reviewed state fields; never echo paths, messages, or digests."""
+
+    try:
+        metadata = state_path.lstat()
+    except FileNotFoundError:
+        metadata = None
+    result: dict[str, object] = {
+        "present": metadata is not None,
+        "dataSchema": None,
+        "steps": {},
+    }
+    if metadata is None:
+        result["readStatus"] = "missing"
+        return result
+    if stat.S_ISLNK(metadata.st_mode):
+        result["readStatus"] = "symlink-rejected"
+        return result
+    if not stat.S_ISREG(metadata.st_mode):
+        result["readStatus"] = "nonregular-rejected"
+        return result
+    if metadata.st_size > 64 * 1024:
+        result["readStatus"] = "oversize-rejected"
+        return result
+    try:
+        state = json.loads(state_path.read_text(encoding="utf-8"))
+    except (OSError, UnicodeDecodeError, json.JSONDecodeError):
+        result["readStatus"] = "invalid-json"
+        return result
+    if not isinstance(state, dict):
+        result["readStatus"] = "invalid-object"
+        return result
+    result["readStatus"] = "reviewed"
+    schema = state.get("data_schema")
+    result["dataSchema"] = schema if type(schema) is int and 0 <= schema <= 3 else None
+    raw_steps = state.get("steps")
+    raw_steps = raw_steps if isinstance(raw_steps, dict) else {}
+    reviewed: dict[str, object] = {}
+    for step in REVIEWED_MIGRATION_STEPS:
+        raw = raw_steps.get(step)
+        raw = raw if isinstance(raw, dict) else {}
+        status = raw.get("status")
+        entry: dict[str, object] = {
+            "status": status if status in REVIEWED_STEP_STATUSES else "missing"
+        }
+        if status == "failed":
+            entry["errorCode"] = _safe_error_code(raw.get("error_code")) or "redacted"
+        reviewed[step] = entry
+    result["steps"] = reviewed
+    return result
+
+
 def _assert_migration_state(state_path: Path, scenario: str, phase: str) -> None:
     if phase == "current":
         return
-    if not state_path.is_file():
+    try:
+        metadata = state_path.lstat()
+    except FileNotFoundError:
         raise FileNotFoundError(
             f"migration state is missing for {scenario}/{phase}: {state_path}"
         )
-    state = json.loads(state_path.read_text(encoding="utf-8"))
+    if (
+        stat.S_ISLNK(metadata.st_mode)
+        or not stat.S_ISREG(metadata.st_mode)
+        or metadata.st_size > 64 * 1024
+    ):
+        raise ReadinessFailed("migration state file is not a bounded regular file")
+    try:
+        state = json.loads(state_path.read_text(encoding="utf-8"))
+    except (OSError, UnicodeDecodeError, json.JSONDecodeError) as error:
+        raise ReadinessPending("migration state is not valid JSON") from error
+    if not isinstance(state, dict):
+        raise ReadinessFailed("migration state must contain an object")
+    steps = state.get("steps")
+    steps = steps if isinstance(steps, dict) else {}
+    for step in REVIEWED_MIGRATION_STEPS:
+        entry = steps.get(step)
+        if isinstance(entry, dict) and entry.get("status") == "failed":
+            error_code = _safe_error_code(entry.get("error_code")) or "redacted"
+            raise ReadinessFailed(f"migration step failed: {step}/{error_code}")
     expected_schema = {"a": 1, "b": 2, "c": 3}[phase]
     if state.get("data_schema") != expected_schema:
-        raise RuntimeError(
+        raise ReadinessPending(
             f"migration schema mismatch for {scenario}/{phase}: "
             f"expected {expected_schema}, got {state.get('data_schema')}"
         )
     required_steps = [
         "layout_v1",
+        "mobile_db_v1",
         "assistant_ids_v1",
         "mcp_names_v1",
         "extensions_manifest_v1",
+        "cli_v1",
+        "assistant_db_refs_v1",
     ]
     if expected_schema >= 2:
         required_steps.append("remote_only_v2")
@@ -715,9 +1157,112 @@ def _assert_migration_state(state_path: Path, scenario: str, phase: str) -> None
         if state.get("steps", {}).get(step, {}).get("status") != "completed"
     ]
     if incomplete:
-        raise RuntimeError(
+        raise ReadinessPending(
             f"migration steps incomplete for {scenario}/{phase}: {', '.join(incomplete)}"
         )
+
+
+def _read_bounded_regular_file(path: Path, label: str, limit: int = 64 * 1024) -> bytes:
+    try:
+        metadata = path.lstat()
+    except FileNotFoundError as error:
+        raise FileNotFoundError(f"{label} is missing") from error
+    if (
+        stat.S_ISLNK(metadata.st_mode)
+        or not stat.S_ISREG(metadata.st_mode)
+        or metadata.st_size == 0
+        or metadata.st_size > limit
+    ):
+        raise ReadinessFailed(f"{label} is not a bounded regular file")
+    return path.read_bytes()
+
+
+def _read_json_object(path: Path, label: str) -> dict:
+    try:
+        value = json.loads(_read_bounded_regular_file(path, label).decode("utf-8"))
+    except (OSError, UnicodeDecodeError, json.JSONDecodeError) as error:
+        raise ReadinessPending(f"{label} is not valid JSON") from error
+    if not isinstance(value, dict):
+        raise ReadinessPending(f"{label} must be an object")
+    return value
+
+
+def _windows_path_identity(path: Path | str) -> str:
+    return str(path).replace("\\", "/").rstrip("/").casefold()
+
+
+def _assert_source_readiness(spec: SourceReadinessSpec) -> str:
+    settings = _read_json_object(spec.settings, "source settings")
+    configured_root = settings.get("data_folder")
+    if not isinstance(configured_root, str) or _windows_path_identity(
+        configured_root
+    ) != _windows_path_identity(spec.data_root):
+        raise ReadinessPending("source settings data_folder mismatch")
+    store = _read_json_object(spec.store, "source store")
+    for key, expected in spec.required_store.items():
+        actual = store.get(key)
+        if type(actual) is not type(expected) or actual != expected:
+            raise ReadinessPending(f"source store {key} mismatch")
+    mcp_config = _read_json_object(spec.mcp_config, "source MCP configuration")
+    if not isinstance(mcp_config.get("mcpServers"), dict):
+        raise ReadinessPending("source MCP configuration is incomplete")
+    marker = _read_bounded_regular_file(
+        spec.marker,
+        "source preserved-data marker",
+        4 * 1024,
+    )
+
+    digest = hashlib.sha256()
+    for value in (
+        json.dumps(settings, sort_keys=True).encode("utf-8"),
+        json.dumps(store, sort_keys=True).encode("utf-8"),
+        json.dumps(mcp_config, sort_keys=True).encode("utf-8"),
+        marker,
+    ):
+        digest.update(value)
+    return digest.hexdigest()
+
+
+def _stable_source_readiness(spec: SourceReadinessSpec) -> Callable[[], None]:
+    last_digest: str | None = None
+
+    def check() -> None:
+        nonlocal last_digest
+        digest = _assert_source_readiness(spec)
+        if digest != last_digest:
+            last_digest = digest
+            raise ReadinessPending("source readiness requires a stable second observation")
+
+    return check
+
+
+def _assert_reversible_directory_rename(data_root: Path) -> None:
+    try:
+        metadata = data_root.lstat()
+    except FileNotFoundError as error:
+        raise ReadinessFailed("source_data_root_missing") from error
+    if stat.S_ISLNK(metadata.st_mode) or not stat.S_ISDIR(metadata.st_mode):
+        raise ReadinessFailed("source_data_root_not_regular_directory")
+    staging = data_root.parent / f".{data_root.name}.biyan-migrating"
+    probe = data_root.parent / f".{data_root.name}.biyan-legacy-backup"
+    if staging.exists() or probe.exists():
+        raise ReadinessFailed("source_rename_probe_conflict")
+    renamed = False
+    try:
+        data_root.rename(probe)
+        renamed = True
+        probe.rename(data_root)
+        renamed = False
+    except OSError as error:
+        if renamed and probe.exists() and not data_root.exists():
+            try:
+                probe.rename(data_root)
+                renamed = False
+            except OSError:
+                pass
+        raise ReadinessFailed("source_rename_probe_failed") from error
+    if renamed or not data_root.is_dir() or probe.exists():
+        raise ReadinessFailed("source_rename_probe_restore_failed")
 
 
 def _assert_phase_ready(
@@ -748,42 +1293,115 @@ def run_matrix(
     try:
         for case in selected_cases:
             case_dir = work_dir / case.name
-            shutil.rmtree(case_dir, ignore_errors=True)
-            case_dir.mkdir(parents=True, exist_ok=True)
-            executor.cleanup_installation()
-            _clear_qualification_roots(validated, platform)
-            _restore_snapshot(validated.snapshots[case.snapshot])
-            started = time.time()
-            for phase in case.install_sequence:
-                executable = executor.install(validated.installers[phase], phase, case_dir)
-                readiness_check = (
-                    None
-                    if phase == "current"
-                    else partial(
-                        _assert_phase_ready,
-                        validated,
-                        platform,
+            phase_boundary = "case-setup"
+            executor.reset_case_evidence()
+            try:
+                shutil.rmtree(case_dir, ignore_errors=True)
+                case_dir.mkdir(parents=True, exist_ok=True)
+                executor.cleanup_installation()
+                _clear_qualification_roots(validated, platform)
+                phase_boundary = "snapshot-restore"
+                _restore_snapshot(validated.snapshots[case.snapshot])
+                started = time.time()
+                for phase in case.install_sequence:
+                    guarded_source = (
+                        phase == "current" and validated.source_readiness is not None
+                    )
+                    phase_boundary = (
+                        "source-install"
+                        if guarded_source
+                        else "candidate-install"
+                        if phase == "c"
+                        else f"{phase}-install"
+                    )
+                    executable = executor.install(
+                        validated.installers[phase],
+                        phase,
+                        case_dir,
+                    )
+                    if guarded_source:
+                        readiness_check = _stable_source_readiness(
+                            validated.source_readiness
+                        )
+                        phase_boundary = "source-readiness"
+                    elif phase == "current":
+                        readiness_check = None
+                    else:
+                        readiness_check = partial(
+                            _assert_phase_ready,
+                            validated,
+                            platform,
+                            case.name,
+                            phase,
+                        )
+                        phase_boundary = (
+                            "candidate-readiness"
+                            if phase == "c"
+                            else f"{phase}-readiness"
+                        )
+                    executor.startup_probe(
+                        executable,
                         case.name,
                         phase,
+                        readiness_check,
+                        require_graceful_shutdown=guarded_source,
                     )
+                    if guarded_source:
+                        phase_boundary = "source-residual-check"
+                        executor.assert_no_residual_product_processes(
+                            case_dir / "windows-install"
+                        )
+                        phase_boundary = "source-rename-probe"
+                        _assert_reversible_directory_rename(
+                            validated.source_readiness.data_root
+                        )
+                        executor.source_guards["renameProbe"] = "passed"
+                results.append(
+                    {
+                        "scenario": case.name,
+                        "platform": platform,
+                        "snapshot": case.snapshot,
+                        "installSequence": list(case.install_sequence),
+                        "expectedPhase": case.expected_phase,
+                        "status": "passed",
+                        "durationSeconds": round(time.time() - started, 3),
+                    }
                 )
-                executor.startup_probe(
-                    executable,
-                    case.name,
-                    phase,
-                    readiness_check,
+            except Exception as error:
+                probe_error = (
+                    error.probe_error
+                    if isinstance(error, ProbeShutdownError)
+                    else error
                 )
-            results.append(
-                {
+                diagnostics: dict[str, object] = {
                     "scenario": case.name,
                     "platform": platform,
-                    "snapshot": case.snapshot,
-                    "installSequence": list(case.install_sequence),
-                    "expectedPhase": case.expected_phase,
-                    "status": "passed",
-                    "durationSeconds": round(time.time() - started, 3),
+                    "phaseBoundary": phase_boundary,
+                    "failureClass": (
+                        "migration-step-failed"
+                        if isinstance(probe_error, ReadinessFailed)
+                        else "qualification-failed"
+                    ),
+                    "migrationState": _bounded_migration_state(
+                        _migration_state_path(platform)
+                    ),
+                    "processes": executor.bounded_process_evidence(),
+                    "sourceGuards": dict(executor.source_guards),
                 }
-            )
+                if isinstance(error, ProbeShutdownError):
+                    diagnostics["probeFailure"] = (
+                        "migration-step-failed"
+                        if isinstance(error.probe_error, ReadinessFailed)
+                        else "qualification-failed"
+                    )
+                    diagnostics["shutdownFailure"] = "source-shutdown-failed"
+                if executor.last_shutdown is not None:
+                    diagnostics["shutdown"] = dict(executor.last_shutdown)
+                if platform == "windows":
+                    diagnostics["installInventory"] = _bounded_windows_install_inventory(
+                        case_dir / "windows-install"
+                    )
+                raise MigrationRunError(diagnostics) from error
     finally:
         executor.cleanup_installation()
         _clear_qualification_roots(validated, platform)
@@ -882,21 +1500,21 @@ def main(argv: Sequence[str] | None = None) -> int:
         print(f"Migration matrix passed: {len(results)} scenarios")
         return 0
     except Exception as error:  # fail-closed report for CI evidence
+        failure = {
+            "schema": 1,
+            "platform": args.platform,
+            "scenarios": scenario_names,
+            "status": "failed",
+            "error": "qualification_failed",
+        }
+        if isinstance(error, MigrationRunError):
+            failure["diagnostics"] = error.diagnostics
         report_path.write_text(
-            json.dumps(
-                {
-                    "schema": 1,
-                    "platform": args.platform,
-                    "scenarios": scenario_names,
-                    "status": "failed",
-                    "error": str(error),
-                },
-                indent=2,
-            )
+            json.dumps(failure, indent=2)
             + "\n",
             encoding="utf-8",
         )
-        print(str(error), file=sys.stderr)
+        print("qualification_failed", file=sys.stderr)
         return 1
 
 
