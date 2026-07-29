@@ -104,7 +104,9 @@ export async function handleRequest(request, env) {
     return json({ error: 'unauthorized' }, 401)
   }
 
-  const policy = await readR2Json(env.UPDATER_BUCKET, env.POLICY_KEY ?? DEFAULT_POLICY_KEY)
+  const policyKey = env.POLICY_KEY ?? DEFAULT_POLICY_KEY
+  if (policyKey !== DEFAULT_POLICY_KEY) return empty('policy-invalid')
+  const policy = await readR2Json(env.UPDATER_BUCKET, policyKey)
   if (policy === undefined) {
     return empty('policy-unavailable')
   }

@@ -569,12 +569,62 @@ test('worker returns 204 when paused and a flat signed manifest when active', as
   assert.equal(await response.text(), '')
 })
 
-test('worker rejects unsigned requests', async () => {
+test('worker rejects unsigned requests before reading updater state', async () => {
+  let bucketReads = 0
   const response = await handleRequest(
     new Request('https://updates.mita.so/biyan/v1/stable/windows/x86_64/0.6.634'),
-    { BIYAN_SIGNING_KEY: signingKey, UPDATER_BUCKET: bucket({}) },
+    {
+      BIYAN_SIGNING_KEY: signingKey,
+      UPDATER_BUCKET: {
+        async get() {
+          bucketReads += 1
+          return null
+        },
+      },
+    },
   )
   assert.equal(response.status, 401)
+  assert.deepEqual(await response.json(), { error: 'unauthorized' })
+  assert.equal(bucketReads, 0)
+})
+
+test('worker rejects malformed signed requests before reading updater state', async () => {
+  const cases = [
+    ['bad HMAC', (request) => request.headers.set(
+      'X-Request-Token',
+      '0'.repeat(64),
+    )],
+    ['stale timestamp', (request) => request.headers.set(
+      'X-Request-Time',
+      String(Math.floor(Date.now() / 1000) - 301),
+    )],
+    ['bad nonce', (request) => request.headers.set('X-Request-Id', 'invalid')],
+    ['bad session', (request) => request.headers.set('X-Client-Session', 'short')],
+    ['version mismatch', (request) => request.headers.set(
+      'X-Client-Version',
+      '0.6.634',
+    )],
+  ]
+  for (const [name, mutate] of cases) {
+    let bucketReads = 0
+    const request = signedRequest(
+      '/biyan/v1/stable/windows/x86_64/0.6.633',
+      '0.6.633',
+    )
+    mutate(request)
+    const response = await handleRequest(request, {
+      BIYAN_SIGNING_KEY: signingKey,
+      UPDATER_BUCKET: {
+        async get() {
+          bucketReads += 1
+          return null
+        },
+      },
+    })
+    assert.equal(response.status, 401, name)
+    assert.deepEqual(await response.json(), { error: 'unauthorized' }, name)
+    assert.equal(bucketReads, 0, name)
+  }
 })
 
 test('worker fails closed when the stable policy is unavailable', async () => {
@@ -593,6 +643,31 @@ test('worker fails closed when the stable policy is unavailable', async () => {
   )
   assert.equal(response.headers.get('cache-control'), 'no-store')
   assert.equal(await response.text(), '')
+})
+
+test('worker rejects a noncanonical policy key before reading the bucket', async () => {
+  let bucketReads = 0
+  const response = await handleRequest(
+    signedRequest('/biyan/v1/stable/windows/x86_64/0.6.633', '0.6.633'),
+    {
+      BIYAN_SIGNING_KEY: signingKey,
+      POLICY_KEY: 'biyan/updater/preview/policy.json',
+      UPDATER_BUCKET: {
+        async get() {
+          bucketReads += 1
+          return null
+        },
+      },
+    },
+  )
+  assert.equal(response.status, 204)
+  assert.equal(
+    response.headers.get('x-biyan-updater-state'),
+    'policy-invalid',
+  )
+  assert.equal(response.headers.get('cache-control'), 'no-store')
+  assert.equal(await response.text(), '')
+  assert.equal(bucketReads, 0)
 })
 
 test('worker distinguishes malformed stable policies from an absent policy', async () => {
