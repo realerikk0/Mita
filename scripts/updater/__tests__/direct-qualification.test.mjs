@@ -31,7 +31,7 @@ const promotionWorkflowFile = path.join(
   'workflows',
   'promote-desktop-update.yml',
 )
-const waitingPolicy = loadDirectQualificationPolicy(policyFile)
+const trackedPolicy = loadDirectQualificationPolicy(policyFile)
 const harnessSha256 = 'a'.repeat(64)
 const repositoryId = 1225341166
 
@@ -44,7 +44,7 @@ function clone(value) {
 }
 
 function pinnedPolicy() {
-  const policy = clone(waitingPolicy)
+  const policy = clone(trackedPolicy)
   policy.state = 'candidate-pinned'
   policy.candidate.manifestSha256 = 'b'.repeat(64)
   for (const [index, platform] of ['windows', 'macos', 'linux'].entries()) {
@@ -200,24 +200,37 @@ function aggregateFixture() {
   return { root, policy, artifacts }
 }
 
-test('repository policy is reviewable while every execution path rejects the unpinned candidate', () => {
-  assert.equal(waitingPolicy.state, 'awaiting-candidate-pin')
-  assert.throws(
-    () => validateDirectQualificationPolicy(waitingPolicy, { requirePinned: true }),
-    /policy\.state=candidate-pinned/,
+test('repository policy pins the reviewed candidate while an awaiting policy remains fail-closed', () => {
+  assert.equal(trackedPolicy.state, 'candidate-pinned')
+  assert.doesNotThrow(() =>
+    validateDirectQualificationPolicy(trackedPolicy, { requirePinned: true }),
   )
   const result = spawnSync(
     process.execPath,
     [script, 'validate-policy', '--policy', policyFile],
     { encoding: 'utf8' },
   )
-  assert.notEqual(result.status, 0)
-  assert.match(result.stderr, /policy\.state=candidate-pinned/)
+  assert.equal(result.status, 0, result.stderr)
+
+  const awaiting = clone(trackedPolicy)
+  awaiting.state = 'awaiting-candidate-pin'
+  awaiting.candidate.manifestSha256 = null
+  for (const platform of ['windows', 'macos', 'linux']) {
+    awaiting.candidate.assets[platform].sha256 = null
+  }
+  assert.throws(
+    () => validateDirectQualificationPolicy(awaiting, { requirePinned: true }),
+    /policy\.state=candidate-pinned/,
+  )
 })
 
 test('candidate pin must be complete and bound to the exact product source commit', () => {
-  const partial = clone(waitingPolicy)
+  const partial = clone(trackedPolicy)
+  partial.state = 'awaiting-candidate-pin'
   partial.candidate.manifestSha256 = 'd'.repeat(64)
+  for (const platform of ['windows', 'macos', 'linux']) {
+    partial.candidate.assets[platform].sha256 = null
+  }
   assert.throws(
     () => validateDirectQualificationPolicy(partial),
     /may not contain partial release hashes/,
