@@ -11,6 +11,7 @@ from autoqa.migration_runner import (
     PHASES,
     PlatformExecutor,
     _assert_migration_state,
+    _clear_qualification_roots,
     _windows_install_diagnostics,
     main,
     migration_matrix,
@@ -410,6 +411,7 @@ class MigrationRunnerTests(unittest.TestCase):
             "HOME": str(Path.home()),
         }
         process = mock.Mock()
+        process.pid = 4242
         process.poll.return_value = None
         with (
             mock.patch.dict(os.environ, injected, clear=True),
@@ -418,6 +420,7 @@ class MigrationRunnerTests(unittest.TestCase):
                 return_value=process,
             ) as popen,
             mock.patch("autoqa.migration_runner.time.sleep"),
+            mock.patch("autoqa.migration_runner.os.killpg") as killpg,
         ):
             PlatformExecutor("linux", 1).startup_probe(
                 Path("/tmp/Biyan.AppImage"),
@@ -434,6 +437,146 @@ class MigrationRunnerTests(unittest.TestCase):
             "fresh-a",
         )
         self.assertEqual(child_env["BIYAN_AUTOQA_MIGRATION_PHASE"], "a")
+        self.assertTrue(popen.call_args.kwargs["start_new_session"])
+        self.assertEqual(
+            [call.args for call in killpg.call_args_list],
+            [(4242, 15), (4242, 9)],
+        )
+
+    def test_migration_readiness_polls_until_complete(self):
+        process = mock.Mock(pid=5151)
+        process.poll.return_value = None
+        readiness = mock.Mock(
+            side_effect=[
+                FileNotFoundError("state missing"),
+                RuntimeError("schema is still zero"),
+                None,
+            ]
+        )
+        with (
+            mock.patch(
+                "autoqa.migration_runner.subprocess.Popen",
+                return_value=process,
+            ),
+            mock.patch("autoqa.migration_runner.time.sleep") as sleep,
+            mock.patch(
+                "autoqa.migration_runner.time.monotonic",
+                side_effect=[0.0, 1.0, 2.0],
+            ),
+            mock.patch("autoqa.migration_runner.os.killpg"),
+        ):
+            PlatformExecutor("linux", 1, 90).startup_probe(
+                Path("/tmp/Biyan.AppImage"),
+                "current-to-c",
+                "c",
+                readiness,
+            )
+
+        self.assertEqual(readiness.call_count, 3)
+        self.assertEqual(sleep.call_args_list[0], mock.call(1))
+        self.assertEqual(sleep.call_args_list[1:], [mock.call(1.0), mock.call(1.0)])
+
+    def test_migration_readiness_timeout_and_early_exit_fail_closed(self):
+        timeout_process = mock.Mock(pid=6161)
+        timeout_process.poll.return_value = None
+        with (
+            mock.patch(
+                "autoqa.migration_runner.subprocess.Popen",
+                return_value=timeout_process,
+            ),
+            mock.patch("autoqa.migration_runner.time.sleep"),
+            mock.patch(
+                "autoqa.migration_runner.time.monotonic",
+                side_effect=[0.0, 90.0],
+            ),
+            mock.patch("autoqa.migration_runner.os.killpg"),
+        ):
+            with self.assertRaisesRegex(RuntimeError, "timed out after 90s"):
+                PlatformExecutor("linux", 1, 90).startup_probe(
+                    Path("/tmp/Biyan.AppImage"),
+                    "current-to-c",
+                    "c",
+                    mock.Mock(side_effect=FileNotFoundError("state missing")),
+                )
+
+        exit_process = mock.Mock(pid=7171)
+        exit_process.poll.return_value = 7
+        with (
+            mock.patch(
+                "autoqa.migration_runner.subprocess.Popen",
+                return_value=exit_process,
+            ),
+            mock.patch("autoqa.migration_runner.time.sleep"),
+            mock.patch("autoqa.migration_runner.time.monotonic", return_value=0.0),
+            mock.patch("autoqa.migration_runner.os.killpg"),
+        ):
+            with self.assertRaisesRegex(RuntimeError, "exited early"):
+                PlatformExecutor("linux", 1, 90).startup_probe(
+                    Path("/tmp/Biyan.AppImage"),
+                    "current-to-c",
+                    "c",
+                    mock.Mock(),
+                )
+
+    def test_windows_process_tree_is_force_terminated(self):
+        process = mock.Mock(pid=8181)
+        with mock.patch(
+            "autoqa.migration_runner.subprocess.run",
+            return_value=mock.Mock(returncode=0),
+        ) as run:
+            PlatformExecutor("windows", 1, 90)._terminate_process_tree(process)
+
+        self.assertEqual(
+            run.call_args.args[0],
+            ["taskkill", "/PID", "8181", "/T", "/F"],
+        )
+        self.assertEqual(run.call_args.kwargs["timeout"], 30)
+
+    def test_windows_process_tree_failure_is_fail_closed(self):
+        process = mock.Mock(pid=9191)
+        with (
+            mock.patch(
+                "autoqa.migration_runner.subprocess.run",
+                return_value=mock.Mock(returncode=5),
+            ),
+            self.assertRaisesRegex(RuntimeError, "taskkill exit 5"),
+        ):
+            PlatformExecutor("windows", 1, 90)._terminate_process_tree(process)
+
+    def test_cleanup_never_derives_delete_root_from_expectations(self):
+        with tempfile.TemporaryDirectory(dir=Path.home()) as directory:
+            root = Path(directory)
+            installers, manifest = self.make_inputs(root)
+            payload = json.loads(manifest.read_text(encoding="utf-8"))
+            unexpected = root / "Documents/migration-state.json"
+            payload["expectations"]["a"] = [str(unexpected)]
+            manifest.write_text(json.dumps(payload), encoding="utf-8")
+            validated = validate_inputs(
+                {"a": installers["a"]},
+                manifest,
+                "linux",
+                select_migration_cases(["fresh-a"]),
+            )
+
+            with (
+                mock.patch.dict(
+                    os.environ,
+                    {"XDG_DATA_HOME": str(root / "profile")},
+                    clear=False,
+                ),
+                mock.patch("autoqa.migration_runner.shutil.rmtree") as rmtree,
+            ):
+                _clear_qualification_roots(validated, "linux")
+
+            cleared = {call.args[0] for call in rmtree.call_args_list}
+            self.assertNotIn(unexpected.parent, cleared)
+            self.assertEqual(
+                cleared,
+                {
+                    root / "profile/fresh",
+                    root / "profile/Biyan",
+                },
+            )
 
 
 if __name__ == "__main__":

@@ -1,10 +1,15 @@
 import hashlib
 import importlib.util
 import json
+import os
+import shutil
 import tempfile
 import unittest
 import zipfile
 from pathlib import Path
+from unittest import mock
+
+from autoqa.migration_runner import select_migration_cases, validate_inputs
 
 
 MODULE_PATH = Path(__file__).parents[1] / "prepare-direct-qualification-inputs.py"
@@ -26,11 +31,15 @@ class PrepareDirectQualificationInputsTests(unittest.TestCase):
         legacy_manual = root / "Mita_0.6.608_x64-setup.exe"
         legacy_auto = root / "Mita_0.6.611_x64-setup.exe"
         current = root / "Biyan_0.6.633_x64-setup.exe"
+        phase_a = root / "Biyan_0.6.643_x64-setup.exe"
+        phase_b = root / "Biyan_0.6.644_x64-setup.exe"
         terminal = root / "Biyan_0.6.645_x64-setup.exe"
         candidate.write_bytes(b"candidate")
         legacy_manual.write_bytes(b"legacy-manual")
         legacy_auto.write_bytes(b"legacy-auto")
         current.write_bytes(b"current")
+        phase_a.write_bytes(b"phase-a")
+        phase_b.write_bytes(b"phase-b")
         terminal.write_bytes(b"terminal")
         candidate_sha = digest(candidate) if state == "candidate-pinned" else None
         policy = {
@@ -87,6 +96,22 @@ class PrepareDirectQualificationInputsTests(unittest.TestCase):
                         }
                     }
                 },
+                "0.6.643": {
+                    "assets": {
+                        "windows": {
+                            "name": phase_a.name,
+                            "sha256": digest(phase_a),
+                        }
+                    }
+                },
+                "0.6.644": {
+                    "assets": {
+                        "windows": {
+                            "name": phase_b.name,
+                            "sha256": digest(phase_b),
+                        }
+                    }
+                },
                 "0.6.645": {
                     "assets": {
                         "windows": {
@@ -122,6 +147,22 @@ class PrepareDirectQualificationInputsTests(unittest.TestCase):
                     "snapshot": "current",
                 },
                 {
+                    "id": "a-to-c-windows",
+                    "platform": "windows",
+                    "scenario": "a-to-c",
+                    "sourceVersion": "0.6.643",
+                    "sourceRole": "a",
+                    "snapshot": "a",
+                },
+                {
+                    "id": "b-to-c-windows",
+                    "platform": "windows",
+                    "scenario": "b-to-c",
+                    "sourceVersion": "0.6.644",
+                    "sourceRole": "b",
+                    "snapshot": "b",
+                },
+                {
                     "id": "c-to-c-windows",
                     "platform": "windows",
                     "scenario": "c-to-c",
@@ -144,15 +185,20 @@ class PrepareDirectQualificationInputsTests(unittest.TestCase):
                 ("legacy-auto-to-c-windows", "0.6.611", "automatic-updater"),
             ):
                 source = root / policy["sources"][version]["assets"]["windows"]["name"]
+                output_dir = root / lane_id
                 manifest = MODULE.prepare_inputs(
                     policy_path=policy_path,
                     lane_id=lane_id,
                     candidate_installer=candidate,
                     source_installer=source,
-                    output_dir=root / lane_id,
+                    output_dir=output_dir,
                 )
                 self.assertEqual(manifest["qualificationMode"], mode)
                 self.assertEqual(set(manifest["installers"]), {"current", "c"})
+                self.assertEqual(
+                    manifest["snapshots"]["current"]["restore_to"],
+                    "%APPDATA%/Mita/data",
+                )
 
     def test_current_to_c_is_sanitized_and_deterministic(self):
         with tempfile.TemporaryDirectory() as directory:
@@ -177,14 +223,101 @@ class PrepareDirectQualificationInputsTests(unittest.TestCase):
             self.assertEqual(manifest["scenario"], "current-to-c")
             self.assertEqual(set(manifest["installers"]), {"current", "c"})
             self.assertEqual(
+                manifest["snapshots"]["current"]["restore_to"],
+                "%APPDATA%/Mita/data",
+            )
+            self.assertEqual(
+                manifest["expectations"],
+                {
+                    "c": [
+                        "%APPDATA%/Biyan/migration-state.json",
+                        "%APPDATA%/Biyan/data/agent-workspaces/direct-qualification-preserved.txt",
+                    ]
+                },
+            )
+            self.assertEqual(
                 digest(first / "snapshots/current.zip"),
                 digest(second / "snapshots/current.zip"),
             )
             with zipfile.ZipFile(first / "snapshots/current.zip") as archive:
                 self.assertEqual(
                     archive.namelist(),
-                    ["direct-qualification-preserved.txt"],
+                    [
+                        "agent-workspaces/direct-qualification-preserved.txt",
+                        "mcp_config.json",
+                    ],
                 )
+                self.assertEqual(
+                    json.loads(archive.read("mcp_config.json")),
+                    {"mcpServers": {}},
+                )
+                legacy_data = root / "Mita/data"
+                canonical_data = root / "Biyan/data"
+                archive.extractall(legacy_data)
+            # Mirror the product's fail-closed USER_DATA_DIRS/USER_DATA_FILES
+            # copy contract: arbitrary root files are intentionally excluded.
+            shutil.copytree(
+                legacy_data / "agent-workspaces",
+                canonical_data / "agent-workspaces",
+            )
+            canonical_data.mkdir(parents=True, exist_ok=True)
+            shutil.copy2(
+                legacy_data / "mcp_config.json",
+                canonical_data / "mcp_config.json",
+            )
+            self.assertEqual(
+                (
+                    canonical_data
+                    / "agent-workspaces/direct-qualification-preserved.txt"
+                ).read_text(encoding="utf-8"),
+                MODULE.MARKER_CONTENT,
+            )
+
+    def test_a_and_b_lanes_require_source_and_candidate_expectations(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            policy_path, policy, candidate, _, _ = self.make_policy(root)
+            for lane_id, version, phase in (
+                ("a-to-c-windows", "0.6.643", "a"),
+                ("b-to-c-windows", "0.6.644", "b"),
+            ):
+                source = root / policy["sources"][version]["assets"]["windows"]["name"]
+                output_dir = root / lane_id
+                manifest = MODULE.prepare_inputs(
+                    policy_path=policy_path,
+                    lane_id=lane_id,
+                    candidate_installer=candidate,
+                    source_installer=source,
+                    output_dir=output_dir,
+                )
+                self.assertEqual(
+                    manifest["snapshots"][phase]["restore_to"],
+                    "%APPDATA%/Biyan/data",
+                )
+                self.assertEqual(set(manifest["expectations"]), {phase, "c"})
+                self.assertEqual(
+                    manifest["expectations"][phase],
+                    [
+                        "%APPDATA%/Biyan/migration-state.json",
+                        "%APPDATA%/Biyan/data/agent-workspaces/direct-qualification-preserved.txt",
+                    ],
+                )
+                self.assertEqual(
+                    manifest["expectations"][phase],
+                    manifest["expectations"]["c"],
+                )
+                with mock.patch.dict(
+                    os.environ,
+                    {"APPDATA": str(root / "profile")},
+                    clear=False,
+                ):
+                    validated = validate_inputs(
+                        {phase: source, "c": candidate},
+                        output_dir / "manifest.json",
+                        "windows",
+                        select_migration_cases([f"{phase}-to-c"]),
+                    )
+                self.assertEqual(set(validated.expectations), {phase, "c"})
 
     def test_terminal_c_to_c_uses_the_generic_current_slot(self):
         with tempfile.TemporaryDirectory() as directory:
@@ -199,6 +332,10 @@ class PrepareDirectQualificationInputsTests(unittest.TestCase):
             )
             self.assertEqual(manifest["scenario"], "c-to-c")
             self.assertEqual(set(manifest["installers"]), {"current", "c"})
+            self.assertEqual(
+                manifest["snapshots"]["current"]["restore_to"],
+                "%APPDATA%/Biyan/data",
+            )
 
     def test_unpinned_policy_and_tampered_installer_fail_closed(self):
         with tempfile.TemporaryDirectory() as directory:

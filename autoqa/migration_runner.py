@@ -13,6 +13,7 @@ import argparse
 import hashlib
 import json
 import os
+import signal
 import shutil
 import stat
 import subprocess
@@ -22,8 +23,9 @@ import tempfile
 import time
 import zipfile
 from dataclasses import dataclass
+from functools import partial
 from pathlib import Path
-from typing import Dict, Iterable, List, Mapping, Sequence, Tuple
+from typing import Callable, Dict, Iterable, List, Mapping, Sequence, Tuple
 
 
 PHASES: Tuple[str, ...] = ("current", "a", "b", "c")
@@ -356,9 +358,15 @@ $defender = Get-MpComputerStatus |
 
 
 class PlatformExecutor:
-    def __init__(self, platform: str, startup_seconds: int) -> None:
+    def __init__(
+        self,
+        platform: str,
+        startup_seconds: int,
+        migration_timeout_seconds: int = 90,
+    ) -> None:
         self.platform = platform
         self.startup_seconds = startup_seconds
+        self.migration_timeout_seconds = migration_timeout_seconds
         self.last_executable: Path | None = None
 
     def cleanup_installation(self) -> None:
@@ -493,7 +501,61 @@ class PlatformExecutor:
         self.last_executable = executable
         return executable
 
-    def startup_probe(self, executable: Path, scenario: str, phase: str) -> None:
+    def _terminate_process_tree(self, process: subprocess.Popen) -> None:
+        if self.platform == "windows":
+            completed = subprocess.run(
+                [
+                    "taskkill",
+                    "/PID",
+                    str(process.pid),
+                    "/T",
+                    "/F",
+                ],
+                check=False,
+                capture_output=True,
+                timeout=30,
+            )
+            if completed.returncode != 0:
+                raise RuntimeError(
+                    f"failed to terminate Windows process tree {process.pid}: "
+                    f"taskkill exit {completed.returncode}"
+                )
+            try:
+                process.wait(timeout=10)
+            except subprocess.TimeoutExpired:
+                process.kill()
+                process.wait(timeout=5)
+            return
+
+        process_group = process.pid
+        try:
+            os.killpg(process_group, signal.SIGTERM)
+        except ProcessLookupError:
+            pass
+        try:
+            process.wait(timeout=10)
+        except subprocess.TimeoutExpired:
+            pass
+        # The launcher may exit before an inherited child (notably xvfb-run).
+        # Always target the isolated process group once more so no source build
+        # can overlap the next installer or candidate probe.
+        try:
+            os.killpg(process_group, signal.SIGKILL)
+        except ProcessLookupError:
+            pass
+        try:
+            process.wait(timeout=5)
+        except subprocess.TimeoutExpired:
+            process.kill()
+            process.wait(timeout=5)
+
+    def startup_probe(
+        self,
+        executable: Path,
+        scenario: str,
+        phase: str,
+        readiness_check: Callable[[], None] | None = None,
+    ) -> None:
         env = os.environ.copy()
         secret_prefixes = (
             "ACTIONS_",
@@ -533,7 +595,17 @@ class PlatformExecutor:
         command: List[str] = [str(executable)]
         if self.platform == "linux" and not env.get("DISPLAY") and shutil.which("xvfb-run"):
             command = ["xvfb-run", "-a", *command]
-        process = subprocess.Popen(command, env=env)
+        process_kwargs = {"env": env}
+        if self.platform == "windows":
+            process_kwargs["creationflags"] = getattr(
+                subprocess,
+                "CREATE_NEW_PROCESS_GROUP",
+                0,
+            )
+        else:
+            process_kwargs["start_new_session"] = True
+        started = time.monotonic()
+        process = subprocess.Popen(command, **process_kwargs)
         try:
             time.sleep(self.startup_seconds)
             exit_code = process.poll()
@@ -541,14 +613,35 @@ class PlatformExecutor:
                 raise RuntimeError(
                     f"startup probe exited early for {scenario}/{phase} with code {exit_code}"
                 )
-        finally:
-            if process.poll() is None:
-                process.terminate()
+            if readiness_check is None:
+                return
+
+            deadline = started + self.migration_timeout_seconds
+            last_error: Exception | None = None
+            while True:
+                exit_code = process.poll()
+                if exit_code is not None:
+                    raise RuntimeError(
+                        f"startup probe exited before migration readiness for "
+                        f"{scenario}/{phase} with code {exit_code}; "
+                        f"last readiness error: {last_error}"
+                    )
                 try:
-                    process.wait(timeout=20)
-                except subprocess.TimeoutExpired:
-                    process.kill()
-                    process.wait(timeout=10)
+                    readiness_check()
+                    return
+                except (FileNotFoundError, RuntimeError) as error:
+                    last_error = error
+
+                remaining = deadline - time.monotonic()
+                if remaining <= 0:
+                    raise RuntimeError(
+                        f"migration readiness timed out after "
+                        f"{self.migration_timeout_seconds}s for {scenario}/{phase}; "
+                        f"last readiness error: {last_error}"
+                    )
+                time.sleep(min(1.0, remaining))
+        finally:
+            self._terminate_process_tree(process)
 
 
 def _restore_snapshot(spec: SnapshotSpec) -> None:
@@ -556,9 +649,17 @@ def _restore_snapshot(spec: SnapshotSpec) -> None:
     _safe_extract(spec.archive, spec.restore_to)
 
 
-def _clear_snapshot_roots(snapshots: Mapping[str, SnapshotSpec]) -> None:
-    for restore_to in {snapshot.restore_to for snapshot in snapshots.values()}:
-        shutil.rmtree(restore_to, ignore_errors=True)
+def _clear_qualification_roots(
+    validated: ValidatedInputs,
+    platform: str,
+) -> None:
+    roots = {snapshot.restore_to for snapshot in validated.snapshots.values()}
+    # Never derive deletion authority from manifest expectations. The signed
+    # snapshots name their exact restore roots; the only additional mutable
+    # root is the platform's fixed Biyan configuration directory.
+    roots.add(_migration_state_path(platform).parent)
+    for root in sorted(roots, key=lambda value: len(value.parts), reverse=True):
+        shutil.rmtree(root, ignore_errors=True)
 
 
 def _assert_phase_expectations(
@@ -619,15 +720,30 @@ def _assert_migration_state(state_path: Path, scenario: str, phase: str) -> None
         )
 
 
+def _assert_phase_ready(
+    validated: ValidatedInputs,
+    platform: str,
+    scenario: str,
+    phase: str,
+) -> None:
+    _assert_phase_expectations(validated.expectations, scenario, phase)
+    _assert_migration_state(_migration_state_path(platform), scenario, phase)
+
+
 def run_matrix(
     validated: ValidatedInputs,
     platform: str,
     work_dir: Path,
     startup_seconds: int,
+    migration_timeout_seconds: int = 90,
     cases: Sequence[MigrationCase] | None = None,
 ) -> List[dict]:
     selected_cases = tuple(cases) if cases is not None else migration_matrix()
-    executor = PlatformExecutor(platform, startup_seconds)
+    executor = PlatformExecutor(
+        platform,
+        startup_seconds,
+        migration_timeout_seconds,
+    )
     results: List[dict] = []
     try:
         for case in selected_cases:
@@ -635,15 +751,27 @@ def run_matrix(
             shutil.rmtree(case_dir, ignore_errors=True)
             case_dir.mkdir(parents=True, exist_ok=True)
             executor.cleanup_installation()
-            _clear_snapshot_roots(validated.snapshots)
+            _clear_qualification_roots(validated, platform)
             _restore_snapshot(validated.snapshots[case.snapshot])
             started = time.time()
             for phase in case.install_sequence:
                 executable = executor.install(validated.installers[phase], phase, case_dir)
-                executor.startup_probe(executable, case.name, phase)
-                _assert_phase_expectations(validated.expectations, case.name, phase)
-                _assert_migration_state(
-                    _migration_state_path(platform), case.name, phase
+                readiness_check = (
+                    None
+                    if phase == "current"
+                    else partial(
+                        _assert_phase_ready,
+                        validated,
+                        platform,
+                        case.name,
+                        phase,
+                    )
+                )
+                executor.startup_probe(
+                    executable,
+                    case.name,
+                    phase,
+                    readiness_check,
                 )
             results.append(
                 {
@@ -658,7 +786,7 @@ def run_matrix(
             )
     finally:
         executor.cleanup_installation()
-        _clear_snapshot_roots(validated.snapshots)
+        _clear_qualification_roots(validated, platform)
     return results
 
 
@@ -676,6 +804,7 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--report", required=True)
     parser.add_argument("--work-dir", default="")
     parser.add_argument("--startup-seconds", type=int, default=10)
+    parser.add_argument("--migration-timeout-seconds", type=int, default=90)
     parser.add_argument("--validate-only", action="store_true")
     parser.add_argument(
         "--allow-destructive-autoqa",
@@ -689,6 +818,12 @@ def main(argv: Sequence[str] | None = None) -> int:
     args = parse_args(argv)
     if args.startup_seconds <= 0:
         print("--startup-seconds must be greater than zero", file=sys.stderr)
+        return 2
+    if args.migration_timeout_seconds < args.startup_seconds:
+        print(
+            "--migration-timeout-seconds must be at least --startup-seconds",
+            file=sys.stderr,
+        )
         return 2
     installers = {
         phase: Path(value)
@@ -733,6 +868,7 @@ def main(argv: Sequence[str] | None = None) -> int:
                 args.platform,
                 work_dir,
                 args.startup_seconds,
+                args.migration_timeout_seconds,
                 cases,
             )
         report = {

@@ -228,12 +228,25 @@ const LANES = Object.freeze([
     }))
   }),
 ])
-const RESTORE_ROOTS = Object.freeze({
+const BIYAN_CONFIG_ROOTS = Object.freeze({
   windows: '%APPDATA%/Biyan',
   macos: '$HOME/Library/Application Support/Biyan',
   linux: '$HOME/.local/share/Biyan',
 })
-const MARKER_NAME = 'direct-qualification-preserved.txt'
+const LEGACY_DATA_ROOTS = Object.freeze({
+  windows: '%APPDATA%/Mita/data',
+  macos: '$HOME/Library/Application Support/Mita/data',
+  linux: '$HOME/.local/share/Mita/data',
+})
+const BIYAN_DATA_ROOTS = Object.freeze(
+  Object.fromEntries(
+    Object.entries(BIYAN_CONFIG_ROOTS).map(([platform, root]) => [
+      platform,
+      `${root}/data`,
+    ]),
+  ),
+)
+const MARKER_PATH = 'agent-workspaces/direct-qualification-preserved.txt'
 
 function fail(message) {
   throw new Error(message)
@@ -522,6 +535,26 @@ function expectedInstallerDigests(policy, lane) {
   return expected
 }
 
+function expectedRestoreRoot(lane) {
+  return ['0.6.608', '0.6.611', '0.6.633'].includes(lane.sourceVersion)
+    ? LEGACY_DATA_ROOTS[lane.platform]
+    : BIYAN_DATA_ROOTS[lane.platform]
+}
+
+function expectedPhaseExpectations(lane) {
+  const values = [
+    `${BIYAN_CONFIG_ROOTS[lane.platform]}/migration-state.json`,
+    ...(lane.scenario === 'fresh-c'
+      ? []
+      : [`${BIYAN_DATA_ROOTS[lane.platform]}/${MARKER_PATH}`]),
+  ]
+  const phases = [
+    ...(['a', 'b'].includes(lane.sourceRole) ? [lane.sourceRole] : []),
+    'c',
+  ]
+  return Object.fromEntries(phases.map((phase) => [phase, values]))
+}
+
 function validateInputManifest(manifest, snapshotSha256, policy, lane) {
   requireExactKeys(
     manifest,
@@ -563,17 +596,15 @@ function validateInputManifest(manifest, snapshotSha256, policy, lane) {
   if (
     snapshot.archive !== `snapshots/${lane.snapshot}.zip`
     || snapshot.sha256 !== snapshotSha256
-    || snapshot.restore_to !== RESTORE_ROOTS[lane.platform]
+    || snapshot.restore_to !== expectedRestoreRoot(lane)
   ) {
     fail(`${lane.id} snapshot binding is invalid`)
   }
-  const expectations = [
-    `${RESTORE_ROOTS[lane.platform]}/migration-state.json`,
-    ...(lane.scenario === 'fresh-c'
-      ? []
-      : [`${RESTORE_ROOTS[lane.platform]}/${MARKER_NAME}`]),
-  ]
-  sameJson(manifest.expectations, { c: expectations }, `${lane.id} expectations`)
+  sameJson(
+    manifest.expectations,
+    expectedPhaseExpectations(lane),
+    `${lane.id} expectations`,
+  )
 }
 
 export function buildDirectQualificationLaneResult({

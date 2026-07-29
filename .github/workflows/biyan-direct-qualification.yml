@@ -738,6 +738,7 @@ jobs:
               '--report', $report,
               '--work-dir', $work,
               '--startup-seconds', '10',
+              '--migration-timeout-seconds', '90',
               '--allow-destructive-autoqa', 'AUTOQA'
             )
             if ($source) {
@@ -811,6 +812,7 @@ jobs:
               --report "$report"
               --work-dir "$work_dir"
               --startup-seconds 10
+              --migration-timeout-seconds 90
               --allow-destructive-autoqa AUTOQA
             )
             if [ -n "$source" ]; then
