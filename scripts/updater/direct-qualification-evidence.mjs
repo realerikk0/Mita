@@ -536,7 +536,7 @@ function expectedInstallerDigests(policy, lane) {
 }
 
 function expectedRestoreRoot(lane) {
-  return ['0.6.608', '0.6.611', '0.6.633'].includes(lane.sourceVersion)
+  return ['0.6.608', '0.6.611'].includes(lane.sourceVersion)
     ? LEGACY_DATA_ROOTS[lane.platform]
     : BIYAN_DATA_ROOTS[lane.platform]
 }

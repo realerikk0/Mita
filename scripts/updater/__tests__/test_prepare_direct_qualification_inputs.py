@@ -2,7 +2,6 @@ import hashlib
 import importlib.util
 import json
 import os
-import shutil
 import tempfile
 import unittest
 import zipfile
@@ -224,7 +223,7 @@ class PrepareDirectQualificationInputsTests(unittest.TestCase):
             self.assertEqual(set(manifest["installers"]), {"current", "c"})
             self.assertEqual(
                 manifest["snapshots"]["current"]["restore_to"],
-                "%APPDATA%/Mita/data",
+                "%APPDATA%/Biyan/data",
             )
             self.assertEqual(
                 manifest["expectations"],
@@ -251,20 +250,8 @@ class PrepareDirectQualificationInputsTests(unittest.TestCase):
                     json.loads(archive.read("mcp_config.json")),
                     {"mcpServers": {}},
                 )
-                legacy_data = root / "Mita/data"
                 canonical_data = root / "Biyan/data"
-                archive.extractall(legacy_data)
-            # Mirror the product's fail-closed USER_DATA_DIRS/USER_DATA_FILES
-            # copy contract: arbitrary root files are intentionally excluded.
-            shutil.copytree(
-                legacy_data / "agent-workspaces",
-                canonical_data / "agent-workspaces",
-            )
-            canonical_data.mkdir(parents=True, exist_ok=True)
-            shutil.copy2(
-                legacy_data / "mcp_config.json",
-                canonical_data / "mcp_config.json",
-            )
+                archive.extractall(canonical_data)
             self.assertEqual(
                 (
                     canonical_data

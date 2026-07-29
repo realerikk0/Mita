@@ -80,9 +80,9 @@
       "scope": "content"
     },
     {
-      "expectedMatches": 66,
+      "expectedMatches": 68,
       "id": "direct-c-release-qualification-anchors",
-      "matchesSha256": "76b10fdd3e190425dbaf4c10fbf622f42c33efafd7be74c0eb94787ba1971034",
+      "matchesSha256": "d2a76a01616f99fe3a6bd77351eda02ce4d5d9c63657b1e4e2b78781f418403f",
       "pathRegex": "^(?:\\.github/workflows/biyan-direct-qualification\\.yml|scripts/updater/__tests__/direct-c-transition-policy\\.test\\.mjs|scripts/updater/__tests__/direct-qualification\\.test\\.mjs|scripts/updater/__tests__/fixtures/v0\\.6\\.633-latest\\.json|scripts/updater/__tests__/test_prepare_direct_qualification_inputs\\.py|scripts/updater/direct-qualification-evidence\\.mjs|scripts/updater/direct-qualification-policy\\.json|scripts/updater/prepare-direct-qualification-inputs\\.py)$",
       "pattern": "(?:static\\.mitapp\\.cn|catalog\\.jan\\.ai|apps(?:-nightly)?\\.jan\\.ai|janhq|latest[_-]jan[_-]model|model[-_]catalog|(?<![a-z0-9])(?:jan|mita|silence)(?![a-z0-9]))",
       "reason": "Exact one-shot DIRECT_C qualification fixtures retain reviewed legacy updater hosts and identities only to prove upgrades from every supported installed version.",

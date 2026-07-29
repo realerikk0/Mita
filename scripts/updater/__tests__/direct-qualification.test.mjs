@@ -95,9 +95,7 @@ function inputManifest(policy, lane, snapshotSha256) {
     linux: '$HOME/.local/share/Mita/data',
   }
   const biyanDataRoot = `${configRoots[lane.platform]}/data`
-  const restoreRoot = ['0.6.608', '0.6.611', '0.6.633'].includes(
-    lane.sourceVersion,
-  )
+  const restoreRoot = ['0.6.608', '0.6.611'].includes(lane.sourceVersion)
     ? legacyDataRoots[lane.platform]
     : biyanDataRoot
   const qualificationMode =
@@ -297,6 +295,49 @@ test('aggregation requires exactly the reviewed 16 GitHub-native lanes', () => {
       }),
     /exactly one GitHub artifact/,
   )
+})
+
+test('legacy and current lanes bind their exact historical data roots', () => {
+  const policy = pinnedPolicy()
+  for (const laneId of [
+    'legacy-manual-to-c-windows',
+    'legacy-auto-to-c-windows',
+  ]) {
+    const lane = policy.lanes.find((entry) => entry.id === laneId)
+    const manifest = inputManifest(policy, lane, 'd'.repeat(64))
+    assert.equal(
+      manifest.snapshots.current.restore_to,
+      '%APPDATA%/Mita/data',
+    )
+  }
+
+  const lane = policy.lanes.find(
+    (entry) => entry.id === 'current-to-c-windows',
+  )
+  const snapshotSha256 = 'd'.repeat(64)
+  const manifest = inputManifest(policy, lane, snapshotSha256)
+  assert.equal(
+    manifest.snapshots.current.restore_to,
+    '%APPDATA%/Biyan/data',
+  )
+  const build = () =>
+    buildDirectQualificationLaneResult({
+      policy,
+      laneId: lane.id,
+      migrationReport: migrationReport(lane),
+      migrationReportSha256: 'e'.repeat(64),
+      inputManifest: manifest,
+      inputManifestSha256: 'f'.repeat(64),
+      snapshotSha256,
+      runId: 777,
+      runAttempt: 1,
+      harnessSha256,
+      startedAt: '2026-07-29T00:00:00Z',
+      completedAt: '2026-07-29T00:01:00Z',
+    })
+  assert.doesNotThrow(build)
+  manifest.snapshots.current.restore_to = '%APPDATA%/Mita/data'
+  assert.throws(build, /snapshot binding/)
 })
 
 test('A and B lanes require source-aware data roots and both phase expectations', () => {
