@@ -10,13 +10,18 @@ The supported release is one cumulative, forward-only terminal update:
 
 | Release | App version | Migration phase | Data schema | Purpose |
 | --- | --- | --- | --- | --- |
-| Complete | 0.6.646 | C | 3 | Deliver the full Biyan source, branding, packaging, and migration closure in one update |
+| Complete | 0.6.647 | C | 3 | Deliver the full Biyan source, branding, packaging, and migration closure in one update |
 
 The former `0.6.643/A/1` → `0.6.644/B/2` → `0.6.645/C/3` train is
 preserved as immutable audit and compatibility history, but it is not an
-automatic rollout sequence. The `v0.6.646` tag is bound to the exact terminal
-product source commit; later control-plane commits may qualify or distribute
-that source but may not change the tagged product tree.
+automatic rollout sequence. Do not recut A/B/C. The active `v0.6.647` tag is
+bound to exact terminal product source commit
+`ef963bc606366220db4589352afb25aa7d1785bf`; later control-plane commits may
+qualify or distribute that source but may not change the tagged product tree.
+
+The `v0.6.646` tag, Draft release, uploaded assets, and direct-qualification
+failure remain immutable blocked-before-publication evidence. That candidate
+was never published or promoted and must not be retagged, reused, or deleted.
 
 Every later release carries all earlier migration steps. Sources remain
 read-only, conversion happens in staging, integrity checks run before the
@@ -53,15 +58,15 @@ the accepted source.
   must never surface as the product name or re-enable retired behavior.
 - The updater installs the exact signed update object that was checked.
 - Direct-C promotion stays fail-closed until a control-plane pull request pins
-  the accepted `0.6.646` source, manifest, platform assets, and the exact
+  the accepted `0.6.647` source, manifest, platform assets, and the exact
   published compatibility sources.
 - Promotion is one 100% transaction gated by signed-candidate verification,
   GitHub-native upgrade evidence, a healthy report, compare-and-swap, and a
   kill switch. It does not create intermediate A or B cohorts.
 - The direct qualification matrix verifies Windows and macOS
-  `0.6.633 → 0.6.646`, Linux fresh `0.6.646` under the exact no-current-Linux
+  `0.6.633 → 0.6.647`, Linux fresh `0.6.647` under the exact no-current-Linux
   exception, and all three platforms from public `0.6.643`, `0.6.644`, and
-  `0.6.645` to `0.6.646`.
+  `0.6.645` to `0.6.647`.
 - Kill Switch and Health Gate pause the Router and restore both legacy updater
   origins from the exact persisted pre-update backup in one journaled
   transaction. Promotion may resume only after the active complete

@@ -24,16 +24,16 @@ const WORKFLOW = Object.freeze({
   ],
 })
 const CANDIDATE_STATIC = Object.freeze({
-  version: '0.6.646',
-  tag: 'v0.6.646',
-  sourceCommit: '581ebf6b19ef407a9645d0b318792f1012f8f75b',
+  version: '0.6.647',
+  tag: 'v0.6.647',
+  sourceCommit: 'ef963bc606366220db4589352afb25aa7d1785bf',
   migrationPhase: 'C',
   dataSchema: 3,
-  manifestKey: 'biyan/updater/releases/v0.6.646/latest.json',
+  manifestKey: 'biyan/updater/releases/v0.6.647/latest.json',
   assets: {
-    windows: { name: 'Biyan_0.6.646_x64-setup.exe' },
-    macos: { name: 'Biyan_0.6.646_universal.dmg' },
-    linux: { name: 'Biyan_0.6.646_amd64.AppImage' },
+    windows: { name: 'Biyan_0.6.647_x64-setup.exe' },
+    macos: { name: 'Biyan_0.6.647_universal.dmg' },
+    linux: { name: 'Biyan_0.6.647_amd64.AppImage' },
   },
 })
 const SOURCES = Object.freeze({

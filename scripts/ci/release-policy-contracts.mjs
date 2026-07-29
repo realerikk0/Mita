@@ -60,7 +60,7 @@ const TRUSTED_RECOVERY_JOB_ORDER = [
 ]
 
 const TRUSTED_CANDIDATE_WORKFLOW_ALLOWLIST = new Set([
-  '22530342c62be3e2372476d04a4e4e63a53356740e8122bab2794ac638f3ff85',
+  '323a622911f461315aa44b3ee046f672591ea4a0244177930333e58c35f628b4',
 ])
 
 const TRUSTED_RECOVERY_WORKFLOW_ALLOWLIST = new Set([
@@ -80,7 +80,7 @@ const TRUSTED_RELEASE_DISTRIBUTION_WORKFLOW_SHA256 =
   'c780b58de80c07962f42c43fc658b74b2f7c2734df01fd356cefb80f5480ca76'
 
 const TRUSTED_DIRECT_QUALIFICATION_WORKFLOW_SHA256 =
-  '3479f368bf0817f4832bc36ed36b1cfddf1c381636e90edec52a3bba3f34dd17'
+  '8b361ad1a7ebc9eacfa655137708a00f26261363ffec35db45b1f07ae217d197'
 
 export const TRUSTED_SENSITIVE_UPDATER_WORKFLOW_CONTRACTS = Object.freeze({
   '.github/workflows/biyan-a-canary.yml': Object.freeze({
@@ -580,11 +580,17 @@ export function validateReleaseTrainPolicy(policy) {
   }
   exactKeys(
     policy,
-    ['schema', 'activeTrain', 'activeTerminalRelease', 'trains'],
+    [
+      'schema',
+      'activeTrain',
+      'supersededTerminalReleases',
+      'activeTerminalRelease',
+      'trains',
+    ],
     'release train policy'
   )
-  if (policy?.schema !== 2) {
-    failures.push('release train policy must use schema 2')
+  if (policy?.schema !== 3) {
+    failures.push('release train policy must use schema 3')
   }
   if (!Array.isArray(policy?.trains) || policy.trains.length === 0) {
     failures.push('release train policy must declare at least one train')
@@ -593,6 +599,17 @@ export function validateReleaseTrainPolicy(policy) {
 
   const terminal = policy.activeTerminalRelease
   const terminalMode = terminal !== null && terminal !== undefined
+  const supersededTerminals = policy.supersededTerminalReleases
+  if (!Array.isArray(supersededTerminals)) {
+    failures.push('release train policy must declare superseded terminal releases')
+  } else if (
+    (terminalMode && supersededTerminals.length !== 1) ||
+    (!terminalMode && supersededTerminals.length !== 0)
+  ) {
+    failures.push(
+      'release train policy must preserve exactly one superseded terminal only in terminal mode'
+    )
+  }
   const active = policy.trains.filter((train) => train?.status === 'active')
   if (terminalMode) {
     if (active.length !== 0 || policy.activeTrain !== null) {
@@ -711,6 +728,61 @@ export function validateReleaseTrainPolicy(policy) {
     }
   }
 
+  let preservedTerminalVersion = null
+  if (Array.isArray(supersededTerminals)) {
+    for (const [index, preserved] of supersededTerminals.entries()) {
+      exactKeys(
+        preserved,
+        [
+          'tag',
+          'version',
+          'migrationPhase',
+          'dataSchema',
+          'sourceCommit',
+          'status',
+        ],
+        `superseded terminal release ${index}`
+      )
+      if (
+        index !== 0 ||
+        preserved?.tag !== 'v0.6.646' ||
+        preserved?.version !== '0.6.646' ||
+        preserved?.migrationPhase !== 'C' ||
+        preserved?.dataSchema !== 3 ||
+        preserved?.sourceCommit !==
+          '581ebf6b19ef407a9645d0b318792f1012f8f75b' ||
+        preserved?.status !== 'blocked-before-publication' ||
+        preserved?.tag !== `v${preserved?.version}`
+      ) {
+        failures.push(
+          'superseded terminal history must exactly preserve blocked v0.6.646/C/3'
+        )
+      }
+      if (versions.has(preserved?.version)) {
+        failures.push(`duplicate release version: ${preserved.version}`)
+      }
+      versions.add(preserved?.version)
+      const match =
+        typeof preserved?.version === 'string'
+          ? /^(\d+)\.(\d+)\.(\d+)$/.exec(preserved.version)
+          : null
+      if (match) preservedTerminalVersion = match.slice(1).map(Number)
+    }
+  }
+
+  if (
+    terminalMode &&
+    previousC &&
+    (!preservedTerminalVersion ||
+      previousC[0] !== preservedTerminalVersion[0] ||
+      previousC[1] !== preservedTerminalVersion[1] ||
+      previousC[2] + 1 !== preservedTerminalVersion[2])
+  ) {
+    failures.push(
+      'superseded terminal v0.6.646 must immediately follow the final preserved train C 0.6.645'
+    )
+  }
+
   if (terminal !== null && terminal !== undefined) {
     exactKeys(
       terminal,
@@ -724,29 +796,29 @@ export function validateReleaseTrainPolicy(policy) {
       'active terminal release'
     )
     if (
-      terminal?.tag !== 'v0.6.646' ||
-      terminal?.version !== '0.6.646' ||
+      terminal?.tag !== 'v0.6.647' ||
+      terminal?.version !== '0.6.647' ||
       terminal?.migrationPhase !== 'C' ||
       terminal?.dataSchema !== 3 ||
       terminal?.tag !== `v${terminal?.version}` ||
       !/^[0-9a-f]{40}$/.test(terminal?.sourceCommit ?? '')
     ) {
       failures.push(
-        'active terminal release must exactly bind v0.6.646/C/3 to one lowercase 40-hex source commit'
+        'active terminal release must exactly bind v0.6.647/C/3 to one lowercase 40-hex source commit'
       )
     }
     if (versions.has(terminal?.version)) {
       failures.push(`duplicate release version: ${terminal.version}`)
     }
     if (
-      previousC &&
-      (previousC[0] !== 0 ||
-        previousC[1] !== 6 ||
-        previousC[2] !== 645 ||
-        terminal?.version !== '0.6.646')
+      preservedTerminalVersion &&
+      (preservedTerminalVersion[0] !== 0 ||
+        preservedTerminalVersion[1] !== 6 ||
+        preservedTerminalVersion[2] !== 646 ||
+        terminal?.version !== '0.6.647')
     ) {
       failures.push(
-        'active terminal release must immediately follow the final preserved train C 0.6.645'
+        'active terminal release v0.6.647 must immediately follow superseded terminal v0.6.646'
       )
     }
   }
@@ -1154,7 +1226,7 @@ export function validateCandidateWorkflow(
       ) ||
       !tagCut.includes("--jq '.content'") ||
       !tagCut.includes('| base64 --decode') ||
-      !tagCut.includes('.schema == 2') ||
+      !tagCut.includes('.schema == 3') ||
       !tagCut.includes('.activeTrain == null') ||
       !/\(\[\.trains\[\]\s*\|\s*select\(\.status == "active"\)\]\s*\|\s*length\)\s*== 0/.test(
         tagCut
@@ -1165,9 +1237,21 @@ export function validateCandidateWorkflow(
       !tagCut.includes(
         '.trains[-1].status == "superseded-by-terminal"'
       ) ||
+      !tagCut.includes(
+        '(.supersededTerminalReleases | length) == 1'
+      ) ||
+      !tagCut.includes(
+        '.supersededTerminalReleases[0].tag == "v0.6.646"'
+      ) ||
+      !tagCut.includes(
+        '.supersededTerminalReleases[0].sourceCommit == "581ebf6b19ef407a9645d0b318792f1012f8f75b"'
+      ) ||
+      !tagCut.includes(
+        '.supersededTerminalReleases[0].status == "blocked-before-publication"'
+      ) ||
       !tagCut.includes('.activeTerminalRelease.tag == $tag') ||
-      !tagCut.includes('.activeTerminalRelease.tag == "v0.6.646"') ||
-      !tagCut.includes('.activeTerminalRelease.version == "0.6.646"') ||
+      !tagCut.includes('.activeTerminalRelease.tag == "v0.6.647"') ||
+      !tagCut.includes('.activeTerminalRelease.version == "0.6.647"') ||
       !tagCut.includes('.activeTerminalRelease.migrationPhase == "C"') ||
       !tagCut.includes('.activeTerminalRelease.dataSchema == 3') ||
       !tagCut.includes('test("^[0-9a-f]{40}$")') ||
@@ -1180,7 +1264,7 @@ export function validateCandidateWorkflow(
       /\bv0\.6\.(?:643|644|645)\b/.test(tagCut)
     ) {
       failures.push(
-        'tag-cut must resolve only the exact v0.6.646/C/3 terminal source binding from protected live-main policy'
+        'tag-cut must preserve blocked v0.6.646 and resolve only the exact v0.6.647/C/3 terminal source binding from protected live-main policy'
       )
     }
     if (

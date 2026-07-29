@@ -81,13 +81,14 @@ function releaseTrainPolicy(terminalSourceCommit = null) {
     terminalSourceCommit === null
       ? null
       : {
-          tag: 'v0.6.646',
-          version: '0.6.646',
+          tag: 'v0.6.647',
+          version: '0.6.647',
           migrationPhase: 'C',
           dataSchema: 3,
           sourceCommit: terminalSourceCommit,
         }
   if (terminalSourceCommit === null) {
+    policy.supersededTerminalReleases = []
     policy.activeTrain = 'closure-20260724'
     policy.trains.at(-1).status = 'active'
   }
@@ -1722,9 +1723,9 @@ test('candidate provenance preserves the historical active A/B/C identities befo
   )
 })
 
-test('candidate provenance switches fail-closed to exact v0.6.646 terminal tag and source', () => {
+test('candidate provenance switches fail-closed to exact v0.6.647 terminal tag and source', () => {
   const fixture = candidateFixture({
-    version: '0.6.646',
+    version: '0.6.647',
     migrationPhase: 'C',
     dataSchema: 3,
   })
@@ -1743,7 +1744,7 @@ test('candidate provenance switches fail-closed to exact v0.6.646 terminal tag a
   )
 
   const wrongPin = candidateFixture({
-    version: '0.6.646',
+    version: '0.6.647',
     migrationPhase: 'C',
     dataSchema: 3,
   })
