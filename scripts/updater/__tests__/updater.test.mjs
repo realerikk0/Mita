@@ -78,9 +78,15 @@ function promote(options, evidenceOverrides = {}) {
   })
 }
 
-function signedRequest(pathname, currentVersion = '0.6.634', session = 'stable-install-id-1234') {
-  const timestamp = Math.floor(Date.now() / 1000).toString()
-  const nonce = randomBytes(32).toString('hex')
+function signedRequest(
+  pathname,
+  currentVersion = '0.6.634',
+  session = 'stable-install-id-1234',
+  overrides = {},
+) {
+  const timestamp = overrides.timestamp
+    ?? Math.floor(Date.now() / 1000).toString()
+  const nonce = overrides.nonce ?? randomBytes(32).toString('hex')
   const token = createHmac('sha256', signingKey)
     .update(`${session}:${timestamp}:${nonce}`)
     .digest('hex')
@@ -590,29 +596,39 @@ test('worker rejects unsigned requests before reading updater state', async () =
 
 test('worker rejects malformed signed requests before reading updater state', async () => {
   const cases = [
-    ['bad HMAC', (request) => request.headers.set(
-      'X-Request-Token',
-      '0'.repeat(64),
+    ['bad HMAC', () => {
+      const request = signedRequest(
+        '/biyan/v1/stable/windows/x86_64/0.6.633',
+        '0.6.633',
+      )
+      request.headers.set('X-Request-Token', '0'.repeat(64))
+      return request
+    }],
+    ['stale timestamp', () => signedRequest(
+      '/biyan/v1/stable/windows/x86_64/0.6.633',
+      '0.6.633',
+      'stable-install-id-1234',
+      { timestamp: String(Math.floor(Date.now() / 1000) - 301) },
     )],
-    ['stale timestamp', (request) => request.headers.set(
-      'X-Request-Time',
-      String(Math.floor(Date.now() / 1000) - 301),
+    ['bad nonce', () => signedRequest(
+      '/biyan/v1/stable/windows/x86_64/0.6.633',
+      '0.6.633',
+      'stable-install-id-1234',
+      { nonce: 'invalid' },
     )],
-    ['bad nonce', (request) => request.headers.set('X-Request-Id', 'invalid')],
-    ['bad session', (request) => request.headers.set('X-Client-Session', 'short')],
-    ['version mismatch', (request) => request.headers.set(
-      'X-Client-Version',
+    ['bad session', () => signedRequest(
+      '/biyan/v1/stable/windows/x86_64/0.6.633',
+      '0.6.633',
+      'short',
+    )],
+    ['version mismatch', () => signedRequest(
+      '/biyan/v1/stable/windows/x86_64/0.6.633',
       '0.6.634',
     )],
   ]
-  for (const [name, mutate] of cases) {
+  for (const [name, buildRequest] of cases) {
     let bucketReads = 0
-    const request = signedRequest(
-      '/biyan/v1/stable/windows/x86_64/0.6.633',
-      '0.6.633',
-    )
-    mutate(request)
-    const response = await handleRequest(request, {
+    const response = await handleRequest(buildRequest(), {
       BIYAN_SIGNING_KEY: signingKey,
       UPDATER_BUCKET: {
         async get() {
