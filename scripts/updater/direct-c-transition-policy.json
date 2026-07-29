@@ -34,7 +34,21 @@
       "manifestSha256": "83c65a2d55615ceb98617ae0025c45f55273c27450fd79cc60da3ff9e66ceeab"
     }
   },
-  "approvedNext": null,
+  "approvedNext": {
+    "version": "0.6.646",
+    "tag": "v0.6.646",
+    "sourceCommit": "581ebf6b19ef407a9645d0b318792f1012f8f75b",
+    "migrationPhase": "C",
+    "dataSchema": 3,
+    "manifestKey": "biyan/updater/releases/v0.6.646/latest.json",
+    "manifestSha256": "1a62d4b4b6321e134bac20a8bd7f63230dc96fd00413c67b92d0652bf1d48b09",
+    "requiredPlatforms": [
+      "darwin-aarch64",
+      "darwin-x86_64",
+      "windows-x86_64",
+      "linux-x86_64"
+    ]
+  },
   "requiredPlatforms": [
     "windows",
     "macos",
