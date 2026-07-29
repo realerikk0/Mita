@@ -216,26 +216,33 @@ function aggregateFixture() {
   return { root, policy, artifacts }
 }
 
-test('repository policy awaits the reviewed candidate pin and remains fail-closed', () => {
-  assert.equal(trackedPolicy.state, 'awaiting-candidate-pin')
-  assert.equal(trackedPolicy.candidate.manifestSha256, null)
-  for (const platform of ['windows', 'macos', 'linux']) {
-    assert.equal(trackedPolicy.candidate.assets[platform].sha256, null)
-  }
-  assert.throws(
-    () =>
-      validateDirectQualificationPolicy(trackedPolicy, {
-        requirePinned: true,
-      }),
-    /policy\.state=candidate-pinned/,
+test('repository policy pins the reviewed candidate while an awaiting policy remains fail-closed', () => {
+  assert.equal(trackedPolicy.state, 'candidate-pinned')
+  assert.doesNotThrow(() =>
+    validateDirectQualificationPolicy(trackedPolicy, {
+      requirePinned: true,
+    }),
   )
   const result = spawnSync(
     process.execPath,
     [script, 'validate-policy', '--policy', policyFile],
     { encoding: 'utf8' },
   )
-  assert.notEqual(result.status, 0)
-  assert.match(result.stderr, /policy\.state=candidate-pinned/)
+  assert.equal(result.status, 0, result.stderr)
+
+  const awaiting = clone(trackedPolicy)
+  awaiting.state = 'awaiting-candidate-pin'
+  awaiting.candidate.manifestSha256 = null
+  for (const platform of ['windows', 'macos', 'linux']) {
+    awaiting.candidate.assets[platform].sha256 = null
+  }
+  assert.throws(
+    () =>
+      validateDirectQualificationPolicy(awaiting, {
+        requirePinned: true,
+      }),
+    /policy\.state=candidate-pinned/,
+  )
 })
 
 test('candidate pin must be complete and bound to the exact product source commit', () => {
