@@ -25,7 +25,7 @@ import zipfile
 from dataclasses import dataclass
 from functools import partial
 from pathlib import Path
-from typing import Callable, Dict, Iterable, List, Mapping, Sequence, Tuple
+from typing import Any, Callable, Dict, Iterable, List, Mapping, Sequence, Tuple
 
 
 PHASES: Tuple[str, ...] = ("current", "a", "b", "c")
@@ -49,17 +49,48 @@ class SnapshotSpec:
 
 
 @dataclass(frozen=True)
+class SourceReadinessSpec:
+    phase: str
+    version: str
+    settings: Path
+    data_root: Path
+    store: Path
+    mcp_config: Path
+    marker: Path
+    required_store: Mapping[str, object]
+
+
+@dataclass(frozen=True)
 class ValidatedInputs:
     installers: Mapping[str, Path]
     snapshots: Mapping[str, SnapshotSpec]
     expectations: Mapping[str, Tuple[Path, ...]]
+    source_readiness: SourceReadinessSpec | None
+
+
+class MigrationRunError(RuntimeError):
+    """Preserve bounded diagnostics captured before destructive cleanup."""
+
+    def __init__(self, message: str, diagnostics: Mapping[str, object]) -> None:
+        super().__init__(message)
+        self.diagnostics = dict(diagnostics)
+
+
+class ReadinessFailed(RuntimeError):
+    """A terminal readiness state which must not be retried."""
+
+
+class ReadinessPending(RuntimeError):
+    """A transient readiness state which may be retried until the deadline."""
 
 
 def migration_matrix() -> Tuple[MigrationCase, ...]:
     return (
         MigrationCase("current-to-a", "current", ("current", "a"), "a"),
         MigrationCase("a-to-b", "a", ("a", "b"), "b"),
-        MigrationCase("current-to-a-to-b-to-c", "current", ("current", "a", "b", "c"), "c"),
+        MigrationCase(
+            "current-to-a-to-b-to-c", "current", ("current", "a", "b", "c"), "c"
+        ),
         MigrationCase("current-to-b", "current", ("current", "b"), "b"),
         MigrationCase("legacy-manual-to-c", "current", ("current", "c"), "c"),
         MigrationCase("legacy-auto-to-c", "current", ("current", "c"), "c"),
@@ -75,7 +106,9 @@ def migration_matrix() -> Tuple[MigrationCase, ...]:
     )
 
 
-def select_migration_cases(scenarios: Sequence[str] | None = None) -> Tuple[MigrationCase, ...]:
+def select_migration_cases(
+    scenarios: Sequence[str] | None = None,
+) -> Tuple[MigrationCase, ...]:
     matrix = migration_matrix()
     if not scenarios:
         return matrix
@@ -119,9 +152,13 @@ def _require_safe_restore_root(path: Path) -> None:
         ),
     }
     if not any(path == root or root in path.parents for root in allowed_roots):
-        raise ValueError(f"snapshot restore path is outside the AutoQA user profile: {path}")
+        raise ValueError(
+            f"snapshot restore path is outside the AutoQA user profile: {path}"
+        )
     if path in allowed_roots:
-        raise ValueError(f"snapshot restore path may not be an entire profile root: {path}")
+        raise ValueError(
+            f"snapshot restore path may not be an entire profile root: {path}"
+        )
 
 
 def _require_file(path: Path, label: str) -> None:
@@ -130,11 +167,126 @@ def _require_file(path: Path, label: str) -> None:
 
 
 def _require_digest(path: Path, expected: str, label: str) -> None:
-    if len(expected) != 64 or any(char not in "0123456789abcdefABCDEF" for char in expected):
+    if len(expected) != 64 or any(
+        char not in "0123456789abcdefABCDEF" for char in expected
+    ):
         raise ValueError(f"invalid SHA-256 for {label}")
     actual = _sha256(path)
     if actual != expected.lower():
-        raise ValueError(f"SHA-256 mismatch for {label}: expected {expected}, got {actual}")
+        raise ValueError(
+            f"SHA-256 mismatch for {label}: expected {expected}, got {actual}"
+        )
+
+
+def _require_exact_keys(
+    value: Mapping[str, object],
+    expected: Iterable[str],
+    label: str,
+) -> None:
+    actual = set(value)
+    exact = set(expected)
+    if actual != exact:
+        raise ValueError(
+            f"{label} keys must be exact: expected {sorted(exact)}, got {sorted(actual)}"
+        )
+
+
+def _validate_source_readiness(
+    value: object,
+    manifest: Mapping[str, object],
+    platform: str,
+    selected_cases: Sequence[MigrationCase],
+    snapshots: Mapping[str, SnapshotSpec],
+) -> SourceReadinessSpec | None:
+    exact_current_windows = (
+        platform == "windows"
+        and manifest.get("scenario") == "current-to-c"
+        and [case.name for case in selected_cases] == ["current-to-c"]
+    )
+    if value is None:
+        if exact_current_windows:
+            raise ValueError(
+                "current-to-c-windows requires the exact v0.6.633 sourceReadiness contract"
+            )
+        return None
+    if not isinstance(value, dict):
+        raise ValueError("snapshot manifest sourceReadiness must be an object or null")
+    _require_exact_keys(
+        value,
+        (
+            "phase",
+            "version",
+            "settings",
+            "dataRoot",
+            "store",
+            "mcpConfig",
+            "marker",
+            "requiredStore",
+        ),
+        "sourceReadiness",
+    )
+    required_store = value.get("requiredStore")
+    if not isinstance(required_store, dict):
+        raise ValueError("sourceReadiness.requiredStore must be an object")
+    _require_exact_keys(
+        required_store,
+        ("version", "mcp_version", "windows_biyan_migrated"),
+        "sourceReadiness.requiredStore",
+    )
+
+    expected_raw = {
+        "phase": "current",
+        "version": "0.6.633",
+        "settings": "%APPDATA%/Mita/settings.json",
+        "dataRoot": "%APPDATA%/Biyan/data",
+        "store": "%APPDATA%/Biyan/data/store.json",
+        "mcpConfig": "%APPDATA%/Biyan/data/mcp_config.json",
+        "marker": (
+            "%APPDATA%/Biyan/data/agent-workspaces/direct-qualification-preserved.txt"
+        ),
+        "requiredStore": {
+            "version": "0.6.633",
+            "mcp_version": 5,
+            "windows_biyan_migrated": True,
+        },
+    }
+    exact_store = expected_raw["requiredStore"]
+    exact_store_types = all(
+        type(required_store.get(key)) is type(expected)
+        and required_store.get(key) == expected
+        for key, expected in exact_store.items()
+    )
+    if not exact_current_windows or value != expected_raw or not exact_store_types:
+        raise ValueError(
+            "sourceReadiness is allowed only for the exact "
+            "current-to-c-windows v0.6.633 contract"
+        )
+
+    paths = {
+        name: _expand_path(str(value[name]))
+        for name in ("settings", "dataRoot", "store", "mcpConfig", "marker")
+    }
+    for path in paths.values():
+        _require_safe_restore_root(path)
+    current_snapshot = snapshots.get("current")
+    if current_snapshot is None or paths["dataRoot"] != current_snapshot.restore_to:
+        raise ValueError(
+            "sourceReadiness.dataRoot must equal the current snapshot restore root"
+        )
+    for name in ("store", "mcpConfig", "marker"):
+        if paths["dataRoot"] not in paths[name].parents:
+            raise ValueError(f"sourceReadiness.{name} must remain inside dataRoot")
+
+    return SourceReadinessSpec(
+        phase="current",
+        version="0.6.633",
+        settings=paths["settings"],
+        data_root=paths["dataRoot"],
+        store=paths["store"],
+        mcp_config=paths["mcpConfig"],
+        marker=paths["marker"],
+        required_store=dict(required_store),
+    )
 
 
 def validate_inputs(
@@ -190,7 +342,9 @@ def validate_inputs(
     for name in required_snapshots:
         entry = snapshot_manifest.get(name)
         if not isinstance(entry, dict):
-            raise FileNotFoundError(f"snapshot manifest is missing required snapshot: {name}")
+            raise FileNotFoundError(
+                f"snapshot manifest is missing required snapshot: {name}"
+            )
         archive_value = entry.get("archive")
         restore_value = entry.get("restore_to")
         if not isinstance(archive_value, str) or not archive_value:
@@ -200,9 +354,13 @@ def validate_inputs(
         manifest_root = manifest_path.parent.resolve()
         archive = (manifest_root / archive_value).resolve()
         if manifest_root != archive and manifest_root not in archive.parents:
-            raise ValueError(f"snapshot {name} archive escapes the signed bundle: {archive_value}")
+            raise ValueError(
+                f"snapshot {name} archive escapes the signed bundle: {archive_value}"
+            )
         _require_file(archive, f"{name} sanitized snapshot")
-        _require_digest(archive, str(entry.get("sha256", "")), f"{name} sanitized snapshot")
+        _require_digest(
+            archive, str(entry.get("sha256", "")), f"{name} sanitized snapshot"
+        )
         restore_to = _expand_path(restore_value)
         _require_safe_restore_root(restore_to)
         snapshots[name] = SnapshotSpec(name, archive, str(entry["sha256"]), restore_to)
@@ -211,11 +369,19 @@ def validate_inputs(
     if not isinstance(expectation_manifest, dict):
         raise ValueError("snapshot manifest is missing post-migration expectations")
     expectations: Dict[str, Tuple[Path, ...]] = {}
-    required_expectations = tuple(phase for phase in ("a", "b", "c") if phase in required_phases)
+    required_expectations = tuple(
+        phase for phase in ("a", "b", "c") if phase in required_phases
+    )
     for phase in required_expectations:
         values = expectation_manifest.get(phase)
-        if not isinstance(values, list) or not values or not all(isinstance(item, str) for item in values):
-            raise ValueError(f"snapshot manifest must define non-empty expectations.{phase}")
+        if (
+            not isinstance(values, list)
+            or not values
+            or not all(isinstance(item, str) for item in values)
+        ):
+            raise ValueError(
+                f"snapshot manifest must define non-empty expectations.{phase}"
+            )
         expanded = tuple(_expand_path(item) for item in values)
         for path in expanded:
             _require_safe_restore_root(path)
@@ -225,12 +391,28 @@ def validate_inputs(
     # unvalidated installer or snapshot key.
     for case in selected_cases:
         if case.snapshot not in snapshots:
-            raise FileNotFoundError(f"missing snapshot for scenario {case.name}: {case.snapshot}")
+            raise FileNotFoundError(
+                f"missing snapshot for scenario {case.name}: {case.snapshot}"
+            )
         for phase in case.install_sequence:
             if phase not in validated_installers:
-                raise FileNotFoundError(f"missing installer for scenario {case.name}: {phase}")
+                raise FileNotFoundError(
+                    f"missing installer for scenario {case.name}: {phase}"
+                )
 
-    return ValidatedInputs(validated_installers, snapshots, expectations)
+    source_readiness = _validate_source_readiness(
+        manifest.get("sourceReadiness"),
+        manifest,
+        platform,
+        selected_cases,
+        snapshots,
+    )
+    return ValidatedInputs(
+        validated_installers,
+        snapshots,
+        expectations,
+        source_readiness,
+    )
 
 
 def _safe_extract(archive: Path, destination: Path) -> None:
@@ -240,7 +422,10 @@ def _safe_extract(archive: Path, destination: Path) -> None:
     def ensure_safe(names: Iterable[str]) -> None:
         for name in names:
             candidate = (destination_root / name).resolve()
-            if destination_root != candidate and destination_root not in candidate.parents:
+            if (
+                destination_root != candidate
+                and destination_root not in candidate.parents
+            ):
                 raise ValueError(f"snapshot archive contains an unsafe path: {name}")
 
     if zipfile.is_zipfile(archive):
@@ -298,7 +483,9 @@ def _windows_install_diagnostics(install_root: Path) -> dict:
                         }
                     )
                 except OSError as error:
-                    entries.append({"path": str(entry), "error": error.__class__.__name__})
+                    entries.append(
+                        {"path": str(entry), "error": error.__class__.__name__}
+                    )
         snapshots.append(
             {
                 "root": str(root),
@@ -357,6 +544,60 @@ $defender = Get-MpComputerStatus |
     return {"schema": 1, "roots": snapshots, "system": system}
 
 
+def _windows_product_processes(install_root: Path) -> List[dict]:
+    """Return product processes or executables rooted in this qualification install."""
+
+    if sys.platform != "win32":
+        return []
+    escaped_root = str(install_root).replace("'", "''")
+    script = rf"""
+$ErrorActionPreference = 'Stop'
+$installRoot = [System.IO.Path]::GetFullPath('{escaped_root}').TrimEnd('\')
+$matches = Get-CimInstance Win32_Process |
+  Where-Object {{
+    $_.ProcessId -ne $PID -and
+    $_.ExecutablePath -and
+    [System.IO.Path]::GetFullPath($_.ExecutablePath).StartsWith(
+      $installRoot,
+      [System.StringComparison]::OrdinalIgnoreCase
+    )
+  }} |
+  Select-Object -First 40 ProcessId, ParentProcessId, Name, ExecutablePath
+ConvertTo-Json -InputObject @($matches) -Depth 3 -Compress
+"""
+    completed = subprocess.run(
+        [
+            "powershell",
+            "-NoProfile",
+            "-NonInteractive",
+            "-Command",
+            script,
+        ],
+        check=False,
+        capture_output=True,
+        text=True,
+        timeout=30,
+    )
+    if completed.returncode != 0:
+        raise RuntimeError(
+            "failed to enumerate residual Windows product processes: "
+            f"PowerShell exit {completed.returncode}"
+        )
+    try:
+        payload = json.loads(completed.stdout or "[]")
+    except json.JSONDecodeError as error:
+        raise RuntimeError(
+            "failed to parse residual Windows product process inventory"
+        ) from error
+    if not isinstance(payload, list) or not all(
+        isinstance(item, dict) for item in payload
+    ):
+        raise RuntimeError(
+            "residual Windows product process inventory must be an array"
+        )
+    return payload
+
+
 class PlatformExecutor:
     def __init__(
         self,
@@ -368,6 +609,7 @@ class PlatformExecutor:
         self.startup_seconds = startup_seconds
         self.migration_timeout_seconds = migration_timeout_seconds
         self.last_executable: Path | None = None
+        self.last_shutdown: dict | None = None
 
     def cleanup_installation(self) -> None:
         if self.platform == "windows":
@@ -418,6 +660,7 @@ class PlatformExecutor:
                 timeout=300,
             )
         self.last_executable = None
+        self.last_shutdown = None
 
     def install(self, installer: Path, phase: str, case_dir: Path) -> Path:
         if self.platform == "windows":
@@ -443,19 +686,30 @@ class PlatformExecutor:
             mount = case_dir / f"mount-{phase}"
             mount.mkdir(parents=True, exist_ok=True)
             subprocess.run(
-                ["hdiutil", "attach", str(installer), "-mountpoint", str(mount), "-nobrowse"],
+                [
+                    "hdiutil",
+                    "attach",
+                    str(installer),
+                    "-mountpoint",
+                    str(mount),
+                    "-nobrowse",
+                ],
                 check=True,
                 timeout=120,
             )
             try:
                 apps = sorted(mount.glob("*.app"))
                 if len(apps) != 1:
-                    raise RuntimeError(f"expected one app in {installer}, found {len(apps)}")
+                    raise RuntimeError(
+                        f"expected one app in {installer}, found {len(apps)}"
+                    )
                 target = Path("/Applications") / apps[0].name
                 shutil.rmtree(target, ignore_errors=True)
                 shutil.copytree(apps[0], target, symlinks=True)
             finally:
-                subprocess.run(["hdiutil", "detach", str(mount)], check=False, timeout=120)
+                subprocess.run(
+                    ["hdiutil", "detach", str(mount)], check=False, timeout=120
+                )
             candidates = sorted((target / "Contents" / "MacOS").iterdir())
         else:
             if installer.name.lower().endswith(".appimage"):
@@ -469,7 +723,9 @@ class PlatformExecutor:
                     check=False,
                     timeout=300,
                 )
-                subprocess.run(["sudo", "apt-get", "install", "-f", "-y"], check=True, timeout=300)
+                subprocess.run(
+                    ["sudo", "apt-get", "install", "-f", "-y"], check=True, timeout=300
+                )
                 candidates = [
                     prefix / name
                     for prefix in (Path("/usr/bin"), Path("/usr/local/bin"))
@@ -487,7 +743,14 @@ class PlatformExecutor:
             else:
                 raise ValueError(f"unsupported Linux installer: {installer}")
 
-        executable = next((path for path in candidates if path.is_file() and os.access(path, os.X_OK)), None)
+        executable = next(
+            (
+                path
+                for path in candidates
+                if path.is_file() and os.access(path, os.X_OK)
+            ),
+            None,
+        )
         if executable is None:
             if self.platform == "windows":
                 diagnostics = _windows_install_diagnostics(case_dir / "windows-install")
@@ -495,36 +758,142 @@ class PlatformExecutor:
                     f"installed executable not found after {phase}: {installer}; "
                     f"diagnostics={json.dumps(diagnostics, sort_keys=True)}"
                 )
-            raise FileNotFoundError(f"installed executable not found after {phase}: {installer}")
+            raise FileNotFoundError(
+                f"installed executable not found after {phase}: {installer}"
+            )
         if phase != "current" and "biyan" not in executable.name.lower():
-            raise RuntimeError(f"phase {phase} did not install a Biyan executable: {executable}")
+            raise RuntimeError(
+                f"phase {phase} did not install a Biyan executable: {executable}"
+            )
         self.last_executable = executable
         return executable
 
-    def _terminate_process_tree(self, process: subprocess.Popen) -> None:
-        if self.platform == "windows":
+    def _force_terminate_windows_process_tree(self, process: subprocess.Popen) -> None:
+        completed = subprocess.run(
+            [
+                "taskkill",
+                "/PID",
+                str(process.pid),
+                "/T",
+                "/F",
+            ],
+            check=False,
+            capture_output=True,
+            timeout=30,
+        )
+        if completed.returncode != 0:
+            raise RuntimeError(
+                f"failed to terminate Windows process tree {process.pid}: "
+                f"taskkill exit {completed.returncode}"
+            )
+        try:
+            process.wait(timeout=10)
+        except subprocess.TimeoutExpired:
+            process.kill()
+            process.wait(timeout=5)
+
+    def _gracefully_close_windows_process_tree(
+        self,
+        process: subprocess.Popen,
+    ) -> None:
+        started = time.monotonic()
+        exit_code = process.poll()
+        if exit_code is not None:
+            self.last_shutdown = {
+                "method": "wm-close",
+                "rootPid": process.pid,
+                "requested": False,
+                "gracefulExited": False,
+                "forcedCleanup": False,
+                "elapsedMs": round((time.monotonic() - started) * 1000),
+                "unexpectedExitCode": exit_code,
+            }
+            raise RuntimeError(
+                "Windows source process exited before CloseMainWindow "
+                f"with code {exit_code}"
+            )
+        script = (
+            "$ErrorActionPreference = 'Stop'; "
+            f"$process = Get-Process -Id {process.pid}; "
+            "if (-not $process.CloseMainWindow()) { exit 3 }; "
+            "if (-not $process.WaitForExit(30000)) { exit 4 }"
+        )
+        try:
             completed = subprocess.run(
                 [
-                    "taskkill",
-                    "/PID",
-                    str(process.pid),
-                    "/T",
-                    "/F",
+                    "powershell",
+                    "-NoProfile",
+                    "-NonInteractive",
+                    "-Command",
+                    script,
                 ],
                 check=False,
                 capture_output=True,
-                timeout=30,
+                timeout=40,
             )
-            if completed.returncode != 0:
-                raise RuntimeError(
-                    f"failed to terminate Windows process tree {process.pid}: "
-                    f"taskkill exit {completed.returncode}"
-                )
+            close_status: int | str = completed.returncode
+        except (OSError, subprocess.SubprocessError) as error:
+            completed = None
+            close_status = error.__class__.__name__
+        if completed is not None and completed.returncode == 0:
             try:
-                process.wait(timeout=10)
-            except subprocess.TimeoutExpired:
-                process.kill()
                 process.wait(timeout=5)
+                self.last_shutdown = {
+                    "method": "wm-close",
+                    "rootPid": process.pid,
+                    "requested": True,
+                    "gracefulExited": True,
+                    "forcedCleanup": False,
+                    "elapsedMs": round((time.monotonic() - started) * 1000),
+                }
+                return
+            except subprocess.TimeoutExpired:
+                pass
+
+        # Cleanup is still mandatory, but a forced source shutdown invalidates
+        # the next migration phase and therefore remains a lane failure.
+        force_error: Exception | None = None
+        try:
+            self._force_terminate_windows_process_tree(process)
+        except Exception as error:
+            force_error = error
+        self.last_shutdown = {
+            "method": "wm-close",
+            "rootPid": process.pid,
+            "requested": True,
+            "gracefulExited": False,
+            "forcedCleanup": True,
+            "elapsedMs": round((time.monotonic() - started) * 1000),
+            "closeStatus": close_status,
+        }
+        if force_error is not None:
+            self.last_shutdown["forceError"] = force_error.__class__.__name__
+        raise RuntimeError(
+            "Windows source process did not exit through CloseMainWindow; "
+            f"close status {close_status}; forced cleanup used"
+            + (f" but failed with {force_error}" if force_error is not None else "")
+        )
+
+    def _terminate_process_tree(
+        self,
+        process: subprocess.Popen,
+        *,
+        require_graceful: bool = False,
+    ) -> None:
+        if self.platform == "windows":
+            if require_graceful:
+                self._gracefully_close_windows_process_tree(process)
+            else:
+                started = time.monotonic()
+                self._force_terminate_windows_process_tree(process)
+                self.last_shutdown = {
+                    "method": "force",
+                    "rootPid": process.pid,
+                    "requested": True,
+                    "gracefulExited": False,
+                    "forcedCleanup": True,
+                    "elapsedMs": round((time.monotonic() - started) * 1000),
+                }
             return
 
         process_group = process.pid
@@ -555,6 +924,7 @@ class PlatformExecutor:
         scenario: str,
         phase: str,
         readiness_check: Callable[[], None] | None = None,
+        require_graceful_shutdown: bool = False,
     ) -> None:
         env = os.environ.copy()
         secret_prefixes = (
@@ -593,7 +963,11 @@ class PlatformExecutor:
             }
         )
         command: List[str] = [str(executable)]
-        if self.platform == "linux" and not env.get("DISPLAY") and shutil.which("xvfb-run"):
+        if (
+            self.platform == "linux"
+            and not env.get("DISPLAY")
+            and shutil.which("xvfb-run")
+        ):
             command = ["xvfb-run", "-a", *command]
         process_kwargs = {"env": env}
         if self.platform == "windows":
@@ -606,6 +980,7 @@ class PlatformExecutor:
             process_kwargs["start_new_session"] = True
         started = time.monotonic()
         process = subprocess.Popen(command, **process_kwargs)
+        probe_error: Exception | None = None
         try:
             time.sleep(self.startup_seconds)
             exit_code = process.poll()
@@ -613,35 +988,61 @@ class PlatformExecutor:
                 raise RuntimeError(
                     f"startup probe exited early for {scenario}/{phase} with code {exit_code}"
                 )
-            if readiness_check is None:
-                return
+            if readiness_check is not None:
+                deadline = started + self.migration_timeout_seconds
+                last_error: Exception | None = None
+                while True:
+                    exit_code = process.poll()
+                    if exit_code is not None:
+                        raise RuntimeError(
+                            f"startup probe exited before migration readiness for "
+                            f"{scenario}/{phase} with code {exit_code}; "
+                            f"last readiness error: {last_error}"
+                        )
+                    try:
+                        readiness_check()
+                        break
+                    except (FileNotFoundError, ReadinessPending) as error:
+                        last_error = error
 
-            deadline = started + self.migration_timeout_seconds
-            last_error: Exception | None = None
-            while True:
-                exit_code = process.poll()
-                if exit_code is not None:
-                    raise RuntimeError(
-                        f"startup probe exited before migration readiness for "
-                        f"{scenario}/{phase} with code {exit_code}; "
-                        f"last readiness error: {last_error}"
-                    )
-                try:
-                    readiness_check()
-                    return
-                except (FileNotFoundError, RuntimeError) as error:
-                    last_error = error
+                    remaining = deadline - time.monotonic()
+                    if remaining <= 0:
+                        raise RuntimeError(
+                            f"migration readiness timed out after "
+                            f"{self.migration_timeout_seconds}s for {scenario}/{phase}; "
+                            f"last readiness error: {last_error}"
+                        )
+                    time.sleep(min(1.0, remaining))
+        except Exception as error:
+            probe_error = error
 
-                remaining = deadline - time.monotonic()
-                if remaining <= 0:
-                    raise RuntimeError(
-                        f"migration readiness timed out after "
-                        f"{self.migration_timeout_seconds}s for {scenario}/{phase}; "
-                        f"last readiness error: {last_error}"
-                    )
-                time.sleep(min(1.0, remaining))
-        finally:
-            self._terminate_process_tree(process)
+        shutdown_error: Exception | None = None
+        try:
+            self._terminate_process_tree(
+                process,
+                require_graceful=require_graceful_shutdown,
+            )
+        except Exception as error:
+            shutdown_error = error
+
+        if probe_error is not None and shutdown_error is not None:
+            raise RuntimeError(
+                f"{probe_error}; shutdown also failed: {shutdown_error}"
+            ) from probe_error
+        if probe_error is not None:
+            raise probe_error
+        if shutdown_error is not None:
+            raise shutdown_error
+
+    def assert_no_residual_product_processes(self, install_root: Path) -> None:
+        if self.platform != "windows":
+            return
+        residual = _windows_product_processes(install_root)
+        if residual:
+            raise RuntimeError(
+                "residual Windows product processes remain after graceful source exit: "
+                f"{json.dumps(residual, sort_keys=True)}"
+            )
 
 
 def _restore_snapshot(spec: SnapshotSpec) -> None:
@@ -658,6 +1059,11 @@ def _clear_qualification_roots(
     # snapshots name their exact restore roots; the only additional mutable
     # root is the platform's fixed Biyan configuration directory.
     roots.add(_migration_state_path(platform).parent)
+    if validated.source_readiness is not None:
+        # The exact v0.6.633 Windows contract keeps settings under Mita even
+        # though its data root is Biyan/data. Clear that fixed configuration
+        # root so a previous lane/run cannot redirect the source snapshot.
+        roots.add(validated.source_readiness.settings.parent)
     for root in sorted(roots, key=lambda value: len(value.parts), reverse=True):
         shutil.rmtree(root, ignore_errors=True)
 
@@ -685,6 +1091,109 @@ def _migration_state_path(platform: str) -> Path:
     return base / "Biyan/migration-state.json"
 
 
+def _read_json_object(path: Path, label: str) -> dict:
+    if not path.is_file():
+        raise FileNotFoundError(f"{label} is missing: {path}")
+    try:
+        value = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, UnicodeDecodeError, json.JSONDecodeError) as error:
+        raise ReadinessPending(f"{label} is not valid UTF-8 JSON: {path}") from error
+    if not isinstance(value, dict):
+        raise ReadinessPending(f"{label} must contain a JSON object: {path}")
+    return value
+
+
+def _windows_path_identity(path: Path) -> str:
+    return str(path).replace("\\", "/").rstrip("/").casefold()
+
+
+def _assert_source_readiness(spec: SourceReadinessSpec) -> str:
+    settings = _read_json_object(spec.settings, "source settings")
+    configured_root = settings.get("data_folder")
+    if not isinstance(configured_root, str) or _windows_path_identity(
+        Path(configured_root)
+    ) != _windows_path_identity(spec.data_root):
+        raise ReadinessPending(
+            "source settings data_folder mismatch: "
+            f"expected {spec.data_root}, got {configured_root}"
+        )
+
+    store = _read_json_object(spec.store, "source store")
+    for key, expected in spec.required_store.items():
+        actual = store.get(key)
+        if type(actual) is not type(expected) or actual != expected:
+            raise ReadinessPending(
+                f"source store {key} mismatch: expected exact "
+                f"{type(expected).__name__} {expected!r}, got "
+                f"{type(actual).__name__} {actual!r}"
+            )
+    mcp_config = _read_json_object(spec.mcp_config, "source MCP configuration")
+    if not isinstance(mcp_config.get("mcpServers"), dict):
+        raise ReadinessPending("source MCP configuration mcpServers must be an object")
+    _require_file(spec.marker, "source preserved-data marker")
+
+    digest = hashlib.sha256()
+    for path in (spec.settings, spec.store, spec.mcp_config, spec.marker):
+        digest.update(str(path).encode("utf-8"))
+        digest.update(path.read_bytes())
+    return digest.hexdigest()
+
+
+def _stable_source_readiness(spec: SourceReadinessSpec) -> Callable[[], None]:
+    last_digest: str | None = None
+    consecutive = 0
+
+    def check() -> None:
+        nonlocal last_digest, consecutive
+        digest = _assert_source_readiness(spec)
+        if digest != last_digest:
+            last_digest = digest
+            consecutive = 1
+            raise ReadinessPending(
+                "source readiness requires a second stable observation"
+            )
+        consecutive += 1
+        if consecutive < 2:
+            raise ReadinessPending("source readiness has not stabilized")
+
+    return check
+
+
+def _assert_reversible_directory_rename(data_root: Path) -> None:
+    if not data_root.is_dir():
+        raise FileNotFoundError(
+            f"source data root is missing before rename probe: {data_root}"
+        )
+    staging = data_root.parent / f".{data_root.name}.biyan-migrating"
+    probe = data_root.parent / f".{data_root.name}.biyan-legacy-backup"
+    conflicts = [path for path in (staging, probe) if path.exists()]
+    if conflicts:
+        raise RuntimeError(
+            "source rename probe found migration path conflicts: "
+            + ", ".join(str(path) for path in conflicts)
+        )
+    renamed = False
+    try:
+        data_root.rename(probe)
+        renamed = True
+        probe.rename(data_root)
+        renamed = False
+    except OSError as error:
+        if renamed and probe.exists() and not data_root.exists():
+            try:
+                probe.rename(data_root)
+                renamed = False
+            except OSError:
+                pass
+        raise RuntimeError(
+            f"source data root failed reversible rename probe: {error.__class__.__name__}"
+        ) from error
+    if renamed or not data_root.is_dir() or probe.exists():
+        raise RuntimeError(
+            "source data root rename probe did not restore the exact layout"
+        )
+
+
 def _assert_migration_state(state_path: Path, scenario: str, phase: str) -> None:
     if phase == "current":
         return
@@ -692,10 +1201,20 @@ def _assert_migration_state(state_path: Path, scenario: str, phase: str) -> None
         raise FileNotFoundError(
             f"migration state is missing for {scenario}/{phase}: {state_path}"
         )
-    state = json.loads(state_path.read_text(encoding="utf-8"))
+    state = _read_json_object(state_path, "migration state")
+    failed_steps = [
+        (step, details.get("error_code"))
+        for step, details in state.get("steps", {}).items()
+        if isinstance(details, dict) and details.get("status") == "failed"
+    ]
+    if failed_steps:
+        detail = ", ".join(
+            f"{step} (error_code={error_code!r})" for step, error_code in failed_steps
+        )
+        raise ReadinessFailed(f"migration step failed for {scenario}/{phase}: {detail}")
     expected_schema = {"a": 1, "b": 2, "c": 3}[phase]
     if state.get("data_schema") != expected_schema:
-        raise RuntimeError(
+        raise ReadinessPending(
             f"migration schema mismatch for {scenario}/{phase}: "
             f"expected {expected_schema}, got {state.get('data_schema')}"
         )
@@ -715,7 +1234,7 @@ def _assert_migration_state(state_path: Path, scenario: str, phase: str) -> None
         if state.get("steps", {}).get(step, {}).get("status") != "completed"
     ]
     if incomplete:
-        raise RuntimeError(
+        raise ReadinessPending(
             f"migration steps incomplete for {scenario}/{phase}: {', '.join(incomplete)}"
         )
 
@@ -728,6 +1247,216 @@ def _assert_phase_ready(
 ) -> None:
     _assert_phase_expectations(validated.expectations, scenario, phase)
     _assert_migration_state(_migration_state_path(platform), scenario, phase)
+
+
+def _bounded_file_evidence(
+    path: Path,
+    *,
+    parse_json: bool = False,
+    max_bytes: int = 32_768,
+) -> dict:
+    if not path.is_file():
+        return {"path": str(path), "exists": False}
+    try:
+        size = path.stat().st_size
+        digest = _sha256(path)
+        with path.open("rb") as stream:
+            if max_bytes <= 0:
+                tail = b""
+            else:
+                stream.seek(max(0, size - max_bytes))
+                tail = stream.read(max_bytes)
+    except OSError as error:
+        return {
+            "path": str(path),
+            "exists": True,
+            "readError": error.__class__.__name__,
+        }
+    result: Dict[str, Any] = {
+        "path": str(path),
+        "exists": True,
+        "size": size,
+        "sha256": digest,
+        "truncated": size > max_bytes,
+    }
+    if max_bytes <= 0:
+        return result
+    try:
+        text = tail.decode("utf-8")
+        if parse_json and size <= max_bytes:
+            result["json"] = json.loads(text)
+        else:
+            result["tail"] = text
+    except (UnicodeDecodeError, json.JSONDecodeError):
+        result["contentStatus"] = "non-utf8-or-invalid-json"
+    return result
+
+
+def _project_json_evidence(
+    path: Path,
+    projection: Callable[[Mapping[str, object]], Mapping[str, object]],
+) -> dict:
+    metadata = _bounded_file_evidence(path, max_bytes=0)
+    if not metadata.get("exists"):
+        return {**metadata, "valid": False}
+    if metadata.get("size", 0) > 32_768:
+        return {**metadata, "valid": False, "error": "json-too-large"}
+    try:
+        value = json.loads(path.read_text(encoding="utf-8"))
+        if not isinstance(value, dict):
+            raise ValueError("not-object")
+        return {**metadata, "valid": True, **dict(projection(value))}
+    except (OSError, UnicodeDecodeError, json.JSONDecodeError, ValueError) as error:
+        return {**metadata, "valid": False, "error": error.__class__.__name__}
+
+
+def _settings_evidence(path: Path) -> dict:
+    return _project_json_evidence(
+        path,
+        lambda value: {"dataFolder": value.get("data_folder")},
+    )
+
+
+def _store_evidence(path: Path) -> dict:
+    return _project_json_evidence(
+        path,
+        lambda value: {
+            "version": value.get("version"),
+            "mcpVersion": value.get("mcp_version"),
+            "windowsBiyanMigrated": value.get("windows_biyan_migrated"),
+        },
+    )
+
+
+def _mcp_evidence(path: Path) -> dict:
+    def project(value: Mapping[str, object]) -> Mapping[str, object]:
+        servers = value.get("mcpServers")
+        return {
+            "mcpServersIsObject": isinstance(servers, dict),
+            "serverCount": len(servers) if isinstance(servers, dict) else None,
+        }
+
+    return _project_json_evidence(path, project)
+
+
+def _migration_state_evidence(path: Path) -> dict:
+    def project(value: Mapping[str, object]) -> Mapping[str, object]:
+        steps = value.get("steps")
+        projected_steps = {}
+        if isinstance(steps, dict):
+            for name, detail in sorted(steps.items()):
+                if isinstance(detail, dict):
+                    projected_steps[name] = {
+                        "status": detail.get("status"),
+                        "errorCode": detail.get("error_code"),
+                    }
+        return {
+            "dataSchema": value.get("data_schema"),
+            "steps": projected_steps,
+        }
+
+    return _project_json_evidence(path, project)
+
+
+def _bounded_windows_logs(max_files: int = 3) -> List[dict]:
+    local = Path(os.environ.get("LOCALAPPDATA", Path.home() / "AppData/Local"))
+    log_root = local / "biyan/logs"
+    if not log_root.is_dir():
+        return []
+    try:
+        files = sorted(
+            (path for path in log_root.glob("biyan-*.log") if path.is_file()),
+            key=lambda path: path.stat().st_mtime,
+            reverse=True,
+        )
+    except OSError as error:
+        return [{"captureError": error.__class__.__name__}]
+    return [
+        # Never publish raw application log content. The hash/size identify
+        # which bounded CI log existed, while migration state carries the
+        # allowlisted step/error-code details needed for diagnosis.
+        _bounded_file_evidence(path, max_bytes=0)
+        for path in files[:max_files]
+    ]
+
+
+def _capture_failure_diagnostics(
+    validated: ValidatedInputs,
+    platform: str,
+    scenario: str,
+    phase_boundary: str,
+    executable: Path | None,
+    case_dir: Path,
+    shutdown: Mapping[str, object] | None,
+) -> dict:
+    state_path = _migration_state_path(platform)
+    config_root = state_path.parent
+    diagnostics: Dict[str, Any] = {
+        "schema": 1,
+        "scenario": scenario,
+        "phaseBoundary": phase_boundary,
+        "migration": {
+            "state": _migration_state_evidence(state_path),
+            "lock": _bounded_file_evidence(config_root / ".migration.lock"),
+        },
+        "shutdown": dict(shutdown) if shutdown is not None else None,
+        "captureErrors": [],
+    }
+    if executable is not None:
+        diagnostics["executable"] = _bounded_file_evidence(
+            executable,
+            max_bytes=0,
+        )
+    if platform == "windows":
+        appdata = Path(os.environ.get("APPDATA", Path.home() / "AppData/Roaming"))
+        install_root = case_dir / "windows-install"
+        diagnostics.update(
+            {
+                "source": {
+                    "settings": _settings_evidence(appdata / "Mita/settings.json"),
+                    "store": _store_evidence(appdata / "Biyan/data/store.json"),
+                    "mcp": _mcp_evidence(appdata / "Biyan/data/mcp_config.json"),
+                    "marker": _bounded_file_evidence(
+                        appdata / "Biyan/data/agent-workspaces/"
+                        "direct-qualification-preserved.txt",
+                        max_bytes=0,
+                    ),
+                },
+                "logs": _bounded_windows_logs(),
+            }
+        )
+        try:
+            diagnostics["install"] = _windows_install_diagnostics(install_root)
+        except Exception as error:
+            diagnostics["install"] = {"captureError": error.__class__.__name__}
+            diagnostics["captureErrors"].append(f"install:{error.__class__.__name__}")
+        try:
+            diagnostics["residualProcesses"] = _windows_product_processes(install_root)
+        except Exception as error:
+            diagnostics["residualProcesses"] = {
+                "captureError": error.__class__.__name__,
+            }
+            diagnostics["captureErrors"].append(
+                f"residualProcesses:{error.__class__.__name__}"
+            )
+    if validated.source_readiness is not None:
+        data_root = validated.source_readiness.data_root
+        diagnostics["renameProbe"] = {
+            "attempted": phase_boundary
+            in {
+                "source-rename-probe",
+                "candidate-install",
+                "candidate-readiness",
+            },
+            "dataRootExists": data_root.is_dir(),
+            "stagingExists": (
+                data_root.parent / f".{data_root.name}.biyan-migrating"
+            ).exists(),
+            "backupExists": (
+                data_root.parent / f".{data_root.name}.biyan-legacy-backup"
+            ).exists(),
+        }
+    return diagnostics
 
 
 def run_matrix(
@@ -748,42 +1477,98 @@ def run_matrix(
     try:
         for case in selected_cases:
             case_dir = work_dir / case.name
-            shutil.rmtree(case_dir, ignore_errors=True)
-            case_dir.mkdir(parents=True, exist_ok=True)
-            executor.cleanup_installation()
-            _clear_qualification_roots(validated, platform)
-            _restore_snapshot(validated.snapshots[case.snapshot])
-            started = time.time()
-            for phase in case.install_sequence:
-                executable = executor.install(validated.installers[phase], phase, case_dir)
-                readiness_check = (
-                    None
-                    if phase == "current"
-                    else partial(
-                        _assert_phase_ready,
+            executable: Path | None = None
+            phase_boundary = "case-setup"
+            try:
+                shutil.rmtree(case_dir, ignore_errors=True)
+                case_dir.mkdir(parents=True, exist_ok=True)
+                executor.cleanup_installation()
+                _clear_qualification_roots(validated, platform)
+                phase_boundary = "snapshot-restore"
+                _restore_snapshot(validated.snapshots[case.snapshot])
+                started = time.time()
+                for phase in case.install_sequence:
+                    is_guarded_source = (
+                        phase == "current" and validated.source_readiness is not None
+                    )
+                    phase_boundary = (
+                        "source-install"
+                        if is_guarded_source
+                        else "candidate-install"
+                        if phase == "c"
+                        else f"{phase}-install"
+                    )
+                    executable = executor.install(
+                        validated.installers[phase],
+                        phase,
+                        case_dir,
+                    )
+                    if is_guarded_source:
+                        readiness_check = _stable_source_readiness(
+                            validated.source_readiness
+                        )
+                        phase_boundary = "source-readiness"
+                    elif phase == "current":
+                        readiness_check = None
+                    else:
+                        readiness_check = partial(
+                            _assert_phase_ready,
+                            validated,
+                            platform,
+                            case.name,
+                            phase,
+                        )
+                        phase_boundary = (
+                            "candidate-readiness"
+                            if phase == "c"
+                            else f"{phase}-readiness"
+                        )
+                    executor.startup_probe(
+                        executable,
+                        case.name,
+                        phase,
+                        readiness_check,
+                        require_graceful_shutdown=is_guarded_source,
+                    )
+                    if is_guarded_source:
+                        phase_boundary = "source-residual-check"
+                        executor.assert_no_residual_product_processes(
+                            case_dir / "windows-install"
+                        )
+                        phase_boundary = "source-rename-probe"
+                        _assert_reversible_directory_rename(
+                            validated.source_readiness.data_root
+                        )
+                results.append(
+                    {
+                        "scenario": case.name,
+                        "platform": platform,
+                        "snapshot": case.snapshot,
+                        "installSequence": list(case.install_sequence),
+                        "expectedPhase": case.expected_phase,
+                        "status": "passed",
+                        "durationSeconds": round(time.time() - started, 3),
+                    }
+                )
+            except Exception as error:
+                try:
+                    diagnostics = _capture_failure_diagnostics(
                         validated,
                         platform,
                         case.name,
-                        phase,
+                        phase_boundary,
+                        executable,
+                        case_dir,
+                        executor.last_shutdown,
                     )
-                )
-                executor.startup_probe(
-                    executable,
-                    case.name,
-                    phase,
-                    readiness_check,
-                )
-            results.append(
-                {
-                    "scenario": case.name,
-                    "platform": platform,
-                    "snapshot": case.snapshot,
-                    "installSequence": list(case.install_sequence),
-                    "expectedPhase": case.expected_phase,
-                    "status": "passed",
-                    "durationSeconds": round(time.time() - started, 3),
-                }
-            )
+                except Exception as capture_error:
+                    diagnostics = {
+                        "schema": 1,
+                        "scenario": case.name,
+                        "phaseBoundary": phase_boundary,
+                        "captureErrors": [capture_error.__class__.__name__],
+                    }
+                raise MigrationRunError(str(error), diagnostics) from error
     finally:
         executor.cleanup_installation()
         _clear_qualification_roots(validated, platform)
@@ -791,8 +1576,12 @@ def run_matrix(
 
 
 def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
-    parser = argparse.ArgumentParser(description="Run the fail-closed Biyan migration matrix")
-    parser.add_argument("--platform", choices=("windows", "linux", "macos"), required=True)
+    parser = argparse.ArgumentParser(
+        description="Run the fail-closed Biyan migration matrix"
+    )
+    parser.add_argument(
+        "--platform", choices=("windows", "linux", "macos"), required=True
+    )
     for phase in PHASES:
         parser.add_argument(f"--{phase}-installer")
     parser.add_argument(
@@ -856,7 +1645,9 @@ def main(argv: Sequence[str] | None = None) -> int:
             ]
         else:
             if args.allow_destructive_autoqa != "AUTOQA":
-                raise PermissionError("execution requires --allow-destructive-autoqa AUTOQA")
+                raise PermissionError(
+                    "execution requires --allow-destructive-autoqa AUTOQA"
+                )
             work_dir = (
                 Path(args.work_dir).resolve()
                 if args.work_dir
@@ -882,18 +1673,17 @@ def main(argv: Sequence[str] | None = None) -> int:
         print(f"Migration matrix passed: {len(results)} scenarios")
         return 0
     except Exception as error:  # fail-closed report for CI evidence
+        failed_report = {
+            "schema": 1,
+            "platform": args.platform,
+            "scenarios": scenario_names,
+            "status": "failed",
+            "error": str(error),
+        }
+        if isinstance(error, MigrationRunError):
+            failed_report["diagnostics"] = error.diagnostics
         report_path.write_text(
-            json.dumps(
-                {
-                    "schema": 1,
-                    "platform": args.platform,
-                    "scenarios": scenario_names,
-                    "status": "failed",
-                    "error": str(error),
-                },
-                indent=2,
-            )
-            + "\n",
+            json.dumps(failed_report, indent=2) + "\n",
             encoding="utf-8",
         )
         print(str(error), file=sys.stderr)

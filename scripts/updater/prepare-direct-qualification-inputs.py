@@ -61,9 +61,7 @@ def require_file_digest(path: Path, expected: str, label: str) -> None:
         raise FileNotFoundError(f"missing or empty {label}: {path}")
     actual = sha256(path)
     if actual != expected:
-        raise ValueError(
-            f"{label} SHA-256 mismatch: expected {expected}, got {actual}"
-        )
+        raise ValueError(f"{label} SHA-256 mismatch: expected {expected}, got {actual}")
 
 
 def write_snapshot(path: Path, marker: bool) -> None:
@@ -97,14 +95,14 @@ def prepare_inputs(
         or policy.get("state") != "candidate-pinned"
         or policy.get("deploymentMode") != "direct-c"
     ):
-        raise ValueError(
-            "direct qualification requires policy.state=candidate-pinned"
-        )
+        raise ValueError("direct qualification requires policy.state=candidate-pinned")
 
     lanes = policy.get("lanes")
     if not isinstance(lanes, list):
         raise ValueError("policy.lanes must be an array")
-    matches = [lane for lane in lanes if isinstance(lane, dict) and lane.get("id") == lane_id]
+    matches = [
+        lane for lane in lanes if isinstance(lane, dict) and lane.get("id") == lane_id
+    ]
     if len(matches) != 1:
         raise ValueError(f"lane must exist exactly once: {lane_id}")
     lane = matches[0]
@@ -116,12 +114,10 @@ def prepare_inputs(
     if (
         candidate.get("version") != "0.6.646"
         or candidate.get("tag") != "v0.6.646"
-        or candidate.get("sourceCommit")
-        != "581ebf6b19ef407a9645d0b318792f1012f8f75b"
+        or candidate.get("sourceCommit") != "581ebf6b19ef407a9645d0b318792f1012f8f75b"
         or candidate.get("migrationPhase") != "C"
         or candidate.get("dataSchema") != 3
-        or candidate.get("manifestKey")
-        != "biyan/updater/releases/v0.6.646/latest.json"
+        or candidate.get("manifestKey") != "biyan/updater/releases/v0.6.646/latest.json"
     ):
         raise ValueError("candidate identity must be exact v0.6.646/C/schema 3")
     require_sha256(
@@ -220,16 +216,15 @@ def prepare_inputs(
             require_object(policy.get("sources"), "policy.sources").get(source_version),
             f"policy.sources.{source_version}",
         )
-        if source_version in ("0.6.608", "0.6.611") and source.get(
-            "qualificationMode"
-        ) != qualification_mode:
-            raise ValueError(
-                f"{lane_id} source qualification mode is not exact"
-            )
+        if (
+            source_version in ("0.6.608", "0.6.611")
+            and source.get("qualificationMode") != qualification_mode
+        ):
+            raise ValueError(f"{lane_id} source qualification mode is not exact")
         source_asset = require_object(
-            require_object(source.get("assets"), f"policy.sources.{source_version}.assets").get(
-                platform
-            ),
+            require_object(
+                source.get("assets"), f"policy.sources.{source_version}.assets"
+            ).get(platform),
             f"policy.sources.{source_version}.assets.{platform}",
         )
         source_sha = require_sha256(
@@ -266,6 +261,27 @@ def prepare_inputs(
         phase: [state_path, *([marker_path] if marker else [])]
         for phase in required_phases
     }
+    source_readiness = (
+        {
+            "phase": "current",
+            "version": "0.6.633",
+            "settings": "%APPDATA%/Mita/settings.json",
+            "dataRoot": "%APPDATA%/Biyan/data",
+            "store": "%APPDATA%/Biyan/data/store.json",
+            "mcpConfig": "%APPDATA%/Biyan/data/mcp_config.json",
+            "marker": (
+                "%APPDATA%/Biyan/data/agent-workspaces/"
+                "direct-qualification-preserved.txt"
+            ),
+            "requiredStore": {
+                "version": "0.6.633",
+                "mcp_version": 5,
+                "windows_biyan_migrated": True,
+            },
+        }
+        if lane_id == "current-to-c-windows"
+        else None
+    )
 
     manifest = {
         "schema": 1,
@@ -283,6 +299,7 @@ def prepare_inputs(
             }
         },
         "expectations": expectations,
+        "sourceReadiness": source_readiness,
     }
     manifest_path = output_dir / "manifest.json"
     manifest_path.write_text(
@@ -312,9 +329,7 @@ def main(argv: Sequence[str] | None = None) -> int:
             lane_id=args.lane,
             candidate_installer=Path(args.candidate_installer).resolve(),
             source_installer=(
-                Path(args.source_installer).resolve()
-                if args.source_installer
-                else None
+                Path(args.source_installer).resolve() if args.source_installer else None
             ),
             output_dir=Path(args.output_dir).resolve(),
         )

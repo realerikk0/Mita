@@ -198,6 +198,7 @@ class PrepareDirectQualificationInputsTests(unittest.TestCase):
                     manifest["snapshots"]["current"]["restore_to"],
                     "%APPDATA%/Mita/data",
                 )
+                self.assertIsNone(manifest["sourceReadiness"])
 
     def test_current_to_c_is_sanitized_and_deterministic(self):
         with tempfile.TemporaryDirectory() as directory:
@@ -224,6 +225,26 @@ class PrepareDirectQualificationInputsTests(unittest.TestCase):
             self.assertEqual(
                 manifest["snapshots"]["current"]["restore_to"],
                 "%APPDATA%/Biyan/data",
+            )
+            self.assertEqual(
+                manifest["sourceReadiness"],
+                {
+                    "phase": "current",
+                    "version": "0.6.633",
+                    "settings": "%APPDATA%/Mita/settings.json",
+                    "dataRoot": "%APPDATA%/Biyan/data",
+                    "store": "%APPDATA%/Biyan/data/store.json",
+                    "mcpConfig": "%APPDATA%/Biyan/data/mcp_config.json",
+                    "marker": (
+                        "%APPDATA%/Biyan/data/agent-workspaces/"
+                        "direct-qualification-preserved.txt"
+                    ),
+                    "requiredStore": {
+                        "version": "0.6.633",
+                        "mcp_version": 5,
+                        "windows_biyan_migrated": True,
+                    },
+                },
             )
             self.assertEqual(
                 manifest["expectations"],
@@ -281,6 +302,7 @@ class PrepareDirectQualificationInputsTests(unittest.TestCase):
                     manifest["snapshots"][phase]["restore_to"],
                     "%APPDATA%/Biyan/data",
                 )
+                self.assertIsNone(manifest["sourceReadiness"])
                 self.assertEqual(set(manifest["expectations"]), {phase, "c"})
                 self.assertEqual(
                     manifest["expectations"][phase],
@@ -323,6 +345,7 @@ class PrepareDirectQualificationInputsTests(unittest.TestCase):
                 manifest["snapshots"]["current"]["restore_to"],
                 "%APPDATA%/Biyan/data",
             )
+            self.assertIsNone(manifest["sourceReadiness"])
 
     def test_unpinned_policy_and_tampered_installer_fail_closed(self):
         with tempfile.TemporaryDirectory() as directory:

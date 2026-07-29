@@ -134,6 +134,24 @@ function inputManifest(policy, lane, snapshotSha256) {
         ],
       ]),
     ),
+    sourceReadiness:
+      lane.id === 'current-to-c-windows'
+        ? {
+            phase: 'current',
+            version: '0.6.633',
+            settings: '%APPDATA%/Mita/settings.json',
+            dataRoot: '%APPDATA%/Biyan/data',
+            store: '%APPDATA%/Biyan/data/store.json',
+            mcpConfig: '%APPDATA%/Biyan/data/mcp_config.json',
+            marker:
+              '%APPDATA%/Biyan/data/agent-workspaces/direct-qualification-preserved.txt',
+            requiredStore: {
+              version: '0.6.633',
+              mcp_version: 5,
+              windows_biyan_migrated: true,
+            },
+          }
+        : null,
   }
 }
 
@@ -338,6 +356,64 @@ test('legacy and current lanes bind their exact historical data roots', () => {
   assert.doesNotThrow(build)
   manifest.snapshots.current.restore_to = '%APPDATA%/Mita/data'
   assert.throws(build, /snapshot binding/)
+})
+
+test('source readiness is exact for current Windows and null everywhere else', () => {
+  const policy = pinnedPolicy()
+  const lane = policy.lanes.find(
+    (entry) => entry.id === 'current-to-c-windows',
+  )
+  const snapshotSha256 = 'd'.repeat(64)
+  const manifest = inputManifest(policy, lane, snapshotSha256)
+  const build = () =>
+    buildDirectQualificationLaneResult({
+      policy,
+      laneId: lane.id,
+      migrationReport: migrationReport(lane),
+      migrationReportSha256: 'e'.repeat(64),
+      inputManifest: manifest,
+      inputManifestSha256: 'f'.repeat(64),
+      snapshotSha256,
+      runId: 777,
+      runAttempt: 1,
+      harnessSha256,
+      startedAt: '2026-07-29T00:00:00Z',
+      completedAt: '2026-07-29T00:01:00Z',
+    })
+  assert.doesNotThrow(build)
+
+  manifest.sourceReadiness.requiredStore.mcp_version = 4
+  assert.throws(build, /source readiness/)
+  manifest.sourceReadiness.requiredStore.mcp_version = 5
+  delete manifest.sourceReadiness
+  assert.throws(build, /input manifest keys/)
+
+  const otherLane = policy.lanes.find(
+    (entry) => entry.id === 'a-to-c-windows',
+  )
+  const otherManifest = inputManifest(policy, otherLane, snapshotSha256)
+  assert.equal(otherManifest.sourceReadiness, null)
+  otherManifest.sourceReadiness = {
+    phase: 'current',
+  }
+  assert.throws(
+    () =>
+      buildDirectQualificationLaneResult({
+        policy,
+        laneId: otherLane.id,
+        migrationReport: migrationReport(otherLane),
+        migrationReportSha256: 'e'.repeat(64),
+        inputManifest: otherManifest,
+        inputManifestSha256: 'f'.repeat(64),
+        snapshotSha256,
+        runId: 777,
+        runAttempt: 1,
+        harnessSha256,
+        startedAt: '2026-07-29T00:00:00Z',
+        completedAt: '2026-07-29T00:01:00Z',
+      }),
+    /source readiness/,
+  )
 })
 
 test('A and B lanes require source-aware data roots and both phase expectations', () => {

@@ -1,6 +1,7 @@
 import hashlib
 import json
 import os
+import subprocess
 import tempfile
 import unittest
 import zipfile
@@ -9,9 +10,17 @@ from unittest import mock
 
 from autoqa.migration_runner import (
     PHASES,
+    MigrationRunError,
     PlatformExecutor,
+    ReadinessFailed,
+    ReadinessPending,
+    SourceReadinessSpec,
     _assert_migration_state,
+    _assert_reversible_directory_rename,
+    _assert_source_readiness,
+    _bounded_file_evidence,
     _clear_qualification_roots,
+    _stable_source_readiness,
     _windows_install_diagnostics,
     main,
     migration_matrix,
@@ -65,6 +74,26 @@ class MigrationRunnerTests(unittest.TestCase):
         )
         return installers, manifest
 
+    @staticmethod
+    def source_readiness_manifest():
+        return {
+            "phase": "current",
+            "version": "0.6.633",
+            "settings": "%APPDATA%/Mita/settings.json",
+            "dataRoot": "%APPDATA%/Biyan/data",
+            "store": "%APPDATA%/Biyan/data/store.json",
+            "mcpConfig": "%APPDATA%/Biyan/data/mcp_config.json",
+            "marker": (
+                "%APPDATA%/Biyan/data/agent-workspaces/"
+                "direct-qualification-preserved.txt"
+            ),
+            "requiredStore": {
+                "version": "0.6.633",
+                "mcp_version": 5,
+                "windows_biyan_migrated": True,
+            },
+        }
+
     def test_matrix_is_complete_and_explicit(self):
         self.assertEqual(
             [case.name for case in migration_matrix()],
@@ -90,6 +119,70 @@ class MigrationRunnerTests(unittest.TestCase):
             validated = validate_inputs(installers, manifest, "linux")
             self.assertEqual(set(validated.installers), set(PHASES))
             self.assertEqual(set(validated.snapshots), {"current", "a", "b", "fresh"})
+
+    def test_current_to_c_windows_requires_exact_source_readiness(self):
+        with tempfile.TemporaryDirectory(dir=Path.home()) as directory:
+            root = Path(directory)
+            installers, manifest = self.make_inputs(root)
+            payload = json.loads(manifest.read_text(encoding="utf-8"))
+            payload["platform"] = "windows"
+            payload["scenario"] = "current-to-c"
+            payload["snapshots"]["current"]["restore_to"] = "%APPDATA%/Biyan/data"
+            payload["sourceReadiness"] = self.source_readiness_manifest()
+            manifest.write_text(json.dumps(payload), encoding="utf-8")
+            cases = select_migration_cases(["current-to-c"])
+
+            with mock.patch.dict(
+                os.environ,
+                {"APPDATA": str(root / "profile")},
+                clear=False,
+            ):
+                validated = validate_inputs(
+                    {"current": installers["current"], "c": installers["c"]},
+                    manifest,
+                    "windows",
+                    cases,
+                )
+                self.assertEqual(validated.source_readiness.version, "0.6.633")
+
+                payload["sourceReadiness"] = None
+                manifest.write_text(json.dumps(payload), encoding="utf-8")
+                with self.assertRaisesRegex(ValueError, "requires the exact"):
+                    validate_inputs(
+                        {"current": installers["current"], "c": installers["c"]},
+                        manifest,
+                        "windows",
+                        cases,
+                    )
+
+                payload["sourceReadiness"] = self.source_readiness_manifest()
+                payload["sourceReadiness"]["requiredStore"]["mcp_version"] = 4
+                manifest.write_text(json.dumps(payload), encoding="utf-8")
+                with self.assertRaisesRegex(ValueError, "exact.*contract"):
+                    validate_inputs(
+                        {"current": installers["current"], "c": installers["c"]},
+                        manifest,
+                        "windows",
+                        cases,
+                    )
+
+                for key, inexact in (
+                    ("mcp_version", 5.0),
+                    ("windows_biyan_migrated", 1),
+                ):
+                    payload["sourceReadiness"] = self.source_readiness_manifest()
+                    payload["sourceReadiness"]["requiredStore"][key] = inexact
+                    manifest.write_text(json.dumps(payload), encoding="utf-8")
+                    with self.assertRaisesRegex(ValueError, "exact.*contract"):
+                        validate_inputs(
+                            {
+                                "current": installers["current"],
+                                "c": installers["c"],
+                            },
+                            manifest,
+                            "windows",
+                            cases,
+                        )
 
     def test_current_to_a_requires_only_current_and_a_inputs(self):
         with tempfile.TemporaryDirectory(dir=Path.home()) as directory:
@@ -273,6 +366,101 @@ class MigrationRunnerTests(unittest.TestCase):
             with self.assertRaisesRegex(RuntimeError, "cleanup_v3"):
                 _assert_migration_state(state, "current-to-c", "c")
 
+            payload["data_schema"] = 0
+            payload["steps"]["layout_v1"] = {
+                "status": "failed",
+                "error_code": "backup_legacy_data:Access denied",
+            }
+            state.write_text(json.dumps(payload), encoding="utf-8")
+            with self.assertRaisesRegex(
+                ReadinessFailed,
+                "layout_v1.*backup_legacy_data",
+            ):
+                _assert_migration_state(state, "current-to-c", "c")
+
+    def test_source_readiness_is_stable_and_exact(self):
+        with tempfile.TemporaryDirectory(dir=Path.home()) as directory:
+            root = Path(directory)
+            data = root / "Biyan/data"
+            settings = root / "Mita/settings.json"
+            store = data / "store.json"
+            mcp = data / "mcp_config.json"
+            marker = data / "agent-workspaces/direct-qualification-preserved.txt"
+            settings.parent.mkdir(parents=True)
+            marker.parent.mkdir(parents=True)
+            settings.write_text(
+                json.dumps({"data_folder": str(data)}),
+                encoding="utf-8",
+            )
+            store.write_text(
+                json.dumps(
+                    {
+                        "version": "0.6.633",
+                        "mcp_version": 5,
+                        "windows_biyan_migrated": True,
+                    }
+                ),
+                encoding="utf-8",
+            )
+            mcp.write_text(json.dumps({"mcpServers": {}}), encoding="utf-8")
+            marker.write_text("preserved\n", encoding="utf-8")
+            spec = SourceReadinessSpec(
+                phase="current",
+                version="0.6.633",
+                settings=settings,
+                data_root=data,
+                store=store,
+                mcp_config=mcp,
+                marker=marker,
+                required_store={
+                    "version": "0.6.633",
+                    "mcp_version": 5,
+                    "windows_biyan_migrated": True,
+                },
+            )
+
+            self.assertEqual(len(_assert_source_readiness(spec)), 64)
+            stable = _stable_source_readiness(spec)
+            with self.assertRaisesRegex(ReadinessPending, "second stable"):
+                stable()
+            stable()
+
+            mcp.write_text(json.dumps({"mcpServers": []}), encoding="utf-8")
+            with self.assertRaisesRegex(ReadinessPending, "mcpServers"):
+                _assert_source_readiness(spec)
+
+            mcp.write_text(json.dumps({"mcpServers": {}}), encoding="utf-8")
+            for key, inexact in (
+                ("mcp_version", 5.0),
+                ("windows_biyan_migrated", 1),
+            ):
+                store_payload = {
+                    "version": "0.6.633",
+                    "mcp_version": 5,
+                    "windows_biyan_migrated": True,
+                }
+                store_payload[key] = inexact
+                store.write_text(json.dumps(store_payload), encoding="utf-8")
+                with self.assertRaisesRegex(ReadinessPending, f"source store {key}"):
+                    _assert_source_readiness(spec)
+
+    def test_source_rename_probe_uses_exact_product_paths(self):
+        with tempfile.TemporaryDirectory(dir=Path.home()) as directory:
+            data = Path(directory) / "Biyan/data"
+            data.mkdir(parents=True)
+            (data / "marker.txt").write_text("preserved", encoding="utf-8")
+
+            _assert_reversible_directory_rename(data)
+
+            self.assertTrue((data / "marker.txt").is_file())
+            self.assertFalse((data.parent / ".data.biyan-migrating").exists())
+            self.assertFalse((data.parent / ".data.biyan-legacy-backup").exists())
+
+            conflict = data.parent / ".data.biyan-legacy-backup"
+            conflict.mkdir()
+            with self.assertRaisesRegex(RuntimeError, "path conflicts"):
+                _assert_reversible_directory_rename(data)
+
     def test_unix_cleanup_never_matches_the_runner_command_line(self):
         runner_command = (
             "python autoqa/migration_runner.py --a-installer "
@@ -283,9 +471,7 @@ class MigrationRunnerTests(unittest.TestCase):
         for platform in ("macos", "linux"):
             with self.subTest(platform=platform):
                 with (
-                    mock.patch(
-                        "autoqa.migration_runner.subprocess.run"
-                    ) as run,
+                    mock.patch("autoqa.migration_runner.subprocess.run") as run,
                     mock.patch("autoqa.migration_runner.shutil.rmtree"),
                 ):
                     PlatformExecutor(platform, 1).cleanup_installation()
@@ -296,12 +482,8 @@ class MigrationRunnerTests(unittest.TestCase):
                     if call.args and call.args[0][0] == "pkill"
                 ]
                 self.assertGreater(len(pkill_commands), 0)
-                self.assertTrue(
-                    all(command[1] == "-x" for command in pkill_commands)
-                )
-                self.assertTrue(
-                    all("-f" not in command for command in pkill_commands)
-                )
+                self.assertTrue(all(command[1] == "-x" for command in pkill_commands))
+                self.assertTrue(all("-f" not in command for command in pkill_commands))
                 self.assertTrue(
                     all(runner_command not in command for command in pkill_commands)
                 )
@@ -392,7 +574,9 @@ class MigrationRunnerTests(unittest.TestCase):
             self.assertEqual(diagnostics["system"]["status"], "captured")
             self.assertEqual(diagnostics["system"]["data"], system_payload)
             command = run.call_args.args[0]
-            self.assertEqual(command[:3], ["powershell", "-NoProfile", "-NonInteractive"])
+            self.assertEqual(
+                command[:3], ["powershell", "-NoProfile", "-NonInteractive"]
+            )
             self.assertNotIn("Get-ChildItem Env:", command[-1])
 
     def test_startup_probe_scrubs_ci_and_cloud_credentials(self):
@@ -449,7 +633,7 @@ class MigrationRunnerTests(unittest.TestCase):
         readiness = mock.Mock(
             side_effect=[
                 FileNotFoundError("state missing"),
-                RuntimeError("schema is still zero"),
+                ReadinessPending("schema is still zero"),
                 None,
             ]
         )
@@ -542,6 +726,175 @@ class MigrationRunnerTests(unittest.TestCase):
             self.assertRaisesRegex(RuntimeError, "taskkill exit 5"),
         ):
             PlatformExecutor("windows", 1, 90)._terminate_process_tree(process)
+
+    def test_windows_source_shutdown_uses_wm_close_without_force(self):
+        process = mock.Mock(pid=9292)
+        process.poll.return_value = None
+        with mock.patch(
+            "autoqa.migration_runner.subprocess.run",
+            return_value=mock.Mock(returncode=0),
+        ) as run:
+            executor = PlatformExecutor("windows", 1, 90)
+            executor._terminate_process_tree(process, require_graceful=True)
+
+        command = run.call_args.args[0]
+        self.assertEqual(command[:3], ["powershell", "-NoProfile", "-NonInteractive"])
+        self.assertIn("CloseMainWindow", command[-1])
+        self.assertNotIn("/F", command)
+        self.assertTrue(executor.last_shutdown["gracefulExited"])
+        self.assertFalse(executor.last_shutdown["forcedCleanup"])
+
+    def test_windows_source_shutdown_force_cleanup_still_fails_lane(self):
+        process = mock.Mock(pid=9393)
+        process.poll.return_value = None
+        with mock.patch(
+            "autoqa.migration_runner.subprocess.run",
+            side_effect=[
+                mock.Mock(returncode=3),
+                mock.Mock(returncode=0),
+            ],
+        ) as run:
+            executor = PlatformExecutor("windows", 1, 90)
+            with self.assertRaisesRegex(RuntimeError, "forced cleanup used"):
+                executor._terminate_process_tree(process, require_graceful=True)
+
+        self.assertEqual(
+            run.call_args_list[1].args[0],
+            ["taskkill", "/PID", "9393", "/T", "/F"],
+        )
+        self.assertFalse(executor.last_shutdown["gracefulExited"])
+        self.assertTrue(executor.last_shutdown["forcedCleanup"])
+
+    def test_windows_source_shutdown_timeout_forces_cleanup_and_fails(self):
+        process = mock.Mock(pid=9394)
+        process.poll.return_value = None
+        with mock.patch(
+            "autoqa.migration_runner.subprocess.run",
+            side_effect=[
+                subprocess.TimeoutExpired("powershell", 40),
+                mock.Mock(returncode=0),
+            ],
+        ) as run:
+            executor = PlatformExecutor("windows", 1, 90)
+            with self.assertRaisesRegex(
+                RuntimeError,
+                "close status TimeoutExpired.*forced cleanup used",
+            ):
+                executor._terminate_process_tree(process, require_graceful=True)
+
+        self.assertEqual(
+            run.call_args_list[1].args[0],
+            ["taskkill", "/PID", "9394", "/T", "/F"],
+        )
+        self.assertEqual(executor.last_shutdown["closeStatus"], "TimeoutExpired")
+        self.assertTrue(executor.last_shutdown["forcedCleanup"])
+
+    def test_windows_source_pre_exit_is_not_accepted_as_graceful(self):
+        process = mock.Mock(pid=9444)
+        process.poll.return_value = 7
+        executor = PlatformExecutor("windows", 1, 90)
+
+        with self.assertRaisesRegex(
+            RuntimeError,
+            "exited before CloseMainWindow with code 7",
+        ):
+            executor._terminate_process_tree(process, require_graceful=True)
+
+        self.assertFalse(executor.last_shutdown["requested"])
+        self.assertFalse(executor.last_shutdown["gracefulExited"])
+        self.assertEqual(executor.last_shutdown["unexpectedExitCode"], 7)
+
+    def test_probe_and_shutdown_failures_preserve_both_errors(self):
+        process = mock.Mock(pid=9494)
+        process.poll.return_value = None
+        with (
+            mock.patch(
+                "autoqa.migration_runner.subprocess.Popen",
+                return_value=process,
+            ),
+            mock.patch("autoqa.migration_runner.time.sleep"),
+            mock.patch(
+                "autoqa.migration_runner.subprocess.run",
+                side_effect=[
+                    mock.Mock(returncode=3),
+                    mock.Mock(returncode=0),
+                ],
+            ),
+        ):
+            with self.assertRaisesRegex(
+                RuntimeError,
+                "terminal migration failure.*shutdown also failed.*forced cleanup",
+            ):
+                PlatformExecutor("windows", 1, 90).startup_probe(
+                    Path("C:/fixture/Biyan.exe"),
+                    "current-to-c",
+                    "current",
+                    mock.Mock(
+                        side_effect=ReadinessFailed("terminal migration failure")
+                    ),
+                    require_graceful_shutdown=True,
+                )
+
+    def test_bounded_diagnostics_can_hash_without_exposing_content(self):
+        with tempfile.TemporaryDirectory(dir=Path.home()) as directory:
+            evidence_file = Path(directory) / "biyan.log"
+            evidence_file.write_text(
+                ("safe line\n" * 100)
+                + "Authorization: Bearer top-secret-value\n"
+                + "api_key=another-secret\n",
+                encoding="utf-8",
+            )
+
+            evidence = _bounded_file_evidence(
+                evidence_file,
+                max_bytes=0,
+            )
+
+            self.assertTrue(evidence["truncated"])
+            self.assertEqual(len(evidence["sha256"]), 64)
+            self.assertNotIn("tail", evidence)
+            self.assertNotIn("json", evidence)
+
+    def test_failed_main_report_preserves_pre_cleanup_diagnostics(self):
+        with tempfile.TemporaryDirectory(dir=Path.home()) as directory:
+            report = Path(directory) / "report.json"
+            diagnostics = {
+                "schema": 1,
+                "phaseBoundary": "candidate-readiness",
+            }
+            with (
+                mock.patch(
+                    "autoqa.migration_runner.validate_inputs",
+                    return_value=mock.Mock(),
+                ),
+                mock.patch(
+                    "autoqa.migration_runner.run_matrix",
+                    side_effect=MigrationRunError("candidate failed", diagnostics),
+                ),
+            ):
+                result = main(
+                    [
+                        "--platform",
+                        "windows",
+                        "--current-installer",
+                        str(Path(directory) / "current.exe"),
+                        "--c-installer",
+                        str(Path(directory) / "c.exe"),
+                        "--scenario",
+                        "current-to-c",
+                        "--snapshot-manifest",
+                        str(Path(directory) / "manifest.json"),
+                        "--report",
+                        str(report),
+                        "--allow-destructive-autoqa",
+                        "AUTOQA",
+                    ]
+                )
+
+            self.assertEqual(result, 1)
+            payload = json.loads(report.read_text(encoding="utf-8"))
+            self.assertEqual(payload["error"], "candidate failed")
+            self.assertEqual(payload["diagnostics"], diagnostics)
 
     def test_cleanup_never_derives_delete_root_from_expectations(self):
         with tempfile.TemporaryDirectory(dir=Path.home()) as directory:

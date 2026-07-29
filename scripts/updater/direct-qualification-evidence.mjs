@@ -555,6 +555,25 @@ function expectedPhaseExpectations(lane) {
   return Object.fromEntries(phases.map((phase) => [phase, values]))
 }
 
+function expectedSourceReadiness(lane) {
+  if (lane.id !== 'current-to-c-windows') return null
+  return {
+    phase: 'current',
+    version: '0.6.633',
+    settings: '%APPDATA%/Mita/settings.json',
+    dataRoot: '%APPDATA%/Biyan/data',
+    store: '%APPDATA%/Biyan/data/store.json',
+    mcpConfig: '%APPDATA%/Biyan/data/mcp_config.json',
+    marker:
+      '%APPDATA%/Biyan/data/agent-workspaces/direct-qualification-preserved.txt',
+    requiredStore: {
+      version: '0.6.633',
+      mcp_version: 5,
+      windows_biyan_migrated: true,
+    },
+  }
+}
+
 function validateInputManifest(manifest, snapshotSha256, policy, lane) {
   requireExactKeys(
     manifest,
@@ -568,6 +587,7 @@ function validateInputManifest(manifest, snapshotSha256, policy, lane) {
       'installers',
       'snapshots',
       'expectations',
+      'sourceReadiness',
     ],
     `${lane.id} input manifest`,
   )
@@ -604,6 +624,11 @@ function validateInputManifest(manifest, snapshotSha256, policy, lane) {
     manifest.expectations,
     expectedPhaseExpectations(lane),
     `${lane.id} expectations`,
+  )
+  sameJson(
+    manifest.sourceReadiness,
+    expectedSourceReadiness(lane),
+    `${lane.id} source readiness`,
   )
 }
 
