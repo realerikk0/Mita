@@ -9,8 +9,10 @@ import { fileURLToPath } from 'node:url'
 
 import {
   aggregateDirectQualificationEvidence,
+  buildFocusedDiagnosticSummary,
   buildDirectQualificationLaneResult,
   loadDirectQualificationPolicy,
+  resolveDirectQualificationScope,
   validateDirectQualificationPolicy,
 } from '../direct-qualification-evidence.mjs'
 
@@ -103,6 +105,24 @@ function inputManifest(policy, lane, snapshotSha256) {
       ? 'fresh-install'
       : policy.sources[lane.sourceVersion]?.qualificationMode ??
         'automatic-updater'
+  const sourceReadiness =
+    lane.id === 'current-to-c-windows'
+      ? {
+          phase: 'current',
+          version: '0.6.633',
+          settings: '%APPDATA%/Mita/settings.json',
+          dataRoot: '%APPDATA%/Biyan/data',
+          store: '%APPDATA%/Biyan/data/store.json',
+          mcpConfig: '%APPDATA%/Biyan/data/mcp_config.json',
+          marker:
+            '%APPDATA%/Biyan/data/agent-workspaces/direct-qualification-preserved.txt',
+          requiredStore: {
+            version: '0.6.633',
+            mcp_version: 5,
+            windows_biyan_migrated: true,
+          },
+        }
+      : null
   return {
     schema: 1,
     sanitized: true,
@@ -134,6 +154,7 @@ function inputManifest(policy, lane, snapshotSha256) {
         ],
       ]),
     ),
+    sourceReadiness,
   }
 }
 
@@ -269,6 +290,62 @@ test('candidate pin must be complete and bound to the exact product source commi
   )
 })
 
+test('qualification scope is exactly full 16 or focused current Windows 1', () => {
+  const policy = pinnedPolicy()
+  const full = resolveDirectQualificationScope(policy, 'full')
+  assert.equal(full.fullMode, true)
+  assert.equal(full.qualificationMatrix.include.length, 16)
+  assert.deepEqual(
+    full.qualificationMatrix.include.map((lane) => lane.lane),
+    policy.lanes.map((lane) => lane.id),
+  )
+
+  const focused = resolveDirectQualificationScope(
+    policy,
+    'current-to-c-windows',
+  )
+  assert.equal(focused.fullMode, false)
+  assert.deepEqual(focused.qualificationMatrix.include, [
+    {
+      lane: 'current-to-c-windows',
+      platform: 'windows',
+      runner: 'windows-2022',
+      scenario: 'current-to-c',
+      source_version: '0.6.633',
+      source_role: 'current',
+      snapshot: 'current',
+    },
+  ])
+  assert.throws(
+    () => resolveDirectQualificationScope(policy, 'current-to-c-macos'),
+    /exactly full or current-to-c-windows/,
+  )
+})
+
+test('focused diagnostic summary is permanently non-promotable', () => {
+  const policy = pinnedPolicy()
+  const summary = buildFocusedDiagnosticSummary({
+    policy,
+    laneId: 'current-to-c-windows',
+    runId: 777,
+    runAttempt: 1,
+    qualificationOutcome: 'failure',
+  })
+  assert.equal(summary.promotionEligible, false)
+  assert.equal(summary.lane, 'current-to-c-windows')
+  assert.throws(
+    () =>
+      buildFocusedDiagnosticSummary({
+        policy,
+        laneId: 'current-to-c-macos',
+        runId: 777,
+        runAttempt: 1,
+        qualificationOutcome: 'success',
+      }),
+    /restricted to current-to-c-windows/,
+  )
+})
+
 test('aggregation requires exactly the reviewed 16 GitHub-native lanes', () => {
   const fixture = aggregateFixture()
   const evidence = aggregateDirectQualificationEvidence({
@@ -341,6 +418,10 @@ test('legacy and current lanes bind their exact historical data roots', () => {
       completedAt: '2026-07-29T00:01:00Z',
     })
   assert.doesNotThrow(build)
+  const original = clone(manifest.sourceReadiness)
+  manifest.sourceReadiness.requiredStore.windows_biyan_migrated = 1
+  assert.throws(build, /sourceReadiness/)
+  manifest.sourceReadiness = original
   manifest.snapshots.current.restore_to = '%APPDATA%/Mita/data'
   assert.throws(build, /snapshot binding/)
 })
@@ -372,6 +453,11 @@ test('A and B lanes require source-aware data roots and both phase expectations'
         completedAt: '2026-07-29T00:01:00Z',
       })
     assert.doesNotThrow(build)
+    manifest.sourceReadiness = {
+      phase: 'current',
+    }
+    assert.throws(build, /sourceReadiness/)
+    manifest.sourceReadiness = null
     delete manifest.expectations[phase]
     assert.throws(build, /expectations/)
   }

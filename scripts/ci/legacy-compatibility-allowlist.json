@@ -62,10 +62,10 @@
   ],
   "rules": [
     {
-      "expectedMatches": 42,
+      "expectedMatches": 56,
       "id": "autoqa-upgrade-scenarios",
-      "matchesSha256": "586988c6b352836463ac6e0efdd82db794b6c683f9b428ceb73bfe4e7b83c211",
-      "pathRegex": "^(?:autoqa/checklist\\.md|autoqa/migration_runner\\.py|autoqa/scripts/macos_cleanup\\.sh|autoqa/scripts/macos_post_cleanup\\.sh)$",
+      "matchesSha256": "6c120d78f9a1a5b64a45686ddc511d825d28cc29ff6aec65dbb4b7445d6db5d0",
+      "pathRegex": "^(?:autoqa/checklist\\.md|autoqa/migration_runner\\.py|autoqa/tests/test_migration_runner\\.py|autoqa/scripts/macos_cleanup\\.sh|autoqa/scripts/macos_post_cleanup\\.sh)$",
       "pattern": "(?:catalog\\.jan\\.ai|apps(?:-nightly)?\\.jan\\.ai|janhq|latest[_-]jan[_-]model|model[-_]catalog|(?<![a-z0-9])(?:jan|mita|silence)(?![a-z0-9]))",
       "reason": "AutoQA retains exact legacy identities only to build and verify upgrade or cleanup scenarios.",
       "scope": "content"
@@ -80,9 +80,9 @@
       "scope": "content"
     },
     {
-      "expectedMatches": 68,
+      "expectedMatches": 76,
       "id": "direct-c-release-qualification-anchors",
-      "matchesSha256": "d2a76a01616f99fe3a6bd77351eda02ce4d5d9c63657b1e4e2b78781f418403f",
+      "matchesSha256": "3ca493210594c2fcb9ee3b510deba320f256e0d3cace3715d3f964ca31efae1b",
       "pathRegex": "^(?:\\.github/workflows/biyan-direct-qualification\\.yml|scripts/updater/__tests__/direct-c-transition-policy\\.test\\.mjs|scripts/updater/__tests__/direct-qualification\\.test\\.mjs|scripts/updater/__tests__/fixtures/v0\\.6\\.633-latest\\.json|scripts/updater/__tests__/test_prepare_direct_qualification_inputs\\.py|scripts/updater/direct-qualification-evidence\\.mjs|scripts/updater/direct-qualification-policy\\.json|scripts/updater/prepare-direct-qualification-inputs\\.py)$",
       "pattern": "(?:static\\.mitapp\\.cn|catalog\\.jan\\.ai|apps(?:-nightly)?\\.jan\\.ai|janhq|latest[_-]jan[_-]model|model[-_]catalog|(?<![a-z0-9])(?:jan|mita|silence)(?![a-z0-9]))",
       "reason": "Exact one-shot DIRECT_C qualification fixtures retain reviewed legacy updater hosts and identities only to prove upgrades from every supported installed version.",

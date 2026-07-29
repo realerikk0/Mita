@@ -3304,7 +3304,7 @@ test('formal build, release, and updater jobs share the release-distribution env
   )
 })
 
-test('direct qualification is an exact 16-lane read-only evidence workflow', () => {
+test('direct qualification is an exact full-or-focused read-only evidence workflow', () => {
   const workflow = normalizeLineEndings(
     fs.readFileSync(
       '.github/workflows/biyan-direct-qualification.yml',
@@ -3327,9 +3327,25 @@ test('direct qualification is an exact 16-lane read-only evidence workflow', () 
       'manual-only read-only',
     ],
     [
-      'missing lane',
-      workflow.replace('          - lane: c-to-c-linux', '          - lane: c-to-c-extra'),
-      '16-lane upgrade matrix',
+      'unreviewed matrix source',
+      workflow.replace(
+        'matrix: ${{ fromJSON(needs.preflight.outputs.qualification_matrix) }}',
+        'matrix: {include: []}'
+      ),
+      'full 16 or focused current Windows 1',
+    ],
+    [
+      'focused diagnostics may not aggregate',
+      workflow.replace(
+        '            diagnostic-summary `',
+        '            aggregate `'
+      ),
+      'full 16 or focused current Windows 1',
+    ],
+    [
+      'cancelled run may not aggregate',
+      workflow.replace('        && !cancelled()\n', ''),
+      'full 16 or focused current Windows 1',
     ],
     [
       'production secret',

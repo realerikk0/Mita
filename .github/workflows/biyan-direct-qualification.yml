@@ -2,6 +2,15 @@ name: Biyan Direct Qualification
 
 on:
   workflow_dispatch:
+    inputs:
+      focused_lane:
+        description: Qualification scope
+        required: true
+        default: full
+        type: choice
+        options:
+          - full
+          - current-to-c-windows
 
 permissions:
   actions: read
@@ -16,6 +25,9 @@ jobs:
     name: Validate pinned direct qualification control plane
     runs-on: ubuntu-24.04
     timeout-minutes: 20
+    outputs:
+      qualification_matrix: ${{ steps.resolve_scope.outputs.qualification_matrix }}
+      full_mode: ${{ steps.resolve_scope.outputs.full_mode }}
     steps:
       - name: Check out the exact dispatched commit
         uses: actions/checkout@v4
@@ -24,10 +36,33 @@ jobs:
           fetch-depth: 0
           persist-credentials: false
 
+      - name: Bind dispatch to live protected main before trusted scripts
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$GITHUB_REF" = "refs/heads/mita-main"
+          test "$(git rev-parse HEAD)" = "$GITHUB_SHA"
+          git fetch --force --no-tags origin \
+            "+refs/heads/mita-main:refs/remotes/origin/mita-main"
+          test "$(git rev-parse HEAD)" = \
+            "$(git rev-parse refs/remotes/origin/mita-main)"
+
       - name: Set up Python
         uses: actions/setup-python@v5
         with:
           python-version: "3.13"
+
+      - name: Resolve reviewed qualification scope
+        id: resolve_scope
+        env:
+          FOCUSED_LANE: ${{ inputs.focused_lane }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          node scripts/updater/direct-qualification-evidence.mjs \
+            qualification-scope \
+            --policy scripts/updater/direct-qualification-policy.json \
+            --focused-lane "$FOCUSED_LANE" >> "$GITHUB_OUTPUT"
 
       - name: Verify live main, pinned policy, public sources, and harness
         env:
@@ -435,120 +470,7 @@ jobs:
     timeout-minutes: 90
     strategy:
       fail-fast: false
-      matrix:
-        include:
-          - lane: legacy-manual-to-c-windows
-            platform: windows
-            runner: windows-2022
-            scenario: legacy-manual-to-c
-            source_version: 0.6.608
-            source_role: current
-            snapshot: current
-          - lane: legacy-manual-to-c-macos
-            platform: macos
-            runner: macos-15-intel
-            scenario: legacy-manual-to-c
-            source_version: 0.6.608
-            source_role: current
-            snapshot: current
-          - lane: legacy-auto-to-c-windows
-            platform: windows
-            runner: windows-2022
-            scenario: legacy-auto-to-c
-            source_version: 0.6.611
-            source_role: current
-            snapshot: current
-          - lane: legacy-auto-to-c-macos
-            platform: macos
-            runner: macos-15-intel
-            scenario: legacy-auto-to-c
-            source_version: 0.6.611
-            source_role: current
-            snapshot: current
-          - lane: current-to-c-windows
-            platform: windows
-            runner: windows-2022
-            scenario: current-to-c
-            source_version: 0.6.633
-            source_role: current
-            snapshot: current
-          - lane: current-to-c-macos
-            platform: macos
-            runner: macos-15-intel
-            scenario: current-to-c
-            source_version: 0.6.633
-            source_role: current
-            snapshot: current
-          - lane: fresh-c-linux
-            platform: linux
-            runner: ubuntu-24.04
-            scenario: fresh-c
-            source_version: ""
-            source_role: ""
-            snapshot: fresh
-          - lane: a-to-c-windows
-            platform: windows
-            runner: windows-2022
-            scenario: a-to-c
-            source_version: 0.6.643
-            source_role: a
-            snapshot: a
-          - lane: a-to-c-macos
-            platform: macos
-            runner: macos-15-intel
-            scenario: a-to-c
-            source_version: 0.6.643
-            source_role: a
-            snapshot: a
-          - lane: a-to-c-linux
-            platform: linux
-            runner: ubuntu-24.04
-            scenario: a-to-c
-            source_version: 0.6.643
-            source_role: a
-            snapshot: a
-          - lane: b-to-c-windows
-            platform: windows
-            runner: windows-2022
-            scenario: b-to-c
-            source_version: 0.6.644
-            source_role: b
-            snapshot: b
-          - lane: b-to-c-macos
-            platform: macos
-            runner: macos-15-intel
-            scenario: b-to-c
-            source_version: 0.6.644
-            source_role: b
-            snapshot: b
-          - lane: b-to-c-linux
-            platform: linux
-            runner: ubuntu-24.04
-            scenario: b-to-c
-            source_version: 0.6.644
-            source_role: b
-            snapshot: b
-          - lane: c-to-c-windows
-            platform: windows
-            runner: windows-2022
-            scenario: c-to-c
-            source_version: 0.6.645
-            source_role: current
-            snapshot: current
-          - lane: c-to-c-macos
-            platform: macos
-            runner: macos-15-intel
-            scenario: c-to-c
-            source_version: 0.6.645
-            source_role: current
-            snapshot: current
-          - lane: c-to-c-linux
-            platform: linux
-            runner: ubuntu-24.04
-            scenario: c-to-c
-            source_version: 0.6.645
-            source_role: current
-            snapshot: current
+      matrix: ${{ fromJSON(needs.preflight.outputs.qualification_matrix) }}
     env:
       LANE: ${{ matrix.lane }}
       PLATFORM: ${{ matrix.platform }}
@@ -857,6 +779,33 @@ jobs:
           if-no-files-found: error
           retention-days: 30
 
+      - name: Write non-promotable focused diagnostic summary
+        if: always() && needs.preflight.outputs.full_mode == 'false'
+        env:
+          QUALIFICATION_OUTCOME: ${{ steps.execute_windows.outcome }}
+        shell: pwsh
+        run: |
+          node scripts/updater/direct-qualification-evidence.mjs `
+            diagnostic-summary `
+            --policy scripts/updater/direct-qualification-policy.json `
+            --lane $env:LANE `
+            --run-id $env:GITHUB_RUN_ID `
+            --run-attempt $env:GITHUB_RUN_ATTEMPT `
+            --qualification-outcome $env:QUALIFICATION_OUTCOME `
+            --output dist/direct-evidence/focused-diagnostic-summary.json
+          if ($LASTEXITCODE -ne 0) {
+            throw 'focused diagnostic summary failed closed'
+          }
+
+      - name: Upload non-promotable focused diagnostic summary
+        if: always() && needs.preflight.outputs.full_mode == 'false'
+        uses: actions/upload-artifact@v4
+        with:
+          name: direct-qualification-diagnostic-summary-${{ github.run_id }}-${{ github.run_attempt }}
+          path: dist/direct-evidence/focused-diagnostic-summary.json
+          if-no-files-found: error
+          retention-days: 30
+
       - name: Fail closed after preserving Windows evidence
         if: always() && matrix.platform == 'windows' && steps.execute_windows.outcome != 'success'
         shell: pwsh
@@ -888,6 +837,18 @@ jobs:
   aggregate:
     name: Bind exact 16 of 16 evidence for promotion
     needs: [preflight, stage-candidate, qualification]
+    if: >-
+      ${{
+        always()
+        && !cancelled()
+        && needs.preflight.outputs.full_mode == 'true'
+        && needs.preflight.result == 'success'
+        && needs.stage-candidate.result == 'success'
+        && (
+          needs.qualification.result == 'success'
+          || needs.qualification.result == 'failure'
+        )
+      }}
     runs-on: ubuntu-24.04
     timeout-minutes: 20
     steps:
@@ -1011,7 +972,12 @@ jobs:
           retention-days: 30
 
       - name: Upload promotion evidence only after exact 16 of 16
-        if: steps.aggregate_evidence.outcome == 'success'
+        if: >-
+          ${{
+            needs.preflight.outputs.full_mode == 'true'
+            && needs.qualification.result == 'success'
+            && steps.aggregate_evidence.outcome == 'success'
+          }}
         uses: actions/upload-artifact@v4
         with:
           name: biyan-promotion-evidence
@@ -1022,7 +988,14 @@ jobs:
           retention-days: 30
 
       - name: Fail closed after preserving aggregate evidence
-        if: steps.aggregate_evidence.outcome != 'success'
+        if: >-
+          ${{
+            always()
+            && (
+              needs.qualification.result != 'success'
+              || steps.aggregate_evidence.outcome != 'success'
+            )
+          }}
         shell: bash
         run: |
           echo "Direct qualification aggregate failed" >&2

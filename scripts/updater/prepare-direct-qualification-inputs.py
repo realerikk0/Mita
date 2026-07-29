@@ -266,6 +266,30 @@ def prepare_inputs(
         phase: [state_path, *([marker_path] if marker else [])]
         for phase in required_phases
     }
+    source_readiness = None
+    if (
+        lane_id == "current-to-c-windows"
+        and platform == "windows"
+        and scenario == "current-to-c"
+        and source_version == "0.6.633"
+    ):
+        source_readiness = {
+            "phase": "current",
+            "version": "0.6.633",
+            "settings": "%APPDATA%/Mita/settings.json",
+            "dataRoot": "%APPDATA%/Biyan/data",
+            "store": "%APPDATA%/Biyan/data/store.json",
+            "mcpConfig": "%APPDATA%/Biyan/data/mcp_config.json",
+            "marker": (
+                "%APPDATA%/Biyan/data/agent-workspaces/"
+                "direct-qualification-preserved.txt"
+            ),
+            "requiredStore": {
+                "version": "0.6.633",
+                "mcp_version": 5,
+                "windows_biyan_migrated": True,
+            },
+        }
 
     manifest = {
         "schema": 1,
@@ -283,6 +307,7 @@ def prepare_inputs(
             }
         },
         "expectations": expectations,
+        "sourceReadiness": source_readiness,
     }
     manifest_path = output_dir / "manifest.json"
     manifest_path.write_text(

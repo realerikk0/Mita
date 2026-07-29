@@ -80,7 +80,7 @@ const TRUSTED_RELEASE_DISTRIBUTION_WORKFLOW_SHA256 =
   'c780b58de80c07962f42c43fc658b74b2f7c2734df01fd356cefb80f5480ca76'
 
 const TRUSTED_DIRECT_QUALIFICATION_WORKFLOW_SHA256 =
-  '8b361ad1a7ebc9eacfa655137708a00f26261363ffec35db45b1f07ae217d197'
+  '6b6464396cc126e296a4393e76d6e0ac4460203f99470c604853c851f4744de3'
 
 export const TRUSTED_SENSITIVE_UPDATER_WORKFLOW_CONTRACTS = Object.freeze({
   '.github/workflows/biyan-a-canary.yml': Object.freeze({
@@ -3630,7 +3630,7 @@ export function validateDirectQualificationWorkflow(source) {
   if (
     !/^name:\s*Biyan Direct Qualification\s*$/m.test(active) ||
     normalizedYamlEnvelope(topLevelBlock(active, 'on')) !==
-      'on:\n  workflow_dispatch:\n' ||
+      'on:\n  workflow_dispatch:\n    inputs:\n      focused_lane:\n        description: Qualification scope\n        required: true\n        default: full\n        type: choice\n        options:\n          - full\n          - current-to-c-windows\n' ||
     normalizedYamlEnvelope(topLevelBlock(active, 'permissions')) !==
       'permissions:\n  actions: read\n  contents: read\n' ||
     normalizedYamlEnvelope(topLevelBlock(active, 'concurrency')) !==
@@ -3654,35 +3654,39 @@ export function validateDirectQualificationWorkflow(source) {
       'only direct qualification Draft staging may request exact actions: read plus contents: write'
     )
   }
-  const expectedLanes = [
-    'legacy-manual-to-c-windows',
-    'legacy-manual-to-c-macos',
-    'legacy-auto-to-c-windows',
-    'legacy-auto-to-c-macos',
-    'current-to-c-windows',
-    'current-to-c-macos',
-    'fresh-c-linux',
-    'a-to-c-windows',
-    'a-to-c-macos',
-    'a-to-c-linux',
-    'b-to-c-windows',
-    'b-to-c-macos',
-    'b-to-c-linux',
-    'c-to-c-windows',
-    'c-to-c-macos',
-    'c-to-c-linux',
-  ]
-  const lanes = [
-    ...(jobBlock(active, 'qualification')?.matchAll(
-      /^\s{10}- lane:\s*([a-z0-9-]+)\s*$/gm
-    ) ?? []),
-  ].map((match) => match[1])
+  const preflight = jobBlock(active, 'preflight')
+  const qualification = jobBlock(active, 'qualification')
+  const aggregate = jobBlock(active, 'aggregate')
   if (
-    lanes.length !== expectedLanes.length ||
-    lanes.some((lane, index) => lane !== expectedLanes[index])
+    !preflight?.includes(
+      'qualification_matrix: ${{ steps.resolve_scope.outputs.qualification_matrix }}'
+    ) ||
+    !preflight?.includes(
+      'full_mode: ${{ steps.resolve_scope.outputs.full_mode }}'
+    ) ||
+    !preflight?.includes(
+      'Bind dispatch to live protected main before trusted scripts'
+    ) ||
+    !preflight?.includes('qualification-scope') ||
+    !preflight?.includes('--focused-lane "$FOCUSED_LANE"') ||
+    !qualification?.includes(
+      'matrix: ${{ fromJSON(needs.preflight.outputs.qualification_matrix) }}'
+    ) ||
+    !qualification?.includes('\n            diagnostic-summary `') ||
+    !qualification?.includes(
+      'name: direct-qualification-diagnostic-summary-${{ github.run_id }}-${{ github.run_attempt }}'
+    ) ||
+    !aggregate?.includes('always()') ||
+    !aggregate?.includes('!cancelled()') ||
+    !aggregate?.includes("needs.preflight.outputs.full_mode == 'true'") ||
+    !aggregate?.includes("needs.qualification.result == 'success'") ||
+    !aggregate?.includes("needs.qualification.result == 'failure'") ||
+    !aggregate?.includes(
+      "needs.qualification.result == 'success'\n            && steps.aggregate_evidence.outcome == 'success'"
+    )
   ) {
     failures.push(
-      'direct qualification must preserve the exact reviewed 16-lane upgrade matrix'
+      'direct qualification must preserve the policy-derived full 16 or focused current Windows 1 scope and non-promotable diagnostics'
     )
   }
   if (
