@@ -2404,6 +2404,17 @@ test('promotion workflows carry the fail-closed transaction controls', () => {
   const promotion = readText(
     path.join(repoRoot, '.github/workflows/promote-desktop-update.yml')
   )
+  const preparePromotionSource = readText(
+    path.join(repoRoot, 'scripts/updater/prepare-promotion.mjs')
+  )
+  const legacyManifestPolicySource = readText(
+    path.join(repoRoot, 'scripts/updater/legacy-manifest-policy.mjs')
+  )
+  const directTransitionPolicy = JSON.parse(
+    readText(
+      path.join(repoRoot, 'scripts/updater/direct-c-transition-policy.json')
+    )
+  )
   const runner = readText(
     path.join(repoRoot, 'scripts/updater/run-promotion-transaction.sh')
   )
@@ -2466,10 +2477,48 @@ test('promotion workflows carry the fail-closed transaction controls', () => {
     /Publish with rollback protection[\s\S]*inputs\.dry_run != true &&[\s\S]*committed_same_request != 'true'/
   )
   assert.match(promotion, /timeout-minutes: 90/)
-  assert.match(promotion, /"Biyan A Canary"/)
+  assert.match(promotion, /options: \[DIRECT_C, RECOVERY\]/)
+  assert.match(promotion, /"Biyan Direct Qualification"/)
   assert.match(promotion, /"Biyan Upgrade Smoke"/)
-  assert.match(promotion, /github-native-two-point-canary/)
-  assert.match(promotion, /\.workflow\.finishRunId == \$run/)
+  assert.doesNotMatch(promotion, /"Biyan A Canary"/)
+  assert.match(promotion, /github-native-direct-qualification/)
+  assert.match(promotion, /\.sampleSize == 16/)
+  assert.match(promotion, /\.attempts == 16/)
+  assert.match(promotion, /\.passedAttempts == 16/)
+  assert.match(
+    promotion,
+    /\.workflow\.path ==[\s\S]*"\.github\/workflows\/biyan-direct-qualification\.yml"/,
+  )
+  assert.match(promotion, /\.workflow\.runId == \$run/)
+  assert.match(
+    promotion,
+    /if \[ "\$PHASE" = "DIRECT_C" \][\s\S]*create-fallback[\s\S]*--legacy-pause-fallback/,
+  )
+  assert.doesNotMatch(promotion, /\$PHASE" = "A"|validate-approved-a/)
+  assert.equal(
+    Object.hasOwn(directTransitionPolicy, 'approvedNext'),
+    true,
+    'tracked DIRECT_C policy must retain the fail-closed approvedNext gate',
+  )
+  assert.match(
+    preparePromotionSource,
+    /loadDirectCTransitionPolicy\(\)[\s\S]*validateApprovedDirectCTransition\(\{/,
+  )
+  assert.match(
+    legacyManifestPolicySource,
+    /loadDirectCTransitionPolicy\(\)[\s\S]*validateApprovedDirectCTransition\(\{/,
+  )
+  const prepareProposal = promotion.indexOf(
+    'node scripts/updater/prepare-promotion.mjs'
+  )
+  const validateLegacyPromotion = promotion.indexOf(
+    'node scripts/updater/legacy-manifest-policy.mjs validate-promotion'
+  )
+  assert.ok(
+    prepareProposal >= 0
+      && prepareProposal < validateLegacyPromotion,
+    'DIRECT_C proposal validation must precede the independent legacy policy validation',
+  )
   assert.match(
     promotion,
     /legacy-manifest-policy\.mjs[\s\S]*--aliyun dist\/state\/pre-a-legacy-oss\.json[\s\S]*--r2 dist\/state\/pre-a-legacy-r2\.json[\s\S]*--evidence dist\/state\/pre-a-legacy-evidence\.json/

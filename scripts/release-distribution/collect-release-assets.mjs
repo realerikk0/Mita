@@ -4,7 +4,7 @@ import fs from 'node:fs'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 
-import { validateReleaseIdentity } from '../ci/release-policy-contracts.mjs'
+import { validateActiveReleaseIdentity } from '../ci/release-policy-contracts.mjs'
 import {
   decodeUpdaterPublicKey,
   verifyUpdaterSignature,
@@ -272,6 +272,7 @@ export function validateCandidateProvenance(
     tauriConfig,
     cargoLock,
     releasePublishedAt,
+    trainPolicy = RELEASE_TRAIN_POLICY,
   } = {}
 ) {
   if (!candidateDir || !fs.existsSync(candidateDir)) {
@@ -301,29 +302,28 @@ export function validateCandidateProvenance(
   const cargoLockVersion = String(cargoLock ?? '').match(
     /^name\s*=\s*"Biyan"\s*\nversion\s*=\s*"([^"]+)"/m
   )?.[1]
-  const identityFailures = validateReleaseIdentity({
+  const identityFailures = validateActiveReleaseIdentity({
     version,
     migrationPhase: releaseMetadata.migrationPhase,
     dataSchema: releaseMetadata.dataSchema,
     cargoLockVersion,
+    trainPolicy,
   })
   if (identityFailures.length) {
     throw new Error(
       `Tagged release identity is invalid: ${identityFailures.join('; ')}`
     )
   }
-  const activeTrain = RELEASE_TRAIN_POLICY.trains.find(
-    (train) => train.id === RELEASE_TRAIN_POLICY.activeTrain
-  )
-  const activeRelease = activeTrain?.releases?.[releaseMetadata.migrationPhase]
-  if (
-    activeTrain?.status !== 'active' ||
-    activeRelease?.version !== version ||
-    activeRelease?.dataSchema !== releaseMetadata.dataSchema
-  ) {
-    throw new Error(
-      `Release ${version}/${releaseMetadata.migrationPhase}/${releaseMetadata.dataSchema} is not in the active ${RELEASE_TRAIN_POLICY.activeTrain} train`
-    )
+  const terminalRelease = trainPolicy.activeTerminalRelease
+  if (terminalRelease !== null && terminalRelease !== undefined) {
+    if (
+      tagName !== terminalRelease.tag ||
+      expectedSourceCommit !== terminalRelease.sourceCommit
+    ) {
+      throw new Error(
+        `Candidate ${tagName}/${expectedSourceCommit} does not match the active terminal release ${terminalRelease.tag}/${terminalRelease.sourceCommit}`
+      )
+    }
   }
   const updaterPublicKey = decodeUpdaterPublicKey(
     tauriConfig?.plugins?.updater?.pubkey
@@ -670,6 +670,7 @@ export function collectReleaseAssets(release, options = {}) {
       tauriConfig: options.tauriConfig,
       cargoLock: options.cargoLock,
       releasePublishedAt: release.publishedAt ?? release.published_at,
+      trainPolicy: options.trainPolicy,
     })
   }
 

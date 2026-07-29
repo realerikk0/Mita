@@ -7,7 +7,7 @@ The documentation site is built with [Nextra](https://nextra.site/) and exported
 - `/docs/desktop/`: Biyan Desktop guides.
 - `/docs/desktop/remote-models/`: cloud Provider setup.
 - `/docs/desktop/file-upload`: image and document behavior.
-- `/docs/desktop/data-folder`: cumulative current → A → B → C migration.
+- `/docs/desktop/data-folder`: cumulative legacy → complete C/schema-3 migration.
 - `/docs/desktop/mcp`: MCP setup and safety.
 - `/docs/desktop/api-server`: remote-only local API gateway.
 

@@ -6,6 +6,12 @@ import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 
 import { validateCanonicalUpdaterManifest } from './candidate-url-policy.mjs'
+import {
+  createDirectCInitialPolicy,
+  loadDirectCTransitionPolicy,
+  validateApprovedDirectCTransition,
+  validateDirectCTransitionPolicy,
+} from './direct-c-transition-policy.mjs'
 
 const scriptDirectory = path.dirname(fileURLToPath(import.meta.url))
 const policyPath = path.join(scriptDirectory, 'legacy-bridge-policy.json')
@@ -17,7 +23,7 @@ const releaseTrainPolicy = JSON.parse(
   fs.readFileSync(releaseTrainPolicyPath, 'utf8'),
 )
 
-const states = new Set(['pre-a', 'a-pinned'])
+const states = new Set(['pre-a', 'a-pinned', 'direct-c-pinned'])
 const preAPlatforms = [
   'darwin-aarch64',
   'darwin-x86_64',
@@ -130,7 +136,10 @@ function activeTrainReleases(trainPolicy = releaseTrainPolicy) {
 
 export function validateLegacyBridgePolicy(
   value,
-  { trainPolicy = releaseTrainPolicy } = {},
+  {
+    trainPolicy = releaseTrainPolicy,
+    directTransitionPolicy,
+  } = {},
 ) {
   assertPlainObject(value, 'Legacy bridge policy')
   assertExactKeys(
@@ -147,7 +156,9 @@ export function validateLegacyBridgePolicy(
   )
   if (value.schema !== 1) throw new Error(`Unsupported legacy bridge policy schema: ${value.schema}`)
   if (!states.has(value.state)) {
-    throw new Error(`Legacy bridge policy state must be pre-a or a-pinned; found ${value.state}`)
+    throw new Error(
+      `Legacy bridge policy state must be pre-a, a-pinned, or direct-c-pinned; found ${value.state}`,
+    )
   }
   if (
     typeof value.expectedVersion !== 'string'
@@ -159,12 +170,16 @@ export function validateLegacyBridgePolicy(
     throw new Error('Legacy bridge expectedManifestSha256 must be an explicit lowercase SHA-256')
   }
 
-  const expectedPlatforms = value.state === 'pre-a' ? preAPlatforms : aPinnedPlatforms
+  const expectedPlatforms =
+    value.state === 'pre-a' ? preAPlatforms : aPinnedPlatforms
   assertExactPlatformSet(value.requiredPlatforms, expectedPlatforms, `${value.state} requiredPlatforms`)
   if (value.state === 'pre-a' && value.expectedVersion !== '0.6.633') {
     throw new Error('pre-a must remain pinned to the current live version 0.6.633')
   }
-  const activeA = activeTrainReleases(trainPolicy)?.A
+  const activeA =
+    value.state === 'a-pinned'
+      ? activeTrainReleases(trainPolicy)?.A
+      : null
   if (
     value.state === 'a-pinned'
     && (
@@ -174,6 +189,27 @@ export function validateLegacyBridgePolicy(
   ) {
     throw new Error(
       `a-pinned must remain pinned to active train A version ${activeA?.version ?? '(missing)'}`,
+    )
+  }
+  if (value.state === 'direct-c-pinned') {
+    const direct = validateDirectCTransitionPolicy(
+      directTransitionPolicy ?? loadDirectCTransitionPolicy(),
+      { requireApprovedNext: true },
+    )
+    if (
+      value.expectedVersion !== direct.approvedNext.version
+      || value.expectedManifestSha256
+        !== direct.approvedNext.manifestSha256
+      || !isPlainObject(direct.approvedNext)
+    ) {
+      throw new Error(
+        'direct-c-pinned must match the exact approved DIRECT_C target',
+      )
+    }
+    assertExactPlatformSet(
+      value.requiredPlatforms,
+      direct.approvedNext.requiredPlatforms,
+      'direct-c-pinned requiredPlatforms',
     )
   }
 
@@ -202,6 +238,7 @@ export function validatePromotionLegacyBridge({
   currentPolicy,
   nextPolicy,
   trackedPolicy,
+  directTransitionPolicy,
   trainPolicy = releaseTrainPolicy,
 }) {
   const tracked = validateLegacyBridgePolicy(trackedPolicy, { trainPolicy })
@@ -226,6 +263,40 @@ export function validatePromotionLegacyBridge({
   const effectivePhase = release.effectivePhase
   if (!['A', 'B', 'C'].includes(effectivePhase)) {
     throw new Error(`Promotion effective phase must be A, B, or C; found ${effectivePhase}`)
+  }
+  if (nextPolicy.deploymentMode === 'direct-c') {
+    const direct = validateDirectCTransitionPolicy(
+      directTransitionPolicy ?? loadDirectCTransitionPolicy(),
+      { requireApprovedNext: true },
+    )
+    if (
+      tracked.state !== 'pre-a'
+      || tracked.expectedVersion !== direct.current.version
+      || tracked.expectedManifestSha256 !== direct.current.manifestSha256
+    ) {
+      throw new Error(
+        'DIRECT_C requires the tracked legacy bridge to remain at exact pre-a current',
+      )
+    }
+    validateApprovedDirectCTransition({
+      policy: direct,
+      candidate,
+      currentPolicy,
+      nextPolicy,
+    })
+    if (
+      effectivePhase !== 'C'
+      || nextPolicy.legacyBridgeVersion !== candidate.version
+    ) {
+      throw new Error(
+        'DIRECT_C must publish the approved C candidate to both legacy entrypoints',
+      )
+    }
+    return {
+      activeAVersion: candidate.version,
+      effectivePhase,
+      trackedState: direct.state,
+    }
   }
   const activeReleases = activeTrainReleases(trainPolicy)
   const expectedRelease = activeReleases?.[effectivePhase]
@@ -283,8 +354,18 @@ export function validatePromotionLegacyBridge({
   }
 }
 
-export function validateLegacyManifest(value, policyInput) {
-  const policy = validateLegacyBridgePolicy(policyInput)
+export function validateLegacyManifest(
+  value,
+  policyInput,
+  {
+    trainPolicy = releaseTrainPolicy,
+    directTransitionPolicy,
+  } = {},
+) {
+  const policy = validateLegacyBridgePolicy(policyInput, {
+    trainPolicy,
+    directTransitionPolicy,
+  })
   assertPlainObject(value, 'Legacy updater manifest')
   if (value.version !== policy.expectedVersion) {
     throw new Error(
@@ -340,15 +421,23 @@ export function verifyLegacyManifestPair({
   aliyunBytes,
   r2Bytes,
   verifiedAt = new Date().toISOString(),
+  trainPolicy = releaseTrainPolicy,
+  directTransitionPolicy,
 }) {
-  const policy = validateLegacyBridgePolicy(policyInput)
+  const policy = validateLegacyBridgePolicy(policyInput, {
+    trainPolicy,
+    directTransitionPolicy,
+  })
   const aliyun = Buffer.from(aliyunBytes)
   const r2 = Buffer.from(r2Bytes)
   if (!aliyun.equals(r2)) {
     throw new Error('Legacy updater manifests must remain byte-identical')
   }
   const manifest = parseJson(aliyun, 'Legacy updater manifest')
-  validateLegacyManifest(manifest, policy)
+  validateLegacyManifest(manifest, policy, {
+    trainPolicy,
+    directTransitionPolicy,
+  })
   const manifestSha256 = sha256(aliyun)
   if (manifestSha256 !== policy.expectedManifestSha256) {
     throw new Error(
@@ -441,7 +530,7 @@ function runCli() {
         ),
         currentPolicy: fs.existsSync(currentPolicyFile)
           ? parseJson(fs.readFileSync(currentPolicyFile), 'Current promotion policy')
-          : { legacyBridgeVersion: null },
+          : createDirectCInitialPolicy(),
         nextPolicy: parseJson(
           fs.readFileSync(path.resolve(args['--next-policy'])),
           'Next promotion policy',
@@ -450,10 +539,17 @@ function runCli() {
           fs.readFileSync(policyPath),
           'Tracked legacy bridge policy',
         ),
+        directTransitionPolicy:
+          parseJson(
+            fs.readFileSync(path.resolve(args['--next-policy'])),
+            'Next promotion policy mode probe',
+          ).deploymentMode === 'direct-c'
+            ? loadDirectCTransitionPolicy()
+            : undefined,
       })
       console.log(
         `Verified ${result.effectivePhase} promotion against legacy ${result.trackedState} `
-        + `at active A ${result.activeAVersion}`,
+        + `at legacy target ${result.activeAVersion}`,
       )
       return
     }

@@ -242,20 +242,32 @@ function validatePolicyIdentity(policy, expectedCurrentVersion, paused) {
   assertVersion(policy.legacyBridgeVersion, 'Updater policy legacyBridgeVersion')
   assertPlainObject(policy.releases, 'Updater policy releases')
   const release = policy.releases[policy.legacyBridgeVersion]
-  assertPlainObject(release, 'Updater policy active A release')
-  if (release.effectivePhase !== 'A') {
+  const directC = policy.deploymentMode === 'direct-c'
+  const legacyPhase = directC ? 'C' : 'A'
+  assertPlainObject(
+    release,
+    directC
+      ? 'Updater policy active DIRECT_C legacy release'
+      : 'Updater policy active A release'
+  )
+  if (release.effectivePhase !== legacyPhase) {
     throw new Error(
-      'Updater policy legacy bridge must resolve to an effective phase A release'
+      `Updater policy legacy bridge must resolve to an effective phase ${legacyPhase} release`
     )
   }
-  if (!['A', 'RECOVERY'].includes(release.phase)) {
+  const allowedReleasePhases = directC
+    ? ['DIRECT_C', 'RECOVERY']
+    : ['A', 'RECOVERY']
+  if (!allowedReleasePhases.includes(release.phase)) {
     throw new Error(
-      'Updater policy legacy bridge release phase must be A or RECOVERY'
+      `Updater policy legacy bridge release phase must be ${allowedReleasePhases.join(' or ')}`
     )
   }
   assertSha256(
     release.manifestSha256,
-    'Updater policy active A manifestSha256'
+    directC
+      ? 'Updater policy active DIRECT_C legacy manifestSha256'
+      : 'Updater policy active A manifestSha256'
   )
   const fallback = validateLegacyPauseFallback(policy)
   if (compareVersions(fallback.version, policy.legacyBridgeVersion) >= 0) {
@@ -263,7 +275,7 @@ function validatePolicyIdentity(policy, expectedCurrentVersion, paused) {
       'Legacy pause fallback version must be older than the active A bridge'
     )
   }
-  return { release, fallback }
+  return { release, fallback, legacyPhase }
 }
 
 /**
@@ -288,7 +300,7 @@ export function validateLivePauseInputs(input) {
     r2LegacyBytes,
   } = input
   const policy = parseJsonBytes(policyBytes, 'Live updater policy')
-  const { release, fallback } = validatePolicyIdentity(
+  const { release, fallback, legacyPhase } = validatePolicyIdentity(
     policy,
     expectedCurrentVersion,
     false
@@ -301,13 +313,16 @@ export function validateLivePauseInputs(input) {
   const manifestSha256 = sha256(ossLegacyBytes)
   if (manifestSha256 !== release.manifestSha256) {
     throw new Error(
-      'Live legacy A bytes do not match the policy A manifestSha256'
+      `Live legacy ${legacyPhase} bytes do not match the policy ${legacyPhase} manifestSha256`
     )
   }
-  const manifest = parseJsonBytes(ossLegacyBytes, 'Live legacy A manifest')
+  const manifest = parseJsonBytes(
+    ossLegacyBytes,
+    `Live legacy ${legacyPhase} manifest`
+  )
   if (manifest.version !== policy.legacyBridgeVersion) {
     throw new Error(
-      `Live legacy A manifest version must be exactly ${policy.legacyBridgeVersion}`
+      `Live legacy ${legacyPhase} manifest version must be exactly ${policy.legacyBridgeVersion}`
     )
   }
   return {
@@ -338,7 +353,7 @@ export function validateLegacyResumeInputs(input) {
     'Legacy resume inputs'
   )
   const policy = parseJsonBytes(input.policyBytes, 'Paused updater policy')
-  const { release, fallback } = validatePolicyIdentity(
+  const { release, fallback, legacyPhase } = validatePolicyIdentity(
     policy,
     input.expectedCurrentVersion,
     true
@@ -352,16 +367,16 @@ export function validateLegacyResumeInputs(input) {
   const activeASha256 = sha256(input.activeABytes)
   if (activeASha256 !== release.manifestSha256) {
     throw new Error(
-      'Legacy resume active A bytes do not match the policy A manifestSha256'
+      `Legacy resume active ${legacyPhase} bytes do not match the policy ${legacyPhase} manifestSha256`
     )
   }
   const activeAManifest = parseJsonBytes(
     input.activeABytes,
-    'Legacy resume active A manifest'
+    `Legacy resume active ${legacyPhase} manifest`
   )
   if (activeAManifest.version !== policy.legacyBridgeVersion) {
     throw new Error(
-      `Legacy resume active A manifest version must be exactly ${policy.legacyBridgeVersion}`
+      `Legacy resume active ${legacyPhase} manifest version must be exactly ${policy.legacyBridgeVersion}`
     )
   }
   return {

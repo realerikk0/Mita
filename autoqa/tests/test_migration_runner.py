@@ -11,6 +11,7 @@ from autoqa.migration_runner import (
     PHASES,
     PlatformExecutor,
     _assert_migration_state,
+    _windows_install_diagnostics,
     main,
     migration_matrix,
     select_migration_cases,
@@ -71,9 +72,12 @@ class MigrationRunnerTests(unittest.TestCase):
                 "a-to-b",
                 "current-to-a-to-b-to-c",
                 "current-to-b",
+                "legacy-manual-to-c",
+                "legacy-auto-to-c",
                 "current-to-c",
                 "a-to-c",
                 "b-to-c",
+                "c-to-c",
                 "fresh-a",
                 "fresh-c",
             ],
@@ -300,6 +304,95 @@ class MigrationRunnerTests(unittest.TestCase):
                 self.assertTrue(
                     all(runner_command not in command for command in pkill_commands)
                 )
+
+    def test_windows_install_pins_shared_root_and_keeps_nsis_destination_last(self):
+        with tempfile.TemporaryDirectory(dir=Path.home()) as directory:
+            root = Path(directory)
+            case_dir = root / "case"
+            installer = root / "Biyan-setup.exe"
+            installer.write_bytes(b"fixture")
+
+            def install_side_effect(command, **_kwargs):
+                self.assertEqual(command[-1], f"/D={case_dir / 'windows-install'}")
+                executable = case_dir / "windows-install" / "Biyan.exe"
+                executable.parent.mkdir(parents=True, exist_ok=True)
+                executable.write_bytes(b"fixture executable")
+                executable.chmod(0o755)
+                return mock.Mock(returncode=0)
+
+            with mock.patch(
+                "autoqa.migration_runner.subprocess.run",
+                side_effect=install_side_effect,
+            ) as run:
+                executor = PlatformExecutor("windows", 1)
+                source = executor.install(installer, "current", case_dir)
+                candidate = executor.install(installer, "c", case_dir)
+
+            self.assertEqual(source, case_dir / "windows-install" / "Biyan.exe")
+            self.assertEqual(candidate, source)
+            self.assertEqual(run.call_count, 2)
+            for call in run.call_args_list:
+                command = call.args[0]
+                self.assertEqual(command[1], "/S")
+                self.assertEqual(command[-1], f"/D={case_dir / 'windows-install'}")
+
+    def test_windows_missing_executable_reports_bounded_install_roots(self):
+        with tempfile.TemporaryDirectory(dir=Path.home()) as directory:
+            root = Path(directory)
+            case_dir = root / "case"
+            installer = root / "Biyan-setup.exe"
+            installer.write_bytes(b"fixture")
+
+            with mock.patch("autoqa.migration_runner.subprocess.run"):
+                with self.assertRaisesRegex(
+                    FileNotFoundError,
+                    r'diagnostics=.*"schema": 1',
+                ):
+                    PlatformExecutor("windows", 1).install(
+                        installer,
+                        "c",
+                        case_dir,
+                    )
+
+    def test_windows_diagnostics_capture_only_bounded_install_and_security_state(self):
+        with tempfile.TemporaryDirectory(dir=Path.home()) as directory:
+            install_root = Path(directory) / "windows-install"
+            install_root.mkdir()
+            (install_root / "Biyan.exe").write_bytes(b"fixture")
+            system_payload = {
+                "uninstall": [
+                    {
+                        "DisplayName": "Biyan",
+                        "DisplayVersion": "0.6.633",
+                        "InstallLocation": str(install_root),
+                    }
+                ],
+                "defender": {
+                    "AMServiceEnabled": True,
+                    "AntivirusEnabled": True,
+                    "RealTimeProtectionEnabled": True,
+                },
+            }
+            completed = mock.Mock(
+                returncode=0,
+                stdout=json.dumps(system_payload),
+                stderr="",
+            )
+            with (
+                mock.patch("autoqa.migration_runner.sys.platform", "win32"),
+                mock.patch(
+                    "autoqa.migration_runner.subprocess.run",
+                    return_value=completed,
+                ) as run,
+            ):
+                diagnostics = _windows_install_diagnostics(install_root)
+
+            self.assertEqual(diagnostics["schema"], 1)
+            self.assertEqual(diagnostics["system"]["status"], "captured")
+            self.assertEqual(diagnostics["system"]["data"], system_payload)
+            command = run.call_args.args[0]
+            self.assertEqual(command[:3], ["powershell", "-NoProfile", "-NonInteractive"])
+            self.assertNotIn("Get-ChildItem Env:", command[-1])
 
     def test_startup_probe_scrubs_ci_and_cloud_credentials(self):
         injected = {

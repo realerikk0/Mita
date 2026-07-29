@@ -6,6 +6,13 @@ import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { isDeepStrictEqual } from 'node:util'
 
+import {
+  createDirectCInitialPolicy,
+  DIRECT_C_ROUTER_SOURCES,
+  loadDirectCTransitionPolicy,
+  validateApprovedDirectCTransition,
+} from './direct-c-transition-policy.mjs'
+
 export const OPEN_TRANSACTION_KEY =
   'biyan/updater/transactions/open.json'
 export const TRANSACTION_PREFIX = 'biyan/updater/transactions'
@@ -752,6 +759,7 @@ export function terminalPromotionRecoveryPlan({
   rollout,
   smokeEvidence,
   healthEvidence,
+  directTransitionPolicy,
 }) {
   const journal = validateJournal(journalInput)
   if (
@@ -865,7 +873,7 @@ export function terminalPromotionRecoveryPlan({
     targetRelease.manifestSha256,
     'Terminal promotion target manifestSha256'
   )
-  if (!['A', 'B', 'C', 'RECOVERY'].includes(targetRelease.phase)) {
+  if (!['A', 'B', 'C', 'DIRECT_C', 'RECOVERY'].includes(targetRelease.phase)) {
     throw new Error('Terminal promotion target phase is invalid')
   }
   assertSha256(
@@ -917,10 +925,43 @@ export function terminalPromotionRecoveryPlan({
     (key) =>
       !isDeepStrictEqual(beforeTransitions[key], nextTransitions[key])
   )
-  if (changedTransitionKeys.length > 1) {
+  const directSourceVersions = Object.keys(DIRECT_C_ROUTER_SOURCES).sort()
+  const terminalInitialDirectC =
+    targetRelease.phase === 'DIRECT_C'
+    && targetRelease.effectivePhase === 'C'
+    && nextPolicy.deploymentMode === 'direct-c'
+    && nextPolicy.legacyBridgeVersion === journal.targetVersion
+    && beforeCurrentVersion === '0.6.633'
+    && !beforePolicy?.completedPhases?.includes('C')
+    && isDeepStrictEqual(nextPolicy.completedPhases, ['C'])
+    && isDeepStrictEqual([...changedTransitionKeys].sort(), directSourceVersions)
+    && isDeepStrictEqual(Object.keys(nextTransitions).sort(), directSourceVersions)
+    && directSourceVersions.every((sourceVersion) => {
+      const transition = nextTransitions[sourceVersion]
+      return (
+        isPlainObject(transition)
+        && transition.to === journal.targetVersion
+        && transition.phase === 'DIRECT_C'
+        && transition.rollout === 100
+        && transition.manifestKey === targetRelease.manifestKey
+      )
+    })
+  if (changedTransitionKeys.length > 1 && !terminalInitialDirectC) {
     throw new Error(
       'Terminal promotion changed more than one Router transition'
     )
+  }
+  if (terminalInitialDirectC) {
+    validateApprovedDirectCTransition({
+      policy:
+        directTransitionPolicy
+        ?? loadDirectCTransitionPolicy(undefined, {
+          requireApprovedNext: true,
+        }),
+      candidate,
+      currentPolicy: beforePolicy ?? createDirectCInitialPolicy(),
+      nextPolicy,
+    })
   }
   const terminalInitialA =
     changedTransitionKeys.length === 0 &&
@@ -939,7 +980,10 @@ export function terminalPromotionRecoveryPlan({
     )
   let terminalFromVersion
   let terminalRollout
-  if (changedTransitionKeys.length === 1) {
+  if (terminalInitialDirectC) {
+    terminalFromVersion = beforeCurrentVersion
+    terminalRollout = 100
+  } else if (changedTransitionKeys.length === 1) {
     terminalFromVersion = changedTransitionKeys[0]
     const transition = nextTransitions[terminalFromVersion]
     if (
@@ -987,6 +1031,15 @@ export function terminalPromotionRecoveryPlan({
     terminalPolicy,
     terminalFromVersion
   )
+  const directRouters = terminalInitialDirectC
+    ? [
+        terminalFromVersion,
+        ...directSourceVersions,
+        journal.targetVersion,
+      ].map((sourceVersion) =>
+        terminalRouterExpectation(terminalPolicy, sourceVersion)
+      )
+    : [router]
 
   const requestedRollout = Number(rollout)
   const candidateMatches =
@@ -1027,6 +1080,7 @@ export function terminalPromotionRecoveryPlan({
       sha256: legacyRelease.manifestSha256,
     },
     router,
+    ...(terminalInitialDirectC ? { routers: directRouters } : {}),
     sameRequest,
   }
 }

@@ -1,0 +1,973 @@
+name: Biyan Direct Qualification
+
+on:
+  workflow_dispatch:
+
+permissions:
+  actions: read
+  contents: read
+
+concurrency:
+  group: biyan-direct-qualification
+  cancel-in-progress: false
+
+jobs:
+  preflight:
+    name: Validate pinned direct qualification control plane
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - name: Check out the exact dispatched commit
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+
+      - name: Verify live main, pinned policy, public sources, and harness
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p dist/direct-preflight/manifests
+          cp scripts/updater/direct-qualification-policy.json \
+            dist/direct-preflight/policy.json
+          test "$GITHUB_REF" = "refs/heads/mita-main"
+          test "$RUNNER_ARCH" = "X64"
+          test "$(git rev-parse HEAD)" = "$GITHUB_SHA"
+          git fetch --force --no-tags origin \
+            "+refs/heads/mita-main:refs/remotes/origin/mita-main"
+          test "$(git rev-parse HEAD)" = \
+            "$(git rev-parse refs/remotes/origin/mita-main)"
+          node scripts/updater/direct-qualification-evidence.mjs validate-policy \
+            --policy scripts/updater/direct-qualification-policy.json
+
+          python - <<'PY'
+          import hashlib
+          import json
+          import pathlib
+          import subprocess
+
+          policy = json.loads(
+              pathlib.Path(
+                  "scripts/updater/direct-qualification-policy.json"
+              ).read_text(encoding="utf-8")
+          )
+          paths = policy["workflow"]["harnessPaths"]
+          tree = subprocess.check_output(["git", "ls-tree", "HEAD", "--", *paths])
+          actual = [
+              line.split("\t", 1)[1]
+              for line in tree.decode("utf-8").splitlines()
+          ]
+          if len(actual) != len(paths) or sorted(actual) != sorted(paths):
+              raise SystemExit(
+                  "direct qualification harness paths are missing, duplicated, or untracked"
+              )
+          root = pathlib.Path("dist/direct-preflight")
+          (root / "harness-tree.txt").write_bytes(tree)
+          (root / "harness.sha256").write_text(
+              hashlib.sha256(tree).hexdigest() + "\n",
+              encoding="utf-8",
+          )
+          PY
+
+          for version in 0.6.608 0.6.611 0.6.633 0.6.643 0.6.644 0.6.645; do
+            tag="$(jq -er --arg version "$version" \
+              '.sources[$version].tag' \
+              scripts/updater/direct-qualification-policy.json)"
+            commit="$(jq -er --arg version "$version" \
+              '.sources[$version].sourceCommit' \
+              scripts/updater/direct-qualification-policy.json)"
+            git fetch --force --no-tags origin \
+              "refs/tags/${tag}:refs/tags/${tag}"
+            tag_object="$(jq -er --arg version "$version" \
+              '.sources[$version].tagObject // empty' \
+              scripts/updater/direct-qualification-policy.json || true)"
+            if [ -n "$tag_object" ]; then
+              test "$(git rev-parse "refs/tags/${tag}")" = "$tag_object"
+              test "$(git cat-file -t "refs/tags/${tag}")" = tag
+            fi
+            test "$(git rev-parse "refs/tags/${tag}^{commit}")" = "$commit"
+            git merge-base --is-ancestor "$commit" HEAD
+            gh api "repos/${GITHUB_REPOSITORY}/releases/tags/${tag}" \
+              > "dist/direct-preflight/source-${version}-release.json"
+            jq -e --arg tag "$tag" '
+              .tag_name == $tag
+              and .draft == false
+              and .prerelease == false
+              and (.published_at | type == "string")
+            ' "dist/direct-preflight/source-${version}-release.json" >/dev/null
+            jq -r --arg version "$version" '
+              .sources[$version].assets | to_entries[].value.name
+            ' scripts/updater/direct-qualification-policy.json \
+              | sort -u > "dist/direct-preflight/source-${version}-assets.txt"
+            while IFS= read -r asset; do
+              jq -e --arg asset "$asset" '
+                [.assets[] | select(
+                  .name == $asset
+                  and .state == "uploaded"
+                  and (.size | type == "number" and . > 0)
+                )] | length == 1
+              ' "dist/direct-preflight/source-${version}-release.json" >/dev/null
+            done < "dist/direct-preflight/source-${version}-assets.txt"
+          done
+
+          for version in 0.6.608 0.6.611; do
+            release="dist/direct-preflight/source-${version}-release.json"
+            jq -e '[.assets[] | select(.name == "latest.json")] | length == 0' \
+              "$release" >/dev/null
+            commit="$(jq -er --arg version "$version" \
+              '.sources[$version].sourceCommit' \
+              scripts/updater/direct-qualification-policy.json)"
+            config="dist/direct-preflight/source-${version}-tauri.conf.json"
+            git show "${commit}:src-tauri/tauri.conf.json" > "$config"
+            endpoint="$(jq -er --arg version "$version" \
+              '.sources[$version].updater.endpoint' \
+              scripts/updater/direct-qualification-policy.json)"
+            test "$(jq -er '.plugins.updater.endpoints | length' "$config")" = 1
+            test "$(jq -er '.plugins.updater.endpoints[0]' "$config")" = "$endpoint"
+            jq -er '.plugins.updater.pubkey' "$config" \
+              | base64 --decode \
+              > "dist/direct-preflight/source-${version}-updater.pub"
+            expected_key_id="$(jq -er --arg version "$version" \
+              '.sources[$version].updater.publicKeyId' \
+              scripts/updater/direct-qualification-policy.json)"
+            grep -Fx \
+              "untrusted comment: minisign public key: ${expected_key_id}" \
+              "dist/direct-preflight/source-${version}-updater.pub"
+            expected_key_sha="$(jq -er --arg version "$version" \
+              '.sources[$version].updater.publicKeySha256' \
+              scripts/updater/direct-qualification-policy.json)"
+            echo "${expected_key_sha}  dist/direct-preflight/source-${version}-updater.pub" \
+              | sha256sum --check -
+          done
+
+          python - <<'PY'
+          import json
+          import pathlib
+          import socket
+          from urllib.parse import urlparse
+
+          policy = json.loads(
+              pathlib.Path(
+                  "scripts/updater/direct-qualification-policy.json"
+              ).read_text(encoding="utf-8")
+          )
+          legacy = policy["sources"]["0.6.608"]
+          if legacy["qualificationMode"] != "manual-installer":
+              raise SystemExit("0.6.608 must remain manual-installer only")
+          if legacy["updater"]["liveDiscovery"] != "unavailable-no-dns":
+              raise SystemExit("0.6.608 live discovery policy drifted")
+          host = urlparse(legacy["updater"]["endpoint"]).hostname
+          try:
+              socket.getaddrinfo(host, 443)
+          except socket.gaierror as error:
+              result = {"schema": 1, "host": host, "status": "unavailable-no-dns"}
+              pathlib.Path(
+                  "dist/direct-preflight/source-0.6.608-endpoint.json"
+              ).write_text(json.dumps(result, sort_keys=True) + "\n", encoding="utf-8")
+          else:
+              raise SystemExit(
+                  "0.6.608 endpoint unexpectedly resolves; review the manual-only policy"
+              )
+          automatic = policy["sources"]["0.6.611"]
+          if automatic["qualificationMode"] != "automatic-updater":
+              raise SystemExit("0.6.611 must remain the automatic-updater floor")
+          if automatic["updater"]["liveDiscovery"] != "legacy-manifest-0.6.633":
+              raise SystemExit("0.6.611 live discovery policy drifted")
+          PY
+
+          mkdir -p dist/direct-preflight/manifests/0.6.633
+          curl --proto '=https' --tlsv1.2 --fail --location --retry 3 \
+            --connect-timeout 10 --max-time 60 \
+            https://static.mitapp.cn/mita/latest.json \
+            -o dist/direct-preflight/manifests/0.6.633/latest-oss.json
+          legacy_auto_endpoint="$(jq -er \
+            '.sources["0.6.611"].updater.endpoint' \
+            scripts/updater/direct-qualification-policy.json)"
+          curl --proto '=https' --tlsv1.2 --fail --location --retry 3 \
+            --connect-timeout 10 --max-time 60 \
+            "$legacy_auto_endpoint" \
+            -o dist/direct-preflight/manifests/0.6.633/latest-r2.json
+          cmp \
+            dist/direct-preflight/manifests/0.6.633/latest-oss.json \
+            dist/direct-preflight/manifests/0.6.633/latest-r2.json
+          cp dist/direct-preflight/manifests/0.6.633/latest-oss.json \
+            dist/direct-preflight/manifests/0.6.633/latest.json
+
+          for version in 0.6.643 0.6.644 0.6.645; do
+            mkdir -p "dist/direct-preflight/manifests/${version}"
+            tag="$(jq -er --arg version "$version" \
+              '.sources[$version].tag' \
+              scripts/updater/direct-qualification-policy.json)"
+            gh release download "$tag" --repo "$GITHUB_REPOSITORY" \
+              --pattern latest.json \
+              --dir "dist/direct-preflight/manifests/${version}"
+          done
+
+          for version in 0.6.633 0.6.643 0.6.644 0.6.645; do
+            manifest="dist/direct-preflight/manifests/${version}/latest.json"
+            expected_sha="$(jq -er --arg version "$version" \
+              '.sources[$version].manifestSha256' \
+              scripts/updater/direct-qualification-policy.json)"
+            expected_commit="$(jq -er --arg version "$version" \
+              '.sources[$version].sourceCommit' \
+              scripts/updater/direct-qualification-policy.json)"
+            echo "${expected_sha}  ${manifest}" | sha256sum --check -
+            test "$(jq -er .version "$manifest")" = "$version"
+            if [ "$version" != "0.6.633" ]; then
+              test "$(jq -er .sourceCommit "$manifest")" = "$expected_commit"
+            fi
+          done
+
+      - name: Upload preflight evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: direct-preflight-${{ github.run_id }}-${{ github.run_attempt }}
+          path: dist/direct-preflight/
+          if-no-files-found: error
+          retention-days: 30
+
+  stage-candidate:
+    name: Read and stage the exact Draft candidate
+    needs: preflight
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    permissions:
+      actions: read
+      contents: write
+    steps:
+      - name: Check out trusted read-only staging tooling
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Read exact Draft and verify every staged byte
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p dist/direct-candidate/assets dist/direct-candidate/evidence
+          cp scripts/updater/direct-qualification-policy.json \
+            dist/direct-candidate/evidence/policy.json
+          test "$GITHUB_REF" = "refs/heads/mita-main"
+          test "$(git rev-parse HEAD)" = "$GITHUB_SHA"
+          git fetch --force --no-tags origin \
+            "+refs/heads/mita-main:refs/remotes/origin/mita-main"
+          test "$(git rev-parse HEAD)" = \
+            "$(git rev-parse refs/remotes/origin/mita-main)"
+          node scripts/updater/direct-qualification-evidence.mjs validate-policy \
+            --policy scripts/updater/direct-qualification-policy.json
+
+          candidate_tag="$(jq -er .candidate.tag \
+            scripts/updater/direct-qualification-policy.json)"
+          candidate_commit="$(jq -er .candidate.sourceCommit \
+            scripts/updater/direct-qualification-policy.json)"
+          git fetch --force --no-tags origin \
+            "refs/tags/${candidate_tag}:refs/tags/${candidate_tag}"
+          test "$(git rev-parse "refs/tags/${candidate_tag}^{commit}")" = \
+            "$candidate_commit"
+          git merge-base --is-ancestor "$candidate_commit" HEAD
+
+          gh api \
+            "repos/${GITHUB_REPOSITORY}/releases/tags/${candidate_tag}" \
+            > dist/direct-candidate/evidence/draft-release.json
+          jq -e \
+            --arg tag "$candidate_tag" \
+            --arg commit "$candidate_commit" '
+              .tag_name == $tag
+              and .target_commitish == $commit
+              and .draft == true
+              and .prerelease == false
+              and .published_at == null
+            ' dist/direct-candidate/evidence/draft-release.json >/dev/null
+
+          jq -r '.candidate.assets | to_entries[].value.name' \
+            scripts/updater/direct-qualification-policy.json \
+            > dist/direct-candidate/evidence/candidate-assets.txt
+          printf '%s\n' latest.json \
+            >> dist/direct-candidate/evidence/candidate-assets.txt
+          while IFS= read -r asset; do
+            jq -e --arg asset "$asset" '
+              [.assets[] | select(
+                .name == $asset
+                and .state == "uploaded"
+                and (.size | type == "number" and . > 0)
+              )] | length == 1
+            ' dist/direct-candidate/evidence/draft-release.json >/dev/null
+            gh release download "$candidate_tag" \
+              --repo "$GITHUB_REPOSITORY" \
+              --pattern "$asset" \
+              --dir dist/direct-candidate/assets
+          done < dist/direct-candidate/evidence/candidate-assets.txt
+
+          manifest_sha="$(jq -er .candidate.manifestSha256 \
+            scripts/updater/direct-qualification-policy.json)"
+          echo "${manifest_sha}  dist/direct-candidate/assets/latest.json" \
+            | sha256sum --check -
+          jq -e \
+            --arg version "$(jq -er .candidate.version \
+              scripts/updater/direct-qualification-policy.json)" \
+            --arg commit "$candidate_commit" '
+              .version == $version
+              and .sourceCommit == $commit
+              and .migrationPhase == "C"
+              and .dataSchema == 3
+            ' dist/direct-candidate/assets/latest.json >/dev/null
+          for platform in windows macos linux; do
+            name="$(jq -er --arg platform "$platform" \
+              '.candidate.assets[$platform].name' \
+              scripts/updater/direct-qualification-policy.json)"
+            digest="$(jq -er --arg platform "$platform" \
+              '.candidate.assets[$platform].sha256' \
+              scripts/updater/direct-qualification-policy.json)"
+            echo "${digest}  dist/direct-candidate/assets/${name}" \
+              | sha256sum --check -
+          done
+          printf '%s\n' \
+            'read-only commands: gh api GET; gh release download' \
+            > dist/direct-candidate/evidence/read-envelope.txt
+
+      - name: Upload Draft-read diagnostics
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: direct-candidate-read-${{ github.run_id }}-${{ github.run_attempt }}
+          path: dist/direct-candidate/evidence/
+          if-no-files-found: error
+          retention-days: 30
+
+      - name: Upload staged Windows candidate
+        uses: actions/upload-artifact@v4
+        with:
+          name: direct-candidate-windows-${{ github.run_id }}-${{ github.run_attempt }}
+          path: dist/direct-candidate/assets/Biyan_0.6.646_x64-setup.exe
+          if-no-files-found: error
+          compression-level: 0
+          retention-days: 3
+
+      - name: Upload staged macOS candidate
+        uses: actions/upload-artifact@v4
+        with:
+          name: direct-candidate-macos-${{ github.run_id }}-${{ github.run_attempt }}
+          path: dist/direct-candidate/assets/Biyan_0.6.646_universal.dmg
+          if-no-files-found: error
+          compression-level: 0
+          retention-days: 3
+
+      - name: Upload staged Linux candidate
+        uses: actions/upload-artifact@v4
+        with:
+          name: direct-candidate-linux-${{ github.run_id }}-${{ github.run_attempt }}
+          path: dist/direct-candidate/assets/Biyan_0.6.646_amd64.AppImage
+          if-no-files-found: error
+          compression-level: 0
+          retention-days: 3
+
+  qualification:
+    name: ${{ matrix.lane }} on ${{ matrix.runner }}
+    needs: [preflight, stage-candidate]
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 90
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - lane: legacy-manual-to-c-windows
+            platform: windows
+            runner: windows-2022
+            scenario: legacy-manual-to-c
+            source_version: 0.6.608
+            source_role: current
+            snapshot: current
+          - lane: legacy-manual-to-c-macos
+            platform: macos
+            runner: macos-15-intel
+            scenario: legacy-manual-to-c
+            source_version: 0.6.608
+            source_role: current
+            snapshot: current
+          - lane: legacy-auto-to-c-windows
+            platform: windows
+            runner: windows-2022
+            scenario: legacy-auto-to-c
+            source_version: 0.6.611
+            source_role: current
+            snapshot: current
+          - lane: legacy-auto-to-c-macos
+            platform: macos
+            runner: macos-15-intel
+            scenario: legacy-auto-to-c
+            source_version: 0.6.611
+            source_role: current
+            snapshot: current
+          - lane: current-to-c-windows
+            platform: windows
+            runner: windows-2022
+            scenario: current-to-c
+            source_version: 0.6.633
+            source_role: current
+            snapshot: current
+          - lane: current-to-c-macos
+            platform: macos
+            runner: macos-15-intel
+            scenario: current-to-c
+            source_version: 0.6.633
+            source_role: current
+            snapshot: current
+          - lane: fresh-c-linux
+            platform: linux
+            runner: ubuntu-24.04
+            scenario: fresh-c
+            source_version: ""
+            source_role: ""
+            snapshot: fresh
+          - lane: a-to-c-windows
+            platform: windows
+            runner: windows-2022
+            scenario: a-to-c
+            source_version: 0.6.643
+            source_role: a
+            snapshot: a
+          - lane: a-to-c-macos
+            platform: macos
+            runner: macos-15-intel
+            scenario: a-to-c
+            source_version: 0.6.643
+            source_role: a
+            snapshot: a
+          - lane: a-to-c-linux
+            platform: linux
+            runner: ubuntu-24.04
+            scenario: a-to-c
+            source_version: 0.6.643
+            source_role: a
+            snapshot: a
+          - lane: b-to-c-windows
+            platform: windows
+            runner: windows-2022
+            scenario: b-to-c
+            source_version: 0.6.644
+            source_role: b
+            snapshot: b
+          - lane: b-to-c-macos
+            platform: macos
+            runner: macos-15-intel
+            scenario: b-to-c
+            source_version: 0.6.644
+            source_role: b
+            snapshot: b
+          - lane: b-to-c-linux
+            platform: linux
+            runner: ubuntu-24.04
+            scenario: b-to-c
+            source_version: 0.6.644
+            source_role: b
+            snapshot: b
+          - lane: c-to-c-windows
+            platform: windows
+            runner: windows-2022
+            scenario: c-to-c
+            source_version: 0.6.645
+            source_role: current
+            snapshot: current
+          - lane: c-to-c-macos
+            platform: macos
+            runner: macos-15-intel
+            scenario: c-to-c
+            source_version: 0.6.645
+            source_role: current
+            snapshot: current
+          - lane: c-to-c-linux
+            platform: linux
+            runner: ubuntu-24.04
+            scenario: c-to-c
+            source_version: 0.6.645
+            source_role: current
+            snapshot: current
+    env:
+      LANE: ${{ matrix.lane }}
+      PLATFORM: ${{ matrix.platform }}
+      RUNNER_LABEL: ${{ matrix.runner }}
+      SCENARIO: ${{ matrix.scenario }}
+      SOURCE_VERSION: ${{ matrix.source_version }}
+      SOURCE_ROLE: ${{ matrix.source_role }}
+      SNAPSHOT: ${{ matrix.snapshot }}
+      APPIMAGE_EXTRACT_AND_RUN: "1"
+    steps:
+      - name: Check out the exact dispatched commit
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+
+      - name: Download hash-verified staged candidate
+        uses: actions/download-artifact@v4
+        with:
+          name: direct-candidate-${{ matrix.platform }}-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/biyan-direct-${{ matrix.lane }}/assets
+
+      - name: Verify exact lane and derive immutable inputs
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$GITHUB_REF" = "refs/heads/mita-main"
+          test "$RUNNER_ARCH" = "X64"
+          test "$(git rev-parse HEAD)" = "$GITHUB_SHA"
+          git fetch --force --no-tags origin \
+            "+refs/heads/mita-main:refs/remotes/origin/mita-main"
+          test "$(git rev-parse HEAD)" = \
+            "$(git rev-parse refs/remotes/origin/mita-main)"
+          node scripts/updater/direct-qualification-evidence.mjs validate-policy \
+            --policy scripts/updater/direct-qualification-policy.json
+          mkdir -p dist/direct-evidence
+          cp scripts/updater/direct-qualification-policy.json \
+            "dist/direct-evidence/${LANE}-policy.json"
+
+          python - <<'PY'
+          import hashlib
+          import json
+          import os
+          import pathlib
+          import subprocess
+
+          policy = json.loads(
+              pathlib.Path(
+                  "scripts/updater/direct-qualification-policy.json"
+              ).read_text(encoding="utf-8")
+          )
+          matches = [lane for lane in policy["lanes"] if lane["id"] == os.environ["LANE"]]
+          if len(matches) != 1:
+              raise SystemExit("matrix lane must exist exactly once in policy")
+          expected = {
+              "id": os.environ["LANE"],
+              "platform": os.environ["PLATFORM"],
+              "runner": os.environ["RUNNER_LABEL"],
+              "scenario": os.environ["SCENARIO"],
+              "sourceVersion": os.environ["SOURCE_VERSION"] or None,
+              "sourceRole": os.environ["SOURCE_ROLE"] or None,
+              "snapshot": os.environ["SNAPSHOT"],
+          }
+          if matches[0] != expected:
+              raise SystemExit("GitHub matrix lane does not exactly match policy")
+          paths = policy["workflow"]["harnessPaths"]
+          tree = subprocess.check_output(["git", "ls-tree", "HEAD", "--", *paths])
+          actual = [
+              line.split("\t", 1)[1]
+              for line in tree.decode("utf-8").splitlines()
+          ]
+          if len(actual) != len(paths) or sorted(actual) != sorted(paths):
+              raise SystemExit("direct qualification harness tree is incomplete")
+          digest = hashlib.sha256(tree).hexdigest()
+          lane = matches[0]
+          root = pathlib.Path(os.environ["RUNNER_TEMP"]) / f"biyan-direct-{lane['id']}"
+          values = {
+              "QUAL_ROOT": str(root),
+              "HARNESS_SHA256": digest,
+              "CANDIDATE_TAG": policy["candidate"]["tag"],
+              "CANDIDATE_ASSET_NAME": policy["candidate"]["assets"][
+                  lane["platform"]
+              ]["name"],
+          }
+          if lane["sourceVersion"] is not None:
+              source = policy["sources"][lane["sourceVersion"]]
+              values["SOURCE_TAG"] = source["tag"]
+              values["SOURCE_ASSET_NAME"] = source["assets"][lane["platform"]][
+                  "name"
+              ]
+          with pathlib.Path(os.environ["GITHUB_ENV"]).open("a", encoding="utf-8") as out:
+              for key, value in values.items():
+                  if "\n" in value or "\r" in value:
+                      raise SystemExit(f"unsafe newline in {key}")
+                  out.write(f"{key}={value}\n")
+          pathlib.Path("dist/direct-evidence/execution.json").write_text(
+              json.dumps(
+                  {
+                      "schema": 1,
+                      "lane": lane["id"],
+                      "runId": int(os.environ["GITHUB_RUN_ID"]),
+                      "runAttempt": int(os.environ["GITHUB_RUN_ATTEMPT"]),
+                      "status": "started",
+                  },
+                  indent=2,
+              )
+              + "\n",
+              encoding="utf-8",
+          )
+          PY
+
+      - name: Download exact published Windows source
+        if: matrix.platform == 'windows' && matrix.source_version != ''
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          gh release download $env:SOURCE_TAG `
+            --repo $env:GITHUB_REPOSITORY `
+            --pattern $env:SOURCE_ASSET_NAME `
+            --dir (Join-Path $env:QUAL_ROOT 'assets')
+          if ($LASTEXITCODE -ne 0) { throw 'source release download failed' }
+
+      - name: Download exact published Unix source
+        if: matrix.platform != 'windows' && matrix.source_version != ''
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          gh release download "$SOURCE_TAG" \
+            --repo "$GITHUB_REPOSITORY" \
+            --pattern "$SOURCE_ASSET_NAME" \
+            --dir "$QUAL_ROOT/assets"
+
+      - name: Install Linux desktop runtime dependencies
+        if: matrix.platform == 'linux'
+        shell: bash
+        run: |
+          set -euo pipefail
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            libglib2.0-dev libatk1.0-dev libpango1.0-dev libgtk-3-dev \
+            libsoup-3.0-dev libwebkit2gtk-4.1-dev librsvg2-dev \
+            libappindicator3-dev webkit2gtk-driver xvfb
+
+      - name: Run Windows direct qualification and retain raw evidence
+        id: execute_windows
+        if: matrix.platform == 'windows'
+        continue-on-error: true
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Continue'
+          $assets = Join-Path $env:QUAL_ROOT 'assets'
+          $inputs = Join-Path $env:QUAL_ROOT 'inputs'
+          $work = Join-Path $env:QUAL_ROOT 'work'
+          $report = Join-Path $env:QUAL_ROOT 'migration.json'
+          $candidate = Join-Path $assets $env:CANDIDATE_ASSET_NAME
+          $source = if ($env:SOURCE_ASSET_NAME) {
+            Join-Path $assets $env:SOURCE_ASSET_NAME
+          } else { $null }
+          $startedAt = [DateTime]::UtcNow.ToString('o')
+          $prepareArgs = @(
+            'scripts/updater/prepare-direct-qualification-inputs.py',
+            '--policy', 'scripts/updater/direct-qualification-policy.json',
+            '--lane', $env:LANE,
+            '--candidate-installer', $candidate,
+            '--output-dir', $inputs
+          )
+          if ($source) { $prepareArgs += @('--source-installer', $source) }
+          & python @prepareArgs
+          $status = $LASTEXITCODE
+          if ($status -eq 0) {
+            $runnerArgs = @(
+              'autoqa/migration_runner.py',
+              '--platform', $env:PLATFORM,
+              '--scenario', $env:SCENARIO,
+              '--c-installer', $candidate,
+              '--snapshot-manifest', (Join-Path $inputs 'manifest.json'),
+              '--report', $report,
+              '--work-dir', $work,
+              '--startup-seconds', '10',
+              '--allow-destructive-autoqa', 'AUTOQA'
+            )
+            if ($source) {
+              $runnerArgs += @("--$($env:SOURCE_ROLE)-installer", $source)
+            }
+            & python @runnerArgs
+            $status = $LASTEXITCODE
+          }
+          $completedAt = [DateTime]::UtcNow.ToString('o')
+          if (Test-Path $report) {
+            Copy-Item $report "dist/direct-evidence/$($env:LANE)-migration.json"
+          }
+          $manifest = Join-Path $inputs 'manifest.json'
+          $snapshot = Join-Path $inputs "snapshots/$($env:SNAPSHOT).zip"
+          if (Test-Path $manifest) {
+            Copy-Item $manifest "dist/direct-evidence/$($env:LANE)-manifest.json"
+          }
+          if (Test-Path $snapshot) {
+            Copy-Item $snapshot "dist/direct-evidence/$($env:LANE)-snapshot.zip"
+          }
+          if ($status -eq 0) {
+            node scripts/updater/direct-qualification-evidence.mjs lane-result `
+              --policy scripts/updater/direct-qualification-policy.json `
+              --lane $env:LANE `
+              --migration-report $report `
+              --input-manifest $manifest `
+              --snapshot $snapshot `
+              --run-id $env:GITHUB_RUN_ID `
+              --run-attempt $env:GITHUB_RUN_ATTEMPT `
+              --harness-sha256 $env:HARNESS_SHA256 `
+              --started-at $startedAt `
+              --completed-at $completedAt `
+              --output "dist/direct-evidence/$($env:LANE).json"
+            $status = $LASTEXITCODE
+          }
+          if ($status -ne 0) { exit $status }
+
+      - name: Run Unix direct qualification and retain raw evidence
+        id: execute_unix
+        if: matrix.platform != 'windows'
+        continue-on-error: true
+        shell: bash
+        run: |
+          set -uo pipefail
+          assets="$QUAL_ROOT/assets"
+          inputs_dir="$QUAL_ROOT/inputs"
+          work_dir="$QUAL_ROOT/work"
+          report="$QUAL_ROOT/migration.json"
+          candidate="$assets/$CANDIDATE_ASSET_NAME"
+          source="${SOURCE_ASSET_NAME:+$assets/$SOURCE_ASSET_NAME}"
+          started_at="$(python -c \
+            'import datetime; print(datetime.datetime.now(datetime.timezone.utc).isoformat())')"
+          prepare_args=(
+            --policy scripts/updater/direct-qualification-policy.json
+            --lane "$LANE"
+            --candidate-installer "$candidate"
+            --output-dir "$inputs_dir"
+          )
+          if [ -n "$source" ]; then
+            prepare_args+=(--source-installer "$source")
+          fi
+          status=0
+          python scripts/updater/prepare-direct-qualification-inputs.py \
+            "${prepare_args[@]}" || status=$?
+          if [ "$status" -eq 0 ]; then
+            runner_args=(
+              --platform "$PLATFORM"
+              --scenario "$SCENARIO"
+              --c-installer "$candidate"
+              --snapshot-manifest "$inputs_dir/manifest.json"
+              --report "$report"
+              --work-dir "$work_dir"
+              --startup-seconds 10
+              --allow-destructive-autoqa AUTOQA
+            )
+            if [ -n "$source" ]; then
+              runner_args+=("--${SOURCE_ROLE}-installer" "$source")
+            else
+              chmod +x "$candidate"
+            fi
+            python autoqa/migration_runner.py "${runner_args[@]}" || status=$?
+          fi
+          completed_at="$(python -c \
+            'import datetime; print(datetime.datetime.now(datetime.timezone.utc).isoformat())')"
+          manifest="$inputs_dir/manifest.json"
+          snapshot="$inputs_dir/snapshots/$SNAPSHOT.zip"
+          [ ! -f "$report" ] || cp "$report" \
+            "dist/direct-evidence/${LANE}-migration.json"
+          [ ! -f "$manifest" ] || cp "$manifest" \
+            "dist/direct-evidence/${LANE}-manifest.json"
+          [ ! -f "$snapshot" ] || cp "$snapshot" \
+            "dist/direct-evidence/${LANE}-snapshot.zip"
+          if [ "$status" -eq 0 ]; then
+            node scripts/updater/direct-qualification-evidence.mjs lane-result \
+              --policy scripts/updater/direct-qualification-policy.json \
+              --lane "$LANE" \
+              --migration-report "$report" \
+              --input-manifest "$manifest" \
+              --snapshot "$snapshot" \
+              --run-id "$GITHUB_RUN_ID" \
+              --run-attempt "$GITHUB_RUN_ATTEMPT" \
+              --harness-sha256 "$HARNESS_SHA256" \
+              --started-at "$started_at" \
+              --completed-at "$completed_at" \
+              --output "dist/direct-evidence/${LANE}.json" || status=$?
+          fi
+          exit "$status"
+
+      - name: Upload immutable lane evidence even on failure
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: direct-qualification-${{ matrix.lane }}-${{ github.run_id }}-${{ github.run_attempt }}
+          path: dist/direct-evidence/
+          if-no-files-found: error
+          retention-days: 30
+
+      - name: Fail closed after preserving Windows evidence
+        if: always() && matrix.platform == 'windows' && steps.execute_windows.outcome != 'success'
+        shell: pwsh
+        run: throw 'Windows direct qualification failed; raw evidence was retained'
+
+      - name: Fail closed after preserving Unix evidence
+        if: always() && matrix.platform != 'windows' && steps.execute_unix.outcome != 'success'
+        shell: bash
+        run: |
+          echo "Unix direct qualification failed; raw evidence was retained" >&2
+          exit 1
+
+      - name: Remove staged Windows installers and snapshots
+        if: always() && matrix.platform == 'windows'
+        shell: pwsh
+        run: |
+          if ($env:QUAL_ROOT) {
+            Remove-Item -LiteralPath $env:QUAL_ROOT -Recurse -Force `
+              -ErrorAction SilentlyContinue
+          }
+
+      - name: Remove staged Unix installers and snapshots
+        if: always() && matrix.platform != 'windows'
+        shell: bash
+        run: |
+          python -c \
+            'import os, shutil; shutil.rmtree(os.environ.get("QUAL_ROOT", ""), ignore_errors=True)'
+
+  aggregate:
+    name: Bind exact 16 of 16 evidence for promotion
+    needs: [preflight, stage-candidate, qualification]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - name: Check out the exact dispatched commit
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+
+      - name: Download this run's exact lane evidence
+        uses: actions/download-artifact@v4
+        with:
+          pattern: direct-qualification-*-${{ github.run_id }}-${{ github.run_attempt }}
+          path: dist/aggregate-inputs
+          merge-multiple: true
+
+      - name: Bind live run and immutable artifact receipts
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$GITHUB_REF" = "refs/heads/mita-main"
+          test "$(git rev-parse HEAD)" = "$GITHUB_SHA"
+          git fetch --force --no-tags origin \
+            "+refs/heads/mita-main:refs/remotes/origin/mita-main"
+          test "$(git rev-parse HEAD)" = \
+            "$(git rev-parse refs/remotes/origin/mita-main)"
+          node scripts/updater/direct-qualification-evidence.mjs validate-policy \
+            --policy scripts/updater/direct-qualification-policy.json
+          mkdir -p dist/run-receipts dist/promotion-evidence
+
+          python - <<'PY'
+          import hashlib
+          import json
+          import os
+          import pathlib
+          import subprocess
+
+          policy = json.loads(
+              pathlib.Path(
+                  "scripts/updater/direct-qualification-policy.json"
+              ).read_text(encoding="utf-8")
+          )
+          paths = policy["workflow"]["harnessPaths"]
+          tree = subprocess.check_output(["git", "ls-tree", "HEAD", "--", *paths])
+          actual = [
+              line.split("\t", 1)[1]
+              for line in tree.decode("utf-8").splitlines()
+          ]
+          if len(actual) != len(paths) or sorted(actual) != sorted(paths):
+              raise SystemExit("direct qualification harness tree is incomplete")
+          digest = hashlib.sha256(tree).hexdigest()
+          pathlib.Path("dist/run-receipts/harness.sha256").write_text(
+              digest + "\n", encoding="utf-8"
+          )
+          with pathlib.Path(os.environ["GITHUB_ENV"]).open("a", encoding="utf-8") as out:
+              out.write(f"HARNESS_SHA256={digest}\n")
+          PY
+
+          HARNESS_SHA256="$(cat dist/run-receipts/harness.sha256)"
+          gh api "repos/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}" \
+            > dist/run-receipts/run-api.json
+          jq -n --arg harness "$HARNESS_SHA256" \
+            --slurpfile run dist/run-receipts/run-api.json \
+            '{harnessSha256: $harness, run: $run[0]}' \
+            > dist/run-receipts/run-receipt.json
+
+          expected_names="$(jq -r \
+            --arg run "$GITHUB_RUN_ID" \
+            --arg attempt "$GITHUB_RUN_ATTEMPT" \
+            '.lanes[].id
+              | "direct-qualification-" + . + "-" + $run + "-" + $attempt' \
+            scripts/updater/direct-qualification-policy.json | sort)"
+          for try in 1 2 3 4 5; do
+            gh api \
+              "repos/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}/artifacts?per_page=100" \
+              > dist/run-receipts/artifacts.json
+            actual_names="$(jq -r '.artifacts[]
+              | select(.name | startswith("direct-qualification-"))
+              | .name' dist/run-receipts/artifacts.json | sort)"
+            if [ "$actual_names" = "$expected_names" ]; then
+              break
+            fi
+            if [ "$try" -eq 5 ]; then
+              echo "exact 16 lane artifact receipts did not converge" >&2
+              exit 1
+            fi
+            sleep 5
+          done
+
+      - name: Aggregate promotion evidence
+        id: aggregate_evidence
+        continue-on-error: true
+        shell: bash
+        run: |
+          set -euo pipefail
+          node scripts/updater/direct-qualification-evidence.mjs aggregate \
+            --policy scripts/updater/direct-qualification-policy.json \
+            --input-dir dist/aggregate-inputs \
+            --run-receipt dist/run-receipts/run-receipt.json \
+            --artifacts dist/run-receipts/artifacts.json \
+            --output-dir dist/promotion-evidence
+
+      - name: Upload aggregate diagnostics even on failure
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: direct-qualification-aggregate-${{ github.run_id }}-${{ github.run_attempt }}
+          path: |
+            dist/aggregate-inputs/
+            dist/run-receipts/
+            dist/promotion-evidence/
+          if-no-files-found: error
+          retention-days: 30
+
+      - name: Upload promotion evidence only after exact 16 of 16
+        if: steps.aggregate_evidence.outcome == 'success'
+        uses: actions/upload-artifact@v4
+        with:
+          name: biyan-promotion-evidence
+          path: |
+            dist/promotion-evidence/upgrade-smoke.json
+            dist/promotion-evidence/rollout-health.json
+          if-no-files-found: error
+          retention-days: 30
+
+      - name: Fail closed after preserving aggregate evidence
+        if: steps.aggregate_evidence.outcome != 'success'
+        shell: bash
+        run: |
+          echo "Direct qualification aggregate failed" >&2
+          exit 1

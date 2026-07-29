@@ -3,6 +3,12 @@
 import fs from 'node:fs'
 import path from 'node:path'
 
+import {
+  createDirectCInitialPolicy,
+  loadDirectCTransitionPolicy,
+  validateApprovedDirectCTransition,
+  validateDirectCTransitionPolicy,
+} from './direct-c-transition-policy.mjs'
 import { validateLegacyPauseFallback } from './legacy-pause-transaction.mjs'
 
 const HOUR_MS = 60 * 60 * 1000
@@ -11,6 +17,15 @@ const REQUIRED_SMOKE_SCENARIOS = {
   A: ['current-to-a'],
   B: ['a-to-b', 'current-to-b'],
   C: ['current-to-a-to-b-to-c', 'current-to-c', 'a-to-c', 'b-to-c', 'fresh-c'],
+  DIRECT_C: [
+    'legacy-manual-to-c',
+    'legacy-auto-to-c',
+    'current-to-c',
+    'a-to-c',
+    'b-to-c',
+    'c-to-c',
+    'fresh-c',
+  ],
   RECOVERY: ['source-to-recovery'],
 }
 const REQUIRED_SMOKE_PLATFORMS = ['windows', 'macos', 'linux']
@@ -63,18 +78,7 @@ function readJson(file) {
 }
 
 function initialPolicy() {
-  return {
-    schema: 1,
-    channel: 'stable',
-    currentVersion: '0.6.633',
-    legacyBridgeVersion: null,
-    paused: false,
-    completedPhases: [],
-    releases: {},
-    transitions: {},
-    phaseMilestones: {},
-    stableCyclesAfterB: [],
-  }
+  return createDirectCInitialPolicy()
 }
 
 function normalizedLegacyPauseFallback(value, description) {
@@ -157,6 +161,130 @@ function requireElapsed(now, since, minimum, message) {
   if (!since || now - parseDate(since, 'policy milestone') < minimum) throw new Error(message)
 }
 
+function directSourceRelease(source) {
+  return {
+    phase: source.migrationPhase,
+    effectivePhase: source.migrationPhase,
+    tag: source.tag,
+    sourceCommit: source.sourceCommit,
+    dataSchema: source.dataSchema,
+    manifestKey: source.manifestKey,
+    manifestSha256: source.manifestSha256,
+  }
+}
+
+function prepareDirectCPromotion({
+  candidate,
+  currentPolicy,
+  fromVersion,
+  expectedCurrent,
+  rollout,
+  promotedAt,
+  smokeEvidence,
+  healthEvidence,
+  legacyPauseFallback,
+  directTransitionPolicy,
+}) {
+  const tracked = validateDirectCTransitionPolicy(
+    directTransitionPolicy ?? loadDirectCTransitionPolicy(),
+    { requireApprovedNext: true },
+  )
+  if (fromVersion !== tracked.current.version) {
+    throw new Error(
+      `DIRECT_C must start at exact legacy current ${tracked.current.version}`
+    )
+  }
+  if (expectedCurrent !== tracked.current.version) {
+    throw new Error(
+      `DIRECT_C CAS must expect exact current ${tracked.current.version}`
+    )
+  }
+  if (Number(rollout) !== 100) {
+    throw new Error('DIRECT_C must atomically publish at 100%')
+  }
+  if (currentPolicy.legacyPauseFallback !== undefined) {
+    throw new Error(
+      'DIRECT_C requires a policy without legacyPauseFallback'
+    )
+  }
+  const fallback = normalizedLegacyPauseFallback(
+    legacyPauseFallback,
+    'DIRECT_C legacy pause fallback',
+  )
+  if (
+    fallback.version !== tracked.current.version
+    || fallback.manifestSha256 !== tracked.current.manifestSha256
+  ) {
+    throw new Error(
+      'DIRECT_C legacy pause fallback must pin the exact 0.6.633 manifest'
+    )
+  }
+  if (compareSemver(candidate.version, tracked.current.version) <= 0) {
+    throw new Error('DIRECT_C candidate must be newer than legacy current')
+  }
+  for (const version of Object.keys(tracked.routerSources)) {
+    if (compareSemver(candidate.version, version) <= 0) {
+      throw new Error(`DIRECT_C candidate must be newer than Router source ${version}`)
+    }
+  }
+
+  const promoted = new Date(promotedAt).toISOString()
+  const next = structuredClone(currentPolicy)
+  next.deploymentMode = 'direct-c'
+  next.currentVersion = candidate.version
+  next.legacyBridgeVersion = candidate.version
+  next.legacyPauseFallback = structuredClone(fallback)
+  next.paused = false
+  next.completedPhases = ['C']
+  next.releases = Object.fromEntries(
+    Object.entries(tracked.routerSources).map(([version, source]) => [
+      version,
+      directSourceRelease(source),
+    ]),
+  )
+  next.releases[candidate.version] = {
+    phase: 'DIRECT_C',
+    effectivePhase: 'C',
+    tag: candidate.tag,
+    sourceCommit: candidate.sourceCommit,
+    dataSchema: candidate.dataSchema,
+    manifestKey: candidate.manifestKey,
+    manifestSha256: candidate.manifestSha256,
+    promotedAt: promoted,
+    lastPromotedAt: promoted,
+    smokeEvidenceSha256: smokeEvidence.sha256,
+    healthEvidenceSha256: healthEvidence.sha256,
+  }
+  next.transitions = Object.fromEntries(
+    Object.keys(tracked.routerSources).map((version) => [
+      version,
+      {
+        to: candidate.version,
+        phase: 'DIRECT_C',
+        rollout: 100,
+        manifestKey: candidate.manifestKey,
+        rolloutChangedAt: promoted,
+        rolloutHistory: [{ percentage: 100, at: promoted }],
+      },
+    ]),
+  )
+  next.phaseMilestones = {
+    C: {
+      fullAt: promoted,
+      version: candidate.version,
+    },
+  }
+  next.stableCyclesAfterB = []
+
+  validateApprovedDirectCTransition({
+    policy: tracked,
+    candidate,
+    currentPolicy,
+    nextPolicy: next,
+  })
+  return next
+}
+
 export function preparePromotion({
   candidate,
   currentPolicy,
@@ -168,13 +296,17 @@ export function preparePromotion({
   smokeEvidence,
   healthEvidence,
   legacyPauseFallback,
+  directTransitionPolicy,
 }) {
-  if (!['A', 'B', 'C', 'RECOVERY'].includes(phase)) throw new Error(`Invalid phase: ${phase}`)
+  if (!['A', 'B', 'C', 'DIRECT_C', 'RECOVERY'].includes(phase)) {
+    throw new Error(`Invalid phase: ${phase}`)
+  }
   const expectedSchema = { A: 1, B: 2, C: 3 }[candidate.migrationPhase]
   if (!expectedSchema || candidate.dataSchema !== expectedSchema) {
     throw new Error('Candidate migration phase/data schema attestation is invalid')
   }
-  if (phase !== 'RECOVERY' && candidate.migrationPhase !== phase) {
+  const expectedCandidatePhase = phase === 'DIRECT_C' ? 'C' : phase
+  if (phase !== 'RECOVERY' && candidate.migrationPhase !== expectedCandidatePhase) {
     throw new Error(`Candidate migration phase ${candidate.migrationPhase} does not match promotion phase ${phase}`)
   }
   const percentage = Number(rollout)
@@ -189,6 +321,21 @@ export function preparePromotion({
   }
   requirePromotionEvidence({ candidate, phase, promotedAt, smokeEvidence, healthEvidence })
   const promotionTime = parseDate(promotedAt, 'promotion time')
+
+  if (phase === 'DIRECT_C') {
+    return prepareDirectCPromotion({
+      candidate,
+      currentPolicy,
+      fromVersion,
+      expectedCurrent,
+      rollout,
+      promotedAt,
+      smokeEvidence,
+      healthEvidence,
+      legacyPauseFallback,
+      directTransitionPolicy,
+    })
+  }
 
   const targetVersion = candidate.version
   const comparison = compareSemver(targetVersion, currentPolicy.currentVersion)
@@ -355,7 +502,12 @@ export function preparePromotion({
   // The two legacy entrypoints always pin to the latest healthy A-lineage
   // bridge, including an A recovery patch. Pre-A clients must never be forced
   // through a known-bad A build before reaching its forward recovery.
-  if (effectivePhase === 'A') next.legacyBridgeVersion = targetVersion
+  if (
+    effectivePhase === 'A'
+    || (currentPolicy.deploymentMode === 'direct-c' && effectivePhase === 'C')
+  ) {
+    next.legacyBridgeVersion = targetVersion
+  }
   if (percentage === 100) {
     const wasCompleted = completed.has(effectivePhase)
     completed.add(effectivePhase)
@@ -394,6 +546,11 @@ if (import.meta.url === `file://${process.argv[1]}`) {
       legacyPauseFallback: args['legacy-pause-fallback']
         ? readJson(path.resolve(args['legacy-pause-fallback']))
         : undefined,
+      directTransitionPolicy: args['direct-transition-policy']
+        ? readJson(path.resolve(args['direct-transition-policy']))
+        : args.phase === 'DIRECT_C'
+          ? loadDirectCTransitionPolicy()
+          : undefined,
     })
     fs.writeFileSync(path.resolve(args.output), `${JSON.stringify(next, null, 2)}\n`)
     console.log(`Prepared ${args.phase} promotion to ${candidate.version} at ${args.rollout}%`)

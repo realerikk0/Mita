@@ -17,6 +17,7 @@ import {
   validateCandidateWorkflow,
   validateCiControlOwnership,
   validateCiWorkflow,
+  validateDirectQualificationWorkflow,
   validateDocsArchiveConfig,
   validateDraftAssetRepairWorkflow,
   validateFlatpakMetadata,
@@ -44,6 +45,16 @@ const withLineEndings = (source, lineEnding) =>
   normalizeLineEndings(source).replaceAll('\n', lineEnding)
 
 const runtimeOnly = { checkProduct: false, checkRuntime: true }
+
+function historicalActiveTrainPolicy() {
+  const policy = JSON.parse(
+    fs.readFileSync('scripts/ci/release-train-policy.json', 'utf8')
+  )
+  policy.activeTerminalRelease = null
+  policy.activeTrain = 'closure-20260724'
+  policy.trains.at(-1).status = 'active'
+  return policy
+}
 
 test('candidate content policy tests have no external runtime dependency', () => {
   const source = fs.readFileSync(
@@ -267,17 +278,19 @@ test('bridge release trains lock version, phase, schema, and Cargo.lock together
       migrationPhase: 'A',
       dataSchema: 1,
       cargoLockVersion: '0.6.646',
-    }).some((failure) => failure.includes('is not declared'))
+    }).some((failure) => failure.includes('must attest C/3'))
   )
 })
 
 test('formal release identity accepts only the active train checkpoint', () => {
+  const trainPolicy = historicalActiveTrainPolicy()
   assert.deepEqual(
     validateActiveReleaseIdentity({
       version: '0.6.643',
       migrationPhase: 'A',
       dataSchema: 1,
       cargoLockVersion: '0.6.643',
+      trainPolicy,
     }),
     []
   )
@@ -292,12 +305,46 @@ test('formal release identity accepts only the active train checkpoint', () => {
         migrationPhase,
         dataSchema,
         cargoLockVersion: version,
+        trainPolicy,
       }).some((failure) => failure.includes('not the declared active train'))
     )
   }
 })
 
-test('release train policy is unique, contiguous, and fail-closed', () => {
+test('formal release identity switches fail-closed to the exact pinned terminal release', () => {
+  const policy = JSON.parse(
+    fs.readFileSync('scripts/ci/release-train-policy.json', 'utf8')
+  )
+  policy.activeTerminalRelease = {
+    tag: 'v0.6.646',
+    version: '0.6.646',
+    migrationPhase: 'C',
+    dataSchema: 3,
+    sourceCommit: 'a'.repeat(40),
+  }
+
+  assert.deepEqual(
+    validateActiveReleaseIdentity({
+      version: '0.6.646',
+      migrationPhase: 'C',
+      dataSchema: 3,
+      cargoLockVersion: '0.6.646',
+      trainPolicy: policy,
+    }),
+    []
+  )
+  assert.ok(
+    validateActiveReleaseIdentity({
+      version: '0.6.645',
+      migrationPhase: 'C',
+      dataSchema: 3,
+      cargoLockVersion: '0.6.645',
+      trainPolicy: policy,
+    }).some((failure) => failure.includes('active terminal release'))
+  )
+})
+
+test('release train and terminal policy is unique, contiguous, and fail-closed', () => {
   const policy = JSON.parse(
     fs.readFileSync('scripts/ci/release-train-policy.json', 'utf8')
   )
@@ -307,9 +354,20 @@ test('release train policy is unique, contiguous, and fail-closed', () => {
   twoActive.trains[0].status = 'active'
   assert.ok(
     validateReleaseTrainPolicy(twoActive).some((failure) =>
-      failure.includes('exactly one matching active train')
+      failure.includes('retire every active train')
     )
   )
+
+  const namedRetiredTrain = structuredClone(policy)
+  namedRetiredTrain.activeTrain = 'closure-20260724'
+  assert.ok(
+    validateReleaseTrainPolicy(namedRetiredTrain).some((failure) =>
+      failure.includes('set activeTrain to null')
+    )
+  )
+
+  const historical = historicalActiveTrainPolicy()
+  assert.deepEqual(validateReleaseTrainPolicy(historical), [])
 
   const phaseGap = structuredClone(policy)
   phaseGap.trains.at(-1).releases.B.version = '0.6.650'
@@ -363,7 +421,7 @@ test('release train policy is unique, contiguous, and fail-closed', () => {
   ]
   assert.ok(
     validateReleaseTrainPolicy(activeNotLast).some((failure) =>
-      failure.includes('active release train must be the final history entry')
+      failure.includes('only the final history train superseded-by-terminal')
     )
   )
 
@@ -374,6 +432,52 @@ test('release train policy is unique, contiguous, and fail-closed', () => {
       failure.includes('keys must be exactly dataSchema, version')
     )
   )
+
+  const pinned = structuredClone(policy)
+  pinned.activeTerminalRelease = {
+    tag: 'v0.6.646',
+    version: '0.6.646',
+    migrationPhase: 'C',
+    dataSchema: 3,
+    sourceCommit: 'a'.repeat(40),
+  }
+  assert.deepEqual(validateReleaseTrainPolicy(pinned), [])
+
+  for (const [label, mutate] of [
+    [
+      'wrong version',
+      (value) => {
+        value.activeTerminalRelease.version = '0.6.647'
+        value.activeTerminalRelease.tag = 'v0.6.647'
+      },
+    ],
+    [
+      'wrong phase',
+      (value) => {
+        value.activeTerminalRelease.migrationPhase = 'A'
+        value.activeTerminalRelease.dataSchema = 1
+      },
+    ],
+    [
+      'abbreviated source',
+      (value) => {
+        value.activeTerminalRelease.sourceCommit = 'a'.repeat(12)
+      },
+    ],
+    [
+      'extra field',
+      (value) => {
+        value.activeTerminalRelease.rollout = 100
+      },
+    ],
+  ]) {
+    const invalid = structuredClone(pinned)
+    mutate(invalid)
+    assert.ok(
+      validateReleaseTrainPolicy(invalid).length > 0,
+      `terminal policy must reject ${label}`
+    )
+  }
 })
 
 test('Linux release build prepares every binary required by Tauri bundling', () => {
@@ -1052,12 +1156,20 @@ test('candidate workflow gates every platform build on exact-tag tests', () => {
       'workflow_dispatch-only',
     ],
     [
-      'A checkpoint mapping drifted',
+      'terminal source policy lookup drifted',
       candidateWorkflow.replace(
-        '38e6d9290a8b9b0f152ff2a7eefb550e6ead7df5',
-        'f'.repeat(40)
+        'release-train-policy.json?ref=$live_main',
+        'unreviewed-release-policy.json?ref=$live_main'
       ),
-      'reviewed A/B/C checkpoints',
+      'terminal source binding',
+    ],
+    [
+      'superseded train is reactivated',
+      candidateWorkflow.replace(
+        '.activeTrain == null',
+        '.activeTrain == "closure-20260724"'
+      ),
+      'terminal source binding',
     ],
     [
       'tag-cut gains checkout action',
@@ -2228,7 +2340,7 @@ test('candidate recovery authenticates exact artifacts and only resumes package 
   }
 })
 
-test('one-time Draft repair isolates signing and release mutation authority', () => {
+test('retired Draft repair is permanently disabled and preserves historical authority isolation', () => {
   const workflow = normalizeLineEndings(
     fs.readFileSync(
       '.github/workflows/desktop-release-draft-repair.yml',
@@ -2266,6 +2378,22 @@ test('one-time Draft repair isolates signing and release mutation authority', ()
 
   for (const [label, mutated, expected] of [
     [
+      'retired snapshot gate reopened',
+      workflow.replace(
+        "if: ${{ false && inputs.prepared_run_id == ''",
+        "if: ${{ inputs.prepared_run_id == ''"
+      ),
+      'permanently disabled',
+    ],
+    [
+      'retired resume gate reopened',
+      workflow.replace(
+        '        false &&\n        always() &&',
+        '        always() &&'
+      ),
+      'permanently disabled',
+    ],
+    [
       'top-level write',
       workflow.replace(
         'permissions:\n  actions: read\n  contents: read',
@@ -2278,7 +2406,7 @@ test('one-time Draft repair isolates signing and release mutation authority', ()
       workflow.replace(
         `  snapshot:
     name: Snapshot exact mutable Draft
-    if: \${{ inputs.prepared_run_id == '' && inputs.prepared_run_attempt == '' }}
+    if: \${{ false && inputs.prepared_run_id == '' && inputs.prepared_run_attempt == '' }}
     runs-on: ubuntu-24.04
     timeout-minutes: 60
     environment: release-distribution
@@ -2287,7 +2415,7 @@ test('one-time Draft repair isolates signing and release mutation authority', ()
       contents: write`,
         `  snapshot:
     name: Snapshot exact mutable Draft
-    if: \${{ inputs.prepared_run_id == '' && inputs.prepared_run_attempt == '' }}
+    if: \${{ false && inputs.prepared_run_id == '' && inputs.prepared_run_attempt == '' }}
     runs-on: ubuntu-24.04
     timeout-minutes: 60
     environment: release-distribution
@@ -2911,7 +3039,9 @@ test('formal build, release, and updater jobs share the release-distribution env
       ),
     },
     '.github/workflows/promote-desktop-update.yml': {
-      jobName: 'promote',
+      ...TRUSTED_SENSITIVE_UPDATER_WORKFLOW_CONTRACTS[
+        '.github/workflows/promote-desktop-update.yml'
+      ],
       source: fs.readFileSync(
         '.github/workflows/promote-desktop-update.yml',
         'utf8'
@@ -2992,6 +3122,15 @@ test('formal build, release, and updater jobs share the release-distribution env
     [
       '.github/workflows/biyan-a-canary.yml',
       (source) =>
+        source.replace(
+          "    if: ${{ false && inputs.mode != '' }}",
+          "    if: ${{ true && inputs.mode != '' }}"
+        ),
+      'permanently disabled as retired evidence',
+    ],
+    [
+      '.github/workflows/biyan-a-canary.yml',
+      (source) =>
         `${source}\n  unreviewed-cloud-writer:\n    runs-on: ubuntu-24.04\n    environment: release-distribution\n    steps:\n      - run: echo unreviewed\n`,
       'job allowlist',
     ],
@@ -3003,6 +3142,24 @@ test('formal build, release, and updater jobs share the release-distribution env
           'runs-on: ubuntu-24.04'
         ),
       'execution envelope',
+    ],
+    [
+      '.github/workflows/promote-desktop-update.yml',
+      (source) =>
+        source.replace(
+          'options: [DIRECT_C, RECOVERY]',
+          'options: [A, B, C, DIRECT_C, RECOVERY]'
+        ),
+      'manual DIRECT_C and RECOVERY',
+    ],
+    [
+      '.github/workflows/promote-desktop-update.yml',
+      (source) =>
+        source.replace(
+          '"Biyan Direct Qualification"',
+          '"Biyan A Canary"'
+        ),
+      'exact direct qualification evidence',
     ],
     [
       '.github/workflows/biyan-a-canary.yml',
@@ -3109,7 +3266,52 @@ test('formal build, release, and updater jobs share the release-distribution env
   )
 })
 
-test('one-time Biyan alias bootstrap is manual, exact, and fail-closed', () => {
+test('direct qualification is an exact 16-lane read-only evidence workflow', () => {
+  const workflow = normalizeLineEndings(
+    fs.readFileSync(
+      '.github/workflows/biyan-direct-qualification.yml',
+      'utf8'
+    )
+  )
+  assert.deepEqual(validateDirectQualificationWorkflow(workflow), [])
+  assert.deepEqual(
+    validateDirectQualificationWorkflow(withLineEndings(workflow, '\r\n')),
+    []
+  )
+
+  for (const [label, mutation, expected] of [
+    [
+      'extra write authority',
+      workflow.replace(
+        'permissions:\n  actions: read\n  contents: read',
+        'permissions:\n  actions: read\n  contents: write'
+      ),
+      'manual-only read-only',
+    ],
+    [
+      'missing lane',
+      workflow.replace('          - lane: c-to-c-linux', '          - lane: c-to-c-extra'),
+      '16-lane upgrade matrix',
+    ],
+    [
+      'production secret',
+      workflow.replace(
+        '      - name: Upload preflight evidence',
+        '      - env:\n          TOKEN: ${{ secrets.PRODUCTION_TOKEN }}\n        run: echo forbidden\n      - name: Upload preflight evidence'
+      ),
+      'no environment, secret',
+    ],
+  ]) {
+    assert.ok(
+      validateDirectQualificationWorkflow(mutation).some((failure) =>
+        failure.includes(expected)
+      ),
+      label
+    )
+  }
+})
+
+test('historical Biyan alias bootstrap is retained, permanently disabled, exact, and fail-closed', () => {
   const workflow = normalizeLineEndings(
     fs.readFileSync('.github/workflows/release-distribution.yml', 'utf8')
   )
@@ -3129,6 +3331,10 @@ test('one-time Biyan alias bootstrap is manual, exact, and fail-closed', () => {
       .replace(search, replacement)}`
 
   const mutations = [
+    [
+      'permanently disabled bootstrap',
+      mutateBootstrap('      false &&', '      true &&'),
+    ],
     [
       'manual-only operation',
       mutateBootstrap(

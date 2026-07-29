@@ -189,6 +189,26 @@ test('checkpoint-only requires the exact four-file set', () => {
   assert.equal(subset.flags.buildMacos, true)
 })
 
+test('terminal product source with three version files is full qualification, not a checkpoint', () => {
+  const result = classifyChangedFiles([
+    'src-tauri/src/core/setup.rs',
+    'src-tauri/Cargo.toml',
+    'src-tauri/Cargo.lock',
+    'src-tauri/tauri.conf.json',
+  ])
+
+  assert.notEqual(result.classification, 'checkpoint-only')
+  assert.equal(result.flags.checkpoint, false)
+  assert.equal(result.flags.full, true)
+  assert.equal(result.flags.nativeTests, true)
+  assert.equal(result.flags.testMacos, true)
+  assert.equal(result.flags.testWindows, true)
+  assert.equal(result.flags.testLinux, true)
+  assert.equal(result.flags.buildMacos, true)
+  assert.equal(result.flags.buildWindows, true)
+  assert.equal(result.flags.buildLinux, true)
+})
+
 test('direct JS/TS test-only changes run focused checks without native cold builds', () => {
   const result = classifyChangedFiles([
     'web-app/src/chat.test.tsx',

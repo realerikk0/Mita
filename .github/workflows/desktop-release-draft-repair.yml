@@ -31,7 +31,7 @@ env:
 jobs:
   snapshot:
     name: Snapshot exact mutable Draft
-    if: ${{ inputs.prepared_run_id == '' && inputs.prepared_run_attempt == '' }}
+    if: ${{ false && inputs.prepared_run_id == '' && inputs.prepared_run_attempt == '' }}
     runs-on: ubuntu-24.04
     timeout-minutes: 60
     environment: release-distribution
@@ -843,6 +843,7 @@ jobs:
     name: Commit or resume exact Draft repair
     if: >-
       ${{
+        false &&
         always() &&
         (
           (

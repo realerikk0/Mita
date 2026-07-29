@@ -4,7 +4,7 @@ on:
   workflow_dispatch:
     inputs:
       version:
-        description: "Exact reviewed release tag: v0.6.643, v0.6.644, or v0.6.645"
+        description: "Exact terminal release tag pinned by protected policy: v0.6.646"
         required: true
         type: string
 
@@ -43,22 +43,6 @@ jobs:
         run: |
           set -euo pipefail
 
-          case "$RELEASE_TAG" in
-            v0.6.643)
-              source_commit="38e6d9290a8b9b0f152ff2a7eefb550e6ead7df5"
-              ;;
-            v0.6.644)
-              source_commit="d58f4e9141ee9dfc985171d13c993103dd763b01"
-              ;;
-            v0.6.645)
-              source_commit="a79c715a61057d7b78b440d90e3419dfc7e55d12"
-              ;;
-            *)
-              echo "Release tag is not an approved A/B/C checkpoint: $RELEASE_TAG" >&2
-              exit 1
-              ;;
-          esac
-
           if [ "$WORKFLOW_REF" != "refs/heads/mita-main" ]; then
             echo "Candidate dispatch must use protected mita-main" >&2
             exit 1
@@ -79,6 +63,46 @@ jobs:
             echo "Dispatch head $WORKFLOW_SHA is not live mita-main $live_main" >&2
             exit 1
           fi
+
+          policy_json="$RUNNER_TEMP/release-train-policy.json"
+          gh api \
+            "repos/$GITHUB_REPOSITORY/contents/scripts/ci/release-train-policy.json?ref=$live_main" \
+            --jq '.content' \
+            | tr -d '\n' \
+            | base64 --decode \
+            > "$policy_json"
+          if ! jq -e \
+            --arg tag "$RELEASE_TAG" \
+            '
+              (keys | sort)
+                == ["activeTerminalRelease", "activeTrain", "schema", "trains"]
+              and .schema == 2
+              and .activeTrain == null
+              and (.trains | type == "array")
+              and ([.trains[] | select(.status == "active")] | length) == 0
+              and ([.trains[] | select(.status == "superseded-by-terminal")]
+                | length) == 1
+              and .trains[-1].status == "superseded-by-terminal"
+              and (.activeTerminalRelease | type == "object")
+              and ((.activeTerminalRelease | keys | sort)
+                == ["dataSchema", "migrationPhase", "sourceCommit", "tag", "version"])
+              and .activeTerminalRelease.tag == $tag
+              and .activeTerminalRelease.tag
+                == ("v" + .activeTerminalRelease.version)
+              and .activeTerminalRelease.tag == "v0.6.646"
+              and .activeTerminalRelease.version == "0.6.646"
+              and .activeTerminalRelease.migrationPhase == "C"
+              and .activeTerminalRelease.dataSchema == 3
+              and (.activeTerminalRelease.sourceCommit
+                | test("^[0-9a-f]{40}$"))
+            ' \
+            "$policy_json" >/dev/null; then
+            echo "Release tag is not the exact active terminal policy binding: $RELEASE_TAG" >&2
+            exit 1
+          fi
+          source_commit="$(
+            jq -er '.activeTerminalRelease.sourceCommit' "$policy_json"
+          )"
 
           resolved_source="$(
             gh api "repos/$GITHUB_REPOSITORY/commits/$source_commit" --jq '.sha'

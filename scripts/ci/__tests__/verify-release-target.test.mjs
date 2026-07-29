@@ -8,9 +8,11 @@ import test from 'node:test'
 import {
   CHECKPOINT_FILES,
   REVIEWED_CONTROL_PLANE_DRIFT,
+  TERMINAL_CONTROL_PLANE_DRIFT,
   parseNameStatus,
   parseReleaseTargetArgs,
   validateReleaseDrift,
+  validateTerminalReleaseDrift,
   verifyReleaseTarget,
 } from '../verify-release-target.mjs'
 
@@ -29,6 +31,39 @@ const MAIN_CHECKPOINT_CONTENTS = Object.freeze({
   'src-tauri/Cargo.toml': 'protected-main-cargo\n',
   'src-tauri/tauri.conf.json': '{"version":"protected-main"}\n',
 })
+const TERMINAL_SOURCE_CONTENTS = Object.freeze({
+  'biyan-release.json':
+    '{"schema":1,"migrationPhase":"C","dataSchema":3}\n',
+  'src-tauri/Cargo.lock':
+    '[[package]]\nname = "Biyan"\nversion = "0.6.646"\n',
+  'src-tauri/Cargo.toml':
+    '[package]\nname = "Biyan"\nversion = "0.6.646"\n',
+  'src-tauri/tauri.conf.json': '{"version":"0.6.646"}\n',
+})
+
+function trainPolicy(sourceCommit = null) {
+  const policy = JSON.parse(
+    fs.readFileSync(
+      new URL('../release-train-policy.json', import.meta.url),
+      'utf8'
+    )
+  )
+  policy.activeTerminalRelease =
+    sourceCommit === null
+      ? null
+      : {
+          tag: 'v0.6.646',
+          version: '0.6.646',
+          migrationPhase: 'C',
+          dataSchema: 3,
+          sourceCommit,
+        }
+  if (sourceCommit === null) {
+    policy.activeTrain = 'closure-20260724'
+    policy.trains.at(-1).status = 'active'
+  }
+  return policy
+}
 
 function git(repoRoot, args) {
   return execFileSync('git', ['-C', repoRoot, ...args], {
@@ -51,7 +86,7 @@ function commitFixture(repoRoot, message, { allowEmpty = false } = {}) {
   return git(repoRoot, ['rev-parse', 'HEAD'])
 }
 
-function createReleaseFixture(t) {
+function createReleaseFixture(t, { terminal = false } = {}) {
   const temporaryRoot = fs.mkdtempSync(
     path.join(os.tmpdir(), 'verify-release-target-test-')
   )
@@ -66,18 +101,35 @@ function createReleaseFixture(t) {
     git(harnessRoot, ['config', 'commit.gpgsign', 'false'])
 
     for (const relativePath of CHECKPOINT_FILES) {
-      writeFixtureFile(harnessRoot, relativePath, `parent:${relativePath}\n`)
+      writeFixtureFile(
+        harnessRoot,
+        relativePath,
+        terminal && relativePath === 'biyan-release.json'
+          ? TERMINAL_SOURCE_CONTENTS[relativePath]
+          : `parent:${relativePath}\n`
+      )
     }
     writeFixtureFile(
       harnessRoot,
       '.github/workflows/desktop-release.yml',
       'tag-control\n'
     )
-    writeFixtureFile(harnessRoot, 'src-tauri/src/main.rs', 'product-source\n')
+    writeFixtureFile(
+      harnessRoot,
+      'src-tauri/src/main.rs',
+      terminal ? 'product-parent\n' : 'product-source\n'
+    )
+    writeFixtureFile(
+      harnessRoot,
+      'scripts/ci/release-train-policy.json',
+      `${JSON.stringify(trainPolicy(), null, 2)}\n`
+    )
     writeFixtureFile(
       harnessRoot,
       'scripts/ci/qualification-impact.mjs',
-      `process.stdout.write(JSON.stringify({
+      terminal
+        ? `throw new Error('terminal product source must not use checkpoint verification')\n`
+        : `process.stdout.write(JSON.stringify({
   valid: true,
   changedFiles: ${JSON.stringify(CHECKPOINT_FILES)},
   targetVersion: '0.6.643'
@@ -95,7 +147,9 @@ if (rootIndex < 0 || !process.argv.includes('--require-active')) {
   throw new Error('protected policy arguments are missing')
 }
 const repoRoot = path.resolve(process.argv[rootIndex + 1])
-const expected = ${JSON.stringify(SOURCE_CHECKPOINT_CONTENTS)}
+const expected = ${JSON.stringify(
+        terminal ? TERMINAL_SOURCE_CONTENTS : SOURCE_CHECKPOINT_CONTENTS
+      )}
 for (const [relativePath, contents] of Object.entries(expected)) {
   if (fs.readFileSync(path.join(repoRoot, relativePath), 'utf8') !== contents) {
     throw new Error(\`checkpoint was not composed from release source: \${relativePath}\`)
@@ -111,7 +165,9 @@ if (
 }
 if (
   fs.readFileSync(path.join(repoRoot, 'src-tauri/src/main.rs'), 'utf8') !==
-  'product-source\\n'
+  ${JSON.stringify(
+    terminal ? 'terminal-product-source\n' : 'product-source\n'
+  )}
 ) {
   throw new Error('product source changed in the composed policy view')
 }
@@ -120,16 +176,34 @@ if (
     const parentCommit = commitFixture(harnessRoot, 'parent')
 
     for (const [relativePath, contents] of Object.entries(
-      SOURCE_CHECKPOINT_CONTENTS
+      terminal ? TERMINAL_SOURCE_CONTENTS : SOURCE_CHECKPOINT_CONTENTS
     )) {
       writeFixtureFile(harnessRoot, relativePath, contents)
     }
-    const sourceCommit = commitFixture(harnessRoot, 'source checkpoint')
+    if (terminal) {
+      writeFixtureFile(
+        harnessRoot,
+        'src-tauri/src/main.rs',
+        'terminal-product-source\n'
+      )
+    }
+    const sourceCommit = commitFixture(
+      harnessRoot,
+      terminal ? 'terminal product source' : 'source checkpoint'
+    )
 
-    for (const [relativePath, contents] of Object.entries(
-      MAIN_CHECKPOINT_CONTENTS
-    )) {
-      writeFixtureFile(harnessRoot, relativePath, contents)
+    if (terminal) {
+      writeFixtureFile(
+        harnessRoot,
+        'scripts/ci/release-train-policy.json',
+        `${JSON.stringify(trainPolicy(sourceCommit), null, 2)}\n`
+      )
+    } else {
+      for (const [relativePath, contents] of Object.entries(
+        MAIN_CHECKPOINT_CONTENTS
+      )) {
+        writeFixtureFile(harnessRoot, relativePath, contents)
+      }
     }
     writeFixtureFile(
       harnessRoot,
@@ -151,7 +225,7 @@ if (
     return {
       harnessRoot,
       parentCommit,
-      releaseTag,
+      releaseTag: terminal ? 'v0.6.646' : releaseTag,
       sourceCommit,
       targetRoot,
       trustedMain,
@@ -404,6 +478,123 @@ test('release drift accepts only exact checkpoint and reviewed control files', (
   )
 })
 
+test('terminal drift accepts only the exact reviewed Q control-plane paths', () => {
+  assert.deepEqual([...TERMINAL_CONTROL_PLANE_DRIFT], [
+    ['.github/workflows/biyan-a-canary.yml', 'M'],
+    ['.github/workflows/biyan-direct-qualification.yml', 'A'],
+    ['.github/workflows/desktop-release-draft-repair.yml', 'M'],
+    ['.github/workflows/desktop-release.yml', 'M'],
+    ['.github/workflows/promote-desktop-update.yml', 'M'],
+    ['.github/workflows/release-distribution.yml', 'M'],
+    ['DEVELOPMENT_PLAN.md', 'M'],
+    ['autoqa/migration_runner.py', 'M'],
+    ['autoqa/tests/test_migration_runner.py', 'M'],
+    ['docs/README.md', 'M'],
+    ['docs/release-distribution.md', 'M'],
+    ['docs/src/pages/docs/desktop/data-folder.mdx', 'M'],
+    ['scripts/ci/__tests__/qualification-impact.test.mjs', 'M'],
+    ['scripts/ci/__tests__/release-policy.test.mjs', 'M'],
+    ['scripts/ci/__tests__/verify-release-target.test.mjs', 'M'],
+    ['scripts/ci/legacy-compatibility-allowlist.json', 'M'],
+    ['scripts/ci/release-policy-contracts.mjs', 'M'],
+    ['scripts/ci/release-train-policy.json', 'M'],
+    ['scripts/ci/verify-release-policy.mjs', 'M'],
+    ['scripts/ci/verify-release-target.mjs', 'M'],
+    ['scripts/release-distribution/__tests__/release-distribution.test.mjs', 'M'],
+    ['scripts/release-distribution/collect-release-assets.mjs', 'M'],
+    ['scripts/updater/__tests__/direct-c-transition-policy.test.mjs', 'A'],
+    ['scripts/updater/__tests__/direct-qualification.test.mjs', 'A'],
+    ['scripts/updater/__tests__/fixtures/v0.6.633-latest.json', 'A'],
+    ['scripts/updater/__tests__/legacy-manifest-policy.test.mjs', 'M'],
+    ['scripts/updater/__tests__/promotion-transaction.test.mjs', 'M'],
+    ['scripts/updater/__tests__/test_prepare_direct_qualification_inputs.py', 'A'],
+    ['scripts/updater/__tests__/updater.test.mjs', 'M'],
+    ['scripts/updater/direct-c-contract.mjs', 'A'],
+    ['scripts/updater/direct-c-transition-policy.json', 'A'],
+    ['scripts/updater/direct-c-transition-policy.mjs', 'A'],
+    ['scripts/updater/direct-qualification-evidence.mjs', 'A'],
+    ['scripts/updater/direct-qualification-policy.json', 'A'],
+    ['scripts/updater/legacy-manifest-policy.mjs', 'M'],
+    ['scripts/updater/legacy-pause-transaction.mjs', 'M'],
+    ['scripts/updater/prepare-direct-qualification-inputs.py', 'A'],
+    ['scripts/updater/prepare-promotion.mjs', 'M'],
+    ['scripts/updater/promotion-transaction.mjs', 'M'],
+    ['scripts/updater/run-promotion-transaction.sh', 'M'],
+    ['scripts/updater/worker.mjs', 'M'],
+  ])
+
+  const reviewed = [...TERMINAL_CONTROL_PLANE_DRIFT].map(
+    ([relativePath, status]) => ({
+      path: relativePath,
+      status,
+      oldMode: status === 'A' ? null : '100644',
+      newMode: '100644',
+    })
+  )
+  assert.deepEqual(validateTerminalReleaseDrift(reviewed), [])
+
+  for (const [label, entry, pattern] of [
+    [
+      'product drift',
+      {
+        path: 'src-tauri/src/core/setup.rs',
+        status: 'M',
+        oldMode: '100644',
+        newMode: '100644',
+      },
+      /unreviewed terminal release drift/,
+    ],
+    [
+      'source identity drift',
+      {
+        path: 'src-tauri/tauri.conf.json',
+        status: 'M',
+        oldMode: '100644',
+        newMode: '100644',
+      },
+      /must not modify source identity/,
+    ],
+    [
+      'status drift',
+      {
+        path: 'scripts/updater/direct-c-transition-policy.json',
+        status: 'M',
+        oldMode: '100644',
+        newMode: '100644',
+      },
+      /expected A, found M/,
+    ],
+    [
+      'rename drift',
+      {
+        path: 'scripts/ci/release-train-policy.json',
+        pathAfter: 'scripts/ci/release-policy.json',
+        status: 'R100',
+        oldMode: '100644',
+        newMode: '100644',
+      },
+      /must not rename or copy/,
+    ],
+    [
+      'mode drift',
+      {
+        path: 'scripts/ci/release-train-policy.json',
+        status: 'M',
+        oldMode: '100644',
+        newMode: '120000',
+      },
+      /must use regular files/,
+    ],
+  ]) {
+    assert.ok(
+      validateTerminalReleaseDrift([entry]).some((failure) =>
+        pattern.test(failure)
+      ),
+      label
+    )
+  }
+})
+
 test('the control-plane drift policy is an exact path allowlist', () => {
   assert.deepEqual(
     [...REVIEWED_CONTROL_PLANE_DRIFT],
@@ -579,6 +770,7 @@ test('release target composes source checkpoints with protected controls', (t) =
   const result = verifyReleaseTarget(fixture)
 
   assert.equal(result.parentCommit, fixture.parentCommit)
+  assert.equal(result.releaseKind, 'bridge-checkpoint')
   assert.equal(result.releaseTag, releaseTag)
   assert.equal(result.releaseVersion, '0.6.643')
   assert.equal(result.sourceCommit, fixture.sourceCommit)
@@ -589,6 +781,79 @@ test('release target composes source checkpoints with protected controls', (t) =
       status: 'M',
     },
   ])
+})
+
+test('terminal release target authenticates a full product source P through policy-only Q', (t) => {
+  const fixture = createReleaseFixture(t, { terminal: true })
+  const result = verifyReleaseTarget(fixture)
+
+  assert.equal(result.parentCommit, fixture.parentCommit)
+  assert.equal(result.releaseKind, 'terminal')
+  assert.equal(result.releaseTag, 'v0.6.646')
+  assert.equal(result.releaseVersion, '0.6.646')
+  assert.equal(result.sourceCommit, fixture.sourceCommit)
+  assert.equal(result.trustedMain, fixture.trustedMain)
+  assert.equal(result.checkpoint, null)
+  assert.deepEqual(result.controlPlaneDrift, [
+    {
+      path: '.github/workflows/desktop-release.yml',
+      status: 'M',
+    },
+    {
+      path: 'scripts/ci/release-train-policy.json',
+      status: 'M',
+    },
+  ])
+})
+
+test('terminal release target rejects a policy pin that does not exactly bind P', (t) => {
+  const fixture = createReleaseFixture(t, { terminal: true })
+  writeFixtureFile(
+    fixture.harnessRoot,
+    'scripts/ci/release-train-policy.json',
+    `${JSON.stringify(trainPolicy('f'.repeat(40)), null, 2)}\n`
+  )
+  fixture.trustedMain = commitFixture(
+    fixture.harnessRoot,
+    'mismatched terminal pin'
+  )
+
+  assert.throws(
+    () => verifyReleaseTarget(fixture),
+    /terminal release binding is invalid/
+  )
+})
+
+test('terminal release target rejects product or source identity drift after P', (t) => {
+  const product = createReleaseFixture(t, { terminal: true })
+  writeFixtureFile(
+    product.harnessRoot,
+    'src-tauri/src/main.rs',
+    'unreviewed-post-source-change\n'
+  )
+  product.trustedMain = commitFixture(
+    product.harnessRoot,
+    'unreviewed product drift'
+  )
+  assert.throws(
+    () => verifyReleaseTarget(product),
+    /unreviewed terminal release drift: src-tauri\/src\/main\.rs/
+  )
+
+  const identity = createReleaseFixture(t, { terminal: true })
+  writeFixtureFile(
+    identity.harnessRoot,
+    'src-tauri/tauri.conf.json',
+    '{"version":"0.6.647"}\n'
+  )
+  identity.trustedMain = commitFixture(
+    identity.harnessRoot,
+    'unreviewed source identity drift'
+  )
+  assert.throws(
+    () => verifyReleaseTarget(identity),
+    /terminal control-plane commit must not modify source identity/
+  )
 })
 
 test('release target rejects a tag version that aliases another checkpoint', (t) => {
@@ -671,6 +936,6 @@ test('release target rejects a merge commit as the release source', (t) => {
 
   assert.throws(
     () => verifyReleaseTarget(fixture),
-    /release checkpoint must have exactly one parent/
+    /release source must have exactly one parent/
   )
 })

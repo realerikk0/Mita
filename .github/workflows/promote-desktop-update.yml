@@ -8,10 +8,10 @@ on:
         required: true
         type: string
       phase:
-        description: "Migration phase carried by this candidate"
+        description: "One-shot DIRECT_C promotion, or terminal RECOVERY"
         required: true
         type: choice
-        options: [A, B, C, RECOVERY]
+        options: [DIRECT_C, RECOVERY]
       from_version:
         description: "Only this installed version may receive the update"
         required: true
@@ -35,7 +35,7 @@ on:
         required: false
         type: string
       smoke_run_id:
-        description: "Successful A Canary finish run, or B/C Upgrade Smoke run ID"
+        description: "Successful Direct Qualification run, or RECOVERY Upgrade Smoke run ID"
         required: true
         type: string
       smoke_evidence_sha256:
@@ -139,9 +139,9 @@ jobs:
           gh run view "$SMOKE_RUN_ID" \
             --json conclusion,headSha,workflowName,url > dist/smoke-run.json
           test "$(jq -r .conclusion dist/smoke-run.json)" = "success"
-          if [ "$PHASE" = "A" ]; then
+          if [ "$PHASE" = "DIRECT_C" ]; then
             test "$(jq -r .workflowName dist/smoke-run.json)" = \
-              "Biyan A Canary"
+              "Biyan Direct Qualification"
             git merge-base --is-ancestor \
               "$(jq -r .headSha dist/smoke-run.json)" \
               refs/remotes/origin/mita-main
@@ -157,36 +157,156 @@ jobs:
             --smoke dist/evidence/upgrade-smoke.json \
             --smoke-sha256 "$SMOKE_SHA256" \
             --health dist/evidence/rollout-health.json \
-            --health-sha256 "$HEALTH_SHA256" \
-            --output-dir dist/state
-          if [ "$PHASE" = "A" ]; then
+              --health-sha256 "$HEALTH_SHA256" \
+              --output-dir dist/state
+          if [ "$PHASE" = "DIRECT_C" ]; then
+            node scripts/updater/direct-qualification-evidence.mjs validate-policy \
+              --policy scripts/updater/direct-qualification-policy.json
+            test "$(jq -er .candidate.manifestSha256 \
+              scripts/updater/direct-qualification-policy.json)" = \
+              "$(jq -er .manifestSha256 dist/candidate/candidate.json)"
+            for binding in \
+              "windows:windowsExe" \
+              "macos:macosDmg" \
+              "linux:linuxAppImage"; do
+              platform="${binding%%:*}"
+              candidate_key="${binding#*:}"
+              test "$(jq -er --arg platform "$platform" \
+                '.candidate.assets[$platform].sha256' \
+                scripts/updater/direct-qualification-policy.json)" = \
+                "$(jq -er --arg key "$candidate_key" \
+                '.distributionAssets[$key].sha256' \
+                dist/candidate/candidate.json)"
+            done
             jq -e \
               --argjson run "$SMOKE_RUN_ID" \
+              --argjson attempt "$(jq -er .workflow.runAttempt \
+                dist/state/verified-smoke.json)" \
+              --arg head "$(jq -r .headSha dist/smoke-run.json)" \
               --arg tag "$(jq -r .tag dist/candidate/candidate.json)" \
-              --arg commit "$(jq -r .sourceCommit dist/candidate/candidate.json)" '
-                .observationScope == "github-native-two-point-canary"
+              --arg version "$(jq -r .version dist/candidate/candidate.json)" \
+              --arg commit "$(jq -r .sourceCommit dist/candidate/candidate.json)" \
+              --arg manifest "$(jq -r .manifestSha256 dist/candidate/candidate.json)" \
+              --slurpfile policy \
+                scripts/updater/direct-qualification-policy.json '
+                .status == "passed"
+                and .observationScope == "github-native-direct-qualification"
+                and .deploymentMode == "direct-c"
                 and .candidateTag == $tag
+                and .candidateVersion == $version
                 and .sourceCommit == $commit
+                and .candidateManifestSha256 == $manifest
+                and .currentVersion == "0.6.633"
+                and .automaticUpgradeFloor == "0.6.611"
+                and .manualCompatibilityFloor == "0.6.608"
                 and .platforms == ["windows", "macos", "linux"]
-                and .scenarios == ["current-to-a", "fresh-a"]
-                and .sampleSize == 6
-                and .attempts == 6
-                and .passedAttempts == 6
+                and .scenarios == [
+                  "legacy-manual-to-c",
+                  "legacy-auto-to-c",
+                  "current-to-c",
+                  "fresh-c",
+                  "a-to-c",
+                  "b-to-c",
+                  "c-to-c"
+                ]
+                and .sourceVersions == [
+                  "0.6.608",
+                  "0.6.611",
+                  "0.6.633",
+                  "0.6.643",
+                  "0.6.644",
+                  "0.6.645"
+                ]
+                and .sampleSize == 16
+                and .attempts == 16
+                and .passedAttempts == 16
                 and .failedAttempts == 0
-                and .workflow.name == "Biyan A Canary"
-                and .workflow.path == ".github/workflows/biyan-a-canary.yml"
-                and .workflow.finishRunId == $run
+                and (.harnessSha256 | test("^[0-9a-f]{64}$"))
+                and (.qualificationMatrixSha256 | test("^[0-9a-f]{64}$"))
+                and .workflow.name == "Biyan Direct Qualification"
+                and .workflow.path ==
+                  ".github/workflows/biyan-direct-qualification.yml"
+                and .workflow.runId == $run
+                and (.workflow.runAttempt | type == "number" and . > 0)
+                and .workflow.headSha == $head
+                and (.results | length) == 16
+                and (
+                  [.results[]
+                    | select(.sourceVersion == "0.6.608")
+                    | .qualificationMode] | unique
+                ) == ["manual-installer"]
+                and (
+                  [.results[]
+                    | select(.sourceVersion == "0.6.611")
+                    | .qualificationMode] | unique
+                ) == ["automatic-updater"]
+                and (
+                  .results
+                  | map({
+                      lane,
+                      platform,
+                      scenario,
+                      sourceVersion,
+                      status
+                    })
+                ) == (
+                  $policy[0].lanes
+                  | map({
+                      lane: .id,
+                      platform,
+                      scenario,
+                      sourceVersion,
+                      status: "passed"
+                    })
+                )
+                and all(
+                  .results[];
+                  .runId == $run
+                  and .runAttempt == $attempt
+                  and (.migrationReportSha256 | test("^[0-9a-f]{64}$"))
+                  and (.inputManifestSha256 | test("^[0-9a-f]{64}$"))
+                  and (.snapshotSha256 | test("^[0-9a-f]{64}$"))
+                  and (.artifactSha256 | test("^[0-9a-f]{64}$"))
+                )
+                and (
+                  .artifactDigests | keys | sort
+                ) == (
+                  $policy[0].lanes | map(.id) | sort
+                )
+                and all(
+                  .artifactDigests
+                  | to_entries[];
+                  (.value.id | type == "number" and . > 0)
+                  and .value.name == (
+                    "direct-qualification-" + .key + "-"
+                    + ($run | tostring) + "-"
+                    + ($attempt | tostring)
+                  )
+                  and (.value.sha256 | test("^[0-9a-f]{64}$"))
+                )
               ' dist/state/verified-smoke.json >/dev/null
             jq -e \
               --arg tag "$(jq -r .tag dist/candidate/candidate.json)" \
-              --arg commit "$(jq -r .sourceCommit dist/candidate/candidate.json)" '
-                .observationScope == "github-native-two-point-canary"
+              --arg commit "$(jq -r .sourceCommit dist/candidate/candidate.json)" \
+              --arg manifest "$(jq -r .manifestSha256 dist/candidate/candidate.json)" \
+              --slurpfile smoke dist/state/verified-smoke.json '
+                .status == "healthy"
+                and .observationScope == "github-native-direct-qualification"
+                and .deploymentMode == "direct-c"
                 and .candidateTag == $tag
                 and .sourceCommit == $commit
-                and .sampleSize == 6
-                and .attempts == 6
-                and .passedAttempts == 6
+                and .candidateManifestSha256 == $manifest
+                and .sampleSize == 16
+                and .attempts == 16
+                and .passedAttempts == 16
                 and .failedAttempts == 0
+                and .p0Incidents == 0
+                and .p1Incidents == 0
+                and .dataLossIncidents == 0
+                and .migrationFailureRate == 0
+                and .harnessSha256 == $smoke[0].harnessSha256
+                and .qualificationMatrixSha256 ==
+                  $smoke[0].qualificationMatrixSha256
               ' dist/state/verified-health.json >/dev/null
           fi
 
@@ -383,7 +503,7 @@ jobs:
             --health-evidence dist/state/verified-health.json
             --output dist/state/next-policy.json
           )
-          if [ "$PHASE" = "A" ] \
+          if [ "$PHASE" = "DIRECT_C" ] \
             && [ "$(jq -r '.legacyBridgeVersion // empty' dist/state/current-policy.json 2>/dev/null || true)" = "" ]; then
             oss_endpoint="${ALIYUN_OSS_ENDPOINT#https://}"
             oss_endpoint="https://${oss_endpoint#http://}"
@@ -414,21 +534,6 @@ jobs:
             --manifest dist/candidate/latest.json \
             --current-policy dist/state/current-policy.json \
             --next-policy dist/state/next-policy.json
-          if [ "$PHASE" = "A" ] \
-            && [ "$(jq -r '.legacyBridgeVersion // empty' dist/state/current-policy.json 2>/dev/null || true)" = "" ]; then
-            if [ -f dist/state/current-policy.json ]; then
-              cp dist/state/current-policy.json dist/state/current-legacy-policy.json
-            else
-              printf '{"legacyBridgeVersion":null}\n' > dist/state/current-legacy-policy.json
-            fi
-            node scripts/updater/promotion-transaction.mjs validate-approved-a \
-              --policy scripts/updater/legacy-a-transition-policy.json \
-              --candidate dist/candidate/candidate.json \
-              --manifest dist/candidate/latest.json \
-              --current-policy dist/state/current-legacy-policy.json \
-              --next-policy dist/state/next-policy.json \
-              --output dist/state/approved-a.json
-          fi
           cat dist/state/next-policy.json
 
       - name: Publish with rollback protection

@@ -1,3 +1,8 @@
+import {
+  DIRECT_C_ROUTER_SOURCES,
+  DIRECT_C_TARGET_SOURCE_COMMIT,
+} from './direct-c-contract.mjs'
+
 const DEFAULT_POLICY_KEY = 'biyan/updater/stable/policy.json'
 const MAX_CLOCK_SKEW_SECONDS = 300
 
@@ -72,12 +77,49 @@ function platformKey(target, arch) {
   return null
 }
 
+function compareStableVersions(left, right) {
+  const parse = (value) => {
+    const match = /^(\d+)\.(\d+)\.(\d+)$/.exec(value ?? '')
+    return match ? match.slice(1).map(Number) : null
+  }
+  const a = parse(left)
+  const b = parse(right)
+  if (!a || !b) return null
+  for (let index = 0; index < a.length; index += 1) {
+    if (a[index] !== b[index]) return a[index] < b[index] ? -1 : 1
+  }
+  return 0
+}
+
 function isAllowedTransition(policy, currentVersion, transition) {
   const source = policy.releases?.[currentVersion]
   const target = policy.releases?.[transition.to]
   const sourcePhase = source?.effectivePhase ?? source?.phase
   const targetPhase = target?.effectivePhase ?? target?.phase
-  if (transition.phase !== target?.phase) return false
+  if (
+    transition.phase !== target?.phase
+    || transition.manifestKey !== target?.manifestKey
+    || compareStableVersions(currentVersion, transition.to) !== -1
+  ) return false
+  if (transition.phase === 'DIRECT_C') {
+    const reviewedSource = DIRECT_C_ROUTER_SOURCES[currentVersion]
+    return Boolean(reviewedSource)
+      && policy.deploymentMode === 'direct-c'
+      && transition.to === policy.currentVersion
+      && transition.to === '0.6.646'
+      && targetPhase === 'C'
+      && target.tag === 'v0.6.646'
+      && target.sourceCommit === DIRECT_C_TARGET_SOURCE_COMMIT
+      && target.dataSchema === 3
+      && target.manifestKey
+        === 'biyan/updater/releases/v0.6.646/latest.json'
+      && sourcePhase === reviewedSource.migrationPhase
+      && source.tag === reviewedSource.tag
+      && source.sourceCommit === reviewedSource.sourceCommit
+      && source.dataSchema === reviewedSource.dataSchema
+      && source.manifestKey === reviewedSource.manifestKey
+      && source.manifestSha256 === reviewedSource.manifestSha256
+  }
   if (target?.phase === 'RECOVERY') return Boolean(sourcePhase) && sourcePhase === targetPhase
   if (transition.phase === 'A') return sourcePhase === 'A'
   if (transition.phase === 'B') return sourcePhase === 'A'
