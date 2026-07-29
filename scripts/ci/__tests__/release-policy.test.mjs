@@ -4605,8 +4605,9 @@ jobs:
           harness/scripts/ci/run-untrusted-qualification-verifier.sh \
             --read-root "$probe_root" "$verifier" \
             verify-platforms --root "$probe_root"
-      - if: steps.classification.outputs.policy == 'true'
-        working-directory: target
+      - name: Run release policy contracts
+        if: steps.classification.outputs.policy == 'true'
+        working-directory: harness
         run: |
           node scripts/ci/verify-release-policy.mjs
           node --test scripts/ci/__tests__/release-policy.test.mjs
@@ -4849,6 +4850,10 @@ test('exact-SHA qualification keeps the harness trusted and has no production au
   assert.deepEqual(validateQualificationWorkflow(qualificationWorkflow), [])
 
   for (const [index, mutation] of [
+    qualificationWorkflow.replace(
+      '      - name: Run release policy contracts\n        if: steps.classification.outputs.policy == \'true\'\n        working-directory: harness',
+      '      - name: Run release policy contracts\n        if: steps.classification.outputs.policy == \'true\'\n        working-directory: target'
+    ),
     qualificationWorkflow.replace('  workflow_dispatch:', '  push:'),
     qualificationWorkflow.replace(
       '  workflow_dispatch:',

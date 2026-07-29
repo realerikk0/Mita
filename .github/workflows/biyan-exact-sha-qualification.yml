@@ -638,7 +638,7 @@ jobs:
 
       - name: Run release policy contracts
         if: steps.classification.outputs.policy == 'true'
-        working-directory: target
+        working-directory: harness
         run: |
           node scripts/ci/verify-release-policy.mjs
           node --test scripts/ci/__tests__/release-policy.test.mjs

@@ -4961,13 +4961,28 @@ export function validateQualificationWorkflow(source) {
         'qualification preflight must probe both exact-target verifier modes through the protected sandbox helper'
       )
     }
+    const releasePolicyStep = workflowStepBlocks(activePreflight).find(
+      (step) =>
+        /^\s*(?:-\s*)?name:\s*Run release policy contracts\s*$/m.test(step)
+    )
+    if (
+      !releasePolicyStep ||
+      !/^\s*working-directory:\s*harness\s*$/m.test(releasePolicyStep) ||
+      !/^\s*if:\s*steps\.classification\.outputs\.policy\s*==\s*['"]true['"]\s*$/m.test(
+        releasePolicyStep
+      )
+    ) {
+      failures.push(
+        'qualification release policy contracts must run from the protected harness'
+      )
+    }
     for (const [command, condition] of [
       ['node scripts/ci/verify-release-policy.mjs', 'policy'],
       ['node --test scripts/ci/__tests__/release-policy.test.mjs', 'policy'],
     ]) {
       if (
         !hasRunInvocation(
-          preflight,
+          releasePolicyStep ?? '',
           new RegExp(`^${escapeRegExp(command)}(?:\\s|$)`)
         ) ||
         !new RegExp(`steps\\.classification\\.outputs\\.${condition}`).test(
