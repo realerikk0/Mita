@@ -45,7 +45,8 @@
     "externalBin": ["resources/bin/bun", "resources/bin/uv"],
     "windows": {
       "nsis": {
-        "installMode": "currentUser"
+        "installMode": "currentUser",
+        "template": "tauri.bundle.windows.nsis.template"
       },
       "wix": {
         "template": "windows/wix/main.wxs"

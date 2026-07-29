@@ -9,6 +9,14 @@ const windowsBuildWorkflow = fs.readFileSync(
   '.github/workflows/template-tauri-build-windows-x64.yml',
   'utf8',
 )
+const desktopReleaseWorkflow = fs.readFileSync(
+  '.github/workflows/desktop-release.yml',
+  'utf8',
+)
+const releaseVersionSource = fs.readFileSync('scripts/release-version.mjs', 'utf8')
+const windowsConfig = JSON.parse(
+  fs.readFileSync('src-tauri/tauri.windows.conf.json', 'utf8'),
+)
 const makefile = fs.readFileSync('Makefile', 'utf8')
 const libSource = fs.readFileSync('src-tauri/src/lib.rs', 'utf8')
 const setupSource = fs.readFileSync('src-tauri/src/core/setup.rs', 'utf8')
@@ -306,6 +314,50 @@ test('Windows stable build template publishes Biyan installer artifacts', () => 
   assert.match(windowsBuildWorkflow, /WIN_SIG=\$\(cat Biyan_\$\{\{ inputs\.new_version \}\}_x64-setup\.exe\.sig\)/)
   assert.match(windowsBuildWorkflow, /MSI_FILE="Biyan_\$\{\{ inputs\.new_version \}\}_x64_en-US\.msi"/)
   assert.doesNotMatch(windowsBuildWorkflow, /FILE_NAME=Mita_\$\{\{ inputs\.new_version \}\}_x64-setup\.exe/)
+})
+
+test('production Windows builds cannot silently drop the reviewed NSIS template', () => {
+  assert.equal(
+    windowsConfig.bundle.windows.nsis.template,
+    'tauri.bundle.windows.nsis.template',
+  )
+  assert.match(
+    releaseVersionSource,
+    /json\.bundle\.windows\.nsis\.template = 'tauri\.bundle\.windows\.nsis\.template'/,
+  )
+  assert.doesNotMatch(
+    releaseVersionSource,
+    /delete json\.bundle\.windows\.nsis\.template/,
+  )
+
+  const windowsBuild = desktopReleaseWorkflow.slice(
+    desktopReleaseWorkflow.indexOf('  build-windows:'),
+    desktopReleaseWorkflow.indexOf('  build-linux:'),
+  )
+  const stamp = windowsBuild.indexOf(
+    'node scripts/release-version.mjs stamp "$VERSION" --windows',
+  )
+  const build = windowsBuild.indexOf('run: make build')
+  assert.notEqual(stamp, -1)
+  assert.notEqual(build, -1)
+  assert.ok(stamp < build, 'Windows template binding must happen before make build')
+})
+
+test('passive and silent Windows installs launch Biyan only with an explicit /R flag', () => {
+  const onInstallSuccess = functionBody('.onInstSuccess')
+  const restartOption = onInstallSuccess.indexOf(
+    '${GetOptions} $CMDLINE "/R" $R0',
+  )
+  const restartGate = onInstallSuccess.indexOf('${IfNot} ${Errors}')
+  const run = onInstallSuccess.indexOf(
+    'nsis_tauri_utils::RunAsUser "$INSTDIR\\${MAINBINARYNAME}.exe" "$R0"',
+  )
+
+  assert.notEqual(restartOption, -1)
+  assert.notEqual(restartGate, -1)
+  assert.notEqual(run, -1)
+  assert.ok(restartOption < restartGate && restartGate < run)
+  assert.doesNotMatch(onInstallSuccess, /;\s*\$\{GetOptions\} \$CMDLINE "\/R"/)
 })
 
 test('Windows NSIS installer rejects normal application downgrades', () => {
