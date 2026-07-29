@@ -57,6 +57,9 @@ ${StrLoc}
 !define MANUPRODUCTKEY "${MANUKEY}\${PRODUCTNAME}"
 !define LEGACY_PRODUCTNAME "Mita"
 !define LEGACY_MAINBINARYNAME "mita"
+!define BIYAN_ASSISTANT_EXTENSION_ARCHIVE "biyan-assistant-extension-1.0.2.tgz"
+!define BIYAN_CONVERSATIONAL_EXTENSION_ARCHIVE "biyan-conversational-extension-1.0.0.tgz"
+!define BIYAN_DOWNLOAD_EXTENSION_ARCHIVE "biyan-download-extension-1.0.0.tgz"
 !define LEGACY_UNINSTKEY "Software\Microsoft\Windows\CurrentVersion\Uninstall\${LEGACY_PRODUCTNAME}"
 !define LEGACY_MANUPRODUCTKEY "${MANUKEY}\${LEGACY_PRODUCTNAME}"
 !define UNINSTALLERSIGNCOMMAND "$\"powershell$\" $\"-ExecutionPolicy$\" $\"Bypass$\" $\"-File$\" $\"./sign.ps1$\" $\"%1$\""
@@ -74,6 +77,7 @@ Var PreviousUninstKey
 Var PreviousManuProductKey
 Var LegacyInstallDir
 Var LegacyShortcutFound
+Var OwnedExistingInstall
 
 Name "${PRODUCTNAME}"
 BrandingText "${COPYRIGHT}"
@@ -713,6 +717,19 @@ Section Install
 
   !insertmacro CheckIfAppIsRunning "${MAINBINARYNAME}.exe" "${PRODUCTNAME}"
 
+  ; An in-place upgrade overlays files. Remove reviewed retired resources only
+  ; when the registry proves that $INSTDIR is owned by an existing product
+  ; installation. An unowned directory is never mutated.
+  Call DetectOwnedBiyanInstallLocation
+  ${If} $OwnedExistingInstall = 1
+    !insertmacro CheckIfAppIsRunning "${LEGACY_PRODUCTNAME}.exe" "${LEGACY_PRODUCTNAME}"
+    !insertmacro CheckIfAppIsRunning "${LEGACY_MAINBINARYNAME}-cli.exe" "${LEGACY_PRODUCTNAME}"
+    !insertmacro CheckIfAppIsRunning "${LEGACY_MAINBINARYNAME}-computer-agent-runner.exe" "${LEGACY_PRODUCTNAME}"
+    Call RemoveRetiredBiyanInstallResources
+  ${Else}
+    Call RejectUnownedRetiredBiyanResources
+  ${EndIf}
+
   ; Copy main executable
   File "${MAINBINARYSRCPATH}"
 
@@ -728,6 +745,10 @@ Section Install
   {{#each binaries}}
     File /a "/oname={{this}}" "{{no-escape @key}}"
   {{/each}}
+
+  ; Fail closed unless the completed install tree is exactly the current
+  ; three-extension Biyan inventory and contains no reviewed retired payload.
+  Call VerifyInstalledBiyanResources
 
   ; Create file associations
 
@@ -1051,6 +1072,235 @@ Function CleanupLegacyMitaInstall
   DeleteRegKey HKCU "${LEGACY_UNINSTKEY}"
   DeleteRegKey HKCU "${LEGACY_MANUPRODUCTKEY}"
   DeleteRegKey /ifempty HKCU "${MANUKEY}"
+FunctionEnd
+
+Function DetectOwnedBiyanInstallLocation
+  StrCpy $OwnedExistingInstall 0
+  ${StrCase} $R8 $INSTDIR "L"
+
+  ReadRegStr $R4 SHCTX "${MANUPRODUCTKEY}" ""
+  ${If} $R4 != ""
+    ${StrCase} $R9 $R4 "L"
+    ${If} $R8 == $R9
+      StrCpy $OwnedExistingInstall 1
+      Return
+    ${EndIf}
+  ${EndIf}
+
+  ReadRegStr $R4 SHCTX "${LEGACY_MANUPRODUCTKEY}" ""
+  ${If} $R4 != ""
+    ${StrCase} $R9 $R4 "L"
+    ${If} $R8 == $R9
+      StrCpy $OwnedExistingInstall 1
+      Return
+    ${EndIf}
+  ${EndIf}
+
+  ReadRegStr $R4 HKCU "${LEGACY_MANUPRODUCTKEY}" ""
+  ${If} $R4 != ""
+    ${StrCase} $R9 $R4 "L"
+    ${If} $R8 == $R9
+      StrCpy $OwnedExistingInstall 1
+    ${EndIf}
+  ${EndIf}
+FunctionEnd
+
+Function RejectUnownedRetiredBiyanResources
+  ${If} ${FileExists} "$INSTDIR\resources\pre-install\*.*"
+    Abort "Biyan found extension packages in an unowned install directory. Installation was cancelled without deleting them."
+  ${EndIf}
+  ${If} ${FileExists} "$INSTDIR\resources\embedding-models\*.*"
+    Abort "Biyan found embedding models in an unowned install directory. Installation was cancelled without deleting them."
+  ${EndIf}
+  ${If} ${FileExists} "$INSTDIR\${LEGACY_MAINBINARYNAME}-cli.exe"
+    Abort "Biyan found a command-line binary in an unowned install directory. Installation was cancelled without deleting it."
+  ${EndIf}
+  ${If} ${FileExists} "$INSTDIR\${LEGACY_MAINBINARYNAME}-computer-agent-runner.exe"
+    Abort "Biyan found a computer-agent binary in an unowned install directory. Installation was cancelled without deleting it."
+  ${EndIf}
+  ${If} ${FileExists} "$INSTDIR\resources\bin\${LEGACY_MAINBINARYNAME}.exe"
+    Abort "Biyan found a helper binary in an unowned install directory. Installation was cancelled without deleting it."
+  ${EndIf}
+  ${If} ${FileExists} "$INSTDIR\resources\bin\${LEGACY_MAINBINARYNAME}-cli.exe"
+    Abort "Biyan found a command-line helper in an unowned install directory. Installation was cancelled without deleting it."
+  ${EndIf}
+  ${If} ${FileExists} "$INSTDIR\resources\bin\${LEGACY_MAINBINARYNAME}-web-research-mcp.mjs"
+    Abort "Biyan found a web-research helper in an unowned install directory. Installation was cancelled without deleting it."
+  ${EndIf}
+  ${If} ${FileExists} "$INSTDIR\resources\computer-agent-runner\${LEGACY_MAINBINARYNAME}-computer-agent-runner.exe"
+    Abort "Biyan found a computer-agent helper in an unowned install directory. Installation was cancelled without deleting it."
+  ${EndIf}
+FunctionEnd
+
+Function RemoveRetiredBiyanInstallResources
+  ${If} ${FileExists} "$INSTDIR\resources\pre-install\*.*"
+    ClearErrors
+    RMDir /r "$INSTDIR\resources\pre-install"
+    ${If} ${Errors}
+      Abort "Biyan could not remove retired extension packages. Installation was cancelled."
+    ${EndIf}
+    ${If} ${FileExists} "$INSTDIR\resources\pre-install\*.*"
+      Abort "Biyan found retired extension packages after cleanup. Installation was cancelled."
+    ${EndIf}
+  ${EndIf}
+
+  ${If} ${FileExists} "$INSTDIR\resources\embedding-models\*.*"
+    ClearErrors
+    RMDir /r "$INSTDIR\resources\embedding-models"
+    ${If} ${Errors}
+      Abort "Biyan could not remove retired embedding models. Installation was cancelled."
+    ${EndIf}
+    ${If} ${FileExists} "$INSTDIR\resources\embedding-models\*.*"
+      Abort "Biyan found retired embedding models after cleanup. Installation was cancelled."
+    ${EndIf}
+  ${EndIf}
+
+  ${If} ${FileExists} "$INSTDIR\${LEGACY_MAINBINARYNAME}-cli.exe"
+    ClearErrors
+    Delete "$INSTDIR\${LEGACY_MAINBINARYNAME}-cli.exe"
+    ${If} ${Errors}
+      Abort "Biyan could not remove a retired command-line binary. Installation was cancelled."
+    ${EndIf}
+    ${If} ${FileExists} "$INSTDIR\${LEGACY_MAINBINARYNAME}-cli.exe"
+      Abort "Biyan found a retired command-line binary after cleanup. Installation was cancelled."
+    ${EndIf}
+  ${EndIf}
+
+  ${If} ${FileExists} "$INSTDIR\${LEGACY_MAINBINARYNAME}-computer-agent-runner.exe"
+    ClearErrors
+    Delete "$INSTDIR\${LEGACY_MAINBINARYNAME}-computer-agent-runner.exe"
+    ${If} ${Errors}
+      Abort "Biyan could not remove a retired computer-agent binary. Installation was cancelled."
+    ${EndIf}
+    ${If} ${FileExists} "$INSTDIR\${LEGACY_MAINBINARYNAME}-computer-agent-runner.exe"
+      Abort "Biyan found a retired computer-agent binary after cleanup. Installation was cancelled."
+    ${EndIf}
+  ${EndIf}
+
+  ${If} ${FileExists} "$INSTDIR\resources\bin\${LEGACY_MAINBINARYNAME}.exe"
+    ClearErrors
+    Delete "$INSTDIR\resources\bin\${LEGACY_MAINBINARYNAME}.exe"
+    ${If} ${Errors}
+      Abort "Biyan could not remove a retired helper binary. Installation was cancelled."
+    ${EndIf}
+    ${If} ${FileExists} "$INSTDIR\resources\bin\${LEGACY_MAINBINARYNAME}.exe"
+      Abort "Biyan found a retired helper binary after cleanup. Installation was cancelled."
+    ${EndIf}
+  ${EndIf}
+
+  ${If} ${FileExists} "$INSTDIR\resources\bin\${LEGACY_MAINBINARYNAME}-cli.exe"
+    ClearErrors
+    Delete "$INSTDIR\resources\bin\${LEGACY_MAINBINARYNAME}-cli.exe"
+    ${If} ${Errors}
+      Abort "Biyan could not remove a retired command-line helper. Installation was cancelled."
+    ${EndIf}
+    ${If} ${FileExists} "$INSTDIR\resources\bin\${LEGACY_MAINBINARYNAME}-cli.exe"
+      Abort "Biyan found a retired command-line helper after cleanup. Installation was cancelled."
+    ${EndIf}
+  ${EndIf}
+
+  ${If} ${FileExists} "$INSTDIR\resources\bin\${LEGACY_MAINBINARYNAME}-web-research-mcp.mjs"
+    ClearErrors
+    Delete "$INSTDIR\resources\bin\${LEGACY_MAINBINARYNAME}-web-research-mcp.mjs"
+    ${If} ${Errors}
+      Abort "Biyan could not remove a retired web-research helper. Installation was cancelled."
+    ${EndIf}
+    ${If} ${FileExists} "$INSTDIR\resources\bin\${LEGACY_MAINBINARYNAME}-web-research-mcp.mjs"
+      Abort "Biyan found a retired web-research helper after cleanup. Installation was cancelled."
+    ${EndIf}
+  ${EndIf}
+
+  ${If} ${FileExists} "$INSTDIR\resources\computer-agent-runner\${LEGACY_MAINBINARYNAME}-computer-agent-runner.exe"
+    ClearErrors
+    Delete "$INSTDIR\resources\computer-agent-runner\${LEGACY_MAINBINARYNAME}-computer-agent-runner.exe"
+    ${If} ${Errors}
+      Abort "Biyan could not remove a retired computer-agent helper. Installation was cancelled."
+    ${EndIf}
+    ${If} ${FileExists} "$INSTDIR\resources\computer-agent-runner\${LEGACY_MAINBINARYNAME}-computer-agent-runner.exe"
+      Abort "Biyan found a retired computer-agent helper after cleanup. Installation was cancelled."
+    ${EndIf}
+  ${EndIf}
+FunctionEnd
+
+Function VerifyInstalledBiyanResources
+  ${IfNot} ${FileExists} "$INSTDIR\resources\pre-install\${BIYAN_ASSISTANT_EXTENSION_ARCHIVE}"
+    Abort "Biyan assistant extension is missing. Installation was cancelled."
+  ${EndIf}
+  ${IfNot} ${FileExists} "$INSTDIR\resources\pre-install\${BIYAN_CONVERSATIONAL_EXTENSION_ARCHIVE}"
+    Abort "Biyan conversational extension is missing. Installation was cancelled."
+  ${EndIf}
+  ${IfNot} ${FileExists} "$INSTDIR\resources\pre-install\${BIYAN_DOWNLOAD_EXTENSION_ARCHIVE}"
+    Abort "Biyan download extension is missing. Installation was cancelled."
+  ${EndIf}
+
+  StrCpy $R2 0
+  ClearErrors
+  FindFirst $R0 $R1 "$INSTDIR\resources\pre-install\*.*"
+  ${If} ${Errors}
+    Abort "Biyan could not enumerate installed extension packages. Installation was cancelled."
+  ${EndIf}
+
+  biyan_extension_inventory_loop:
+    StrCmp $R1 "" biyan_extension_inventory_complete
+    StrCmp $R1 "." biyan_extension_inventory_next
+    StrCmp $R1 ".." biyan_extension_inventory_next
+    ClearErrors
+    ${GetFileAttributes} "$INSTDIR\resources\pre-install\$R1" "DIRECTORY" $R3
+    ${If} ${Errors}
+      FindClose $R0
+      Abort "Biyan could not inspect an installed extension package. Installation was cancelled."
+    ${EndIf}
+    IntCmp $R3 0 biyan_extension_inventory_compare
+    FindClose $R0
+    Abort "Biyan found an unreviewed extension directory. Installation was cancelled."
+
+  biyan_extension_inventory_compare:
+    StrCmp $R1 "${BIYAN_ASSISTANT_EXTENSION_ARCHIVE}" biyan_extension_inventory_allowed
+    StrCmp $R1 "${BIYAN_CONVERSATIONAL_EXTENSION_ARCHIVE}" biyan_extension_inventory_allowed
+    StrCmp $R1 "${BIYAN_DOWNLOAD_EXTENSION_ARCHIVE}" biyan_extension_inventory_allowed
+    FindClose $R0
+    Abort "Biyan found an unreviewed extension package. Installation was cancelled."
+
+  biyan_extension_inventory_allowed:
+    IntOp $R2 $R2 + 1
+
+  biyan_extension_inventory_next:
+    ClearErrors
+    FindNext $R0 $R1
+    ${If} ${Errors}
+      Goto biyan_extension_inventory_complete
+    ${EndIf}
+    Goto biyan_extension_inventory_loop
+
+  biyan_extension_inventory_complete:
+    FindClose $R0
+    IntCmp $R2 3 biyan_extension_inventory_valid biyan_extension_inventory_invalid biyan_extension_inventory_invalid
+
+  biyan_extension_inventory_invalid:
+    Abort "Biyan extension package inventory is incomplete. Installation was cancelled."
+
+  biyan_extension_inventory_valid:
+  ${If} ${FileExists} "$INSTDIR\resources\embedding-models\*.*"
+    Abort "Biyan found retired embedding models after installation. Installation was cancelled."
+  ${EndIf}
+  ${If} ${FileExists} "$INSTDIR\${LEGACY_MAINBINARYNAME}-cli.exe"
+    Abort "Biyan found a retired command-line binary after installation. Installation was cancelled."
+  ${EndIf}
+  ${If} ${FileExists} "$INSTDIR\${LEGACY_MAINBINARYNAME}-computer-agent-runner.exe"
+    Abort "Biyan found a retired computer-agent binary after installation. Installation was cancelled."
+  ${EndIf}
+  ${If} ${FileExists} "$INSTDIR\resources\bin\${LEGACY_MAINBINARYNAME}.exe"
+    Abort "Biyan found a retired helper binary after installation. Installation was cancelled."
+  ${EndIf}
+  ${If} ${FileExists} "$INSTDIR\resources\bin\${LEGACY_MAINBINARYNAME}-cli.exe"
+    Abort "Biyan found a retired command-line helper after installation. Installation was cancelled."
+  ${EndIf}
+  ${If} ${FileExists} "$INSTDIR\resources\bin\${LEGACY_MAINBINARYNAME}-web-research-mcp.mjs"
+    Abort "Biyan found a retired web-research helper after installation. Installation was cancelled."
+  ${EndIf}
+  ${If} ${FileExists} "$INSTDIR\resources\computer-agent-runner\${LEGACY_MAINBINARYNAME}-computer-agent-runner.exe"
+    Abort "Biyan found a retired computer-agent helper after installation. Installation was cancelled."
+  ${EndIf}
 FunctionEnd
 
 Function Skip

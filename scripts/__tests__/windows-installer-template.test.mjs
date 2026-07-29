@@ -2,6 +2,8 @@ import assert from 'node:assert/strict'
 import fs from 'node:fs'
 import test from 'node:test'
 
+import { EXPECTED_PREINSTALL_PACKAGE_IDENTITIES } from '../ci/candidate-content-policy.mjs'
+
 const template = fs.readFileSync('src-tauri/tauri.bundle.windows.nsis.template', 'utf8')
 const windowsBuildWorkflow = fs.readFileSync(
   '.github/workflows/template-tauri-build-windows-x64.yml',
@@ -9,10 +11,27 @@ const windowsBuildWorkflow = fs.readFileSync(
 )
 const makefile = fs.readFileSync('Makefile', 'utf8')
 const libSource = fs.readFileSync('src-tauri/src/lib.rs', 'utf8')
+const setupSource = fs.readFileSync('src-tauri/src/core/setup.rs', 'utf8')
 
 function functionBody(name) {
-  const match = template.match(new RegExp(`Function ${name}([\\s\\S]*?)FunctionEnd`))
+  const match = template.match(
+    new RegExp(
+      `^Function[ \\t]+${escapeRegex(name)}[ \\t]*\\r?\\n([\\s\\S]*?)^FunctionEnd[ \\t]*\\r?$`,
+      'm',
+    ),
+  )
   assert.ok(match, `expected ${name} function to exist`)
+  return match[1]
+}
+
+function sectionBody(name) {
+  const match = template.match(
+    new RegExp(
+      `^Section[ \\t]+${escapeRegex(name)}[ \\t]*\\r?\\n([\\s\\S]*?)^SectionEnd[ \\t]*\\r?$`,
+      'm',
+    ),
+  )
+  assert.ok(match, `expected ${name} section to exist`)
   return match[1]
 }
 
@@ -105,6 +124,177 @@ test('Windows NSIS installer leaves legacy install directory deletion to runtime
   assert.doesNotMatch(cleanupLegacyMitaInstall, /Delete "\$LegacyInstallDir/)
 })
 
+test('Windows NSIS installer cleans retired product resources before copying an upgrade', () => {
+  const install = sectionBody('Install')
+  const appRunningCheck = install.indexOf('!insertmacro CheckIfAppIsRunning')
+  const ownershipCheck = install.indexOf('Call DetectOwnedBiyanInstallLocation')
+  const ownershipGate = install.indexOf('${If} $OwnedExistingInstall = 1')
+  const legacyAppCheck = install.indexOf(
+    '!insertmacro CheckIfAppIsRunning "${LEGACY_PRODUCTNAME}.exe"',
+  )
+  const legacyCliCheck = install.indexOf(
+    '!insertmacro CheckIfAppIsRunning "${LEGACY_MAINBINARYNAME}-cli.exe"',
+  )
+  const legacyRunnerCheck = install.indexOf(
+    '!insertmacro CheckIfAppIsRunning "${LEGACY_MAINBINARYNAME}-computer-agent-runner.exe"',
+  )
+  const cleanup = install.indexOf('Call RemoveRetiredBiyanInstallResources')
+  const unownedReject = install.indexOf('Call RejectUnownedRetiredBiyanResources')
+  const mainCopy = install.indexOf('File "${MAINBINARYSRCPATH}"')
+  const resourceCopy = install.indexOf('{{#each resources}}')
+  const verify = install.indexOf('Call VerifyInstalledBiyanResources')
+  const binaryCopy = install.indexOf('{{#each binaries}}')
+
+  for (const index of [
+    appRunningCheck,
+    ownershipCheck,
+    ownershipGate,
+    legacyAppCheck,
+    legacyCliCheck,
+    legacyRunnerCheck,
+    cleanup,
+    unownedReject,
+    mainCopy,
+    resourceCopy,
+    verify,
+    binaryCopy,
+  ]) {
+    assert.notEqual(index, -1)
+  }
+  assert.ok(appRunningCheck < ownershipCheck)
+  assert.ok(ownershipCheck < ownershipGate)
+  assert.ok(ownershipGate < legacyAppCheck)
+  assert.ok(legacyAppCheck < legacyCliCheck)
+  assert.ok(legacyCliCheck < legacyRunnerCheck)
+  assert.ok(legacyRunnerCheck < cleanup)
+  assert.ok(cleanup < unownedReject)
+  assert.ok(cleanup < mainCopy)
+  assert.ok(mainCopy < resourceCopy)
+  assert.ok(resourceCopy < binaryCopy)
+  assert.ok(binaryCopy < verify)
+
+  const cleanupBody = functionBody('RemoveRetiredBiyanInstallResources')
+  assert.match(cleanupBody, /RMDir \/r "\$INSTDIR\\resources\\pre-install"/)
+  assert.match(cleanupBody, /RMDir \/r "\$INSTDIR\\resources\\embedding-models"/)
+  assert.doesNotMatch(cleanupBody, /\/REBOOTOK/)
+  assert.doesNotMatch(cleanupBody, /\$(?:APPDATA|LOCALAPPDATA|PROFILE)/)
+  assert.doesNotMatch(cleanupBody, /RMDir \/r "\$INSTDIR(?:\\resources)?"/)
+
+  const retiredFiles = [
+    '$INSTDIR\\${LEGACY_MAINBINARYNAME}-cli.exe',
+    '$INSTDIR\\${LEGACY_MAINBINARYNAME}-computer-agent-runner.exe',
+    '$INSTDIR\\resources\\bin\\${LEGACY_MAINBINARYNAME}.exe',
+    '$INSTDIR\\resources\\bin\\${LEGACY_MAINBINARYNAME}-cli.exe',
+    '$INSTDIR\\resources\\bin\\${LEGACY_MAINBINARYNAME}-web-research-mcp.mjs',
+    '$INSTDIR\\resources\\computer-agent-runner\\${LEGACY_MAINBINARYNAME}-computer-agent-runner.exe',
+  ]
+  for (const retiredFile of retiredFiles) {
+    assert.match(cleanupBody, new RegExp(`Delete "${escapeRegex(retiredFile)}"`))
+    assert.match(
+      cleanupBody,
+      new RegExp(
+        `Delete "${escapeRegex(retiredFile)}"[\\s\\S]*?FileExists.*${escapeRegex(retiredFile)}`,
+      ),
+    )
+  }
+  assert.ok(
+    cleanupBody.match(/Abort "Biyan /g)?.length >= retiredFiles.length + 4,
+    'every reviewed cleanup class must fail closed',
+  )
+})
+
+test('Windows NSIS installer never cleans an unowned fresh or custom install directory', () => {
+  const detectOwnership = functionBody('DetectOwnedBiyanInstallLocation')
+  assert.match(detectOwnership, /StrCpy \$OwnedExistingInstall 0/)
+  assert.match(detectOwnership, /ReadRegStr \$R4 SHCTX "\$\{MANUPRODUCTKEY\}" ""/)
+  assert.match(
+    detectOwnership,
+    /ReadRegStr \$R4 SHCTX "\$\{LEGACY_MANUPRODUCTKEY\}" ""/,
+  )
+  assert.match(
+    detectOwnership,
+    /ReadRegStr \$R4 HKCU "\$\{LEGACY_MANUPRODUCTKEY\}" ""/,
+  )
+  assert.match(detectOwnership, /\$\{StrCase\} \$R8 \$INSTDIR "L"/)
+  assert.match(detectOwnership, /\$\{StrCase\} \$R9 \$R4 "L"/)
+  assert.match(
+    detectOwnership,
+    /\$\{If\} \$R8 == \$R9[\s\S]*?StrCpy \$OwnedExistingInstall 1/,
+  )
+  assert.doesNotMatch(detectOwnership, /FileExists/)
+
+  const rejectUnowned = functionBody('RejectUnownedRetiredBiyanResources')
+  assert.match(rejectUnowned, /\$INSTDIR\\resources\\pre-install\\\*\.\*/)
+  assert.match(rejectUnowned, /\$INSTDIR\\resources\\embedding-models\\\*\.\*/)
+  assert.match(rejectUnowned, /Installation was cancelled without deleting/)
+  assert.doesNotMatch(rejectUnowned, /\b(?:Delete|RMDir)\b/)
+  assert.doesNotMatch(rejectUnowned, /\$(?:APPDATA|LOCALAPPDATA|PROFILE)/)
+})
+
+test('Windows NSIS installer accepts exactly the three reviewed Biyan extension archives', () => {
+  const verify = functionBody('VerifyInstalledBiyanResources')
+  const expectedArchives = EXPECTED_PREINSTALL_PACKAGE_IDENTITIES.map(
+    ({ file }) => file,
+  )
+
+  for (const archive of expectedArchives) {
+    const archiveDefine = template.match(
+      new RegExp(`!define (BIYAN_[A-Z_]+) "${escapeRegex(archive)}"`),
+    )
+    assert.ok(archiveDefine, `expected an NSIS define for ${archive}`)
+    assert.match(
+      verify,
+      new RegExp(`StrCmp \\$R1 "\\$\\{${archiveDefine[1]}\\}"`),
+    )
+  }
+  assert.match(verify, /FindFirst \$R0 \$R1 "\$INSTDIR\\resources\\pre-install\\\*\.\*"/)
+  assert.match(verify, /FindNext \$R0 \$R1/)
+  assert.match(verify, /FindClose \$R0/)
+  const inspectEntry = verify.indexOf(
+    '${GetFileAttributes} "$INSTDIR\\resources\\pre-install\\$R1" "DIRECTORY" $R3',
+  )
+  const compareAllowed = verify.indexOf(
+    'StrCmp $R1 "${BIYAN_ASSISTANT_EXTENSION_ARCHIVE}"',
+  )
+  assert.notEqual(inspectEntry, -1)
+  assert.notEqual(compareAllowed, -1)
+  assert.ok(inspectEntry < compareAllowed)
+  assert.match(verify, /IntCmp \$R3 0 biyan_extension_inventory_compare/)
+  assert.match(verify, /Abort "Biyan found an unreviewed extension directory/)
+  assert.match(
+    verify,
+    new RegExp(
+      `IntCmp \\$R2 ${expectedArchives.length} biyan_extension_inventory_valid biyan_extension_inventory_invalid biyan_extension_inventory_invalid`,
+    ),
+  )
+  assert.match(verify, /Abort "Biyan found an unreviewed extension package/)
+  assert.match(verify, /Abort "Biyan extension package inventory is incomplete/)
+})
+
+test('Windows runtime keeps retired Jan extension IDs outside the compatibility allowlist', () => {
+  const allowlist = setupSource.match(
+    /const ALLOWED_BUNDLED_EXTENSION_IDS: &\[&str\] = &\[([\s\S]*?)\];/,
+  )
+  assert.ok(allowlist)
+  assert.deepEqual([...allowlist[1].matchAll(/"([^"]+)"/g)].map((match) => match[1]), [
+    '@biyan/assistant-extension',
+    '@biyan/conversational-extension',
+    '@biyan/download-extension',
+  ])
+
+  const retiredExtensionIds = [
+    '@janhq/assistant-extension',
+    '@janhq/conversational-extension',
+    '@janhq/download-extension',
+    '@janhq/llamacpp-extension',
+    '@janhq/rag-extension',
+    '@janhq/vector-db-extension',
+  ]
+  for (const id of retiredExtensionIds) {
+    assert.doesNotMatch(setupSource, new RegExp(escapeRegex(id)))
+  }
+})
+
 test('Windows stable build template publishes Biyan installer artifacts', () => {
   assert.match(windowsBuildWorkflow, /s\/biyan_productname\/Biyan\/g/)
   assert.match(windowsBuildWorkflow, /s\/biyan_mainbinaryname\/Biyan\/g/)
@@ -139,3 +329,7 @@ test('Windows startup self-heal marks migration only after success', () => {
   assert.ok(spawnIndex < runIndex, 'migration should run inside spawn_blocking')
   assert.ok(runIndex < markerIndex, 'migration marker should be written after migration succeeds')
 })
+
+function escapeRegex(value) {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+}
