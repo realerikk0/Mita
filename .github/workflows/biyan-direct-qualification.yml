@@ -280,12 +280,33 @@ jobs:
           git merge-base --is-ancestor "$candidate_commit" HEAD
 
           gh api \
-            "repos/${GITHUB_REPOSITORY}/releases/tags/${candidate_tag}" \
+            --paginate \
+            --slurp \
+            "repos/${GITHUB_REPOSITORY}/releases?per_page=100" \
+            > dist/direct-candidate/evidence/release-pages.json
+          release_id="$(
+            jq -er \
+              --arg tag "$candidate_tag" '
+                [.[][] | select(.tag_name == $tag)] as $matches
+                | if ($matches | length) == 1 then
+                    $matches[0].id
+                    | select(type == "number" and . > 0)
+                  else
+                    error(
+                      "candidate tag must resolve to exactly one release"
+                    )
+                  end
+              ' dist/direct-candidate/evidence/release-pages.json
+          )"
+          gh api \
+            "repos/${GITHUB_REPOSITORY}/releases/${release_id}" \
             > dist/direct-candidate/evidence/draft-release.json
           jq -e \
+            --argjson release_id "$release_id" \
             --arg tag "$candidate_tag" \
             --arg commit "$candidate_commit" '
-              .tag_name == $tag
+              .id == $release_id
+              and .tag_name == $tag
               and .target_commitish == $commit
               and .draft == true
               and .prerelease == false
@@ -298,17 +319,50 @@ jobs:
           printf '%s\n' latest.json \
             >> dist/direct-candidate/evidence/candidate-assets.txt
           while IFS= read -r asset; do
-            jq -e --arg asset "$asset" '
-              [.assets[] | select(
-                .name == $asset
-                and .state == "uploaded"
-                and (.size | type == "number" and . > 0)
-              )] | length == 1
-            ' dist/direct-candidate/evidence/draft-release.json >/dev/null
-            gh release download "$candidate_tag" \
-              --repo "$GITHUB_REPOSITORY" \
-              --pattern "$asset" \
-              --dir dist/direct-candidate/assets
+            if [[ "$asset" == */* ]] || [[ "$asset" == *\\* ]]; then
+              echo "Unsafe candidate asset name: $asset" >&2
+              exit 1
+            fi
+            asset_record="$(
+              jq -cer --arg asset "$asset" '
+                [.assets[] | select(.name == $asset)] as $matches
+                | if ($matches | length) == 1 then
+                    $matches[0]
+                  else
+                    error(
+                      "candidate asset must resolve to exactly one release asset"
+                    )
+                  end
+                | select(
+                    .state == "uploaded"
+                    and (.id | type == "number" and . > 0)
+                    and (.size | type == "number" and . > 0)
+                    and (
+                      .digest
+                      | type == "string"
+                      and test("^sha256:[0-9a-f]{64}$")
+                    )
+                  )
+                | [.id, .size, .digest] | @tsv
+              ' dist/direct-candidate/evidence/draft-release.json
+            )"
+            IFS=$'\t' read -r asset_id asset_size asset_digest \
+              <<<"$asset_record"
+            [[ "$asset_id" =~ ^[1-9][0-9]*$ ]]
+            [[ "$asset_size" =~ ^[1-9][0-9]*$ ]]
+            [[ "$asset_digest" =~ ^sha256:[0-9a-f]{64}$ ]]
+            file="dist/direct-candidate/assets/${asset}"
+            gh api \
+              -H "Accept: application/octet-stream" \
+              "repos/${GITHUB_REPOSITORY}/releases/assets/${asset_id}" \
+              >"$file"
+            actual_size="$(stat -c '%s' "$file")"
+            actual_digest="sha256:$(sha256sum "$file" | awk '{ print $1 }')"
+            if [ "$actual_size" != "$asset_size" ] ||
+               [ "$actual_digest" != "$asset_digest" ]; then
+              echo "Candidate asset bytes do not match REST metadata: $asset" >&2
+              exit 1
+            fi
           done < dist/direct-candidate/evidence/candidate-assets.txt
 
           manifest_sha="$(jq -er .candidate.manifestSha256 \
@@ -335,7 +389,7 @@ jobs:
               | sha256sum --check -
           done
           printf '%s\n' \
-            'read-only commands: gh api GET; gh release download' \
+            'read-only commands: gh api GET by exact release and asset ID' \
             > dist/direct-candidate/evidence/read-envelope.txt
 
       - name: Upload Draft-read diagnostics

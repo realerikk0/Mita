@@ -297,7 +297,25 @@ test('workflow confines Draft read authority to one read-only command envelope',
   assert.doesNotMatch(stage, /\n    environment:/)
   assert.match(stage, /persist-credentials: false/)
   assert.match(stage, /\bgh api\b/)
-  assert.match(stage, /\bgh release download\b/)
+  assert.match(stage, /--paginate/)
+  assert.match(stage, /--slurp/)
+  assert.match(stage, /releases\?per_page=100/)
+  assert.equal(
+    [...stage.matchAll(/\(\$matches \| length\) == 1/g)].length,
+    2,
+  )
+  assert.match(stage, /releases\/\$\{release_id\}/)
+  assert.match(stage, /\.id == \$release_id/)
+  assert.match(stage, /\.tag_name == \$tag/)
+  assert.match(stage, /\.target_commitish == \$commit/)
+  assert.match(stage, /\.draft == true/)
+  assert.match(stage, /\.prerelease == false/)
+  assert.match(stage, /\.published_at == null/)
+  assert.match(stage, /Accept: application\/octet-stream/)
+  assert.match(stage, /releases\/assets\/\$\{asset_id\}/)
+  assert.match(stage, /Candidate asset bytes do not match REST metadata/)
+  assert.doesNotMatch(stage, /releases\/tags\//)
+  assert.doesNotMatch(stage, /\bgh release download\b/)
   assert.doesNotMatch(
     stage,
     /\bgh\s+(release\s+(create|edit|delete|upload)|api\s+--method|api\s+-X)\b/,
