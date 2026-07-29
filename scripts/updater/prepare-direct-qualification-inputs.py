@@ -248,9 +248,12 @@ def prepare_inputs(
     snapshot_path = output_dir / "snapshots" / f"{snapshot_name}.zip"
     marker = scenario != "fresh-c"
     write_snapshot(snapshot_path, marker=marker)
+    # v0.6.633 kept its configuration under Mita, but productName=Biyan made
+    # its default user data root Biyan/data. Only the two Mita-branded sources
+    # therefore restore snapshots into the legacy data root.
     restore_root = (
         LEGACY_DATA_ROOTS[platform]
-        if source_version in ("0.6.608", "0.6.611", "0.6.633")
+        if source_version in ("0.6.608", "0.6.611")
         else BIYAN_DATA_ROOTS[platform]
     )
     state_path = f"{BIYAN_CONFIG_ROOTS[platform]}/migration-state.json"
