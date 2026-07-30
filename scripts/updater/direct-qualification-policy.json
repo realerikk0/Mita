@@ -1,6 +1,6 @@
 {
   "schema": 1,
-  "state": "awaiting-candidate-pin",
+  "state": "candidate-pinned",
   "deploymentMode": "direct-c",
   "workflow": {
     "name": "Biyan Direct Qualification",
@@ -20,19 +20,19 @@
     "migrationPhase": "C",
     "dataSchema": 3,
     "manifestKey": "biyan/updater/releases/v0.6.649/latest.json",
-    "manifestSha256": null,
+    "manifestSha256": "e8b0508c345e2cf2e51c5b773d5042ccad3c4a67089e6fe016eeed399f8faf82",
     "assets": {
       "windows": {
         "name": "Biyan_0.6.649_x64-setup.exe",
-        "sha256": null
+        "sha256": "03903eac4282a9c679a7863d9d2c72cf64aaf1123357e9a71c00c051d5b9350b"
       },
       "macos": {
         "name": "Biyan_0.6.649_universal.dmg",
-        "sha256": null
+        "sha256": "59d054faaa2adc906d68714e10ac988ac835abc9ac9f0fb861d1cfc17c2da7f9"
       },
       "linux": {
         "name": "Biyan_0.6.649_amd64.AppImage",
-        "sha256": null
+        "sha256": "dda0fcafe253f2d19d86b839bea51da5840efe24e768b83d038b1d3371f889e5"
       }
     }
   },
