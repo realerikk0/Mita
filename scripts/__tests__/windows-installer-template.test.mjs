@@ -197,6 +197,7 @@ test('Windows NSIS installer cleans retired product resources before copying an 
   assert.doesNotMatch(cleanupBody, /RMDir \/r "\$INSTDIR(?:\\resources)?"/)
 
   const retiredFiles = [
+    '$INSTDIR\\${LEGACY_PRODUCTNAME}.exe',
     '$INSTDIR\\${LEGACY_MAINBINARYNAME}-cli.exe',
     '$INSTDIR\\${LEGACY_MAINBINARYNAME}-computer-agent-runner.exe',
     '$INSTDIR\\resources\\bin\\${LEGACY_MAINBINARYNAME}.exe',
@@ -242,9 +243,19 @@ test('Windows NSIS installer never cleans an unowned fresh or custom install dir
   const rejectUnowned = functionBody('RejectUnownedRetiredBiyanResources')
   assert.match(rejectUnowned, /\$INSTDIR\\resources\\pre-install\\\*\.\*/)
   assert.match(rejectUnowned, /\$INSTDIR\\resources\\embedding-models\\\*\.\*/)
+  assert.match(rejectUnowned, /\$INSTDIR\\\$\{LEGACY_PRODUCTNAME\}\.exe/)
   assert.match(rejectUnowned, /Installation was cancelled without deleting/)
   assert.doesNotMatch(rejectUnowned, /\b(?:Delete|RMDir)\b/)
   assert.doesNotMatch(rejectUnowned, /\$(?:APPDATA|LOCALAPPDATA|PROFILE)/)
+})
+
+test('Windows NSIS installer rejects a legacy main executable after installation', () => {
+  const verify = functionBody('VerifyInstalledBiyanResources')
+
+  assert.match(
+    verify,
+    /\$\{If\} \$\{FileExists\} "\$INSTDIR\\\$\{LEGACY_PRODUCTNAME\}\.exe"[\s\S]*?Abort "Biyan found the legacy main executable after installation/,
+  )
 })
 
 test('Windows NSIS installer accepts exactly the three reviewed Biyan extension archives', () => {

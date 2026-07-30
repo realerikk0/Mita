@@ -4,7 +4,7 @@ on:
   workflow_dispatch:
     inputs:
       version:
-        description: "Exact terminal release tag pinned by protected policy: v0.6.648"
+        description: "Exact terminal release tag pinned by protected policy: v0.6.649"
         required: true
         type: string
 
@@ -84,7 +84,7 @@ jobs:
                 | length) == 1
               and .trains[-1].status == "superseded-by-terminal"
               and (.supersededTerminalReleases | type == "array")
-              and (.supersededTerminalReleases | length) == 2
+              and (.supersededTerminalReleases | length) == 3
               and ((.supersededTerminalReleases[0] | keys | sort)
                 == ["dataSchema", "migrationPhase", "sourceCommit", "status", "tag", "version"])
               and .supersededTerminalReleases[0].tag == "v0.6.646"
@@ -101,14 +101,22 @@ jobs:
               and .supersededTerminalReleases[1].dataSchema == 3
               and .supersededTerminalReleases[1].sourceCommit == "ef963bc606366220db4589352afb25aa7d1785bf"
               and .supersededTerminalReleases[1].status == "blocked-before-publication"
+              and ((.supersededTerminalReleases[2] | keys | sort)
+                == ["dataSchema", "migrationPhase", "sourceCommit", "status", "tag", "version"])
+              and .supersededTerminalReleases[2].tag == "v0.6.648"
+              and .supersededTerminalReleases[2].version == "0.6.648"
+              and .supersededTerminalReleases[2].migrationPhase == "C"
+              and .supersededTerminalReleases[2].dataSchema == 3
+              and .supersededTerminalReleases[2].sourceCommit == "33e8c5b03278b2b91318a553eb3b699b19c6ad1e"
+              and .supersededTerminalReleases[2].status == "blocked-before-publication"
               and (.activeTerminalRelease | type == "object")
               and ((.activeTerminalRelease | keys | sort)
                 == ["dataSchema", "migrationPhase", "sourceCommit", "tag", "version"])
               and .activeTerminalRelease.tag == $tag
               and .activeTerminalRelease.tag
                 == ("v" + .activeTerminalRelease.version)
-              and .activeTerminalRelease.tag == "v0.6.648"
-              and .activeTerminalRelease.version == "0.6.648"
+              and .activeTerminalRelease.tag == "v0.6.649"
+              and .activeTerminalRelease.version == "0.6.649"
               and .activeTerminalRelease.migrationPhase == "C"
               and .activeTerminalRelease.dataSchema == 3
               and (.activeTerminalRelease.sourceCommit

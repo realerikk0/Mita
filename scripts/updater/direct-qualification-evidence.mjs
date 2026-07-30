@@ -24,16 +24,16 @@ const WORKFLOW = Object.freeze({
   ],
 })
 const CANDIDATE_STATIC = Object.freeze({
-  version: '0.6.648',
-  tag: 'v0.6.648',
-  sourceCommit: '33e8c5b03278b2b91318a553eb3b699b19c6ad1e',
+  version: '0.6.649',
+  tag: 'v0.6.649',
+  sourceCommit: 'cc7bd75e40da7e32ea93433ed7311fb7ddbab379',
   migrationPhase: 'C',
   dataSchema: 3,
-  manifestKey: 'biyan/updater/releases/v0.6.648/latest.json',
+  manifestKey: 'biyan/updater/releases/v0.6.649/latest.json',
   assets: {
-    windows: { name: 'Biyan_0.6.648_x64-setup.exe' },
-    macos: { name: 'Biyan_0.6.648_universal.dmg' },
-    linux: { name: 'Biyan_0.6.648_amd64.AppImage' },
+    windows: { name: 'Biyan_0.6.649_x64-setup.exe' },
+    macos: { name: 'Biyan_0.6.649_universal.dmg' },
+    linux: { name: 'Biyan_0.6.649_amd64.AppImage' },
   },
 })
 const SOURCES = Object.freeze({
@@ -488,15 +488,19 @@ function workflowMatrixLane(lane) {
 
 export function resolveDirectQualificationScope(policy, focusedLane) {
   validateDirectQualificationPolicy(policy, { requirePinned: true })
-  if (!['full', 'current-to-c-windows'].includes(focusedLane)) {
+  const focusedLanes = [
+    'current-to-c-windows',
+    'legacy-manual-to-c-windows',
+  ]
+  if (!['full', ...focusedLanes].includes(focusedLane)) {
     fail(
-      'focused qualification lane must be exactly full or current-to-c-windows',
+      'focused qualification lane must be exactly full, current-to-c-windows, or legacy-manual-to-c-windows',
     )
   }
   const lanes =
     focusedLane === 'full'
       ? policy.lanes
-      : [laneById(policy, 'current-to-c-windows')]
+      : [laneById(policy, focusedLane)]
   return {
     qualificationMatrix: {
       include: lanes.map(workflowMatrixLane),
@@ -726,8 +730,12 @@ export function buildFocusedDiagnosticSummary({
 }) {
   validateDirectQualificationPolicy(policy, { requirePinned: true })
   const lane = laneById(policy, laneId)
-  if (lane.id !== 'current-to-c-windows') {
-    fail('focused diagnostic summary is restricted to current-to-c-windows')
+  if (
+    !['current-to-c-windows', 'legacy-manual-to-c-windows'].includes(lane.id)
+  ) {
+    fail(
+      'focused diagnostic summary is restricted to current-to-c-windows or legacy-manual-to-c-windows',
+    )
   }
   if (
     !['success', 'failure', 'cancelled', 'skipped'].includes(

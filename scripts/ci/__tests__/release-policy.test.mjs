@@ -275,10 +275,10 @@ test('bridge release trains lock version, phase, schema, and Cargo.lock together
   )
   assert.ok(
     validateReleaseIdentity({
-      version: '0.6.648',
+      version: '0.6.649',
       migrationPhase: 'A',
       dataSchema: 1,
-      cargoLockVersion: '0.6.648',
+      cargoLockVersion: '0.6.649',
     }).some((failure) => failure.includes('must attest C/3'))
   )
 })
@@ -317,8 +317,8 @@ test('formal release identity switches fail-closed to the exact pinned terminal 
     fs.readFileSync('scripts/ci/release-train-policy.json', 'utf8')
   )
   policy.activeTerminalRelease = {
-    tag: 'v0.6.648',
-    version: '0.6.648',
+    tag: 'v0.6.649',
+    version: '0.6.649',
     migrationPhase: 'C',
     dataSchema: 3,
     sourceCommit: 'a'.repeat(40),
@@ -326,10 +326,10 @@ test('formal release identity switches fail-closed to the exact pinned terminal 
 
   assert.deepEqual(
     validateActiveReleaseIdentity({
-      version: '0.6.648',
+      version: '0.6.649',
       migrationPhase: 'C',
       dataSchema: 3,
-      cargoLockVersion: '0.6.648',
+      cargoLockVersion: '0.6.649',
       trainPolicy: policy,
     }),
     []
@@ -350,6 +350,13 @@ test('release train and terminal policy is unique, contiguous, and fail-closed',
     fs.readFileSync('scripts/ci/release-train-policy.json', 'utf8')
   )
   assert.deepEqual(validateReleaseTrainPolicy(policy), [])
+  assert.deepEqual(policy.activeTerminalRelease, {
+    tag: 'v0.6.649',
+    version: '0.6.649',
+    migrationPhase: 'C',
+    dataSchema: 3,
+    sourceCommit: 'cc7bd75e40da7e32ea93433ed7311fb7ddbab379',
+  })
 
   const twoActive = structuredClone(policy)
   twoActive.trains[0].status = 'active'
@@ -436,8 +443,8 @@ test('release train and terminal policy is unique, contiguous, and fail-closed',
 
   const pinned = structuredClone(policy)
   pinned.activeTerminalRelease = {
-    tag: 'v0.6.648',
-    version: '0.6.648',
+    tag: 'v0.6.649',
+    version: '0.6.649',
     migrationPhase: 'C',
     dataSchema: 3,
     sourceCommit: 'a'.repeat(40),
@@ -448,8 +455,8 @@ test('release train and terminal policy is unique, contiguous, and fail-closed',
     [
       'wrong version',
       (value) => {
-        value.activeTerminalRelease.version = '0.6.649'
-        value.activeTerminalRelease.tag = 'v0.6.649'
+        value.activeTerminalRelease.version = '0.6.650'
+        value.activeTerminalRelease.tag = 'v0.6.650'
       },
     ],
     [
@@ -509,16 +516,16 @@ test('release train and terminal policy is unique, contiguous, and fail-closed',
     [
       'wrong preserved source',
       (value) => {
-        value.supersededTerminalReleases[1].sourceCommit = 'b'.repeat(40)
+        value.supersededTerminalReleases[2].sourceCommit = 'b'.repeat(40)
       },
     ],
     [
       'extra preserved terminal',
       (value) => {
         value.supersededTerminalReleases.push({
-          ...structuredClone(value.supersededTerminalReleases[1]),
-          tag: 'v0.6.648',
-          version: '0.6.648',
+          ...structuredClone(value.supersededTerminalReleases[2]),
+          tag: 'v0.6.649',
+          version: '0.6.649',
           sourceCommit: 'c'.repeat(40),
         })
       },
@@ -3347,7 +3354,7 @@ test('direct qualification is an exact full-or-focused read-only evidence workfl
         'matrix: ${{ fromJSON(needs.preflight.outputs.qualification_matrix) }}',
         'matrix: {include: []}'
       ),
-      'full 16 or focused current Windows 1',
+      'full 16 or focused current/manual Windows 1',
     ],
     [
       'focused diagnostics may not aggregate',
@@ -3355,12 +3362,12 @@ test('direct qualification is an exact full-or-focused read-only evidence workfl
         '            diagnostic-summary `',
         '            aggregate `'
       ),
-      'full 16 or focused current Windows 1',
+      'full 16 or focused current/manual Windows 1',
     ],
     [
       'cancelled run may not aggregate',
       workflow.replace('        && !cancelled()\n', ''),
-      'full 16 or focused current Windows 1',
+      'full 16 or focused current/manual Windows 1',
     ],
     [
       'production secret',

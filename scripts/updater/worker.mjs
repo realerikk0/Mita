@@ -106,13 +106,13 @@ function isAllowedTransition(policy, currentVersion, transition) {
     return Boolean(reviewedSource)
       && policy.deploymentMode === 'direct-c'
       && transition.to === policy.currentVersion
-      && transition.to === '0.6.648'
+      && transition.to === '0.6.649'
       && targetPhase === 'C'
-      && target.tag === 'v0.6.648'
+      && target.tag === 'v0.6.649'
       && target.sourceCommit === DIRECT_C_TARGET_SOURCE_COMMIT
       && target.dataSchema === 3
       && target.manifestKey
-        === 'biyan/updater/releases/v0.6.648/latest.json'
+        === 'biyan/updater/releases/v0.6.649/latest.json'
       && sourcePhase === reviewedSource.migrationPhase
       && source.tag === reviewedSource.tag
       && source.sourceCommit === reviewedSource.sourceCommit

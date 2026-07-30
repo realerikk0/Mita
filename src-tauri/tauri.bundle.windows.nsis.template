@@ -1112,6 +1112,9 @@ Function RejectUnownedRetiredBiyanResources
   ${If} ${FileExists} "$INSTDIR\resources\embedding-models\*.*"
     Abort "Biyan found embedding models in an unowned install directory. Installation was cancelled without deleting them."
   ${EndIf}
+  ${If} ${FileExists} "$INSTDIR\${LEGACY_PRODUCTNAME}.exe"
+    Abort "Biyan found a legacy main executable in an unowned install directory. Installation was cancelled without deleting it."
+  ${EndIf}
   ${If} ${FileExists} "$INSTDIR\${LEGACY_MAINBINARYNAME}-cli.exe"
     Abort "Biyan found a command-line binary in an unowned install directory. Installation was cancelled without deleting it."
   ${EndIf}
@@ -1152,6 +1155,17 @@ Function RemoveRetiredBiyanInstallResources
     ${EndIf}
     ${If} ${FileExists} "$INSTDIR\resources\embedding-models\*.*"
       Abort "Biyan found retired embedding models after cleanup. Installation was cancelled."
+    ${EndIf}
+  ${EndIf}
+
+  ${If} ${FileExists} "$INSTDIR\${LEGACY_PRODUCTNAME}.exe"
+    ClearErrors
+    Delete "$INSTDIR\${LEGACY_PRODUCTNAME}.exe"
+    ${If} ${Errors}
+      Abort "Biyan could not remove the legacy main executable. Installation was cancelled."
+    ${EndIf}
+    ${If} ${FileExists} "$INSTDIR\${LEGACY_PRODUCTNAME}.exe"
+      Abort "Biyan found the legacy main executable after cleanup. Installation was cancelled."
     ${EndIf}
   ${EndIf}
 
@@ -1282,6 +1296,9 @@ Function VerifyInstalledBiyanResources
   biyan_extension_inventory_valid:
   ${If} ${FileExists} "$INSTDIR\resources\embedding-models\*.*"
     Abort "Biyan found retired embedding models after installation. Installation was cancelled."
+  ${EndIf}
+  ${If} ${FileExists} "$INSTDIR\${LEGACY_PRODUCTNAME}.exe"
+    Abort "Biyan found the legacy main executable after installation. Installation was cancelled."
   ${EndIf}
   ${If} ${FileExists} "$INSTDIR\${LEGACY_MAINBINARYNAME}-cli.exe"
     Abort "Biyan found a retired command-line binary after installation. Installation was cancelled."

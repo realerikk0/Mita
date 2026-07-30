@@ -60,4 +60,4 @@ export const DIRECT_C_CANONICAL_UPDATER_PLATFORMS = Object.freeze([
 ])
 
 export const DIRECT_C_TARGET_SOURCE_COMMIT =
-  '33e8c5b03278b2b91318a553eb3b699b19c6ad1e'
+  'cc7bd75e40da7e32ea93433ed7311fb7ddbab379'
