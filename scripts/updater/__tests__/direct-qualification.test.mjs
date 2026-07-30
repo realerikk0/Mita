@@ -501,19 +501,18 @@ test('A and B lanes require source-aware data roots and both phase expectations'
   }
 })
 
-test('workflow confines Draft read authority to one read-only command envelope', () => {
+test('workflow confines published candidate reads to one exact command envelope', () => {
   const source = fs.readFileSync(workflowFile, 'utf8')
   assert.match(
     source,
     /^permissions:\n  actions: read\n  contents: read$/m,
   )
-  const writeGrants = source.match(/^\s{6}contents: write$/gm) ?? []
-  assert.equal(writeGrants.length, 1)
+  assert.doesNotMatch(source, /^\s{6}contents: write$/m)
   const stageStart = source.indexOf('\n  stage-candidate:\n')
   const qualificationStart = source.indexOf('\n  qualification:\n')
   assert.ok(stageStart >= 0 && qualificationStart > stageStart)
   const stage = source.slice(stageStart, qualificationStart)
-  assert.match(stage, /\n    permissions:\n      actions: read\n      contents: write\n/)
+  assert.match(stage, /\n    permissions:\n      actions: read\n      contents: read\n/)
   assert.doesNotMatch(stage, /\n    environment:/)
   assert.match(stage, /persist-credentials: false/)
   assert.match(stage, /\bgh api\b/)
@@ -528,9 +527,9 @@ test('workflow confines Draft read authority to one read-only command envelope',
   assert.match(stage, /\.id == \$release_id/)
   assert.match(stage, /\.tag_name == \$tag/)
   assert.match(stage, /\.target_commitish == \$commit/)
-  assert.match(stage, /\.draft == true/)
+  assert.match(stage, /\.draft == false/)
   assert.match(stage, /\.prerelease == false/)
-  assert.match(stage, /\.published_at == null/)
+  assert.match(stage, /\.published_at \| type == "string" and length > 0/)
   assert.match(stage, /Accept: application\/octet-stream/)
   assert.match(stage, /releases\/assets\/\$\{asset_id\}/)
   assert.match(stage, /Candidate asset bytes do not match REST metadata/)
@@ -540,8 +539,6 @@ test('workflow confines Draft read authority to one read-only command envelope',
     stage,
     /\bgh\s+(release\s+(create|edit|delete|upload)|api\s+--method|api\s+-X)\b/,
   )
-  const remainder = `${source.slice(0, stageStart)}${source.slice(qualificationStart)}`
-  assert.doesNotMatch(remainder, /^\s{6}contents: write$/m)
   assert.doesNotMatch(source, /release-distribution/)
 })
 
