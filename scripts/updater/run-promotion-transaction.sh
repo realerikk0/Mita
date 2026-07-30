@@ -963,8 +963,8 @@ ossutil api get-object-acl --bucket "$ALIYUN_OSS_BUCKET" \
   --key "$LEGACY_ALIYUN_KEY" --endpoint "$oss_endpoint" \
   --region "$ALIYUN_REGION" --output-format json --quiet \
   > dist/state/snapshots/legacy-oss-acl.json
-legacy_oss_acl="$(jq -er '.acl // .Acl // .objectAcl // .ObjectAcl' \
-  dist/state/snapshots/legacy-oss-acl.json)"
+legacy_oss_acl="$(node scripts/updater/promotion-transaction.mjs \
+  extract-oss-acl --acl dist/state/snapshots/legacy-oss-acl.json)"
 case "$legacy_oss_acl" in
   default|private|public-read) ;;
   *) echo "Unsupported OSS ACL snapshot: $legacy_oss_acl" >&2; exit 1 ;;
