@@ -153,24 +153,141 @@ function normalizedMetadata(value) {
   assertPlainObject(value, 'Object metadata')
   const scalars = new Map()
   const customMetadata = {}
-  const visit = (childValue, parentKey = '') => {
-    if (!childValue || typeof childValue !== 'object') return
-    for (const [key, child] of Object.entries(childValue)) {
-      const normalized = key.toLowerCase().replace(/[^a-z0-9]/g, '')
-      if (
-        ['metadata', 'custom', 'custommetadata'].includes(parentKey) &&
-        (typeof child === 'string' || typeof child === 'number')
-      ) {
-        customMetadata[key.replace(/^x-(?:amz|oss)-meta-/i, '')] = String(child)
+  const rootFields = new Map([
+    ['cachecontrol', 'cachecontrol'],
+    ['contenttype', 'contenttype'],
+    ['contentencoding', 'contentencoding'],
+    ['contentdisposition', 'contentdisposition'],
+    ['contentlanguage', 'contentlanguage'],
+    ['expires', 'expires'],
+    ['storageclass', 'storageclass'],
+  ])
+  const headerFields = new Map([
+    ['cache-control', 'cachecontrol'],
+    ['content-type', 'contenttype'],
+    ['content-encoding', 'contentencoding'],
+    ['content-disposition', 'contentdisposition'],
+    ['content-language', 'contentlanguage'],
+    ['expires', 'expires'],
+    ['x-amz-storage-class', 'storageclass'],
+    ['x-oss-storage-class', 'storageclass'],
+  ])
+  const customContainers = new Set([
+    'metadata',
+    'custom',
+    'custommetadata',
+  ])
+  const metadataFieldShapes = new Set([
+    'cachecontrol',
+    'contenttype',
+    'contentencoding',
+    'contentdisposition',
+    'contentlanguage',
+    'expires',
+    'storageclass',
+    'xamzstorageclass',
+    'xossstorageclass',
+  ])
+  const scalarValue = (child, description, arrayValue = false) => {
+    const candidate = arrayValue
+      ? typeof child === 'string'
+        ? child
+        : Array.isArray(child) && child.length === 1
+          ? child[0]
+          : undefined
+      : child
+    if (typeof candidate !== 'string' || candidate.length === 0) {
+      throw new Error(
+        arrayValue
+          ? `${description} must be a nonempty string or one-element nonempty string array`
+          : `${description} must be a nonempty string`
+      )
+    }
+    return candidate
+  }
+  const recordScalar = (name, child, description, arrayValue = false) => {
+    const candidate = scalarValue(child, description, arrayValue)
+    const existing = scalars.get(name)
+    if (existing !== undefined && existing !== candidate) {
+      throw new Error(`Object metadata has conflicting ${name} values`)
+    }
+    scalars.set(name, candidate)
+  }
+  const recordCustom = (key, child, arrayValue = false) => {
+    const name = key
+      .replace(/^x-(?:amz|oss)-meta-/i, '')
+      .toLowerCase()
+    if (!name) throw new Error('Object custom metadata has an empty key')
+    const candidate = scalarValue(
+      child,
+      `Object custom metadata ${name}`,
+      arrayValue
+    )
+    const existing = customMetadata[name]
+    if (existing !== undefined && existing !== candidate) {
+      throw new Error(`Object metadata has conflicting custom ${name} values`)
+    }
+    customMetadata[name] = candidate
+  }
+  const visitHeader = (header) => {
+    assertPlainObject(header, 'Object metadata Header')
+    for (const [key, child] of Object.entries(header)) {
+      const lower = key.toLowerCase()
+      const field = headerFields.get(lower)
+      if (field) {
+        recordScalar(field, child, `Object metadata Header.${key}`, true)
+        continue
       }
-      if (typeof child === 'string' || typeof child === 'number') {
-        if (!scalars.has(normalized)) scalars.set(normalized, String(child))
-      } else {
-        visit(child, normalized)
+      if (/^x-(?:amz|oss)-meta-/i.test(key)) {
+        recordCustom(key, child, true)
+        continue
+      }
+      const compact = lower.replace(/[^a-z0-9]/g, '')
+      if (
+        metadataFieldShapes.has(compact) ||
+        compact === 'header' ||
+        compact === 'headers' ||
+        compact.startsWith('xamzmeta') ||
+        compact.startsWith('xossmeta')
+      ) {
+        throw new Error(`Object metadata Header has unsupported field ${key}`)
       }
     }
   }
-  visit(value)
+  for (const [key, child] of Object.entries(value)) {
+    const lower = key.toLowerCase()
+    const field = rootFields.get(lower)
+    if (field) {
+      recordScalar(field, child, `Object metadata ${key}`)
+      continue
+    }
+    if (/^x-(?:amz|oss)-meta-/i.test(key)) {
+      recordCustom(key, child)
+      continue
+    }
+    if (customContainers.has(lower)) {
+      assertPlainObject(child, `Object metadata ${key}`)
+      for (const [customKey, customValue] of Object.entries(child)) {
+        recordCustom(customKey, customValue)
+      }
+      continue
+    }
+    if (key === 'Header') {
+      visitHeader(child)
+      continue
+    }
+    const compact = lower.replace(/[^a-z0-9]/g, '')
+    if (
+      metadataFieldShapes.has(compact) ||
+      compact === 'header' ||
+      compact === 'headers' ||
+      customContainers.has(compact) ||
+      compact.startsWith('xamzmeta') ||
+      compact.startsWith('xossmeta')
+    ) {
+      throw new Error(`Object metadata has unsupported field ${key}`)
+    }
+  }
   const required = (name) => {
     const found = scalars.get(name)
     if (!found) throw new Error(`Object metadata is missing ${name}`)
@@ -441,6 +558,7 @@ function validateObjectSnapshot(snapshot, description) {
   if (snapshot.existed) {
     assertSha256(snapshot.bytesSha256, `${description} bytesSha256`)
     assertPlainObject(snapshot.metadata, `${description} metadata`)
+    backupMetadataPlan(snapshot.metadata)
     if (snapshot.provider === 'oss') {
       if (!isPlainObject(snapshot.acl)) {
         throw new Error(`${description} OSS ACL evidence is not restorable`)

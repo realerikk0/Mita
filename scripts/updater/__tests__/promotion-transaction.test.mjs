@@ -1158,10 +1158,11 @@ test('R2 ETag and recovery bytes metadata ACL readback are strict', () => {
     ...snapshot('oss', 'mita/latest.json'),
     bytesSha256: createHash('sha256').update(bytes).digest('hex'),
     metadata: {
-      CacheControl: 'public, max-age=60, must-revalidate',
-      ContentType: 'application/json',
-      Metadata: { owner: 'release' },
-      StorageClass: 'Standard',
+      Header: {
+        'Cache-Control': ['public, max-age=60, must-revalidate'],
+        'Content-Type': ['application/json'],
+        'X-Oss-Storage-Class': ['Standard'],
+      },
     },
     acl: { acl: 'public-read' },
   }
@@ -1170,10 +1171,11 @@ test('R2 ETag and recovery bytes metadata ACL readback are strict', () => {
       snapshot: restorable,
       bytes,
       metadata: {
-        cacheControl: 'public, max-age=60, must-revalidate',
-        contentType: 'application/json',
-        metadata: { owner: 'release' },
-        storageClass: 'Standard',
+        Header: {
+          'Cache-Control': ['public, max-age=60, must-revalidate'],
+          'Content-Type': ['application/json'],
+          'X-Oss-Storage-Class': ['Standard'],
+        },
       },
       acl: { objectAcl: 'public-read' },
     }).acl,
@@ -1185,10 +1187,11 @@ test('R2 ETag and recovery bytes metadata ACL readback are strict', () => {
         snapshot: restorable,
         bytes,
         metadata: {
-          cacheControl: 'no-store',
-          contentType: 'application/json',
-          metadata: { owner: 'release' },
-          storageClass: 'Standard',
+          Header: {
+            'Cache-Control': ['no-store'],
+            'Content-Type': ['application/json'],
+            'X-Oss-Storage-Class': ['Standard'],
+          },
         },
         acl: { objectAcl: 'public-read' },
       }),
@@ -1315,6 +1318,47 @@ test('snapshot backup metadata is exactly reproducible or rejected', () => {
       cacheControl: 'public, max-age=60, must-revalidate',
     }
   )
+  assert.deepEqual(
+    backupMetadataPlan({
+      Header: {
+        'Cache-Control': ['no-store'],
+        'Content-Type': ['application/json'],
+        'Content-Length': ['3468'],
+        'X-Oss-Object-Type': ['Normal'],
+        'X-Oss-Storage-Class': ['Standard'],
+      },
+    }),
+    {
+      contentType: 'application/json',
+      cacheControl: 'no-store',
+    }
+  )
+  assert.deepEqual(
+    backupMetadataPlan({
+      CacheControl: 'no-store',
+      ContentType: 'application/json',
+      Header: {
+        'Cache-Control': ['no-store'],
+        'Content-Type': ['application/json'],
+      },
+    }),
+    {
+      contentType: 'application/json',
+      cacheControl: 'no-store',
+    }
+  )
+  assert.deepEqual(
+    backupMetadataPlan({
+      Header: {
+        'Cache-Control': 'no-store',
+        'Content-Type': 'application/json',
+      },
+    }),
+    {
+      contentType: 'application/json',
+      cacheControl: 'no-store',
+    }
+  )
 
   for (const metadata of [
     {
@@ -1332,11 +1376,172 @@ test('snapshot backup metadata is exactly reproducible or rejected', () => {
       ContentType: 'application/json',
       StorageClass: 'GLACIER',
     },
+    {
+      Header: {
+        'Cache-Control': ['no-store'],
+        'Content-Type': ['application/json'],
+        'X-Oss-Meta-Owner': ['release'],
+      },
+    },
+    {
+      Header: {
+        'Cache-Control': ['no-store'],
+        'Content-Type': ['application/json'],
+        'x-oss-storage-class': ['Archive'],
+      },
+    },
+    {
+      Header: {
+        'Cache-Control': ['no-store'],
+        'Content-Type': ['application/json'],
+        'X-Amz-Meta-Owner': ['release'],
+      },
+    },
+    {
+      CacheControl: 'no-store',
+      ContentType: 'application/json',
+      'X-Oss-Meta-Owner': 'release',
+    },
+    {
+      CacheControl: 'no-store',
+      ContentType: 'application/json',
+      METADATA: { owner: 'release' },
+    },
   ]) {
     assert.throws(
       () => backupMetadataPlan(metadata),
       /unsupported backup fields/
     )
+  }
+
+  for (const metadata of [
+    {
+      Header: {
+        'Cache-Control': [],
+        'Content-Type': ['application/json'],
+      },
+    },
+    {
+      Header: {
+        'Cache-Control': ['no-store', 'public, max-age=60'],
+        'Content-Type': ['application/json'],
+      },
+    },
+    {
+      Header: {
+        'Cache-Control': [['no-store']],
+        'Content-Type': ['application/json'],
+      },
+    },
+    {
+      Header: {
+        'Cache-Control': [true],
+        'Content-Type': ['application/json'],
+      },
+    },
+    {
+      Header: {
+        'Cache-Control': [''],
+        'Content-Type': ['application/json'],
+      },
+    },
+  ]) {
+    assert.throws(
+      () => backupMetadataPlan(metadata),
+      /nonempty string or one-element nonempty string array/
+    )
+  }
+
+  assert.throws(
+    () =>
+      backupMetadataPlan({
+        CacheControl: 'public, max-age=60',
+        ContentType: 'application/json',
+        Header: {
+          'Cache-Control': ['no-store'],
+          'Content-Type': ['application/json'],
+        },
+      }),
+    /conflicting cachecontrol values/
+  )
+
+  for (const metadata of [
+    {
+      Header: {
+        Cache___Control: ['no-store'],
+        'Content-Type': ['application/json'],
+      },
+    },
+    {
+      'Cache-Control': ['no-store'],
+      'Content-Type': ['application/json'],
+    },
+    {
+      Header: {
+        Header: {
+          'Cache-Control': ['no-store'],
+          'Content-Type': ['application/json'],
+        },
+      },
+    },
+  ]) {
+    assert.throws(
+      () => backupMetadataPlan(metadata),
+      /unsupported/
+    )
+  }
+
+  assert.throws(
+    () =>
+      backupMetadataPlan({
+        CacheControl: 123,
+        ContentType: 'application/json',
+      }),
+    /must be a nonempty string/
+  )
+})
+
+test('metadata CLI accepts the pinned ossutil 2.3.0 Header envelope', () => {
+  const temp = fs.mkdtempSync(
+    path.join(os.tmpdir(), 'biyan-oss-metadata-')
+  )
+  try {
+    const metadataFile = path.join(temp, 'metadata.json')
+    const outputFile = path.join(temp, 'plan.json')
+    fs.writeFileSync(
+      metadataFile,
+      `${JSON.stringify({
+        Header: {
+          'Accept-Ranges': ['bytes'],
+          'Cache-Control': ['no-store'],
+          'Content-Length': ['3468'],
+          'Content-Md5': ['CJYEEHvCM831htSv2GhPjg=='],
+          'Content-Type': ['application/json'],
+          Etag: ['"089604107BC233CDF586D4AFD8684F8E"'],
+          'X-Oss-Object-Type': ['Normal'],
+          'X-Oss-Storage-Class': ['Standard'],
+        },
+      }, null, 2)}\n`
+    )
+    const result = spawnSync(
+      process.execPath,
+      [
+        path.join(repoRoot, 'scripts/updater/promotion-transaction.mjs'),
+        'backup-metadata-plan',
+        '--metadata',
+        metadataFile,
+        '--output',
+        outputFile,
+      ],
+      { encoding: 'utf8' }
+    )
+    assert.equal(result.status, 0, result.stderr)
+    assert.deepEqual(JSON.parse(fs.readFileSync(outputFile, 'utf8')), {
+      contentType: 'application/json',
+      cacheControl: 'no-store',
+    })
+  } finally {
+    fs.rmSync(temp, { recursive: true, force: true })
   }
 })
 
@@ -1469,6 +1674,28 @@ test('tracked initial A approval pins the accepted v0.6.643 manifest exactly', (
 test('journal validates restorable bytes, metadata, ACL, and immutable ledger', () => {
   const prepared = journal()
   assert.equal(validateJournal(prepared).state, 'prepared')
+  const unsafeSnapshots = structuredClone(prepared.snapshots)
+  unsafeSnapshots[1].metadata = {
+    Header: {
+      'Cache-Control': ['no-store'],
+      'Content-Type': ['application/json'],
+      'X-Oss-Meta-Owner': ['release'],
+    },
+  }
+  assert.throws(
+    () =>
+      createJournal({
+        runId: '123',
+        runAttempt: '1',
+        targetTag: 'v0.6.643',
+        targetVersion: '0.6.643',
+        sourceCommit,
+        nextPolicyBytes: Buffer.from('{"currentVersion":"0.6.643"}\n'),
+        createdAt: '2026-07-24T00:00:00.000Z',
+        snapshots: unsafeSnapshots,
+      }),
+    /unsupported backup fields/
+  )
   const committing = advanceJournal(prepared, {
     state: 'committing',
     checkpoint: 'before-policy-write',
