@@ -2562,7 +2562,7 @@ test('promotion journal artifacts are create-only, read back, and CAS-deleted', 
 
 test('mutable OSS journals omit the overwrite guard while immutable journals keep it', () => {
   const temporaryDirectory = fs.mkdtempSync(
-    path.join(os.tmpdir(), 'mita-oss-journal-overwrite-')
+    path.join(os.tmpdir(), 'updater-oss-journal-overwrite-')
   )
   try {
     for (const runnerName of [
