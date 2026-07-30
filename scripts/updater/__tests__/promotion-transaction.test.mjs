@@ -3257,7 +3257,9 @@ test('every machine-readable ossutil API call suppresses the human elapsed trail
       if (!/\.(?:mjs|sh|ya?ml)$/.test(entry.name)) continue
       const source = readText(absolute)
       if (source.includes('ossutil api')) {
-        discovered.push(path.relative(repoRoot, absolute))
+        // Keep the checked-in policy envelope platform-neutral: Windows emits
+        // backslashes here, while the allowlist intentionally uses Git paths.
+        discovered.push(path.relative(repoRoot, absolute).split(path.sep).join('/'))
       }
     }
   }
