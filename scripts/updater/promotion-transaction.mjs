@@ -1756,7 +1756,7 @@ export function recoveryCommands(journalInput) {
     `aws s3api get-object --bucket "$CLOUDFLARE_R2_BUCKET" --key ${q(legacyR2.key)} --endpoint-url "$r2_endpoint" "recovery-readback/r2-${legacyR2Index}" > "recovery-readback/r2-${legacyR2Index}-metadata.json"`,
     `node scripts/updater/promotion-transaction.mjs verify-snapshot-readback --journal "$JOURNAL" --index ${q(legacyR2Index)} --bytes "recovery-readback/r2-${legacyR2Index}" --metadata "recovery-readback/r2-${legacyR2Index}-metadata.json" --output "recovery-readback/r2-${legacyR2Index}-verified.json"`,
     'if [[ "$legacy_restored" == true ]]; then',
-    '  aliyun cdn RefreshObjectCaches --region "$ALIYUN_REGION" --ObjectPath "$LEGACY_ALIYUN_URL" --ObjectType File > recovery-readback/aliyun-cache-purge.json',
+    '  aliyun --profile release cdn RefreshObjectCaches --region "$ALIYUN_REGION" --ObjectPath "$LEGACY_ALIYUN_URL" --ObjectType File > recovery-readback/aliyun-cache-purge.json',
     '  jq -e \'.RefreshTaskId or .RequestId\' recovery-readback/aliyun-cache-purge.json >/dev/null',
     `  node scripts/updater/promotion-transaction.mjs poll-url --url "$LEGACY_ALIYUN_URL" --expected "recovery-readback/backups/${legacyOssIndex}" --timeout-seconds 600 --interval-seconds 10 --output recovery-readback/legacy-aliyun-cdn.json`,
     `  node scripts/updater/promotion-transaction.mjs poll-url --url "$LEGACY_R2_URL" --expected "recovery-readback/backups/${legacyR2Index}" --timeout-seconds 600 --interval-seconds 10 --output recovery-readback/legacy-r2-cdn.json`,

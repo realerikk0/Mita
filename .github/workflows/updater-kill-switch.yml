@@ -104,7 +104,15 @@ jobs:
           OSS_ACCESS_KEY_SECRET: ${{ secrets.ALIYUN_ACCESS_KEY_SECRET }}
           ALIYUN_OSS_BUCKET: ${{ secrets.ALIYUN_OSS_BUCKET || vars.ALIYUN_OSS_BUCKET || 'mita-static' }}
           BIYAN_SIGNING_KEY: ${{ secrets.BIYAN_SIGNING_KEY }}
-        run: bash scripts/updater/run-pause-transaction.sh
+        run: |
+          set -euo pipefail
+          aliyun configure set \
+            --profile release \
+            --mode AK \
+            --region "$ALIYUN_REGION" \
+            --access-key-id "$ALIYUN_ACCESS_KEY_ID" \
+            --access-key-secret "$ALIYUN_ACCESS_KEY_SECRET"
+          bash scripts/updater/run-pause-transaction.sh
 
       - name: Upload kill-switch transaction evidence
         if: always()

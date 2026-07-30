@@ -943,7 +943,10 @@ test('pause workflows recover a partially deleted terminal lock before new mutat
       path.join(repoRoot, '.github/workflows', workflowName),
       'utf8'
     )
-    assert.match(workflow, /run: bash scripts\/updater\/run-pause-transaction\.sh/)
+    assert.match(
+      workflow,
+      /run: \|[\s\S]*aliyun configure set[\s\S]*--profile release[\s\S]*bash scripts\/updater\/run-pause-transaction\.sh/
+    )
     assert.match(
       workflow,
       /if: always\(\)[\s\S]*actions\/upload-artifact@v4[\s\S]*dist\/pause\//

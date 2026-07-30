@@ -3252,8 +3252,8 @@ test('formal build, release, and updater jobs share the release-distribution env
       '.github/workflows/updater-health-gate.yml',
       (source) =>
         source.replace(
-          'run: bash scripts/updater/run-pause-transaction.sh',
-          'run: echo skipped-shared-pause-runner'
+          '          bash scripts/updater/run-pause-transaction.sh',
+          '          echo skipped-shared-pause-runner'
         ),
       'execution envelope',
     ],
@@ -3261,8 +3261,8 @@ test('formal build, release, and updater jobs share the release-distribution env
       '.github/workflows/updater-kill-switch.yml',
       (source) =>
         source.replace(
-          'run: bash scripts/updater/run-pause-transaction.sh',
-          'run: echo skipped-shared-pause-runner'
+          '          bash scripts/updater/run-pause-transaction.sh',
+          '          echo skipped-shared-pause-runner'
         ),
       'execution envelope',
     ],

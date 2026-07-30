@@ -2229,7 +2229,7 @@ test('recovery commands are derived from durable snapshots and created-object le
   )
   assert.match(
     commands,
-    /RefreshObjectCaches --region "\$ALIYUN_REGION"/
+    /aliyun --profile release cdn RefreshObjectCaches --region "\$ALIYUN_REGION"/
   )
   assert.doesNotMatch(commands, /cloudflare-cache-purge|purge_cache/)
   assert.match(commands, /poll-url[\s\S]*legacy-aliyun-cdn/)
@@ -3347,6 +3347,10 @@ test('promotion workflows carry the fail-closed transaction controls', () => {
     promotion,
     /Publish with rollback protection[\s\S]*git fetch --force --no-tags origin[\s\S]*refs\/remotes\/origin\/mita-main[\s\S]*run-promotion-transaction\.sh/
   )
+  assert.match(
+    promotion,
+    /Publish with rollback protection[\s\S]*aliyun configure set[\s\S]*--profile release[\s\S]*run-promotion-transaction\.sh/
+  )
   for (const writer of [
     'updater-health-gate.yml',
     'updater-kill-switch.yml',
@@ -3357,9 +3361,35 @@ test('promotion workflows carry the fail-closed transaction controls', () => {
     assert.match(source, new RegExp(OPEN_TRANSACTION_KEY.replaceAll('/', '\\/')))
     assert.match(source, /ref: mita-main/)
     assert.match(source, /refs\/remotes\/origin\/mita-main/)
+    assert.match(source, /aliyun-cli-linux-3\.3\.22-amd64\.tgz/)
     assert.match(source, /ossutil-2\.3\.0-linux-amd64\.zip/)
+    assert.match(
+      source,
+      /aliyun configure set[\s\S]*--profile release[\s\S]*run-pause-transaction\.sh/
+    )
     assert.match(source, /run-pause-transaction\.sh/)
     assert.match(source, /environment: release-distribution/)
+  }
+  const recoveryWorkflow = readText(
+    path.join(
+      repoRoot,
+      '.github/workflows/recover-split-updater-transaction.yml'
+    )
+  )
+  assert.match(recoveryWorkflow, /aliyun-cli-linux-3\.3\.22-amd64\.tgz/)
+  assert.match(
+    recoveryWorkflow,
+    /aliyun configure set[\s\S]*--profile release[\s\S]*--recover-split-nonterminal-only/
+  )
+  for (const source of [runner, pauseRunner, promotionTransaction]) {
+    const cdnCalls =
+      source.match(
+        /\baliyun\s+(?:--profile\s+\S+\s+)?cdn\s+RefreshObjectCaches[^\n]*/g
+      ) ?? []
+    assert.ok(cdnCalls.length > 0)
+    for (const call of cdnCalls) {
+      assert.match(call, /aliyun --profile release cdn RefreshObjectCaches/)
+    }
   }
   assert.match(pauseRunner, /promotion-transaction\.mjs classify-probe/)
   assert.match(pauseRunner, /--provider r2/)
