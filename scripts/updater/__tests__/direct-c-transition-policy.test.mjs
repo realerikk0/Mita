@@ -252,7 +252,7 @@ function snapshot({
   }
 }
 
-test('tracked DIRECT_C policy awaits approval and pins every reviewed source', () => {
+test('tracked DIRECT_C policy pins the accepted candidate and every reviewed source', () => {
   const tracked = loadDirectCTransitionPolicy()
   const qualification = JSON.parse(
     fs.readFileSync(
@@ -263,12 +263,36 @@ test('tracked DIRECT_C policy awaits approval and pins every reviewed source', (
       'utf8',
     ),
   )
-  assert.equal(tracked.approvedNext, null)
-  assert.equal(qualification.state, 'awaiting-candidate-pin')
-  assert.equal(qualification.candidate.manifestSha256, null)
-  for (const platform of ['windows', 'macos', 'linux']) {
-    assert.equal(qualification.candidate.assets[platform].sha256, null)
-  }
+  assert.deepEqual(tracked.approvedNext, {
+    version: qualification.candidate.version,
+    tag: qualification.candidate.tag,
+    sourceCommit: qualification.candidate.sourceCommit,
+    migrationPhase: qualification.candidate.migrationPhase,
+    dataSchema: qualification.candidate.dataSchema,
+    manifestKey: qualification.candidate.manifestKey,
+    manifestSha256: qualification.candidate.manifestSha256,
+    requiredPlatforms: DIRECT_C_CANONICAL_UPDATER_PLATFORMS,
+  })
+  assert.equal(qualification.state, 'candidate-pinned')
+  assert.equal(
+    tracked.approvedNext.manifestSha256,
+    'e8b0508c345e2cf2e51c5b773d5042ccad3c4a67089e6fe016eeed399f8faf82',
+  )
+  assert.deepEqual(
+    Object.fromEntries(
+      Object.entries(qualification.candidate.assets).map(
+        ([platform, asset]) => [platform, asset.sha256],
+      ),
+    ),
+    {
+      windows:
+        '03903eac4282a9c679a7863d9d2c72cf64aaf1123357e9a71c00c051d5b9350b',
+      macos:
+        '59d054faaa2adc906d68714e10ac988ac835abc9ac9f0fb861d1cfc17c2da7f9',
+      linux:
+        'dda0fcafe253f2d19d86b839bea51da5840efe24e768b83d038b1d3371f889e5',
+    },
+  )
   assert.deepEqual(tracked.current, DIRECT_C_CURRENT)
   assert.deepEqual(tracked.routerSources, DIRECT_C_ROUTER_SOURCES)
   assert.equal(
@@ -292,8 +316,16 @@ test('tracked DIRECT_C policy awaits approval and pins every reviewed source', (
       },
     )
   }
-  assert.throws(() =>
+  assert.doesNotThrow(() =>
     validateDirectCTransitionPolicy(tracked, {
+      requireApprovedNext: true,
+    }),
+  )
+
+  const awaiting = structuredClone(tracked)
+  awaiting.approvedNext = null
+  assert.throws(() =>
+    validateDirectCTransitionPolicy(awaiting, {
       requireApprovedNext: true,
     }),
     /approvedNext is still fail-closed/,

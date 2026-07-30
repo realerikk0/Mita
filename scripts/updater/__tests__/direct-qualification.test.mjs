@@ -237,22 +237,48 @@ function aggregateFixture() {
   return { root, policy, artifacts }
 }
 
-test('repository policy awaits the reviewed candidate pin and remains fail-closed', () => {
-  assert.equal(trackedPolicy.state, 'awaiting-candidate-pin')
-  assert.equal(trackedPolicy.candidate.manifestSha256, null)
-  for (const platform of ['windows', 'macos', 'linux']) {
-    assert.equal(trackedPolicy.candidate.assets[platform].sha256, null)
-  }
+test('repository policy pins the reviewed candidate while an awaiting policy remains fail-closed', () => {
+  assert.equal(trackedPolicy.state, 'candidate-pinned')
+  assert.equal(
+    trackedPolicy.candidate.manifestSha256,
+    'e8b0508c345e2cf2e51c5b773d5042ccad3c4a67089e6fe016eeed399f8faf82',
+  )
+  assert.deepEqual(
+    Object.fromEntries(
+      Object.entries(trackedPolicy.candidate.assets).map(
+        ([platform, asset]) => [platform, asset.sha256],
+      ),
+    ),
+    {
+      windows:
+        '03903eac4282a9c679a7863d9d2c72cf64aaf1123357e9a71c00c051d5b9350b',
+      macos:
+        '59d054faaa2adc906d68714e10ac988ac835abc9ac9f0fb861d1cfc17c2da7f9',
+      linux:
+        'dda0fcafe253f2d19d86b839bea51da5840efe24e768b83d038b1d3371f889e5',
+    },
+  )
+  assert.doesNotThrow(() =>
+    validateDirectQualificationPolicy(trackedPolicy, {
+      requirePinned: true,
+    }),
+  )
   const result = spawnSync(
     process.execPath,
     [script, 'validate-policy', '--policy', policyFile],
     { encoding: 'utf8' },
   )
-  assert.notEqual(result.status, 0)
-  assert.match(result.stderr, /policy\.state=candidate-pinned/)
+  assert.equal(result.status, 0, result.stderr)
+
+  const awaiting = clone(trackedPolicy)
+  awaiting.state = 'awaiting-candidate-pin'
+  awaiting.candidate.manifestSha256 = null
+  for (const platform of ['windows', 'macos', 'linux']) {
+    awaiting.candidate.assets[platform].sha256 = null
+  }
   assert.throws(
     () =>
-      validateDirectQualificationPolicy(trackedPolicy, {
+      validateDirectQualificationPolicy(awaiting, {
         requirePinned: true,
       }),
     /policy\.state=candidate-pinned/,
