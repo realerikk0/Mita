@@ -4540,12 +4540,15 @@ export function validateCiWorkflow(source) {
     )
     const buildCondition =
       /^\s*if:\s*needs\.ci-scope\.outputs\.build_windows\s*==\s*'true'\s*$/m
+    const unsignedSignerReference =
+      /\$\{\{\s*secrets\.|\b(?:BIYAN_SIGNING_KEY|TAURI_SIGNING_PRIVATE_KEY(?:_PATH|_PASSWORD)?)\b/
     const buildSchemaSequence =
       /^\s*\$releaseMetadata\s*=\s*Get-Content\s+biyan-release\.json\s+-Raw\s*\|\s*\n\s*ConvertFrom-Json\s*\n\s*\$env:BIYAN_DATA_SCHEMA\s*=\s*\[string\]\$releaseMetadata\.dataSchema\s*\n\s*\$version\s*=\s*\(\s*\n\s*Get-Content\s+src-tauri\/tauri\.conf\.json\s+-Raw\s*\|\s*\n\s*ConvertFrom-Json\s*\n\s*\)\.version\s*\n\s*&\s+node\s+scripts\/release-version\.mjs\s+stamp\s+\$version\s+--windows\s*\n\s*if\s*\(\$LASTEXITCODE\s+-ne\s+0\)\s*\{\s*\n\s*throw\s+'Windows release stamp failed'\s*\n\s*\}\s*\n\s*\$tauriConfigPath\s*=\s*'src-tauri\/tauri\.conf\.json'\s*\n\s*\$tauriConfig\s*=\s*Get-Content\s+\$tauriConfigPath\s+-Raw\s*\|\s*\n\s*ConvertFrom-Json\s*\n\s*\$tauriConfig\.bundle\.createUpdaterArtifacts\s*=\s*\$false\s*\n\s*\$tauriConfig\s*\|\s*ConvertTo-Json\s+-Depth\s+100\s*\|\s*\n\s*Set-Content\s+\$tauriConfigPath\s+-Encoding\s+utf8NoBOM\s*\n\s*\$unsignedConfig\s*=\s*Get-Content\s+\$tauriConfigPath\s+-Raw\s*\|\s*\n\s*ConvertFrom-Json\s*\n\s*if\s*\(\$unsignedConfig\.bundle\.createUpdaterArtifacts\s+-ne\s+\$false\)\s*\{\s*\n\s*throw\s+'Focused PR candidate must disable updater artifacts'\s*\n\s*\}\s*\n\s*make build\s*$/m
     if (
       !/^\s*timeout-minutes:\s*90\s*$/m.test(windowsPr) ||
       !buildStep ||
       !buildCondition.test(buildStep) ||
+      unsignedSignerReference.test(uncommentedSource(buildStep)) ||
       /^\s*continue-on-error:\s*/m.test(buildStep) ||
       !hasRunInvocation(buildStep, /^make build$/) ||
       !buildSchemaSequence.test(uncommentedSource(buildStep)) ||

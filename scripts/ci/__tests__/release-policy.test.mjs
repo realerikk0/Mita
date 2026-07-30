@@ -4355,6 +4355,10 @@ jobs:
       '          if ($unsignedConfig.bundle.createUpdaterArtifacts -eq $false) {'
     ),
     workflow.replace(
+      '        shell: pwsh\n        run: |\n          $releaseMetadata = Get-Content biyan-release.json -Raw |',
+      '        shell: pwsh\n        env:\n          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}\n        run: |\n          $releaseMetadata = Get-Content biyan-release.json -Raw |'
+    ),
+    workflow.replace(
       '      - name: Build focused unsigned Windows candidate\n',
       '      - name: Build focused unsigned Windows candidate\n        continue-on-error: true\n'
     ),
