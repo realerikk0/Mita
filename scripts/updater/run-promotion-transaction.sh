@@ -68,7 +68,7 @@ probe_r2() {
 probe_oss() {
   local key="$1" name="$2" rc
   if ossutil api head-object --bucket "$ALIYUN_OSS_BUCKET" --key "$key" \
-    --endpoint "$oss_endpoint" --region "$ALIYUN_REGION" --output-format json \
+    --endpoint "$oss_endpoint" --region "$ALIYUN_REGION" --output-format json --quiet \
     >"dist/state/probes/${name}.stdout" \
     2>"dist/state/probes/${name}.stderr"; then
     rc=0
@@ -88,7 +88,7 @@ put_oss_json() {
     --body "file://${file}" --content-type application/json \
     --cache-control no-store --object-acl default \
     --forbid-overwrite "$([[ "$overwrite" == true ]] && echo false || echo true)" \
-    --endpoint "$oss_endpoint" --region "$ALIYUN_REGION" --output-format json
+    --endpoint "$oss_endpoint" --region "$ALIYUN_REGION" --output-format json --quiet
 }
 
 put_r2_json() {
@@ -152,7 +152,7 @@ publish_transaction_next_policy() {
       --content-type application/json --cache-control no-store \
       --object-acl private --forbid-overwrite true \
       --endpoint "$oss_endpoint" --region "$ALIYUN_REGION" \
-      --output-format json >/dev/null
+      --output-format json --quiet >/dev/null
   else
     jq -e '.state == "exists"' \
       dist/state/probes/next-policy-oss.json >/dev/null
@@ -165,7 +165,7 @@ publish_transaction_next_policy() {
     --endpoint "$oss_endpoint" --region "$ALIYUN_REGION"
   ossutil api head-object --bucket "$ALIYUN_OSS_BUCKET" --key "$key" \
     --endpoint "$oss_endpoint" --region "$ALIYUN_REGION" \
-    --output-format json >dist/state/next-policy-oss-readback-metadata.json
+    --output-format json --quiet >dist/state/next-policy-oss-readback-metadata.json
   cmp dist/state/next-policy.json dist/state/next-policy-r2-readback.json
   cmp dist/state/next-policy.json dist/state/next-policy-oss-readback.json
   test "$(sha256sum dist/state/next-policy-r2-readback.json | cut -d' ' -f1)" \
@@ -240,7 +240,7 @@ delete_open_journal() {
         --endpoint "$oss_endpoint" --region "$ALIYUN_REGION"
       ossutil api head-object --bucket "$ALIYUN_OSS_BUCKET" \
         --key "$OPEN_TRANSACTION_KEY" --endpoint "$oss_endpoint" \
-        --region "$ALIYUN_REGION" --output-format json \
+        --region "$ALIYUN_REGION" --output-format json --quiet \
         >dist/state/open-journal-oss-predelete-metadata.json
       cmp "$journal" dist/state/open-journal-oss-predelete.json
       test "$(jq -er .transactionId \
@@ -272,7 +272,7 @@ delete_open_journal() {
           --endpoint "$oss_endpoint" --region "$ALIYUN_REGION"
         ossutil api head-object --bucket "$ALIYUN_OSS_BUCKET" \
           --key "$OPEN_TRANSACTION_KEY" --endpoint "$oss_endpoint" \
-          --region "$ALIYUN_REGION" --output-format json \
+          --region "$ALIYUN_REGION" --output-format json --quiet \
           >dist/state/open-journal-oss-immediate-metadata.json
         cmp "$journal" dist/state/open-journal-oss-immediate.json
         test "$(jq -er .transactionId \
@@ -285,7 +285,7 @@ delete_open_journal() {
         ' dist/state/open-journal-oss-immediate-metadata-plan.json >/dev/null
         ossutil api delete-object --bucket "$ALIYUN_OSS_BUCKET" \
           --key "$OPEN_TRANSACTION_KEY" --endpoint "$oss_endpoint" \
-          --region "$ALIYUN_REGION" --output-format json >/dev/null
+          --region "$ALIYUN_REGION" --output-format json --quiet >/dev/null
       else
         test "$oss_state" = absent
       fi
@@ -337,7 +337,7 @@ publish_snapshot_backup_oss() {
       --body "file://${file}" --content-type "$content_type" \
       --cache-control "$cache_control" --object-acl "$acl" \
       --forbid-overwrite true --endpoint "$oss_endpoint" \
-      --region "$ALIYUN_REGION" --output-format json >/dev/null
+      --region "$ALIYUN_REGION" --output-format json --quiet >/dev/null
   else
     jq -e '.state == "exists"' \
       "dist/state/probes/${name}-probe.json" >/dev/null
@@ -347,10 +347,10 @@ publish_snapshot_backup_oss() {
     --endpoint "$oss_endpoint" --region "$ALIYUN_REGION"
   ossutil api head-object --bucket "$ALIYUN_OSS_BUCKET" --key "$key" \
     --endpoint "$oss_endpoint" --region "$ALIYUN_REGION" \
-    --output-format json >"dist/state/${name}-metadata.json"
+    --output-format json --quiet >"dist/state/${name}-metadata.json"
   ossutil api get-object-acl --bucket "$ALIYUN_OSS_BUCKET" --key "$key" \
     --endpoint "$oss_endpoint" --region "$ALIYUN_REGION" \
-    --output-format json >"dist/state/${name}-acl.json"
+    --output-format json --quiet >"dist/state/${name}-acl.json"
   node scripts/updater/promotion-transaction.mjs verify-snapshot-readback \
     --journal "$journal" --index "$index" \
     --bytes "dist/state/${name}-readback" \
@@ -404,7 +404,7 @@ classify_ledger_object() {
       || return 1
     ossutil api head-object --bucket "$ALIYUN_OSS_BUCKET" --key "$key" \
       --endpoint "$oss_endpoint" --region "$ALIYUN_REGION" \
-      --output-format json \
+      --output-format json --quiet \
       >"dist/state/ledger-cleanup/${stage}-${index}.metadata.json" \
       || return 1
   else
@@ -481,7 +481,7 @@ recover_terminal_open_journal() {
       --endpoint "$oss_endpoint" --region "$ALIYUN_REGION"
     ossutil api head-object --bucket "$ALIYUN_OSS_BUCKET" \
       --key "$OPEN_TRANSACTION_KEY" --endpoint "$oss_endpoint" \
-      --region "$ALIYUN_REGION" --output-format json \
+      --region "$ALIYUN_REGION" --output-format json --quiet \
       >dist/state/terminal-recovery/open-journal-oss-metadata.json
     verify_json_metadata \
       dist/state/terminal-recovery/open-journal-oss-metadata.json \
@@ -523,7 +523,7 @@ recover_terminal_open_journal() {
     --endpoint "$oss_endpoint" --region "$ALIYUN_REGION"
   ossutil api head-object --bucket "$ALIYUN_OSS_BUCKET" \
     --key "$history_key" --endpoint "$oss_endpoint" \
-    --region "$ALIYUN_REGION" --output-format json \
+    --region "$ALIYUN_REGION" --output-format json --quiet \
     >dist/state/terminal-recovery/history-oss-metadata.json
   cmp "$terminal_journal" dist/state/terminal-recovery/history-r2.json
   cmp "$terminal_journal" dist/state/terminal-recovery/history-oss.json
@@ -544,7 +544,7 @@ recover_terminal_open_journal() {
     --endpoint "$oss_endpoint" --region "$ALIYUN_REGION"
   ossutil api head-object --bucket "$ALIYUN_OSS_BUCKET" \
     --key "$next_policy_key" --endpoint "$oss_endpoint" \
-    --region "$ALIYUN_REGION" --output-format json \
+    --region "$ALIYUN_REGION" --output-format json --quiet \
     >dist/state/terminal-recovery/next-policy-oss-metadata.json
   cmp dist/state/terminal-recovery/next-policy-r2.json \
     dist/state/terminal-recovery/next-policy-oss.json
@@ -604,11 +604,11 @@ recover_terminal_open_journal() {
     --endpoint "$oss_endpoint" --region "$ALIYUN_REGION"
   ossutil api head-object --bucket "$ALIYUN_OSS_BUCKET" \
     --key "$legacy_oss_backup" --endpoint "$oss_endpoint" \
-    --region "$ALIYUN_REGION" --output-format json \
+    --region "$ALIYUN_REGION" --output-format json --quiet \
     >dist/state/terminal-recovery/backups/legacy-oss-metadata.json
   ossutil api get-object-acl --bucket "$ALIYUN_OSS_BUCKET" \
     --key "$legacy_oss_backup" --endpoint "$oss_endpoint" \
-    --region "$ALIYUN_REGION" --output-format json \
+    --region "$ALIYUN_REGION" --output-format json --quiet \
     >dist/state/terminal-recovery/backups/legacy-oss-acl.json
   node scripts/updater/promotion-transaction.mjs verify-snapshot-readback \
     --journal "$terminal_journal" --index "$legacy_oss_index" \
@@ -716,7 +716,7 @@ recover_terminal_open_journal() {
       --endpoint "$oss_endpoint" --region "$ALIYUN_REGION"
     ossutil api head-object --bucket "$ALIYUN_OSS_BUCKET" \
       --key "$legacy_target_key" --endpoint "$oss_endpoint" \
-      --region "$ALIYUN_REGION" --output-format json \
+      --region "$ALIYUN_REGION" --output-format json --quiet \
       >dist/state/terminal-recovery/legacy-target-oss-metadata.json
     aws s3api get-object --bucket "$CLOUDFLARE_R2_BUCKET" \
       --key "$legacy_target_key" --endpoint-url "$r2_endpoint" \
@@ -754,11 +754,11 @@ recover_terminal_open_journal() {
     --endpoint "$oss_endpoint" --region "$ALIYUN_REGION"
   ossutil api head-object --bucket "$ALIYUN_OSS_BUCKET" \
     --key "$LEGACY_ALIYUN_KEY" --endpoint "$oss_endpoint" \
-    --region "$ALIYUN_REGION" --output-format json \
+    --region "$ALIYUN_REGION" --output-format json --quiet \
     >dist/state/terminal-recovery/live/legacy-oss-metadata.json
   ossutil api get-object-acl --bucket "$ALIYUN_OSS_BUCKET" \
     --key "$LEGACY_ALIYUN_KEY" --endpoint "$oss_endpoint" \
-    --region "$ALIYUN_REGION" --output-format json \
+    --region "$ALIYUN_REGION" --output-format json --quiet \
     >dist/state/terminal-recovery/live/legacy-oss-acl.json
   aws s3api get-object --bucket "$CLOUDFLARE_R2_BUCKET" \
     --key "$LEGACY_R2_KEY" --endpoint-url "$r2_endpoint" \
@@ -961,7 +961,7 @@ fi
 
 ossutil api get-object-acl --bucket "$ALIYUN_OSS_BUCKET" \
   --key "$LEGACY_ALIYUN_KEY" --endpoint "$oss_endpoint" \
-  --region "$ALIYUN_REGION" --output-format json \
+  --region "$ALIYUN_REGION" --output-format json --quiet \
   > dist/state/snapshots/legacy-oss-acl.json
 legacy_oss_acl="$(jq -er '.acl // .Acl // .objectAcl // .ObjectAcl' \
   dist/state/snapshots/legacy-oss-acl.json)"
@@ -1272,7 +1272,7 @@ rollback() {
       --cache-control "$(jq -er .cacheControl \
         dist/state/legacy-oss-backup-metadata-plan.json)" \
       --object-acl "$legacy_oss_acl" --endpoint "$oss_endpoint" \
-      --region "$ALIYUN_REGION" --output-format json >/dev/null \
+      --region "$ALIYUN_REGION" --output-format json --quiet >/dev/null \
       || rollback_failed=1
     if [[ "$rollback_failed" -eq 0 ]]; then legacy_restore_performed=true; fi
   fi
@@ -1298,7 +1298,7 @@ rollback() {
       || rollback_failed=1
     ossutil api head-object --bucket "$ALIYUN_OSS_BUCKET" \
       --key "$LEGACY_ALIYUN_KEY" --endpoint "$oss_endpoint" \
-      --region "$ALIYUN_REGION" --output-format json \
+      --region "$ALIYUN_REGION" --output-format json --quiet \
       > dist/state/rollback-legacy-oss-metadata.json \
       || rollback_failed=1
     aws s3api get-object --bucket "$CLOUDFLARE_R2_BUCKET" \
@@ -1308,7 +1308,7 @@ rollback() {
       || rollback_failed=1
     ossutil api get-object-acl --bucket "$ALIYUN_OSS_BUCKET" \
       --key "$LEGACY_ALIYUN_KEY" --endpoint "$oss_endpoint" \
-      --region "$ALIYUN_REGION" --output-format json \
+      --region "$ALIYUN_REGION" --output-format json --quiet \
       > dist/state/rollback-legacy-oss-acl.json || rollback_failed=1
     node scripts/updater/promotion-transaction.mjs \
       verify-snapshot-readback --journal "$journal" --index 1 \
@@ -1470,7 +1470,7 @@ rollback() {
       if [[ "$ledger_provider" == oss ]]; then
         ossutil api delete-object --bucket "$ALIYUN_OSS_BUCKET" \
           --key "$ledger_key" --endpoint "$oss_endpoint" \
-          --region "$ALIYUN_REGION" --output-format json >/dev/null \
+          --region "$ALIYUN_REGION" --output-format json --quiet >/dev/null \
           || { rollback_failed=1; break; }
       else
         ledger_etag="$(cat \
@@ -1555,7 +1555,7 @@ publish_immutable_oss() {
     --body "file://${file}" --content-type "$content_type" \
     --cache-control "public, max-age=31536000, immutable" \
     --object-acl default --forbid-overwrite true \
-    --endpoint "$oss_endpoint" --region "$ALIYUN_REGION" --output-format json >/dev/null
+    --endpoint "$oss_endpoint" --region "$ALIYUN_REGION" --output-format json --quiet >/dev/null
   ossutil cp "oss://${ALIYUN_OSS_BUCKET}/${key}" "dist/state/${probe_name}" \
     --force --endpoint "$oss_endpoint" --region "$ALIYUN_REGION"
   cmp "$file" "dist/state/${probe_name}"
@@ -1624,7 +1624,7 @@ if [[ "$update_legacy" == true ]]; then
     --body "file://${legacy_publish_source}" --content-type application/json \
     --cache-control "public, max-age=60, must-revalidate" --object-acl default \
     --forbid-overwrite true --endpoint "$oss_endpoint" --region "$ALIYUN_REGION" \
-    --output-format json >/dev/null
+    --output-format json --quiet >/dev/null
   aws s3api put-object --bucket "$CLOUDFLARE_R2_BUCKET" --key "$legacy_staging_key" \
     --body "$legacy_publish_source" --content-type application/json \
     --cache-control "public, max-age=60, must-revalidate" --if-none-match '*' \
@@ -1666,7 +1666,7 @@ if [[ "$update_legacy" == true ]]; then
       --content-type application/json \
       --cache-control "public, max-age=60, must-revalidate" \
       --object-acl "$legacy_oss_acl" --endpoint "$oss_endpoint" \
-      --region "$ALIYUN_REGION" --output-format json >/dev/null
+      --region "$ALIYUN_REGION" --output-format json --quiet >/dev/null
   fi
   ossutil cp "oss://${ALIYUN_OSS_BUCKET}/${LEGACY_ALIYUN_KEY}" \
     dist/state/forward-legacy-oss-readback.json --force \
@@ -1823,7 +1823,7 @@ done < <(
 if [[ "$update_legacy" == true ]]; then
   ossutil api delete-object --bucket "$ALIYUN_OSS_BUCKET" \
     --key "$legacy_staging_key" --endpoint "$oss_endpoint" \
-    --region "$ALIYUN_REGION" --output-format json >/dev/null
+    --region "$ALIYUN_REGION" --output-format json --quiet >/dev/null
   aws s3api delete-object --bucket "$CLOUDFLARE_R2_BUCKET" \
     --key "$legacy_staging_key" --endpoint-url "$r2_endpoint" >/dev/null
 fi

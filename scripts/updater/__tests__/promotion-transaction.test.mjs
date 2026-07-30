@@ -542,6 +542,12 @@ const notFound = (key) => {
   process.stderr.write('404 NoSuchKey ' + provider + ' ' + key + '\\n')
   process.exit(44)
 }
+const writeOssJson = (bytes) => {
+  process.stdout.write(bytes)
+  if (!args.includes('--quiet')) {
+    process.stdout.write('\\n0.123456(s) elapsed\\n')
+  }
+}
 if (tool === 'aws') {
   if (args.includes('--generate-cli-skeleton')) {
     process.stdout.write(JSON.stringify({IfMatch:'',IfNoneMatch:''}) + '\\n')
@@ -579,7 +585,7 @@ if (tool === 'aws') {
   if (args[0] === 'api' && args[1] === 'head-object') {
     const key = value('--key')
     if (!exists(key)) notFound(key)
-    process.stdout.write(metadata(key))
+    writeOssJson(metadata(key))
   } else if (args[0] === 'cp') {
     const key = args[1].replace(/^oss:\\/\\/[^/]+\\//, '')
     if (!exists(key)) notFound(key)
@@ -587,7 +593,7 @@ if (tool === 'aws') {
   } else if (args[0] === 'api' && args[1] === 'get-object-acl') {
     const key = value('--key')
     if (!exists(key)) notFound(key)
-    process.stdout.write(fs.readFileSync(object(key) + '.acl.json'))
+    writeOssJson(fs.readFileSync(object(key) + '.acl.json'))
   } else if (args[0] === 'api' && args[1] === 'delete-object') {
     const key = value('--key')
     if (exists(key)) {
@@ -596,7 +602,7 @@ if (tool === 'aws') {
       fs.rmSync(object(key) + '.acl.json', {force:true})
       fs.appendFileSync(process.env.FAKE_MUTATIONS, 'oss-delete ' + key + '\\n')
     }
-    process.stdout.write('{}\\n')
+    writeOssJson('{}\\n')
   } else {
     process.stderr.write('unsupported ossutil: ' + args.join(' ') + '\\n')
     process.exit(65)
@@ -2609,6 +2615,53 @@ test('promotion workflows carry the fail-closed transaction controls', () => {
     path.join(repoRoot, '.github/workflows/updater-health-gate.yml')
   )
   assert.match(health, /validate-health-evidence-url/)
+})
+
+test('every machine-readable ossutil API call suppresses the human elapsed trailer', () => {
+  const roots = [
+    path.join(repoRoot, '.github/workflows'),
+    path.join(repoRoot, 'scripts/updater'),
+  ]
+  const discovered = []
+  const visit = (directory) => {
+    for (const entry of fs.readdirSync(directory, { withFileTypes: true })) {
+      const absolute = path.join(directory, entry.name)
+      if (entry.isDirectory()) {
+        if (entry.name !== '__tests__') visit(absolute)
+        continue
+      }
+      if (!/\.(?:mjs|sh|ya?ml)$/.test(entry.name)) continue
+      const source = readText(absolute)
+      if (source.includes('ossutil api')) {
+        discovered.push(path.relative(repoRoot, absolute))
+      }
+    }
+  }
+  for (const root of roots) visit(root)
+  assert.deepEqual(discovered.sort(), [
+    '.github/workflows/biyan-a-canary.yml',
+    '.github/workflows/promote-desktop-update.yml',
+    'scripts/updater/promotion-transaction.mjs',
+    'scripts/updater/run-pause-transaction.sh',
+    'scripts/updater/run-promotion-transaction.sh',
+  ])
+
+  let commandCount = 0
+  for (const relative of discovered) {
+    const lines = readText(path.join(repoRoot, relative)).split('\n')
+    for (let index = 0; index < lines.length; index += 1) {
+      if (!lines[index].includes('ossutil api')) continue
+      commandCount += 1
+      let command = lines[index]
+      while (lines[index].trimEnd().endsWith('\\')) {
+        index += 1
+        command += `\n${lines[index]}`
+      }
+      assert.match(command, /--output-format json/, relative)
+      assert.match(command, /--quiet/, relative)
+    }
+  }
+  assert.equal(commandCount, 68)
 })
 
 test('updater workflows expose production secrets only to required read or mutation steps', () => {

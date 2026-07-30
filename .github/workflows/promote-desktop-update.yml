@@ -396,7 +396,7 @@ jobs:
             set +e
             ossutil api head-object --bucket "$ALIYUN_OSS_BUCKET" --key "$key" \
               --endpoint "$oss_endpoint" --region "$ALIYUN_REGION" \
-              --output-format json \
+              --output-format json --quiet \
               >"dist/state/probes/${name}.stdout" 2>"dist/state/probes/${name}.stderr"
             rc=$?
             set -e

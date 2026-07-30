@@ -875,7 +875,7 @@ jobs:
             set +e
             ossutil api head-object --bucket "$ALIYUN_OSS_BUCKET" \
               --key "$key" --endpoint "$oss_endpoint" \
-              --region "$ALIYUN_REGION" --output-format json \
+              --region "$ALIYUN_REGION" --output-format json --quiet \
               >"dist/evidence/probes/${name}.stdout" \
               2>"dist/evidence/probes/${name}.stderr"
             rc=$?
@@ -919,7 +919,7 @@ jobs:
                 --cache-control "public, max-age=31536000, immutable" \
                 --object-acl default --forbid-overwrite true \
                 --endpoint "$oss_endpoint" --region "$ALIYUN_REGION" \
-                --output-format json >/dev/null
+                --output-format json --quiet >/dev/null
             else
               jq -e '.state == "exists"' \
                 "dist/evidence/probes/${name}-oss.json" >/dev/null
