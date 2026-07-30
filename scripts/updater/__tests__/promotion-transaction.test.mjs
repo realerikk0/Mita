@@ -3285,7 +3285,10 @@ test('every machine-readable ossutil API call suppresses the human elapsed trail
       assert.match(command, /--quiet/, relative)
     }
   }
-  assert.equal(commandCount, 68)
+  // The split-lock recovery path adds five explicitly machine-readable OSS
+  // probes. Keep this count locked so a future OSS command cannot bypass the
+  // JSON/quiet contract unnoticed.
+  assert.equal(commandCount, 73)
 })
 
 test('updater workflows expose production secrets only to required read or mutation steps', () => {
