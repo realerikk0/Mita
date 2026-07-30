@@ -13,6 +13,7 @@ import {
   classifyPolicyRollback,
   classifyRemoteProbe,
   createJournal,
+  extractOssAcl,
   extractR2Etag,
   pollPublicBytes,
   recoveryCommands,
@@ -425,7 +426,12 @@ function runTerminalRedispatch({
       if (provider === 'oss') {
         fs.writeFileSync(
           `${file}.acl.json`,
-          `${JSON.stringify(acl ?? { acl: 'default' })}\n`
+          `${JSON.stringify(
+            acl ?? {
+              AccessControlList: { Grant: 'default' },
+              Owner: { DisplayName: 'test-owner', ID: 'test-owner' },
+            }
+          )}\n`
         )
       }
     }
@@ -1188,6 +1194,112 @@ test('R2 ETag and recovery bytes metadata ACL readback are strict', () => {
       }),
     /metadata does not match/
   )
+})
+
+test('OSS ACL extraction matches pinned ossutil output and rejects schema drift', () => {
+  const productionAcl = {
+    AccessControlList: { Grant: 'default' },
+    Owner: {
+      DisplayName: 'test-owner',
+      ID: 'test-owner',
+    },
+  }
+  assert.equal(extractOssAcl(productionAcl), 'default')
+  for (const legacy of [
+    { acl: 'private' },
+    { Acl: 'private' },
+    { objectAcl: 'public-read' },
+    { ObjectAcl: 'public-read' },
+  ]) {
+    assert.equal(extractOssAcl(legacy), Object.values(legacy)[0])
+  }
+  assert.equal(
+    extractOssAcl({
+      acl: 'default',
+      AccessControlList: { Grant: 'default' },
+    }),
+    'default'
+  )
+  assert.throws(
+    () =>
+      extractOssAcl({
+        acl: 'default',
+        AccessControlList: { Grant: 'private' },
+      }),
+    /no unambiguous ACL/
+  )
+  assert.throws(
+    () => extractOssAcl({ AccessControlList: { Grant: 'public-read-write' } }),
+    /not safely restorable/
+  )
+  assert.throws(
+    () => extractOssAcl({ AccessControlList: { grant: 'default' } }),
+    /no unambiguous ACL/
+  )
+  assert.throws(
+    () => extractOssAcl({ AccessControlList: { Grant: 1 } }),
+    /non-string approved ACL field/
+  )
+
+  const temp = fs.mkdtempSync(path.join(os.tmpdir(), 'biyan-oss-acl-'))
+  try {
+    const aclFile = path.join(temp, 'acl.json')
+    fs.writeFileSync(
+      aclFile,
+      `${JSON.stringify(productionAcl, null, 2)}\n`
+    )
+    const result = spawnSync(
+      process.execPath,
+      [
+        path.join(repoRoot, 'scripts/updater/promotion-transaction.mjs'),
+        'extract-oss-acl',
+        '--acl',
+        aclFile,
+      ],
+      { encoding: 'utf8' }
+    )
+    assert.equal(result.status, 0, result.stderr)
+    assert.equal(result.stdout, 'default\n')
+
+    const journalFile = path.join(temp, 'journal.json')
+    const prepared = journal()
+    prepared.snapshots[1].acl = productionAcl
+    fs.writeFileSync(
+      journalFile,
+      `${JSON.stringify(prepared, null, 2)}\n`
+    )
+    const snapshotResult = spawnSync(
+      process.execPath,
+      [
+        path.join(repoRoot, 'scripts/updater/promotion-transaction.mjs'),
+        'extract-oss-acl',
+        '--acl',
+        journalFile,
+        '--snapshot-index',
+        '1',
+      ],
+      { encoding: 'utf8' }
+    )
+    assert.equal(snapshotResult.status, 0, snapshotResult.stderr)
+    assert.equal(snapshotResult.stdout, 'default\n')
+
+    const invalidSnapshotResult = spawnSync(
+      process.execPath,
+      [
+        path.join(repoRoot, 'scripts/updater/promotion-transaction.mjs'),
+        'extract-oss-acl',
+        '--acl',
+        journalFile,
+        '--snapshot-index',
+        '0',
+      ],
+      { encoding: 'utf8' }
+    )
+    assert.equal(invalidSnapshotResult.status, 1)
+    assert.match(invalidSnapshotResult.stderr, /snapshot index is invalid/)
+  } finally {
+    fs.rmSync(temp, { recursive: true, force: true })
+  }
 })
 
 test('snapshot backup metadata is exactly reproducible or rejected', () => {
@@ -2442,7 +2554,20 @@ test('promotion workflows carry the fail-closed transaction controls', () => {
   const pauseRunner = readText(
     path.join(repoRoot, 'scripts/updater/run-pause-transaction.sh')
   )
+  const promotionTransaction = readText(
+    path.join(repoRoot, 'scripts/updater/promotion-transaction.mjs')
+  )
   const promotionControl = `${promotion}\n${runner}`
+  assert.equal((runner.match(/extract-oss-acl/g) ?? []).length, 1)
+  assert.equal((pauseRunner.match(/extract-oss-acl/g) ?? []).length, 4)
+  assert.equal(
+    (promotionTransaction.match(/extract-oss-acl/g) ?? []).length,
+    2
+  )
+  assert.doesNotMatch(
+    `${runner}\n${pauseRunner}`,
+    /\.acl\s*\/\/\s*\.Acl|\.objectAcl\s*\/\/\s*\.ObjectAcl|AccessControlList\.Grant/
+  )
   assert.match(promotion, /^  actions: read$/m)
   assert.match(promotion, /^  contents: read$/m)
   assert.match(promotion, /group: biyan-stable-updater-promotion/)

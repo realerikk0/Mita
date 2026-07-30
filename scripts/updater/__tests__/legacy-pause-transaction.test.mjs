@@ -78,7 +78,10 @@ const fallback = {
       `biyan/updater/transactions/${fallbackTransactionId}/backups/legacy-r2.json`,
   },
 }
-const ossAclBytes = bytes({ acl: 'public-read' })
+const ossAclBytes = bytes({
+  AccessControlList: { Grant: 'public-read' },
+  Owner: { DisplayName: 'test-owner', ID: 'test-owner' },
+})
 
 function policy(overrides = {}) {
   return {
@@ -888,6 +891,11 @@ test('pause workflows recover a partially deleted terminal lock before new mutat
   const runner = fs.readFileSync(
     path.join(repoRoot, 'scripts/updater/run-pause-transaction.sh'),
     'utf8'
+  )
+  assert.equal((runner.match(/extract-oss-acl/g) ?? []).length, 4)
+  assert.doesNotMatch(
+    runner,
+    /\.acl\s*\/\/\s*\.Acl|\.objectAcl\s*\/\/\s*\.ObjectAcl|AccessControlList\.Grant/
   )
   const recoveryStart = runner.indexOf('recover_terminal_open_journal() {')
   const recoveryEnd = runner.indexOf(

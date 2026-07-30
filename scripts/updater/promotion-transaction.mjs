@@ -213,30 +213,36 @@ export function backupMetadataPlan(value) {
   }
 }
 
-function normalizedAcl(value) {
+const RESTORABLE_OSS_ACLS = new Set(['default', 'private', 'public-read'])
+
+export function extractOssAcl(value) {
   assertPlainObject(value, 'OSS ACL metadata')
-  const values = []
-  const visit = (childValue) => {
-    if (!childValue || typeof childValue !== 'object') return
-    for (const [key, child] of Object.entries(childValue)) {
-      if (
-        ['acl', 'objectacl'].includes(
-          key.toLowerCase().replace(/[^a-z0-9]/g, '')
-        ) &&
-        typeof child === 'string'
-      ) {
-        values.push(child)
-      } else {
-        visit(child)
-      }
-    }
+  const accessControlList = value.AccessControlList
+  if (
+    accessControlList !== undefined &&
+    !isPlainObject(accessControlList)
+  ) {
+    throw new Error('OSS ACL metadata AccessControlList must be an object')
   }
-  visit(value)
+  const values = [
+    value.acl,
+    value.Acl,
+    value.objectAcl,
+    value.ObjectAcl,
+    accessControlList?.Grant,
+  ].filter((candidate) => candidate !== undefined)
+  if (values.some((candidate) => typeof candidate !== 'string')) {
+    throw new Error('OSS ACL metadata contains a non-string approved ACL field')
+  }
   const unique = [...new Set(values)]
   if (unique.length !== 1) {
     throw new Error('OSS ACL metadata has no unambiguous ACL')
   }
-  return unique[0]
+  const [acl] = unique
+  if (!RESTORABLE_OSS_ACLS.has(acl)) {
+    throw new Error(`OSS ACL metadata is not safely restorable: ${acl}`)
+  }
+  return acl
 }
 
 export function verifySnapshotReadback({
@@ -259,7 +265,7 @@ export function verifySnapshotReadback({
   }
   if (
     snapshot.provider === 'oss' &&
-    normalizedAcl(acl) !== normalizedAcl(snapshot.acl)
+    extractOssAcl(acl) !== extractOssAcl(snapshot.acl)
   ) {
     throw new Error('Recovery snapshot ACL does not match')
   }
@@ -268,7 +274,7 @@ export function verifySnapshotReadback({
     key: snapshot.key,
     sha256: snapshot.bytesSha256,
     metadata: actualMetadata,
-    acl: snapshot.provider === 'oss' ? normalizedAcl(acl) : null,
+    acl: snapshot.provider === 'oss' ? extractOssAcl(acl) : null,
   }
 }
 
@@ -439,6 +445,7 @@ function validateObjectSnapshot(snapshot, description) {
       if (!isPlainObject(snapshot.acl)) {
         throw new Error(`${description} OSS ACL evidence is not restorable`)
       }
+      extractOssAcl(snapshot.acl)
     } else if (snapshot.acl !== null) {
       throw new Error(`${description} R2 ACL must be null`)
     }
@@ -1454,7 +1461,7 @@ export function recoveryCommands(journalInput) {
     'if [[ "$(jq -r .action recovery-readback/decisions/legacy-oss.json)" == restore ]]; then',
     `  ossutil cp "oss://\${ALIYUN_OSS_BUCKET}/${legacyOss.key}" recovery-readback/live/legacy-oss-prewrite.json --force --endpoint "$oss_endpoint" --region "$ALIYUN_REGION"`,
     '  cmp recovery-readback/live/legacy-oss.json recovery-readback/live/legacy-oss-prewrite.json',
-    `  legacy_oss_acl="$(jq -er '.snapshots[${legacyOssIndex}].acl | .acl // .Acl // .objectAcl // .ObjectAcl' "$JOURNAL")"`,
+    `  legacy_oss_acl="$(node scripts/updater/promotion-transaction.mjs extract-oss-acl --acl "$JOURNAL" --snapshot-index ${q(legacyOssIndex)})"`,
     '  case "$legacy_oss_acl" in default|private|public-read) ;; *) echo "Unsafe ACL in journal" >&2; exit 1;; esac',
     '  legacy_oss_restore_needed=true',
     'fi',
@@ -1790,6 +1797,24 @@ async function runCli() {
     )
     return
   }
+  if (command === 'extract-oss-acl') {
+    const input = readJson(path.resolve(args['--acl']))
+    let acl = input
+    if (args['--snapshot-index'] !== undefined) {
+      const journal = validateJournal(input)
+      const index = Number(args['--snapshot-index'])
+      if (
+        !Number.isInteger(index) ||
+        !journal.snapshots[index] ||
+        journal.snapshots[index].provider !== 'oss'
+      ) {
+        throw new Error('OSS ACL snapshot index is invalid')
+      }
+      acl = journal.snapshots[index].acl
+    }
+    process.stdout.write(`${extractOssAcl(acl)}\n`)
+    return
+  }
   if (command === 'backup-metadata-plan') {
     const result = backupMetadataPlan(
       readJson(path.resolve(args['--metadata']))
@@ -1862,9 +1887,9 @@ async function runCli() {
       !snapshot ||
       snapshot.provider !== 'oss' ||
       !snapshot.existed ||
-      normalizedAcl(
+      extractOssAcl(
         readJson(path.resolve(args['--acl']))
-      ) !== normalizedAcl(snapshot.acl)
+      ) !== extractOssAcl(snapshot.acl)
     ) {
       throw new Error('Live OSS ACL does not match the terminal snapshot')
     }

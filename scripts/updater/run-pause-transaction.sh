@@ -162,8 +162,8 @@ publish_immutable_oss() {
     .contentType == "application/json"
     and .cacheControl == "no-store"
   ' "${state_dir}/${name}.metadata-plan.json" >/dev/null
-  test "$(jq -er '.acl // .Acl // .objectAcl // .ObjectAcl' \
-    "${state_dir}/${name}.acl.json")" = private
+  test "$(node scripts/updater/promotion-transaction.mjs extract-oss-acl \
+    --acl "${state_dir}/${name}.acl.json")" = private
 }
 
 persist_journal() {
@@ -487,10 +487,12 @@ recover_terminal_open_journal() {
   download_oss "$acl_backup" "${state_dir}/terminal-legacy-oss-acl-backup.json"
   test "$(sha256sum "${state_dir}/terminal-legacy-oss-acl-backup.json" \
     | cut -d' ' -f1)" = "$(jq -er .legacySnapshots.oss.aclSha256 "$journal")"
-  expected_acl="$(jq -er '.acl // .Acl // .objectAcl // .ObjectAcl' \
-    "${state_dir}/terminal-legacy-oss-acl-backup.json")"
-  actual_acl="$(jq -er '.acl // .Acl // .objectAcl // .ObjectAcl' \
-    "${state_dir}/terminal-live-legacy-oss-acl.json")"
+  expected_acl="$(node scripts/updater/promotion-transaction.mjs \
+    extract-oss-acl \
+    --acl "${state_dir}/terminal-legacy-oss-acl-backup.json")"
+  actual_acl="$(node scripts/updater/promotion-transaction.mjs \
+    extract-oss-acl \
+    --acl "${state_dir}/terminal-live-legacy-oss-acl.json")"
   test "$actual_acl" = "$expected_acl"
 
   if [[ "$terminal_state" == committed ]]; then
@@ -607,8 +609,8 @@ ossutil api get-object-acl --bucket "$ALIYUN_OSS_BUCKET" \
   --key "$LEGACY_ALIYUN_KEY" --endpoint "$oss_endpoint" \
   --region "$ALIYUN_REGION" --output-format json --quiet \
   >"${state_dir}/legacy-a-oss-acl.json"
-legacy_oss_acl="$(jq -er '.acl // .Acl // .objectAcl // .ObjectAcl' \
-  "${state_dir}/legacy-a-oss-acl.json")"
+legacy_oss_acl="$(node scripts/updater/promotion-transaction.mjs \
+  extract-oss-acl --acl "${state_dir}/legacy-a-oss-acl.json")"
 case "$legacy_oss_acl" in
   default|private|public-read) ;;
   *)
