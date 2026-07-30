@@ -1335,6 +1335,22 @@ test('snapshot backup metadata is exactly reproducible or rejected', () => {
   )
   assert.deepEqual(
     backupMetadataPlan({
+      AcceptRanges: 'bytes',
+      LastModified: '2026-07-30T08:41:28+00:00',
+      ContentLength: 3468,
+      ETag: '"089604107bc233cdf586d4afd8684f8e"',
+      ChecksumCRC64NVME: 'pH9V8sO2EOo=',
+      CacheControl: 'no-store',
+      ContentType: 'application/json',
+      Metadata: {},
+    }),
+    {
+      contentType: 'application/json',
+      cacheControl: 'no-store',
+    }
+  )
+  assert.deepEqual(
+    backupMetadataPlan({
       CacheControl: 'no-store',
       ContentType: 'application/json',
       Header: {
@@ -1388,6 +1404,13 @@ test('snapshot backup metadata is exactly reproducible or rejected', () => {
         'Cache-Control': ['no-store'],
         'Content-Type': ['application/json'],
         'x-oss-storage-class': ['Archive'],
+      },
+    },
+    {
+      Header: {
+        'Cache-Control': ['no-store'],
+        'Content-Type': ['application/json'],
+        'X-Oss-Object-Type': ['Appendable'],
       },
     },
     {
@@ -1499,6 +1522,57 @@ test('snapshot backup metadata is exactly reproducible or rejected', () => {
       }),
     /must be a nonempty string/
   )
+
+  for (const metadata of [
+    {
+      Header: {
+        'Cache-Control': ['no-store'],
+        'Content-Type': ['application/json'],
+        'X-Oss-Website-Redirect-Location': ['/legacy'],
+      },
+    },
+    {
+      Header: {
+        'Cache-Control': ['no-store'],
+        'Content-Type': ['application/json'],
+        'X-Oss-Server-Side-Encryption': ['AES256'],
+      },
+    },
+    {
+      Header: {
+        'Cache-Control': ['no-store'],
+        'Content-Type': ['application/json'],
+        'X-Oss-Object-Lock-Retain-Until-Date': [
+          '2026-08-01T00:00:00Z',
+        ],
+      },
+    },
+    {
+      CacheControl: 'no-store',
+      ContentType: 'application/json',
+      WebsiteRedirectLocation: '/legacy',
+    },
+    {
+      CacheControl: 'no-store',
+      ContentType: 'application/json',
+      ServerSideEncryption: 'AES256',
+    },
+    {
+      CacheControl: 'no-store',
+      ContentType: 'application/json',
+      'Content-Encodingg': 'gzip',
+    },
+    {
+      CacheControl: 'no-store',
+      ContentType: 'application/json',
+      UserMetadata: {},
+    },
+  ]) {
+    assert.throws(
+      () => backupMetadataPlan(metadata),
+      /unsupported field/
+    )
+  }
 })
 
 test('metadata CLI accepts the pinned ossutil 2.3.0 Header envelope', () => {
@@ -1514,11 +1588,19 @@ test('metadata CLI accepts the pinned ossutil 2.3.0 Header envelope', () => {
         Header: {
           'Accept-Ranges': ['bytes'],
           'Cache-Control': ['no-store'],
+          Connection: ['keep-alive'],
           'Content-Length': ['3468'],
           'Content-Md5': ['CJYEEHvCM831htSv2GhPjg=='],
           'Content-Type': ['application/json'],
+          Date: ['Thu, 30 Jul 2026 08:41:33 GMT'],
           Etag: ['"089604107BC233CDF586D4AFD8684F8E"'],
+          'Last-Modified': ['Thu, 30 Jul 2026 08:41:29 GMT'],
+          Server: ['AliyunOSS'],
+          Vary: ['Accept-Encoding'],
+          'X-Oss-Hash-Crc64ecma': ['10175078662113262299'],
           'X-Oss-Object-Type': ['Normal'],
+          'X-Oss-Request-Id': ['6A6B0E3DF9028F363769D727'],
+          'X-Oss-Server-Time': ['57'],
           'X-Oss-Storage-Class': ['Standard'],
         },
       }, null, 2)}\n`

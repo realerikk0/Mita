@@ -170,23 +170,34 @@ function normalizedMetadata(value) {
     ['content-language', 'contentlanguage'],
     ['expires', 'expires'],
     ['x-amz-storage-class', 'storageclass'],
+    ['x-oss-object-type', 'objecttype'],
     ['x-oss-storage-class', 'storageclass'],
+  ])
+  const ignoredRootFields = new Set([
+    'acceptranges',
+    'checksumcrc64nvme',
+    'contentlength',
+    'etag',
+    'lastmodified',
+  ])
+  const ignoredHeaderFields = new Set([
+    'accept-ranges',
+    'connection',
+    'content-length',
+    'content-md5',
+    'date',
+    'etag',
+    'last-modified',
+    'server',
+    'vary',
+    'x-oss-hash-crc64ecma',
+    'x-oss-request-id',
+    'x-oss-server-time',
   ])
   const customContainers = new Set([
     'metadata',
     'custom',
     'custommetadata',
-  ])
-  const metadataFieldShapes = new Set([
-    'cachecontrol',
-    'contenttype',
-    'contentencoding',
-    'contentdisposition',
-    'contentlanguage',
-    'expires',
-    'storageclass',
-    'xamzstorageclass',
-    'xossstorageclass',
   ])
   const scalarValue = (child, description, arrayValue = false) => {
     const candidate = arrayValue
@@ -242,16 +253,8 @@ function normalizedMetadata(value) {
         recordCustom(key, child, true)
         continue
       }
-      const compact = lower.replace(/[^a-z0-9]/g, '')
-      if (
-        metadataFieldShapes.has(compact) ||
-        compact === 'header' ||
-        compact === 'headers' ||
-        compact.startsWith('xamzmeta') ||
-        compact.startsWith('xossmeta')
-      ) {
-        throw new Error(`Object metadata Header has unsupported field ${key}`)
-      }
+      if (ignoredHeaderFields.has(lower)) continue
+      throw new Error(`Object metadata Header has unsupported field ${key}`)
     }
   }
   for (const [key, child] of Object.entries(value)) {
@@ -276,17 +279,8 @@ function normalizedMetadata(value) {
       visitHeader(child)
       continue
     }
-    const compact = lower.replace(/[^a-z0-9]/g, '')
-    if (
-      metadataFieldShapes.has(compact) ||
-      compact === 'header' ||
-      compact === 'headers' ||
-      customContainers.has(compact) ||
-      compact.startsWith('xamzmeta') ||
-      compact.startsWith('xossmeta')
-    ) {
-      throw new Error(`Object metadata has unsupported field ${key}`)
-    }
+    if (ignoredRootFields.has(lower)) continue
+    throw new Error(`Object metadata has unsupported field ${key}`)
   }
   const required = (name) => {
     const found = scalars.get(name)
@@ -301,6 +295,7 @@ function normalizedMetadata(value) {
     contentDisposition: optional('contentdisposition'),
     contentLanguage: optional('contentlanguage'),
     expires: optional('expires'),
+    objectType: optional('objecttype'),
     storageClass: optional('storageclass'),
     customMetadata: Object.fromEntries(
       Object.entries(customMetadata).sort(([left], [right]) =>
@@ -317,6 +312,7 @@ export function backupMetadataPlan(value) {
     metadata.contentDisposition !== null ||
     metadata.contentLanguage !== null ||
     metadata.expires !== null ||
+    ![null, 'Normal'].includes(metadata.objectType) ||
     Object.keys(metadata.customMetadata).length !== 0 ||
     ![null, 'STANDARD', 'Standard'].includes(metadata.storageClass)
   ) {
