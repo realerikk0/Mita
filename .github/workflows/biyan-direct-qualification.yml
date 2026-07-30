@@ -272,13 +272,13 @@ jobs:
           retention-days: 30
 
   stage-candidate:
-    name: Read and stage the exact Draft candidate
+    name: Read and stage the exact published candidate
     needs: preflight
     runs-on: ubuntu-24.04
     timeout-minutes: 60
     permissions:
       actions: read
-      contents: write
+      contents: read
     steps:
       - name: Check out trusted read-only staging tooling
         uses: actions/checkout@v4
@@ -287,7 +287,7 @@ jobs:
           fetch-depth: 0
           persist-credentials: false
 
-      - name: Read exact Draft and verify every staged byte
+      - name: Read exact published release and verify every staged byte
         env:
           GH_TOKEN: ${{ github.token }}
         shell: bash
@@ -336,7 +336,7 @@ jobs:
           )"
           gh api \
             "repos/${GITHUB_REPOSITORY}/releases/${release_id}" \
-            > dist/direct-candidate/evidence/draft-release.json
+            > dist/direct-candidate/evidence/candidate-release.json
           jq -e \
             --argjson release_id "$release_id" \
             --arg tag "$candidate_tag" \
@@ -344,10 +344,10 @@ jobs:
               .id == $release_id
               and .tag_name == $tag
               and .target_commitish == $commit
-              and .draft == true
+              and .draft == false
               and .prerelease == false
-              and .published_at == null
-            ' dist/direct-candidate/evidence/draft-release.json >/dev/null
+              and (.published_at | type == "string" and length > 0)
+            ' dist/direct-candidate/evidence/candidate-release.json >/dev/null
 
           jq -r '.candidate.assets | to_entries[].value.name' \
             scripts/updater/direct-qualification-policy.json \
@@ -380,7 +380,7 @@ jobs:
                     )
                   )
                 | [.id, .size, .digest] | @tsv
-              ' dist/direct-candidate/evidence/draft-release.json
+              ' dist/direct-candidate/evidence/candidate-release.json
             )"
             IFS=$'\t' read -r asset_id asset_size asset_digest \
               <<<"$asset_record"

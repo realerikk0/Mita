@@ -80,7 +80,7 @@ const TRUSTED_RELEASE_DISTRIBUTION_WORKFLOW_SHA256 =
   'c780b58de80c07962f42c43fc658b74b2f7c2734df01fd356cefb80f5480ca76'
 
 const TRUSTED_DIRECT_QUALIFICATION_WORKFLOW_SHA256 =
-  'e617339f5ccefeaa227a1c2941a0f252f1cdbd7c951978b96628f4b1e89927a0'
+  'cf6d31d1fbc55494376ac95c6539dfca8296b5f2cbfa79dbe30fb20c794ca0e5'
 
 export const TRUSTED_SENSITIVE_UPDATER_WORKFLOW_CONTRACTS = Object.freeze({
   '.github/workflows/biyan-a-canary.yml': Object.freeze({
@@ -3710,13 +3710,13 @@ export function validateDirectQualificationWorkflow(source) {
   if (
     stagePermissions.length !== 1 ||
     normalizedYamlEnvelope(stagePermissions[0]) !==
-      '    permissions:\n      actions: read\n      contents: write\n' ||
+      '    permissions:\n      actions: read\n      contents: read\n' ||
     expectedJobs
       .filter((job) => job !== 'stage-candidate')
       .some((job) => jobPermissionBlocks(jobBlock(active, job)).length !== 0)
   ) {
     failures.push(
-      'only direct qualification Draft staging may request exact actions: read plus contents: write'
+      'direct qualification published candidate staging must retain exact read-only permissions'
     )
   }
   const preflight = jobBlock(active, 'preflight')
