@@ -1539,7 +1539,8 @@ rollback() {
   fi
   if [[ "$rollback_failed" -eq 0 \
     && "$legacy_restore_performed" == true ]]; then
-    aliyun cdn RefreshObjectCaches --region "$ALIYUN_REGION" \
+    aliyun --profile release cdn RefreshObjectCaches \
+      --region "$ALIYUN_REGION" \
       --ObjectPath "$LEGACY_ALIYUN_URL" \
       --ObjectType File > dist/state/rollback-aliyun-cache-purge.json \
       || rollback_failed=1
@@ -1915,7 +1916,8 @@ if [[ "$update_legacy" == true ]]; then
   cmp dist/state/staged-legacy-r2.json \
     dist/state/forward-legacy-r2-readback.json
 
-  aliyun cdn RefreshObjectCaches --region "$ALIYUN_REGION" \
+  aliyun --profile release cdn RefreshObjectCaches \
+    --region "$ALIYUN_REGION" \
     --ObjectPath "$LEGACY_ALIYUN_URL" \
     --ObjectType File > dist/state/aliyun-cache-purge.json
   jq -e '.RefreshTaskId or .RequestId' dist/state/aliyun-cache-purge.json >/dev/null

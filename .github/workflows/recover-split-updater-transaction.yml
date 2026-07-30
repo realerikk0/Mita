@@ -67,6 +67,16 @@ jobs:
           set -euo pipefail
           mkdir -p dist/tools
           curl --proto '=https' --tlsv1.2 -fsSL \
+            https://aliyuncli.alicdn.com/aliyun-cli-linux-3.3.22-amd64.tgz \
+            -o dist/tools/aliyun-cli.tgz
+          echo '41a67dfd2f44c00eb628d9f91fa7c4807222de54ebe44fac3477fb9c70b3b0bc  dist/tools/aliyun-cli.tgz' \
+            | sha256sum --check -
+          tar -xzf dist/tools/aliyun-cli.tgz -C dist/tools
+          sudo install -m 0755 dist/tools/aliyun /usr/local/bin/aliyun
+          aliyun version | tee dist/tools/aliyun-version.txt
+          grep -Eq '(^|[^0-9])3\.3\.22([^0-9]|$)' dist/tools/aliyun-version.txt
+
+          curl --proto '=https' --tlsv1.2 -fsSL \
             https://gosspublic.alicdn.com/ossutil/v2/2.3.0/ossutil-2.3.0-linux-amd64.zip \
             -o dist/tools/ossutil.zip
           echo '3ae4d9fc85a7a6e9f5654d1599766f1a3a42a3692870887b5ae9338d582ef65a  dist/tools/ossutil.zip' \
@@ -103,6 +113,12 @@ jobs:
           RECOVERY_TRANSACTION_ID: ${{ inputs.transaction_id }}
         run: |
           set -euo pipefail
+          aliyun configure set \
+            --profile release \
+            --mode AK \
+            --region "$ALIYUN_REGION" \
+            --access-key-id "$ALIYUN_ACCESS_KEY_ID" \
+            --access-key-secret "$ALIYUN_ACCESS_KEY_SECRET"
           bash scripts/updater/run-promotion-transaction.sh \
             --recover-split-nonterminal-only
 

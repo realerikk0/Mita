@@ -297,7 +297,8 @@ delete_open_journal() {
 
 purge_legacy_caches() {
   local prefix="$1"
-  aliyun cdn RefreshObjectCaches --region "$ALIYUN_REGION" \
+  aliyun --profile release cdn RefreshObjectCaches \
+    --region "$ALIYUN_REGION" \
     --ObjectPath "$LEGACY_ALIYUN_URL" \
     --ObjectType File >"${state_dir}/${prefix}-aliyun-cache-purge.json"
   jq -e '.RefreshTaskId or .RequestId' \
