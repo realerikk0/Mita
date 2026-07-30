@@ -3803,6 +3803,17 @@ jobs:
           if ($LASTEXITCODE -ne 0) {
             throw 'Windows release stamp failed'
           }
+          $tauriConfigPath = 'src-tauri/tauri.conf.json'
+          $tauriConfig = Get-Content $tauriConfigPath -Raw |
+            ConvertFrom-Json
+          $tauriConfig.bundle.createUpdaterArtifacts = $false
+          $tauriConfig | ConvertTo-Json -Depth 100 |
+            Set-Content $tauriConfigPath -Encoding utf8NoBOM
+          $unsignedConfig = Get-Content $tauriConfigPath -Raw |
+            ConvertFrom-Json
+          if ($unsignedConfig.bundle.createUpdaterArtifacts -ne $false) {
+            throw 'Focused PR candidate must disable updater artifacts'
+          }
           make build
       - name: Verify focused unsigned Windows candidate
         if: needs.ci-scope.outputs.build_windows == 'true'
@@ -4334,6 +4345,14 @@ jobs:
     workflow.replace(
       '          $env:BIYAN_DATA_SCHEMA = [string]$releaseMetadata.dataSchema',
       '          Write-Output $env:BIYAN_DATA_SCHEMA = [string]$releaseMetadata.dataSchema'
+    ),
+    workflow.replace(
+      '          $tauriConfig.bundle.createUpdaterArtifacts = $false',
+      '          $tauriConfig.bundle.createUpdaterArtifacts = $true'
+    ),
+    workflow.replace(
+      '          if ($unsignedConfig.bundle.createUpdaterArtifacts -ne $false) {',
+      '          if ($unsignedConfig.bundle.createUpdaterArtifacts -eq $false) {'
     ),
     workflow.replace(
       '      - name: Build focused unsigned Windows candidate\n',

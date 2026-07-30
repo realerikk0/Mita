@@ -13,6 +13,10 @@ const desktopReleaseWorkflow = fs.readFileSync(
   '.github/workflows/desktop-release.yml',
   'utf8',
 )
+const prCiWorkflow = fs.readFileSync(
+  '.github/workflows/biyan-linter-and-test.yml',
+  'utf8',
+)
 const releaseVersionSource = fs.readFileSync('scripts/release-version.mjs', 'utf8')
 const windowsConfig = JSON.parse(
   fs.readFileSync('src-tauri/tauri.windows.conf.json', 'utf8'),
@@ -341,6 +345,35 @@ test('production Windows builds cannot silently drop the reviewed NSIS template'
   assert.notEqual(stamp, -1)
   assert.notEqual(build, -1)
   assert.ok(stamp < build, 'Windows template binding must happen before make build')
+})
+
+test('focused PR Windows builds disable updater artifacts after stamping', () => {
+  const buildStep = prCiWorkflow.slice(
+    prCiWorkflow.indexOf(
+      '      - name: Build focused unsigned Windows candidate',
+    ),
+    prCiWorkflow.indexOf(
+      '      - name: Verify focused unsigned Windows candidate',
+    ),
+  )
+  const stamp = buildStep.indexOf(
+    '& node scripts/release-version.mjs stamp $version --windows',
+  )
+  const disableUpdaterArtifacts = buildStep.indexOf(
+    '$tauriConfig.bundle.createUpdaterArtifacts = $false',
+  )
+  const readback = buildStep.indexOf(
+    'if ($unsignedConfig.bundle.createUpdaterArtifacts -ne $false) {',
+  )
+  const build = buildStep.indexOf('make build')
+
+  assert.notEqual(stamp, -1)
+  assert.notEqual(disableUpdaterArtifacts, -1)
+  assert.notEqual(readback, -1)
+  assert.notEqual(build, -1)
+  assert.ok(stamp < disableUpdaterArtifacts)
+  assert.ok(disableUpdaterArtifacts < readback)
+  assert.ok(readback < build)
 })
 
 test('reusable stable Windows builds verify the rendered NSIS contract without breaking non-stable channels', () => {

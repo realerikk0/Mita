@@ -656,6 +656,17 @@ jobs:
           if ($LASTEXITCODE -ne 0) {
             throw 'Windows release stamp failed'
           }
+          $tauriConfigPath = 'src-tauri/tauri.conf.json'
+          $tauriConfig = Get-Content $tauriConfigPath -Raw |
+            ConvertFrom-Json
+          $tauriConfig.bundle.createUpdaterArtifacts = $false
+          $tauriConfig | ConvertTo-Json -Depth 100 |
+            Set-Content $tauriConfigPath -Encoding utf8NoBOM
+          $unsignedConfig = Get-Content $tauriConfigPath -Raw |
+            ConvertFrom-Json
+          if ($unsignedConfig.bundle.createUpdaterArtifacts -ne $false) {
+            throw 'Focused PR candidate must disable updater artifacts'
+          }
           make build
 
       - name: Verify focused unsigned Windows candidate
