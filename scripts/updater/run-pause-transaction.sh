@@ -3,8 +3,6 @@ set -Eeuo pipefail
 
 : "${CLOUDFLARE_R2_ACCOUNT_ID:?}"
 : "${CLOUDFLARE_R2_BUCKET:?}"
-: "${CLOUDFLARE_API_TOKEN:?}"
-: "${CLOUDFLARE_ZONE_ID:?}"
 : "${ALIYUN_OSS_BUCKET:?}"
 : "${ALIYUN_OSS_ENDPOINT:?}"
 : "${ALIYUN_REGION:?}"
@@ -299,18 +297,11 @@ delete_open_journal() {
 
 purge_legacy_caches() {
   local prefix="$1"
-  aliyun cdn RefreshObjectCaches --ObjectPath "$LEGACY_ALIYUN_URL" \
+  aliyun cdn RefreshObjectCaches --region "$ALIYUN_REGION" \
+    --ObjectPath "$LEGACY_ALIYUN_URL" \
     --ObjectType File >"${state_dir}/${prefix}-aliyun-cache-purge.json"
   jq -e '.RefreshTaskId or .RequestId' \
     "${state_dir}/${prefix}-aliyun-cache-purge.json" >/dev/null
-  curl --proto '=https' --tlsv1.2 -fsS -X POST \
-    "https://api.cloudflare.com/client/v4/zones/${CLOUDFLARE_ZONE_ID}/purge_cache" \
-    -H "Authorization: Bearer ${CLOUDFLARE_API_TOKEN}" \
-    -H "Content-Type: application/json" \
-    --data "{\"files\":[\"${LEGACY_R2_URL}\"]}" \
-    >"${state_dir}/${prefix}-cloudflare-cache-purge.json"
-  jq -e '.success == true' \
-    "${state_dir}/${prefix}-cloudflare-cache-purge.json" >/dev/null
 }
 
 poll_legacy_bytes() {

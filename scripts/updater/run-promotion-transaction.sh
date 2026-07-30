@@ -1539,21 +1539,12 @@ rollback() {
   fi
   if [[ "$rollback_failed" -eq 0 \
     && "$legacy_restore_performed" == true ]]; then
-    aliyun cdn RefreshObjectCaches --ObjectPath "$LEGACY_ALIYUN_URL" \
+    aliyun cdn RefreshObjectCaches --region "$ALIYUN_REGION" \
+      --ObjectPath "$LEGACY_ALIYUN_URL" \
       --ObjectType File > dist/state/rollback-aliyun-cache-purge.json \
       || rollback_failed=1
     jq -e '.RefreshTaskId or .RequestId' \
       dist/state/rollback-aliyun-cache-purge.json >/dev/null \
-      || rollback_failed=1
-    curl --proto '=https' --tlsv1.2 -fsS -X POST \
-      "https://api.cloudflare.com/client/v4/zones/${CLOUDFLARE_ZONE_ID}/purge_cache" \
-      -H "Authorization: Bearer ${CLOUDFLARE_API_TOKEN}" \
-      -H "Content-Type: application/json" \
-      --data "{\"files\":[\"${LEGACY_R2_URL}\"]}" \
-      > dist/state/rollback-cloudflare-cache-purge.json \
-      || rollback_failed=1
-    jq -e '.success == true' \
-      dist/state/rollback-cloudflare-cache-purge.json >/dev/null \
       || rollback_failed=1
     node scripts/updater/promotion-transaction.mjs poll-url \
       --url "$LEGACY_ALIYUN_URL" \
@@ -1924,15 +1915,10 @@ if [[ "$update_legacy" == true ]]; then
   cmp dist/state/staged-legacy-r2.json \
     dist/state/forward-legacy-r2-readback.json
 
-  aliyun cdn RefreshObjectCaches --ObjectPath "$LEGACY_ALIYUN_URL" \
+  aliyun cdn RefreshObjectCaches --region "$ALIYUN_REGION" \
+    --ObjectPath "$LEGACY_ALIYUN_URL" \
     --ObjectType File > dist/state/aliyun-cache-purge.json
   jq -e '.RefreshTaskId or .RequestId' dist/state/aliyun-cache-purge.json >/dev/null
-  curl --proto '=https' --tlsv1.2 -fsS -X POST \
-    "https://api.cloudflare.com/client/v4/zones/${CLOUDFLARE_ZONE_ID}/purge_cache" \
-    -H "Authorization: Bearer ${CLOUDFLARE_API_TOKEN}" \
-    -H "Content-Type: application/json" \
-    --data "{\"files\":[\"${LEGACY_R2_URL}\"]}" > dist/state/cloudflare-cache-purge.json
-  jq -e '.success == true' dist/state/cloudflare-cache-purge.json >/dev/null
   node scripts/updater/promotion-transaction.mjs poll-url \
     --url "$LEGACY_ALIYUN_URL" --expected "$legacy_publish_source" \
     --timeout-seconds 600 --interval-seconds 10 \

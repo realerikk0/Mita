@@ -95,7 +95,7 @@ export const TRUSTED_SENSITIVE_UPDATER_WORKFLOW_CONTRACTS = Object.freeze({
   '.github/workflows/promote-desktop-update.yml': Object.freeze({
     exactJobNames: Object.freeze(['promote']),
     expectedEnvelopeSha256:
-      '03764e9bdb07aeb1e59c739e8c7c444c1c996b41aa525a0f60826a7dd1e7f0ee',
+      '584ecd2d3f56e90dc60d4f6fe528130ace34d41d07ec64c668b6b4f079decfa1',
     expectedPermissions: Object.freeze({
       actions: 'read',
       contents: 'read',
@@ -104,7 +104,7 @@ export const TRUSTED_SENSITIVE_UPDATER_WORKFLOW_CONTRACTS = Object.freeze({
   '.github/workflows/recover-split-updater-transaction.yml': Object.freeze({
     exactJobNames: Object.freeze(['recover']),
     expectedEnvelopeSha256:
-      '4a63bc648f0e86f1613780c69b88d791d5434e2027a198ea3d79cc4c204b8b17',
+      '7d023a3b43fc09e03b2fd4e8339165c5206969fc208f1b18a27e5125770fbd77',
     expectedPermissions: Object.freeze({
       contents: 'read',
     }),
@@ -112,7 +112,7 @@ export const TRUSTED_SENSITIVE_UPDATER_WORKFLOW_CONTRACTS = Object.freeze({
   '.github/workflows/updater-health-gate.yml': Object.freeze({
     exactJobNames: Object.freeze(['evaluate']),
     expectedEnvelopeSha256:
-      '2f9a7f09dc1fad4528dcaf83e7b601dad8cff8fae47e6bc4c570077e0cc96b52',
+      '52776bab68800f360b65896006238fa0c71278bc91e626cd1c14d64c538585da',
     expectedPermissions: Object.freeze({
       contents: 'read',
     }),
@@ -120,7 +120,7 @@ export const TRUSTED_SENSITIVE_UPDATER_WORKFLOW_CONTRACTS = Object.freeze({
   '.github/workflows/updater-kill-switch.yml': Object.freeze({
     exactJobNames: Object.freeze(['update']),
     expectedEnvelopeSha256:
-      '8c21ea7002200a82d2485ee9a71cb494d742094e5672202201d13f1139505d8c',
+      '5460b3edf242cb2591eba8a3cc583c12db2a723e6d637b4642cfc0dfd3044537',
     expectedPermissions: Object.freeze({
       contents: 'read',
     }),
