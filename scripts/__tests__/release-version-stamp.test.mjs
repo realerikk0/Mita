@@ -44,6 +44,47 @@ function cargoMetadata(manifestPath) {
   )
 }
 
+function writeWindowsStampFixture(root, { includeTemplate = true } = {}) {
+  writeFixture(root, 'src-tauri/tauri.conf.json', {
+    productName: 'Biyan',
+    version: '0.6.647',
+    bundle: {},
+  })
+  writeFixture(
+    root,
+    'src-tauri/Cargo.toml',
+    '[package]\nname = "Biyan"\nversion = "0.6.647"\nedition = "2021"\n'
+  )
+  writeFixture(
+    root,
+    'src-tauri/Cargo.lock',
+    '[[package]]\nname = "Biyan"\nversion = "0.6.647"\n'
+  )
+  writeFixture(root, 'src-tauri/tauri.windows.conf.json', {
+    bundle: {
+      windows: {
+        signCommand: 'retired-sign-command',
+        nsis: {
+          installMode: 'currentUser',
+          template: 'wrong-template.nsi',
+        },
+      },
+    },
+  })
+  if (includeTemplate) {
+    writeFixture(
+      root,
+      'src-tauri/tauri.bundle.windows.nsis.template',
+      `!define PRODUCTNAME "biyan_productname"
+!define MAINBINARYNAME "biyan_mainbinaryname"
+!define VERSION "biyan_version"
+!define VERSIONWITHBUILD "biyan_build"
+!define UNINSTALLERSIGNCOMMAND "retired-sign-command"
+`
+    )
+  }
+}
+
 test('release stamp updates product and JS versions without changing Rust plugin crates', (t) => {
   const fixtureRoot = fs.mkdtempSync(
     path.join(os.tmpdir(), 'biyan-release-stamp-')
@@ -172,6 +213,68 @@ resolver = "2"
     'tauri-plugin-document-parser': '0.1.0',
     'tauri-plugin-hardware': '0.6.599',
   })
+})
+
+test('Windows release stamp binds and stamps the reviewed NSIS template', (t) => {
+  const fixtureRoot = fs.mkdtempSync(
+    path.join(os.tmpdir(), 'biyan-windows-release-stamp-')
+  )
+  t.after(() => fs.rmSync(fixtureRoot, { force: true, recursive: true }))
+  writeWindowsStampFixture(fixtureRoot)
+
+  execFileSync(
+    process.execPath,
+    [releaseVersionScript, 'stamp', '0.6.648', '--windows'],
+    {
+      cwd: fixtureRoot,
+      stdio: 'pipe',
+    }
+  )
+
+  const windowsConfig = JSON.parse(
+    fs.readFileSync(
+      path.join(fixtureRoot, 'src-tauri', 'tauri.windows.conf.json'),
+      'utf8'
+    )
+  )
+  assert.equal(
+    windowsConfig.bundle.windows.nsis.template,
+    'tauri.bundle.windows.nsis.template'
+  )
+  assert.equal(windowsConfig.bundle.windows.nsis.installMode, 'currentUser')
+  assert.equal('signCommand' in windowsConfig.bundle.windows, false)
+
+  const template = fs.readFileSync(
+    path.join(fixtureRoot, 'src-tauri', 'tauri.bundle.windows.nsis.template'),
+    'utf8'
+  )
+  assert.match(template, /!define PRODUCTNAME "Biyan"/)
+  assert.match(template, /!define MAINBINARYNAME "Biyan"/)
+  assert.match(template, /!define VERSION "0\.6\.648"/)
+  assert.match(template, /!define VERSIONWITHBUILD "0\.6\.648\.0"/)
+  assert.match(template, /!define UNINSTALLERSIGNCOMMAND ""/)
+  assert.doesNotMatch(template, /biyan_(?:productname|mainbinaryname|version|build)/)
+})
+
+test('Windows release stamp fails closed when the reviewed NSIS template is missing', (t) => {
+  const fixtureRoot = fs.mkdtempSync(
+    path.join(os.tmpdir(), 'biyan-windows-release-stamp-missing-')
+  )
+  t.after(() => fs.rmSync(fixtureRoot, { force: true, recursive: true }))
+  writeWindowsStampFixture(fixtureRoot, { includeTemplate: false })
+
+  assert.throws(
+    () =>
+      execFileSync(
+        process.execPath,
+        [releaseVersionScript, 'stamp', '0.6.648', '--windows'],
+        {
+          cwd: fixtureRoot,
+          stdio: 'pipe',
+        }
+      ),
+    /Command failed/
+  )
 })
 
 test('release stamp source never targets Rust plugin manifests', () => {

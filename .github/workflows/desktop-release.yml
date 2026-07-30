@@ -4,7 +4,7 @@ on:
   workflow_dispatch:
     inputs:
       version:
-        description: "Exact terminal release tag pinned by protected policy: v0.6.647"
+        description: "Exact terminal release tag pinned by protected policy: v0.6.648"
         required: true
         type: string
 
@@ -84,7 +84,7 @@ jobs:
                 | length) == 1
               and .trains[-1].status == "superseded-by-terminal"
               and (.supersededTerminalReleases | type == "array")
-              and (.supersededTerminalReleases | length) == 1
+              and (.supersededTerminalReleases | length) == 2
               and ((.supersededTerminalReleases[0] | keys | sort)
                 == ["dataSchema", "migrationPhase", "sourceCommit", "status", "tag", "version"])
               and .supersededTerminalReleases[0].tag == "v0.6.646"
@@ -93,14 +93,22 @@ jobs:
               and .supersededTerminalReleases[0].dataSchema == 3
               and .supersededTerminalReleases[0].sourceCommit == "581ebf6b19ef407a9645d0b318792f1012f8f75b"
               and .supersededTerminalReleases[0].status == "blocked-before-publication"
+              and ((.supersededTerminalReleases[1] | keys | sort)
+                == ["dataSchema", "migrationPhase", "sourceCommit", "status", "tag", "version"])
+              and .supersededTerminalReleases[1].tag == "v0.6.647"
+              and .supersededTerminalReleases[1].version == "0.6.647"
+              and .supersededTerminalReleases[1].migrationPhase == "C"
+              and .supersededTerminalReleases[1].dataSchema == 3
+              and .supersededTerminalReleases[1].sourceCommit == "ef963bc606366220db4589352afb25aa7d1785bf"
+              and .supersededTerminalReleases[1].status == "blocked-before-publication"
               and (.activeTerminalRelease | type == "object")
               and ((.activeTerminalRelease | keys | sort)
                 == ["dataSchema", "migrationPhase", "sourceCommit", "tag", "version"])
               and .activeTerminalRelease.tag == $tag
               and .activeTerminalRelease.tag
                 == ("v" + .activeTerminalRelease.version)
-              and .activeTerminalRelease.tag == "v0.6.647"
-              and .activeTerminalRelease.version == "0.6.647"
+              and .activeTerminalRelease.tag == "v0.6.648"
+              and .activeTerminalRelease.version == "0.6.648"
               and .activeTerminalRelease.migrationPhase == "C"
               and .activeTerminalRelease.dataSchema == 3
               and (.activeTerminalRelease.sourceCommit
@@ -672,7 +680,8 @@ jobs:
           & ./harness/scripts/ci/verify-windows-candidate.ps1 `
             -Exe "$bundle/nsis/Biyan_$env:VERSION`_x64-setup.exe" `
             -Msi "$bundle/msi/Biyan_$env:VERSION`_x64_en-US.msi" `
-            -Version $env:VERSION
+            -Version $env:VERSION `
+            -GeneratedNsis 'src-tauri/target/release/nsis/x64/installer.nsi'
 
       - name: Revalidate protected main before Windows artifact mutation
         shell: bash

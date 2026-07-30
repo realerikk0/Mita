@@ -62,9 +62,9 @@
   ],
   "rules": [
     {
-      "expectedMatches": 56,
+      "expectedMatches": 77,
       "id": "autoqa-upgrade-scenarios",
-      "matchesSha256": "6c120d78f9a1a5b64a45686ddc511d825d28cc29ff6aec65dbb4b7445d6db5d0",
+      "matchesSha256": "8ba0a96f529f18b3ae4cfbd858c99e78509156a39c335aa4df8ae24738de9f91",
       "pathRegex": "^(?:autoqa/checklist\\.md|autoqa/migration_runner\\.py|autoqa/tests/test_migration_runner\\.py|autoqa/scripts/macos_cleanup\\.sh|autoqa/scripts/macos_post_cleanup\\.sh)$",
       "pattern": "(?:catalog\\.jan\\.ai|apps(?:-nightly)?\\.jan\\.ai|janhq|latest[_-]jan[_-]model|model[-_]catalog|(?<![a-z0-9])(?:jan|mita|silence)(?![a-z0-9]))",
       "reason": "AutoQA retains exact legacy identities only to build and verify upgrade or cleanup scenarios.",

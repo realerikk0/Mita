@@ -9,7 +9,11 @@ param(
 
   [Parameter(Mandatory = $true)]
   [ValidatePattern('^\d+\.\d+\.\d+(?:[-+][0-9A-Za-z.-]+)?$')]
-  [string]$Version
+  [string]$Version,
+
+  [Parameter(Mandatory = $false)]
+  [ValidateNotNullOrEmpty()]
+  [string]$GeneratedNsis
 )
 
 Set-StrictMode -Version Latest
@@ -60,6 +64,74 @@ function Test-ExpectedFileVersion {
   }
   $pattern = '^' + [regex]::Escape($Expected) + '(?:\.0)?$'
   return $Value.Trim() -match $pattern
+}
+
+function Test-GeneratedNsisContract {
+  param(
+    [Parameter(Mandatory = $true)]
+    [string]$Path,
+    [Parameter(Mandatory = $true)]
+    [string]$Version
+  )
+
+  $resolved = (Resolve-Path -LiteralPath $Path).Path
+  if (-not (Test-Path -LiteralPath $resolved -PathType Leaf)) {
+    throw "Generated NSIS script is missing: $Path"
+  }
+  $item = Get-Item -LiteralPath $resolved
+  if ($item.Length -le 0 -or $item.Length -gt 4MB) {
+    throw "Generated NSIS script size is outside the reviewed bound: $($item.Length)"
+  }
+  $source = Get-Content -LiteralPath $resolved -Raw
+  foreach ($required in @(
+    "!define PRODUCTNAME `"Biyan`"",
+    "!define MAINBINARYNAME `"Biyan`"",
+    "!define VERSION `"$Version`"",
+    'Function DetectOwnedBiyanInstallLocation',
+    'Function RejectUnownedRetiredBiyanResources',
+    'Function RemoveRetiredBiyanInstallResources',
+    'Function VerifyInstalledBiyanResources',
+    '${GetOptions} $CMDLINE "/R" $R0',
+    'Abort "Biyan could not remove retired extension packages.',
+    'Abort "Biyan found an unreviewed extension package.'
+  )) {
+    if (-not $source.Contains($required)) {
+      throw "Generated NSIS script is missing reviewed contract: $required"
+    }
+  }
+  if ($source -match 'biyan_(?:productname|mainbinaryname|version|build)') {
+    throw 'Generated NSIS script retains an unstamped release placeholder'
+  }
+
+  $section = [regex]::Match(
+    $source,
+    '(?ms)^Section Install\s*\r?\n(?<body>.*?)^SectionEnd\s*$'
+  )
+  if (-not $section.Success) {
+    throw 'Generated NSIS script is missing the Install section'
+  }
+  $body = $section.Groups['body'].Value
+  $ordered = @(
+    'Call DetectOwnedBiyanInstallLocation',
+    '${If} $OwnedExistingInstall = 1',
+    'Call RemoveRetiredBiyanInstallResources',
+    '${Else}',
+    'Call RejectUnownedRetiredBiyanResources',
+    '; Copy main executable',
+    'Call VerifyInstalledBiyanResources'
+  )
+  $cursor = -1
+  foreach ($required in $ordered) {
+    $next = $body.IndexOf(
+      $required,
+      $cursor + 1,
+      [StringComparison]::Ordinal
+    )
+    if ($next -lt 0) {
+      throw "Generated NSIS Install section is missing or misorders: $required"
+    }
+    $cursor = $next
+  }
 }
 
 function Get-MsiProperty {
@@ -175,6 +247,9 @@ function Write-MsiLogTail {
 
 $exePath = (Resolve-Path -LiteralPath $Exe).Path
 $msiPath = (Resolve-Path -LiteralPath $Msi).Path
+if ($PSBoundParameters.ContainsKey('GeneratedNsis')) {
+  Test-GeneratedNsisContract -Path $GeneratedNsis -Version $Version
+}
 foreach ($candidate in @($exePath, $msiPath)) {
   if (-not (Test-Path -LiteralPath $candidate -PathType Leaf)) {
     throw "Missing Windows qualification candidate: $candidate"

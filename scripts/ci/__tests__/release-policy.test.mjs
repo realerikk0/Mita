@@ -275,10 +275,10 @@ test('bridge release trains lock version, phase, schema, and Cargo.lock together
   )
   assert.ok(
     validateReleaseIdentity({
-      version: '0.6.647',
+      version: '0.6.648',
       migrationPhase: 'A',
       dataSchema: 1,
-      cargoLockVersion: '0.6.647',
+      cargoLockVersion: '0.6.648',
     }).some((failure) => failure.includes('must attest C/3'))
   )
 })
@@ -317,8 +317,8 @@ test('formal release identity switches fail-closed to the exact pinned terminal 
     fs.readFileSync('scripts/ci/release-train-policy.json', 'utf8')
   )
   policy.activeTerminalRelease = {
-    tag: 'v0.6.647',
-    version: '0.6.647',
+    tag: 'v0.6.648',
+    version: '0.6.648',
     migrationPhase: 'C',
     dataSchema: 3,
     sourceCommit: 'a'.repeat(40),
@@ -326,10 +326,10 @@ test('formal release identity switches fail-closed to the exact pinned terminal 
 
   assert.deepEqual(
     validateActiveReleaseIdentity({
-      version: '0.6.647',
+      version: '0.6.648',
       migrationPhase: 'C',
       dataSchema: 3,
-      cargoLockVersion: '0.6.647',
+      cargoLockVersion: '0.6.648',
       trainPolicy: policy,
     }),
     []
@@ -436,8 +436,8 @@ test('release train and terminal policy is unique, contiguous, and fail-closed',
 
   const pinned = structuredClone(policy)
   pinned.activeTerminalRelease = {
-    tag: 'v0.6.647',
-    version: '0.6.647',
+    tag: 'v0.6.648',
+    version: '0.6.648',
     migrationPhase: 'C',
     dataSchema: 3,
     sourceCommit: 'a'.repeat(40),
@@ -448,8 +448,8 @@ test('release train and terminal policy is unique, contiguous, and fail-closed',
     [
       'wrong version',
       (value) => {
-        value.activeTerminalRelease.version = '0.6.648'
-        value.activeTerminalRelease.tag = 'v0.6.648'
+        value.activeTerminalRelease.version = '0.6.649'
+        value.activeTerminalRelease.tag = 'v0.6.649'
       },
     ],
     [
@@ -482,6 +482,18 @@ test('release train and terminal policy is unique, contiguous, and fail-closed',
 
   for (const [label, mutate] of [
     [
+      'missing latest preserved terminal',
+      (value) => {
+        value.supersededTerminalReleases.pop()
+      },
+    ],
+    [
+      'reordered preserved terminals',
+      (value) => {
+        value.supersededTerminalReleases.reverse()
+      },
+    ],
+    [
       'wrong preserved version',
       (value) => {
         value.supersededTerminalReleases[0].version = '0.6.644'
@@ -497,15 +509,18 @@ test('release train and terminal policy is unique, contiguous, and fail-closed',
     [
       'wrong preserved source',
       (value) => {
-        value.supersededTerminalReleases[0].sourceCommit = 'b'.repeat(40)
+        value.supersededTerminalReleases[1].sourceCommit = 'b'.repeat(40)
       },
     ],
     [
       'extra preserved terminal',
       (value) => {
-        value.supersededTerminalReleases.push(
-          structuredClone(value.supersededTerminalReleases[0]),
-        )
+        value.supersededTerminalReleases.push({
+          ...structuredClone(value.supersededTerminalReleases[1]),
+          tag: 'v0.6.648',
+          version: '0.6.648',
+          sourceCommit: 'c'.repeat(40),
+        })
       },
     ],
   ]) {
@@ -3780,12 +3795,31 @@ jobs:
           $releaseMetadata = Get-Content biyan-release.json -Raw |
             ConvertFrom-Json
           $env:BIYAN_DATA_SCHEMA = [string]$releaseMetadata.dataSchema
+          $version = (
+            Get-Content src-tauri/tauri.conf.json -Raw |
+              ConvertFrom-Json
+          ).version
+          & node scripts/release-version.mjs stamp $version --windows
+          if ($LASTEXITCODE -ne 0) {
+            throw 'Windows release stamp failed'
+          }
+          $tauriConfigPath = 'src-tauri/tauri.conf.json'
+          $tauriConfig = Get-Content $tauriConfigPath -Raw |
+            ConvertFrom-Json
+          $tauriConfig.bundle.createUpdaterArtifacts = $false
+          $tauriConfig | ConvertTo-Json -Depth 100 |
+            Set-Content $tauriConfigPath -Encoding utf8NoBOM
+          $unsignedConfig = Get-Content $tauriConfigPath -Raw |
+            ConvertFrom-Json
+          if ($unsignedConfig.bundle.createUpdaterArtifacts -ne $false) {
+            throw 'Focused PR candidate must disable updater artifacts'
+          }
           make build
       - name: Verify focused unsigned Windows candidate
         if: needs.ci-scope.outputs.build_windows == 'true'
         shell: pwsh
         run: |
-          & ./scripts/ci/verify-windows-candidate.ps1 -Exe $exe -Msi $msi -Version $version
+          & ./scripts/ci/verify-windows-candidate.ps1 -Exe $exe -Msi $msi -Version $version -GeneratedNsis 'src-tauri/target/release/nsis/x64/installer.nsi'
           node ./scripts/ci/candidate-path-policy.mjs --root $bundle
   test-on-ubuntu:
     needs: ci-scope
@@ -4311,6 +4345,18 @@ jobs:
     workflow.replace(
       '          $env:BIYAN_DATA_SCHEMA = [string]$releaseMetadata.dataSchema',
       '          Write-Output $env:BIYAN_DATA_SCHEMA = [string]$releaseMetadata.dataSchema'
+    ),
+    workflow.replace(
+      '          $tauriConfig.bundle.createUpdaterArtifacts = $false',
+      '          $tauriConfig.bundle.createUpdaterArtifacts = $true'
+    ),
+    workflow.replace(
+      '          if ($unsignedConfig.bundle.createUpdaterArtifacts -ne $false) {',
+      '          if ($unsignedConfig.bundle.createUpdaterArtifacts -eq $false) {'
+    ),
+    workflow.replace(
+      '        shell: pwsh\n        run: |\n          $releaseMetadata = Get-Content biyan-release.json -Raw |',
+      '        shell: pwsh\n        env:\n          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}\n        run: |\n          $releaseMetadata = Get-Content biyan-release.json -Raw |'
     ),
     workflow.replace(
       '      - name: Build focused unsigned Windows candidate\n',

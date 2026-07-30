@@ -179,32 +179,33 @@ function stamp(version, options) {
 
 function stampWindowsBuildFiles(version) {
   const windowsConfigPath = 'src-tauri/tauri.windows.conf.json'
-  if (fs.existsSync(windowsConfigPath)) {
-    const json = readJson(windowsConfigPath)
-    json.bundle ??= {}
-    json.bundle.windows ??= {}
-    delete json.bundle.windows.signCommand
-    if (json.bundle.windows.nsis) {
-      delete json.bundle.windows.nsis.template
-    }
-    writeJson(windowsConfigPath, json)
+  if (!fs.existsSync(windowsConfigPath)) {
+    throw new Error(`Missing required Windows bundle config: ${windowsConfigPath}`)
   }
+  const json = readJson(windowsConfigPath)
+  json.bundle ??= {}
+  json.bundle.windows ??= {}
+  json.bundle.windows.nsis ??= {}
+  delete json.bundle.windows.signCommand
+  json.bundle.windows.nsis.template = 'tauri.bundle.windows.nsis.template'
+  writeJson(windowsConfigPath, json)
 
   const templatePath = 'src-tauri/tauri.bundle.windows.nsis.template'
-  if (fs.existsSync(templatePath)) {
-    const { fileVersion, productVersion } = windowsVersionInfo(version)
-    const next = fs
-      .readFileSync(templatePath, 'utf8')
-      .replaceAll('biyan_productname', 'Biyan')
-      .replaceAll('biyan_mainbinaryname', 'Biyan')
-      .replaceAll('biyan_version', fileVersion)
-      .replaceAll('biyan_build', productVersion)
-      .replace(
-        /^!define UNINSTALLERSIGNCOMMAND .*$/m,
-        '!define UNINSTALLERSIGNCOMMAND ""'
-      )
-    fs.writeFileSync(templatePath, next)
+  if (!fs.existsSync(templatePath)) {
+    throw new Error(`Missing required Windows NSIS template: ${templatePath}`)
   }
+  const { fileVersion, productVersion } = windowsVersionInfo(version)
+  const next = fs
+    .readFileSync(templatePath, 'utf8')
+    .replaceAll('biyan_productname', 'Biyan')
+    .replaceAll('biyan_mainbinaryname', 'Biyan')
+    .replaceAll('biyan_version', fileVersion)
+    .replaceAll('biyan_build', productVersion)
+    .replace(
+      /^!define UNINSTALLERSIGNCOMMAND .*$/m,
+      '!define UNINSTALLERSIGNCOMMAND ""'
+    )
+  fs.writeFileSync(templatePath, next)
 }
 
 try {

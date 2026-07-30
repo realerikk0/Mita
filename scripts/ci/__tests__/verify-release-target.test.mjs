@@ -35,10 +35,10 @@ const TERMINAL_SOURCE_CONTENTS = Object.freeze({
   'biyan-release.json':
     '{"schema":1,"migrationPhase":"C","dataSchema":3}\n',
   'src-tauri/Cargo.lock':
-    '[[package]]\nname = "Biyan"\nversion = "0.6.647"\n',
+    '[[package]]\nname = "Biyan"\nversion = "0.6.648"\n',
   'src-tauri/Cargo.toml':
-    '[package]\nname = "Biyan"\nversion = "0.6.647"\n',
-  'src-tauri/tauri.conf.json': '{"version":"0.6.647"}\n',
+    '[package]\nname = "Biyan"\nversion = "0.6.648"\n',
+  'src-tauri/tauri.conf.json': '{"version":"0.6.648"}\n',
 })
 
 function trainPolicy(sourceCommit = null) {
@@ -52,8 +52,8 @@ function trainPolicy(sourceCommit = null) {
     sourceCommit === null
       ? null
       : {
-          tag: 'v0.6.647',
-          version: '0.6.647',
+          tag: 'v0.6.648',
+          version: '0.6.648',
           migrationPhase: 'C',
           dataSchema: 3,
           sourceCommit,
@@ -226,7 +226,7 @@ if (
     return {
       harnessRoot,
       parentCommit,
-      releaseTag: terminal ? 'v0.6.647' : releaseTag,
+      releaseTag: terminal ? 'v0.6.648' : releaseTag,
       sourceCommit,
       targetRoot,
       trustedMain,
@@ -482,17 +482,22 @@ test('release drift accepts only exact checkpoint and reviewed control files', (
 test('terminal drift accepts only the exact reviewed Q control-plane paths', () => {
   assert.deepEqual([...TERMINAL_CONTROL_PLANE_DRIFT], [
     ['.github/workflows/biyan-direct-qualification.yml', 'M'],
-    ['.github/workflows/biyan-exact-sha-qualification.yml', 'M'],
+    ['.github/workflows/biyan-linter-and-test.yml', 'M'],
     ['.github/workflows/desktop-release.yml', 'M'],
+    ['.github/workflows/template-tauri-build-windows-x64.yml', 'M'],
     ['DEVELOPMENT_PLAN.md', 'M'],
+    ['autoqa/migration_runner.py', 'M'],
+    ['autoqa/tests/test_migration_runner.py', 'M'],
     ['docs/release-distribution.md', 'M'],
     ['docs/src/pages/docs/desktop/data-folder.mdx', 'M'],
     ['scripts/__tests__/windows-installer-template.test.mjs', 'M'],
     ['scripts/ci/__tests__/release-policy.test.mjs', 'M'],
     ['scripts/ci/__tests__/verify-release-target.test.mjs', 'M'],
+    ['scripts/ci/legacy-compatibility-allowlist.json', 'M'],
     ['scripts/ci/release-policy-contracts.mjs', 'M'],
     ['scripts/ci/release-train-policy.json', 'M'],
     ['scripts/ci/verify-release-target.mjs', 'M'],
+    ['scripts/ci/verify-windows-candidate.ps1', 'M'],
     ['scripts/release-distribution/__tests__/release-distribution.test.mjs', 'M'],
     ['scripts/updater/__tests__/direct-c-transition-policy.test.mjs', 'M'],
     ['scripts/updater/__tests__/direct-qualification.test.mjs', 'M'],
@@ -772,8 +777,8 @@ test('terminal release target authenticates a full product source P through poli
 
   assert.equal(result.parentCommit, fixture.parentCommit)
   assert.equal(result.releaseKind, 'terminal')
-  assert.equal(result.releaseTag, 'v0.6.647')
-  assert.equal(result.releaseVersion, '0.6.647')
+  assert.equal(result.releaseTag, 'v0.6.648')
+  assert.equal(result.releaseVersion, '0.6.648')
   assert.equal(result.sourceCommit, fixture.sourceCommit)
   assert.equal(result.trustedMain, fixture.trustedMain)
   assert.equal(result.checkpoint, null)
@@ -827,7 +832,7 @@ test('terminal release target rejects product or source identity drift after P',
   writeFixtureFile(
     identity.harnessRoot,
     'src-tauri/tauri.conf.json',
-    '{"version":"0.6.648"}\n'
+    '{"version":"0.6.649"}\n'
   )
   identity.trustedMain = commitFixture(
     identity.harnessRoot,

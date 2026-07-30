@@ -43,6 +43,19 @@ REVIEWED_MIGRATION_STEPS: Tuple[str, ...] = (
 )
 REVIEWED_STEP_STATUSES = frozenset(("pending", "running", "completed", "failed"))
 WINDOWS_EXECUTABLE_NAMES = frozenset(("Biyan.exe", "Mita.exe", "Silence.exe", "Jan.exe"))
+WINDOWS_CURRENT_EXTENSION_ARCHIVES = (
+    "biyan-assistant-extension-1.0.2.tgz",
+    "biyan-conversational-extension-1.0.0.tgz",
+    "biyan-download-extension-1.0.0.tgz",
+)
+WINDOWS_RETIRED_EXTENSION_ARCHIVES = (
+    "janhq-assistant-extension-1.0.2.tgz",
+    "janhq-conversational-extension-1.0.0.tgz",
+    "janhq-download-extension-1.0.0.tgz",
+    "janhq-llamacpp-extension-1.0.1.tgz",
+    "janhq-rag-extension-0.1.0.tgz",
+    "janhq-vector-db-extension-0.1.0.tgz",
+)
 
 
 @dataclass(frozen=True)
@@ -79,6 +92,7 @@ class ValidatedInputs:
     snapshots: Mapping[str, SnapshotSpec]
     expectations: Mapping[str, Tuple[Path, ...]]
     source_readiness: SourceReadinessSpec | None = None
+    qualification_mode: str | None = None
 
 
 class MigrationRunError(RuntimeError):
@@ -297,6 +311,35 @@ def validate_inputs(
         raise ValueError(
             f"snapshot platform mismatch: expected {platform}, got {manifest.get('platform')}"
         )
+    qualification_mode = manifest.get("qualificationMode")
+    scenario = manifest.get("scenario")
+    lane = manifest.get("lane")
+    if any(value is not None for value in (qualification_mode, scenario, lane)):
+        if not all(
+            isinstance(value, str) and value
+            for value in (qualification_mode, scenario, lane)
+        ):
+            raise ValueError("qualified lane metadata must be complete")
+        if len(selected_cases) != 1:
+            raise ValueError(
+                "qualified lane metadata requires exactly one selected scenario"
+            )
+        expected_scenario = selected_cases[0].name
+        expected_mode = (
+            "fresh-install"
+            if expected_scenario.startswith("fresh-")
+            else "manual-installer"
+            if expected_scenario == "legacy-manual-to-c"
+            else "automatic-updater"
+        )
+        if (
+            scenario != expected_scenario
+            or lane != f"{expected_scenario}-{platform}"
+            or qualification_mode != expected_mode
+        ):
+            raise ValueError(
+                "lane, scenario, and qualificationMode must match the selected platform path"
+            )
 
     installer_manifest = manifest.get("installers")
     if not isinstance(installer_manifest, dict):
@@ -382,6 +425,7 @@ def validate_inputs(
         snapshots,
         expectations,
         source_readiness,
+        qualification_mode,
     )
 
 
@@ -536,6 +580,24 @@ def _bounded_windows_install_inventory(install_root: Path) -> dict:
         "downloadExtension": (
             "resources/pre-install/biyan-download-extension-1.0.0.tgz"
         ),
+        "retiredAssistantExtension": (
+            "resources/pre-install/janhq-assistant-extension-1.0.2.tgz"
+        ),
+        "retiredConversationalExtension": (
+            "resources/pre-install/janhq-conversational-extension-1.0.0.tgz"
+        ),
+        "retiredDownloadExtension": (
+            "resources/pre-install/janhq-download-extension-1.0.0.tgz"
+        ),
+        "retiredLlamacppExtension": (
+            "resources/pre-install/janhq-llamacpp-extension-1.0.1.tgz"
+        ),
+        "retiredRagExtension": (
+            "resources/pre-install/janhq-rag-extension-0.1.0.tgz"
+        ),
+        "retiredVectorDbExtension": (
+            "resources/pre-install/janhq-vector-db-extension-0.1.0.tgz"
+        ),
     }
     inventory: dict[str, object] = {}
     for identifier, relative in controlled.items():
@@ -570,6 +632,84 @@ def _bounded_windows_install_inventory(install_root: Path) -> dict:
     return inventory
 
 
+def _assert_exact_windows_candidate_install_inventory(install_root: Path) -> None:
+    """Fail closed before first launch unless the installed extension set is exact."""
+
+    inventory = _bounded_windows_install_inventory(install_root)
+    required_files = (
+        "biyanExecutable",
+        "assistantExtension",
+        "conversationalExtension",
+        "downloadExtension",
+    )
+    if any(
+        inventory.get(identifier, {}).get("kind") != "file"
+        or int(inventory.get(identifier, {}).get("size", 0)) <= 0
+        for identifier in required_files
+    ):
+        raise ReadinessFailed("candidate_install_inventory_required_file")
+
+    forbidden = (
+        "legacyMitaExecutable",
+        "legacySilenceExecutable",
+        "legacyJanExecutable",
+        "legacyCliExecutable",
+        "legacyRunnerExecutable",
+        "legacyResourceMain",
+        "legacyResourceCli",
+        "legacyResourceWebResearch",
+        "legacyResourceRunner",
+        "embeddingModelsDirectory",
+        "retiredAssistantExtension",
+        "retiredConversationalExtension",
+        "retiredDownloadExtension",
+        "retiredLlamacppExtension",
+        "retiredRagExtension",
+        "retiredVectorDbExtension",
+    )
+    if any(
+        inventory.get(identifier, {}).get("kind") != "missing"
+        for identifier in forbidden
+    ):
+        raise ReadinessFailed("candidate_install_inventory_retired_payload")
+
+    pre_install = install_root / "resources" / "pre-install"
+    try:
+        metadata = pre_install.lstat()
+        is_junction = pre_install.is_junction()
+    except (FileNotFoundError, OSError) as error:
+        raise ReadinessFailed("candidate_install_inventory_preinstall") from error
+    if (
+        stat.S_ISLNK(metadata.st_mode)
+        or is_junction
+        or not stat.S_ISDIR(metadata.st_mode)
+    ):
+        raise ReadinessFailed("candidate_install_inventory_preinstall")
+
+    try:
+        entries = list(pre_install.iterdir())
+    except OSError as error:
+        raise ReadinessFailed("candidate_install_inventory_preinstall") from error
+    if len(entries) != len(WINDOWS_CURRENT_EXTENSION_ARCHIVES):
+        raise ReadinessFailed("candidate_install_inventory_extension_set")
+    if {entry.name for entry in entries} != set(WINDOWS_CURRENT_EXTENSION_ARCHIVES):
+        raise ReadinessFailed("candidate_install_inventory_extension_set")
+    for entry in entries:
+        try:
+            entry_metadata = entry.lstat()
+            entry_is_junction = entry.is_junction()
+        except OSError as error:
+            raise ReadinessFailed("candidate_install_inventory_extension_file") from error
+        if (
+            stat.S_ISLNK(entry_metadata.st_mode)
+            or entry_is_junction
+            or not stat.S_ISREG(entry_metadata.st_mode)
+            or entry_metadata.st_size <= 0
+            or entry_metadata.st_size > 512 * 1024 * 1024
+        ):
+            raise ReadinessFailed("candidate_install_inventory_extension_file")
+
+
 class PlatformExecutor:
     def __init__(
         self,
@@ -581,6 +721,7 @@ class PlatformExecutor:
         self.startup_seconds = startup_seconds
         self.migration_timeout_seconds = migration_timeout_seconds
         self.last_executable: Path | None = None
+        self.last_install_root: Path | None = None
         self.process_evidence: List[dict] = []
         self.last_shutdown: dict | None = None
         self.source_guards: dict[str, str] = {}
@@ -604,11 +745,38 @@ class PlatformExecutor:
                 [
                     "powershell",
                     "-NoProfile",
+                    "-NonInteractive",
                     "-Command",
                     "Get-Process Biyan,Mita,Silence,Jan -ErrorAction SilentlyContinue | "
                     "Stop-Process -Force -ErrorAction SilentlyContinue",
                 ],
                 check=False,
+            )
+            subprocess.run(
+                [
+                    "powershell",
+                    "-NoProfile",
+                    "-NonInteractive",
+                    "-Command",
+                    "$ErrorActionPreference = 'Stop'; "
+                    "$keys = @("
+                    "'HKCU:\\Software\\Jingxing\\Biyan',"
+                    "'HKCU:\\Software\\Jingxing\\Biyan-nightly',"
+                    "'HKCU:\\Software\\Jingxing\\Mita',"
+                    "'HKCU:\\Software\\Microsoft\\Windows\\CurrentVersion\\Uninstall\\Biyan',"
+                    "'HKCU:\\Software\\Microsoft\\Windows\\CurrentVersion\\Uninstall\\Biyan-nightly',"
+                    "'HKCU:\\Software\\Microsoft\\Windows\\CurrentVersion\\Uninstall\\Mita'"
+                    "); "
+                    "foreach ($key in $keys) { "
+                    "Remove-Item -LiteralPath $key -Recurse -Force "
+                    "-ErrorAction SilentlyContinue }; "
+                    "$remaining = @($keys | Where-Object { "
+                    "Test-Path -LiteralPath $_ }); "
+                    "if ($remaining.Count -ne 0) { "
+                    "throw 'Reviewed product registry cleanup failed' }",
+                ],
+                check=True,
+                timeout=30,
             )
             local = Path(os.environ.get("LOCALAPPDATA", Path.home() / "AppData/Local"))
             for name in ("Biyan", "Biyan-nightly", "Mita", "Silence", "Jan"):
@@ -647,25 +815,44 @@ class PlatformExecutor:
                 timeout=300,
             )
         self.last_executable = None
+        self.last_install_root = None
 
-    def install(self, installer: Path, phase: str, case_dir: Path) -> Path:
+    def install(
+        self,
+        installer: Path,
+        phase: str,
+        case_dir: Path,
+        *,
+        updater_install: bool = False,
+        default_biyan_root: bool = False,
+    ) -> Path:
         if self.platform == "windows":
-            # NSIS requires /D=... to be the final argument. Pinning both the
-            # source and candidate into one per-scenario root removes registry
-            # and runner-image default-path ambiguity from upgrade evidence.
+            # Manual installs pin /D last. Automatic upgrades intentionally
+            # omit /D and exercise the passive updater path and registry-owned
+            # destination; /R stays withheld until the exact inventory passes.
             install_root = case_dir / "windows-install"
             install_root.mkdir(parents=True, exist_ok=True)
-            command = [str(installer), "/S", f"/D={install_root}"]
+            expected_root = (
+                Path(os.environ["LOCALAPPDATA"]) / "Programs" / "Biyan"
+                if default_biyan_root
+                else install_root
+            )
+            self.last_install_root = expected_root
+            command = (
+                [str(installer), "/P", "/UPDATE", "/ARGS"]
+                if updater_install
+                else [str(installer), "/S", f"/D={install_root}"]
+            )
             try:
                 subprocess.run(command, check=True, timeout=300)
             except subprocess.CalledProcessError as error:
-                diagnostics = _windows_install_diagnostics(install_root)
+                diagnostics = _windows_install_diagnostics(expected_root)
                 raise RuntimeError(
                     f"Windows installer failed for {phase} with exit "
                     f"{error.returncode}: {json.dumps(diagnostics, sort_keys=True)}"
                 ) from error
             candidates = [
-                install_root / f"{product}.exe"
+                expected_root / f"{product}.exe"
                 for product in ("Biyan", "Mita", "Silence", "Jan")
             ]
         elif self.platform == "macos":
@@ -1318,7 +1505,28 @@ def run_matrix(
                         validated.installers[phase],
                         phase,
                         case_dir,
+                        updater_install=(
+                            platform == "windows"
+                            and phase == "c"
+                            and (
+                                validated.qualification_mode
+                                == "automatic-updater"
+                                if validated.qualification_mode is not None
+                                else case.name
+                                not in ("legacy-manual-to-c", "fresh-c")
+                            )
+                        ),
+                        default_biyan_root=(
+                            platform == "windows"
+                            and phase == "c"
+                            and case.name == "legacy-auto-to-c"
+                        ),
                     )
+                    if platform == "windows" and phase == "c":
+                        phase_boundary = "candidate-install-inventory"
+                        _assert_exact_windows_candidate_install_inventory(
+                            executable.parent
+                        )
                     if guarded_source:
                         readiness_check = _stable_source_readiness(
                             validated.source_readiness
@@ -1378,7 +1586,9 @@ def run_matrix(
                     "platform": platform,
                     "phaseBoundary": phase_boundary,
                     "failureClass": (
-                        "migration-step-failed"
+                        "candidate-install-inventory-failed"
+                        if phase_boundary == "candidate-install-inventory"
+                        else "migration-step-failed"
                         if isinstance(probe_error, ReadinessFailed)
                         else "qualification-failed"
                     ),
@@ -1399,7 +1609,8 @@ def run_matrix(
                     diagnostics["shutdown"] = dict(executor.last_shutdown)
                 if platform == "windows":
                     diagnostics["installInventory"] = _bounded_windows_install_inventory(
-                        case_dir / "windows-install"
+                        executor.last_install_root
+                        or (case_dir / "windows-install")
                     )
                 raise MigrationRunError(diagnostics) from error
     finally:
