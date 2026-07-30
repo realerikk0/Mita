@@ -2227,8 +2227,11 @@ test('recovery commands are derived from durable snapshots and created-object le
     mutations,
     /open-r2-predelete\.json[\s\S]*open-oss-predelete\.json[\s\S]*cmp "\$JOURNAL"[\s\S]*transactionId[\s\S]*--if-match "\$open_etag"/
   )
-  assert.match(commands, /RefreshObjectCaches/)
-  assert.match(commands, /cloudflare-cache-purge/)
+  assert.match(
+    commands,
+    /RefreshObjectCaches --region "\$ALIYUN_REGION"/
+  )
+  assert.doesNotMatch(commands, /cloudflare-cache-purge|purge_cache/)
   assert.match(commands, /poll-url[\s\S]*legacy-aliyun-cdn/)
   assert.match(commands, /poll-url[\s\S]*legacy-r2-cdn/)
   assert.doesNotMatch(commands, /copy-object/)
@@ -2336,6 +2339,50 @@ test('recovery fails closed when an unverified immutable create intent exists', 
     commands.slice(unverifiedProbe, firstDelete),
     /delete-object/
   )
+})
+
+test('recovery pairs an immutable create intent only with a later exact verification', () => {
+  const intent = {
+    provider: 'oss',
+    key: 'biyan/updater/releases/v0.6.643/paired.tar.gz',
+    sha256: sha('f'),
+    contentType: 'application/octet-stream',
+    cacheControl: 'public, max-age=31536000, immutable',
+    createdByTransaction: true,
+    verified: false,
+  }
+  const withIntent = advanceJournal(journal(), {
+    state: 'committing',
+    checkpoint: 'immutable-create-intent',
+    immutableEntry: intent,
+    updatedAt: '2026-07-24T00:01:00.000Z',
+  })
+  const withExactVerification = advanceJournal(withIntent, {
+    state: 'rollback-required',
+    checkpoint: 'immutable-create-verified',
+    immutableEntry: { ...intent, verified: true },
+    updatedAt: '2026-07-24T00:02:00.000Z',
+  })
+  const exactCommands = recoveryCommands(withExactVerification)
+  assert.match(exactCommands, /initial-ledger-0-oss/)
+  assert.doesNotMatch(
+    exactCommands,
+    /missing-target-unverified-|unverified-ledger-/
+  )
+
+  const withMismatchedVerification = advanceJournal(withIntent, {
+    state: 'rollback-required',
+    checkpoint: 'immutable-create-mismatched',
+    immutableEntry: {
+      ...intent,
+      sha256: sha('e'),
+      verified: true,
+    },
+    updatedAt: '2026-07-24T00:02:00.000Z',
+  })
+  const mismatchedCommands = recoveryCommands(withMismatchedVerification)
+  assert.match(mismatchedCommands, /missing-target-unverified-0-oss/)
+  assert.match(mismatchedCommands, /unverified-ledger-0-oss/)
 })
 
 test('CDN polling waits through stale success and accepts only exact bytes', async () => {
@@ -3399,17 +3446,21 @@ test('updater workflows expose production secrets only to required read or mutat
   const count = (source, pattern) => source.match(pattern)?.length ?? 0
 
   const promotion = workflow('promote-desktop-update.yml')
+  const recovery = workflow('recover-split-updater-transaction.yml')
   const health = workflow('updater-health-gate.yml')
   const kill = workflow('updater-kill-switch.yml')
   for (const source of [promotion, health, kill]) {
     assert.doesNotMatch(jobEnvironment(source), /secrets\./)
   }
 
-  assert.equal(
-    count(promotion, /secrets\.CLOUDFLARE_API_TOKEN/g),
-    1,
-    'Cloudflare cache mutation token must exist only on publish'
-  )
+  for (const source of [promotion, recovery, health, kill]) {
+    assert.equal(
+      count(source, /secrets\.CLOUDFLARE_API_TOKEN/g),
+      0,
+      'updater transactions must converge by exact polling without a broad Cloudflare cache token'
+    )
+    assert.equal(count(source, /secrets\.CLOUDFLARE_ZONE_ID/g), 0)
+  }
   assert.equal(
     count(promotion, /secrets\.BIYAN_SIGNING_KEY/g),
     2,

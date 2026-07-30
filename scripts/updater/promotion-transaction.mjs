@@ -1352,11 +1352,38 @@ export function recoveryCommands(journalInput) {
   const terminalHistoryKey =
     `${TRANSACTION_PREFIX}/${journal.transactionId}/journal-` +
     `${String(journal.sequence).padStart(4, '0')}.json`
+  const sameImmutableObject = (left, right) =>
+    left.provider === right.provider &&
+    left.key === right.key &&
+    left.sha256 === right.sha256 &&
+    left.contentType === right.contentType &&
+    left.cacheControl === right.cacheControl &&
+    left.createdByTransaction === right.createdByTransaction
   const cleanupLedger = journal.immutableLedger.filter(
     (item) => item.createdByTransaction && item.verified
   )
+  const cleanupKeys = new Set()
+  for (const entry of cleanupLedger) {
+    const objectKey = `${entry.provider}\0${entry.key}`
+    if (cleanupKeys.has(objectKey)) {
+      throw new Error(
+        `Recovery journal contains duplicate verified immutable object ${entry.provider}:${entry.key}`
+      )
+    }
+    cleanupKeys.add(objectKey)
+  }
   const unverifiedLedger = journal.immutableLedger.filter(
-    (item) => item.createdByTransaction && !item.verified
+    (item, index, entries) =>
+      item.createdByTransaction &&
+      !item.verified &&
+      !entries
+        .slice(index + 1)
+        .some(
+          (later) =>
+            later.createdByTransaction &&
+            later.verified &&
+            sameImmutableObject(item, later)
+        )
   )
   const lines = [
     '#!/usr/bin/env bash',
@@ -1368,8 +1395,6 @@ export function recoveryCommands(journalInput) {
     ': "${ALIYUN_OSS_BUCKET:?}"',
     ': "${ALIYUN_OSS_ENDPOINT:?}"',
     ': "${ALIYUN_REGION:?}"',
-    ': "${CLOUDFLARE_ZONE_ID:?}"',
-    ': "${CLOUDFLARE_API_TOKEN:?}"',
     ': "${LEGACY_ALIYUN_URL:?}"',
     ': "${LEGACY_R2_URL:?}"',
     'JOURNAL="${JOURNAL:-promotion-journal.json}"',
@@ -1731,10 +1756,8 @@ export function recoveryCommands(journalInput) {
     `aws s3api get-object --bucket "$CLOUDFLARE_R2_BUCKET" --key ${q(legacyR2.key)} --endpoint-url "$r2_endpoint" "recovery-readback/r2-${legacyR2Index}" > "recovery-readback/r2-${legacyR2Index}-metadata.json"`,
     `node scripts/updater/promotion-transaction.mjs verify-snapshot-readback --journal "$JOURNAL" --index ${q(legacyR2Index)} --bytes "recovery-readback/r2-${legacyR2Index}" --metadata "recovery-readback/r2-${legacyR2Index}-metadata.json" --output "recovery-readback/r2-${legacyR2Index}-verified.json"`,
     'if [[ "$legacy_restored" == true ]]; then',
-    '  aliyun cdn RefreshObjectCaches --ObjectPath "$LEGACY_ALIYUN_URL" --ObjectType File > recovery-readback/aliyun-cache-purge.json',
+    '  aliyun cdn RefreshObjectCaches --region "$ALIYUN_REGION" --ObjectPath "$LEGACY_ALIYUN_URL" --ObjectType File > recovery-readback/aliyun-cache-purge.json',
     '  jq -e \'.RefreshTaskId or .RequestId\' recovery-readback/aliyun-cache-purge.json >/dev/null',
-    '  curl --proto \'=https\' --tlsv1.2 -fsS -X POST "https://api.cloudflare.com/client/v4/zones/${CLOUDFLARE_ZONE_ID}/purge_cache" -H "Authorization: Bearer ${CLOUDFLARE_API_TOKEN}" -H "Content-Type: application/json" --data "{\\"files\\":[\\"${LEGACY_R2_URL}\\"]}" > recovery-readback/cloudflare-cache-purge.json',
-    '  jq -e \'.success == true\' recovery-readback/cloudflare-cache-purge.json >/dev/null',
     `  node scripts/updater/promotion-transaction.mjs poll-url --url "$LEGACY_ALIYUN_URL" --expected "recovery-readback/backups/${legacyOssIndex}" --timeout-seconds 600 --interval-seconds 10 --output recovery-readback/legacy-aliyun-cdn.json`,
     `  node scripts/updater/promotion-transaction.mjs poll-url --url "$LEGACY_R2_URL" --expected "recovery-readback/backups/${legacyR2Index}" --timeout-seconds 600 --interval-seconds 10 --output recovery-readback/legacy-r2-cdn.json`,
     'fi',
