@@ -531,6 +531,7 @@ test('distribution and updater workflows replay artifacts without desktop builds
   for (const name of [
     'release-distribution.yml',
     'promote-desktop-update.yml',
+    'recover-split-updater-transaction.yml',
     'updater-health-gate.yml',
   ]) {
     const result = classifyChangedFiles([`.github/workflows/${name}`])

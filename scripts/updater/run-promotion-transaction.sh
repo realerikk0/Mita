@@ -2,12 +2,19 @@
 set -euo pipefail
 
 terminal_recovery_only=false
-if [[ "${1:-}" == "--recover-terminal-only" ]]; then
-  terminal_recovery_only=true
-  shift
-fi
+split_nonterminal_recovery_only=false
+case "${1:-}" in
+  --recover-terminal-only)
+    terminal_recovery_only=true
+    shift
+    ;;
+  --recover-split-nonterminal-only)
+    split_nonterminal_recovery_only=true
+    shift
+    ;;
+esac
 if [[ "$#" -ne 0 ]]; then
-  echo "Usage: $0 [--recover-terminal-only]" >&2
+  echo "Usage: $0 [--recover-terminal-only|--recover-split-nonterminal-only]" >&2
   exit 2
 fi
 
@@ -22,19 +29,10 @@ fi
 : "${LEGACY_ALIYUN_URL:?}"
 : "${LEGACY_R2_URL:?}"
 : "${OPEN_TRANSACTION_KEY:?}"
-: "${FROM_VERSION:?}"
-: "${ROLLOUT:?}"
 
 r2_endpoint="https://${CLOUDFLARE_R2_ACCOUNT_ID}.r2.cloudflarestorage.com"
 oss_endpoint="${ALIYUN_OSS_ENDPOINT#https://}"
 oss_endpoint="https://${oss_endpoint#http://}"
-target_version="$(jq -er .version dist/candidate/candidate.json)"
-target_tag="$(jq -er .tag dist/candidate/candidate.json)"
-source_commit="$(jq -er .sourceCommit dist/candidate/candidate.json)"
-transaction_id="${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
-transaction_prefix="biyan/updater/transactions/${transaction_id}"
-legacy_staging_key="${transaction_prefix}/staging/legacy-latest.json"
-journal=dist/state/promotion-journal.json
 
 assert_aws_conditional_capabilities() {
   local put_skeleton delete_skeleton
@@ -887,10 +885,194 @@ recover_terminal_open_journal() {
     }' >dist/state/terminal-promotion-recovery.json
 }
 
+recover_split_nonterminal_open_journal() {
+  local recovery_dir r2_state oss_state transaction_id r2_sequence oss_sequence
+  local r2_history_key oss_history_key canonical_provider previous_provider
+  recovery_dir=dist/state/split-nonterminal-recovery
+  mkdir -p "$recovery_dir"
+
+  # A split lock can only be recovered when both replicas are present.  Missing
+  # or unclassified state belongs to the terminal recovery path instead.
+  probe_r2 "$OPEN_TRANSACTION_KEY" split-open-r2
+  probe_oss "$OPEN_TRANSACTION_KEY" split-open-oss
+  r2_state="$(jq -er .state dist/state/probes/split-open-r2.json)"
+  oss_state="$(jq -er .state dist/state/probes/split-open-oss.json)"
+  test "$r2_state" = exists
+  test "$oss_state" = exists
+
+  aws s3api get-object --bucket "$CLOUDFLARE_R2_BUCKET" \
+    --key "$OPEN_TRANSACTION_KEY" --endpoint-url "$r2_endpoint" \
+    "$recovery_dir/open-r2.json" >"$recovery_dir/open-r2-metadata.json"
+  ossutil cp "oss://${ALIYUN_OSS_BUCKET}/${OPEN_TRANSACTION_KEY}" \
+    "$recovery_dir/open-oss.json" --force \
+    --endpoint "$oss_endpoint" --region "$ALIYUN_REGION"
+  ossutil api head-object --bucket "$ALIYUN_OSS_BUCKET" \
+    --key "$OPEN_TRANSACTION_KEY" --endpoint "$oss_endpoint" \
+    --region "$ALIYUN_REGION" --output-format json --quiet \
+    >"$recovery_dir/open-oss-metadata.json"
+  verify_json_metadata "$recovery_dir/open-r2-metadata.json" \
+    "$recovery_dir/open-r2-metadata-plan.json" no-store
+  verify_json_metadata "$recovery_dir/open-oss-metadata.json" \
+    "$recovery_dir/open-oss-metadata-plan.json" no-store
+  node scripts/updater/promotion-transaction.mjs validate-journal \
+    --journal "$recovery_dir/open-r2.json"
+  node scripts/updater/promotion-transaction.mjs validate-journal \
+    --journal "$recovery_dir/open-oss.json"
+  transaction_id="$(jq -er .transactionId "$recovery_dir/open-r2.json")"
+  test "$transaction_id" = "$(jq -er .transactionId "$recovery_dir/open-oss.json")"
+  test "$transaction_id" = "${RECOVERY_TRANSACTION_ID:?}"
+  r2_sequence="$(jq -er .sequence "$recovery_dir/open-r2.json")"
+  oss_sequence="$(jq -er .sequence "$recovery_dir/open-oss.json")"
+  test "$r2_sequence" -ne "$oss_sequence"
+
+  r2_history_key="biyan/updater/transactions/${transaction_id}/journal-$(printf '%04d' "$r2_sequence").json"
+  oss_history_key="biyan/updater/transactions/${transaction_id}/journal-$(printf '%04d' "$oss_sequence").json"
+  aws s3api get-object --bucket "$CLOUDFLARE_R2_BUCKET" \
+    --key "$r2_history_key" --endpoint-url "$r2_endpoint" \
+    "$recovery_dir/history-r2-open-r2.json" \
+    >"$recovery_dir/history-r2-open-r2-metadata.json"
+  ossutil cp "oss://${ALIYUN_OSS_BUCKET}/${r2_history_key}" \
+    "$recovery_dir/history-r2-open-oss.json" --force \
+    --endpoint "$oss_endpoint" --region "$ALIYUN_REGION"
+  ossutil api head-object --bucket "$ALIYUN_OSS_BUCKET" --key "$r2_history_key" \
+    --endpoint "$oss_endpoint" --region "$ALIYUN_REGION" --output-format json --quiet \
+    >"$recovery_dir/history-r2-open-oss-metadata.json"
+  aws s3api get-object --bucket "$CLOUDFLARE_R2_BUCKET" \
+    --key "$oss_history_key" --endpoint-url "$r2_endpoint" \
+    "$recovery_dir/history-oss-open-r2.json" \
+    >"$recovery_dir/history-oss-open-r2-metadata.json"
+  ossutil cp "oss://${ALIYUN_OSS_BUCKET}/${oss_history_key}" \
+    "$recovery_dir/history-oss-open-oss.json" --force \
+    --endpoint "$oss_endpoint" --region "$ALIYUN_REGION"
+  ossutil api head-object --bucket "$ALIYUN_OSS_BUCKET" --key "$oss_history_key" \
+    --endpoint "$oss_endpoint" --region "$ALIYUN_REGION" --output-format json --quiet \
+    >"$recovery_dir/history-oss-open-oss-metadata.json"
+  for metadata in "$recovery_dir"/history-*-metadata.json; do
+    verify_json_metadata "$metadata" "${metadata%.json}-plan.json" no-store
+  done
+
+  node scripts/updater/promotion-transaction.mjs \
+    resolve-split-nonterminal-journal \
+    --r2-open "$recovery_dir/open-r2.json" \
+    --oss-open "$recovery_dir/open-oss.json" \
+    --r2-open-history-r2 "$recovery_dir/history-r2-open-r2.json" \
+    --r2-open-history-oss "$recovery_dir/history-r2-open-oss.json" \
+    --oss-open-history-r2 "$recovery_dir/history-oss-open-r2.json" \
+    --oss-open-history-oss "$recovery_dir/history-oss-open-oss.json" \
+    --canonical-output "$recovery_dir/canonical-open-journal.json" \
+    --previous-output "$recovery_dir/previous-open-journal.json" \
+    --output "$recovery_dir/plan.json"
+  canonical_provider="$(jq -er .canonical.provider "$recovery_dir/plan.json")"
+  previous_provider="$(jq -er .previous.provider "$recovery_dir/plan.json")"
+
+  if [[ "${DRY_RUN:?}" == true ]]; then
+    jq '. + {status:"validated-split-nonterminal-dry-run", mutated:false}' \
+      "$recovery_dir/plan.json" >"$recovery_dir/summary.json"
+    return
+  fi
+  test "$DRY_RUN" = false
+  test "${RECOVERY_CONFIRMATION:?}" = RECOVER_SPLIT_TRANSACTION
+
+  # Re-read both lock replicas immediately before the only reconciliation
+  # write.  Their exact preimages were proven by dual-cloud immutable history.
+  probe_r2 "$OPEN_TRANSACTION_KEY" split-boundary-open-r2
+  probe_oss "$OPEN_TRANSACTION_KEY" split-boundary-open-oss
+  test "$(jq -er .state dist/state/probes/split-boundary-open-r2.json)" = exists
+  test "$(jq -er .state dist/state/probes/split-boundary-open-oss.json)" = exists
+  aws s3api get-object --bucket "$CLOUDFLARE_R2_BUCKET" \
+    --key "$OPEN_TRANSACTION_KEY" --endpoint-url "$r2_endpoint" \
+    "$recovery_dir/boundary-open-r2.json" \
+    >"$recovery_dir/boundary-open-r2-metadata.json"
+  ossutil cp "oss://${ALIYUN_OSS_BUCKET}/${OPEN_TRANSACTION_KEY}" \
+    "$recovery_dir/boundary-open-oss.json" --force \
+    --endpoint "$oss_endpoint" --region "$ALIYUN_REGION"
+  ossutil api head-object --bucket "$ALIYUN_OSS_BUCKET" \
+    --key "$OPEN_TRANSACTION_KEY" --endpoint "$oss_endpoint" \
+    --region "$ALIYUN_REGION" --output-format json --quiet \
+    >"$recovery_dir/boundary-open-oss-metadata.json"
+  verify_json_metadata "$recovery_dir/boundary-open-r2-metadata.json" \
+    "$recovery_dir/boundary-open-r2-metadata-plan.json" no-store
+  verify_json_metadata "$recovery_dir/boundary-open-oss-metadata.json" \
+    "$recovery_dir/boundary-open-oss-metadata-plan.json" no-store
+  cmp "$recovery_dir/open-r2.json" "$recovery_dir/boundary-open-r2.json"
+  cmp "$recovery_dir/open-oss.json" "$recovery_dir/boundary-open-oss.json"
+
+  if [[ "$previous_provider" == r2 ]]; then
+    local previous_etag
+    previous_etag="$(node scripts/updater/promotion-transaction.mjs extract-r2-etag \
+      --metadata "$recovery_dir/boundary-open-r2-metadata.json")"
+    aws s3api put-object --bucket "$CLOUDFLARE_R2_BUCKET" \
+      --key "$OPEN_TRANSACTION_KEY" --body "$recovery_dir/canonical-open-journal.json" \
+      --content-type application/json --cache-control no-store \
+      --if-match "$previous_etag" --endpoint-url "$r2_endpoint" >/dev/null
+  elif [[ "$previous_provider" == oss ]]; then
+    # OSS has no destination If-Match overwrite. Re-read its predecessor just
+    # before the overwrite and rely on the release workflow's shared lock.
+    probe_oss "$OPEN_TRANSACTION_KEY" split-immediate-open-oss
+    test "$(jq -er .state dist/state/probes/split-immediate-open-oss.json)" = exists
+    ossutil cp "oss://${ALIYUN_OSS_BUCKET}/${OPEN_TRANSACTION_KEY}" \
+      "$recovery_dir/immediate-open-oss.json" --force \
+      --endpoint "$oss_endpoint" --region "$ALIYUN_REGION"
+    cmp "$recovery_dir/open-oss.json" "$recovery_dir/immediate-open-oss.json"
+    put_oss_json "$recovery_dir/canonical-open-journal.json" \
+      "$OPEN_TRANSACTION_KEY"
+  else
+    echo "Unsupported previous split-lock provider: $previous_provider" >&2
+    return 1
+  fi
+
+  # Both copies must now equal the canonical journal before its generated
+  # recovery script can classify or mutate any product object.
+  aws s3api get-object --bucket "$CLOUDFLARE_R2_BUCKET" \
+    --key "$OPEN_TRANSACTION_KEY" --endpoint-url "$r2_endpoint" \
+    "$recovery_dir/reconciled-open-r2.json" \
+    >"$recovery_dir/reconciled-open-r2-metadata.json"
+  ossutil cp "oss://${ALIYUN_OSS_BUCKET}/${OPEN_TRANSACTION_KEY}" \
+    "$recovery_dir/reconciled-open-oss.json" --force \
+    --endpoint "$oss_endpoint" --region "$ALIYUN_REGION"
+  ossutil api head-object --bucket "$ALIYUN_OSS_BUCKET" \
+    --key "$OPEN_TRANSACTION_KEY" --endpoint "$oss_endpoint" \
+    --region "$ALIYUN_REGION" --output-format json --quiet \
+    >"$recovery_dir/reconciled-open-oss-metadata.json"
+  verify_json_metadata "$recovery_dir/reconciled-open-r2-metadata.json" \
+    "$recovery_dir/reconciled-open-r2-metadata-plan.json" no-store
+  verify_json_metadata "$recovery_dir/reconciled-open-oss-metadata.json" \
+    "$recovery_dir/reconciled-open-oss-metadata-plan.json" no-store
+  cmp "$recovery_dir/canonical-open-journal.json" \
+    "$recovery_dir/reconciled-open-r2.json"
+  cmp "$recovery_dir/canonical-open-journal.json" \
+    "$recovery_dir/reconciled-open-oss.json"
+  test "$canonical_provider" = r2 || test "$canonical_provider" = oss
+
+  node scripts/updater/promotion-transaction.mjs recovery-commands \
+    --journal "$recovery_dir/canonical-open-journal.json" \
+    --output dist/state/RECOVERY_COMMANDS.sh
+  JOURNAL="$recovery_dir/canonical-open-journal.json" \
+    bash dist/state/RECOVERY_COMMANDS.sh
+  mv recovery-readback "$recovery_dir/recovery-readback"
+  jq '. + {status:"recovered-split-nonterminal", mutated:true}' \
+    "$recovery_dir/plan.json" >"$recovery_dir/summary.json"
+}
+
 if [[ "$terminal_recovery_only" == true ]]; then
   recover_terminal_open_journal
   exit 0
 fi
+
+if [[ "$split_nonterminal_recovery_only" == true ]]; then
+  recover_split_nonterminal_open_journal
+  exit 0
+fi
+
+: "${FROM_VERSION:?}"
+: "${ROLLOUT:?}"
+target_version="$(jq -er .version dist/candidate/candidate.json)"
+target_tag="$(jq -er .tag dist/candidate/candidate.json)"
+source_commit="$(jq -er .sourceCommit dist/candidate/candidate.json)"
+transaction_id="${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
+transaction_prefix="biyan/updater/transactions/${transaction_id}"
+legacy_staging_key="${transaction_prefix}/staging/legacy-latest.json"
+journal=dist/state/promotion-journal.json
 
 resume_from_pause=false
 if [[ -f dist/state/current-policy.json ]] \

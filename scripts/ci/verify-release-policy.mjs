@@ -227,6 +227,12 @@ const releaseEnvironmentWorkflows = {
     ],
     source: read('.github/workflows/promote-desktop-update.yml'),
   },
+  '.github/workflows/recover-split-updater-transaction.yml': {
+    ...TRUSTED_SENSITIVE_UPDATER_WORKFLOW_CONTRACTS[
+      '.github/workflows/recover-split-updater-transaction.yml'
+    ],
+    source: read('.github/workflows/recover-split-updater-transaction.yml'),
+  },
   '.github/workflows/updater-health-gate.yml': {
     ...TRUSTED_SENSITIVE_UPDATER_WORKFLOW_CONTRACTS[
       '.github/workflows/updater-health-gate.yml'

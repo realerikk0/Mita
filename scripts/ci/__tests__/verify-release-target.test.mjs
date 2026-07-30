@@ -595,6 +595,7 @@ test('the control-plane drift policy is an exact path allowlist', () => {
       ['.github/workflows/desktop-release-recovery.yml', 'A'],
       ['.github/workflows/desktop-release.yml', 'M'],
       ['.github/workflows/promote-desktop-update.yml', 'M'],
+      ['.github/workflows/recover-split-updater-transaction.yml', 'A'],
       ['.github/workflows/release-distribution.yml', 'M'],
       ['.github/workflows/updater-health-gate.yml', 'M'],
       ['.github/workflows/updater-kill-switch.yml', 'M'],

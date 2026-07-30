@@ -17,6 +17,7 @@ import {
   extractR2Etag,
   pollPublicBytes,
   recoveryCommands,
+  resolveSplitNonterminalJournal,
   terminalPromotionRecoveryPlan,
   validateApprovedATransition,
   validateHealthEvidenceUrl,
@@ -1836,6 +1837,136 @@ test('journal validates restorable bytes, metadata, ACL, and immutable ledger', 
   )
 })
 
+test('split nonterminal recovery accepts only one exact journal successor', () => {
+  const prepared = journal()
+  const committing = advanceJournal(prepared, {
+    state: 'committing',
+    checkpoint: 'before-immutable-write',
+    immutableEntry: {
+      provider: 'oss',
+      key: 'biyan/updater/releases/v0.6.643/Biyan.app.tar.gz',
+      sha256: sha('f'),
+      contentType: 'application/octet-stream',
+      cacheControl: 'public, max-age=31536000, immutable',
+      createdByTransaction: true,
+      verified: false,
+    },
+    updatedAt: '2026-07-24T00:01:00.000Z',
+  })
+  const resolved = resolveSplitNonterminalJournal({
+    r2Open: committing,
+    ossOpen: prepared,
+  })
+  assert.equal(resolved.transactionId, '123-1')
+  assert.equal(resolved.previousProvider, 'oss')
+  assert.equal(resolved.canonicalProvider, 'r2')
+  assert.deepEqual(resolved.previous, prepared)
+  assert.deepEqual(resolved.canonical, committing)
+
+  assert.throws(
+    () =>
+      resolveSplitNonterminalJournal({
+        r2Open: committing,
+        ossOpen: structuredClone(committing),
+      }),
+    /different sequences/
+  )
+  const unsafe = structuredClone(committing)
+  unsafe.sequence += 1
+  assert.throws(
+    () => resolveSplitNonterminalJournal({ r2Open: unsafe, ossOpen: prepared }),
+    /differ by exactly one sequence/
+  )
+  const other = createJournal({
+    runId: '124',
+    runAttempt: '1',
+    targetTag: 'v0.6.643',
+    targetVersion: '0.6.643',
+    sourceCommit,
+    nextPolicyBytes: Buffer.from('{"currentVersion":"0.6.643"}\n'),
+    createdAt: '2026-07-24T00:00:00.000Z',
+    snapshots: prepared.snapshots,
+  })
+  assert.throws(
+    () => resolveSplitNonterminalJournal({ r2Open: committing, ossOpen: other }),
+    /do not share a transaction identity/
+  )
+})
+
+test('split nonterminal resolver requires both clouds to retain exact history bytes', () => {
+  const prepared = journal()
+  const committing = advanceJournal(prepared, {
+    state: 'committing',
+    checkpoint: 'before-immutable-write',
+    updatedAt: '2026-07-24T00:01:00.000Z',
+  })
+  const temp = fs.mkdtempSync(path.join(os.tmpdir(), 'updater-split-history-'))
+  const write = (name, value) => {
+    const file = path.join(temp, name)
+    fs.writeFileSync(file, `${JSON.stringify(value, null, 2)}\n`)
+    return file
+  }
+  const paths = {
+    r2Open: write('open-r2.json', committing),
+    ossOpen: write('open-oss.json', prepared),
+    r2OpenHistoryR2: write('history-r2-r2.json', committing),
+    r2OpenHistoryOss: write('history-r2-oss.json', committing),
+    ossOpenHistoryR2: write('history-oss-r2.json', prepared),
+    ossOpenHistoryOss: write('history-oss-oss.json', prepared),
+    canonical: path.join(temp, 'canonical.json'),
+    previous: path.join(temp, 'previous.json'),
+    output: path.join(temp, 'plan.json'),
+  }
+  const args = () => [
+    'scripts/updater/promotion-transaction.mjs',
+    'resolve-split-nonterminal-journal',
+    '--r2-open',
+    paths.r2Open,
+    '--oss-open',
+    paths.ossOpen,
+    '--r2-open-history-r2',
+    paths.r2OpenHistoryR2,
+    '--r2-open-history-oss',
+    paths.r2OpenHistoryOss,
+    '--oss-open-history-r2',
+    paths.ossOpenHistoryR2,
+    '--oss-open-history-oss',
+    paths.ossOpenHistoryOss,
+    '--canonical-output',
+    paths.canonical,
+    '--previous-output',
+    paths.previous,
+    '--output',
+    paths.output,
+  ]
+  try {
+    const resolved = spawnSync(process.execPath, args(), {
+      cwd: repoRoot,
+      encoding: 'utf8',
+    })
+    assert.equal(resolved.status, 0, resolved.stderr)
+    assert.deepEqual(JSON.parse(fs.readFileSync(paths.canonical, 'utf8')), committing)
+    assert.deepEqual(JSON.parse(fs.readFileSync(paths.previous, 'utf8')), prepared)
+    assert.deepEqual(JSON.parse(fs.readFileSync(paths.output, 'utf8')), {
+      schema: 1,
+      status: 'validated-split-nonterminal',
+      transactionId: '123-1',
+      previous: { provider: 'oss', sequence: 0, state: 'prepared' },
+      canonical: { provider: 'r2', sequence: 1, state: 'committing' },
+    })
+
+    fs.writeFileSync(paths.r2OpenHistoryOss, '{"drift":true}\n')
+    const drift = spawnSync(process.execPath, args(), {
+      cwd: repoRoot,
+      encoding: 'utf8',
+    })
+    assert.notEqual(drift.status, 0)
+    assert.match(drift.stderr, /does not exactly match its open journal/)
+  } finally {
+    fs.rmSync(temp, { recursive: true, force: true })
+  }
+})
+
 test('recovery commands are derived from durable snapshots and created-object ledger', () => {
   const ossCommitting = advanceJournal(journal(), {
     state: 'committing',
@@ -2084,7 +2215,7 @@ test('recovery leaves the already-published GitHub release immutable', () => {
   assert.match(commands, /poll-url/)
 })
 
-test('recovery never deletes an immutable object before transaction readback verified it', () => {
+test('recovery fails closed when an unverified immutable create intent exists', () => {
   const unverified = advanceJournal(journal(), {
     state: 'committing',
     checkpoint: 'immutable-create-intent',
@@ -2099,7 +2230,19 @@ test('recovery never deletes an immutable object before transaction readback ver
     },
     updatedAt: '2026-07-24T00:01:00.000Z',
   })
-  assert.doesNotMatch(recoveryCommands(unverified), /unverified\.tar\.gz/)
+  const commands = recoveryCommands(unverified)
+  assert.match(commands, /unverified\.tar\.gz/)
+  const unverifiedProbe = commands.indexOf('unverified-ledger-0-oss')
+  const firstDelete = commands.indexOf('# Delete cleanup objects only')
+  assert.ok(unverifiedProbe >= 0 && unverifiedProbe < firstDelete)
+  assert.match(
+    commands.slice(unverifiedProbe, firstDelete),
+    /\.state == "absent"/
+  )
+  assert.doesNotMatch(
+    commands.slice(unverifiedProbe, firstDelete),
+    /delete-object/
+  )
 })
 
 test('CDN polling waits through stale success and accepts only exact bytes', async () => {
@@ -3114,7 +3257,9 @@ test('every machine-readable ossutil API call suppresses the human elapsed trail
       if (!/\.(?:mjs|sh|ya?ml)$/.test(entry.name)) continue
       const source = readText(absolute)
       if (source.includes('ossutil api')) {
-        discovered.push(path.relative(repoRoot, absolute))
+        // Keep the checked-in policy envelope platform-neutral: Windows emits
+        // backslashes here, while the allowlist intentionally uses Git paths.
+        discovered.push(path.relative(repoRoot, absolute).split(path.sep).join('/'))
       }
     }
   }
@@ -3142,7 +3287,10 @@ test('every machine-readable ossutil API call suppresses the human elapsed trail
       assert.match(command, /--quiet/, relative)
     }
   }
-  assert.equal(commandCount, 68)
+  // The split-lock recovery path adds five explicitly machine-readable OSS
+  // probes. Keep this count locked so a future OSS command cannot bypass the
+  // JSON/quiet contract unnoticed.
+  assert.equal(commandCount, 73)
 })
 
 test('updater workflows expose production secrets only to required read or mutation steps', () => {

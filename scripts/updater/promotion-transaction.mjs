@@ -69,6 +69,19 @@ function readJson(file, description = file) {
   }
 }
 
+function readJsonBytes(file, description = file) {
+  const bytes = fs.readFileSync(file)
+  try {
+    return { bytes, value: JSON.parse(bytes.toString('utf8')) }
+  } catch (error) {
+    throw new Error(
+      `${description} is not valid JSON: ${
+        error instanceof Error ? error.message : String(error)
+      }`
+    )
+  }
+}
+
 function sha256Bytes(bytes) {
   return createHash('sha256').update(bytes).digest('hex')
 }
@@ -811,6 +824,72 @@ export function advanceJournal(
   return validateJournal(journal)
 }
 
+// A promotion may be interrupted after the immutable history write but before
+// both mutable open-lock replicas are updated.  This recognises only the
+// exact, one-step journal transition produced by advanceJournal; every other
+// divergence remains an operator-visible, fail-closed error.
+export function resolveSplitNonterminalJournal({ r2Open, ossOpen }) {
+  const copies = [
+    { provider: 'r2', journal: validateJournal(r2Open) },
+    { provider: 'oss', journal: validateJournal(ossOpen) },
+  ]
+  if (copies[0].journal.transactionId !== copies[1].journal.transactionId) {
+    throw new Error('Split promotion locks do not share a transaction identity')
+  }
+  if (copies[0].journal.sequence === copies[1].journal.sequence) {
+    throw new Error('Split promotion locks must have different sequences')
+  }
+  const [previous, canonical] = [...copies].sort(
+    (left, right) => left.journal.sequence - right.journal.sequence
+  )
+  if (canonical.journal.sequence !== previous.journal.sequence + 1) {
+    throw new Error('Split promotion locks must differ by exactly one sequence')
+  }
+  if (
+    !canonical.journal.recovery.required ||
+    !['committing', 'rollback-required'].includes(canonical.journal.state)
+  ) {
+    throw new Error('Split promotion lock successor must require nonterminal recovery')
+  }
+  if (
+    canonical.journal.checkpoints.length !==
+      previous.journal.checkpoints.length + 1 ||
+    canonical.journal.immutableLedger.length <
+      previous.journal.immutableLedger.length ||
+    canonical.journal.immutableLedger.length >
+      previous.journal.immutableLedger.length + 1
+  ) {
+    throw new Error('Split promotion lock successor has an unsafe journal delta')
+  }
+  const checkpoint = canonical.journal.checkpoints.at(-1)
+  if (!checkpoint || checkpoint.sequence !== canonical.journal.sequence) {
+    throw new Error('Split promotion lock successor has no exact checkpoint')
+  }
+  const immutableEntry =
+    canonical.journal.immutableLedger.length ===
+    previous.journal.immutableLedger.length + 1
+      ? canonical.journal.immutableLedger.at(-1)
+      : undefined
+  const reconstructed = advanceJournal(previous.journal, {
+    state: canonical.journal.state,
+    checkpoint: checkpoint.name,
+    immutableEntry,
+    updatedAt: canonical.journal.updatedAt,
+  })
+  if (!isDeepStrictEqual(reconstructed, canonical.journal)) {
+    throw new Error(
+      'Split promotion lock successor is not an exact immutable journal transition'
+    )
+  }
+  return {
+    transactionId: canonical.journal.transactionId,
+    previousProvider: previous.provider,
+    canonicalProvider: canonical.provider,
+    previous: previous.journal,
+    canonical: canonical.journal,
+  }
+}
+
 function terminalRouterExpectation(policy, currentVersion) {
   assertVersion(currentVersion, 'Terminal Router probe current version')
   if (policy === null) {
@@ -1257,6 +1336,9 @@ export function recoveryCommands(journalInput) {
   const cleanupLedger = journal.immutableLedger.filter(
     (item) => item.createdByTransaction && item.verified
   )
+  const unverifiedLedger = journal.immutableLedger.filter(
+    (item) => item.createdByTransaction && !item.verified
+  )
   const lines = [
     '#!/usr/bin/env bash',
     '# Generated from the durable promotion journal; run only in release-distribution recovery.',
@@ -1643,6 +1725,14 @@ export function recoveryCommands(journalInput) {
   lines.push(
     '# Reclassify every cleanup object before the first cleanup deletion.'
   )
+  for (const [index, entry] of unverifiedLedger.entries()) {
+    const probeName = `unverified-ledger-${index}-${entry.provider}`
+    lines.push(
+      `# An unverified create intent is ambiguous: it must still be absent.`,
+      `probe_${entry.provider}_recovery ${q(entry.key)} ${q(probeName)}`,
+      `jq -e '.state == "absent"' recovery-readback/${probeName}.json >/dev/null`
+    )
+  }
   const reverseCleanupLedger = [...cleanupLedger].reverse()
   for (const [index, entry] of reverseCleanupLedger.entries()) {
     const probeName = `predelete-ledger-${index}-${entry.provider}`
@@ -2083,6 +2173,80 @@ async function runCli() {
     fs.writeFileSync(
       path.resolve(args['--output']),
       recoveryCommands(readJson(path.resolve(args['--journal'])))
+    )
+    return
+  }
+  if (command === 'resolve-split-nonterminal-journal') {
+    const r2Open = readJsonBytes(
+      path.resolve(args['--r2-open']),
+      'R2 open promotion journal'
+    )
+    const ossOpen = readJsonBytes(
+      path.resolve(args['--oss-open']),
+      'OSS open promotion journal'
+    )
+    const histories = [
+      [
+        'R2 history for the R2 open journal',
+        args['--r2-open-history-r2'],
+        r2Open.bytes,
+      ],
+      [
+        'OSS history for the R2 open journal',
+        args['--r2-open-history-oss'],
+        r2Open.bytes,
+      ],
+      [
+        'R2 history for the OSS open journal',
+        args['--oss-open-history-r2'],
+        ossOpen.bytes,
+      ],
+      [
+        'OSS history for the OSS open journal',
+        args['--oss-open-history-oss'],
+        ossOpen.bytes,
+      ],
+    ]
+    for (const [description, file, expected] of histories) {
+      if (typeof file !== 'string' || !file) {
+        throw new Error(`${description} path is required`)
+      }
+      const actual = fs.readFileSync(path.resolve(file))
+      if (!actual.equals(expected)) {
+        throw new Error(`${description} does not exactly match its open journal`)
+      }
+    }
+    const resolved = resolveSplitNonterminalJournal({
+      r2Open: r2Open.value,
+      ossOpen: ossOpen.value,
+    })
+    const canonicalBytes =
+      resolved.canonicalProvider === 'r2' ? r2Open.bytes : ossOpen.bytes
+    const previousBytes =
+      resolved.previousProvider === 'r2' ? r2Open.bytes : ossOpen.bytes
+    fs.writeFileSync(path.resolve(args['--canonical-output']), canonicalBytes)
+    fs.writeFileSync(path.resolve(args['--previous-output']), previousBytes)
+    fs.writeFileSync(
+      path.resolve(args['--output']),
+      `${JSON.stringify(
+        {
+          schema: 1,
+          status: 'validated-split-nonterminal',
+          transactionId: resolved.transactionId,
+          previous: {
+            provider: resolved.previousProvider,
+            sequence: resolved.previous.sequence,
+            state: resolved.previous.state,
+          },
+          canonical: {
+            provider: resolved.canonicalProvider,
+            sequence: resolved.canonical.sequence,
+            state: resolved.canonical.state,
+          },
+        },
+        null,
+        2
+      )}\n`
     )
     return
   }

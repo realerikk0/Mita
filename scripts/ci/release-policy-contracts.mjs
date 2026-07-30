@@ -101,6 +101,14 @@ export const TRUSTED_SENSITIVE_UPDATER_WORKFLOW_CONTRACTS = Object.freeze({
       contents: 'read',
     }),
   }),
+  '.github/workflows/recover-split-updater-transaction.yml': Object.freeze({
+    exactJobNames: Object.freeze(['recover']),
+    expectedEnvelopeSha256:
+      '4a63bc648f0e86f1613780c69b88d791d5434e2027a198ea3d79cc4c204b8b17',
+    expectedPermissions: Object.freeze({
+      contents: 'read',
+    }),
+  }),
   '.github/workflows/updater-health-gate.yml': Object.freeze({
     exactJobNames: Object.freeze(['evaluate']),
     expectedEnvelopeSha256:
