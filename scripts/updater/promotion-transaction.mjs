@@ -312,7 +312,7 @@ export function classifyRemoteProbe({
       ? /(?:\b404\b|NoSuchKey|Not Found)/i.test(detail)
       : /(?:\b404\b|NoSuchKey|SymlinkTargetNotExist|Not Found)/i.test(detail)
   const permissionOrTransportFailure =
-    /(?:AccessDenied|Forbidden|InvalidAccessKey|SignatureDoesNotMatch|Unauthorized|timeout|timed out|connection|network|TLS|certificate|5\d\d)/i.test(
+    /(?:AccessDenied|Forbidden|InvalidAccessKey|SignatureDoesNotMatch|Unauthorized|timeout|timed out|connection|network|TLS|certificate|\b5\d{2}\b)/i.test(
       detail
     )
   if (exactNotFound && !permissionOrTransportFailure) {

@@ -1083,6 +1083,21 @@ test('remote probes distinguish exact absence from permission and network errors
     }).state,
     'absent'
   )
+  assert.equal(
+    classifyRemoteProbe({
+      provider: 'oss',
+      key: 'missing',
+      exitCode: 1,
+      stderr: [
+        'Error: operation error HeadObject: Error returned by Service.',
+        'Http Status Code: 404.',
+        'Error Code: NoSuchKey.',
+        'Request Id: 6A6AFD28FF8AE533309A16AA.',
+        'Message: The specified key does not exist.',
+      ].join('\n'),
+    }).state,
+    'absent'
+  )
   for (const detail of [
     'AccessDenied 403',
     'Request timeout',
