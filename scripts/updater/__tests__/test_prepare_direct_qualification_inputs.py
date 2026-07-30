@@ -26,7 +26,7 @@ def digest(path: Path) -> str:
 
 class PrepareDirectQualificationInputsTests(unittest.TestCase):
     def make_policy(self, root: Path, state: str = "candidate-pinned") -> tuple:
-        candidate = root / "Biyan_0.6.647_x64-setup.exe"
+        candidate = root / "Biyan_0.6.648_x64-setup.exe"
         legacy_manual = root / "Mita_0.6.608_x64-setup.exe"
         legacy_auto = root / "Mita_0.6.611_x64-setup.exe"
         current = root / "Biyan_0.6.633_x64-setup.exe"
@@ -46,12 +46,12 @@ class PrepareDirectQualificationInputsTests(unittest.TestCase):
             "state": state,
             "deploymentMode": "direct-c",
             "candidate": {
-                "version": "0.6.647",
-                "tag": "v0.6.647",
-                "sourceCommit": "ef963bc606366220db4589352afb25aa7d1785bf",
+                "version": "0.6.648",
+                "tag": "v0.6.648",
+                "sourceCommit": "33e8c5b03278b2b91318a553eb3b699b19c6ad1e",
                 "migrationPhase": "C",
                 "dataSchema": 3,
-                "manifestKey": "biyan/updater/releases/v0.6.647/latest.json",
+                "manifestKey": "biyan/updater/releases/v0.6.648/latest.json",
                 "manifestSha256": "f" * 64 if state == "candidate-pinned" else None,
                 "assets": {
                     "windows": {
@@ -59,11 +59,11 @@ class PrepareDirectQualificationInputsTests(unittest.TestCase):
                         "sha256": candidate_sha,
                     },
                     "macos": {
-                        "name": "Biyan_0.6.647_universal.dmg",
+                        "name": "Biyan_0.6.648_universal.dmg",
                         "sha256": "a" * 64 if state == "candidate-pinned" else None,
                     },
                     "linux": {
-                        "name": "Biyan_0.6.647_amd64.AppImage",
+                        "name": "Biyan_0.6.648_amd64.AppImage",
                         "sha256": "b" * 64 if state == "candidate-pinned" else None,
                     },
                 },

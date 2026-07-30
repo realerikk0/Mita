@@ -241,10 +241,16 @@ jobs:
           if ($installers.Count -ne 1 -or $msis.Count -ne 1) {
             throw "Expected exactly one Biyan NSIS and MSI candidate"
           }
-          & ./scripts/ci/verify-windows-candidate.ps1 `
-            -Exe $installers[0].FullName `
-            -Msi $msis[0].FullName `
-            -Version '${{ inputs.new_version }}'
+          $verifier = @{
+            Exe = $installers[0].FullName
+            Msi = $msis[0].FullName
+            Version = '${{ inputs.new_version }}'
+          }
+          if ('${{ inputs.channel }}' -eq 'stable') {
+            $verifier.GeneratedNsis =
+              'src-tauri/target/release/nsis/x64/installer.nsi'
+          }
+          & ./scripts/ci/verify-windows-candidate.ps1 @verifier
 
       - name: Upload NSIS Installer Artifact
         uses: actions/upload-artifact@v4

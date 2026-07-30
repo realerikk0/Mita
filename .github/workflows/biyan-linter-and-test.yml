@@ -648,6 +648,14 @@ jobs:
           $releaseMetadata = Get-Content biyan-release.json -Raw |
             ConvertFrom-Json
           $env:BIYAN_DATA_SCHEMA = [string]$releaseMetadata.dataSchema
+          $version = (
+            Get-Content src-tauri/tauri.conf.json -Raw |
+              ConvertFrom-Json
+          ).version
+          & node scripts/release-version.mjs stamp $version --windows
+          if ($LASTEXITCODE -ne 0) {
+            throw 'Windows release stamp failed'
+          }
           make build
 
       - name: Verify focused unsigned Windows candidate
@@ -663,7 +671,8 @@ jobs:
           & ./scripts/ci/verify-windows-candidate.ps1 `
             -Exe $exe `
             -Msi $msi `
-            -Version $version
+            -Version $version `
+            -GeneratedNsis 'src-tauri/target/release/nsis/x64/installer.nsi'
           node ./scripts/ci/candidate-path-policy.mjs --root $bundle
 
   test-on-ubuntu:

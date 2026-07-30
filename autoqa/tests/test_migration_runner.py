@@ -10,6 +10,9 @@ from unittest import mock
 from autoqa.migration_runner import (
     PHASES,
     PlatformExecutor,
+    MigrationRunError,
+    ValidatedInputs,
+    _assert_exact_windows_candidate_install_inventory,
     _assert_migration_state,
     _assert_reversible_directory_rename,
     _assert_source_readiness,
@@ -22,6 +25,7 @@ from autoqa.migration_runner import (
     SourceReadinessSpec,
     main,
     migration_matrix,
+    run_matrix,
     select_migration_cases,
     validate_inputs,
 )
@@ -91,12 +95,67 @@ class MigrationRunnerTests(unittest.TestCase):
             ],
         )
 
+    def test_windows_updater_command_contract_is_lock_and_config_bound(self):
+        repository_root = Path(__file__).resolve().parents[2]
+        cargo_lock = (repository_root / "src-tauri/Cargo.lock").read_text(
+            encoding="utf-8"
+        )
+        self.assertRegex(
+            cargo_lock,
+            r'(?ms)^\[\[package\]\]\nname = "tauri-plugin-updater"\n'
+            r'version = "2\.9\.0"\n',
+        )
+        tauri_config = json.loads(
+            (repository_root / "src-tauri/tauri.conf.json").read_text(
+                encoding="utf-8"
+            )
+        )
+        self.assertEqual(
+            tauri_config["plugins"]["updater"]["windows"]["installMode"],
+            "passive",
+        )
+
     def test_complete_installers_and_snapshots_validate(self):
         with tempfile.TemporaryDirectory(dir=Path.home()) as directory:
             installers, manifest = self.make_inputs(Path(directory))
             validated = validate_inputs(installers, manifest, "linux")
             self.assertEqual(set(validated.installers), set(PHASES))
             self.assertEqual(set(validated.snapshots), {"current", "a", "b", "fresh"})
+
+    def test_qualified_lane_metadata_binds_the_real_install_mode(self):
+        with tempfile.TemporaryDirectory(dir=Path.home()) as directory:
+            root = Path(directory)
+            installers, manifest = self.make_inputs(root)
+            payload = json.loads(manifest.read_text(encoding="utf-8"))
+            payload.update(
+                {
+                    "platform": "windows",
+                    "lane": "legacy-auto-to-c-windows",
+                    "scenario": "legacy-auto-to-c",
+                    "qualificationMode": "automatic-updater",
+                }
+            )
+            manifest.write_text(json.dumps(payload), encoding="utf-8")
+            cases = select_migration_cases(["legacy-auto-to-c"])
+
+            validated = validate_inputs(
+                installers,
+                manifest,
+                "windows",
+                cases,
+            )
+            self.assertEqual(
+                validated.qualification_mode,
+                "automatic-updater",
+            )
+
+            payload["qualificationMode"] = "manual-installer"
+            manifest.write_text(json.dumps(payload), encoding="utf-8")
+            with self.assertRaisesRegex(
+                ValueError,
+                "qualificationMode",
+            ):
+                validate_inputs(installers, manifest, "windows", cases)
 
     def test_current_to_a_requires_only_current_and_a_inputs(self):
         with tempfile.TemporaryDirectory(dir=Path.home()) as directory:
@@ -445,7 +504,78 @@ class MigrationRunnerTests(unittest.TestCase):
                 inventory["downloadExtension"]["kind"],
                 "oversize-rejected",
             )
+            self.assertEqual(
+                inventory["retiredAssistantExtension"]["kind"],
+                "missing",
+            )
             self.assertNotIn(str(install), encoded)
+
+    def test_windows_candidate_install_inventory_is_exact_and_fail_closed(self):
+        with tempfile.TemporaryDirectory(dir=Path.home()) as directory:
+            install = Path(directory) / "windows-install"
+            pre_install = install / "resources/pre-install"
+            pre_install.mkdir(parents=True)
+            (install / "Biyan.exe").write_bytes(b"candidate")
+            current = (
+                "biyan-assistant-extension-1.0.2.tgz",
+                "biyan-conversational-extension-1.0.0.tgz",
+                "biyan-download-extension-1.0.0.tgz",
+            )
+            retired = (
+                "janhq-assistant-extension-1.0.2.tgz",
+                "janhq-conversational-extension-1.0.0.tgz",
+                "janhq-download-extension-1.0.0.tgz",
+                "janhq-llamacpp-extension-1.0.1.tgz",
+                "janhq-rag-extension-0.1.0.tgz",
+                "janhq-vector-db-extension-0.1.0.tgz",
+            )
+            for name in current:
+                (pre_install / name).write_bytes(b"reviewed")
+
+            _assert_exact_windows_candidate_install_inventory(install)
+
+            for name in retired:
+                with self.subTest(retired=name):
+                    path = pre_install / name
+                    path.write_bytes(b"retired")
+                    with self.assertRaisesRegex(
+                        ReadinessFailed,
+                        "candidate_install_inventory",
+                    ):
+                        _assert_exact_windows_candidate_install_inventory(install)
+                    path.unlink()
+
+            for name in current:
+                with self.subTest(missing=name):
+                    path = pre_install / name
+                    contents = path.read_bytes()
+                    path.unlink()
+                    with self.assertRaisesRegex(
+                        ReadinessFailed,
+                        "candidate_install_inventory",
+                    ):
+                        _assert_exact_windows_candidate_install_inventory(install)
+                    path.write_bytes(contents)
+
+            extra = pre_install / "unknown.tgz"
+            extra.write_bytes(b"unknown")
+            with self.assertRaisesRegex(
+                ReadinessFailed,
+                "candidate_install_inventory",
+            ):
+                _assert_exact_windows_candidate_install_inventory(install)
+            extra.unlink()
+
+            target = Path(directory) / "target.tgz"
+            target.write_bytes(b"linked")
+            linked = pre_install / current[0]
+            linked.unlink()
+            linked.symlink_to(target)
+            with self.assertRaisesRegex(
+                ReadinessFailed,
+                "candidate_install_inventory",
+            ):
+                _assert_exact_windows_candidate_install_inventory(install)
 
     def test_source_data_root_rename_probe_is_reversible_and_conflict_closed(self):
         with tempfile.TemporaryDirectory(dir=Path.home()) as directory:
@@ -479,6 +609,27 @@ class MigrationRunnerTests(unittest.TestCase):
             self.assertRaisesRegex(ReadinessFailed, "source_residual_processes"),
         ):
             executor.assert_no_residual_product_processes(Path("C:/AutoQA/install"))
+
+    def test_windows_cleanup_removes_only_reviewed_product_registry_keys(self):
+        with (
+            mock.patch(
+                "autoqa.migration_runner.subprocess.run",
+                return_value=mock.Mock(returncode=0),
+            ) as run,
+            mock.patch("autoqa.migration_runner.shutil.rmtree"),
+        ):
+            PlatformExecutor("windows", 1).cleanup_installation()
+
+        self.assertEqual(run.call_count, 2)
+        registry_call = run.call_args_list[1]
+        self.assertTrue(registry_call.kwargs["check"])
+        script = registry_call.args[0][-1]
+        for product in ("Biyan", "Biyan-nightly", "Mita"):
+            self.assertIn(f"Jingxing\\{product}", script)
+            self.assertIn(f"Uninstall\\{product}", script)
+        self.assertNotIn("HKLM:", script)
+        self.assertIn("Test-Path -LiteralPath", script)
+        self.assertIn("throw 'Reviewed product registry cleanup failed'", script)
 
     def test_probe_and_shutdown_failures_remain_distinct(self):
         process = mock.Mock(pid=1111)
@@ -543,7 +694,7 @@ class MigrationRunnerTests(unittest.TestCase):
                     all(runner_command not in command for command in pkill_commands)
                 )
 
-    def test_windows_install_pins_shared_root_and_keeps_nsis_destination_last(self):
+    def test_windows_manual_and_updater_install_commands_are_exact(self):
         with tempfile.TemporaryDirectory(dir=Path.home()) as directory:
             root = Path(directory)
             case_dir = root / "case"
@@ -551,7 +702,6 @@ class MigrationRunnerTests(unittest.TestCase):
             installer.write_bytes(b"fixture")
 
             def install_side_effect(command, **_kwargs):
-                self.assertEqual(command[-1], f"/D={case_dir / 'windows-install'}")
                 executable = case_dir / "windows-install" / "Biyan.exe"
                 executable.parent.mkdir(parents=True, exist_ok=True)
                 executable.write_bytes(b"fixture executable")
@@ -564,15 +714,130 @@ class MigrationRunnerTests(unittest.TestCase):
             ) as run:
                 executor = PlatformExecutor("windows", 1)
                 source = executor.install(installer, "current", case_dir)
-                candidate = executor.install(installer, "c", case_dir)
+                candidate = executor.install(
+                    installer,
+                    "c",
+                    case_dir,
+                    updater_install=True,
+                )
 
             self.assertEqual(source, case_dir / "windows-install" / "Biyan.exe")
             self.assertEqual(candidate, source)
             self.assertEqual(run.call_count, 2)
-            for call in run.call_args_list:
-                command = call.args[0]
-                self.assertEqual(command[1], "/S")
-                self.assertEqual(command[-1], f"/D={case_dir / 'windows-install'}")
+            manual = run.call_args_list[0].args[0]
+            updater = run.call_args_list[1].args[0]
+            self.assertEqual(manual[1], "/S")
+            self.assertEqual(manual[-1], f"/D={case_dir / 'windows-install'}")
+            self.assertEqual(
+                updater,
+                [str(installer), "/P", "/UPDATE", "/ARGS"],
+            )
+            self.assertNotIn("/R", updater)
+            self.assertFalse(any(argument.startswith("/D=") for argument in updater))
+
+    def test_legacy_automatic_upgrade_uses_the_exact_default_biyan_root(self):
+        with tempfile.TemporaryDirectory(dir=Path.home()) as directory:
+            root = Path(directory)
+            case_dir = root / "case"
+            installer = root / "Biyan-setup.exe"
+            installer.write_bytes(b"fixture")
+            default_root = root / "local" / "Programs" / "Biyan"
+
+            def install_side_effect(command, **_kwargs):
+                self.assertEqual(
+                    command,
+                    [str(installer), "/P", "/UPDATE", "/ARGS"],
+                )
+                executable = default_root / "Biyan.exe"
+                executable.parent.mkdir(parents=True, exist_ok=True)
+                executable.write_bytes(b"fixture executable")
+                executable.chmod(0o755)
+                return mock.Mock(returncode=0)
+
+            with (
+                mock.patch.dict(
+                    os.environ,
+                    {"LOCALAPPDATA": str(root / "local")},
+                    clear=False,
+                ),
+                mock.patch(
+                    "autoqa.migration_runner.subprocess.run",
+                    side_effect=install_side_effect,
+                ),
+            ):
+                executable = PlatformExecutor("windows", 1).install(
+                    installer,
+                    "c",
+                    case_dir,
+                    updater_install=True,
+                    default_biyan_root=True,
+                )
+            self.assertEqual(executable, default_root / "Biyan.exe")
+
+    def test_candidate_inventory_failure_blocks_first_start_and_is_classified(self):
+        with tempfile.TemporaryDirectory(dir=Path.home()) as directory:
+            root = Path(directory)
+            case = select_migration_cases(["fresh-c"])[0]
+            executable = root / "windows-install" / "Biyan.exe"
+            validated = ValidatedInputs(
+                installers={"c": root / "candidate.exe"},
+                snapshots={"fresh": mock.Mock()},
+                expectations={"c": (root / "migration-state.json",)},
+            )
+            with (
+                mock.patch.object(
+                    PlatformExecutor,
+                    "cleanup_installation",
+                ),
+                mock.patch.object(
+                    PlatformExecutor,
+                    "install",
+                    return_value=executable,
+                ),
+                mock.patch.object(
+                    PlatformExecutor,
+                    "startup_probe",
+                ) as startup,
+                mock.patch(
+                    "autoqa.migration_runner._restore_snapshot",
+                ),
+                mock.patch(
+                    "autoqa.migration_runner._clear_qualification_roots",
+                ),
+                mock.patch(
+                    "autoqa.migration_runner._bounded_migration_state",
+                    return_value={},
+                ),
+                mock.patch(
+                    "autoqa.migration_runner._bounded_windows_install_inventory",
+                    return_value={},
+                ),
+                mock.patch(
+                    "autoqa.migration_runner."
+                    "_assert_exact_windows_candidate_install_inventory",
+                    side_effect=ReadinessFailed(
+                        "candidate_install_inventory_extension_set"
+                    ),
+                ),
+                self.assertRaises(MigrationRunError) as raised,
+            ):
+                run_matrix(
+                    validated,
+                    "windows",
+                    root,
+                    1,
+                    cases=[case],
+                )
+
+            startup.assert_not_called()
+            self.assertEqual(
+                raised.exception.diagnostics["phaseBoundary"],
+                "candidate-install-inventory",
+            )
+            self.assertEqual(
+                raised.exception.diagnostics["failureClass"],
+                "candidate-install-inventory-failed",
+            )
 
     def test_windows_missing_executable_reports_bounded_install_roots(self):
         with tempfile.TemporaryDirectory(dir=Path.home()) as directory:

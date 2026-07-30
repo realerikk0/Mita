@@ -60,7 +60,7 @@ const TRUSTED_RECOVERY_JOB_ORDER = [
 ]
 
 const TRUSTED_CANDIDATE_WORKFLOW_ALLOWLIST = new Set([
-  '323a622911f461315aa44b3ee046f672591ea4a0244177930333e58c35f628b4',
+  '43ded02dc645c0dd8d7e8badc8a46a3e363507ccd33569fab855d7574c26fb10',
 ])
 
 const TRUSTED_RECOVERY_WORKFLOW_ALLOWLIST = new Set([
@@ -80,7 +80,7 @@ const TRUSTED_RELEASE_DISTRIBUTION_WORKFLOW_SHA256 =
   'c780b58de80c07962f42c43fc658b74b2f7c2734df01fd356cefb80f5480ca76'
 
 const TRUSTED_DIRECT_QUALIFICATION_WORKFLOW_SHA256 =
-  '6b6464396cc126e296a4393e76d6e0ac4460203f99470c604853c851f4744de3'
+  'ea7bda7d0fc43d316da4dd66309e0648b02abf3621ce935f0aa71904cc87aae1'
 
 export const TRUSTED_SENSITIVE_UPDATER_WORKFLOW_CONTRACTS = Object.freeze({
   '.github/workflows/biyan-a-canary.yml': Object.freeze({
@@ -603,11 +603,11 @@ export function validateReleaseTrainPolicy(policy) {
   if (!Array.isArray(supersededTerminals)) {
     failures.push('release train policy must declare superseded terminal releases')
   } else if (
-    (terminalMode && supersededTerminals.length !== 1) ||
+    (terminalMode && supersededTerminals.length !== 2) ||
     (!terminalMode && supersededTerminals.length !== 0)
   ) {
     failures.push(
-      'release train policy must preserve exactly one superseded terminal only in terminal mode'
+      'release train policy must preserve exactly two superseded terminals only in terminal mode'
     )
   }
   const active = policy.trains.filter((train) => train?.status === 'active')
@@ -728,9 +728,28 @@ export function validateReleaseTrainPolicy(policy) {
     }
   }
 
-  let preservedTerminalVersion = null
+  const expectedSupersededTerminals = [
+    {
+      tag: 'v0.6.646',
+      version: '0.6.646',
+      migrationPhase: 'C',
+      dataSchema: 3,
+      sourceCommit: '581ebf6b19ef407a9645d0b318792f1012f8f75b',
+      status: 'blocked-before-publication',
+    },
+    {
+      tag: 'v0.6.647',
+      version: '0.6.647',
+      migrationPhase: 'C',
+      dataSchema: 3,
+      sourceCommit: 'ef963bc606366220db4589352afb25aa7d1785bf',
+      status: 'blocked-before-publication',
+    },
+  ]
+  const preservedTerminalVersions = []
   if (Array.isArray(supersededTerminals)) {
     for (const [index, preserved] of supersededTerminals.entries()) {
+      const expected = expectedSupersededTerminals[index]
       exactKeys(
         preserved,
         [
@@ -744,18 +763,17 @@ export function validateReleaseTrainPolicy(policy) {
         `superseded terminal release ${index}`
       )
       if (
-        index !== 0 ||
-        preserved?.tag !== 'v0.6.646' ||
-        preserved?.version !== '0.6.646' ||
-        preserved?.migrationPhase !== 'C' ||
-        preserved?.dataSchema !== 3 ||
-        preserved?.sourceCommit !==
-          '581ebf6b19ef407a9645d0b318792f1012f8f75b' ||
-        preserved?.status !== 'blocked-before-publication' ||
+        !expected ||
+        preserved?.tag !== expected.tag ||
+        preserved?.version !== expected.version ||
+        preserved?.migrationPhase !== expected.migrationPhase ||
+        preserved?.dataSchema !== expected.dataSchema ||
+        preserved?.sourceCommit !== expected.sourceCommit ||
+        preserved?.status !== expected.status ||
         preserved?.tag !== `v${preserved?.version}`
       ) {
         failures.push(
-          'superseded terminal history must exactly preserve blocked v0.6.646/C/3'
+          'superseded terminal history must exactly preserve blocked v0.6.646 and v0.6.647 C/3 releases'
         )
       }
       if (versions.has(preserved?.version)) {
@@ -766,21 +784,33 @@ export function validateReleaseTrainPolicy(policy) {
         typeof preserved?.version === 'string'
           ? /^(\d+)\.(\d+)\.(\d+)$/.exec(preserved.version)
           : null
-      if (match) preservedTerminalVersion = match.slice(1).map(Number)
+      if (match) preservedTerminalVersions.push(match.slice(1).map(Number))
     }
   }
 
+  const firstPreservedTerminalVersion = preservedTerminalVersions[0]
   if (
     terminalMode &&
     previousC &&
-    (!preservedTerminalVersion ||
-      previousC[0] !== preservedTerminalVersion[0] ||
-      previousC[1] !== preservedTerminalVersion[1] ||
-      previousC[2] + 1 !== preservedTerminalVersion[2])
+    (!firstPreservedTerminalVersion ||
+      previousC[0] !== firstPreservedTerminalVersion[0] ||
+      previousC[1] !== firstPreservedTerminalVersion[1] ||
+      previousC[2] + 1 !== firstPreservedTerminalVersion[2])
   ) {
     failures.push(
       'superseded terminal v0.6.646 must immediately follow the final preserved train C 0.6.645'
     )
+  }
+  for (let index = 1; index < preservedTerminalVersions.length; index += 1) {
+    const previous = preservedTerminalVersions[index - 1]
+    const current = preservedTerminalVersions[index]
+    if (
+      current[0] !== previous[0] ||
+      current[1] !== previous[1] ||
+      current[2] !== previous[2] + 1
+    ) {
+      failures.push('superseded terminal releases must be contiguous')
+    }
   }
 
   if (terminal !== null && terminal !== undefined) {
@@ -796,29 +826,30 @@ export function validateReleaseTrainPolicy(policy) {
       'active terminal release'
     )
     if (
-      terminal?.tag !== 'v0.6.647' ||
-      terminal?.version !== '0.6.647' ||
+      terminal?.tag !== 'v0.6.648' ||
+      terminal?.version !== '0.6.648' ||
       terminal?.migrationPhase !== 'C' ||
       terminal?.dataSchema !== 3 ||
       terminal?.tag !== `v${terminal?.version}` ||
       !/^[0-9a-f]{40}$/.test(terminal?.sourceCommit ?? '')
     ) {
       failures.push(
-        'active terminal release must exactly bind v0.6.647/C/3 to one lowercase 40-hex source commit'
+        'active terminal release must exactly bind v0.6.648/C/3 to one lowercase 40-hex source commit'
       )
     }
     if (versions.has(terminal?.version)) {
       failures.push(`duplicate release version: ${terminal.version}`)
     }
+    const lastPreservedTerminalVersion = preservedTerminalVersions.at(-1)
     if (
-      preservedTerminalVersion &&
-      (preservedTerminalVersion[0] !== 0 ||
-        preservedTerminalVersion[1] !== 6 ||
-        preservedTerminalVersion[2] !== 646 ||
-        terminal?.version !== '0.6.647')
+      lastPreservedTerminalVersion &&
+      (lastPreservedTerminalVersion[0] !== 0 ||
+        lastPreservedTerminalVersion[1] !== 6 ||
+        lastPreservedTerminalVersion[2] !== 647 ||
+        terminal?.version !== '0.6.648')
     ) {
       failures.push(
-        'active terminal release v0.6.647 must immediately follow superseded terminal v0.6.646'
+        'active terminal release v0.6.648 must immediately follow superseded terminal v0.6.647'
       )
     }
   }
@@ -1238,7 +1269,7 @@ export function validateCandidateWorkflow(
         '.trains[-1].status == "superseded-by-terminal"'
       ) ||
       !tagCut.includes(
-        '(.supersededTerminalReleases | length) == 1'
+        '(.supersededTerminalReleases | length) == 2'
       ) ||
       !tagCut.includes(
         '.supersededTerminalReleases[0].tag == "v0.6.646"'
@@ -1249,9 +1280,18 @@ export function validateCandidateWorkflow(
       !tagCut.includes(
         '.supersededTerminalReleases[0].status == "blocked-before-publication"'
       ) ||
+      !tagCut.includes(
+        '.supersededTerminalReleases[1].tag == "v0.6.647"'
+      ) ||
+      !tagCut.includes(
+        '.supersededTerminalReleases[1].sourceCommit == "ef963bc606366220db4589352afb25aa7d1785bf"'
+      ) ||
+      !tagCut.includes(
+        '.supersededTerminalReleases[1].status == "blocked-before-publication"'
+      ) ||
       !tagCut.includes('.activeTerminalRelease.tag == $tag') ||
-      !tagCut.includes('.activeTerminalRelease.tag == "v0.6.647"') ||
-      !tagCut.includes('.activeTerminalRelease.version == "0.6.647"') ||
+      !tagCut.includes('.activeTerminalRelease.tag == "v0.6.648"') ||
+      !tagCut.includes('.activeTerminalRelease.version == "0.6.648"') ||
       !tagCut.includes('.activeTerminalRelease.migrationPhase == "C"') ||
       !tagCut.includes('.activeTerminalRelease.dataSchema == 3') ||
       !tagCut.includes('test("^[0-9a-f]{40}$")') ||
@@ -1264,7 +1304,7 @@ export function validateCandidateWorkflow(
       /\bv0\.6\.(?:643|644|645)\b/.test(tagCut)
     ) {
       failures.push(
-        'tag-cut must preserve blocked v0.6.646 and resolve only the exact v0.6.647/C/3 terminal source binding from protected live-main policy'
+        'tag-cut must preserve blocked v0.6.646 and v0.6.647 releases and resolve only the exact v0.6.648/C/3 terminal source binding from protected live-main policy'
       )
     }
     if (
@@ -4501,7 +4541,7 @@ export function validateCiWorkflow(source) {
     const buildCondition =
       /^\s*if:\s*needs\.ci-scope\.outputs\.build_windows\s*==\s*'true'\s*$/m
     const buildSchemaSequence =
-      /^\s*\$releaseMetadata\s*=\s*Get-Content\s+biyan-release\.json\s+-Raw\s*\|\s*\n\s*ConvertFrom-Json\s*\n\s*\$env:BIYAN_DATA_SCHEMA\s*=\s*\[string\]\$releaseMetadata\.dataSchema\s*\n\s*make build\s*$/m
+      /^\s*\$releaseMetadata\s*=\s*Get-Content\s+biyan-release\.json\s+-Raw\s*\|\s*\n\s*ConvertFrom-Json\s*\n\s*\$env:BIYAN_DATA_SCHEMA\s*=\s*\[string\]\$releaseMetadata\.dataSchema\s*\n\s*\$version\s*=\s*\(\s*\n\s*Get-Content\s+src-tauri\/tauri\.conf\.json\s+-Raw\s*\|\s*\n\s*ConvertFrom-Json\s*\n\s*\)\.version\s*\n\s*&\s+node\s+scripts\/release-version\.mjs\s+stamp\s+\$version\s+--windows\s*\n\s*if\s*\(\$LASTEXITCODE\s+-ne\s+0\)\s*\{\s*\n\s*throw\s+'Windows release stamp failed'\s*\n\s*\}\s*\n\s*make build\s*$/m
     if (
       !/^\s*timeout-minutes:\s*90\s*$/m.test(windowsPr) ||
       !buildStep ||
@@ -4515,7 +4555,12 @@ export function validateCiWorkflow(source) {
       !hasRunInvocation(
         verifyStep,
         /^&\s+\.\/scripts\/ci\/verify-windows-candidate\.ps1(?:\s|$)/,
-        [/-Exe\s+\$exe/, /-Msi\s+\$msi/, /-Version\s+\$version/]
+        [
+          /-Exe\s+\$exe/,
+          /-Msi\s+\$msi/,
+          /-Version\s+\$version/,
+          /-GeneratedNsis\s+'src-tauri\/target\/release\/nsis\/x64\/installer\.nsi'/,
+        ]
       ) ||
       !hasRunInvocation(
         verifyStep,
@@ -4638,6 +4683,23 @@ export function validateWindowsCandidateVerifier(source) {
     [/SummaryInformation\(0\)/, 'must read the MSI summary information'],
     [/Property\(7\)/, 'must read the MSI Template Summary'],
     [/x64\|Intel64/, 'must require an x64 MSI Template Summary'],
+    [/\[string\]\$GeneratedNsis/, 'must accept the rendered NSIS script'],
+    [
+      /\$PSBoundParameters\.ContainsKey\(['"]GeneratedNsis['"]\)[\s\S]*Test-GeneratedNsisContract/,
+      'must verify the rendered NSIS script when supplied',
+    ],
+    [
+      /Function DetectOwnedBiyanInstallLocation[\s\S]*Function RejectUnownedRetiredBiyanResources[\s\S]*Function RemoveRetiredBiyanInstallResources[\s\S]*Function VerifyInstalledBiyanResources/,
+      'must require every reviewed NSIS cleanup function',
+    ],
+    [
+      /Call DetectOwnedBiyanInstallLocation[\s\S]*Call RemoveRetiredBiyanInstallResources[\s\S]*Call RejectUnownedRetiredBiyanResources[\s\S]*Call VerifyInstalledBiyanResources/,
+      'must require the reviewed NSIS Install section order',
+    ],
+    [
+      /\$\{GetOptions\}\s+\$CMDLINE\s+["']\/R["']\s+\$R0/,
+      'must require explicit restart authorization in the rendered NSIS script',
+    ],
   ]) {
     if (!pattern.test(active)) {
       failures.push(`Windows candidate verifier ${message}`)

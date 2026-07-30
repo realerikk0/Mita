@@ -343,6 +343,27 @@ test('production Windows builds cannot silently drop the reviewed NSIS template'
   assert.ok(stamp < build, 'Windows template binding must happen before make build')
 })
 
+test('reusable stable Windows builds verify the rendered NSIS contract without breaking non-stable channels', () => {
+  const verifyStep = windowsBuildWorkflow.slice(
+    windowsBuildWorkflow.indexOf('      - name: Verify extracted Windows candidate'),
+    windowsBuildWorkflow.indexOf('      - name: Upload NSIS Installer Artifact'),
+  )
+  const stableGate = verifyStep.indexOf(
+    "if ('${{ inputs.channel }}' -eq 'stable') {",
+  )
+  const renderedScript = verifyStep.indexOf(
+    "'src-tauri/target/release/nsis/x64/installer.nsi'",
+  )
+  const invocation = verifyStep.indexOf(
+    '& ./scripts/ci/verify-windows-candidate.ps1 @verifier',
+  )
+
+  assert.notEqual(stableGate, -1)
+  assert.notEqual(renderedScript, -1)
+  assert.notEqual(invocation, -1)
+  assert.ok(stableGate < renderedScript && renderedScript < invocation)
+})
+
 test('passive and silent Windows installs launch Biyan only with an explicit /R flag', () => {
   const onInstallSuccess = functionBody('.onInstSuccess')
   const restartOption = onInstallSuccess.indexOf(
