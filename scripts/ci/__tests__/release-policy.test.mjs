@@ -3363,7 +3363,7 @@ test('direct qualification is an exact full-or-focused read-only evidence workfl
         'matrix: ${{ fromJSON(needs.preflight.outputs.qualification_matrix) }}',
         'matrix: {include: []}'
       ),
-      'full 16 or focused current/manual Windows 1',
+      'full 16 or focused reviewed Windows 1',
     ],
     [
       'focused diagnostics may not aggregate',
@@ -3371,12 +3371,12 @@ test('direct qualification is an exact full-or-focused read-only evidence workfl
         '            diagnostic-summary `',
         '            aggregate `'
       ),
-      'full 16 or focused current/manual Windows 1',
+      'full 16 or focused reviewed Windows 1',
     ],
     [
       'cancelled run may not aggregate',
       workflow.replace('        && !cancelled()\n', ''),
-      'full 16 or focused current/manual Windows 1',
+      'full 16 or focused reviewed Windows 1',
     ],
     [
       'production secret',

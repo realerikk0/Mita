@@ -12,6 +12,7 @@ on:
           - full
           - current-to-c-windows
           - legacy-manual-to-c-windows
+          - legacy-auto-to-c-windows
 
 permissions:
   actions: read

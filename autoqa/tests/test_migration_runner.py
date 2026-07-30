@@ -1013,12 +1013,17 @@ class MigrationRunnerTests(unittest.TestCase):
             mock.patch("autoqa.migration_runner.os.killpg"),
         ):
             with self.assertRaisesRegex(RuntimeError, "exited early"):
-                PlatformExecutor("linux", 1, 90).startup_probe(
+                executor = PlatformExecutor("linux", 1, 90)
+                executor.startup_probe(
                     Path("/tmp/Biyan.AppImage"),
                     "current-to-c",
                     "c",
                     mock.Mock(),
                 )
+        self.assertEqual(
+            executor.bounded_process_evidence()[0]["probe"],
+            {"status": "early-exit", "exitCode": 7},
+        )
 
     def test_windows_process_tree_is_force_terminated(self):
         process = mock.Mock(pid=8181)
