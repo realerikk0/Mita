@@ -1,0 +1,121 @@
+name: Recover Split Desktop Update Transaction
+
+on:
+  workflow_dispatch:
+    inputs:
+      transaction_id:
+        description: Exact nonterminal transaction ID whose dual-cloud open locks diverged
+        required: true
+        type: string
+      dry_run:
+        description: Verify both histories and the exact one-step successor without any store write
+        required: true
+        default: true
+        type: boolean
+      confirmation:
+        description: For a real recovery type RECOVER_SPLIT_TRANSACTION
+        required: false
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: biyan-stable-updater-promotion
+  cancel-in-progress: false
+
+jobs:
+  recover:
+    name: Verify and recover split nonterminal updater transaction
+    if: github.ref == 'refs/heads/mita-main'
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    environment: release-distribution
+    env:
+      AWS_DEFAULT_REGION: auto
+      ALIYUN_OSS_ENDPOINT: ${{ vars.ALIYUN_OSS_ENDPOINT || 'oss-cn-hangzhou.aliyuncs.com' }}
+      ALIYUN_REGION: ${{ vars.ALIYUN_REGION || 'cn-hangzhou' }}
+      LEGACY_ALIYUN_KEY: mita/latest.json
+      LEGACY_R2_KEY: mita/latest.json
+      LEGACY_ALIYUN_URL: https://static.mitapp.cn/mita/latest.json
+      LEGACY_R2_URL: https://updates.mita.so/mita/latest.json
+      POLICY_KEY: biyan/updater/stable/policy.json
+      OPEN_TRANSACTION_KEY: biyan/updater/transactions/open.json
+    steps:
+      - name: Checkout trusted recovery tooling
+        uses: actions/checkout@v4
+        with:
+          ref: mita-main
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Validate operator intent
+        env:
+          TRANSACTION_ID: ${{ inputs.transaction_id }}
+          DRY_RUN: ${{ inputs.dry_run }}
+          CONFIRMATION: ${{ inputs.confirmation }}
+        run: |
+          set -euo pipefail
+          [[ "$TRANSACTION_ID" =~ ^[1-9][0-9]*-[1-9][0-9]*$ ]]
+          if [ "$DRY_RUN" != true ] && [ "$CONFIRMATION" != RECOVER_SPLIT_TRANSACTION ]; then
+            echo 'Real split recovery requires confirmation RECOVER_SPLIT_TRANSACTION' >&2
+            exit 1
+          fi
+
+      - name: Install exact production store clients
+        run: |
+          set -euo pipefail
+          mkdir -p dist/tools
+          curl --proto '=https' --tlsv1.2 -fsSL \
+            https://gosspublic.alicdn.com/ossutil/v2/2.3.0/ossutil-2.3.0-linux-amd64.zip \
+            -o dist/tools/ossutil.zip
+          echo '3ae4d9fc85a7a6e9f5654d1599766f1a3a42a3692870887b5ae9338d582ef65a  dist/tools/ossutil.zip' \
+            | sha256sum --check -
+          unzip -q dist/tools/ossutil.zip -d dist/tools
+          sudo install -m 0755 \
+            dist/tools/ossutil-2.3.0-linux-amd64/ossutil \
+            /usr/local/bin/ossutil
+          ossutil version | tee dist/tools/ossutil-version.txt
+          grep -Eq '(^|[^0-9])2\.3\.0([^0-9]|$)' dist/tools/ossutil-version.txt
+
+      - name: Revalidate exact live main before release secrets
+        run: |
+          set -euo pipefail
+          test "$GITHUB_REF" = refs/heads/mita-main
+          git fetch --force --no-tags origin \
+            +refs/heads/mita-main:refs/remotes/origin/mita-main
+          test "$GITHUB_SHA" = "$(git rev-parse HEAD)"
+          test "$GITHUB_SHA" = "$(git rev-parse refs/remotes/origin/mita-main)"
+
+      - name: Reconcile only a proven split nonterminal journal
+        env:
+          AWS_ACCESS_KEY_ID: ${{ secrets.CLOUDFLARE_R2_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.CLOUDFLARE_R2_SECRET_ACCESS_KEY }}
+          CLOUDFLARE_R2_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_R2_ACCOUNT_ID }}
+          CLOUDFLARE_R2_BUCKET: ${{ secrets.CLOUDFLARE_R2_BUCKET }}
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ZONE_ID: ${{ secrets.CLOUDFLARE_ZONE_ID }}
+          ALIYUN_ACCESS_KEY_ID: ${{ secrets.ALIYUN_ACCESS_KEY_ID }}
+          ALIYUN_ACCESS_KEY_SECRET: ${{ secrets.ALIYUN_ACCESS_KEY_SECRET }}
+          OSS_ACCESS_KEY_ID: ${{ secrets.ALIYUN_ACCESS_KEY_ID }}
+          OSS_ACCESS_KEY_SECRET: ${{ secrets.ALIYUN_ACCESS_KEY_SECRET }}
+          ALIYUN_OSS_BUCKET: ${{ secrets.ALIYUN_OSS_BUCKET || vars.ALIYUN_OSS_BUCKET || 'mita-static' }}
+          DRY_RUN: ${{ inputs.dry_run }}
+          RECOVERY_CONFIRMATION: ${{ inputs.confirmation }}
+          RECOVERY_TRANSACTION_ID: ${{ inputs.transaction_id }}
+        run: |
+          set -euo pipefail
+          bash scripts/updater/run-promotion-transaction.sh \
+            --recover-split-nonterminal-only
+
+      - name: Upload split recovery evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: updater-split-recovery-${{ inputs.transaction_id }}-${{ github.run_id }}
+          if-no-files-found: error
+          path: |
+            dist/tools/*
+            dist/state/RECOVERY_COMMANDS.sh
+            dist/state/probes/*
+            dist/state/split-nonterminal-recovery/**

@@ -56,6 +56,7 @@ const UPDATER_WORKFLOW_NAMES = new Set([
   'biyan-upgrade-smoke.yml',
   'deploy-updater-router.yml',
   'promote-desktop-update.yml',
+  'recover-split-updater-transaction.yml',
   'release-distribution.yml',
   'sync-legacy-updater.yml',
   'updater-health-gate.yml',

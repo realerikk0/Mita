@@ -3107,6 +3107,15 @@ test('formal build, release, and updater jobs share the release-distribution env
         'utf8'
       ),
     },
+    '.github/workflows/recover-split-updater-transaction.yml': {
+      ...TRUSTED_SENSITIVE_UPDATER_WORKFLOW_CONTRACTS[
+        '.github/workflows/recover-split-updater-transaction.yml'
+      ],
+      source: fs.readFileSync(
+        '.github/workflows/recover-split-updater-transaction.yml',
+        'utf8'
+      ),
+    },
     '.github/workflows/updater-health-gate.yml': {
       ...TRUSTED_SENSITIVE_UPDATER_WORKFLOW_CONTRACTS[
         '.github/workflows/updater-health-gate.yml'
