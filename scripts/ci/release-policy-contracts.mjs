@@ -86,7 +86,7 @@ export const TRUSTED_SENSITIVE_UPDATER_WORKFLOW_CONTRACTS = Object.freeze({
   '.github/workflows/biyan-a-canary.yml': Object.freeze({
     exactJobNames: Object.freeze(['preflight', 'platform-canary', 'aggregate']),
     expectedEnvelopeSha256:
-      'aa14fbadc416e78eb02eff33b54941191ad071b148c4f58f836c69d9c98d5dd9',
+      '541f97b65e015d883af4cc19a21eccefedf6e728353fdba023c21906b47293ce',
     expectedPermissions: Object.freeze({
       actions: 'read',
       contents: 'read',
@@ -95,7 +95,7 @@ export const TRUSTED_SENSITIVE_UPDATER_WORKFLOW_CONTRACTS = Object.freeze({
   '.github/workflows/promote-desktop-update.yml': Object.freeze({
     exactJobNames: Object.freeze(['promote']),
     expectedEnvelopeSha256:
-      '3c9c72fc42456c08ad7b846ec95bcd08b5f38ceb7dbb0b977dfe097a18eb0417',
+      '03764e9bdb07aeb1e59c739e8c7c444c1c996b41aa525a0f60826a7dd1e7f0ee',
     expectedPermissions: Object.freeze({
       actions: 'read',
       contents: 'read',
