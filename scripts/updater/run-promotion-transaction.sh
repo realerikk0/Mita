@@ -887,7 +887,8 @@ recover_terminal_open_journal() {
 
 recover_split_nonterminal_open_journal() {
   local recovery_dir r2_state oss_state transaction_id r2_sequence oss_sequence
-  local r2_history_key oss_history_key canonical_provider previous_provider
+  local r2_history_key oss_history_key recovery_mode canonical_provider
+  local previous_provider
   recovery_dir=dist/state/split-nonterminal-recovery
   mkdir -p "$recovery_dir"
 
@@ -923,7 +924,6 @@ recover_split_nonterminal_open_journal() {
   test "$transaction_id" = "${RECOVERY_TRANSACTION_ID:?}"
   r2_sequence="$(jq -er .sequence "$recovery_dir/open-r2.json")"
   oss_sequence="$(jq -er .sequence "$recovery_dir/open-oss.json")"
-  test "$r2_sequence" -ne "$oss_sequence"
 
   r2_history_key="biyan/updater/transactions/${transaction_id}/journal-$(printf '%04d' "$r2_sequence").json"
   oss_history_key="biyan/updater/transactions/${transaction_id}/journal-$(printf '%04d' "$oss_sequence").json"
@@ -962,11 +962,26 @@ recover_split_nonterminal_open_journal() {
     --canonical-output "$recovery_dir/canonical-open-journal.json" \
     --previous-output "$recovery_dir/previous-open-journal.json" \
     --output "$recovery_dir/plan.json"
+  recovery_mode="$(jq -er '
+    if .status == "validated-split-nonterminal" then "split"
+    elif .status == "validated-unified-nonterminal" then "unified"
+    else empty
+    end
+  ' "$recovery_dir/plan.json")"
   canonical_provider="$(jq -er .canonical.provider "$recovery_dir/plan.json")"
-  previous_provider="$(jq -er .previous.provider "$recovery_dir/plan.json")"
+  previous_provider="$(jq -r '.previous.provider // "none"' \
+    "$recovery_dir/plan.json")"
 
   if [[ "${DRY_RUN:?}" == true ]]; then
-    jq '. + {status:"validated-split-nonterminal-dry-run", mutated:false}' \
+    jq '
+      .status = (
+        if .status == "validated-split-nonterminal"
+        then "validated-split-nonterminal-dry-run"
+        else "validated-unified-nonterminal-dry-run"
+        end
+      )
+      | .mutated = false
+    ' \
       "$recovery_dir/plan.json" >"$recovery_dir/summary.json"
     return
   fi
@@ -997,27 +1012,36 @@ recover_split_nonterminal_open_journal() {
   cmp "$recovery_dir/open-r2.json" "$recovery_dir/boundary-open-r2.json"
   cmp "$recovery_dir/open-oss.json" "$recovery_dir/boundary-open-oss.json"
 
-  if [[ "$previous_provider" == r2 ]]; then
-    local previous_etag
-    previous_etag="$(node scripts/updater/promotion-transaction.mjs extract-r2-etag \
-      --metadata "$recovery_dir/boundary-open-r2-metadata.json")"
-    aws s3api put-object --bucket "$CLOUDFLARE_R2_BUCKET" \
-      --key "$OPEN_TRANSACTION_KEY" --body "$recovery_dir/canonical-open-journal.json" \
-      --content-type application/json --cache-control no-store \
-      --if-match "$previous_etag" --endpoint-url "$r2_endpoint" >/dev/null
-  elif [[ "$previous_provider" == oss ]]; then
-    # OSS has no destination If-Match overwrite. Re-read its predecessor just
-    # before the overwrite and rely on the release workflow's shared lock.
-    probe_oss "$OPEN_TRANSACTION_KEY" split-immediate-open-oss
-    test "$(jq -er .state dist/state/probes/split-immediate-open-oss.json)" = exists
-    ossutil cp "oss://${ALIYUN_OSS_BUCKET}/${OPEN_TRANSACTION_KEY}" \
-      "$recovery_dir/immediate-open-oss.json" --force \
-      --endpoint "$oss_endpoint" --region "$ALIYUN_REGION"
-    cmp "$recovery_dir/open-oss.json" "$recovery_dir/immediate-open-oss.json"
-    put_oss_json "$recovery_dir/canonical-open-journal.json" \
-      "$OPEN_TRANSACTION_KEY"
+  if [[ "$recovery_mode" == split ]]; then
+    if [[ "$previous_provider" == r2 ]]; then
+      local previous_etag
+      previous_etag="$(node scripts/updater/promotion-transaction.mjs extract-r2-etag \
+        --metadata "$recovery_dir/boundary-open-r2-metadata.json")"
+      aws s3api put-object --bucket "$CLOUDFLARE_R2_BUCKET" \
+        --key "$OPEN_TRANSACTION_KEY" \
+        --body "$recovery_dir/canonical-open-journal.json" \
+        --content-type application/json --cache-control no-store \
+        --if-match "$previous_etag" --endpoint-url "$r2_endpoint" >/dev/null
+    elif [[ "$previous_provider" == oss ]]; then
+      # OSS has no destination If-Match overwrite. Re-read its predecessor just
+      # before the overwrite and rely on the release workflow's shared lock.
+      probe_oss "$OPEN_TRANSACTION_KEY" split-immediate-open-oss
+      test "$(jq -er .state dist/state/probes/split-immediate-open-oss.json)" = exists
+      ossutil cp "oss://${ALIYUN_OSS_BUCKET}/${OPEN_TRANSACTION_KEY}" \
+        "$recovery_dir/immediate-open-oss.json" --force \
+        --endpoint "$oss_endpoint" --region "$ALIYUN_REGION"
+      cmp "$recovery_dir/open-oss.json" "$recovery_dir/immediate-open-oss.json"
+      put_oss_json "$recovery_dir/canonical-open-journal.json" \
+        "$OPEN_TRANSACTION_KEY"
+    else
+      echo "Unsupported previous split-lock provider: $previous_provider" >&2
+      return 1
+    fi
+  elif [[ "$recovery_mode" == unified ]]; then
+    test "$previous_provider" = none
+    test "$canonical_provider" = both
   else
-    echo "Unsupported previous split-lock provider: $previous_provider" >&2
+    echo "Unsupported nonterminal recovery mode: $recovery_mode" >&2
     return 1
   fi
 
@@ -1042,7 +1066,10 @@ recover_split_nonterminal_open_journal() {
     "$recovery_dir/reconciled-open-r2.json"
   cmp "$recovery_dir/canonical-open-journal.json" \
     "$recovery_dir/reconciled-open-oss.json"
-  test "$canonical_provider" = r2 || test "$canonical_provider" = oss
+  case "${recovery_mode}:${canonical_provider}" in
+    split:r2|split:oss|unified:both) ;;
+    *) return 1 ;;
+  esac
 
   node scripts/updater/promotion-transaction.mjs recovery-commands \
     --journal "$recovery_dir/canonical-open-journal.json" \
@@ -1050,7 +1077,8 @@ recover_split_nonterminal_open_journal() {
   JOURNAL="$recovery_dir/canonical-open-journal.json" \
     bash dist/state/RECOVERY_COMMANDS.sh
   mv recovery-readback "$recovery_dir/recovery-readback"
-  jq '. + {status:"recovered-split-nonterminal", mutated:true}' \
+  jq --arg status "recovered-${recovery_mode}-nonterminal" \
+    '. + {status:$status, mutated:true}' \
     "$recovery_dir/plan.json" >"$recovery_dir/summary.json"
 }
 

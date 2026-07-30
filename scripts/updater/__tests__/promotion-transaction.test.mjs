@@ -18,6 +18,7 @@ import {
   pollPublicBytes,
   recoveryCommands,
   resolveSplitNonterminalJournal,
+  resolveUnifiedNonterminalJournal,
   terminalPromotionRecoveryPlan,
   validateApprovedATransition,
   validateHealthEvidenceUrl,
@@ -1893,6 +1894,45 @@ test('split nonterminal recovery accepts only one exact journal successor', () =
   )
 })
 
+test('unified nonterminal recovery accepts only an exact recoverable journal', () => {
+  const committing = advanceJournal(journal(), {
+    state: 'committing',
+    checkpoint: 'before-immutable-write',
+    updatedAt: '2026-07-24T00:01:00.000Z',
+  })
+  const resolved = resolveUnifiedNonterminalJournal({
+    r2Open: committing,
+    ossOpen: structuredClone(committing),
+  })
+  assert.equal(resolved.transactionId, '123-1')
+  assert.equal(resolved.canonicalProvider, 'both')
+  assert.deepEqual(resolved.canonical, committing)
+
+  const drift = structuredClone(committing)
+  drift.checkpoints.at(-1).name = 'drift'
+  assert.throws(
+    () =>
+      resolveUnifiedNonterminalJournal({
+        r2Open: committing,
+        ossOpen: drift,
+      }),
+    /must be exactly equal/
+  )
+  const terminal = advanceJournal(committing, {
+    state: 'committed',
+    checkpoint: 'done',
+    updatedAt: '2026-07-24T00:02:00.000Z',
+  })
+  assert.throws(
+    () =>
+      resolveUnifiedNonterminalJournal({
+        r2Open: terminal,
+        ossOpen: structuredClone(terminal),
+      }),
+    /must require nonterminal recovery/
+  )
+})
+
 test('split nonterminal resolver requires both clouds to retain exact history bytes', () => {
   const prepared = journal()
   const committing = advanceJournal(prepared, {
@@ -1954,6 +1994,30 @@ test('split nonterminal resolver requires both clouds to retain exact history by
       previous: { provider: 'oss', sequence: 0, state: 'prepared' },
       canonical: { provider: 'r2', sequence: 1, state: 'committing' },
     })
+
+    for (const file of [
+      paths.r2Open,
+      paths.ossOpen,
+      paths.r2OpenHistoryR2,
+      paths.r2OpenHistoryOss,
+      paths.ossOpenHistoryR2,
+      paths.ossOpenHistoryOss,
+    ]) {
+      fs.writeFileSync(file, `${JSON.stringify(committing, null, 2)}\n`)
+    }
+    const unified = spawnSync(process.execPath, args(), {
+      cwd: repoRoot,
+      encoding: 'utf8',
+    })
+    assert.equal(unified.status, 0, unified.stderr)
+    assert.deepEqual(JSON.parse(fs.readFileSync(paths.output, 'utf8')), {
+      schema: 1,
+      status: 'validated-unified-nonterminal',
+      transactionId: '123-1',
+      canonical: { provider: 'both', sequence: 1, state: 'committing' },
+    })
+    assert.deepEqual(JSON.parse(fs.readFileSync(paths.canonical, 'utf8')), committing)
+    assert.deepEqual(JSON.parse(fs.readFileSync(paths.previous, 'utf8')), committing)
 
     fs.writeFileSync(paths.r2OpenHistoryOss, '{"drift":true}\n')
     const drift = spawnSync(process.execPath, args(), {
@@ -2232,6 +2296,35 @@ test('recovery fails closed when an unverified immutable create intent exists', 
   })
   const commands = recoveryCommands(unverified)
   assert.match(commands, /unverified\.tar\.gz/)
+  const targetProbe = commands.indexOf('legacy-target-oss-probe')
+  const missingTargetBranch = commands.indexOf(
+    'legacy_target_oss_state" == absent'
+  )
+  const missingTargetProbe = commands.indexOf(
+    'missing-target-unverified-0-oss'
+  )
+  const missingTargetSnapshotProof = commands.indexOf(
+    'missing-target-legacy-r2-verified.json'
+  )
+  const asymmetricTargetFailure = commands.indexOf(
+    'Legacy target manifest presence differs across recovery stores'
+  )
+  const mutationBoundary = commands.indexOf(
+    '# RECOVERY MUTATIONS BEGIN: every mutable object is now classified.'
+  )
+  assert.ok(
+    targetProbe >= 0
+      && targetProbe < missingTargetBranch
+      && missingTargetBranch < missingTargetProbe
+      && missingTargetProbe < missingTargetSnapshotProof
+      && missingTargetSnapshotProof < asymmetricTargetFailure
+      && asymmetricTargetFailure < mutationBoundary,
+    'missing targets must prove every unverified intent absent and both snapshots exact before mutation'
+  )
+  assert.match(
+    commands.slice(missingTargetBranch, asymmetricTargetFailure),
+    /test '0' -eq 0[\s\S]*\.state == "absent"[\s\S]*verify-snapshot-readback[\s\S]*target-never-created-live-equals-snapshot/
+  )
   const unverifiedProbe = commands.indexOf('unverified-ledger-0-oss')
   const firstDelete = commands.indexOf('# Delete cleanup objects only')
   assert.ok(unverifiedProbe >= 0 && unverifiedProbe < firstDelete)
@@ -3287,10 +3380,10 @@ test('every machine-readable ossutil API call suppresses the human elapsed trail
       assert.match(command, /--quiet/, relative)
     }
   }
-  // The split-lock recovery path adds five explicitly machine-readable OSS
-  // probes. Keep this count locked so a future OSS command cannot bypass the
-  // JSON/quiet contract unnoticed.
-  assert.equal(commandCount, 73)
+  // The split-lock recovery paths add seven explicitly machine-readable OSS
+  // probes, including the missing-target snapshot metadata and ACL reads.
+  // Keep this count locked so no OSS command can bypass JSON/quiet unnoticed.
+  assert.equal(commandCount, 75)
 })
 
 test('updater workflows expose production secrets only to required read or mutation steps', () => {

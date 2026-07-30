@@ -890,6 +890,25 @@ export function resolveSplitNonterminalJournal({ r2Open, ossOpen }) {
   }
 }
 
+export function resolveUnifiedNonterminalJournal({ r2Open, ossOpen }) {
+  const r2 = validateJournal(r2Open)
+  const oss = validateJournal(ossOpen)
+  if (!isDeepStrictEqual(r2, oss)) {
+    throw new Error('Unified promotion locks must be exactly equal')
+  }
+  if (
+    !r2.recovery.required ||
+    !['committing', 'rollback-required'].includes(r2.state)
+  ) {
+    throw new Error('Unified promotion lock must require nonterminal recovery')
+  }
+  return {
+    transactionId: r2.transactionId,
+    canonicalProvider: 'both',
+    canonical: r2,
+  }
+}
+
 function terminalRouterExpectation(policy, currentVersion) {
   assertVersion(currentVersion, 'Terminal Router probe current version')
   if (policy === null) {
@@ -1478,23 +1497,52 @@ export function recoveryCommands(journalInput) {
     '# Classify both legacy origins against the exact next-policy A bridge.',
     'legacy_target_key="$(jq -er \'.legacyBridgeVersion as $version | .releases[$version].manifestKey\' "$NEXT_POLICY")"',
     'legacy_target_sha256="$(jq -er \'.legacyBridgeVersion as $version | .releases[$version].manifestSha256\' "$NEXT_POLICY")"',
-    'ossutil cp "oss://${ALIYUN_OSS_BUCKET}/${legacy_target_key}" recovery-readback/live/legacy-target-oss.json --force --endpoint "$oss_endpoint" --region "$ALIYUN_REGION"',
-    'aws s3 cp "s3://${CLOUDFLARE_R2_BUCKET}/${legacy_target_key}" recovery-readback/live/legacy-target-r2.json --endpoint-url "$r2_endpoint"',
-    'cmp recovery-readback/live/legacy-target-oss.json recovery-readback/live/legacy-target-r2.json',
-    'test "$(sha256sum recovery-readback/live/legacy-target-oss.json | cut -d\' \' -f1)" = "$legacy_target_sha256"',
+    'probe_oss_recovery "$legacy_target_key" legacy-target-oss-probe',
+    'probe_r2_recovery "$legacy_target_key" legacy-target-r2-probe',
+    'legacy_target_oss_state="$(jq -er .state recovery-readback/legacy-target-oss-probe.json)"',
+    'legacy_target_r2_state="$(jq -er .state recovery-readback/legacy-target-r2-probe.json)"',
     `ossutil cp "oss://\${ALIYUN_OSS_BUCKET}/${legacyOss.key}" recovery-readback/live/legacy-oss.json --force --endpoint "$oss_endpoint" --region "$ALIYUN_REGION"`,
     `aws s3api get-object --bucket "$CLOUDFLARE_R2_BUCKET" --key ${q(legacyR2.key)} --endpoint-url "$r2_endpoint" recovery-readback/live/legacy-r2.json > recovery-readback/live/legacy-r2-metadata.json`,
-    `if cmp -s "recovery-readback/backups/${legacyOssIndex}" recovery-readback/live/legacy-target-oss.json; then`,
+    'if [[ "$legacy_target_oss_state" == exists && "$legacy_target_r2_state" == exists ]]; then',
+    '  ossutil cp "oss://${ALIYUN_OSS_BUCKET}/${legacy_target_key}" recovery-readback/live/legacy-target-oss.json --force --endpoint "$oss_endpoint" --region "$ALIYUN_REGION"',
+    '  aws s3 cp "s3://${CLOUDFLARE_R2_BUCKET}/${legacy_target_key}" recovery-readback/live/legacy-target-r2.json --endpoint-url "$r2_endpoint"',
+    '  cmp recovery-readback/live/legacy-target-oss.json recovery-readback/live/legacy-target-r2.json',
+    '  test "$(sha256sum recovery-readback/live/legacy-target-oss.json | cut -d\' \' -f1)" = "$legacy_target_sha256"',
+    `  if cmp -s "recovery-readback/backups/${legacyOssIndex}" recovery-readback/live/legacy-target-oss.json; then`,
     `  cmp "recovery-readback/backups/${legacyOssIndex}" recovery-readback/live/legacy-oss.json`,
-    '  jq -n \'{action:"no-change",reason:"target-already-equals-snapshot"}\' > recovery-readback/decisions/legacy-oss.json',
-    'else',
-    `  node scripts/updater/legacy-pause-transaction.mjs classify-rollback --object-kind legacy-oss --live-state exists --live recovery-readback/live/legacy-oss.json --before "recovery-readback/backups/${legacyOssIndex}" --paused recovery-readback/live/legacy-target-oss.json --output recovery-readback/decisions/legacy-oss.json`,
-    'fi',
-    `if cmp -s "recovery-readback/backups/${legacyR2Index}" recovery-readback/live/legacy-target-r2.json; then`,
+    '    jq -n \'{action:"no-change",reason:"target-already-equals-snapshot"}\' > recovery-readback/decisions/legacy-oss.json',
+    '  else',
+    `    node scripts/updater/legacy-pause-transaction.mjs classify-rollback --object-kind legacy-oss --live-state exists --live recovery-readback/live/legacy-oss.json --before "recovery-readback/backups/${legacyOssIndex}" --paused recovery-readback/live/legacy-target-oss.json --output recovery-readback/decisions/legacy-oss.json`,
+    '  fi',
+    `  if cmp -s "recovery-readback/backups/${legacyR2Index}" recovery-readback/live/legacy-target-r2.json; then`,
     `  cmp "recovery-readback/backups/${legacyR2Index}" recovery-readback/live/legacy-r2.json`,
-    '  jq -n \'{action:"no-change",reason:"target-already-equals-snapshot"}\' > recovery-readback/decisions/legacy-r2.json',
+    '    jq -n \'{action:"no-change",reason:"target-already-equals-snapshot"}\' > recovery-readback/decisions/legacy-r2.json',
+    '  else',
+    `    node scripts/updater/legacy-pause-transaction.mjs classify-rollback --object-kind legacy-r2 --live-state exists --live recovery-readback/live/legacy-r2.json --before "recovery-readback/backups/${legacyR2Index}" --paused recovery-readback/live/legacy-target-r2.json --output recovery-readback/decisions/legacy-r2.json`,
+    '  fi',
+    'elif [[ "$legacy_target_oss_state" == absent && "$legacy_target_r2_state" == absent ]]; then',
+    `  test ${q(cleanupLedger.length)} -eq 0`,
+    '  # A pre-create failure may omit the target manifest only when every',
+    '  # unverified create intent is still absent and live legacy state is the',
+    '  # exact durable snapshot. Any partial target or mutable drift is unsafe.'
+  )
+  for (const [index, entry] of unverifiedLedger.entries()) {
+    const probeName = `missing-target-unverified-${index}-${entry.provider}`
+    lines.push(
+      `  probe_${entry.provider}_recovery ${q(entry.key)} ${q(probeName)}`,
+      `  jq -e '.state == "absent"' recovery-readback/${probeName}.json >/dev/null`
+    )
+  }
+  lines.push(
+    `  ossutil api head-object --bucket "$ALIYUN_OSS_BUCKET" --key ${q(legacyOss.key)} --endpoint "$oss_endpoint" --region "$ALIYUN_REGION" --output-format json --quiet > recovery-readback/live/legacy-oss-metadata.json`,
+    `  ossutil api get-object-acl --bucket "$ALIYUN_OSS_BUCKET" --key ${q(legacyOss.key)} --endpoint "$oss_endpoint" --region "$ALIYUN_REGION" --output-format json --quiet > recovery-readback/live/legacy-oss-acl.json`,
+    `  node scripts/updater/promotion-transaction.mjs verify-snapshot-readback --journal "$JOURNAL" --index ${q(legacyOssIndex)} --bytes recovery-readback/live/legacy-oss.json --metadata recovery-readback/live/legacy-oss-metadata.json --acl recovery-readback/live/legacy-oss-acl.json --output recovery-readback/missing-target-legacy-oss-verified.json`,
+    `  node scripts/updater/promotion-transaction.mjs verify-snapshot-readback --journal "$JOURNAL" --index ${q(legacyR2Index)} --bytes recovery-readback/live/legacy-r2.json --metadata recovery-readback/live/legacy-r2-metadata.json --output recovery-readback/missing-target-legacy-r2-verified.json`,
+    '  jq -n \'{action:"no-change",reason:"target-never-created-live-equals-snapshot"}\' > recovery-readback/decisions/legacy-oss.json',
+    '  jq -n \'{action:"no-change",reason:"target-never-created-live-equals-snapshot"}\' > recovery-readback/decisions/legacy-r2.json',
     'else',
-    `  node scripts/updater/legacy-pause-transaction.mjs classify-rollback --object-kind legacy-r2 --live-state exists --live recovery-readback/live/legacy-r2.json --before "recovery-readback/backups/${legacyR2Index}" --paused recovery-readback/live/legacy-target-r2.json --output recovery-readback/decisions/legacy-r2.json`,
+    '  echo "Legacy target manifest presence differs across recovery stores" >&2',
+    '  exit 1',
     'fi',
     '# Classify every immutable object before any deletion or restore.',
     'ledger_cleanup_pending=false'
@@ -2216,34 +2264,57 @@ async function runCli() {
         throw new Error(`${description} does not exactly match its open journal`)
       }
     }
-    const resolved = resolveSplitNonterminalJournal({
-      r2Open: r2Open.value,
-      ossOpen: ossOpen.value,
-    })
-    const canonicalBytes =
-      resolved.canonicalProvider === 'r2' ? r2Open.bytes : ossOpen.bytes
-    const previousBytes =
-      resolved.previousProvider === 'r2' ? r2Open.bytes : ossOpen.bytes
+    const unified = r2Open.bytes.equals(ossOpen.bytes)
+    const resolved = unified
+      ? resolveUnifiedNonterminalJournal({
+          r2Open: r2Open.value,
+          ossOpen: ossOpen.value,
+        })
+      : resolveSplitNonterminalJournal({
+          r2Open: r2Open.value,
+          ossOpen: ossOpen.value,
+        })
+    const canonicalBytes = unified
+      ? r2Open.bytes
+      : resolved.canonicalProvider === 'r2'
+        ? r2Open.bytes
+        : ossOpen.bytes
+    const previousBytes = unified
+      ? canonicalBytes
+      : resolved.previousProvider === 'r2'
+        ? r2Open.bytes
+        : ossOpen.bytes
     fs.writeFileSync(path.resolve(args['--canonical-output']), canonicalBytes)
     fs.writeFileSync(path.resolve(args['--previous-output']), previousBytes)
     fs.writeFileSync(
       path.resolve(args['--output']),
       `${JSON.stringify(
-        {
-          schema: 1,
-          status: 'validated-split-nonterminal',
-          transactionId: resolved.transactionId,
-          previous: {
-            provider: resolved.previousProvider,
-            sequence: resolved.previous.sequence,
-            state: resolved.previous.state,
-          },
-          canonical: {
-            provider: resolved.canonicalProvider,
-            sequence: resolved.canonical.sequence,
-            state: resolved.canonical.state,
-          },
-        },
+        unified
+          ? {
+              schema: 1,
+              status: 'validated-unified-nonterminal',
+              transactionId: resolved.transactionId,
+              canonical: {
+                provider: resolved.canonicalProvider,
+                sequence: resolved.canonical.sequence,
+                state: resolved.canonical.state,
+              },
+            }
+          : {
+              schema: 1,
+              status: 'validated-split-nonterminal',
+              transactionId: resolved.transactionId,
+              previous: {
+                provider: resolved.previousProvider,
+                sequence: resolved.previous.sequence,
+                state: resolved.previous.state,
+              },
+              canonical: {
+                provider: resolved.canonicalProvider,
+                sequence: resolved.canonical.sequence,
+                state: resolved.canonical.state,
+              },
+            },
         null,
         2
       )}\n`
