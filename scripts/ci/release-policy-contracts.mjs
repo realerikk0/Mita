@@ -60,7 +60,7 @@ const TRUSTED_RECOVERY_JOB_ORDER = [
 ]
 
 const TRUSTED_CANDIDATE_WORKFLOW_ALLOWLIST = new Set([
-  '43ded02dc645c0dd8d7e8badc8a46a3e363507ccd33569fab855d7574c26fb10',
+  'fb78647a448ce6865fd83142b2a7aafbb20b0b4d2af69fc4624e428b211c2502',
 ])
 
 const TRUSTED_RECOVERY_WORKFLOW_ALLOWLIST = new Set([
@@ -80,7 +80,7 @@ const TRUSTED_RELEASE_DISTRIBUTION_WORKFLOW_SHA256 =
   'c780b58de80c07962f42c43fc658b74b2f7c2734df01fd356cefb80f5480ca76'
 
 const TRUSTED_DIRECT_QUALIFICATION_WORKFLOW_SHA256 =
-  'ea7bda7d0fc43d316da4dd66309e0648b02abf3621ce935f0aa71904cc87aae1'
+  'e617339f5ccefeaa227a1c2941a0f252f1cdbd7c951978b96628f4b1e89927a0'
 
 export const TRUSTED_SENSITIVE_UPDATER_WORKFLOW_CONTRACTS = Object.freeze({
   '.github/workflows/biyan-a-canary.yml': Object.freeze({
@@ -603,11 +603,11 @@ export function validateReleaseTrainPolicy(policy) {
   if (!Array.isArray(supersededTerminals)) {
     failures.push('release train policy must declare superseded terminal releases')
   } else if (
-    (terminalMode && supersededTerminals.length !== 2) ||
+    (terminalMode && supersededTerminals.length !== 3) ||
     (!terminalMode && supersededTerminals.length !== 0)
   ) {
     failures.push(
-      'release train policy must preserve exactly two superseded terminals only in terminal mode'
+      'release train policy must preserve exactly three superseded terminals only in terminal mode'
     )
   }
   const active = policy.trains.filter((train) => train?.status === 'active')
@@ -745,6 +745,14 @@ export function validateReleaseTrainPolicy(policy) {
       sourceCommit: 'ef963bc606366220db4589352afb25aa7d1785bf',
       status: 'blocked-before-publication',
     },
+    {
+      tag: 'v0.6.648',
+      version: '0.6.648',
+      migrationPhase: 'C',
+      dataSchema: 3,
+      sourceCommit: '33e8c5b03278b2b91318a553eb3b699b19c6ad1e',
+      status: 'blocked-before-publication',
+    },
   ]
   const preservedTerminalVersions = []
   if (Array.isArray(supersededTerminals)) {
@@ -773,7 +781,7 @@ export function validateReleaseTrainPolicy(policy) {
         preserved?.tag !== `v${preserved?.version}`
       ) {
         failures.push(
-          'superseded terminal history must exactly preserve blocked v0.6.646 and v0.6.647 C/3 releases'
+          'superseded terminal history must exactly preserve blocked v0.6.646, v0.6.647, and v0.6.648 C/3 releases'
         )
       }
       if (versions.has(preserved?.version)) {
@@ -826,15 +834,15 @@ export function validateReleaseTrainPolicy(policy) {
       'active terminal release'
     )
     if (
-      terminal?.tag !== 'v0.6.648' ||
-      terminal?.version !== '0.6.648' ||
+      terminal?.tag !== 'v0.6.649' ||
+      terminal?.version !== '0.6.649' ||
       terminal?.migrationPhase !== 'C' ||
       terminal?.dataSchema !== 3 ||
       terminal?.tag !== `v${terminal?.version}` ||
       !/^[0-9a-f]{40}$/.test(terminal?.sourceCommit ?? '')
     ) {
       failures.push(
-        'active terminal release must exactly bind v0.6.648/C/3 to one lowercase 40-hex source commit'
+        'active terminal release must exactly bind v0.6.649/C/3 to one lowercase 40-hex source commit'
       )
     }
     if (versions.has(terminal?.version)) {
@@ -845,11 +853,11 @@ export function validateReleaseTrainPolicy(policy) {
       lastPreservedTerminalVersion &&
       (lastPreservedTerminalVersion[0] !== 0 ||
         lastPreservedTerminalVersion[1] !== 6 ||
-        lastPreservedTerminalVersion[2] !== 647 ||
-        terminal?.version !== '0.6.648')
+        lastPreservedTerminalVersion[2] !== 648 ||
+        terminal?.version !== '0.6.649')
     ) {
       failures.push(
-        'active terminal release v0.6.648 must immediately follow superseded terminal v0.6.647'
+        'active terminal release v0.6.649 must immediately follow superseded terminal v0.6.648'
       )
     }
   }
@@ -1269,7 +1277,7 @@ export function validateCandidateWorkflow(
         '.trains[-1].status == "superseded-by-terminal"'
       ) ||
       !tagCut.includes(
-        '(.supersededTerminalReleases | length) == 2'
+        '(.supersededTerminalReleases | length) == 3'
       ) ||
       !tagCut.includes(
         '.supersededTerminalReleases[0].tag == "v0.6.646"'
@@ -1289,9 +1297,18 @@ export function validateCandidateWorkflow(
       !tagCut.includes(
         '.supersededTerminalReleases[1].status == "blocked-before-publication"'
       ) ||
+      !tagCut.includes(
+        '.supersededTerminalReleases[2].tag == "v0.6.648"'
+      ) ||
+      !tagCut.includes(
+        '.supersededTerminalReleases[2].sourceCommit == "33e8c5b03278b2b91318a553eb3b699b19c6ad1e"'
+      ) ||
+      !tagCut.includes(
+        '.supersededTerminalReleases[2].status == "blocked-before-publication"'
+      ) ||
       !tagCut.includes('.activeTerminalRelease.tag == $tag') ||
-      !tagCut.includes('.activeTerminalRelease.tag == "v0.6.648"') ||
-      !tagCut.includes('.activeTerminalRelease.version == "0.6.648"') ||
+      !tagCut.includes('.activeTerminalRelease.tag == "v0.6.649"') ||
+      !tagCut.includes('.activeTerminalRelease.version == "0.6.649"') ||
       !tagCut.includes('.activeTerminalRelease.migrationPhase == "C"') ||
       !tagCut.includes('.activeTerminalRelease.dataSchema == 3') ||
       !tagCut.includes('test("^[0-9a-f]{40}$")') ||
@@ -1304,7 +1321,7 @@ export function validateCandidateWorkflow(
       /\bv0\.6\.(?:643|644|645)\b/.test(tagCut)
     ) {
       failures.push(
-        'tag-cut must preserve blocked v0.6.646 and v0.6.647 releases and resolve only the exact v0.6.648/C/3 terminal source binding from protected live-main policy'
+        'tag-cut must preserve blocked v0.6.646, v0.6.647, and v0.6.648 releases and resolve only the exact v0.6.649/C/3 terminal source binding from protected live-main policy'
       )
     }
     if (
@@ -3670,7 +3687,7 @@ export function validateDirectQualificationWorkflow(source) {
   if (
     !/^name:\s*Biyan Direct Qualification\s*$/m.test(active) ||
     normalizedYamlEnvelope(topLevelBlock(active, 'on')) !==
-      'on:\n  workflow_dispatch:\n    inputs:\n      focused_lane:\n        description: Qualification scope\n        required: true\n        default: full\n        type: choice\n        options:\n          - full\n          - current-to-c-windows\n' ||
+      'on:\n  workflow_dispatch:\n    inputs:\n      focused_lane:\n        description: Qualification scope\n        required: true\n        default: full\n        type: choice\n        options:\n          - full\n          - current-to-c-windows\n          - legacy-manual-to-c-windows\n' ||
     normalizedYamlEnvelope(topLevelBlock(active, 'permissions')) !==
       'permissions:\n  actions: read\n  contents: read\n' ||
     normalizedYamlEnvelope(topLevelBlock(active, 'concurrency')) !==
@@ -3726,7 +3743,7 @@ export function validateDirectQualificationWorkflow(source) {
     )
   ) {
     failures.push(
-      'direct qualification must preserve the policy-derived full 16 or focused current Windows 1 scope and non-promotable diagnostics'
+      'direct qualification must preserve the policy-derived full 16 or focused current/manual Windows 1 scope and non-promotable diagnostics'
     )
   }
   if (

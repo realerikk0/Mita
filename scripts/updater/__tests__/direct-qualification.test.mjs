@@ -237,48 +237,22 @@ function aggregateFixture() {
   return { root, policy, artifacts }
 }
 
-test('repository policy pins the reviewed candidate while an awaiting policy remains fail-closed', () => {
-  assert.equal(trackedPolicy.state, 'candidate-pinned')
-  assert.equal(
-    trackedPolicy.candidate.manifestSha256,
-    'ebf703dcce0e83a6e23ab36a565fe4916cc63c1ba73f02eaf214bbb2d52c24b3',
-  )
-  assert.deepEqual(
-    Object.fromEntries(
-      Object.entries(trackedPolicy.candidate.assets).map(
-        ([platform, asset]) => [platform, asset.sha256],
-      ),
-    ),
-    {
-      windows:
-        '47046052dc34b6f9ae177f84ce9c42d472f12268ea0c228b7cf04aaccceda01e',
-      macos:
-        '820edd9a6abbc9b409abc564acd4af4ea5d30eaed4efebb46f6063fb3b49424e',
-      linux:
-        '9b8dd0876ea7a9f49ecf0862918919f7a47c218c62981c19040e7d68529be2b6',
-    },
-  )
-  assert.doesNotThrow(() =>
-    validateDirectQualificationPolicy(trackedPolicy, {
-      requirePinned: true,
-    }),
-  )
+test('repository policy awaits the reviewed candidate pin and remains fail-closed', () => {
+  assert.equal(trackedPolicy.state, 'awaiting-candidate-pin')
+  assert.equal(trackedPolicy.candidate.manifestSha256, null)
+  for (const platform of ['windows', 'macos', 'linux']) {
+    assert.equal(trackedPolicy.candidate.assets[platform].sha256, null)
+  }
   const result = spawnSync(
     process.execPath,
     [script, 'validate-policy', '--policy', policyFile],
     { encoding: 'utf8' },
   )
-  assert.equal(result.status, 0, result.stderr)
-
-  const awaiting = clone(trackedPolicy)
-  awaiting.state = 'awaiting-candidate-pin'
-  awaiting.candidate.manifestSha256 = null
-  for (const platform of ['windows', 'macos', 'linux']) {
-    awaiting.candidate.assets[platform].sha256 = null
-  }
+  assert.notEqual(result.status, 0)
+  assert.match(result.stderr, /policy\.state=candidate-pinned/)
   assert.throws(
     () =>
-      validateDirectQualificationPolicy(awaiting, {
+      validateDirectQualificationPolicy(trackedPolicy, {
         requirePinned: true,
       }),
     /policy\.state=candidate-pinned/,
@@ -300,7 +274,7 @@ test('candidate pin must be complete and bound to the exact product source commi
   const policy = pinnedPolicy()
   assert.equal(
     policy.candidate.sourceCommit,
-    '33e8c5b03278b2b91318a553eb3b699b19c6ad1e',
+    'cc7bd75e40da7e32ea93433ed7311fb7ddbab379',
   )
   policy.candidate.sourceCommit = 'e'.repeat(40)
   assert.throws(
@@ -309,7 +283,7 @@ test('candidate pin must be complete and bound to the exact product source commi
   )
 })
 
-test('qualification scope is exactly full 16 or focused current Windows 1', () => {
+test('qualification scope is exactly full 16 or one of two focused Windows lanes', () => {
   const policy = pinnedPolicy()
   const full = resolveDirectQualificationScope(policy, 'full')
   assert.equal(full.fullMode, true)
@@ -319,39 +293,58 @@ test('qualification scope is exactly full 16 or focused current Windows 1', () =
     policy.lanes.map((lane) => lane.id),
   )
 
-  const focused = resolveDirectQualificationScope(
-    policy,
-    'current-to-c-windows',
-  )
-  assert.equal(focused.fullMode, false)
-  assert.deepEqual(focused.qualificationMatrix.include, [
-    {
-      lane: 'current-to-c-windows',
-      platform: 'windows',
-      runner: 'windows-2022',
-      scenario: 'current-to-c',
-      source_version: '0.6.633',
-      source_role: 'current',
-      snapshot: 'current',
-    },
-  ])
+  for (const [focusedLane, expected] of [
+    [
+      'current-to-c-windows',
+      {
+        lane: 'current-to-c-windows',
+        platform: 'windows',
+        runner: 'windows-2022',
+        scenario: 'current-to-c',
+        source_version: '0.6.633',
+        source_role: 'current',
+        snapshot: 'current',
+      },
+    ],
+    [
+      'legacy-manual-to-c-windows',
+      {
+        lane: 'legacy-manual-to-c-windows',
+        platform: 'windows',
+        runner: 'windows-2022',
+        scenario: 'legacy-manual-to-c',
+        source_version: '0.6.608',
+        source_role: 'current',
+        snapshot: 'current',
+      },
+    ],
+  ]) {
+    const focused = resolveDirectQualificationScope(policy, focusedLane)
+    assert.equal(focused.fullMode, false)
+    assert.deepEqual(focused.qualificationMatrix.include, [expected])
+  }
   assert.throws(
     () => resolveDirectQualificationScope(policy, 'current-to-c-macos'),
-    /exactly full or current-to-c-windows/,
+    /exactly full, current-to-c-windows, or legacy-manual-to-c-windows/,
   )
 })
 
 test('focused diagnostic summary is permanently non-promotable', () => {
   const policy = pinnedPolicy()
-  const summary = buildFocusedDiagnosticSummary({
-    policy,
-    laneId: 'current-to-c-windows',
-    runId: 777,
-    runAttempt: 1,
-    qualificationOutcome: 'failure',
-  })
-  assert.equal(summary.promotionEligible, false)
-  assert.equal(summary.lane, 'current-to-c-windows')
+  for (const laneId of [
+    'current-to-c-windows',
+    'legacy-manual-to-c-windows',
+  ]) {
+    const summary = buildFocusedDiagnosticSummary({
+      policy,
+      laneId,
+      runId: 777,
+      runAttempt: 1,
+      qualificationOutcome: 'failure',
+    })
+    assert.equal(summary.promotionEligible, false)
+    assert.equal(summary.lane, laneId)
+  }
   assert.throws(
     () =>
       buildFocusedDiagnosticSummary({
@@ -361,7 +354,7 @@ test('focused diagnostic summary is permanently non-promotable', () => {
         runAttempt: 1,
         qualificationOutcome: 'success',
       }),
-    /restricted to current-to-c-windows/,
+    /restricted to current-to-c-windows or legacy-manual-to-c-windows/,
   )
 })
 

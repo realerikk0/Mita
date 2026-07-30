@@ -35,10 +35,10 @@ const TERMINAL_SOURCE_CONTENTS = Object.freeze({
   'biyan-release.json':
     '{"schema":1,"migrationPhase":"C","dataSchema":3}\n',
   'src-tauri/Cargo.lock':
-    '[[package]]\nname = "Biyan"\nversion = "0.6.648"\n',
+    '[[package]]\nname = "Biyan"\nversion = "0.6.649"\n',
   'src-tauri/Cargo.toml':
-    '[package]\nname = "Biyan"\nversion = "0.6.648"\n',
-  'src-tauri/tauri.conf.json': '{"version":"0.6.648"}\n',
+    '[package]\nname = "Biyan"\nversion = "0.6.649"\n',
+  'src-tauri/tauri.conf.json': '{"version":"0.6.649"}\n',
 })
 
 function trainPolicy(sourceCommit = null) {
@@ -52,8 +52,8 @@ function trainPolicy(sourceCommit = null) {
     sourceCommit === null
       ? null
       : {
-          tag: 'v0.6.648',
-          version: '0.6.648',
+          tag: 'v0.6.649',
+          version: '0.6.649',
           migrationPhase: 'C',
           dataSchema: 3,
           sourceCommit,
@@ -226,7 +226,7 @@ if (
     return {
       harnessRoot,
       parentCommit,
-      releaseTag: terminal ? 'v0.6.648' : releaseTag,
+      releaseTag: terminal ? 'v0.6.649' : releaseTag,
       sourceCommit,
       targetRoot,
       trustedMain,
@@ -777,8 +777,8 @@ test('terminal release target authenticates a full product source P through poli
 
   assert.equal(result.parentCommit, fixture.parentCommit)
   assert.equal(result.releaseKind, 'terminal')
-  assert.equal(result.releaseTag, 'v0.6.648')
-  assert.equal(result.releaseVersion, '0.6.648')
+  assert.equal(result.releaseTag, 'v0.6.649')
+  assert.equal(result.releaseVersion, '0.6.649')
   assert.equal(result.sourceCommit, fixture.sourceCommit)
   assert.equal(result.trustedMain, fixture.trustedMain)
   assert.equal(result.checkpoint, null)
@@ -832,7 +832,7 @@ test('terminal release target rejects product or source identity drift after P',
   writeFixtureFile(
     identity.harnessRoot,
     'src-tauri/tauri.conf.json',
-    '{"version":"0.6.649"}\n'
+    '{"version":"0.6.650"}\n'
   )
   identity.trustedMain = commitFixture(
     identity.harnessRoot,
