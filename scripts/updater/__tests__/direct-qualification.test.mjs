@@ -309,7 +309,7 @@ test('candidate pin must be complete and bound to the exact product source commi
   )
 })
 
-test('qualification scope is exactly full 16 or one of two focused Windows lanes', () => {
+test('qualification scope is exactly full 16 or one of three focused Windows lanes', () => {
   const policy = pinnedPolicy()
   const full = resolveDirectQualificationScope(policy, 'full')
   assert.equal(full.fullMode, true)
@@ -344,6 +344,18 @@ test('qualification scope is exactly full 16 or one of two focused Windows lanes
         snapshot: 'current',
       },
     ],
+    [
+      'legacy-auto-to-c-windows',
+      {
+        lane: 'legacy-auto-to-c-windows',
+        platform: 'windows',
+        runner: 'windows-2022',
+        scenario: 'legacy-auto-to-c',
+        source_version: '0.6.611',
+        source_role: 'current',
+        snapshot: 'current',
+      },
+    ],
   ]) {
     const focused = resolveDirectQualificationScope(policy, focusedLane)
     assert.equal(focused.fullMode, false)
@@ -351,7 +363,7 @@ test('qualification scope is exactly full 16 or one of two focused Windows lanes
   }
   assert.throws(
     () => resolveDirectQualificationScope(policy, 'current-to-c-macos'),
-    /exactly full, current-to-c-windows, or legacy-manual-to-c-windows/,
+    /exactly full, current-to-c-windows, legacy-manual-to-c-windows, or legacy-auto-to-c-windows/,
   )
 })
 
@@ -360,6 +372,7 @@ test('focused diagnostic summary is permanently non-promotable', () => {
   for (const laneId of [
     'current-to-c-windows',
     'legacy-manual-to-c-windows',
+    'legacy-auto-to-c-windows',
   ]) {
     const summary = buildFocusedDiagnosticSummary({
       policy,
@@ -380,7 +393,7 @@ test('focused diagnostic summary is permanently non-promotable', () => {
         runAttempt: 1,
         qualificationOutcome: 'success',
       }),
-    /restricted to current-to-c-windows or legacy-manual-to-c-windows/,
+    /restricted to current-to-c-windows, legacy-manual-to-c-windows, or legacy-auto-to-c-windows/,
   )
 })
 

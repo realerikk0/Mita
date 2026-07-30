@@ -80,7 +80,7 @@ const TRUSTED_RELEASE_DISTRIBUTION_WORKFLOW_SHA256 =
   'c780b58de80c07962f42c43fc658b74b2f7c2734df01fd356cefb80f5480ca76'
 
 const TRUSTED_DIRECT_QUALIFICATION_WORKFLOW_SHA256 =
-  'cf6d31d1fbc55494376ac95c6539dfca8296b5f2cbfa79dbe30fb20c794ca0e5'
+  '9169ed489cbebbcd6fc6bddc19408764c7fec44fe51c5a2f7d6c849fe4dccef5'
 
 export const TRUSTED_SENSITIVE_UPDATER_WORKFLOW_CONTRACTS = Object.freeze({
   '.github/workflows/biyan-a-canary.yml': Object.freeze({
@@ -3695,7 +3695,7 @@ export function validateDirectQualificationWorkflow(source) {
   if (
     !/^name:\s*Biyan Direct Qualification\s*$/m.test(active) ||
     normalizedYamlEnvelope(topLevelBlock(active, 'on')) !==
-      'on:\n  workflow_dispatch:\n    inputs:\n      focused_lane:\n        description: Qualification scope\n        required: true\n        default: full\n        type: choice\n        options:\n          - full\n          - current-to-c-windows\n          - legacy-manual-to-c-windows\n' ||
+      'on:\n  workflow_dispatch:\n    inputs:\n      focused_lane:\n        description: Qualification scope\n        required: true\n        default: full\n        type: choice\n        options:\n          - full\n          - current-to-c-windows\n          - legacy-manual-to-c-windows\n          - legacy-auto-to-c-windows\n' ||
     normalizedYamlEnvelope(topLevelBlock(active, 'permissions')) !==
       'permissions:\n  actions: read\n  contents: read\n' ||
     normalizedYamlEnvelope(topLevelBlock(active, 'concurrency')) !==
@@ -3751,7 +3751,7 @@ export function validateDirectQualificationWorkflow(source) {
     )
   ) {
     failures.push(
-      'direct qualification must preserve the policy-derived full 16 or focused current/manual Windows 1 scope and non-promotable diagnostics'
+      'direct qualification must preserve the policy-derived full 16 or focused reviewed Windows 1 scope and non-promotable diagnostics'
     )
   }
   if (

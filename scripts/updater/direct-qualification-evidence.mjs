@@ -491,10 +491,11 @@ export function resolveDirectQualificationScope(policy, focusedLane) {
   const focusedLanes = [
     'current-to-c-windows',
     'legacy-manual-to-c-windows',
+    'legacy-auto-to-c-windows',
   ]
   if (!['full', ...focusedLanes].includes(focusedLane)) {
     fail(
-      'focused qualification lane must be exactly full, current-to-c-windows, or legacy-manual-to-c-windows',
+      'focused qualification lane must be exactly full, current-to-c-windows, legacy-manual-to-c-windows, or legacy-auto-to-c-windows',
     )
   }
   const lanes =
@@ -731,10 +732,14 @@ export function buildFocusedDiagnosticSummary({
   validateDirectQualificationPolicy(policy, { requirePinned: true })
   const lane = laneById(policy, laneId)
   if (
-    !['current-to-c-windows', 'legacy-manual-to-c-windows'].includes(lane.id)
+    ![
+      'current-to-c-windows',
+      'legacy-manual-to-c-windows',
+      'legacy-auto-to-c-windows',
+    ].includes(lane.id)
   ) {
     fail(
-      'focused diagnostic summary is restricted to current-to-c-windows or legacy-manual-to-c-windows',
+      'focused diagnostic summary is restricted to current-to-c-windows, legacy-manual-to-c-windows, or legacy-auto-to-c-windows',
     )
   }
   if (

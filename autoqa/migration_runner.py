@@ -1115,6 +1115,10 @@ class PlatformExecutor:
             "pid": process.pid if type(process.pid) is int and process.pid > 0 else None,
             "executableName": executable_name,
             "executableSha256": _sha256(executable) if executable.is_file() else None,
+            "probe": {
+                "status": "started",
+                "exitCode": None,
+            },
         }
         self.process_evidence.append(process_entry)
         probe_error: Exception | None = None
@@ -1122,6 +1126,10 @@ class PlatformExecutor:
             time.sleep(self.startup_seconds)
             exit_code = process.poll()
             if exit_code is not None:
+                process_entry["probe"] = {
+                    "status": "early-exit",
+                    "exitCode": exit_code if type(exit_code) is int else None,
+                }
                 raise RuntimeError(
                     f"startup probe exited early for {scenario}/{phase} with code {exit_code}"
                 )
@@ -1131,6 +1139,10 @@ class PlatformExecutor:
                 while True:
                     exit_code = process.poll()
                     if exit_code is not None:
+                        process_entry["probe"] = {
+                            "status": "early-exit",
+                            "exitCode": exit_code if type(exit_code) is int else None,
+                        }
                         raise RuntimeError(
                             f"startup probe exited before migration readiness for "
                             f"{scenario}/{phase} with code {exit_code}; "
@@ -1138,6 +1150,10 @@ class PlatformExecutor:
                         )
                     try:
                         readiness_check()
+                        process_entry["probe"] = {
+                            "status": "ready",
+                            "exitCode": None,
+                        }
                         if require_graceful_shutdown:
                             self.source_guards["readiness"] = "passed"
                         break
@@ -1158,7 +1174,22 @@ class PlatformExecutor:
                             f"last readiness error: {last_error}"
                         )
                     time.sleep(min(1.0, remaining))
+            else:
+                process_entry["probe"] = {
+                    "status": "running",
+                    "exitCode": None,
+                }
         except Exception as error:
+            if process_entry["probe"]["status"] == "started":
+                exit_code = process.poll()
+                process_entry["probe"] = {
+                    "status": (
+                        "early-exit"
+                        if type(exit_code) is int
+                        else "readiness-failed"
+                    ),
+                    "exitCode": exit_code if type(exit_code) is int else None,
+                }
             probe_error = error
 
         shutdown_error: Exception | None = None
