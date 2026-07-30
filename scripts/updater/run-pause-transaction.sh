@@ -103,12 +103,15 @@ put_r2_json() {
 
 put_oss_json() {
   local file="$1" key="$2" overwrite="$3"
-  ossutil api put-object --bucket "$ALIYUN_OSS_BUCKET" --key "$key" \
+  local args=(ossutil api put-object --bucket "$ALIYUN_OSS_BUCKET" --key "$key" \
     --body "file://${file}" --content-type application/json \
     --cache-control no-store --object-acl default \
-    --forbid-overwrite "$([[ "$overwrite" == true ]] && echo false || echo true)" \
     --endpoint "$oss_endpoint" --region "$ALIYUN_REGION" \
-    --output-format json --quiet >/dev/null
+    --output-format json --quiet)
+  # OSS overwrites by default. Omit the flag for mutable journal state instead
+  # of relying on ossutil to serialize an explicit boolean false header.
+  if [[ "$overwrite" != true ]]; then args+=(--forbid-overwrite true); fi
+  "${args[@]}" >/dev/null
 }
 
 publish_immutable_r2() {

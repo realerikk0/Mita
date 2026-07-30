@@ -2560,6 +2560,53 @@ test('promotion journal artifacts are create-only, read back, and CAS-deleted', 
   }
 })
 
+test('mutable OSS journals omit the overwrite guard while immutable journals keep it', () => {
+  const temporaryDirectory = fs.mkdtempSync(
+    path.join(os.tmpdir(), 'updater-oss-journal-overwrite-')
+  )
+  try {
+    for (const runnerName of [
+      'run-promotion-transaction.sh',
+      'run-pause-transaction.sh',
+    ]) {
+      const runner = readText(path.join(repoRoot, 'scripts/updater', runnerName))
+      const putOssJson = shellFunction(runner, 'put_oss_json')
+      const capture = path.join(temporaryDirectory, `${runnerName}.log`)
+      const result = spawnSync(
+        'bash',
+        [
+          '-c',
+          `
+ossutil() { printf '%s\\n' "$*" >> "$OSSUTIL_CAPTURE"; }
+${putOssJson}
+put_oss_json journal.json biyan/updater/transactions/open.json true
+put_oss_json journal.json biyan/updater/transactions/123-1/journal-0000.json false
+`,
+        ],
+        {
+          encoding: 'utf8',
+          env: { ...process.env, OSSUTIL_CAPTURE: capture },
+        }
+      )
+      assert.equal(result.status, 0, `${runnerName}: ${result.stderr}`)
+      const [mutableJournal, immutableHistory] = readText(capture)
+        .trim()
+        .split('\n')
+      assert.match(
+        mutableJournal,
+        /--key biyan\/updater\/transactions\/open\.json/
+      )
+      assert.doesNotMatch(mutableJournal, /--forbid-overwrite/)
+      assert.match(
+        immutableHistory,
+        /--key biyan\/updater\/transactions\/123-1\/journal-0000\.json[\s\S]*--forbid-overwrite true/
+      )
+    }
+  } finally {
+    fs.rmSync(temporaryDirectory, { recursive: true, force: true })
+  }
+})
+
 test('mutable snapshots are backed up create-only and fully read back before writes', () => {
   const runner = readText(
     path.join(repoRoot, 'scripts/updater/run-promotion-transaction.sh')
