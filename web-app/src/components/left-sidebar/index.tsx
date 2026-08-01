@@ -38,8 +38,7 @@ export function LeftSidebar() {
           <NavMain />
         </SidebarHeader>
         <SidebarContent className="mask-b-from-95% mask-t-from-98%">
-          <NavProjects />
-          <NavChats />
+          <NavChats projects={<NavProjects />} />
         </SidebarContent>
         <SidebarRail />
       </Sidebar>

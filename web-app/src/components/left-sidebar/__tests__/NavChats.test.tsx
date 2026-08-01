@@ -25,6 +25,7 @@ const h = vi.hoisted(() => ({
     pathname: '/threads/thread-1',
     search: {},
   } as { pathname: string; search: Record<string, string> },
+  setProjectDialogOpen: vi.fn(),
 }))
 
 vi.mock('@tanstack/react-router', () => ({
@@ -46,7 +47,7 @@ vi.mock('@/i18n/react-i18next-compat', () => ({
   useTranslation: () => ({
     t: (key: string) =>
       ({
-        'common:history': 'History',
+        'common:projects.new': 'New Project',
         'common:pinned': 'Pinned',
         'common:pinToTop': 'Pin to top',
         'common:unpin': 'Unpin',
@@ -104,6 +105,11 @@ vi.mock('@/hooks/useThreadManagement', () => ({
   }),
 }))
 
+vi.mock('@/hooks/useProjectDialog', () => ({
+  useProjectDialog: (selector: any) =>
+    selector({ open: false, setOpen: h.setProjectDialogOpen }),
+}))
+
 vi.mock('@/hooks/useServiceHub', () => ({
   useServiceHub: () => ({
     imageGeneration: () => ({
@@ -121,7 +127,9 @@ vi.mock('@/hooks/useServiceHub', () => ({
 
 vi.mock('@/components/ui/sidebar', () => ({
   SidebarGroup: ({ children }: any) => <section>{children}</section>,
-  SidebarGroupAction: ({ children }: any) => <button>{children}</button>,
+  SidebarGroupAction: ({ children, ...props }: any) => (
+    <button {...props}>{children}</button>
+  ),
   SidebarGroupLabel: ({ children }: any) => <h2>{children}</h2>,
   SidebarMenu: ({ children }: any) => <ul>{children}</ul>,
   SidebarMenuAction: ({ children }: any) => <button>{children}</button>,
@@ -201,12 +209,28 @@ describe('NavChats history stream', () => {
     h.toastSuccess.mockClear()
     h.toggleThreadPinned.mockClear()
     h.updateThread.mockClear()
+    h.setProjectDialogOpen.mockClear()
     h.folders = []
     h.location = {
       pathname: '/threads/thread-1',
       search: {},
     }
     useImageGenerationStore.getState().reset()
+  })
+
+  it('shows projects as the section title and opens New Project from the plus button when empty', async () => {
+    render(<NavChats projects={<div data-testid="project-list" />} />)
+
+    await waitFor(() => {
+      expect(screen.getByRole('heading', { name: 'Projects' })).toBeVisible()
+      expect(screen.getByTestId('project-list')).toBeVisible()
+    })
+
+    fireEvent.click(screen.getByRole('button', { name: 'New Project' }))
+
+    await waitFor(() => {
+      expect(h.setProjectDialogOpen).toHaveBeenCalledWith(true)
+    })
   })
 
   it('mixes chats, generated media, and Biyan Teams in updated order', async () => {

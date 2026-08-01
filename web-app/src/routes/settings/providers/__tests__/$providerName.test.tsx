@@ -1,5 +1,5 @@
 /* eslint-disable @typescript-eslint/no-explicit-any */
-import { render, screen } from '@testing-library/react'
+import { fireEvent, render, screen } from '@testing-library/react'
 import '@testing-library/jest-dom'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
@@ -66,8 +66,20 @@ vi.mock('@/components/ui/button', () => ({
   ),
 }))
 vi.mock('@/components/ui/switch', () => ({
-  Switch: ({ checked }: { checked: boolean }) => (
-    <input type="checkbox" checked={checked} readOnly />
+  Switch: ({
+    checked,
+    onCheckedChange,
+    ...props
+  }: {
+    checked: boolean
+    onCheckedChange?: (checked: boolean) => void
+  }) => (
+    <input
+      type="checkbox"
+      checked={checked}
+      onChange={(event) => onCheckedChange?.(event.target.checked)}
+      {...props}
+    />
   ),
 }))
 vi.mock('@/components/ui/textarea', () => ({
@@ -144,11 +156,46 @@ describe('remote-only provider settings', () => {
   })
 
   it('renders remote settings while filtering runtime-only controls', () => {
-    renderRoute()
+    const { container } = renderRoute()
 
-    expect(screen.getByText('Remote base URL')).toBeVisible()
+    const enableSwitch = screen.getByRole('checkbox', {
+      name: 'Enable Remote',
+    })
+    const enableLabel = screen.getByText('Enable')
+    const baseUrlLabel = screen.getByText('Remote base URL')
+
+    expect(container.firstElementChild).toHaveClass(
+      'h-svh',
+      'max-h-svh',
+      'overflow-hidden'
+    )
+    expect(container.querySelector('.overflow-y-auto')).toHaveClass(
+      'min-h-0',
+      'flex-1'
+    )
+    expect(screen.getByText('Enable')).toBeVisible()
+    expect(enableSwitch).toBeChecked()
+    expect(baseUrlLabel).toBeVisible()
+    expect(
+      enableLabel.compareDocumentPosition(baseUrlLabel) &
+        Node.DOCUMENT_POSITION_FOLLOWING
+    ).toBeTruthy()
     expect(screen.getByText('Remote endpoint')).toBeVisible()
     expect(screen.queryByText('GPU layers')).not.toBeInTheDocument()
     expect(screen.getByText('chat-1')).toBeVisible()
+  })
+
+  it('updates the provider from the labeled enable control', () => {
+    renderRoute()
+
+    fireEvent.click(
+      screen.getByRole('checkbox', {
+        name: 'Enable Remote',
+      })
+    )
+
+    expect(h.updateProvider).toHaveBeenCalledWith('remote', {
+      active: false,
+    })
   })
 })

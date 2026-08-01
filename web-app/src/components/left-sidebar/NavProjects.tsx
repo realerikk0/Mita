@@ -20,8 +20,6 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu"
 import {
-  SidebarGroup,
-  SidebarGroupLabel,
   SidebarMenu,
   SidebarMenuAction,
   SidebarMenuButton,
@@ -47,6 +45,7 @@ import { cn } from "@/lib/utils"
 import { ThreadProjectMenuItems } from "@/containers/ThreadProjectMenuItems"
 import { MediaProjectMenuItems } from "@/containers/MediaProjectMenuItems"
 import { isBiyanTeamsThread } from '@/types/biyan-teams'
+import { useProjectDialog } from '@/hooks/useProjectDialog'
 
 type ProjectChildEntry =
   | {
@@ -331,8 +330,10 @@ function ProjectItem({
 export function NavProjects() {
   const { t } = useTranslation()
   const { isMobile } = useSidebar()
+  const navigate = useNavigate()
   const serviceHub = useServiceHub()
-  const { folders, updateFolder, getFolderById } = useThreadManagement()
+  const { folders, addFolder, updateFolder, getFolderById } =
+    useThreadManagement()
   const threads = useThreads((state) => state.threads)
   const imageAssets = useImageGenerationStore((state) => state.assets)
   const setImageAssets = useImageGenerationStore((state) => state.setAssets)
@@ -346,6 +347,8 @@ export function NavProjects() {
   const [selectedProject, setSelectedProject] = useState<ThreadFolder | null>(null)
   const [openProjects, setOpenProjects] = useState<Record<string, boolean>>({})
   const [videoAssets, setVideoAssets] = useState<VideoAssetRecord[]>([])
+  const createDialogOpen = useProjectDialog((state) => state.open)
+  const setCreateDialogOpen = useProjectDialog((state) => state.setOpen)
 
   useEffect(() => {
     const activeProjectId = location.pathname.match(/^\/project\/([^/]+)/)?.[1]
@@ -468,6 +471,15 @@ export function NavProjects() {
     setEditDialogOpen(true)
   }
 
+  const handleCreate = async (name: string, assistantId?: string) => {
+    const project = await addFolder(name, assistantId)
+    setCreateDialogOpen(false)
+    navigate({
+      to: '/project/$projectId',
+      params: { projectId: project.id },
+    })
+  }
+
   const handleDelete = (project: ThreadFolder) => {
     setSelectedProject(project)
     setDeleteDialogOpen(true)
@@ -499,14 +511,9 @@ export function NavProjects() {
     upsertImageAsset(asset)
   }
 
-  if (folders.length === 0) {
-    return null
-  }
-
   return (
     <>
-      <SidebarGroup className="group-data-[collapsible=icon]:hidden">
-        <SidebarGroupLabel>{t('common:projects.title')}</SidebarGroupLabel>
+      {folders.length > 0 && (
         <SidebarMenu>
           {folders.map((item) => (
             <ProjectItem
@@ -526,7 +533,14 @@ export function NavProjects() {
             />
           ))}
         </SidebarMenu>
-      </SidebarGroup>
+      )}
+
+      <AddProjectDialog
+        open={createDialogOpen}
+        onOpenChange={setCreateDialogOpen}
+        editingKey={null}
+        onSave={handleCreate}
+      />
 
       <AddProjectDialog
         open={editDialogOpen}

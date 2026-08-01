@@ -4,7 +4,7 @@ import { getNavMainItems } from '../NavMain'
 
 describe('NavMain', () => {
   it('places New Image directly after New Chat', () => {
-    const items = getNavMainItems(vi.fn(), vi.fn(), vi.fn(), vi.fn(), vi.fn())
+    const items = getNavMainItems(vi.fn(), vi.fn(), vi.fn(), vi.fn())
     const titles = items.map((item) => item.title)
     const newImageItem = items.find((item) => item.title === 'common:newMedia')
 
@@ -15,11 +15,17 @@ describe('NavMain', () => {
   })
 
   it('shows a shortcut for New Biyan Teams', () => {
-    const items = getNavMainItems(vi.fn(), vi.fn(), vi.fn(), vi.fn(), vi.fn())
+    const items = getNavMainItems(vi.fn(), vi.fn(), vi.fn(), vi.fn())
     const newBiyanTeamsItem = items.find(
       (item) => item.title === 'common:newBiyanTeams'
     )
 
     expect(newBiyanTeamsItem?.shortcut).toBeTruthy()
+  })
+
+  it('moves New Project out of the primary action list', () => {
+    const items = getNavMainItems(vi.fn(), vi.fn(), vi.fn(), vi.fn())
+
+    expect(items.some((item) => item.title === 'common:projects.new')).toBe(false)
   })
 })
