@@ -87,16 +87,16 @@ describe('TauriVideoGenerationService', () => {
     const init = vi.mocked(fetchTauri).mock.calls[0][1] as RequestInit & {
       body: string
     }
-    expect(JSON.parse(init.body)).toMatchObject({
+    const body = JSON.parse(init.body)
+    expect(body).toMatchObject({
       prompt: 'A gold robot walks through a neon city.',
     })
-    expect(JSON.parse(init.body).content).toEqual([
+    expect(body).not.toHaveProperty('image')
+    expect(body.content).toEqual([
       { type: 'text', text: 'A gold robot walks through a neon city.' },
       {
         type: 'image_url',
-        image_url: {
-          url: 'data:image/png;base64,AQID',
-        },
+        image_url: { url: 'data:image/png;base64,AQID' },
       },
     ])
   })

@@ -53,6 +53,7 @@ vi.mock('@/i18n/react-i18next-compat', () => ({
         'common:unpin': 'Unpin',
         'common:newMedia': 'New Media',
         'common:newThread': 'New Thread',
+        'common:imageGeneration.mode.video': 'Video',
         'common:imageGeneration.mode.storyboardVideo': 'Storyboard video',
         'common:imageGeneration.toast.deleteAssetFailed':
           'Failed to delete image asset',
@@ -285,6 +286,49 @@ describe('NavChats history stream', () => {
       )
       expect(new Set(iconShapes).size).toBeGreaterThanOrEqual(3)
     })
+  })
+
+  it('routes generated videos to video mode and storyboard or legacy videos to storyboard mode', async () => {
+    h.videoAssets = [
+      {
+        id: 'video-generated',
+        prompt: 'generated video',
+        createdAt: '2026-06-04T00:00:00Z',
+        assetKind: 'generated',
+      },
+      {
+        id: 'video-storyboard',
+        prompt: 'explicit storyboard video',
+        createdAt: '2026-06-03T00:00:00Z',
+        assetKind: 'storyboard',
+      },
+      {
+        id: 'video-legacy',
+        prompt: 'legacy storyboard video',
+        createdAt: '2026-06-02T00:00:00Z',
+      },
+    ]
+
+    render(<NavChats />)
+
+    expect(
+      await screen.findByRole('link', { name: 'generated video' })
+    ).toHaveAttribute(
+      'href',
+      '/images?media=video&videoId=video-generated'
+    )
+    expect(
+      screen.getByRole('link', { name: 'explicit storyboard video' })
+    ).toHaveAttribute(
+      'href',
+      '/images?media=storyboard&videoId=video-storyboard'
+    )
+    expect(
+      screen.getByRole('link', { name: 'legacy storyboard video' })
+    ).toHaveAttribute(
+      'href',
+      '/images?media=storyboard&videoId=video-legacy'
+    )
   })
 
   it('keeps reference images out of the sidebar history', async () => {

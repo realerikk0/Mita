@@ -7,8 +7,10 @@ import {
   extractModelRepo,
   getModelCapabilities,
   inferJingxingModelCapabilities,
+  isJingxingAudioTranscriptionModel,
   isJingxingImageGenerationModel,
   isJingxingNativeWebSearchModel,
+  isJingxingVideoGenerationModel,
   normalizeModelCapabilitiesForProvider,
 } from '../models'
 import { ModelCapabilities } from '@/types/models'
@@ -483,6 +485,8 @@ describe('getModelCapabilities', () => {
       'gpt-image-2',
       'mai-image-2-5',
       'mai-image-2-5-flash',
+      'doubao-seedream-4-5-251128',
+      'doubao-seedream-5-0-260128',
     ]) {
       expect(isJingxingImageGenerationModel(modelId)).toBe(true)
       expect(inferJingxingModelCapabilities(modelId)).toEqual([
@@ -491,6 +495,20 @@ describe('getModelCapabilities', () => {
         ModelCapabilities.IMAGE_TO_IMAGE,
       ])
     }
+  })
+
+  it('marks Jingxing video and transcription models as non-completion models', () => {
+    expect(
+      isJingxingVideoGenerationModel('doubao-seedance-2-0-260128')
+    ).toBe(true)
+    expect(
+      inferJingxingModelCapabilities('doubao-seedance-2-0-260128')
+    ).toEqual([ModelCapabilities.VIDEO_GENERATION])
+
+    expect(isJingxingAudioTranscriptionModel('gpt-4o-transcribe')).toBe(true)
+    expect(inferJingxingModelCapabilities('gpt-4o-transcribe')).toEqual([
+      ModelCapabilities.AUDIO_TO_TEXT,
+    ])
   })
 
   it('normalizes stale Jingxing capabilities while preserving user configured values', () => {

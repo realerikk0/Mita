@@ -1,6 +1,7 @@
 import { localStorageKey } from '@/constants/localStorage'
 import type { ModelInfo } from '@biyan/core'
 import {
+  configuredChatModels,
   isConfiguredModelProvider,
   type RemoteModelProvider,
 } from '@/lib/configured-model-providers'
@@ -9,6 +10,18 @@ const isRemoteUsableProvider = (
   provider?: ModelProvider
 ): provider is RemoteModelProvider =>
   Boolean(provider && isConfiguredModelProvider(provider))
+
+const resolveConfiguredChatModel = (
+  provider: ModelProvider | undefined,
+  modelId: string
+): { model: string; provider: ModelProvider } | null => {
+  if (!isRemoteUsableProvider(provider)) return null
+
+  const model = configuredChatModels(provider).find(
+    (candidate) => candidate.id === modelId
+  )
+  return model ? { model: model.id, provider } : null
+}
 
 export const getLastUsedModel = (): {
   provider: string
@@ -36,30 +49,27 @@ export const getModelToStart = (params: {
   // Use last used model if available
   const lastUsedModel = getLastUsedModel()
   if (lastUsedModel) {
-    const provider = getProviderByName(lastUsedModel.provider)
-    if (
-      isRemoteUsableProvider(provider) &&
-      provider.models.some((model) => model.id === lastUsedModel.model)
-    ) {
-      return { model: lastUsedModel.model, provider }
-    }
+    const resolved = resolveConfiguredChatModel(
+      getProviderByName(lastUsedModel.provider),
+      lastUsedModel.model
+    )
+    if (resolved) return resolved
   }
 
   // Use selected model if available
   if (selectedModel && selectedProvider) {
-    const provider = getProviderByName(selectedProvider)
-    if (
-      isRemoteUsableProvider(provider) &&
-      provider.models.some((model) => model.id === selectedModel.id)
-    ) {
-      return { model: selectedModel.id, provider }
-    }
+    const resolved = resolveConfiguredChatModel(
+      getProviderByName(selectedProvider),
+      selectedModel.id
+    )
+    if (resolved) return resolved
   }
 
-  const firstProvider = providers.find(
-    (provider) => isRemoteUsableProvider(provider) && provider.models.length > 0
-  )
-  if (firstProvider) return { model: firstProvider.models[0].id, provider: firstProvider }
+  for (const provider of providers) {
+    if (!isRemoteUsableProvider(provider)) continue
+    const firstModel = configuredChatModels(provider)[0]
+    if (firstModel) return { model: firstModel.id, provider }
+  }
 
   return null
 }

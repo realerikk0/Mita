@@ -68,7 +68,7 @@ type ProjectChildEntry =
       icon: LucideIcon
       to: '/images'
       search: {
-        media?: 'image' | 'storyboard'
+        media?: 'image' | 'video' | 'storyboard'
         assetId?: string
         videoId?: string
       }
@@ -448,12 +448,19 @@ export function NavProjects() {
         kind: 'media',
         mediaType: 'video',
         asset,
-        title: mediaTitle(asset, t('common:imageGeneration.mode.storyboardVideo')),
+        title: mediaTitle(
+          asset,
+          t(
+            asset.assetKind === 'generated'
+              ? 'common:imageGeneration.mode.video'
+              : 'common:imageGeneration.mode.storyboardVideo'
+          )
+        ),
         updatedAt: timestampFromIso(asset.createdAt),
         icon: Video,
         to: route.images as '/images',
         search: {
-          media: 'storyboard',
+          media: asset.assetKind === 'generated' ? 'video' : 'storyboard',
           videoId: asset.id,
         },
       })

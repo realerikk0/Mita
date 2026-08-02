@@ -74,6 +74,7 @@ function Index() {
         <div className="flex items-center gap-2 w-full">
           <DropdownModelProvider
             model={threadModel}
+            useLastUsedModel
             restrictToVisibleProviders
           />
         </div>

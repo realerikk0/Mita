@@ -10,12 +10,15 @@ import {
 } from '@/legacy_migrations/storage'
 import { videoDebugError, videoDebugLog } from '@/lib/video-generation-debug'
 import { videoFileExtension } from '@/lib/video-generation'
-import type { ImageRatio } from '@/lib/image-generation'
+import type { SeedanceReferenceCapabilities } from '@/lib/seedance-video'
 import type { ImageAssetRecord } from '@/services/image-generation/types'
 import type {
+  VideoAssetKind,
   VideoAssetRecord,
+  VideoGenerationReference,
   VideoGenerationService,
   VideoGenerationStatus,
+  VideoRatio,
   VideoResolution,
 } from '@/services/video-generation/types'
 
@@ -34,6 +37,8 @@ const VIDEO_GENERATION_NO_URL =
   'Video generation finished without a playable video URL'
 const VIDEO_PROVIDER_UNAVAILABLE =
   'Video provider unavailable — reconnect it to resume, or generate again'
+const VIDEO_MODEL_UNAVAILABLE =
+  'Video model unavailable — refresh the provider to resume, or generate again'
 
 type VideoHub = Pick<
   VideoGenerationService,
@@ -50,11 +55,13 @@ export type PersistedVideoTask = {
   providerName: string
   modelId: string
   prompt: string
-  ratio: ImageRatio
+  ratio: VideoRatio
   resolution: VideoResolution
   duration: number
   fps: number
   sourceAssetIds: string[]
+  references?: VideoGenerationReference[]
+  assetKind?: VideoAssetKind
   startedAt: number
   estimateMs: number
 }
@@ -62,6 +69,8 @@ export type PersistedVideoTask = {
 /** Live, in-memory state surfaced to the UI (never persisted). */
 export type VideoRuntime = {
   status: VideoGenerationStatus
+  assetId?: string
+  assetKind?: VideoAssetKind
   startedAt?: number
   estimateMs?: number
   asset?: VideoAssetRecord
@@ -74,13 +83,17 @@ export type StartVideoTaskInput = {
   provider: ModelProvider
   model: Model
   prompt: string
-  ratio: ImageRatio
+  ratio: VideoRatio
   resolution: VideoResolution
   duration: number
   fps: number
   generateAudio: boolean
-  sourceAsset: ImageAssetRecord
-  sourceAssetIds: string[]
+  /** Legacy single-image input retained for the storyboard flow. */
+  sourceAsset?: ImageAssetRecord
+  sourceAssetIds?: string[]
+  references?: VideoGenerationReference[]
+  seedanceReferenceCapabilities?: SeedanceReferenceCapabilities
+  assetKind?: VideoAssetKind
 }
 
 type VideoGenerationStoreState = {
@@ -99,6 +112,57 @@ const runners = new Map<string, AbortController>()
 
 function estimateMsFor(durationSeconds: number) {
   return Math.max(MIN_ESTIMATE_MS, durationSeconds * RENDER_MS_PER_VIDEO_SECOND)
+}
+
+function legacyReferenceFor(
+  sourceAsset?: ImageAssetRecord
+): VideoGenerationReference[] {
+  if (!sourceAsset) return []
+
+  return [
+    {
+      kind: 'image',
+      role: 'reference',
+      asset: {
+        id: sourceAsset.id,
+        path: sourceAsset.path,
+        fileName: sourceAsset.fileName,
+        mimeType: sourceAsset.mimeType,
+      },
+    },
+  ]
+}
+
+function referencesForInput(
+  input: StartVideoTaskInput
+): VideoGenerationReference[] {
+  return input.references?.length
+    ? input.references
+    : legacyReferenceFor(input.sourceAsset)
+}
+
+function sourceAssetIdsForInput(
+  input: StartVideoTaskInput,
+  references: VideoGenerationReference[]
+) {
+  const ids = new Set(input.sourceAssetIds ?? [])
+  if (input.sourceAsset?.id) ids.add(input.sourceAsset.id)
+  for (const reference of references) {
+    if (reference.asset?.id) ids.add(reference.asset.id)
+  }
+  return [...ids]
+}
+
+function assetKindForInput(input: StartVideoTaskInput): VideoAssetKind {
+  // Before direct video generation existed, every task with sourceAsset was a
+  // storyboard task. Preserve that default while new callers opt into generated.
+  return input.assetKind ?? (input.sourceAsset ? 'storyboard' : 'generated')
+}
+
+function assetKindForPersistedTask(task: PersistedVideoTask): VideoAssetKind {
+  // Old localStorage records predate assetKind and were all storyboard videos.
+  return task.assetKind ??
+    (task.sourceAssetIds?.length ? 'storyboard' : 'generated')
 }
 
 function setRuntime(key: string, patch: Partial<VideoRuntime>) {
@@ -202,12 +266,13 @@ async function finishTask(
       duration: persisted.duration,
       fps: persisted.fps,
       sourceAssetIds: persisted.sourceAssetIds,
+      references: persisted.references,
       usage: finalTask.usage,
       status: 'succeeded',
       mimeType: 'video/mp4',
       videoUrl: finalTask.videoUrl,
       extension: videoFileExtension('video/mp4'),
-      assetKind: 'storyboard',
+      assetKind: assetKindForPersistedTask(persisted),
     })
 
     // saveVideoAsset is an un-abortable download; a regenerate/reset may have
@@ -246,6 +311,9 @@ export const useVideoGenerationStore = create<VideoGenerationStoreState>()(
       start: (input, hub) => {
         // Abort any earlier attempt for this storyboard before restarting.
         get().cancel(input.key)
+        const references = referencesForInput(input)
+        const sourceAssetIds = sourceAssetIdsForInput(input, references)
+        const assetKind = assetKindForInput(input)
         videoDebugLog('store:start', {
           key: input.key,
           assetId: input.assetId,
@@ -257,19 +325,30 @@ export const useVideoGenerationStore = create<VideoGenerationStoreState>()(
           duration: input.duration,
           fps: input.fps,
           generateAudio: input.generateAudio,
-          sourceAsset: {
-            id: input.sourceAsset.id,
-            path: input.sourceAsset.path,
-            mimeType: input.sourceAsset.mimeType,
-            fileName: input.sourceAsset.fileName,
-          },
-          sourceAssetIds: input.sourceAssetIds,
+          sourceAsset: input.sourceAsset
+            ? {
+                id: input.sourceAsset.id,
+                path: input.sourceAsset.path,
+                mimeType: input.sourceAsset.mimeType,
+                fileName: input.sourceAsset.fileName,
+              }
+            : undefined,
+          references: references.map((reference) => ({
+            kind: reference.kind,
+            role: reference.role,
+            assetId: reference.asset?.id,
+            hasUrl: Boolean(reference.url),
+          })),
+          sourceAssetIds,
+          assetKind,
         })
 
         const startedAt = Date.now()
         const estimateMs = estimateMsFor(input.duration)
         setRuntime(input.key, {
           status: 'running',
+          assetId: input.assetId,
+          assetKind,
           startedAt,
           estimateMs,
           asset: undefined,
@@ -291,6 +370,9 @@ export const useVideoGenerationStore = create<VideoGenerationStoreState>()(
               resolution: input.resolution,
               fps: input.fps,
               generateAudio: input.generateAudio,
+              references,
+              seedanceReferenceCapabilities:
+                input.seedanceReferenceCapabilities,
               sourceAsset: input.sourceAsset,
               signal: controller.signal,
             })
@@ -334,7 +416,9 @@ export const useVideoGenerationStore = create<VideoGenerationStoreState>()(
             resolution: input.resolution,
             duration: input.duration,
             fps: input.fps,
-            sourceAssetIds: input.sourceAssetIds,
+            sourceAssetIds,
+            references,
+            assetKind,
             startedAt,
             estimateMs,
           })
@@ -387,18 +471,32 @@ export const useVideoGenerationStore = create<VideoGenerationStoreState>()(
             // disabled) but keep the task so it resumes if the provider returns.
             setRuntime(key, {
               status: 'failed',
+              assetId: persisted.assetId,
+              assetKind: assetKindForPersistedTask(persisted),
               startedAt: persisted.startedAt,
               estimateMs: persisted.estimateMs,
               error: VIDEO_PROVIDER_UNAVAILABLE,
             })
             continue
           }
-          // Model may still be loading (provider refresh second wave) — leave
-          // persisted so a later resumeAll picks it up.
-          if (!model) continue
+          if (!model) {
+            // Keep the descriptor so a later provider refresh can resume it,
+            // while surfacing a terminal UI state instead of fake progress.
+            setRuntime(key, {
+              status: 'failed',
+              assetId: persisted.assetId,
+              assetKind: assetKindForPersistedTask(persisted),
+              startedAt: persisted.startedAt,
+              estimateMs: persisted.estimateMs,
+              error: VIDEO_MODEL_UNAVAILABLE,
+            })
+            continue
+          }
 
           setRuntime(key, {
             status: 'running',
+            assetId: persisted.assetId,
+            assetKind: assetKindForPersistedTask(persisted),
             startedAt: persisted.startedAt,
             estimateMs: persisted.estimateMs,
             asset: undefined,

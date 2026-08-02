@@ -18,6 +18,8 @@ vi.mock('@/hooks/useModelProvider', () => ({
 }))
 
 import { toast } from 'sonner'
+import { SEEDANCE_MULTIMODAL_REFERENCE_CAPABILITIES } from '@/lib/seedance-video'
+import type { VideoGenerationReference } from '@/services/video-generation/types'
 import { useVideoGenerationStore } from '../video-generation-store'
 
 const provider = {
@@ -33,6 +35,34 @@ const sourceAsset = {
   path: '/mock/image-assets/sb1/image.png',
   mimeType: 'image/png',
 } as never
+
+const directReferences = [
+  {
+    kind: 'image',
+    role: 'first_frame',
+    asset: {
+      id: 'reference-image-1',
+      path: '/mock/image-assets/reference-image-1/image.png',
+      fileName: 'image.png',
+      mimeType: 'image/png',
+    },
+  },
+  {
+    kind: 'video',
+    role: 'reference',
+    url: 'https://cdn.example.test/reference-video.mp4',
+  },
+  {
+    kind: 'audio',
+    role: 'soundtrack',
+    asset: {
+      id: 'reference-audio-1',
+      path: '/mock/audio-assets/reference-audio-1/audio.mp3',
+      fileName: 'audio.mp3',
+      mimeType: 'audio/mpeg',
+    },
+  },
+] satisfies VideoGenerationReference[]
 
 function baseInput(key: string) {
   return {
@@ -104,6 +134,18 @@ describe('useVideoGenerationStore', () => {
     )
 
     expect(hub.generateVideo).toHaveBeenCalledTimes(1)
+    expect(hub.generateVideo).toHaveBeenCalledWith(
+      expect.objectContaining({
+        sourceAsset,
+        references: [
+          expect.objectContaining({
+            kind: 'image',
+            role: 'reference',
+            asset: expect.objectContaining({ id: 'sb1' }),
+          }),
+        ],
+      })
+    )
     expect(hub.pollVideoTask).toHaveBeenCalledWith(
       expect.objectContaining({ taskId: 'video-task-1' })
     )
@@ -117,6 +159,12 @@ describe('useVideoGenerationStore', () => {
         status: 'succeeded',
         assetKind: 'storyboard',
         sourceAssetIds: ['sb1'],
+        references: [
+          expect.objectContaining({
+            kind: 'image',
+            asset: expect.objectContaining({ id: 'sb1' }),
+          }),
+        ],
       })
     )
 
@@ -126,6 +174,54 @@ describe('useVideoGenerationStore', () => {
     expect(useVideoGenerationStore.getState().tasks['sb1']).toBeUndefined()
     expect(dispatchSpy).toHaveBeenCalledWith(
       expect.objectContaining({ type: 'biyan-media-history-updated' })
+    )
+  })
+
+  it('supports direct generation with mixed references and no source asset', async () => {
+    const hub = makeHub()
+
+    useVideoGenerationStore.getState().start(
+      {
+        key: 'direct-1',
+        assetId: 'asset-direct-1',
+        provider,
+        model,
+        prompt: 'a cinematic paper boat',
+        ratio: '16:9',
+        resolution: '720p',
+        duration: 6,
+        fps: 24,
+        generateAudio: true,
+        references: directReferences,
+        seedanceReferenceCapabilities:
+          SEEDANCE_MULTIMODAL_REFERENCE_CAPABILITIES,
+        assetKind: 'generated',
+      },
+      hub as never
+    )
+
+    await vi.waitFor(() =>
+      expect(
+        useVideoGenerationStore.getState().runtime['direct-1']?.status
+      ).toBe('succeeded')
+    )
+
+    expect(hub.generateVideo).toHaveBeenCalledWith(
+      expect.objectContaining({
+        generateAudio: true,
+        references: directReferences,
+        seedanceReferenceCapabilities:
+          SEEDANCE_MULTIMODAL_REFERENCE_CAPABILITIES,
+        sourceAsset: undefined,
+      })
+    )
+    expect(hub.saveVideoAsset).toHaveBeenCalledWith(
+      expect.objectContaining({
+        id: 'asset-direct-1',
+        assetKind: 'generated',
+        references: directReferences,
+        sourceAssetIds: ['reference-image-1', 'reference-audio-1'],
+      })
     )
   })
 
@@ -194,9 +290,109 @@ describe('useVideoGenerationStore', () => {
       expect.objectContaining({ taskId: 'video-task-9' })
     )
     expect(hub.saveVideoAsset).toHaveBeenCalledWith(
-      expect.objectContaining({ id: 'asset-sb2', sourceAssetIds: ['sb2'] })
+      expect.objectContaining({
+        id: 'asset-sb2',
+        sourceAssetIds: ['sb2'],
+        assetKind: 'storyboard',
+      })
     )
     expect(useVideoGenerationStore.getState().tasks['sb2']).toBeUndefined()
+  })
+
+  it('resumes a generated task with its references and asset kind', async () => {
+    const hub = makeHub()
+    h.hubForResume = hub
+    h.providersForResume = [provider]
+
+    useVideoGenerationStore.setState({
+      tasks: {
+        direct: {
+          key: 'direct',
+          assetId: 'asset-direct',
+          taskId: 'video-task-direct',
+          providerName: 'biyuan',
+          modelId: 'doubao-seedance-2-0',
+          prompt: 'a cinematic paper boat',
+          ratio: '16:9',
+          resolution: '720p',
+          duration: 6,
+          fps: 24,
+          sourceAssetIds: ['reference-image-1', 'reference-audio-1'],
+          references: directReferences,
+          assetKind: 'generated',
+          startedAt: Date.now() - 60_000,
+          estimateMs: 540_000,
+        },
+      },
+      runtime: {},
+    })
+
+    useVideoGenerationStore.getState().resumeAll()
+
+    await vi.waitFor(() =>
+      expect(
+        useVideoGenerationStore.getState().runtime.direct?.status
+      ).toBe('succeeded')
+    )
+
+    expect(hub.generateVideo).not.toHaveBeenCalled()
+    expect(hub.saveVideoAsset).toHaveBeenCalledWith(
+      expect.objectContaining({
+        id: 'asset-direct',
+        sourceAssetIds: ['reference-image-1', 'reference-audio-1'],
+        references: directReferences,
+        assetKind: 'generated',
+      })
+    )
+  })
+
+  it('surfaces a failed runtime when a persisted task model is unavailable', () => {
+    const hub = makeHub()
+    h.hubForResume = hub
+    h.providersForResume = [{ ...provider, models: [] }]
+
+    useVideoGenerationStore.setState({
+      tasks: {
+        'direct-video:missing-model': {
+          key: 'direct-video:missing-model',
+          assetId: 'asset-missing-model',
+          taskId: 'video-task-missing-model',
+          providerName: 'biyuan',
+          modelId: 'removed-seedance-model',
+          prompt: 'a quiet mountain lake',
+          ratio: '16:9',
+          resolution: '720p',
+          duration: 6,
+          fps: 24,
+          sourceAssetIds: [],
+          assetKind: 'generated',
+          startedAt: Date.now() - 60_000,
+          estimateMs: 540_000,
+        },
+      },
+      runtime: {},
+    })
+
+    useVideoGenerationStore.getState().resumeAll()
+
+    expect(
+      useVideoGenerationStore.getState().runtime[
+        'direct-video:missing-model'
+      ]
+    ).toEqual(
+      expect.objectContaining({
+        status: 'failed',
+        assetId: 'asset-missing-model',
+        assetKind: 'generated',
+        error: expect.stringContaining('Video model unavailable'),
+      })
+    )
+    expect(
+      useVideoGenerationStore.getState().tasks[
+        'direct-video:missing-model'
+      ]
+    ).toBeDefined()
+    expect(hub.pollVideoTask).not.toHaveBeenCalled()
   })
 
   it('drops persisted tasks older than the signed-URL lifetime on resume', async () => {

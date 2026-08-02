@@ -35,6 +35,7 @@ const h = vi.hoisted(() => ({
   dialogSave: vi.fn(),
   revealItemInDir: vi.fn(),
   openExternalUrl: vi.fn(),
+  providerFetch: vi.fn(),
   convertFileSrc: vi.fn((path: string) => `asset://${path}`),
   copyFile: vi.fn(),
   navigate: vi.fn((options: any) => {
@@ -52,6 +53,7 @@ const h = vi.hoisted(() => ({
   toast: {
     success: vi.fn(),
     error: vi.fn(),
+    info: vi.fn(),
   },
   search: {} as Record<string, unknown>,
 }))
@@ -88,8 +90,8 @@ vi.mock('@/hooks/useModelProvider', () => ({
   useModelProvider: (selector: any) => selector({ providers: h.providers }),
 }))
 
-vi.mock('@/hooks/useServiceHub', () => ({
-  useServiceHub: () => ({
+vi.mock('@/hooks/useServiceHub', () => {
+  const serviceHub = {
     imageGeneration: () => ({
       generateImages: h.generateImages,
       saveAsset: h.saveAsset,
@@ -113,8 +115,14 @@ vi.mock('@/hooks/useServiceHub', () => ({
       revealItemInDir: h.revealItemInDir,
       openExternalUrl: h.openExternalUrl,
     }),
-  }),
-}))
+    providers: () => ({
+      fetch: () => h.providerFetch,
+    }),
+  }
+  return {
+    useServiceHub: () => serviceHub,
+  }
+})
 
 vi.mock('@/constants/routes', () => ({
   route: {
@@ -128,6 +136,7 @@ const translations: Record<string, string> = {
   'common:cancel': 'Cancel',
   'common:imageGeneration.emptyState': 'Generated images will appear here.',
   'common:imageGeneration.mode.image': 'Image',
+  'common:imageGeneration.mode.video': 'Video',
   'common:imageGeneration.mode.storyboardVideo': 'Storyboard video',
   'common:imageGeneration.mode.newBadge': 'New',
   'common:imageGeneration.mode.longVideo': 'Long video',
@@ -357,14 +366,17 @@ const translations: Record<string, string> = {
   'common:toast.downloadFailed.description': 'Could not save {{item}}',
 }
 
-vi.mock('@/i18n/react-i18next-compat', () => ({
-  useTranslation: () => ({
+vi.mock('@/i18n/react-i18next-compat', () => {
+  const translation = {
     t: (key: string, options?: Record<string, unknown>) =>
       (translations[key] ?? key).replace(/\{\{(\w+)\}\}/g, (match, name) =>
         options?.[name] !== undefined ? String(options[name]) : match
       ),
-  }),
-}))
+  }
+  return {
+    useTranslation: () => translation,
+  }
+})
 
 import { Route } from '../images'
 
@@ -376,6 +388,7 @@ const renderComponent = () => {
 describe('Images route', () => {
   afterEach(() => {
     vi.unstubAllGlobals()
+    vi.restoreAllMocks()
   })
 
   beforeEach(() => {
@@ -402,10 +415,12 @@ describe('Images route', () => {
     h.dialogSave.mockResolvedValue(null)
     h.revealItemInDir.mockResolvedValue(undefined)
     h.openExternalUrl.mockResolvedValue(undefined)
+    h.providerFetch.mockResolvedValue({ ok: false })
     h.copyFile.mockResolvedValue(undefined)
     h.navigate.mockClear()
     h.toast.success.mockClear()
     h.toast.error.mockClear()
+    h.toast.info.mockClear()
     h.search = {}
   })
 
@@ -416,6 +431,610 @@ describe('Images route', () => {
       await screen.findByText('No image models available')
     ).toBeInTheDocument()
     expect(screen.getByText('Open Providers')).toBeInTheDocument()
+  })
+
+  it('shows the four media modes in order and keeps long video disabled', async () => {
+    h.providers = [
+      {
+        provider: 'jingxing',
+        base_url: 'https://api.jingxing.uk/v1',
+        settings: [],
+        models: [
+          {
+            id: 'seedance-2.0',
+            capabilities: [ModelCapabilities.VIDEO_GENERATION],
+          },
+        ],
+      },
+    ]
+
+    renderComponent()
+
+    const imageMode = screen.getByRole('button', { name: 'Image' })
+    const videoMode = screen.getByRole('button', { name: 'Video' })
+    const storyboardMode = screen.getByRole('button', {
+      name: 'Storyboard video',
+    })
+    const longVideoMode = screen.getByRole('button', { name: 'Long video' })
+    const follows = (before: HTMLElement, after: HTMLElement) =>
+      Boolean(
+        before.compareDocumentPosition(after) &
+          Node.DOCUMENT_POSITION_FOLLOWING
+      )
+
+    expect(follows(imageMode, videoMode)).toBe(true)
+    expect(follows(videoMode, storyboardMode)).toBe(true)
+    expect(follows(storyboardMode, longVideoMode)).toBe(true)
+    expect(longVideoMode).toBeDisabled()
+
+    fireEvent.click(videoMode)
+    expect(await screen.findByTestId('direct-video-mode')).toBeInTheDocument()
+  })
+
+  it('generates and previews a direct Seedance video with a unique task key', async () => {
+    h.providers = [
+      {
+        provider: 'jingxing',
+        base_url: 'https://api.jingxing.uk/v1',
+        settings: [],
+        models: [
+          {
+            id: 'seedance-2.0',
+            capabilities: [ModelCapabilities.VIDEO_GENERATION],
+          },
+        ],
+      },
+    ]
+    h.generateVideo.mockResolvedValue({
+      id: 'direct-video-provider-task',
+      status: 'queued',
+      progress: 0,
+    })
+    h.pollVideoTask.mockResolvedValue({
+      id: 'direct-video-provider-task',
+      status: 'succeeded',
+      progress: 100,
+      videoUrl: 'https://cdn.example.test/direct-video.mp4',
+    })
+    h.saveVideoAsset.mockImplementation((request: any) =>
+      Promise.resolve({
+        ...request,
+        createdAt: '2026-08-01T00:00:00Z',
+        path: `/mock/mita/video-assets/${request.id}/video.mp4`,
+        fileName: 'video.mp4',
+      })
+    )
+
+    renderComponent()
+    fireEvent.click(screen.getByRole('button', { name: 'Video' }))
+    fireEvent.change(screen.getByLabelText('提示词'), {
+      target: { value: '低机位跟拍跑车驶过雨夜公路' },
+    })
+    fireEvent.click(screen.getByRole('button', { name: '生成视频' }))
+
+    await waitFor(() => expect(h.generateVideo).toHaveBeenCalledTimes(1))
+    expect(h.generateVideo.mock.calls[0][0]).toMatchObject({
+      model: expect.objectContaining({ id: 'seedance-2.0' }),
+      prompt: '低机位跟拍跑车驶过雨夜公路',
+      ratio: '16:9',
+      resolution: '720p',
+      duration: 5,
+      generateAudio: true,
+      references: [],
+      seedanceReferenceCapabilities: {
+        maxImages: 9,
+        maxVideos: 3,
+        maxAudios: 3,
+        maxMedia: 15,
+        serializeMultimodalContent: true,
+      },
+      sourceAsset: undefined,
+    })
+    expect(Object.keys(useVideoGenerationStore.getState().runtime)).toEqual([
+      expect.stringMatching(/^direct-video:/),
+    ])
+
+    await waitFor(() => expect(h.saveVideoAsset).toHaveBeenCalledTimes(1))
+    expect(h.saveVideoAsset.mock.calls[0][0]).toMatchObject({
+      assetKind: 'generated',
+      references: [],
+      sourceAssetIds: [],
+    })
+    await waitFor(() =>
+      expect(document.querySelector('video')).toHaveAttribute(
+        'src',
+        expect.stringContaining('/mock/mita/video-assets/')
+      )
+    )
+  })
+
+  it('imports local image, video, and audio references through the native picker', async () => {
+    const createElement = document.createElement.bind(document)
+    vi.spyOn(document, 'createElement').mockImplementation(
+      ((tagName: string, options?: ElementCreationOptions) => {
+        const element = createElement(tagName, options)
+        if (tagName === 'video' || tagName === 'audio') {
+          Object.defineProperty(element, 'duration', {
+            configurable: true,
+            value: 5,
+          })
+          queueMicrotask(() =>
+            element.dispatchEvent(new Event('loadedmetadata'))
+          )
+        }
+        return element
+      }) as typeof document.createElement
+    )
+    h.providers = [
+      {
+        provider: 'jingxing',
+        base_url: 'https://api.jingxing.uk/v1',
+        settings: [],
+        models: [
+          {
+            id: 'seedance-2.0',
+            capabilities: [ModelCapabilities.VIDEO_GENERATION],
+          },
+        ],
+      },
+    ]
+    h.listAssets.mockResolvedValue([
+      {
+        id: 'local-image-ref',
+        prompt: 'City reference',
+        mode: 'generate',
+        provider: 'jingxing',
+        model: 'doubao-seedream',
+        ratio: '16:9',
+        size: '1024x576',
+        quality: 'standard',
+        sourceAssetIds: [],
+        createdAt: '2026-08-01T00:00:00Z',
+        status: 'succeeded',
+        path: '/mock/images/city.png',
+        fileName: 'city.png',
+        mimeType: 'image/png',
+        assetKind: 'generated',
+      },
+    ])
+    h.listVideoAssets.mockResolvedValue([
+      {
+        id: 'local-video-ref',
+        prompt: 'Motion reference',
+        provider: 'jingxing',
+        model: 'seedance-2.0',
+        ratio: '16:9',
+        resolution: '720p',
+        duration: 5,
+        fps: 24,
+        sourceAssetIds: [],
+        createdAt: '2026-08-01T00:00:00Z',
+        status: 'succeeded',
+        path: '/mock/videos/motion.mp4',
+        fileName: 'motion.mp4',
+        mimeType: 'video/mp4',
+        assetKind: 'generated',
+      },
+    ])
+    h.dialogOpen.mockResolvedValue([
+      'C:\\references\\city.png',
+      'C:\\references\\motion.mp4',
+      'C:\\references\\soundtrack.mp3',
+    ])
+    h.generateVideo.mockResolvedValue({
+      id: 'multimodal-provider-task',
+      status: 'queued',
+      progress: 0,
+    })
+    h.pollVideoTask.mockResolvedValue({
+      id: 'multimodal-provider-task',
+      status: 'succeeded',
+      progress: 100,
+      videoUrl: 'https://cdn.example.test/multimodal.mp4',
+    })
+    h.saveVideoAsset.mockImplementation((request: any) =>
+      Promise.resolve({
+        ...request,
+        createdAt: '2026-08-01T00:05:00Z',
+        path: `/mock/mita/video-assets/${request.id}/video.mp4`,
+        fileName: 'video.mp4',
+      })
+    )
+
+    renderComponent()
+    fireEvent.click(screen.getByRole('button', { name: 'Video' }))
+    fireEvent.click(
+      await screen.findByRole('button', { name: '添加参考素材' })
+    )
+    await screen.findByRole('button', {
+      name: '移除参考音频 soundtrack.mp3',
+    }, { timeout: 3_000 })
+    fireEvent.change(screen.getByLabelText('提示词'), {
+      target: { value: 'Follow the references' },
+    })
+    fireEvent.click(screen.getByRole('button', { name: '生成视频' }))
+
+    await waitFor(() => expect(h.generateVideo).toHaveBeenCalledTimes(1))
+    expect(h.generateVideo.mock.calls[0][0]).toMatchObject({
+      references: [
+        {
+          kind: 'image',
+          asset: expect.objectContaining({
+            id: 'direct-reference:c:\\references\\city.png',
+            path: 'C:\\references\\city.png',
+          }),
+        },
+        {
+          kind: 'video',
+          asset: expect.objectContaining({
+            id: 'direct-reference:c:\\references\\motion.mp4',
+            path: 'C:\\references\\motion.mp4',
+          }),
+        },
+        {
+          kind: 'audio',
+          asset: expect.objectContaining({
+            id: 'direct-reference:c:\\references\\soundtrack.mp3',
+            path: 'C:\\references\\soundtrack.mp3',
+          }),
+        },
+      ],
+      seedanceReferenceCapabilities: {
+        maxImages: 9,
+        maxVideos: 3,
+        maxAudios: 3,
+        maxMedia: 15,
+        serializeMultimodalContent: true,
+      },
+    })
+
+    await waitFor(() => expect(h.saveVideoAsset).toHaveBeenCalledTimes(1))
+    expect(h.saveVideoAsset.mock.calls[0][0]).toMatchObject({
+      sourceAssetIds: [
+        'direct-reference:c:\\references\\city.png',
+        'direct-reference:c:\\references\\motion.mp4',
+        'direct-reference:c:\\references\\soundtrack.mp3',
+      ],
+      references: expect.arrayContaining([
+        expect.objectContaining({
+          kind: 'audio',
+          asset: expect.objectContaining({
+            path: 'C:\\references\\soundtrack.mp3',
+          }),
+        }),
+      ]),
+    })
+  })
+
+  it('does not let duplicate picks consume the remaining image quota', async () => {
+    h.providers = [
+      {
+        provider: 'jingxing',
+        base_url: 'https://api.jingxing.uk/v1',
+        settings: [],
+        models: [
+          {
+            id: 'seedance-2.0',
+            capabilities: [ModelCapabilities.VIDEO_GENERATION],
+          },
+        ],
+      },
+    ]
+    const firstEight = Array.from(
+      { length: 8 },
+      (_, index) => `C:\\references\\image-${index + 1}.png`
+    )
+    h.dialogOpen
+      .mockResolvedValueOnce(firstEight)
+      .mockResolvedValueOnce([
+        firstEight[0],
+        'C:\\references\\image-9.png',
+        'C:\\references\\image-10.png',
+      ])
+
+    renderComponent()
+    fireEvent.click(screen.getByRole('button', { name: 'Video' }))
+    await screen.findByRole('button', {
+      name: '添加参考素材',
+    })
+    fireEvent.click(
+      screen.getByRole('button', { name: '添加参考素材' })
+    )
+    await waitFor(() =>
+      expect(
+        screen.getAllByRole('button', { name: /移除参考图片/ })
+      ).toHaveLength(8)
+    )
+
+    fireEvent.click(
+      screen.getByRole('button', { name: '添加参考素材' })
+    )
+    await waitFor(() =>
+      expect(
+        screen.getByRole('button', {
+          name: '移除参考图片 image-9.png',
+        })
+      ).toBeInTheDocument()
+    )
+    expect(
+      screen.getAllByRole('button', { name: /移除参考图片/ })
+    ).toHaveLength(9)
+    expect(
+      screen.queryByRole('button', {
+        name: '移除参考图片 image-10.png',
+      })
+    ).not.toBeInTheDocument()
+  })
+
+  it('skips media whose duration cannot be verified', async () => {
+    h.providers = [
+      {
+        provider: 'jingxing',
+        base_url: 'https://api.jingxing.uk/v1',
+        settings: [],
+        models: [
+          {
+            id: 'seedance-2.0',
+            capabilities: [ModelCapabilities.VIDEO_GENERATION],
+          },
+        ],
+      },
+    ]
+    h.dialogOpen.mockResolvedValue(['C:\\references\\unreadable.mp4'])
+
+    renderComponent()
+    fireEvent.click(screen.getByRole('button', { name: 'Video' }))
+    fireEvent.click(
+      await screen.findByRole('button', { name: '添加参考素材' })
+    )
+
+    await waitFor(
+      () =>
+        expect(h.toast.error).toHaveBeenCalledWith(
+          '无法读取部分视频或音频的时长，已跳过；请确认文件可正常播放后重试。'
+        ),
+      { timeout: 3_000 }
+    )
+    expect(
+      screen.queryByRole('button', { name: /移除参考视频/ })
+    ).not.toBeInTheDocument()
+  })
+
+  it('keeps exact media duration precision at the 2–15 second boundary', async () => {
+    const createElement = document.createElement.bind(document)
+    vi.spyOn(document, 'createElement').mockImplementation(
+      ((tagName: string, options?: ElementCreationOptions) => {
+        const element = createElement(tagName, options)
+        if (tagName === 'video' || tagName === 'audio') {
+          Object.defineProperty(element, 'duration', {
+            configurable: true,
+            value: tagName === 'video' ? 1.96 : 15.04,
+          })
+          queueMicrotask(() =>
+            element.dispatchEvent(new Event('loadedmetadata'))
+          )
+        }
+        return element
+      }) as typeof document.createElement
+    )
+    h.providers = [
+      {
+        provider: 'jingxing',
+        base_url: 'https://api.jingxing.uk/v1',
+        settings: [],
+        models: [
+          {
+            id: 'seedance-2.0',
+            capabilities: [ModelCapabilities.VIDEO_GENERATION],
+          },
+        ],
+      },
+    ]
+    h.dialogOpen.mockResolvedValue([
+      'C:\\references\\too-short.mp4',
+      'C:\\references\\too-long.mp3',
+    ])
+
+    renderComponent()
+    fireEvent.click(screen.getByRole('button', { name: 'Video' }))
+    fireEvent.click(
+      await screen.findByRole('button', { name: '添加参考素材' })
+    )
+
+    await waitFor(() =>
+      expect(h.toast.error).toHaveBeenCalledWith(
+        '参考视频和音频单个需 2–15 秒，且各自总时长不能超过 15 秒。'
+      )
+    )
+    expect(
+      screen.queryByRole('button', { name: /移除参考(视频|音频)/ })
+    ).not.toBeInTheDocument()
+  })
+
+  it('applies media count limits after removing invalid-duration picks', async () => {
+    const createElement = document.createElement.bind(document)
+    const durations = [1, 5, 5, 5]
+    let videoIndex = 0
+    vi.spyOn(document, 'createElement').mockImplementation(
+      ((tagName: string, options?: ElementCreationOptions) => {
+        const element = createElement(tagName, options)
+        if (tagName === 'video') {
+          Object.defineProperty(element, 'duration', {
+            configurable: true,
+            value: durations[videoIndex++],
+          })
+          queueMicrotask(() =>
+            element.dispatchEvent(new Event('loadedmetadata'))
+          )
+        }
+        return element
+      }) as typeof document.createElement
+    )
+    h.providers = [
+      {
+        provider: 'jingxing',
+        base_url: 'https://api.jingxing.uk/v1',
+        settings: [],
+        models: [
+          {
+            id: 'seedance-2.0',
+            capabilities: [ModelCapabilities.VIDEO_GENERATION],
+          },
+        ],
+      },
+    ]
+    h.dialogOpen.mockResolvedValue([
+      'C:\\references\\invalid.mp4',
+      'C:\\references\\valid-1.mp4',
+      'C:\\references\\valid-2.mp4',
+      'C:\\references\\valid-3.mp4',
+    ])
+
+    renderComponent()
+    fireEvent.click(screen.getByRole('button', { name: 'Video' }))
+    fireEvent.click(
+      await screen.findByRole('button', { name: '添加参考素材' })
+    )
+
+    await waitFor(() =>
+      expect(
+        screen.getAllByRole('button', { name: /移除参考视频/ })
+      ).toHaveLength(3)
+    )
+    expect(
+      screen.queryByRole('button', {
+        name: '移除参考视频 invalid.mp4',
+      })
+    ).not.toBeInTheDocument()
+    expect(
+      screen.getByRole('button', {
+        name: '移除参考视频 valid-3.mp4',
+      })
+    ).toBeInTheDocument()
+  })
+
+  it('retries Biyuan public pricing after an unsuccessful load', async () => {
+    const modelId = 'doubao-seedance-2-0-price-retry-test'
+    h.search = { media: 'video' }
+    h.providers = [
+      {
+        provider: 'jingxing',
+        base_url: 'https://api.jingxing.uk/v1',
+        settings: [],
+        models: [
+          {
+            id: modelId,
+            capabilities: [ModelCapabilities.VIDEO_GENERATION],
+          },
+        ],
+      },
+    ]
+    h.providerFetch
+      .mockResolvedValueOnce({ ok: false })
+      .mockResolvedValueOnce({ ok: false })
+      .mockResolvedValueOnce({
+        ok: true,
+        json: () =>
+          Promise.resolve({
+            data: [
+              {
+                model_name: modelId,
+                model_ratio: 3.9,
+                completion_ratio: 1,
+              },
+            ],
+            group_ratio: { default: 1 },
+          }),
+      })
+      .mockResolvedValueOnce({
+        ok: true,
+        json: () =>
+          Promise.resolve({ data: { usd_exchange_rate: 7 } }),
+      })
+
+    const firstRender = renderComponent()
+    await waitFor(() => expect(h.providerFetch).toHaveBeenCalledTimes(2))
+    firstRender.unmount()
+
+    renderComponent()
+    await waitFor(() => expect(h.providerFetch).toHaveBeenCalledTimes(4))
+    fireEvent.change(screen.getByLabelText('提示词'), {
+      target: { value: 'Price retry check' },
+    })
+    expect(await screen.findByText('约 ¥5.90')).toBeInTheDocument()
+  })
+
+  it('loads generated video history without mixing in storyboard videos', async () => {
+    h.providers = [
+      {
+        provider: 'jingxing',
+        base_url: 'https://api.jingxing.uk/v1',
+        settings: [],
+        models: [
+          {
+            id: 'seedance-2.0',
+            capabilities: [ModelCapabilities.VIDEO_GENERATION],
+          },
+        ],
+      },
+    ]
+    h.listVideoAssets.mockResolvedValue([
+      {
+        id: 'direct-history-1',
+        prompt: 'direct history',
+        provider: 'jingxing',
+        model: 'seedance-2.0',
+        ratio: '16:9',
+        resolution: '720p',
+        duration: 5,
+        fps: 24,
+        sourceAssetIds: [],
+        references: [
+          {
+            kind: 'image',
+            url: 'https://cdn.example.test/history-reference.png',
+          },
+        ],
+        createdAt: '2026-08-01T00:00:00Z',
+        status: 'succeeded',
+        path: '/mock/video/direct-history-1.mp4',
+        fileName: 'direct-history-1.mp4',
+        mimeType: 'video/mp4',
+        assetKind: 'generated',
+      },
+      {
+        id: 'storyboard-history-1',
+        prompt: 'storyboard history',
+        provider: 'jingxing',
+        model: 'seedance-2.0',
+        ratio: '16:9',
+        resolution: '1080p',
+        duration: 8,
+        fps: 24,
+        sourceAssetIds: ['storyboard-1'],
+        createdAt: '2026-08-01T00:01:00Z',
+        status: 'succeeded',
+        path: '/mock/video/storyboard-history-1.mp4',
+        fileName: 'storyboard-history-1.mp4',
+        mimeType: 'video/mp4',
+        assetKind: 'storyboard',
+      },
+    ])
+
+    renderComponent()
+    fireEvent.click(screen.getByRole('button', { name: 'Video' }))
+
+    expect(await screen.findByText('direct history')).toBeInTheDocument()
+    expect(screen.queryByText('storyboard history')).not.toBeInTheDocument()
+    expect(document.querySelector('video')).toHaveAttribute(
+      'src',
+      'asset:///mock/video/direct-history-1.mp4'
+    )
+    expect(
+      document.querySelector(
+        'img[src="https://cdn.example.test/history-reference.png"]'
+      )
+    ).toBeInTheDocument()
   })
 
   it('renders image controls when an image generation model is available', async () => {

@@ -683,6 +683,26 @@ describe('ChatInput', () => {
     ).toBeInTheDocument()
   })
 
+  it('rejects an image-generation model before submitting chat', () => {
+    selectedModelOverride = {
+      id: 'doubao-seedream-4-5-251128',
+      capabilities: ['image_generation'],
+      provider: 'jingxing',
+    }
+    promptState = 'hi'
+    const onSubmit = vi.fn()
+
+    renderInput({ onSubmit })
+    fireEvent.keyDown(getTextarea(), { key: 'Enter' })
+
+    expect(
+      screen.getByText(
+        'Please select a text generation model to start chatting.'
+      )
+    ).toBeInTheDocument()
+    expect(onSubmit).not.toHaveBeenCalled()
+  })
+
   it('does not submit if isComposing (IME) is true', () => {
     promptState = 'hello'
     const onSubmit = vi.fn()

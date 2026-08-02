@@ -23,6 +23,31 @@ const IMAGE_EDIT_ENDPOINTS = new Set([
   'image-to-image',
 ])
 
+const VIDEO_GENERATION_ENDPOINTS = new Set([
+  'video-generation',
+  'video-generations',
+  'videos-generation',
+  'videos-generations',
+  'videos/generations',
+  'text-to-video',
+  'image-to-video',
+])
+
+const AUDIO_GENERATION_ENDPOINTS = new Set([
+  'audio-generation',
+  'audio-generations',
+  'text-to-audio',
+  'text-to-speech',
+  'tts',
+])
+
+const AUDIO_TRANSCRIPTION_ENDPOINTS = new Set([
+  'audio-transcription',
+  'transcription',
+  'speech-to-text',
+  'stt',
+])
+
 const uniqueCapabilities = (capabilities: Array<string | undefined>) =>
   capabilities.filter(
     (capability, index, arr): capability is string =>
@@ -53,11 +78,24 @@ export const inferModelCapabilitiesFromEndpointTypes = (
   const supportsImageEditing = normalizedEndpointTypes.some((endpointType) =>
     IMAGE_EDIT_ENDPOINTS.has(endpointType)
   )
+  const supportsVideoGeneration = normalizedEndpointTypes.some((endpointType) =>
+    VIDEO_GENERATION_ENDPOINTS.has(endpointType)
+  )
+  const supportsAudioGeneration = normalizedEndpointTypes.some((endpointType) =>
+    AUDIO_GENERATION_ENDPOINTS.has(endpointType)
+  )
+  const supportsAudioTranscription = normalizedEndpointTypes.some(
+    (endpointType) => AUDIO_TRANSCRIPTION_ENDPOINTS.has(endpointType)
+  )
 
   return uniqueCapabilities([
     supportsImageGeneration ? ModelCapabilities.IMAGE_GENERATION : undefined,
     supportsImageGeneration ? ModelCapabilities.TEXT_TO_IMAGE : undefined,
     supportsImageEditing ? ModelCapabilities.IMAGE_TO_IMAGE : undefined,
+    supportsVideoGeneration ? ModelCapabilities.VIDEO_GENERATION : undefined,
+    supportsAudioGeneration ? ModelCapabilities.AUDIO_GENERATION : undefined,
+    supportsAudioGeneration ? ModelCapabilities.TEXT_TO_AUDIO : undefined,
+    supportsAudioTranscription ? ModelCapabilities.AUDIO_TO_TEXT : undefined,
   ])
 }
 
@@ -74,11 +112,45 @@ export const isJingxingImageGenerationModel = (modelId?: string): boolean => {
     /^gpt-image(?:-|$)/,
     /^mai-image(?:-|$)/,
     /^gemini-\d+(?:\.\d+)?-(?:flash|pro)-image(?:-preview)?$/,
+    /(?:^|[-_.])seedream(?:[-_.]|$)/,
+  ].some((pattern) => pattern.test(normalized))
+}
+
+export const isJingxingVideoGenerationModel = (modelId?: string): boolean => {
+  if (!modelId) return false
+  const normalized = modelId.toLowerCase()
+
+  return [
+    /(?:^|[-_.])seedance(?:[-_.]|$)/,
+    /(?:^|[-_.])seedane(?:[-_.]|$)/,
+    /(?:^|[-_.])sora(?:[-_.]|$)/,
+    /(?:^|[-_.])veo(?:[-_.]|$)/,
+  ].some((pattern) => pattern.test(normalized))
+}
+
+export const isJingxingAudioTranscriptionModel = (
+  modelId?: string
+): boolean => {
+  if (!modelId) return false
+  const normalized = modelId.toLowerCase()
+
+  return [
+    /(?:^|[-_.])asr(?:[-_.]|$)/,
+    /(?:^|[-_.])transcribe(?:[-_.]|$)/,
+    /(?:^|[-_.])transcription(?:[-_.]|$)/,
+    /^whisper(?:-|$)/,
   ].some((pattern) => pattern.test(normalized))
 }
 
 export const isJingxingNativeWebSearchModel = (modelId?: string): boolean => {
-  if (!modelId || isJingxingImageGenerationModel(modelId)) return false
+  if (
+    !modelId ||
+    isJingxingImageGenerationModel(modelId) ||
+    isJingxingVideoGenerationModel(modelId) ||
+    isJingxingAudioTranscriptionModel(modelId)
+  ) {
+    return false
+  }
   const normalized = modelId.toLowerCase()
 
   return (
@@ -103,6 +175,14 @@ export const inferJingxingModelCapabilities = (modelId: string): string[] => {
       ModelCapabilities.TEXT_TO_IMAGE,
       ModelCapabilities.IMAGE_TO_IMAGE,
     ])
+  }
+
+  if (isJingxingVideoGenerationModel(normalized)) {
+    return [ModelCapabilities.VIDEO_GENERATION]
+  }
+
+  if (isJingxingAudioTranscriptionModel(normalized)) {
+    return [ModelCapabilities.AUDIO_TO_TEXT]
   }
 
   const capabilities: string[] = [ModelCapabilities.COMPLETION]

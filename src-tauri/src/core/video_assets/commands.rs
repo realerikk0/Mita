@@ -134,6 +134,7 @@ fn save_video_asset_bytes<R: Runtime>(
         duration: asset.duration,
         fps: asset.fps,
         source_asset_ids: asset.source_asset_ids,
+        references: asset.references,
         created_at: asset.created_at.unwrap_or_else(|| Utc::now().to_rfc3339()),
         usage: asset.usage,
         status: asset.status,
