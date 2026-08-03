@@ -39,8 +39,27 @@ export type VideoReferenceAsset = {
 export type VideoGenerationReference = {
   kind: VideoReferenceKind
   role?: VideoReferenceRole
+  durationSeconds?: number
   url?: string
   asset?: VideoReferenceAsset
+}
+
+export type UploadVideoReferenceMediaRequest = {
+  endpoint: string
+  apiKey?: string
+  customHeaders: Record<string, string>
+  reference: {
+    kind: VideoReferenceKind
+    asset: VideoReferenceAsset
+  }
+}
+
+export type UploadedVideoReferenceMedia = {
+  id: string
+  kind: VideoReferenceKind
+  mimeType: string
+  sizeBytes: number
+  expiresAt: string
 }
 
 export type VideoGenerationTask = {

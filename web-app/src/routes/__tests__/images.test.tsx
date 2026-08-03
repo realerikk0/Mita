@@ -38,6 +38,7 @@ const h = vi.hoisted(() => ({
   providerFetch: vi.fn(),
   convertFileSrc: vi.fn((path: string) => `asset://${path}`),
   copyFile: vi.fn(),
+  fileStat: vi.fn(),
   navigate: vi.fn((options: any) => {
     const nextSearch =
       typeof options?.search === 'function'
@@ -65,6 +66,7 @@ vi.mock('@biyan/core', async (importOriginal) => {
     fs: {
       ...actual.fs,
       copyFile: h.copyFile,
+      fileStat: h.fileStat,
     },
   }
 })
@@ -417,6 +419,7 @@ describe('Images route', () => {
     h.openExternalUrl.mockResolvedValue(undefined)
     h.providerFetch.mockResolvedValue({ ok: false })
     h.copyFile.mockResolvedValue(undefined)
+    h.fileStat.mockResolvedValue({ size: 1024 })
     h.navigate.mockClear()
     h.toast.success.mockClear()
     h.toast.error.mockClear()
@@ -500,7 +503,7 @@ describe('Images route', () => {
       Promise.resolve({
         ...request,
         createdAt: '2026-08-01T00:00:00Z',
-        path: `/mock/mita/video-assets/${request.id}/video.mp4`,
+        path: `/mock/biyan/video-assets/${request.id}/video.mp4`,
         fileName: 'video.mp4',
       })
     )
@@ -543,7 +546,7 @@ describe('Images route', () => {
     await waitFor(() =>
       expect(document.querySelector('video')).toHaveAttribute(
         'src',
-        expect.stringContaining('/mock/mita/video-assets/')
+        expect.stringContaining('/mock/biyan/video-assets/')
       )
     )
   })
@@ -636,7 +639,7 @@ describe('Images route', () => {
       Promise.resolve({
         ...request,
         createdAt: '2026-08-01T00:05:00Z',
-        path: `/mock/mita/video-assets/${request.id}/video.mp4`,
+        path: `/mock/biyan/video-assets/${request.id}/video.mp4`,
         fileName: 'video.mp4',
       })
     )
@@ -666,6 +669,7 @@ describe('Images route', () => {
         },
         {
           kind: 'video',
+          durationSeconds: 5,
           asset: expect.objectContaining({
             id: 'direct-reference:c:\\references\\motion.mp4',
             path: 'C:\\references\\motion.mp4',
@@ -673,6 +677,7 @@ describe('Images route', () => {
         },
         {
           kind: 'audio',
+          durationSeconds: 5,
           asset: expect.objectContaining({
             id: 'direct-reference:c:\\references\\soundtrack.mp3',
             path: 'C:\\references\\soundtrack.mp3',
@@ -704,6 +709,79 @@ describe('Images route', () => {
         }),
       ]),
     })
+  })
+
+  it('rejects oversized and unsupported references before media decoding', async () => {
+    const createElementSpy = vi.spyOn(document, 'createElement')
+    h.providers = [
+      {
+        provider: 'jingxing',
+        base_url: 'https://api.jingxing.uk/v1',
+        settings: [],
+        models: [
+          {
+            id: 'seedance-2.0',
+            capabilities: [ModelCapabilities.VIDEO_GENERATION],
+          },
+        ],
+      },
+    ]
+    h.dialogOpen.mockResolvedValue([
+      'C:\\references\\oversized.mp4',
+      'C:\\references\\unsupported.avi',
+    ])
+    h.fileStat.mockResolvedValue({ size: 200 * 1024 * 1024 + 1 })
+
+    renderComponent()
+    fireEvent.click(screen.getByRole('button', { name: 'Video' }))
+    fireEvent.click(
+      await screen.findByRole('button', { name: '添加参考素材' })
+    )
+
+    await waitFor(() => {
+      expect(h.toast.error).toHaveBeenCalledWith(
+        expect.stringContaining('格式不受支持')
+      )
+      expect(h.toast.error).toHaveBeenCalledWith(
+        expect.stringContaining('超过上传限制')
+      )
+    })
+    expect(h.fileStat).toHaveBeenCalledTimes(1)
+    expect(
+      createElementSpy.mock.calls.some(([tagName]) => tagName === 'video')
+    ).toBe(false)
+    expect(screen.queryByRole('button', { name: /移除参考/ })).toBeNull()
+  })
+
+  it('rejects references when their file size cannot be inspected', async () => {
+    h.providers = [
+      {
+        provider: 'jingxing',
+        base_url: 'https://api.jingxing.uk/v1',
+        settings: [],
+        models: [
+          {
+            id: 'seedance-2.0',
+            capabilities: [ModelCapabilities.VIDEO_GENERATION],
+          },
+        ],
+      },
+    ]
+    h.dialogOpen.mockResolvedValue(['C:\\references\\unknown-size.png'])
+    h.fileStat.mockRejectedValue(new Error('stat failed'))
+
+    renderComponent()
+    fireEvent.click(screen.getByRole('button', { name: 'Video' }))
+    fireEvent.click(
+      await screen.findByRole('button', { name: '添加参考素材' })
+    )
+
+    await waitFor(() =>
+      expect(h.toast.error).toHaveBeenCalledWith(
+        expect.stringContaining('无法读取部分素材的文件大小')
+      )
+    )
+    expect(screen.queryByRole('button', { name: /移除参考/ })).toBeNull()
   })
 
   it('does not let duplicate picks consume the remaining image quota', async () => {

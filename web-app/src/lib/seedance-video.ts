@@ -29,11 +29,27 @@ export const SEEDANCE_REFERENCE_LIMITS = {
   total: 15,
 } as const
 
+export const SEEDANCE_REFERENCE_SIZE_LIMIT_BYTES = {
+  image: 30 * 1024 * 1024,
+  video: 200 * 1024 * 1024,
+  audio: 15 * 1024 * 1024,
+} as const
+
+export const SEEDANCE_REFERENCE_DURATION_LIMITS = {
+  min: 2,
+  max: 15,
+  totalPerKind: 15,
+} as const
+
 export type SeedanceVideoRatio = (typeof SEEDANCE_VIDEO_RATIOS)[number]
 export type SeedanceVideoResolution =
   (typeof SEEDANCE_VIDEO_RESOLUTIONS)[number]
 export type SeedanceModelProfile = 'standard' | 'fast' | 'mini'
 export type SeedanceReferenceKind = 'image' | 'video' | 'audio'
+export type SeedanceReferenceRole =
+  | 'reference_image'
+  | 'reference_video'
+  | 'reference_audio'
 export type FixedSeedanceVideoRatio = Exclude<
   SeedanceVideoRatio,
   'adaptive'
@@ -112,11 +128,9 @@ export const SEEDANCE_MULTIMODAL_REFERENCE_CAPABILITIES: SeedanceReferenceCapabi
   })
 
 /**
- * Biyuan's public schema still shows the legacy single-image field, but its
- * production Seedance endpoint has been verified to accept OpenAI-style
- * `content[]` entries for image, video, and audio references. We deliberately
- * retain Seedance's official 9/3/3 limits instead of relying on more permissive
- * gateway behaviour.
+ * Biyuan's production gateway supports Seedance's official image/video/audio
+ * limits. Remote references are serialized under `metadata.content`, while
+ * local references are uploaded separately and submitted as media tickets.
  */
 export const BIYUAN_PUBLIC_SEEDANCE_REFERENCE_CAPABILITIES: SeedanceReferenceCapabilities =
   SEEDANCE_MULTIMODAL_REFERENCE_CAPABILITIES
@@ -131,6 +145,10 @@ export type SeedanceValidationErrorCode =
   | 'too_many_media'
   | 'audio_requires_visual_reference'
   | 'multimodal_content_not_enabled'
+  | 'ambiguous_reference_source'
+  | 'mixed_reference_sources_not_supported'
+  | 'invalid_reference_duration'
+  | 'reference_duration_total_exceeded'
   | 'invalid_reference_url'
   | 'reference_mime_mismatch'
 
@@ -284,20 +302,29 @@ export function serializeSeedanceReferenceContent(
     if (reference.kind === 'image') {
       return {
         type: 'image_url' as const,
+        role: seedanceReferenceRole(reference.kind),
         image_url: { url: reference.url },
       }
     }
     if (reference.kind === 'video') {
       return {
         type: 'video_url' as const,
+        role: seedanceReferenceRole(reference.kind),
         video_url: { url: reference.url },
       }
     }
     return {
       type: 'audio_url' as const,
+      role: seedanceReferenceRole(reference.kind),
       audio_url: { url: reference.url },
     }
   })
+}
+
+export function seedanceReferenceRole(
+  kind: SeedanceReferenceKind
+): SeedanceReferenceRole {
+  return `reference_${kind}`
 }
 
 export function isSeedanceVideoRatio(
@@ -349,6 +376,9 @@ function validateReferenceUrl(reference: SeedanceReferenceInput) {
   }
 
   if (value.toLowerCase().startsWith('data:')) {
+    if (reference.kind === 'video') {
+      throw invalidReferenceUrl(reference.kind)
+    }
     const commaIndex = value.indexOf(',')
     const header = commaIndex >= 0 ? value.slice(5, commaIndex) : ''
     const payload = commaIndex >= 0 ? value.slice(commaIndex + 1) : ''
@@ -385,8 +415,12 @@ function validateReferenceUrl(reference: SeedanceReferenceInput) {
 }
 
 function invalidReferenceUrl(kind: SeedanceReferenceKind) {
+  const supportedSource =
+    kind === 'video'
+      ? 'an HTTP(S) URL'
+      : 'an HTTP(S) URL or a matching base64 data URL'
   return new SeedanceValidationError(
     'invalid_reference_url',
-    `Seedance ${kind} reference must be an HTTP(S) URL or a matching base64 data URL`
+    `Seedance ${kind} reference must use ${supportedSource}`
   )
 }

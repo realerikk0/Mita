@@ -10,7 +10,10 @@ import { videoFileExtension } from '@/lib/video-generation'
 import {
   BIYUAN_PUBLIC_SEEDANCE_REFERENCE_CAPABILITIES,
   isSeedanceVideoModel,
+  SEEDANCE_REFERENCE_DURATION_LIMITS,
   SEEDANCE_STANDARD_VIDEO_DIMENSIONS,
+  SeedanceValidationError,
+  seedanceReferenceRole,
   serializeSeedanceReferenceContent,
   validateSeedanceVideoInput,
   type SeedanceReferenceCapabilities,
@@ -25,6 +28,8 @@ import type {
   VideoGenerationStatus,
   VideoGenerationTask,
   VideoGenerationReference,
+  UploadVideoReferenceMediaRequest,
+  UploadedVideoReferenceMedia,
   VideoResolution,
 } from './types'
 import type { ProjectAssignment } from '@/services/projects/types'
@@ -91,6 +96,17 @@ type RawVideoUrlCandidate =
 type JsonResponseResult = {
   json: RawVideoResponse
   apiKey?: string
+}
+
+type PreparedGenerationRequest = {
+  body: Record<string, unknown>
+  pinnedApiKey?: string
+  pinApiKey: boolean
+}
+
+type BiyuanMediaReference = {
+  id: string
+  role: ReturnType<typeof seedanceReferenceRole>
 }
 
 type ProviderErrorDetails = {
@@ -223,11 +239,22 @@ function referenceForEarlyValidation(
     }
   }
 
+  if (!reference.asset) {
+    throw new Error(`Missing ${reference.kind} reference URL or local asset`)
+  }
+
   return {
     kind: reference.kind,
-    // Validate the declared MIME before reading a potentially large local file.
-    url: `data:${reference.asset?.mimeType ?? ''};base64,AA==`,
+    // The authoritative local MIME and size checks happen in the streaming
+    // upload boundary. This placeholder lets us validate counts before I/O.
+    url: `https://local.invalid/reference.${reference.kind}`,
   }
+}
+
+function mediaUploadStatus(error: unknown) {
+  const record = errorRecord(error)
+  const status = record?.status
+  return typeof status === 'number' ? status : undefined
 }
 
 export class DefaultVideoGenerationService implements VideoGenerationService {
@@ -263,11 +290,26 @@ export class DefaultVideoGenerationService implements VideoGenerationService {
     return path
   }
 
+  protected async uploadLocalReference(
+    request: UploadVideoReferenceMediaRequest
+  ): Promise<UploadedVideoReferenceMedia> {
+    void request
+    throw new Error(
+      'Local Biyuan reference uploads are only available in the desktop app'
+    )
+  }
+
   async generateVideo(
     request: GenerateVideoRequest
   ): Promise<VideoGenerationTask> {
     const endpoint = this.videoGenerationEndpoint(request.provider)
-    const body = await this.generationBody(request)
+    const prepared = await this.prepareGenerationRequest(request)
+    const body = prepared.body
+    const metadata =
+      body.metadata && typeof body.metadata === 'object'
+        ? (body.metadata as Record<string, unknown>)
+        : undefined
+    const media = Array.isArray(body.media) ? body.media : []
     videoDebugLog('generate:request', {
       endpoint,
       provider: request.provider.provider,
@@ -284,7 +326,11 @@ export class DefaultVideoGenerationService implements VideoGenerationService {
       references: referenceLogSummary(request),
       requestShape: {
         fields: Object.keys(body).sort(),
-        contentTypes: contentTypesForLog(body.content),
+        contentTypes: contentTypesForLog(body.content ?? metadata?.content),
+        mediaRoles: media.flatMap((item) => {
+          const role = errorRecord(item)?.role
+          return typeof role === 'string' ? [role] : []
+        }),
       },
     })
 
@@ -292,7 +338,9 @@ export class DefaultVideoGenerationService implements VideoGenerationService {
       endpoint,
       request.provider,
       body,
-      request.signal
+      request.signal,
+      prepared.pinnedApiKey,
+      !prepared.pinApiKey
     )
     const task = this.parseVideoTask(json)
     videoDebugLog('generate:response', {
@@ -380,12 +428,15 @@ export class DefaultVideoGenerationService implements VideoGenerationService {
     )
   }
 
-  private async generationBody(request: GenerateVideoRequest) {
+  private async prepareGenerationRequest(
+    request: GenerateVideoRequest
+  ): Promise<PreparedGenerationRequest> {
     const requestedReferences = this.requestedReferences(request)
     const isSeedance = isSeedanceVideoModel(request.model.id)
+    const usesBiyuan = this.usesJingxingCompatibleVideoParams(request.provider)
     const referenceCapabilities =
       request.seedanceReferenceCapabilities ??
-      (this.usesJingxingCompatibleVideoParams(request.provider)
+      (usesBiyuan
         ? BIYUAN_PUBLIC_SEEDANCE_REFERENCE_CAPABILITIES
         : LEGACY_SEEDANCE_REFERENCE_CAPABILITIES)
 
@@ -400,6 +451,58 @@ export class DefaultVideoGenerationService implements VideoGenerationService {
       })
     }
 
+    if (
+      isSeedance &&
+      usesBiyuan &&
+      requestedReferences.some(
+        (reference) => Boolean(reference.url?.trim()) && Boolean(reference.asset)
+      )
+    ) {
+      throw new SeedanceValidationError(
+        'ambiguous_reference_source',
+        'A Biyuan reference cannot contain both a local asset and a URL'
+      )
+    }
+
+    const localReferences = requestedReferences.filter(
+      (reference) => !reference.url?.trim() && reference.asset
+    )
+    const remoteReferences = requestedReferences.filter((reference) =>
+      Boolean(reference.url?.trim())
+    )
+
+    if (
+      isSeedance &&
+      usesBiyuan &&
+      localReferences.length > 0 &&
+      remoteReferences.length > 0
+    ) {
+      throw new SeedanceValidationError(
+        'mixed_reference_sources_not_supported',
+        'Biyuan cannot preserve reference order when local uploads and remote URLs are mixed'
+      )
+    }
+
+    if (isSeedance && usesBiyuan && localReferences.length > 0) {
+      this.validateBiyuanLocalReferenceDurations(localReferences)
+      const uploaded = await this.uploadBiyuanReferences(
+        request.provider,
+        localReferences,
+        request.signal
+      )
+      return {
+        body: this.buildGenerationBody(
+          request,
+          isSeedance,
+          referenceCapabilities,
+          [],
+          uploaded.media
+        ),
+        pinnedApiKey: uploaded.apiKey,
+        pinApiKey: true,
+      }
+    }
+
     const references = await this.resolveReferences(requestedReferences)
     if (isSeedance) {
       validateSeedanceVideoInput({
@@ -412,18 +515,68 @@ export class DefaultVideoGenerationService implements VideoGenerationService {
       })
     }
 
+    return {
+      body: this.buildGenerationBody(
+        request,
+        isSeedance,
+        referenceCapabilities,
+        references,
+        []
+      ),
+      pinApiKey: false,
+    }
+  }
+
+  private validateBiyuanLocalReferenceDurations(
+    references: readonly VideoGenerationReference[]
+  ) {
+    const totals = { video: 0, audio: 0 }
+
+    for (const reference of references) {
+      if (reference.kind === 'image') continue
+
+      const durationSeconds = reference.durationSeconds
+      if (
+        typeof durationSeconds !== 'number' ||
+        !Number.isFinite(durationSeconds) ||
+        durationSeconds < SEEDANCE_REFERENCE_DURATION_LIMITS.min ||
+        durationSeconds > SEEDANCE_REFERENCE_DURATION_LIMITS.max
+      ) {
+        throw new SeedanceValidationError(
+          'invalid_reference_duration',
+          `Local ${reference.kind} references must declare a duration from ${SEEDANCE_REFERENCE_DURATION_LIMITS.min} to ${SEEDANCE_REFERENCE_DURATION_LIMITS.max} seconds`
+        )
+      }
+
+      totals[reference.kind] += durationSeconds
+      if (
+        totals[reference.kind] >
+        SEEDANCE_REFERENCE_DURATION_LIMITS.totalPerKind
+      ) {
+        throw new SeedanceValidationError(
+          'reference_duration_total_exceeded',
+          `Local ${reference.kind} reference duration cannot exceed ${SEEDANCE_REFERENCE_DURATION_LIMITS.totalPerKind} seconds in total`
+        )
+      }
+    }
+  }
+
+  private buildGenerationBody(
+    request: GenerateVideoRequest,
+    isSeedance: boolean,
+    referenceCapabilities: SeedanceReferenceCapabilities,
+    references: readonly SeedanceReferenceInput[],
+    media: readonly BiyuanMediaReference[]
+  ) {
     const useMultimodalContent =
       isSeedance &&
       referenceCapabilities.serializeMultimodalContent &&
       references.length > 0
-    const content = [
-      { type: 'text', text: request.prompt },
-      ...(useMultimodalContent
-        ? serializeSeedanceReferenceContent(references, referenceCapabilities)
-        : isSeedance
-          ? []
-          : legacyImageContent(references)),
-    ]
+    const serializedReferences = useMultimodalContent
+      ? serializeSeedanceReferenceContent(references, referenceCapabilities)
+      : isSeedance
+        ? []
+        : legacyImageContent(references)
     const singleImageReference =
       references.length === 1 && references[0]?.kind === 'image'
         ? references[0].url
@@ -433,7 +586,6 @@ export class DefaultVideoGenerationService implements VideoGenerationService {
     const baseBody: Record<string, unknown> = {
       model: request.model.id,
       prompt: request.prompt,
-      content,
       ratio: request.ratio,
       duration: request.duration,
       resolution: apiResolution,
@@ -443,21 +595,21 @@ export class DefaultVideoGenerationService implements VideoGenerationService {
     }
 
     if (!this.usesJingxingCompatibleVideoParams(request.provider)) {
+      const body = {
+        ...baseBody,
+        content: [
+          { type: 'text', text: request.prompt },
+          ...serializedReferences,
+        ],
+      }
       return isSeedance && singleImageReference && !useMultimodalContent
-        ? {
-            ...baseBody,
-            image: singleImageReference,
-          }
-        : baseBody
+        ? { ...body, image: singleImageReference }
+        : body
     }
 
     return {
       ...baseBody,
-      ...(singleImageReference && !useMultimodalContent
-        ? {
-            image: singleImageReference,
-          }
-        : {}),
+      ...(media.length > 0 ? { media } : {}),
       ...(request.ratio === 'adaptive'
         ? {}
         : {
@@ -470,7 +622,86 @@ export class DefaultVideoGenerationService implements VideoGenerationService {
         fps: request.fps,
         generate_audio: request.generateAudio ?? false,
         watermark: false,
+        ...(serializedReferences.length > 0
+          ? { content: serializedReferences }
+          : {}),
       },
+    }
+  }
+
+  private async uploadBiyuanReferences(
+    provider: ModelProvider,
+    references: readonly VideoGenerationReference[],
+    signal?: AbortSignal
+  ) {
+    const attempts = this.apiKeyAttempts(provider)
+    let lastError: unknown
+
+    for (let index = 0; index < attempts.length; index += 1) {
+      const apiKey = attempts[index]
+      let first: BiyuanMediaReference
+      try {
+        first = await this.uploadBiyuanReference(
+          provider,
+          references[0],
+          apiKey,
+          signal
+        )
+      } catch (error) {
+        lastError = error
+        const canRotate =
+          RETRYABLE_KEY_STATUSES.includes(mediaUploadStatus(error) ?? 0) &&
+          index < attempts.length - 1
+        if (!canRotate) throw error
+        continue
+      }
+
+      const media: BiyuanMediaReference[] = [first]
+      for (const reference of references.slice(1)) {
+        media.push(
+          await this.uploadBiyuanReference(
+            provider,
+            reference,
+            apiKey,
+            signal
+          )
+        )
+      }
+      return { media, apiKey }
+    }
+
+    throw lastError ?? new Error('Biyuan media upload API key rotation exhausted')
+  }
+
+  private async uploadBiyuanReference(
+    provider: ModelProvider,
+    reference: VideoGenerationReference,
+    apiKey: string | undefined,
+    signal?: AbortSignal
+  ): Promise<BiyuanMediaReference> {
+    this.throwIfAborted(signal)
+    if (!reference.asset || reference.url?.trim()) {
+      throw new Error(`Expected a local ${reference.kind} reference asset`)
+    }
+
+    const uploaded = await this.uploadLocalReference({
+      endpoint: this.mediaUploadEndpoint(provider),
+      apiKey,
+      customHeaders: this.uploadCustomHeaders(provider),
+      reference: {
+        kind: reference.kind,
+        asset: reference.asset,
+      },
+    })
+    this.throwIfAborted(signal)
+
+    if (!uploaded.id?.trim() || uploaded.kind !== reference.kind) {
+      throw new Error('Biyuan returned an invalid media upload response')
+    }
+
+    return {
+      id: uploaded.id,
+      role: seedanceReferenceRole(reference.kind),
     }
   }
 
@@ -518,6 +749,10 @@ export class DefaultVideoGenerationService implements VideoGenerationService {
     return `${this.normalizedBaseUrl(provider)}/video/generations`
   }
 
+  private mediaUploadEndpoint(provider: ModelProvider) {
+    return `${this.normalizedBaseUrl(provider)}/media`
+  }
+
   private videoTaskEndpoint(provider: ModelProvider, taskId: string) {
     return `${this.videoGenerationEndpoint(provider)}/${encodeURIComponent(
       taskId
@@ -526,6 +761,23 @@ export class DefaultVideoGenerationService implements VideoGenerationService {
 
   private normalizedBaseUrl(provider: ModelProvider) {
     return (provider.base_url || 'https://api.openai.com/v1').replace(/\/$/, '')
+  }
+
+  private uploadCustomHeaders(provider: ModelProvider) {
+    const forbidden = new Set([
+      'authorization',
+      'content-length',
+      'content-type',
+      'host',
+      'x-api-key',
+    ])
+    return Object.fromEntries(
+      (provider.custom_header ?? [])
+        .filter(
+          (header) => !forbidden.has(header.header.trim().toLowerCase())
+        )
+        .map((header) => [header.header, header.value])
+    )
   }
 
   private async sourceAssetDataUrl(asset: { path: string; mimeType: string }) {
@@ -591,9 +843,13 @@ export class DefaultVideoGenerationService implements VideoGenerationService {
     endpoint: string,
     provider: ModelProvider,
     body: Record<string, unknown>,
-    signal?: AbortSignal
+    signal?: AbortSignal,
+    preferredApiKey?: string,
+    rotateApiKeys = true
   ): Promise<JsonResponseResult> {
-    const attempts = this.apiKeyAttempts(provider)
+    const attempts = rotateApiKeys
+      ? this.apiKeyAttempts(provider, preferredApiKey)
+      : [preferredApiKey]
     let requestRetryIndex = 0
 
     keyAttempts: for (let index = 0; index < attempts.length; index++) {
@@ -605,7 +861,7 @@ export class DefaultVideoGenerationService implements VideoGenerationService {
           method: 'POST',
           headers: {
             'Content-Type': 'application/json',
-            ...this.baseHeaders(provider, apiKey),
+            ...this.baseHeaders(provider, apiKey, !rotateApiKeys),
           },
           body: JSON.stringify(body),
           signal,
@@ -981,7 +1237,11 @@ export class DefaultVideoGenerationService implements VideoGenerationService {
     return status === 'succeeded' ? 100 : 0
   }
 
-  private baseHeaders(provider: ModelProvider, apiKey?: string) {
+  private baseHeaders(
+    provider: ModelProvider,
+    apiKey?: string,
+    apiKeyWins = false
+  ) {
     const headers: Record<string, string> = {}
 
     if (apiKey) {
@@ -992,6 +1252,17 @@ export class DefaultVideoGenerationService implements VideoGenerationService {
     provider.custom_header?.forEach((customHeader) => {
       headers[customHeader.header] = customHeader.value
     })
+
+    if (apiKey && apiKeyWins) {
+      Object.keys(headers).forEach((header) => {
+        const normalized = header.trim().toLowerCase()
+        if (normalized === 'authorization' || normalized === 'x-api-key') {
+          delete headers[header]
+        }
+      })
+      headers.Authorization = `Bearer ${apiKey}`
+      headers['x-api-key'] = apiKey
+    }
 
     return headers
   }

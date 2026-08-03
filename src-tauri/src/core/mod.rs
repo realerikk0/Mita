@@ -6,6 +6,7 @@ pub mod filesystem;
 pub mod image_assets;
 pub mod legacy_migrations;
 pub mod mcp;
+pub mod media_upload;
 pub mod server;
 pub mod setup;
 pub mod state;

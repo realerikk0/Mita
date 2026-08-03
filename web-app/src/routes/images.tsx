@@ -101,7 +101,9 @@ import { getVideoModels } from '@/lib/video-generation'
 import { videoDebugLog } from '@/lib/video-generation-debug'
 import {
   BIYUAN_PUBLIC_SEEDANCE_REFERENCE_CAPABILITIES,
+  SEEDANCE_REFERENCE_DURATION_LIMITS,
   SEEDANCE_REFERENCE_LIMITS,
+  SEEDANCE_REFERENCE_SIZE_LIMIT_BYTES,
 } from '@/lib/seedance-video'
 import { parseBiyuanSeedancePricePerMillionCny } from '@/lib/seedance-video-cost'
 import {
@@ -975,8 +977,6 @@ const DIRECT_VIDEO_REFERENCE_FILTERS = [
       'png',
       'jpg',
       'jpeg',
-      'webp',
-      'gif',
       'mp4',
       'mov',
       'mp3',
@@ -992,8 +992,6 @@ const DIRECT_VIDEO_REFERENCE_MIME_BY_EXTENSION: Record<
   png: { kind: 'image', mimeType: 'image/png' },
   jpg: { kind: 'image', mimeType: 'image/jpeg' },
   jpeg: { kind: 'image', mimeType: 'image/jpeg' },
-  webp: { kind: 'image', mimeType: 'image/webp' },
-  gif: { kind: 'image', mimeType: 'image/gif' },
   mp4: { kind: 'video', mimeType: 'video/mp4' },
   mov: { kind: 'video', mimeType: 'video/quicktime' },
   mp3: { kind: 'audio', mimeType: 'audio/mpeg' },
@@ -4390,23 +4388,69 @@ function Images() {
         kind: VideoReferenceKind
         mimeType: string
       }> = []
+      let unsupportedFormat = false
+      let sizeUnavailable = false
+      let fileTooLarge = false
 
       for (const sourcePath of sourcePaths) {
         const info = directVideoReferenceInfo(sourcePath)
-        if (!info) continue
+        if (!info) {
+          unsupportedFormat = true
+          continue
+        }
         const referenceId = directVideoReferenceId(sourcePath)
         if (seenReferenceIds.has(referenceId)) continue
+        let sizeBytes: number
+        try {
+          const stat = await fs.fileStat(sourcePath)
+          sizeBytes = Number(stat?.size)
+        } catch {
+          sizeUnavailable = true
+          continue
+        }
+        if (!Number.isFinite(sizeBytes) || sizeBytes <= 0) {
+          sizeUnavailable = true
+          continue
+        }
+        const sizeLimit = SEEDANCE_REFERENCE_SIZE_LIMIT_BYTES[info.kind]
+        const exceedsLimit =
+          info.kind === 'image'
+            ? sizeBytes >= sizeLimit
+            : sizeBytes > sizeLimit
+        if (exceedsLimit) {
+          fileTooLarge = true
+          continue
+        }
         seenReferenceIds.add(referenceId)
         candidates.push({ path: sourcePath, ...info })
+      }
+
+      if (unsupportedFormat) {
+        toast.error(
+          '部分素材格式不受支持，已跳过；支持 PNG/JPEG、MP4/MOV、MP3/WAV。'
+        )
+      }
+      if (sizeUnavailable) {
+        toast.error('无法读取部分素材的文件大小，已跳过。')
+      }
+      if (fileTooLarge) {
+        toast.error(
+          '部分素材超过上传限制，已跳过；图片需小于 30 MB，视频不超过 200 MB，音频不超过 15 MB。'
+        )
       }
 
       const options = await Promise.all(
         candidates.map(async ({ path, kind, mimeType }) => {
           const previewSrc = serviceHub.core().convertFileSrc(path)
+          const durationSeconds = await localMediaDurationSeconds(
+            kind,
+            previewSrc
+          )
           return {
             reference: {
               kind,
               role: 'reference' as const,
+              durationSeconds,
               asset: {
                 id: directVideoReferenceId(path),
                 path,
@@ -4416,10 +4460,7 @@ function Images() {
             },
             displayName: localFileName(path),
             previewSrc: kind === 'audio' ? undefined : previewSrc,
-            durationSeconds: await localMediaDurationSeconds(
-              kind,
-              previewSrc
-            ),
+            durationSeconds,
           } satisfies VideoReferenceAssetOption
         })
       )
@@ -4461,9 +4502,10 @@ function Images() {
             continue
           }
           if (
-            seconds < 2 ||
-            seconds > 15 ||
-            knownDurations[kind] + seconds > 15
+            seconds < SEEDANCE_REFERENCE_DURATION_LIMITS.min ||
+            seconds > SEEDANCE_REFERENCE_DURATION_LIMITS.max ||
+            knownDurations[kind] + seconds >
+              SEEDANCE_REFERENCE_DURATION_LIMITS.totalPerKind
           ) {
             invalidDuration = true
             continue

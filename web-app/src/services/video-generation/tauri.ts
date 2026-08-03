@@ -4,9 +4,37 @@ import { videoDebugError, videoDebugLog } from '@/lib/video-generation-debug'
 import { DefaultVideoGenerationService } from './default'
 import type {
   SaveVideoAssetRequest,
+  UploadedVideoReferenceMedia,
+  UploadVideoReferenceMediaRequest,
   VideoAssetRecord,
 } from './types'
 import type { ProjectAssignment } from '@/services/projects/types'
+
+function mediaUploadErrorFromUnknown(error: unknown) {
+  if (error instanceof Error) return error
+  if (!error || typeof error !== 'object') {
+    return new Error('Unable to upload Biyuan reference media')
+  }
+
+  const payload = error as Record<string, unknown>
+  const message =
+    typeof payload.message === 'string' && payload.message.trim()
+      ? payload.message
+      : 'Unable to upload Biyuan reference media'
+  const uploadError = new Error(message) as Error &
+    Record<string, unknown>
+  uploadError.name = 'MediaUploadError'
+  for (const field of [
+    'code',
+    'status',
+    'retryAfterSeconds',
+    'requestId',
+    'outcomeUnknown',
+  ]) {
+    if (payload[field] !== undefined) uploadError[field] = payload[field]
+  }
+  return uploadError
+}
 
 export class TauriVideoGenerationService extends DefaultVideoGenerationService {
   protected fetch(): typeof globalThis.fetch {
@@ -15,6 +43,19 @@ export class TauriVideoGenerationService extends DefaultVideoGenerationService {
 
   protected fileSrc(path: string): string {
     return convertFileSrc(path)
+  }
+
+  protected async uploadLocalReference(
+    request: UploadVideoReferenceMediaRequest
+  ): Promise<UploadedVideoReferenceMedia> {
+    try {
+      return await invoke<UploadedVideoReferenceMedia>(
+        'upload_video_reference_media',
+        { request }
+      )
+    } catch (error) {
+      throw mediaUploadErrorFromUnknown(error)
+    }
   }
 
   async saveVideoAsset(

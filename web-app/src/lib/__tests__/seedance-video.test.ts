@@ -205,9 +205,21 @@ describe('Seedance video validation', () => {
         BIYUAN_PUBLIC_SEEDANCE_REFERENCE_CAPABILITIES
       )
     ).toEqual([
-      { type: 'image_url', image_url: { url: image(0).url } },
-      { type: 'video_url', video_url: { url: video(0).url } },
-      { type: 'audio_url', audio_url: { url: audio(0).url } },
+      {
+        type: 'image_url',
+        role: 'reference_image',
+        image_url: { url: image(0).url },
+      },
+      {
+        type: 'video_url',
+        role: 'reference_video',
+        video_url: { url: video(0).url },
+      },
+      {
+        type: 'audio_url',
+        role: 'reference_audio',
+        audio_url: { url: audio(0).url },
+      },
     ])
   })
 
@@ -230,13 +242,22 @@ describe('Seedance video validation', () => {
     )
   })
 
-  it('accepts matching data URLs and rejects unsafe or mismatched URLs', () => {
+  it('accepts supported data URLs and rejects video, unsafe, or mismatched URLs', () => {
     expect(() =>
       validateSeedanceReferences(
-        [{ kind: 'video', url: 'data:video/mp4;base64,AQID' }],
+        [{ kind: 'image', url: 'data:image/png;base64,AQID' }],
         SEEDANCE_MULTIMODAL_REFERENCE_CAPABILITIES
       )
     ).not.toThrow()
+
+    expectCode(
+      () =>
+        validateSeedanceReferences(
+          [{ kind: 'video', url: 'data:video/mp4;base64,AQID' }],
+          SEEDANCE_MULTIMODAL_REFERENCE_CAPABILITIES
+        ),
+      'invalid_reference_url'
+    )
 
     expectCode(
       () =>

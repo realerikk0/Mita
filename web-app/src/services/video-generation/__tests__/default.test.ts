@@ -6,6 +6,10 @@ import {
 } from '@/lib/seedance-video'
 import { ModelCapabilities } from '@/types/models'
 import { DefaultVideoGenerationService } from '../default'
+import type {
+  UploadedVideoReferenceMedia,
+  UploadVideoReferenceMediaRequest,
+} from '../types'
 
 const provider = {
   provider: 'jingxing',
@@ -20,6 +24,20 @@ const model = {
   id: 'seedance-2.0',
   capabilities: [ModelCapabilities.VIDEO_GENERATION],
 } as Model
+
+class UploadingVideoGenerationService extends DefaultVideoGenerationService {
+  readonly upload = vi.fn<
+    (
+      request: UploadVideoReferenceMediaRequest
+    ) => Promise<UploadedVideoReferenceMedia>
+  >()
+
+  protected uploadLocalReference(
+    request: UploadVideoReferenceMediaRequest
+  ): Promise<UploadedVideoReferenceMedia> {
+    return this.upload(request)
+  }
+}
 
 function upstreamCapacityResponse() {
   return new Response(
@@ -80,12 +98,6 @@ describe('DefaultVideoGenerationService', () => {
     expect(JSON.parse(init.body)).toMatchObject({
       model: 'seedance-2.0',
       prompt: 'A gold robot walks through a neon city.',
-      content: [
-        {
-          type: 'text',
-          text: 'A gold robot walks through a neon city.',
-        },
-      ],
       ratio: '16:9',
       duration: 8,
       resolution: '1080p',
@@ -93,6 +105,7 @@ describe('DefaultVideoGenerationService', () => {
       generate_audio: true,
       watermark: false,
     })
+    expect(JSON.parse(init.body)).not.toHaveProperty('content')
     expect(task).toMatchObject({
       id: 'video-task-1',
       status: 'queued',
@@ -275,30 +288,31 @@ describe('DefaultVideoGenerationService', () => {
     ])
   })
 
-  it('serializes Biyuan storyboard sources through multimodal content', async () => {
-    const fetchMock = vi
-      .fn()
-      .mockResolvedValueOnce(
-        new Response(new Uint8Array([1, 2, 3]), {
-          status: 200,
-          headers: { 'content-type': 'image/png' },
-        })
+  it('uploads Biyuan storyboard sources and submits media tickets', async () => {
+    const storyboardPath =
+      '/mock/mita/image-assets/storyboard-1/image.png'
+    const fetchMock = vi.fn().mockResolvedValueOnce(
+      new Response(
+        JSON.stringify({
+          id: 'video-task-1',
+          task_id: 'video-task-1',
+          object: 'video',
+          status: 'queued',
+          progress: 0,
+        }),
+        { status: 202, headers: { 'content-type': 'application/json' } }
       )
-      .mockResolvedValueOnce(
-        new Response(
-          JSON.stringify({
-            id: 'video-task-1',
-            task_id: 'video-task-1',
-            object: 'video',
-            status: 'queued',
-            progress: 0,
-          }),
-          { status: 202, headers: { 'content-type': 'application/json' } }
-        )
-      )
+    )
     vi.stubGlobal('fetch', fetchMock)
 
-    const service = new DefaultVideoGenerationService()
+    const service = new UploadingVideoGenerationService()
+    service.upload.mockResolvedValue({
+      id: 'media-storyboard-1',
+      kind: 'image',
+      mimeType: 'image/png',
+      sizeBytes: 3,
+      expiresAt: '2026-09-03T00:00:00Z',
+    })
     await service.generateVideo({
       provider: {
         ...provider,
@@ -330,17 +344,31 @@ describe('DefaultVideoGenerationService', () => {
       },
     })
 
-    expect(fetchMock).toHaveBeenNthCalledWith(
-      1,
-      '/mock/mita/image-assets/storyboard-1/image.png'
-    )
-    const init = fetchMock.mock.calls[1][1] as RequestInit & { body: string }
+    expect(service.upload).toHaveBeenCalledWith({
+      endpoint: 'https://api.biyuan.ai/v1/media',
+      apiKey: 'test-key',
+      customHeaders: { 'x-custom': 'yes' },
+      reference: {
+        kind: 'image',
+        asset: expect.objectContaining({
+          id: 'storyboard-1',
+          path: storyboardPath,
+          mimeType: 'image/png',
+        }),
+      },
+    })
+    const init = fetchMock.mock.calls[0][1] as RequestInit & { body: string }
     const body = JSON.parse(init.body)
-    const imageUrl = 'data:image/png;base64,AQID'
 
     expect(body).toMatchObject({
       model: 'seedance-2.0',
       prompt: 'A gold robot walks through a neon city.',
+      media: [
+        {
+          id: 'media-storyboard-1',
+          role: 'reference_image',
+        },
+      ],
       size: '1920x1080',
       metadata: {
         ratio: '16:9',
@@ -350,13 +378,358 @@ describe('DefaultVideoGenerationService', () => {
       },
     })
     expect(body).not.toHaveProperty('image')
-    expect(body.content).toEqual([
-      { type: 'text', text: 'A gold robot walks through a neon city.' },
-      {
-        type: 'image_url',
-        image_url: { url: imageUrl },
-      },
+    expect(body).not.toHaveProperty('content')
+    expect(body.metadata).not.toHaveProperty('content')
+    expect(JSON.stringify(body)).not.toContain(storyboardPath)
+  })
+
+  it('pins the fallback API key after the first successful media upload', async () => {
+    const fetchMock = vi.fn().mockResolvedValueOnce(
+      new Response(
+        JSON.stringify({
+          task_id: 'video-task-pinned-key',
+          status: 'queued',
+        }),
+        { status: 202, headers: { 'content-type': 'application/json' } }
+      )
+    )
+    vi.stubGlobal('fetch', fetchMock)
+
+    const service = new UploadingVideoGenerationService()
+    service.upload
+      .mockRejectedValueOnce({
+        code: 'authentication_failed',
+        status: 401,
+        message: 'Invalid API key',
+      })
+      .mockResolvedValueOnce({
+        id: 'media-image',
+        kind: 'image',
+        mimeType: 'image/png',
+        sizeBytes: 128,
+        expiresAt: '2026-09-03T00:00:00Z',
+      })
+      .mockResolvedValueOnce({
+        id: 'media-video',
+        kind: 'video',
+        mimeType: 'video/mp4',
+        sizeBytes: 1024,
+        expiresAt: '2026-09-03T00:00:00Z',
+      })
+
+    await service.generateVideo({
+      provider: {
+        ...provider,
+        api_key_fallbacks: ['fallback-key'],
+        custom_header: [
+          ...(provider.custom_header ?? []),
+          { header: 'authorization', value: 'Bearer wrong-user' },
+          { header: 'X-API-Key', value: 'wrong-user' },
+        ],
+      } as unknown as ModelProvider,
+      model,
+      prompt: 'Keep these references in order.',
+      ratio: '16:9',
+      duration: 8,
+      resolution: '1080p',
+      fps: 24,
+      references: [
+        {
+          kind: 'image',
+          asset: {
+            id: 'local-image',
+            path: '/references/image.png',
+            fileName: 'image.png',
+            mimeType: 'image/png',
+          },
+        },
+        {
+          kind: 'video',
+          durationSeconds: 5,
+          asset: {
+            id: 'local-video',
+            path: '/references/video.mp4',
+            fileName: 'video.mp4',
+            mimeType: 'video/mp4',
+          },
+        },
+      ],
+    })
+
+    expect(service.upload.mock.calls.map(([request]) => request.apiKey)).toEqual([
+      'test-key',
+      'fallback-key',
+      'fallback-key',
     ])
+    const generationInit = fetchMock.mock.calls[0][1] as RequestInit & {
+      headers: Record<string, string>
+      body: string
+    }
+    expect(generationInit.headers.Authorization).toBe('Bearer fallback-key')
+    expect(generationInit.headers['x-api-key']).toBe('fallback-key')
+    expect(JSON.stringify(generationInit.headers)).not.toContain('wrong-user')
+    expect(JSON.parse(generationInit.body).media).toEqual([
+      { id: 'media-image', role: 'reference_image' },
+      { id: 'media-video', role: 'reference_video' },
+    ])
+  })
+
+  it('does not rotate keys after a media upload has succeeded', async () => {
+    const fetchMock = vi.fn()
+    vi.stubGlobal('fetch', fetchMock)
+
+    const service = new UploadingVideoGenerationService()
+    service.upload
+      .mockResolvedValueOnce({
+        id: 'media-image',
+        kind: 'image',
+        mimeType: 'image/png',
+        sizeBytes: 128,
+        expiresAt: '2026-09-03T00:00:00Z',
+      })
+      .mockRejectedValueOnce({
+        code: 'authentication_failed',
+        status: 401,
+        message: 'Pinned key rejected',
+      })
+
+    const promise = service.generateVideo({
+      provider: {
+        ...provider,
+        api_key_fallbacks: ['fallback-key'],
+      } as unknown as ModelProvider,
+      model,
+      prompt: 'Do not cross user boundaries.',
+      ratio: '16:9',
+      duration: 8,
+      resolution: '1080p',
+      fps: 24,
+      references: [
+        {
+          kind: 'image',
+          asset: {
+            id: 'local-image',
+            path: '/references/image.png',
+            mimeType: 'image/png',
+          },
+        },
+        {
+          kind: 'video',
+          durationSeconds: 5,
+          asset: {
+            id: 'local-video',
+            path: '/references/video.mp4',
+            mimeType: 'video/mp4',
+          },
+        },
+      ],
+    })
+
+    await expect(promise).rejects.toMatchObject({ status: 401 })
+    expect(service.upload.mock.calls.map(([request]) => request.apiKey)).toEqual([
+      'test-key',
+      'test-key',
+    ])
+    expect(fetchMock).not.toHaveBeenCalled()
+  })
+
+  it('keeps the uploaded media key pinned for the generation request', async () => {
+    const fetchMock = vi.fn().mockResolvedValueOnce(
+      new Response(
+        JSON.stringify({ error: { message: 'Pinned key rejected' } }),
+        { status: 401, headers: { 'content-type': 'application/json' } }
+      )
+    )
+    vi.stubGlobal('fetch', fetchMock)
+
+    const service = new UploadingVideoGenerationService()
+    service.upload.mockResolvedValueOnce({
+      id: 'media-image',
+      kind: 'image',
+      mimeType: 'image/png',
+      sizeBytes: 128,
+      expiresAt: '2026-09-03T00:00:00Z',
+    })
+    const promise = service.generateVideo({
+      provider: {
+        ...provider,
+        api_key_fallbacks: ['fallback-key'],
+      } as unknown as ModelProvider,
+      model,
+      prompt: 'Keep the generation key pinned.',
+      ratio: '16:9',
+      duration: 8,
+      resolution: '1080p',
+      fps: 24,
+      references: [
+        {
+          kind: 'image',
+          asset: {
+            id: 'local-image',
+            path: '/references/image.png',
+            mimeType: 'image/png',
+          },
+        },
+      ],
+    })
+
+    await expect(promise).rejects.toThrow('Pinned key rejected')
+    expect(fetchMock).toHaveBeenCalledTimes(1)
+    const init = fetchMock.mock.calls[0][1] as RequestInit & {
+      headers: Record<string, string>
+    }
+    expect(init.headers.Authorization).toBe('Bearer test-key')
+  })
+
+  it.each([413, 429, 503])(
+    'does not retry or rotate a rejected media upload with status %s',
+    async (status) => {
+      const fetchMock = vi.fn()
+      vi.stubGlobal('fetch', fetchMock)
+      const service = new UploadingVideoGenerationService()
+      service.upload.mockRejectedValueOnce({
+        code: 'upload_failed',
+        status,
+        message: 'Upload rejected',
+      })
+
+      const promise = service.generateVideo({
+        provider: {
+          ...provider,
+          api_key_fallbacks: ['fallback-key'],
+        } as unknown as ModelProvider,
+        model,
+        prompt: 'One local reference.',
+        ratio: '16:9',
+        duration: 8,
+        resolution: '1080p',
+        fps: 24,
+        references: [
+          {
+            kind: 'image',
+            asset: {
+              id: 'local-image',
+              path: '/references/image.png',
+              mimeType: 'image/png',
+            },
+          },
+        ],
+      })
+
+      await expect(promise).rejects.toMatchObject({ status })
+      expect(service.upload).toHaveBeenCalledTimes(1)
+      expect(fetchMock).not.toHaveBeenCalled()
+    }
+  )
+
+  it('rejects mixed local and remote Biyuan references before I/O', async () => {
+    const fetchMock = vi.fn()
+    vi.stubGlobal('fetch', fetchMock)
+    const service = new UploadingVideoGenerationService()
+
+    const promise = service.generateVideo({
+      provider,
+      model,
+      prompt: 'Mixed reference transports.',
+      ratio: '16:9',
+      duration: 8,
+      resolution: '1080p',
+      fps: 24,
+      references: [
+        {
+          kind: 'image',
+          asset: {
+            id: 'local-image',
+            path: '/references/image.png',
+            mimeType: 'image/png',
+          },
+        },
+        {
+          kind: 'video',
+          url: 'https://assets.example.test/video.mp4',
+        },
+      ],
+    })
+
+    await expect(promise).rejects.toMatchObject({
+      code: 'mixed_reference_sources_not_supported',
+    })
+    expect(service.upload).not.toHaveBeenCalled()
+    expect(fetchMock).not.toHaveBeenCalled()
+  })
+
+  it('rejects local media with an unknown duration before upload', async () => {
+    const fetchMock = vi.fn()
+    vi.stubGlobal('fetch', fetchMock)
+    const service = new UploadingVideoGenerationService()
+
+    const promise = service.generateVideo({
+      provider,
+      model,
+      prompt: 'Validate this local clip.',
+      ratio: '16:9',
+      duration: 8,
+      resolution: '1080p',
+      fps: 24,
+      references: [
+        {
+          kind: 'video',
+          asset: {
+            id: 'local-video',
+            path: '/references/video.mp4',
+            mimeType: 'video/mp4',
+          },
+        },
+      ],
+    })
+
+    await expect(promise).rejects.toMatchObject({
+      code: 'invalid_reference_duration',
+    })
+    expect(service.upload).not.toHaveBeenCalled()
+    expect(fetchMock).not.toHaveBeenCalled()
+  })
+
+  it('rejects local media duration totals before upload', async () => {
+    const fetchMock = vi.fn()
+    vi.stubGlobal('fetch', fetchMock)
+    const service = new UploadingVideoGenerationService()
+
+    const promise = service.generateVideo({
+      provider,
+      model,
+      prompt: 'Validate these local clips.',
+      ratio: '16:9',
+      duration: 8,
+      resolution: '1080p',
+      fps: 24,
+      references: [
+        {
+          kind: 'video',
+          durationSeconds: 8,
+          asset: {
+            id: 'local-video-a',
+            path: '/references/video-a.mp4',
+            mimeType: 'video/mp4',
+          },
+        },
+        {
+          kind: 'video',
+          durationSeconds: 8,
+          asset: {
+            id: 'local-video-b',
+            path: '/references/video-b.mp4',
+            mimeType: 'video/mp4',
+          },
+        },
+      ],
+    })
+
+    await expect(promise).rejects.toMatchObject({
+      code: 'reference_duration_total_exceeded',
+    })
+    expect(service.upload).not.toHaveBeenCalled()
+    expect(fetchMock).not.toHaveBeenCalled()
   })
 
   it('serializes multimodal references only with an explicit capability', async () => {
@@ -373,7 +746,11 @@ describe('DefaultVideoGenerationService', () => {
 
     const service = new DefaultVideoGenerationService()
     await service.generateVideo({
-      provider,
+      provider: {
+        ...provider,
+        provider: 'openai-compatible',
+        base_url: 'https://api.example.test/v1',
+      } as unknown as ModelProvider,
       model,
       prompt: 'Use all references in their supplied order.',
       ratio: '16:9',
@@ -399,14 +776,17 @@ describe('DefaultVideoGenerationService', () => {
       },
       {
         type: 'image_url',
+        role: 'reference_image',
         image_url: { url: 'https://assets.example.test/image.png' },
       },
       {
         type: 'video_url',
+        role: 'reference_video',
         video_url: { url: 'https://assets.example.test/video.mp4' },
       },
       {
         type: 'audio_url',
+        role: 'reference_audio',
         audio_url: { url: 'https://assets.example.test/audio.mp3' },
       },
     ])
@@ -444,14 +824,18 @@ describe('DefaultVideoGenerationService', () => {
     })
 
     const init = fetchMock.mock.calls[0][1] as RequestInit & { body: string }
-    expect(JSON.parse(init.body).content).toEqual([
-      { type: 'text', text: 'Animate this clip.' },
+    const body = JSON.parse(init.body)
+    expect(body).not.toHaveProperty('content')
+    expect(body).not.toHaveProperty('media')
+    expect(body.metadata.content).toEqual([
       {
         type: 'video_url',
+        role: 'reference_video',
         video_url: { url: 'https://assets.example.test/video.mp4' },
       },
       {
         type: 'audio_url',
+        role: 'reference_audio',
         audio_url: { url: 'https://assets.example.test/audio.mp3' },
       },
     ])
