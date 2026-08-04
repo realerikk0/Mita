@@ -106,14 +106,21 @@ function requirePositiveInteger(value, label) {
 }
 
 function timestamp(value, label) {
+  const parsed = typeof value === 'string' ? Date.parse(value) : Number.NaN
+  const normalized = Number.isFinite(parsed)
+    ? new Date(parsed).toISOString()
+    : ''
+  const githubSeconds =
+    normalized.endsWith('.000Z') ? normalized.replace('.000Z', 'Z') : ''
   if (
     typeof value !== 'string' ||
     !value ||
-    new Date(value).toISOString() !== value
+    !Number.isFinite(parsed) ||
+    (value !== normalized && value !== githubSeconds)
   ) {
     fail(`${label} must be canonical ISO-8601`)
   }
-  return Date.parse(value)
+  return parsed
 }
 
 function canonicalize(value) {
