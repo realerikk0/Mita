@@ -4721,8 +4721,9 @@ jobs:
           node --test \\
             scripts/ci/__tests__/release-policy.test.mjs \\
             scripts/ci/__tests__/verify-release-target.test.mjs
-      - if: steps.classification.outputs.updater == 'true'
-        working-directory: target
+      - name: Run updater contracts
+        if: steps.classification.outputs.updater == 'true'
+        working-directory: harness
         run: |
           node --test scripts/updater/__tests__/a-canary-evidence.test.mjs
           node --test scripts/updater/__tests__/legacy-manifest-policy.test.mjs
@@ -4734,15 +4735,14 @@ jobs:
             autoqa/tests/test_migration_runner.py \\
             scripts/updater/__tests__/test_prepare_a_canary_inputs.py \\
             scripts/updater/__tests__/test_prepare_recovery_qualification_inputs.py
-      - working-directory: target
+      - name: Run trusted distribution contracts
+        if: >-
+          steps.classification.outputs.policy == 'true' ||
+          steps.classification.outputs.updater == 'true'
+        working-directory: harness
         run: |
-          test_files=(
-            "scripts/release-distribution/__tests__/bootstrap-biyan-download-aliases.test.mjs"
-            "scripts/release-distribution/__tests__/release-distribution.test.mjs"
-          )
-          for test_file in "\${test_files[@]}"; do
-            node --test "$test_file"
-          done
+          node --test scripts/release-distribution/__tests__/bootstrap-biyan-download-aliases.test.mjs
+          node --test scripts/release-distribution/__tests__/release-distribution.test.mjs
   docs-build:
     runs-on: ubuntu-24.04
     needs: preflight
@@ -5051,6 +5051,26 @@ test('exact-SHA qualification keeps the harness trusted and has no production au
     ),
     qualificationWorkflow.replace('$bootstrap_full --format', '--format'),
     qualificationWorkflow.replace(
+      "      - name: Run updater contracts\n        if: steps.classification.outputs.updater == 'true'\n        working-directory: harness",
+      "      - name: Run updater contracts\n        if: steps.classification.outputs.updater == 'true'\n        working-directory: target"
+    ),
+    qualificationWorkflow.replace(
+      '      - name: Run updater contracts',
+      '      - name: Optionally run updater contracts'
+    ),
+    qualificationWorkflow.replace(
+      "      - name: Run updater contracts\n        if: steps.classification.outputs.updater == 'true'",
+      '      - name: Run updater contracts\n        if: false'
+    ),
+    qualificationWorkflow.replace(
+      "      - name: Run trusted distribution contracts\n        if: >-\n          steps.classification.outputs.policy == 'true' ||\n          steps.classification.outputs.updater == 'true'\n        working-directory: harness",
+      "      - name: Run trusted distribution contracts\n        if: >-\n          steps.classification.outputs.policy == 'true' ||\n          steps.classification.outputs.updater == 'true'\n        working-directory: target"
+    ),
+    qualificationWorkflow.replace(
+      "steps.classification.outputs.policy == 'true' ||",
+      "steps.classification.outputs.policy == 'true' &&"
+    ),
+    qualificationWorkflow.replace(
       'node --test scripts/updater/__tests__/a-canary-evidence.test.mjs',
       'echo skipped-a-canary-contracts'
     ),
@@ -5071,6 +5091,18 @@ test('exact-SHA qualification keeps the harness trusted and has no production au
       'echo skipped-promotion-contracts'
     ),
     qualificationWorkflow.replace(
+      'node --test scripts/updater/__tests__/recovery-qualification.test.mjs',
+      'echo skipped-recovery-qualification-contracts'
+    ),
+    qualificationWorkflow.replace(
+      '          node --test scripts/updater/__tests__/recovery-qualification.test.mjs',
+      '          if [ -f scripts/updater/__tests__/recovery-qualification.test.mjs ]; then\n            node --test scripts/updater/__tests__/recovery-qualification.test.mjs\n          fi'
+    ),
+    qualificationWorkflow.replace(
+      '          node --test scripts/updater/__tests__/recovery-qualification.test.mjs',
+      '          if test -f scripts/updater/__tests__/recovery-qualification.test.mjs; then\n            node --test scripts/updater/__tests__/recovery-qualification.test.mjs\n          fi'
+    ),
+    qualificationWorkflow.replace(
       'node --test scripts/updater/__tests__/updater.test.mjs',
       'echo skipped-updater-contracts'
     ),
@@ -5081,6 +5113,22 @@ test('exact-SHA qualification keeps the harness trusted and has no production au
     qualificationWorkflow.replace(
       'scripts/updater/__tests__/test_prepare_a_canary_inputs.py',
       'scripts/updater/__tests__/test_prepare_a_canary_inputs.py.disabled'
+    ),
+    qualificationWorkflow.replace(
+      'scripts/updater/__tests__/test_prepare_recovery_qualification_inputs.py',
+      'scripts/updater/__tests__/test_prepare_recovery_qualification_inputs.py.disabled'
+    ),
+    qualificationWorkflow.replace(
+      'node --test scripts/release-distribution/__tests__/release-distribution.test.mjs',
+      'echo skipped-release-distribution-contracts'
+    ),
+    qualificationWorkflow.replace(
+      '          node --test scripts/release-distribution/__tests__/release-distribution.test.mjs',
+      '          if [ -f scripts/release-distribution/__tests__/release-distribution.test.mjs ]; then\n            node --test scripts/release-distribution/__tests__/release-distribution.test.mjs\n          fi'
+    ),
+    qualificationWorkflow.replace(
+      '          node --test scripts/release-distribution/__tests__/release-distribution.test.mjs',
+      '          if [[ -f scripts/release-distribution/__tests__/release-distribution.test.mjs ]]; then\n            node --test scripts/release-distribution/__tests__/release-distribution.test.mjs\n          fi'
     ),
     qualificationWorkflow.replace(
       'node harness/scripts/ci/verify-qualification-artifacts.mjs verify',
