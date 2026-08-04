@@ -40,9 +40,48 @@ describe('provider model descriptors', () => {
     expect(isModelChatSelectable({ id: 'gpt-image-2' } as Model)).toBe(false)
     expect(isModelChatSelectable({ id: 'seedance-1-pro' } as Model)).toBe(false)
     expect(isModelChatSelectable({ id: 'seedream-4.0' } as Model)).toBe(false)
+    expect(
+      isModelChatSelectable({
+        id: 'doubao-seedream-4-5-251128',
+      } as Model)
+    ).toBe(false)
+    expect(
+      isModelChatSelectable({
+        id: 'doubao-seedream-5-0-260128',
+      } as Model)
+    ).toBe(false)
+    expect(
+      isModelChatSelectable({
+        id: 'doubao-seedance-2-0-260128',
+      } as Model)
+    ).toBe(false)
     expect(isModelChatSelectable({ id: 'sora-2-pro' } as Model)).toBe(false)
     expect(isModelChatSelectable({ id: 'veo-3.1-generate-preview' } as Model)).toBe(false)
     expect(isModelChatSelectable({ id: 'doubao-seed-asr-2.0' } as Model)).toBe(false)
+  })
+
+  it('rejects media capabilities while keeping text-output vision models', () => {
+    expect(
+      isModelChatSelectable({
+        id: 'custom-renderer',
+        capabilities: [ModelCapabilities.VIDEO_GENERATION],
+      })
+    ).toBe(false)
+    expect(
+      isModelChatSelectable({
+        id: 'custom-image-editor',
+        capabilities: [ModelCapabilities.IMAGE_TO_IMAGE],
+      })
+    ).toBe(false)
+    expect(
+      isModelChatSelectable({
+        id: 'multimodal-chat',
+        capabilities: [
+          ModelCapabilities.COMPLETION,
+          ModelCapabilities.VISION,
+        ],
+      })
+    ).toBe(true)
   })
 
   it('detects response-only chat models from metadata and Jingxing policy', () => {
@@ -112,6 +151,26 @@ describe('provider model descriptors', () => {
         ModelCapabilities.IMAGE_TO_IMAGE,
       ])
     )
+  })
+
+  it('maps unknown video and transcription endpoints to non-chat capabilities', () => {
+    const videoModel = modelDescriptorToModel('biyuan', {
+      id: 'custom-motion-model',
+      supported_endpoint_types: ['video-generation'],
+    })
+    const transcriptionModel = modelDescriptorToModel('biyuan', {
+      id: 'custom-speech-reader',
+      supported_endpoint_types: ['audio-transcription'],
+    })
+
+    expect(videoModel?.capabilities).toContain(
+      ModelCapabilities.VIDEO_GENERATION
+    )
+    expect(transcriptionModel?.capabilities).toContain(
+      ModelCapabilities.AUDIO_TO_TEXT
+    )
+    expect(isModelChatSelectable(videoModel!)).toBe(false)
+    expect(isModelChatSelectable(transcriptionModel!)).toBe(false)
   })
 
   it('recognizes a Biyuan-hosted compatible provider without misclassifying others', () => {

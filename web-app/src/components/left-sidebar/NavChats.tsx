@@ -31,6 +31,7 @@ import {
   Pencil,
   Pin,
   PinOff,
+  Plus,
   Trash2,
   UsersRound,
   Video,
@@ -54,6 +55,7 @@ import { useThreadManagement } from "@/hooks/useThreadManagement"
 import type { ThreadFolder } from "@/services/projects/types"
 import { MediaProjectMenuItems } from "@/containers/MediaProjectMenuItems"
 import { isBiyanTeamsThread } from '@/types/biyan-teams'
+import { useProjectDialog } from '@/hooks/useProjectDialog'
 
 type HistoryEntry =
   | {
@@ -77,7 +79,7 @@ type HistoryEntry =
       icon: LucideIcon
       to: '/images'
       search: {
-        media?: 'image' | 'storyboard'
+        media?: 'image' | 'video' | 'storyboard'
         assetId?: string
         videoId?: string
       }
@@ -358,7 +360,7 @@ function HistoryItem({
   )
 }
 
-export function NavChats() {
+export function NavChats({ projects }: { projects?: ReactNode }) {
   const { t } = useTranslation()
   const location = useRouterState({
     select: (state) => state.location,
@@ -377,6 +379,7 @@ export function NavChats() {
   const removeImageAsset = useImageGenerationStore((state) => state.removeAsset)
   const [dropdownOpen, setDropdownOpen] = useState(false)
   const [videoAssets, setVideoAssets] = useState<VideoAssetRecord[]>([])
+  const setProjectDialogOpen = useProjectDialog((state) => state.setOpen)
 
   const threadsWithoutProject = useMemo(() => {
     return getFilteredThreads('').filter((thread) => !thread.metadata?.project)
@@ -502,12 +505,19 @@ export function NavChats() {
         kind: 'media',
         mediaType: 'video',
         asset,
-        title: mediaTitle(asset, t('common:imageGeneration.mode.storyboardVideo')),
+        title: mediaTitle(
+          asset,
+          t(
+            asset.assetKind === 'generated'
+              ? 'common:imageGeneration.mode.video'
+              : 'common:imageGeneration.mode.storyboardVideo'
+          )
+        ),
         updatedAt: timestampFromIso(asset.createdAt),
         icon: Video,
         to: route.images as '/images',
         search: {
-          media: 'storyboard',
+          media: asset.assetKind === 'generated' ? 'video' : 'storyboard',
           videoId: asset.id,
         },
       }))
@@ -526,17 +536,13 @@ export function NavChats() {
     [historyEntries]
   )
 
-  if (historyEntries.length === 0) {
-    return null
-  }
-
   return (
     <SidebarGroup className="group-data-[collapsible=icon]:hidden">
-      <SidebarGroupLabel>{t('common:history')}</SidebarGroupLabel>
+      <SidebarGroupLabel>{t('common:projects.title')}</SidebarGroupLabel>
       {threadsWithoutProject.length > 1 &&
         <DropdownMenu open={dropdownOpen} onOpenChange={setDropdownOpen}>
           <DropdownMenuTrigger asChild>
-            <SidebarGroupAction className="hover:bg-sidebar-foreground/8">
+            <SidebarGroupAction className="right-9 hover:bg-sidebar-foreground/8">
               <MoreHorizontal className="text-muted-foreground" />
               <span className="sr-only">More</span>
             </SidebarGroupAction>
@@ -549,7 +555,17 @@ export function NavChats() {
           </DropdownMenuContent>
         </DropdownMenu>
       }
-      <SidebarMenu>
+      <SidebarGroupAction
+        type="button"
+        aria-label={t('common:projects.new')}
+        title={t('common:projects.new')}
+        className="hover:bg-sidebar-foreground/8"
+        onClick={() => setProjectDialogOpen(true)}
+      >
+        <Plus className="text-muted-foreground" />
+      </SidebarGroupAction>
+      {projects}
+      {historyEntries.length > 0 && <SidebarMenu>
         {pinnedEntries.length > 0 && (
           <>
             <SectionLabel>{t('common:pinned')}</SectionLabel>
@@ -594,7 +610,7 @@ export function NavChats() {
             getFolderById={getFolderById}
           />
         ))}
-      </SidebarMenu>
+      </SidebarMenu>}
     </SidebarGroup>
   )
 }

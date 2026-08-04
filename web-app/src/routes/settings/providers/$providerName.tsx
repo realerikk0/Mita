@@ -186,7 +186,7 @@ function ProviderDetail() {
   }
 
   return (
-    <div className="h-full flex flex-col">
+    <div className="flex h-svh max-h-svh w-full flex-col overflow-hidden">
       <HeaderPage>
         <span className="font-medium text-base font-studio">
           {t('common:settings')}
@@ -194,7 +194,7 @@ function ProviderDetail() {
       </HeaderPage>
       <div className="flex min-h-0 flex-1">
         <SettingsMenu />
-        <div className="p-4 pt-0 w-full overflow-y-auto">
+        <div className="min-h-0 min-w-0 flex-1 overflow-y-auto p-4 pt-0">
           {retired ? (
             <Card title="Local runtime retired">
               <p className="text-sm leading-relaxed">
@@ -214,19 +214,23 @@ function ProviderDetail() {
             </Card>
           ) : (
             <div className="flex flex-col gap-3">
-              <div className="flex items-center justify-between">
-                <h1 className="font-medium text-base">
-                  {getProviderTitle(provider.provider)}
-                </h1>
-                <Switch
-                  checked={provider.active}
-                  onCheckedChange={(active) =>
-                    updateProvider(provider.provider, { active })
-                  }
-                />
-              </div>
+              <h1 className="font-medium text-base">
+                {getProviderTitle(provider.provider)}
+              </h1>
 
               <Card title={t('common:settings')}>
+                <CardItem
+                  title="Enable"
+                  actions={
+                    <Switch
+                      aria-label={`Enable ${getProviderTitle(provider.provider)}`}
+                      checked={provider.active}
+                      onCheckedChange={(active) =>
+                        updateProvider(provider.provider, { active })
+                      }
+                    />
+                  }
+                />
                 {remoteSettings.length === 0 ? (
                   <p className="text-sm">No additional settings.</p>
                 ) : (

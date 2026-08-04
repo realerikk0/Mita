@@ -3,6 +3,7 @@ import {
   getModelCapabilities,
   normalizeModelCapabilitiesForProvider,
 } from '@/lib/models'
+import { ModelCapabilities } from '@/types/models'
 
 type ProviderModelMetadata = Partial<Model> & {
   id?: string
@@ -45,6 +46,16 @@ const RESPONSES_ENDPOINTS = new Set([
   'openai-response',
   'openai-responses',
   'responses',
+])
+
+const NON_CHAT_MODEL_CAPABILITIES = new Set<string>([
+  ModelCapabilities.IMAGE_GENERATION,
+  ModelCapabilities.VIDEO_GENERATION,
+  ModelCapabilities.AUDIO_GENERATION,
+  ModelCapabilities.TEXT_TO_IMAGE,
+  ModelCapabilities.IMAGE_TO_IMAGE,
+  ModelCapabilities.TEXT_TO_AUDIO,
+  ModelCapabilities.AUDIO_TO_TEXT,
 ])
 
 function uniqueStrings(values: string[]) {
@@ -106,6 +117,13 @@ export function isModelChatSelectable(model: Partial<Model>): boolean {
     return false
   }
   if (isTranscriptionModel(model)) return false
+  if (
+    model.capabilities?.some((capability) =>
+      NON_CHAT_MODEL_CAPABILITIES.has(capability)
+    )
+  ) {
+    return false
+  }
 
   const endpointTypes = supportedEndpointTypesFromModel(model)
   if (endpointTypes.length === 0) return true

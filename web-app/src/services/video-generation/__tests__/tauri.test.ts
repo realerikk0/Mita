@@ -21,14 +21,16 @@ describe('TauriVideoGenerationService', () => {
     vi.unstubAllGlobals()
   })
 
-  it('reads local storyboard sources through the webview fetch', async () => {
-    const webviewFetch = vi.fn().mockResolvedValue(
-      new Response(new Uint8Array([1, 2, 3]), {
-        status: 200,
-        headers: { 'content-type': 'image/png' },
-      })
-    )
-    vi.stubGlobal('fetch', webviewFetch)
+  it('streams local storyboard sources through the native media upload', async () => {
+    const legacyWebviewUrl =
+      'asset:///mock/mita/image-assets/storyboard-1/image.png'
+    vi.mocked(invoke).mockResolvedValue({
+      id: 'media-storyboard-1',
+      kind: 'image',
+      mimeType: 'image/png',
+      sizeBytes: 3,
+      expiresAt: '2026-09-03T00:00:00Z',
+    })
     vi.mocked(fetchTauri).mockResolvedValue(
       new Response(
         JSON.stringify({
@@ -77,9 +79,22 @@ describe('TauriVideoGenerationService', () => {
       },
     })
 
-    expect(webviewFetch).toHaveBeenCalledWith(
-      'asset:///mock/mita/image-assets/storyboard-1/image.png'
-    )
+    expect(invoke).toHaveBeenCalledWith('upload_video_reference_media', {
+      request: {
+        endpoint: 'https://api.jingxing.uk/v1/media',
+        apiKey: 'test-key',
+        customHeaders: {},
+        reference: {
+          kind: 'image',
+          asset: expect.objectContaining({
+            id: 'storyboard-1',
+            path: expect.stringContaining('storyboard-1/image.png'),
+            fileName: 'image.png',
+            mimeType: 'image/png',
+          }),
+        },
+      },
+    })
     expect(fetchTauri).toHaveBeenCalledTimes(1)
     expect(vi.mocked(fetchTauri).mock.calls[0][0]).toBe(
       'https://api.jingxing.uk/v1/video/generations'
@@ -87,18 +102,68 @@ describe('TauriVideoGenerationService', () => {
     const init = vi.mocked(fetchTauri).mock.calls[0][1] as RequestInit & {
       body: string
     }
-    expect(JSON.parse(init.body)).toMatchObject({
+    const body = JSON.parse(init.body)
+    expect(body).toMatchObject({
       prompt: 'A gold robot walks through a neon city.',
-    })
-    expect(JSON.parse(init.body).content).toEqual([
-      { type: 'text', text: 'A gold robot walks through a neon city.' },
-      {
-        type: 'image_url',
-        image_url: {
-          url: 'data:image/png;base64,AQID',
+      media: [
+        {
+          id: 'media-storyboard-1',
+          role: 'reference_image',
         },
-      },
-    ])
+      ],
+    })
+    expect(body).not.toHaveProperty('image')
+    expect(body).not.toHaveProperty('content')
+    expect(body.metadata).not.toHaveProperty('content')
+    expect(JSON.stringify(body)).not.toContain(legacyWebviewUrl)
+  })
+
+  it('surfaces structured native upload failures without creating a task', async () => {
+    vi.mocked(invoke).mockRejectedValue({
+      code: 'rate_limited',
+      status: 429,
+      message: 'Biyuan media upload is rate limited',
+      retryAfterSeconds: 30,
+      outcomeUnknown: false,
+    })
+
+    const service = new TauriVideoGenerationService()
+    const promise = service.generateVideo({
+      provider: {
+        provider: 'jingxing',
+        base_url: 'https://api.jingxing.uk/v1',
+        api_key: 'test-key',
+        models: [],
+        settings: [],
+      } as unknown as ModelProvider,
+      model: {
+        id: 'seedance-2.0',
+        capabilities: [ModelCapabilities.VIDEO_GENERATION],
+      } as Model,
+      prompt: 'A gold robot walks through a neon city.',
+      ratio: '16:9',
+      duration: 8,
+      resolution: '1080p',
+      fps: 30,
+      references: [
+        {
+          kind: 'image',
+          asset: {
+            id: 'reference-1',
+            path: '/references/image.png',
+            mimeType: 'image/png',
+          },
+        },
+      ],
+    })
+
+    await expect(promise).rejects.toMatchObject({
+      name: 'MediaUploadError',
+      message: 'Biyuan media upload is rate limited',
+      status: 429,
+      retryAfterSeconds: 30,
+    })
+    expect(fetchTauri).not.toHaveBeenCalled()
   })
 
   it('saves video assets through Tauri', async () => {

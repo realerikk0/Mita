@@ -32,6 +32,7 @@
     "emptyState": "Generated images will appear here.",
     "mode": {
       "image": "Image",
+      "video": "Video",
       "storyboardVideo": "Storyboard video",
       "newBadge": "New",
       "longVideo": "Long video",

@@ -88,6 +88,7 @@ import { isBrowserMCPServerName } from '@/constants/mcp'
 import { useAgentMode } from '@/hooks/useAgentMode'
 import { AssistantsMenu } from '@/components/AssistantsMenu'
 import { parseCompactCommand } from '@/lib/compact-thread'
+import { isModelChatSelectable } from '@/lib/provider-models'
 
 type ChatInputProps = {
   className?: string
@@ -334,6 +335,12 @@ const ChatInput = memo(function ChatInput({
 
     if (!selectedModel) {
       setMessage('Please select a model to start chatting.')
+      return
+    }
+    if (!isModelChatSelectable(selectedModel)) {
+      setMessage(
+        'Please select a text generation model to start chatting.'
+      )
       return
     }
     if (!prompt.trim()) {

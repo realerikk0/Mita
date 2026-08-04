@@ -88,6 +88,7 @@ macro_rules! invoke_commands_with_extras {
         core::video_assets::commands::list_video_assets,
         core::video_assets::commands::delete_video_asset,
         core::video_assets::commands::update_video_asset_project,
+        core::media_upload::commands::upload_video_reference_media,
         // Computer Agent commands
         core::computer_agent::commands::get_computer_agent_shell_status,
         core::computer_agent::commands::get_computer_agent_workspace_path,

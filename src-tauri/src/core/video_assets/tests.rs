@@ -1,7 +1,9 @@
 use super::commands::{
     delete_video_asset, list_video_assets, save_video_asset, update_video_asset_project,
 };
-use super::models::{SaveVideoAssetRequest, VideoAssetProject};
+use super::models::{
+    SaveVideoAssetRequest, VideoAssetProject, VideoGenerationReference, VideoReferenceAsset,
+};
 use crate::core::app::commands::get_biyan_data_folder_path;
 use std::fs;
 use tauri::test::mock_app;
@@ -17,6 +19,17 @@ fn test_asset(id: &str) -> SaveVideoAssetRequest {
         duration: 8,
         fps: 30,
         source_asset_ids: vec!["storyboard-1".to_string()],
+        references: Some(vec![VideoGenerationReference {
+            kind: "image".to_string(),
+            role: Some("reference".to_string()),
+            url: None,
+            asset: Some(VideoReferenceAsset {
+                id: "storyboard-1".to_string(),
+                path: "C:\\media\\storyboard-1.png".to_string(),
+                file_name: Some("storyboard-1.png".to_string()),
+                mime_type: "image/png".to_string(),
+            }),
+        }]),
         usage: None,
         status: "succeeded".to_string(),
         mime_type: "video/mp4".to_string(),
@@ -44,10 +57,30 @@ fn saves_lists_and_deletes_video_asset_under_data_folder() {
     assert!(record.path.ends_with("video.mp4"));
     assert!(fs::metadata(&record.path).unwrap().is_file());
     assert_eq!(record.source_asset_ids, vec!["storyboard-1".to_string()]);
+    assert_eq!(
+        record
+            .references
+            .as_ref()
+            .and_then(|references| references.first())
+            .map(|reference| reference.kind.as_str()),
+        Some("image")
+    );
     assert_eq!(record.asset_kind.as_deref(), Some("generated"));
 
     let assets = list_video_assets(app.handle().clone()).unwrap();
-    assert!(assets.iter().any(|asset| asset.id == id));
+    let listed = assets
+        .iter()
+        .find(|asset| asset.id == id)
+        .expect("saved video is listed");
+    assert_eq!(
+        listed
+            .references
+            .as_ref()
+            .and_then(|references| references.first())
+            .and_then(|reference| reference.asset.as_ref())
+            .map(|asset| asset.id.as_str()),
+        Some("storyboard-1")
+    );
 
     delete_video_asset(app.handle().clone(), id.to_string()).unwrap();
     assert!(!fs::metadata(&record.path).is_ok());

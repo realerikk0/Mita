@@ -51,7 +51,10 @@ import {
   searchDecisionMetadata,
   webSearchModeFromEnabled,
 } from '@/lib/search-decision'
-import { modelRequiresResponsesEndpoint } from '@/lib/provider-models'
+import {
+  isModelChatSelectable,
+  modelRequiresResponsesEndpoint,
+} from '@/lib/provider-models'
 
 const COMPUTER_AGENT_SERVER_NAME = 'biyan-computer-agent'
 
@@ -423,10 +426,17 @@ export class CustomChatTransport implements ChatTransport<UIMessage> {
     // Capture the effective provider name early so the Anthropic serial
     // tool-use repair later uses the same value that was used to create the
     // model, even if the user switches provider mid-request.
-    const modelId = useModelProvider.getState().selectedModel?.id
-    const providerId = useModelProvider.getState().selectedProvider
+    const modelProviderState = useModelProvider.getState()
+    const selectedModel = modelProviderState.selectedModel
+    const modelId = selectedModel?.id
+    const providerId = modelProviderState.selectedProvider
     const effectiveProviderName = providerId
-    const provider = useModelProvider.getState().getProviderByName(providerId)
+    const provider = modelProviderState.getProviderByName(providerId)
+    if (!selectedModel || !isModelChatSelectable(selectedModel)) {
+      throw new Error(
+        'A text-generation model must be selected before sending a chat message.'
+      )
+    }
     if (!this.serviceHub || !modelId || !provider) {
       throw new Error('ServiceHub not initialized or model/provider missing.')
     }
@@ -512,8 +522,6 @@ export class CustomChatTransport implements ChatTransport<UIMessage> {
     const compactVisibleMessages = messagesToConvert.filter(
       (message) => !isArchivedCompactMessage(message)
     )
-
-    const selectedModel = useModelProvider.getState().selectedModel
 
     const configuredMaxOutputTokens: number | undefined = (() => {
       const raw = inferenceParams.max_output_tokens ?? inferenceParams.max_tokens

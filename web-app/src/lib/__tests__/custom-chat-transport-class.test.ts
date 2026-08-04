@@ -81,6 +81,28 @@ describe('CustomChatTransport', () => {
     expect(transport.model).toBeNull()
   })
 
+  it('rejects media-generation models before creating a chat request', async () => {
+    h.selectedProvider = 'jingxing'
+    h.selectedModel = {
+      id: 'doubao-seedream-4-5-251128',
+      capabilities: ['image_generation'],
+    }
+    const blockedTransport = new CustomChatTransport(
+      'You are helpful',
+      'thread-1'
+    )
+
+    await expect(
+      blockedTransport.sendMessages({
+        chatId: 'thread-1',
+        messages: [],
+        abortSignal: undefined,
+        trigger: 'submit-message',
+        messageId: undefined,
+      })
+    ).rejects.toThrow('A text-generation model must be selected')
+  })
+
   it('getTools returns empty object initially', () => {
     expect(transport.getTools()).toEqual({})
   })

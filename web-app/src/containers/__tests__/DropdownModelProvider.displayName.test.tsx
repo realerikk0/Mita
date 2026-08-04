@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
-import { render, screen, cleanup } from '@testing-library/react'
+import { render, screen, cleanup, waitFor } from '@testing-library/react'
 import '@testing-library/jest-dom'
 import DropdownModelProvider from '../DropdownModelProvider'
 import { getChatModelFamilySortRank } from '@/lib/chat-model-sort'
@@ -7,6 +7,7 @@ import { getModelDisplayName } from '@/lib/utils'
 import { useModelProvider } from '@/hooks/useModelProvider'
 import { useFavoriteModel } from '@/hooks/useFavoriteModel'
 import { useProviderBalance } from '@/hooks/useProviderBalance'
+import { localStorageKey } from '@/constants/localStorage'
 
 // Define basic types to avoid missing declarations
 type ModelProvider = {
@@ -178,6 +179,7 @@ describe('DropdownModelProvider - Display Name Integration', () => {
 
   beforeEach(() => {
     vi.clearAllMocks()
+    localStorage.clear()
     vi.mocked(useProviderBalance).mockReturnValue({
       balance: null,
       loading: false,
@@ -483,5 +485,76 @@ describe('DropdownModelProvider - Display Name Integration', () => {
     })
     expect(screen.queryByText('Mistral')).not.toBeInTheDocument()
     expect(screen.queryByText('mistral-chat-model')).not.toBeInTheDocument()
+  })
+
+  it('hides Biyuan media models and replaces a persisted media selection', async () => {
+    const jingxingProviders: ModelProvider[] = [
+      {
+        provider: 'jingxing',
+        active: true,
+        api_key: 'test-token',
+        base_url: 'https://api.biyuan.ai/v1',
+        models: [
+          {
+            id: 'doubao-seedream-4-5-251128',
+            capabilities: ['image_generation'],
+          },
+          {
+            id: 'doubao-seedance-2-0-260128',
+            capabilities: ['video_generation'],
+          },
+          {
+            id: 'claude-opus-4-8',
+            capabilities: ['completion'],
+          },
+        ],
+        settings: [],
+      },
+    ]
+    const selectModelProvider = vi.fn()
+
+    localStorage.setItem(
+      localStorageKey.lastUsedModel,
+      JSON.stringify({
+        provider: 'jingxing',
+        model: 'doubao-seedream-4-5-251128',
+      })
+    )
+    vi.mocked(useModelProvider).mockReturnValue({
+      providers: jingxingProviders,
+      selectedProvider: 'jingxing',
+      selectedModel: jingxingProviders[0].models[0],
+      getProviderByName: vi.fn((name: string) =>
+        jingxingProviders.find((provider) => provider.provider === name)
+      ),
+      selectModelProvider,
+      getModelBy: vi.fn((id: string) =>
+        jingxingProviders[0].models.find((model) => model.id === id)
+      ),
+      updateProvider: vi.fn(),
+    } as MockHookReturn)
+
+    render(
+      <DropdownModelProvider
+        useLastUsedModel
+        restrictToVisibleProviders
+      />
+    )
+
+    expect(
+      screen.queryByText('doubao-seedream-4-5-251128')
+    ).not.toBeInTheDocument()
+    expect(
+      screen.queryByText('doubao-seedance-2-0-260128')
+    ).not.toBeInTheDocument()
+    expect(screen.getByText('claude-opus-4-8')).toBeInTheDocument()
+    expect(screen.getByRole('button')).toHaveTextContent('common:selectAModel')
+
+    await waitFor(() => {
+      expect(selectModelProvider).toHaveBeenCalledWith(
+        'jingxing',
+        'claude-opus-4-8'
+      )
+    })
   })
 })

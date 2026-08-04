@@ -1,4 +1,3 @@
-/* eslint-disable @typescript-eslint/no-explicit-any */
 import { useEffect, useState, useRef, useMemo, useCallback, memo } from 'react'
 import {
   Popover,
@@ -25,7 +24,7 @@ import { useTranslation } from '@/i18n/react-i18next-compat'
 import { useFavoriteModel } from '@/hooks/useFavoriteModel'
 import { predefinedProviders } from '@/constants/providers'
 import { providerHasRemoteApiKeys } from '@/lib/provider-api-keys'
-import { getLastUsedModel } from '@/utils/getModelToStart'
+import { getModelToStart } from '@/utils/getModelToStart'
 import { ChevronsUpDown } from 'lucide-react'
 import {
   Tooltip,
@@ -39,6 +38,7 @@ import {
   isVisibleModelProvider,
 } from '@/constants/visible-model-providers'
 import {
+  configuredChatModels,
   isRemoteProviderEndpoint,
   RETIRED_LOCAL_PROVIDER_IDS,
 } from '@/lib/configured-model-providers'
@@ -90,7 +90,6 @@ const DropdownModelProvider = memo(function DropdownModelProvider({
     selectedProvider,
     selectedModel,
   } = useModelProvider()
-  const [displayModel, setDisplayModel] = useState<string>('')
   const { updateCurrentThreadModel } = useThreads()
   const navigate = useNavigate()
   const { t } = useTranslation()
@@ -119,8 +118,10 @@ const DropdownModelProvider = memo(function DropdownModelProvider({
       const provider = displayedProviders.find(
         (p) => p.provider === providerName && p.active
       )
-      return provider?.models.find(
-        (m) => m.id === modelId && isModelChatSelectable(m)
+      if (!provider) return undefined
+
+      return configuredChatModels(provider).find(
+        (candidate) => candidate.id === modelId
       )
     },
     [displayedProviders]
@@ -128,36 +129,36 @@ const DropdownModelProvider = memo(function DropdownModelProvider({
 
   // Initialize model provider - avoid race conditions with manual selections
   useEffect(() => {
+    const selectFallbackModel = () => {
+      const resolved = getModelToStart({
+        selectedModel,
+        selectedProvider,
+        getProviderByName: (providerName) =>
+          displayedProviders.find(
+            (candidate) => candidate.provider === providerName
+          ),
+        providers: displayedProviders,
+      })
+
+      if (!resolved) {
+        selectModelProvider('', '')
+        return
+      }
+
+      selectModelProvider(resolved.provider.provider, resolved.model)
+      setLastUsedModel(resolved.provider.provider, resolved.model)
+    }
+
     const initializeModel = () => {
       // Auto select model when existing thread is passed
       if (model) {
-        selectModelProvider(model?.provider as string, model?.id as string)
-        if (!checkModelExists(model.provider, model.id)) {
-          selectModelProvider('', '')
+        if (checkModelExists(model.provider, model.id)) {
+          selectModelProvider(model.provider, model.id)
+        } else {
+          selectFallbackModel()
         }
       } else if (useLastUsedModel) {
-        // Try to use last used model only when explicitly requested (for new chat)
-        const lastUsed = getLastUsedModel()
-        if (lastUsed && checkModelExists(lastUsed.provider, lastUsed.model)) {
-          selectModelProvider(lastUsed.provider, lastUsed.model)
-        } else {
-          const firstRemoteProvider = displayedProviders.find(
-            (provider) =>
-              provider.active &&
-              provider.models.some((candidate) =>
-                isModelChatSelectable(candidate)
-              )
-          )
-          const firstModel = firstRemoteProvider?.models.find((candidate) =>
-            isModelChatSelectable(candidate)
-          )
-          if (firstRemoteProvider && firstModel) {
-            selectModelProvider(firstRemoteProvider.provider, firstModel.id)
-            setLastUsedModel(firstRemoteProvider.provider, firstModel.id)
-          } else {
-            selectModelProvider('', '')
-          }
-        }
+        selectFallbackModel()
       }
     }
 
@@ -165,6 +166,7 @@ const DropdownModelProvider = memo(function DropdownModelProvider({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [
     model,
+    useLastUsedModel,
     selectModelProvider,
     updateCurrentThreadModel,
     displayedProviders,
@@ -182,18 +184,13 @@ const DropdownModelProvider = memo(function DropdownModelProvider({
     }
   }, [restrictToVisibleProviders, selectedProvider, selectModelProvider])
 
-  // Update display model when selection changes
-  useEffect(() => {
-    if (
-      selectedProvider &&
-      selectedModel &&
-      (!restrictToVisibleProviders || isVisibleModelProvider(selectedProvider))
-    ) {
-      setDisplayModel(getModelDisplayName(selectedModel))
-    } else {
-      setDisplayModel(t('common:selectAModel'))
-    }
-  }, [restrictToVisibleProviders, selectedProvider, selectedModel, t])
+  const selectedChatModel =
+    selectedProvider && selectedModel
+      ? checkModelExists(selectedProvider, selectedModel.id)
+      : undefined
+  const displayModel = selectedChatModel
+    ? getModelDisplayName(selectedChatModel)
+    : t('common:selectAModel')
 
   // Reset search value when dropdown closes
   const onOpenChange = useCallback((open: boolean) => {
@@ -372,8 +369,6 @@ const DropdownModelProvider = memo(function DropdownModelProvider({
 
   const handleSelect = useCallback(
     async (searchableModel: SearchableModel) => {
-      // Immediately update display to prevent double-click issues
-      setDisplayModel(getModelDisplayName(searchableModel.model))
       setSearchValue('')
       setOpen(false)
 
@@ -396,15 +391,22 @@ const DropdownModelProvider = memo(function DropdownModelProvider({
     [selectModelProvider, updateCurrentThreadModel]
   )
 
-  const provider = displayedProviders.find(
-    (candidate) => candidate.provider === selectedProvider
-  )
+  const provider = selectedChatModel
+    ? displayedProviders.find(
+        (candidate) => candidate.provider === selectedProvider
+      )
+    : undefined
 
   if (!displayedProviders.length) return null
 
   const selectedModelLogoProvider =
-    provider && selectedModel?.id
-      ? { provider: getModelLogoProvider(selectedModel.id, provider.provider) }
+    provider && selectedChatModel?.id
+      ? {
+          provider: getModelLogoProvider(
+            selectedChatModel.id,
+            provider.provider
+          ),
+        }
       : provider
 
   return (
@@ -425,7 +427,7 @@ const DropdownModelProvider = memo(function DropdownModelProvider({
                 <span
                   className={cn(
                     'text-foreground truncate leading-normal',
-                    !selectedModel?.id && 'text-muted-foreground'
+                    !selectedChatModel?.id && 'text-muted-foreground'
                   )}
                 >
                   {displayModel}

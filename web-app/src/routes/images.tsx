@@ -60,6 +60,15 @@ import { getCurrentWebviewWindow } from '@tauri-apps/api/webviewWindow'
 import { fs } from '@biyan/core'
 
 import { ProviderQuotaActions } from '@/components/ProviderQuotaActions'
+import { isBiyuanProvider } from '@/constants/biyuan'
+import {
+  DirectVideoFeed,
+  DirectVideoMode,
+  type DirectVideoFeedItem,
+  type DirectVideoGenerationInput,
+  type DirectVideoModelOption,
+  type VideoReferenceAssetOption,
+} from '@/components/media/DirectVideoMode'
 import { Button } from '@/components/ui/button'
 import { Dialog, DialogContent, DialogTitle } from '@/components/ui/dialog'
 import {
@@ -91,6 +100,13 @@ import {
 import { getVideoModels } from '@/lib/video-generation'
 import { videoDebugLog } from '@/lib/video-generation-debug'
 import {
+  BIYUAN_PUBLIC_SEEDANCE_REFERENCE_CAPABILITIES,
+  SEEDANCE_REFERENCE_DURATION_LIMITS,
+  SEEDANCE_REFERENCE_LIMITS,
+  SEEDANCE_REFERENCE_SIZE_LIMIT_BYTES,
+} from '@/lib/seedance-video'
+import { parseBiyuanSeedancePricePerMillionCny } from '@/lib/seedance-video-cost'
+import {
   cn,
   getModelDisplayName,
   getModelLogoProvider,
@@ -119,16 +135,23 @@ import {
   type ImageTaskGroup,
   useImageGenerationStore,
 } from '@/stores/image-generation-store'
-import { useVideoGenerationStore } from '@/stores/video-generation-store'
+import {
+  type PersistedVideoTask,
+  type VideoRuntime,
+  useVideoGenerationStore,
+} from '@/stores/video-generation-store'
 import { useStoryboardSessionStore } from '@/stores/storyboard-session-store'
 import type {
   VideoAssetRecord,
+  VideoGenerationReference,
   VideoGenerationStatus,
+  VideoRatio,
+  VideoReferenceKind,
   VideoResolution,
 } from '@/services/video-generation/types'
 
 type ImagesSearchParams = {
-  media?: 'image' | 'storyboard'
+  media?: 'image' | 'video' | 'storyboard'
   assetId?: string
   videoId?: string
 }
@@ -136,6 +159,18 @@ type ImagesSearchParams = {
 type SourceAssetCache = {
   records: Map<string, ImageAssetRecord>
   listAssetsPromise?: Promise<ImageAssetRecord[]>
+}
+
+type DirectVideoSubmissionSnapshot = {
+  taskKey: string
+  createdAt: number
+  prompt: string
+  provider: string
+  model: string
+  ratio: VideoRatio
+  resolution: VideoResolution
+  duration: number
+  references: VideoGenerationReference[]
 }
 
 function createSourceAssetCache(
@@ -152,6 +187,8 @@ export const Route = createFileRoute(route.images as '/images')({
     media:
       search.media === 'storyboard'
         ? 'storyboard'
+        : search.media === 'video'
+          ? 'video'
         : search.media === 'image'
           ? 'image'
           : undefined,
@@ -225,7 +262,7 @@ type ModelPickerOption = {
   model: Model
 }
 
-export type MediaMode = 'image' | 'storyboard' | 'long-video'
+export type MediaMode = 'image' | 'video' | 'storyboard' | 'long-video'
 
 type StoryboardStage = 'compose' | 'storyboard' | 'video'
 
@@ -371,6 +408,16 @@ function localDownloadSourcePath(path?: string) {
   return path && !/^https?:/i.test(path) ? path : undefined
 }
 
+function localReferenceAssetIds(references: VideoGenerationReference[]) {
+  return [
+    ...new Set(
+      references
+        .map((reference) => reference.asset?.id)
+        .filter((id): id is string => Boolean(id))
+    ),
+  ]
+}
+
 const COMPOSER_RATIO_ORDER: ImageRatio[] = [
   '16:9',
   '3:2',
@@ -480,6 +527,7 @@ const DEFAULT_STORYBOARD_STORY =
 const VIDEO_DURATION_MIN = 4
 const VIDEO_DURATION_MAX = 15
 const VIDEO_RESOLUTION_OPTIONS: VideoResolution[] = ['720p', '1080p']
+const DIRECT_VIDEO_TASK_KEY_PREFIX = 'direct-video:'
 const STORYBOARD_EDITOR_COLORS = [
   '#f36f4f',
   '#2563eb',
@@ -492,6 +540,47 @@ const STORYBOARD_PREVIEW_ZOOM_MIN = 0.35
 const STORYBOARD_PREVIEW_ZOOM_MAX = 4
 const STORYBOARD_EDITOR_ZOOM_MIN = 0.35
 const STORYBOARD_EDITOR_ZOOM_MAX = 3
+
+function latestDirectVideoTaskKey(
+  tasks: Record<string, PersistedVideoTask>,
+  runtime: Record<string, VideoRuntime>
+) {
+  const candidates = new Map<string, number>()
+
+  Object.entries(tasks).forEach(([key, task]) => {
+    if (
+      task.assetKind === 'generated' ||
+      key.startsWith(DIRECT_VIDEO_TASK_KEY_PREFIX)
+    ) {
+      candidates.set(key, task.startedAt)
+    }
+  })
+
+  Object.entries(runtime).forEach(([key, item]) => {
+    if (
+      item.assetKind !== 'generated' &&
+      item.asset?.assetKind !== 'generated' &&
+      !key.startsWith(DIRECT_VIDEO_TASK_KEY_PREFIX)
+    ) {
+      return
+    }
+
+    const assetTime = item.asset?.createdAt
+      ? Date.parse(item.asset.createdAt)
+      : Number.NaN
+    candidates.set(
+      key,
+      item.startedAt ??
+        (Number.isFinite(assetTime) ? assetTime : candidates.get(key) ?? 0)
+    )
+  })
+
+  return [...candidates.entries()].sort(
+    ([keyA, timeA], [keyB, timeB]) =>
+      timeB - timeA || keyB.localeCompare(keyA)
+  )[0]?.[0]
+}
+
 const STORYBOARD_CAMERA_PRESETS = [
   '缓慢推近',
   '横移跟随',
@@ -879,6 +968,116 @@ function localPromptFromPath(path: string, fallback: string) {
   const fileName = path.split(/[\\/]/).pop()
   const stem = fileName?.replace(/\.[^.]+$/, '').trim()
   return stem || fallback
+}
+
+const DIRECT_VIDEO_REFERENCE_FILTERS = [
+  {
+    name: '参考媒体',
+    extensions: [
+      'png',
+      'jpg',
+      'jpeg',
+      'mp4',
+      'mov',
+      'mp3',
+      'wav',
+    ],
+  },
+] as const
+
+const DIRECT_VIDEO_REFERENCE_MIME_BY_EXTENSION: Record<
+  string,
+  { kind: VideoReferenceKind; mimeType: string }
+> = {
+  png: { kind: 'image', mimeType: 'image/png' },
+  jpg: { kind: 'image', mimeType: 'image/jpeg' },
+  jpeg: { kind: 'image', mimeType: 'image/jpeg' },
+  mp4: { kind: 'video', mimeType: 'video/mp4' },
+  mov: { kind: 'video', mimeType: 'video/quicktime' },
+  mp3: { kind: 'audio', mimeType: 'audio/mpeg' },
+  wav: { kind: 'audio', mimeType: 'audio/wav' },
+}
+
+const biyuanVideoPriceCache = new Map<
+  string,
+  Promise<number | undefined>
+>()
+
+function directVideoReferenceInfo(path: string) {
+  const extension = path.toLowerCase().split('.').pop() ?? ''
+  return DIRECT_VIDEO_REFERENCE_MIME_BY_EXTENSION[extension]
+}
+
+function directVideoReferenceId(path: string) {
+  return `direct-reference:${path.trim().toLowerCase()}`
+}
+
+function localFileName(path: string) {
+  return path.split(/[\\/]/).pop() || path
+}
+
+async function localMediaDurationSeconds(
+  kind: VideoReferenceKind,
+  src: string
+) {
+  if (kind !== 'video' && kind !== 'audio') return undefined
+
+  return new Promise<number | undefined>((resolve) => {
+    const element = document.createElement(kind)
+    let finished = false
+    const finish = (duration?: number) => {
+      if (finished) return
+      finished = true
+      window.clearTimeout(timeout)
+      element.removeAttribute('src')
+      resolve(
+        duration && Number.isFinite(duration)
+          ? duration
+          : undefined
+      )
+    }
+    const timeout = window.setTimeout(() => finish(), 1_500)
+    element.preload = 'metadata'
+    element.onloadedmetadata = () => finish(element.duration)
+    element.onerror = () => finish()
+    element.src = src
+  })
+}
+
+async function loadBiyuanVideoPricePerMillionCny(
+  fetchImpl: typeof fetch,
+  modelId: string
+) {
+  const cached = biyuanVideoPriceCache.get(modelId)
+  if (cached) return cached
+
+  const request = Promise.all([
+    fetchImpl('https://biyuan.ai/api/pricing'),
+    fetchImpl('https://biyuan.ai/api/status'),
+  ])
+    .then(async ([pricingResponse, statusResponse]) => {
+      if (!pricingResponse.ok || !statusResponse.ok) return undefined
+      const [pricing, status] = await Promise.all([
+        pricingResponse.json(),
+        statusResponse.json(),
+      ])
+      return parseBiyuanSeedancePricePerMillionCny(
+        pricing,
+        status,
+        modelId
+      )
+    })
+    .then((price) => {
+      if (price === undefined) biyuanVideoPriceCache.delete(modelId)
+      return price
+    })
+    .catch(() => {
+      biyuanVideoPriceCache.delete(modelId)
+      return undefined
+    })
+
+  biyuanVideoPriceCache.set(modelId, request)
+  return request
 }
 
 type DroppedFileWithPath = File & {
@@ -4041,11 +4240,15 @@ function Images() {
   const videoModels = useMemo(() => getVideoModels(providers), [providers])
   const [mediaMode, setMediaMode] = useState<MediaMode>(() => {
     // Explicit history/deep-link params win; otherwise resume the last mode.
-    if (search.media === 'storyboard' || search.videoId) return 'storyboard'
+    if (search.media === 'storyboard') return 'storyboard'
+    if (search.media === 'video') return 'video'
+    if (search.videoId) return 'storyboard'
     if (search.media === 'image' || search.assetId) return 'image'
     const persisted = useStoryboardSessionStore.getState().mediaMode
     // Only the user-reachable modes restore; ignore stale/disabled values.
-    return persisted === 'storyboard' || persisted === 'image'
+    return persisted === 'storyboard' ||
+      persisted === 'video' ||
+      persisted === 'image'
       ? persisted
       : 'image'
   })
@@ -4090,7 +4293,331 @@ function Images() {
   >(null)
   const [previewVideoAsset, setPreviewVideoAsset] =
     useState<VideoAssetRecord | null>(null)
+  const [directVideoAssets, setDirectVideoAssets] = useState<
+    VideoAssetRecord[]
+  >([])
+  const [directVideoSubmission, setDirectVideoSubmission] =
+    useState<DirectVideoSubmissionSnapshot | null>(null)
   const [contextMenu, setContextMenu] = useState<AssetContextMenuState>(null)
+  const videoTasks = useVideoGenerationStore((state) => state.tasks)
+  const videoRuntime = useVideoGenerationStore((state) => state.runtime)
+  const [directVideoTaskKey, setDirectVideoTaskKey] = useState(
+    () =>
+      latestDirectVideoTaskKey(
+        useVideoGenerationStore.getState().tasks,
+        useVideoGenerationStore.getState().runtime
+      ) ?? ''
+  )
+  const latestDirectTaskKey = useMemo(
+    () => latestDirectVideoTaskKey(videoTasks, videoRuntime) ?? '',
+    [videoRuntime, videoTasks]
+  )
+  useEffect(() => {
+    if (latestDirectTaskKey !== directVideoTaskKey) {
+      setDirectVideoTaskKey(latestDirectTaskKey)
+    }
+  }, [directVideoTaskKey, latestDirectTaskKey])
+
+  const directVideoRuntime = directVideoTaskKey
+    ? videoRuntime[directVideoTaskKey]
+    : undefined
+  const directVideoTask = directVideoTaskKey
+    ? videoTasks[directVideoTaskKey]
+    : undefined
+  const directVideoStatus =
+    directVideoRuntime?.status ?? (directVideoTask ? 'running' : 'idle')
+  const [directVideoNowMs, setDirectVideoNowMs] = useState(() => Date.now())
+
+  useEffect(() => {
+    if (directVideoStatus !== 'running') return
+    const interval = window.setInterval(
+      () => setDirectVideoNowMs(Date.now()),
+      1000
+    )
+    return () => window.clearInterval(interval)
+  }, [directVideoStatus])
+
+  const directVideoProgress = useMemo(() => {
+    if (directVideoStatus === 'succeeded') return 100
+    if (directVideoStatus !== 'running') return 0
+
+    const startedAt =
+      directVideoRuntime?.startedAt ?? directVideoTask?.startedAt
+    const estimateMs =
+      directVideoRuntime?.estimateMs ?? directVideoTask?.estimateMs
+    if (!startedAt || !estimateMs) return 0
+    return Math.min(
+      95,
+      Math.max(1, Math.round(((directVideoNowMs - startedAt) / estimateMs) * 100))
+    )
+  }, [
+    directVideoNowMs,
+    directVideoRuntime?.estimateMs,
+    directVideoRuntime?.startedAt,
+    directVideoStatus,
+    directVideoTask?.estimateMs,
+    directVideoTask?.startedAt,
+  ])
+  const directVideoAsset = directVideoRuntime?.asset
+
+  const pickDirectVideoReferences = useCallback(
+    async (
+      selectedReferences: readonly VideoReferenceAssetOption[]
+    ): Promise<VideoReferenceAssetOption[]> => {
+      const selected = await serviceHub.dialog().open({
+        multiple: true,
+        filters: DIRECT_VIDEO_REFERENCE_FILTERS.map((filter) => ({
+          name: filter.name,
+          extensions: [...filter.extensions],
+        })),
+      })
+      const sourcePaths = Array.isArray(selected)
+        ? selected
+        : selected
+          ? [selected]
+          : []
+      if (sourcePaths.length === 0) return []
+
+      const seenReferenceIds = new Set(
+        selectedReferences
+          .map((option) => option.reference.asset?.id)
+          .filter((id): id is string => Boolean(id))
+      )
+      const candidates: Array<{
+        path: string
+        kind: VideoReferenceKind
+        mimeType: string
+      }> = []
+      let unsupportedFormat = false
+      let sizeUnavailable = false
+      let fileTooLarge = false
+
+      for (const sourcePath of sourcePaths) {
+        const info = directVideoReferenceInfo(sourcePath)
+        if (!info) {
+          unsupportedFormat = true
+          continue
+        }
+        const referenceId = directVideoReferenceId(sourcePath)
+        if (seenReferenceIds.has(referenceId)) continue
+        let sizeBytes: number
+        try {
+          const stat = await fs.fileStat(sourcePath)
+          sizeBytes = Number(stat?.size)
+        } catch {
+          sizeUnavailable = true
+          continue
+        }
+        if (!Number.isFinite(sizeBytes) || sizeBytes <= 0) {
+          sizeUnavailable = true
+          continue
+        }
+        const sizeLimit = SEEDANCE_REFERENCE_SIZE_LIMIT_BYTES[info.kind]
+        const exceedsLimit =
+          info.kind === 'image'
+            ? sizeBytes >= sizeLimit
+            : sizeBytes > sizeLimit
+        if (exceedsLimit) {
+          fileTooLarge = true
+          continue
+        }
+        seenReferenceIds.add(referenceId)
+        candidates.push({ path: sourcePath, ...info })
+      }
+
+      if (unsupportedFormat) {
+        toast.error(
+          '部分素材格式不受支持，已跳过；支持 PNG/JPEG、MP4/MOV、MP3/WAV。'
+        )
+      }
+      if (sizeUnavailable) {
+        toast.error('无法读取部分素材的文件大小，已跳过。')
+      }
+      if (fileTooLarge) {
+        toast.error(
+          '部分素材超过上传限制，已跳过；图片需小于 30 MB，视频不超过 200 MB，音频不超过 15 MB。'
+        )
+      }
+
+      const options = await Promise.all(
+        candidates.map(async ({ path, kind, mimeType }) => {
+          const previewSrc = serviceHub.core().convertFileSrc(path)
+          const durationSeconds = await localMediaDurationSeconds(
+            kind,
+            previewSrc
+          )
+          return {
+            reference: {
+              kind,
+              role: 'reference' as const,
+              durationSeconds,
+              asset: {
+                id: directVideoReferenceId(path),
+                path,
+                fileName: localFileName(path),
+                mimeType,
+              },
+            },
+            displayName: localFileName(path),
+            previewSrc: kind === 'audio' ? undefined : previewSrc,
+            durationSeconds,
+          } satisfies VideoReferenceAssetOption
+        })
+      )
+
+      const counts = selectedReferences.reduce(
+        (current, option) => {
+          current[option.reference.kind] += 1
+          return current
+        },
+        { image: 0, video: 0, audio: 0 } satisfies Record<
+          VideoReferenceKind,
+          number
+        >
+      )
+      let total = selectedReferences.length
+      const knownDurations = selectedReferences.reduce(
+        (current, option) => {
+          const kind = option.reference.kind
+          if (
+            (kind === 'video' || kind === 'audio') &&
+            option.durationSeconds
+          ) {
+            current[kind] += option.durationSeconds
+          }
+          return current
+        },
+        { video: 0, audio: 0 }
+      )
+      let limitReached = false
+      let invalidDuration = false
+      let unknownDuration = false
+      const validOptions: VideoReferenceAssetOption[] = []
+      for (const option of options) {
+        const kind = option.reference.kind
+        const seconds = option.durationSeconds
+        if (kind === 'video' || kind === 'audio') {
+          if (seconds === undefined) {
+            unknownDuration = true
+            continue
+          }
+          if (
+            seconds < SEEDANCE_REFERENCE_DURATION_LIMITS.min ||
+            seconds > SEEDANCE_REFERENCE_DURATION_LIMITS.max ||
+            knownDurations[kind] + seconds >
+              SEEDANCE_REFERENCE_DURATION_LIMITS.totalPerKind
+          ) {
+            invalidDuration = true
+            continue
+          }
+        }
+
+        const kindLimit =
+          kind === 'image'
+            ? SEEDANCE_REFERENCE_LIMITS.image
+            : kind === 'video'
+              ? SEEDANCE_REFERENCE_LIMITS.video
+              : SEEDANCE_REFERENCE_LIMITS.audio
+        if (
+          total >= SEEDANCE_REFERENCE_LIMITS.total ||
+          counts[kind] >= kindLimit
+        ) {
+          limitReached = true
+          continue
+        }
+
+        counts[kind] += 1
+        total += 1
+        if (
+          (kind === 'video' || kind === 'audio') &&
+          seconds !== undefined
+        ) {
+          knownDurations[kind] += seconds
+        }
+        validOptions.push(option)
+      }
+      if (limitReached) {
+        toast.info('部分素材已达到 Seedance 参考数量上限，未继续添加。')
+      }
+      if (invalidDuration) {
+        toast.error(
+          '参考视频和音频单个需 2–15 秒，且各自总时长不能超过 15 秒。'
+        )
+      }
+      if (unknownDuration) {
+        toast.error(
+          '无法读取部分视频或音频的时长，已跳过；请确认文件可正常播放后重试。'
+        )
+      }
+      return validOptions
+    },
+    [serviceHub]
+  )
+
+  const loadDirectVideoPrice = useCallback(
+    (option: DirectVideoModelOption) => {
+      if (
+        !isBiyuanProvider(
+          option.provider.provider,
+          option.provider.base_url
+        )
+      ) {
+        return Promise.resolve(undefined)
+      }
+      return loadBiyuanVideoPricePerMillionCny(
+        serviceHub.providers().fetch(),
+        option.model.id
+      )
+    },
+    [serviceHub]
+  )
+
+  const generateDirectVideo = useCallback(
+    (input: DirectVideoGenerationInput) => {
+      const assetId = createId()
+      const taskKey = `${DIRECT_VIDEO_TASK_KEY_PREFIX}${assetId}`
+      const references = input.references ?? []
+      setDirectVideoTaskKey(taskKey)
+      setDirectVideoSubmission({
+        taskKey,
+        createdAt: Date.now(),
+        prompt: input.prompt,
+        provider: input.provider.provider,
+        model: input.model.id,
+        ratio: input.ratio,
+        resolution: input.resolution,
+        duration: input.duration,
+        references,
+      })
+      useVideoGenerationStore.getState().start(
+        {
+          key: taskKey,
+          assetId,
+          provider: input.provider,
+          model: input.model,
+          prompt: input.prompt,
+          ratio: input.ratio,
+          resolution: input.resolution,
+          duration: input.duration,
+          // Seedance does not expose an output-frame-rate control. Keep the
+          // legacy persisted field internal until the asset schema is migrated.
+          fps: 24,
+          generateAudio: input.generateAudio,
+          references,
+          sourceAssetIds: localReferenceAssetIds(references),
+          seedanceReferenceCapabilities: isBiyuanProvider(
+            input.provider.provider,
+            input.provider.base_url
+          )
+            ? BIYUAN_PUBLIC_SEEDANCE_REFERENCE_CAPABILITIES
+            : undefined,
+          assetKind: 'generated',
+        },
+        serviceHub.videoGeneration()
+      )
+    },
+    [serviceHub]
+  )
 
   const clearMediaHistorySearch = useCallback(() => {
     if (!search.media && !search.assetId && !search.videoId) return
@@ -4107,7 +4634,17 @@ function Images() {
   }, [navigate, search.assetId, search.media, search.videoId])
 
   useEffect(() => {
-    if (search.media === 'storyboard' || search.videoId) {
+    if (search.media === 'storyboard') {
+      setMediaMode('storyboard')
+      return
+    }
+
+    if (search.media === 'video') {
+      setMediaMode('video')
+      return
+    }
+
+    if (search.videoId) {
       setMediaMode('storyboard')
       return
     }
@@ -4154,6 +4691,44 @@ function Images() {
   }, [serviceHub, setAssets, t])
 
   useEffect(() => {
+    if (mediaMode !== 'video') return
+
+    let mounted = true
+    const loadDirectVideoAssets = () => {
+      void serviceHub
+        .videoGeneration()
+        .listVideoAssets()
+        .then((videos) => {
+          if (!mounted) return
+          setDirectVideoAssets(
+            videos
+              .filter((asset) => asset.assetKind === 'generated')
+              .sort(
+                (left, right) =>
+                  Date.parse(right.createdAt) - Date.parse(left.createdAt)
+              )
+          )
+        })
+        .catch((error) => {
+          console.error('Failed to load generated video assets:', error)
+        })
+    }
+
+    loadDirectVideoAssets()
+    window.addEventListener(
+      'biyan-media-history-updated',
+      loadDirectVideoAssets
+    )
+    return () => {
+      mounted = false
+      window.removeEventListener(
+        'biyan-media-history-updated',
+        loadDirectVideoAssets
+      )
+    }
+  }, [mediaMode, serviceHub])
+
+  useEffect(() => {
     if (!search.assetId) return
     const asset = assets.find(
       (item) => item.id === search.assetId && item.assetKind !== 'reference'
@@ -4162,8 +4737,14 @@ function Images() {
   }, [assets, search.assetId])
 
   useEffect(() => {
-    if (!search.videoId) return
+    if (!search.videoId) {
+      setPreviewVideoAsset(null)
+      return
+    }
     let mounted = true
+    setPreviewVideoAsset((current) =>
+      current?.id === search.videoId ? current : null
+    )
     serviceHub
       .videoGeneration()
       .listVideoAssets()
@@ -4174,6 +4755,7 @@ function Images() {
       })
       .catch((error) => {
         console.error('Failed to load video asset from history link:', error)
+        if (mounted) setPreviewVideoAsset(null)
       })
     return () => {
       mounted = false
@@ -4229,10 +4811,17 @@ function Images() {
               disabled: false,
             },
             {
+              value: 'video',
+              label: imageT(t, 'mode.video'),
+              Icon: Play,
+              badge: imageT(t, 'mode.newBadge'),
+              disabled: false,
+            },
+            {
               value: 'storyboard',
               label: imageT(t, 'mode.storyboardVideo'),
               Icon: Film,
-              badge: imageT(t, 'mode.newBadge'),
+              badge: undefined,
               disabled: false,
             },
             {
@@ -4595,6 +5184,132 @@ function Images() {
       asset.path ? serviceHub.core().convertFileSrc(asset.path) : '',
     [serviceHub]
   )
+  const videoAssetSrc = useCallback(
+    (asset: VideoAssetRecord) =>
+      asset.path
+        ? /^https?:/i.test(asset.path)
+          ? asset.path
+          : serviceHub.core().convertFileSrc(asset.path)
+        : '',
+    [serviceHub]
+  )
+  const videoReferenceSrc = useCallback(
+    (reference?: VideoGenerationReference) => {
+      const source = reference?.url?.trim() || reference?.asset?.path?.trim()
+      if (!source) return undefined
+      return /^(?:https?:|data:|blob:)/i.test(source)
+        ? source
+        : serviceHub.core().convertFileSrc(source)
+    },
+    [serviceHub]
+  )
+  const directVideoFeedItems = useMemo<DirectVideoFeedItem[]>(() => {
+    const items: DirectVideoFeedItem[] = []
+    const matchingSubmission =
+      directVideoSubmission?.taskKey === directVideoTaskKey
+        ? directVideoSubmission
+        : undefined
+    const currentImageReference =
+      matchingSubmission?.references.find(
+        (reference) => reference.kind === 'image'
+      ) ??
+      directVideoTask?.references?.find(
+        (reference) => reference.kind === 'image'
+      ) ??
+      directVideoAsset?.references?.find(
+        (reference) => reference.kind === 'image'
+      )
+    const currentSourceAsset = directVideoTask?.sourceAssetIds
+        ?.map((id) => resolveAssetById(id))
+        .find((asset): asset is ImageAssetRecord => Boolean(asset))
+    const hasCurrentItem = Boolean(
+      directVideoTask ||
+        directVideoRuntime ||
+        matchingSubmission ||
+        directVideoAsset
+    )
+
+    if (hasCurrentItem && directVideoStatus !== 'idle') {
+      items.push({
+        id: directVideoTaskKey || directVideoAsset?.id || 'direct-video-current',
+        prompt:
+          directVideoTask?.prompt ??
+          directVideoAsset?.prompt ??
+          matchingSubmission?.prompt ??
+          '视频生成任务',
+        provider:
+          directVideoTask?.providerName ??
+          directVideoAsset?.provider ??
+          matchingSubmission?.provider,
+        model:
+          directVideoTask?.modelId ??
+          directVideoAsset?.model ??
+          matchingSubmission?.model ??
+          'Seedance',
+        ratio:
+          directVideoTask?.ratio ??
+          directVideoAsset?.ratio ??
+          matchingSubmission?.ratio ??
+          '16:9',
+        resolution:
+          directVideoTask?.resolution ??
+          directVideoAsset?.resolution ??
+          matchingSubmission?.resolution ??
+          '720p',
+        duration:
+          directVideoTask?.duration ??
+          directVideoAsset?.duration ??
+          matchingSubmission?.duration ??
+          5,
+        status: directVideoStatus,
+        progress: directVideoProgress,
+        error: directVideoRuntime?.error,
+        asset: directVideoAsset,
+        sourceImageSrc:
+          videoReferenceSrc(currentImageReference) ??
+          (currentSourceAsset ? assetSrc(currentSourceAsset) : undefined),
+      })
+    }
+
+    directVideoAssets.forEach((asset) => {
+      if (asset.id === directVideoAsset?.id) return
+      const sourceImageReference = asset.references?.find(
+        (reference) => reference.kind === 'image'
+      )
+      const sourceAsset = asset.sourceAssetIds
+        .map((id) => resolveAssetById(id))
+        .find((candidate): candidate is ImageAssetRecord => Boolean(candidate))
+      items.push({
+        id: asset.id,
+        prompt: asset.prompt,
+        provider: asset.provider,
+        model: asset.model,
+        ratio: asset.ratio,
+        resolution: asset.resolution,
+        duration: asset.duration,
+        status: asset.status,
+        progress: asset.status === 'succeeded' ? 100 : undefined,
+        asset,
+        sourceImageSrc:
+          videoReferenceSrc(sourceImageReference) ??
+          (sourceAsset ? assetSrc(sourceAsset) : undefined),
+      })
+    })
+
+    return items
+  }, [
+    assetSrc,
+    directVideoAsset,
+    directVideoAssets,
+    directVideoProgress,
+    directVideoRuntime,
+    directVideoStatus,
+    directVideoSubmission,
+    directVideoTask,
+    directVideoTaskKey,
+    resolveAssetById,
+    videoReferenceSrc,
+  ])
   const previewVideoSrc = previewVideoAsset?.path
     ? /^https?:/i.test(previewVideoAsset.path)
       ? previewVideoAsset.path
@@ -5638,10 +6353,10 @@ function Images() {
     )
   }
 
-  if (imageModels.length === 0) {
+  if (imageModels.length === 0 && mediaMode !== 'video') {
     return (
       <div className="flex h-svh max-h-svh flex-col overflow-hidden">
-        <MediaHeader />
+        <MediaHeader>{mediaModeSwitch}</MediaHeader>
         <div className="flex flex-1 items-center justify-center px-6">
           <div className="max-w-md space-y-4 text-center">
             <div className="mx-auto flex size-12 items-center justify-center rounded-full bg-secondary">
@@ -5675,7 +6390,7 @@ function Images() {
           <div
             className={cn(
               'mx-auto px-[26px] pt-[18px]',
-              mediaMode === 'image'
+              mediaMode === 'image' || mediaMode === 'video'
                 ? 'max-w-[1040px] pb-[190px]'
                 : 'max-w-[1120px] pb-10'
             )}
@@ -5904,6 +6619,20 @@ function Images() {
                   </div>
                 )}
               </>
+            ) : mediaMode === 'video' ? (
+              <>
+                <h2 className="mt-1 mb-[14px] text-2xl font-semibold tracking-normal text-foreground">
+                  {imageT(t, 'today')}
+                </h2>
+                <DirectVideoFeed
+                  items={directVideoFeedItems}
+                  videoSrc={videoAssetSrc}
+                  onPreview={setPreviewVideoAsset}
+                  onCancel={(item) =>
+                    useVideoGenerationStore.getState().cancel(item.id)
+                  }
+                />
+              </>
             ) : (
               <StoryboardVideoMode
                 serviceHub={serviceHub}
@@ -5920,10 +6649,24 @@ function Images() {
           </div>
         </main>
 
-        {mediaMode === 'image' && (
+        {(mediaMode === 'image' || mediaMode === 'video') && (
           <div className="pointer-events-none absolute inset-x-0 bottom-0 z-20 bg-gradient-to-t from-[#fbfbfa] via-[#fbfbfa] to-transparent pb-5 pt-8 dark:from-background dark:via-background">
             <div className="pointer-events-auto mx-auto max-w-[1040px] px-[26px]">
-              {renderImageComposer({ pinned: true })}
+              {mediaMode === 'image' ? (
+                renderImageComposer({ pinned: true })
+              ) : (
+                <DirectVideoMode
+                  videoModels={videoModels}
+                  runtime={{
+                    status: directVideoStatus,
+                    progress: directVideoProgress,
+                    error: directVideoRuntime?.error,
+                  }}
+                  onPickReferences={pickDirectVideoReferences}
+                  loadPricePerMillionCny={loadDirectVideoPrice}
+                  onGenerate={generateDirectVideo}
+                />
+              )}
             </div>
           </div>
         )}

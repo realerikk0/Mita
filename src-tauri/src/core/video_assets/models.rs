@@ -8,6 +8,24 @@ pub struct VideoAssetProject {
     pub updated_at: i64,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct VideoReferenceAsset {
+    pub id: String,
+    pub path: String,
+    pub file_name: Option<String>,
+    pub mime_type: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct VideoGenerationReference {
+    pub kind: String,
+    pub role: Option<String>,
+    pub url: Option<String>,
+    pub asset: Option<VideoReferenceAsset>,
+}
+
 #[derive(Debug, Clone, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct SaveVideoAssetRequest {
@@ -21,6 +39,8 @@ pub struct SaveVideoAssetRequest {
     pub fps: u32,
     #[serde(default)]
     pub source_asset_ids: Vec<String>,
+    #[serde(default)]
+    pub references: Option<Vec<VideoGenerationReference>>,
     pub usage: Option<serde_json::Value>,
     pub status: String,
     pub mime_type: String,
@@ -46,6 +66,8 @@ pub struct VideoAssetRecord {
     pub duration: u32,
     pub fps: u32,
     pub source_asset_ids: Vec<String>,
+    #[serde(default)]
+    pub references: Option<Vec<VideoGenerationReference>>,
     pub created_at: String,
     pub usage: Option<serde_json::Value>,
     pub status: String,

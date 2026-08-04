@@ -17,10 +17,6 @@ import {
   type SearchIconHandle,
 } from '@/components/animated-icon/search'
 import {
-  FolderPlusIcon,
-  type FolderPlusIconHandle,
-} from '@/components/animated-icon/folder-plus'
-import {
   MessageCircleIcon,
   type MessageCircleIconHandle,
 } from '@/components/animated-icon/message-circle'
@@ -32,11 +28,8 @@ import {
   BotIcon,
   type BotIconHandle,
 } from '@/components/animated-icon/bot'
-import AddProjectDialog from '@/containers/dialogs/AddProjectDialog'
 import { SearchDialog } from '@/containers/dialogs/SearchDialog'
-import { useThreadManagement } from '@/hooks/useThreadManagement'
 import { useSearchDialog } from '@/hooks/useSearchDialog'
-import { useProjectDialog } from '@/hooks/useProjectDialog'
 import { PlatformShortcuts, ShortcutAction } from '@/lib/shortcuts'
 import { startNewAgentChat, startNewChat, startNewBiyanTeams } from '@/lib/new-chat'
 import { useModelProvider } from '@/hooks/useModelProvider'
@@ -46,7 +39,6 @@ import { providerHasRemoteApiKeys } from '@/lib/provider-api-keys'
 
 type AnimatedIconHandle =
   | SearchIconHandle
-  | FolderPlusIconHandle
   | MessageCircleIconHandle
   | SettingsIconHandle
   | BotIconHandle
@@ -67,7 +59,6 @@ type NavMainItem = {
 }
 
 export const getNavMainItems = (
-  onNewProject: () => void,
   onSearch: () => void,
   onNewChat: () => void,
   onBiyanTeams: () => void,
@@ -122,19 +113,6 @@ export const getNavMainItems = (
           <PlatformMetaKey />
         </Kbd>
         <Kbd className="bg-transparent size-3 uppercase">{PlatformShortcuts[ShortcutAction.NEW_AGENT_CHAT].key}</Kbd>
-      </KbdGroup>
-    ),
-  },
-  {
-    title: 'common:projects.new',
-    animatedIcon: FolderPlusIcon,
-    onClick: onNewProject,
-    shortcut: (
-      <KbdGroup className="ml-auto scale-90 gap-0">
-        <Kbd className="bg-transparent size-3">
-          <PlatformMetaKey />
-        </Kbd>
-        <Kbd className="bg-transparent size-3 uppercase">{PlatformShortcuts[ShortcutAction.NEW_PROJECT].key}</Kbd>
       </KbdGroup>
     ),
   },
@@ -200,7 +178,6 @@ export function NavMain() {
   const pathname = useRouterState({
     select: (state) => state.location.pathname,
   })
-  const { addFolder } = useThreadManagement()
   const { selectedProvider, getProviderByName } = useModelProvider()
   const currentProvider = selectedProvider
     ? getProviderByName(selectedProvider)
@@ -215,10 +192,7 @@ export function NavMain() {
     weeklyWindowLabel: t('common:providerBalance.subscription.weeklyCompact'),
   })
   const { open: searchOpen, setOpen: setSearchOpen } = useSearchDialog()
-  const { open: projectDialogOpen, setOpen: setProjectDialogOpen } =
-    useProjectDialog()
   const navMainItems = getNavMainItems(
-    () => setProjectDialogOpen(true),
     () => setSearchOpen(true),
     () => startNewChat(navigate),
     () => {
@@ -231,15 +205,6 @@ export function NavMain() {
       isActive: item.url ? pathname.startsWith(item.url) : item.isActive,
     }))
     .filter((item) => item.title !== 'common:newAgentChat')
-
-  const handleCreateProject = async (name: string, assistantId?: string) => {
-    const newProject = await addFolder(name, assistantId)
-    setProjectDialogOpen(false)
-    navigate({
-      to: '/project/$projectId',
-      params: { projectId: newProject.id },
-    })
-  }
 
   return (
     <>
@@ -291,13 +256,6 @@ export function NavMain() {
           )
         })}
       </SidebarMenu>
-
-      <AddProjectDialog
-        open={projectDialogOpen}
-        onOpenChange={setProjectDialogOpen}
-        editingKey={null}
-        onSave={handleCreateProject}
-      />
 
       <SearchDialog open={searchOpen} onOpenChange={setSearchOpen} />
     </>

@@ -18,15 +18,16 @@
   "appearance": "外观",
   "privacy": "隐私",
   "keyboardShortcuts": "快捷键",
-  "newChat": "新建聊天",
+  "newChat": "新对话",
   "newImage": "新建图片",
-  "newMedia": "新建媒体",
-  "newBiyanTeams": "新建彼岩小组",
+  "newMedia": "新媒体",
+  "newBiyanTeams": "新研究小组",
   "imageGeneration": {
     "today": "今天",
     "emptyState": "生成的图片会显示在这里。",
     "mode": {
       "image": "图片",
+      "video": "视频",
       "storyboardVideo": "故事板视频",
       "newBadge": "新",
       "longVideo": "长视频",
@@ -484,7 +485,7 @@
   },
   "projects": {
     "title": "项目",
-    "new": "新建项目",
+    "new": "新项目",
     "addProject": "添加项目",
     "editProject": "编辑项目",
     "deleteProject": "删除项目",
