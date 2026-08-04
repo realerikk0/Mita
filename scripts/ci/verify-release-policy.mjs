@@ -218,7 +218,9 @@ const releaseEnvironmentWorkflows = {
     source: read('.github/workflows/deploy-updater-router.yml'),
   },
   '.github/workflows/biyan-upgrade-smoke.yml': {
-    jobName: 'attest',
+    ...TRUSTED_SENSITIVE_UPDATER_WORKFLOW_CONTRACTS[
+      '.github/workflows/biyan-upgrade-smoke.yml'
+    ],
     source: read('.github/workflows/biyan-upgrade-smoke.yml'),
   },
   '.github/workflows/promote-desktop-update.yml': {

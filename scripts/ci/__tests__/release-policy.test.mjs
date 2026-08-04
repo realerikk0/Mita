@@ -45,6 +45,17 @@ const withLineEndings = (source, lineEnding) =>
   normalizeLineEndings(source).replaceAll('\n', lineEnding)
 
 const runtimeOnly = { checkProduct: false, checkRuntime: true }
+const TRACKED_TRAIN_POLICY = Object.freeze(
+  JSON.parse(
+    fs.readFileSync('scripts/ci/release-train-policy.json', 'utf8')
+  )
+)
+const TRACKED_TERMINAL = Object.freeze(
+  TRACKED_TRAIN_POLICY.activeTerminalRelease
+)
+const TRACKED_PREVIOUS_TERMINAL = Object.freeze(
+  TRACKED_TRAIN_POLICY.supersededTerminalReleases.at(-1)
+)
 
 function historicalActiveTrainPolicy() {
   const policy = JSON.parse(
@@ -317,29 +328,26 @@ test('formal release identity switches fail-closed to the exact pinned terminal 
     fs.readFileSync('scripts/ci/release-train-policy.json', 'utf8')
   )
   policy.activeTerminalRelease = {
-    tag: 'v0.6.649',
-    version: '0.6.649',
-    migrationPhase: 'C',
-    dataSchema: 3,
+    ...TRACKED_TERMINAL,
     sourceCommit: 'a'.repeat(40),
   }
 
   assert.deepEqual(
     validateActiveReleaseIdentity({
-      version: '0.6.649',
+      version: TRACKED_TERMINAL.version,
       migrationPhase: 'C',
       dataSchema: 3,
-      cargoLockVersion: '0.6.649',
+      cargoLockVersion: TRACKED_TERMINAL.version,
       trainPolicy: policy,
     }),
     []
   )
   assert.ok(
     validateActiveReleaseIdentity({
-      version: '0.6.645',
+      version: TRACKED_PREVIOUS_TERMINAL.version,
       migrationPhase: 'C',
       dataSchema: 3,
-      cargoLockVersion: '0.6.645',
+      cargoLockVersion: TRACKED_PREVIOUS_TERMINAL.version,
       trainPolicy: policy,
     }).some((failure) => failure.includes('active terminal release'))
   )
@@ -350,13 +358,11 @@ test('release train and terminal policy is unique, contiguous, and fail-closed',
     fs.readFileSync('scripts/ci/release-train-policy.json', 'utf8')
   )
   assert.deepEqual(validateReleaseTrainPolicy(policy), [])
-  assert.deepEqual(policy.activeTerminalRelease, {
-    tag: 'v0.6.649',
-    version: '0.6.649',
-    migrationPhase: 'C',
-    dataSchema: 3,
-    sourceCommit: 'cc7bd75e40da7e32ea93433ed7311fb7ddbab379',
-  })
+  assert.deepEqual(policy.activeTerminalRelease, TRACKED_TERMINAL)
+  assert.deepEqual(
+    policy.supersededTerminalReleases.at(-1),
+    TRACKED_PREVIOUS_TERMINAL
+  )
 
   const twoActive = structuredClone(policy)
   twoActive.trains[0].status = 'active'
@@ -378,7 +384,7 @@ test('release train and terminal policy is unique, contiguous, and fail-closed',
   assert.deepEqual(validateReleaseTrainPolicy(historical), [])
 
   const phaseGap = structuredClone(policy)
-  phaseGap.trains.at(-1).releases.B.version = '0.6.650'
+  phaseGap.trains.at(-1).releases.B.version = TRACKED_TERMINAL.version
   assert.ok(
     validateReleaseTrainPolicy(phaseGap).some((failure) =>
       failure.includes('versions must be contiguous')
@@ -443,20 +449,44 @@ test('release train and terminal policy is unique, contiguous, and fail-closed',
 
   const pinned = structuredClone(policy)
   pinned.activeTerminalRelease = {
-    tag: 'v0.6.649',
-    version: '0.6.649',
-    migrationPhase: 'C',
-    dataSchema: 3,
+    ...TRACKED_TERMINAL,
     sourceCommit: 'a'.repeat(40),
   }
   assert.deepEqual(validateReleaseTrainPolicy(pinned), [])
 
+  const rolledForward = structuredClone(pinned)
+  rolledForward.supersededTerminalReleases.push({
+    ...rolledForward.activeTerminalRelease,
+    status: 'published-superseded',
+  })
+  rolledForward.activeTerminalRelease = {
+    tag: `v${TRACKED_TERMINAL.version.replace(
+      /(\d+)$/,
+      (patch) => String(Number(patch) + 1)
+    )}`,
+    version: TRACKED_TERMINAL.version.replace(
+      /(\d+)$/,
+      (patch) => String(Number(patch) + 1)
+    ),
+    migrationPhase: 'C',
+    dataSchema: 3,
+    sourceCommit: 'b'.repeat(40),
+  }
+  assert.deepEqual(validateReleaseTrainPolicy(rolledForward), [])
+
   for (const [label, mutate] of [
     [
-      'wrong version',
+      'reused terminal source',
       (value) => {
-        value.activeTerminalRelease.version = '0.6.650'
-        value.activeTerminalRelease.tag = 'v0.6.650'
+        value.activeTerminalRelease.sourceCommit =
+          value.supersededTerminalReleases.at(-1).sourceCommit
+      },
+    ],
+    [
+      'non-contiguous version',
+      (value) => {
+        value.activeTerminalRelease.version = '0.6.652'
+        value.activeTerminalRelease.tag = 'v0.6.652'
       },
     ],
     [
@@ -794,13 +824,19 @@ const candidateReleasePin = `      - env:
 const formalCandidateWorkflow = fs
   .readFileSync('.github/workflows/desktop-release.yml', 'utf8')
   .replace(/\r\n?/g, '\n')
+const formalPreflightStart = formalCandidateWorkflow.indexOf('  preflight:\n')
 const formalTagCutStart = formalCandidateWorkflow.indexOf('  tag-cut:\n')
 const formalTagCutEnd = formalCandidateWorkflow.indexOf(
-  '\n  preflight:\n',
+  '\n  quality-gate:\n',
   formalTagCutStart
 )
+assert.notEqual(formalPreflightStart, -1)
 assert.notEqual(formalTagCutStart, -1)
 assert.notEqual(formalTagCutEnd, -1)
+const exactPreflightFixture = formalCandidateWorkflow.slice(
+  formalPreflightStart,
+  formalTagCutStart
+)
 const exactTagCutFixture = formalCandidateWorkflow.slice(
   formalTagCutStart,
   formalTagCutEnd
@@ -818,51 +854,9 @@ concurrency:
   group: desktop-candidate-\${{ inputs.version }}
   cancel-in-progress: false
 jobs:
-${exactTagCutFixture}
-  preflight:
-    needs: tag-cut
-    steps:
-      - uses: actions/checkout@v4
-        with:
-          ref: \${{ needs.tag-cut.outputs.trusted_main_commit }}
-          path: harness
-          persist-credentials: false
-      - uses: actions/checkout@v4
-        with:
-          ref: \${{ needs.tag-cut.outputs.tag }}
-          path: target
-          persist-credentials: false
-      - id: release
-        env:
-          RELEASE_TAG: \${{ needs.tag-cut.outputs.tag }}
-          EXPECTED_SOURCE: \${{ needs.tag-cut.outputs.source_commit }}
-          EXPECTED_MAIN: \${{ needs.tag-cut.outputs.trusted_main_commit }}
-        run: |
-          checkout_head="$(git -C harness rev-parse HEAD)"
-          live_main="$(git -C harness rev-parse refs/remotes/origin/mita-main)"
-          if [ "$checkout_head" != "$EXPECTED_MAIN" ] || [ "$live_main" != "$EXPECTED_MAIN" ]; then exit 1; fi
-          source_commit="$(git -C harness rev-list -n 1 "refs/tags/$RELEASE_TAG")"
-          test "$source_commit" = "$EXPECTED_SOURCE"
-          test "$source_commit" = "$(git -C target rev-parse HEAD)"
-          echo "trusted_main_commit=$live_main"
-      - run: git -C harness merge-base --is-ancestor "$source_commit" refs/remotes/origin/mita-main
-      - env:
-          RELEASE_TAG: \${{ steps.release.outputs.tag }}
-          SOURCE_COMMIT: \${{ steps.release.outputs.source_commit }}
-          TRUSTED_MAIN: \${{ steps.release.outputs.trusted_main_commit }}
-        run: |
-          node harness/scripts/ci/verify-release-target.mjs \
-            --harness-root harness \
-            --release-tag "$RELEASE_TAG" \
-            --target-root target \
-            --source-commit "$SOURCE_COMMIT" \
-            --trusted-main "$TRUSTED_MAIN"
-      - working-directory: harness
-        run: |
-          node --test scripts/ci/__tests__/release-policy.test.mjs
-          node --test scripts/ci/__tests__/verify-release-target.test.mjs
+${exactPreflightFixture}${exactTagCutFixture}
   quality-gate:
-    needs: preflight
+    needs: [preflight, tag-cut]
     steps:
       - run: make test
       - run: node --test scripts/updater/__tests__/updater.test.mjs
@@ -1221,15 +1215,15 @@ test('candidate workflow gates every platform build on exact-tag tests', () => {
         'release-train-policy.json?ref=$live_main',
         'unreviewed-release-policy.json?ref=$live_main'
       ),
-      'terminal source binding',
+      'active terminal source from protected live-main policy',
     ],
     [
       'superseded train is reactivated',
-      candidateWorkflow.replace(
+      candidateWorkflow.replaceAll(
         '.activeTrain == null',
         '.activeTrain == "closure-20260724"'
       ),
-      'terminal source binding',
+      'exact active C/3 terminal source binding from protected live-main policy',
     ],
     [
       'tag-cut gains checkout action',
@@ -1243,7 +1237,9 @@ test('candidate workflow gates every platform build on exact-tag tests', () => {
     ],
     [
       'tag-cut swaps in a repository secret',
-      candidateWorkflow.replace(
+      replaceInNamedStep(
+        candidateWorkflow,
+        'Cut or verify exact lightweight release tag',
         'GH_TOKEN: ${{ github.token }}',
         'GH_TOKEN: ${{ secrets.RELEASE_PAT }}'
       ),
@@ -1255,10 +1251,12 @@ test('candidate workflow gates every platform build on exact-tag tests', () => {
         `  tag-cut:
     name: Cut or verify exact immutable release tag
     runs-on: ubuntu-latest
+    needs: preflight
     environment: release-distribution`,
         `  tag-cut:
     name: Cut or verify exact immutable release tag
-    runs-on: ubuntu-latest`
+    runs-on: ubuntu-latest
+    needs: preflight`
       ),
       'contents: write release-distribution permission domain',
     ],
@@ -1268,12 +1266,12 @@ test('candidate workflow gates every platform build on exact-tag tests', () => {
       'existing, absent-and-create, and unexpected REST tag states',
     ],
     [
-      'preflight bypasses tag-cut',
+      'tag-cut bypasses preflight',
       candidateWorkflow.replace(
-        '  preflight:\n    needs: tag-cut',
-        '  preflight:'
+        '    needs: preflight\n    environment: release-distribution',
+        '    environment: release-distribution'
       ),
-      'preflight must depend on tag-cut',
+      'tag-cut must depend on read-only preflight',
     ],
   ]) {
     assert.ok(
@@ -1295,12 +1293,12 @@ test('candidate workflow gates every platform build on exact-tag tests', () => {
   )
 
   const untrustedHarness = candidateWorkflow.replace(
-    'ref: ${{ needs.tag-cut.outputs.trusted_main_commit }}',
-    'ref: ${{ needs.tag-cut.outputs.tag }}'
+    'ref: ${{ steps.policy.outputs.trusted_main_commit }}',
+    'ref: ${{ steps.policy.outputs.source_commit }}'
   )
   assert.ok(
     validateCandidateWorkflow(untrustedHarness).some((failure) =>
-      failure.includes('exact protected-main harness')
+      failure.includes('resolved protected-main harness')
     )
   )
 
@@ -1380,7 +1378,7 @@ test('candidate workflow gates every platform build on exact-tag tests', () => {
     )
   )
 
-  const unsafeManualRef = candidateWorkflow.replace(
+  const unsafeManualRef = candidateWorkflow.replaceAll(
     '[ "$WORKFLOW_REF" != "refs/heads/mita-main" ]',
     '[ "$WORKFLOW_REF" != "refs/heads/release-work" ]'
   )
@@ -1390,7 +1388,7 @@ test('candidate workflow gates every platform build on exact-tag tests', () => {
     )
   )
 
-  const advisoryManualRef = candidateWorkflow.replace(
+  const advisoryManualRef = candidateWorkflow.replaceAll(
     `          if [ "$WORKFLOW_REF" != "refs/heads/mita-main" ]; then
             echo "Candidate dispatch must use protected mita-main" >&2
             exit 1
@@ -3092,7 +3090,9 @@ test('formal build, release, and updater jobs share the release-distribution env
       ),
     },
     '.github/workflows/biyan-upgrade-smoke.yml': {
-      jobName: 'attest',
+      ...TRUSTED_SENSITIVE_UPDATER_WORKFLOW_CONTRACTS[
+        '.github/workflows/biyan-upgrade-smoke.yml'
+      ],
       source: fs.readFileSync(
         '.github/workflows/biyan-upgrade-smoke.yml',
         'utf8'
@@ -3753,7 +3753,7 @@ jobs:
             TAURI_SIGNING_PRIVATE_KEY_PASSWORD=preflight-only \\
             yarn tauri signer sign "$signer_probe/payload.txt"
           test -s "$signer_probe/payload.txt.sig"
-      - run: node scripts/ci/verify-release-policy.mjs
+      - run: node scripts/ci/verify-release-policy.mjs --require-active
       - run: node --test scripts/ci/__tests__/candidate-content-policy.test.mjs
       - run: node --test scripts/ci/__tests__/release-policy.test.mjs
       - run: node --test scripts/ci/__tests__/verify-release-target.test.mjs
@@ -3769,10 +3769,12 @@ jobs:
           node --test scripts/updater/__tests__/legacy-manifest-policy.test.mjs
           node --test scripts/updater/__tests__/legacy-pause-transaction.test.mjs
           node --test scripts/updater/__tests__/promotion-transaction.test.mjs
+          node --test scripts/updater/__tests__/recovery-qualification.test.mjs
           node --test scripts/updater/__tests__/updater.test.mjs
           python3 -m unittest \\
             autoqa/tests/test_migration_runner.py \\
-            scripts/updater/__tests__/test_prepare_a_canary_inputs.py
+            scripts/updater/__tests__/test_prepare_a_canary_inputs.py \\
+            scripts/updater/__tests__/test_prepare_recovery_qualification_inputs.py
       - run: node --test scripts/release-distribution/__tests__/bootstrap-biyan-download-aliases.test.mjs
       - run: node --test scripts/release-distribution/__tests__/release-distribution.test.mjs
       - name: Exercise unprivileged qualification verifier boundary
@@ -3889,6 +3891,14 @@ jobs:
   ].join('\n')
   assert.deepEqual(validateCiWorkflow(workflow), [])
   assert.deepEqual(validateCiWorkflow(withLineEndings(workflow, '\r\n')), [])
+  assert.ok(
+    validateCiWorkflow(
+      workflow.replace(
+        'node scripts/ci/verify-release-policy.mjs --require-active',
+        'node scripts/ci/verify-release-policy.mjs'
+      )
+    ).some((failure) => failure.includes('--require-active'))
+  )
   assert.deepEqual(
     validateCiWorkflow(
       workflow.replace('\n  quick-pr-check:', '\n\n\n  quick-pr-check:')
@@ -4408,6 +4418,7 @@ jobs:
     'node --test scripts/updater/__tests__/legacy-manifest-policy.test.mjs',
     'node --test scripts/updater/__tests__/legacy-pause-transaction.test.mjs',
     'node --test scripts/updater/__tests__/promotion-transaction.test.mjs',
+    'node --test scripts/updater/__tests__/recovery-qualification.test.mjs',
     'node --test scripts/updater/__tests__/updater.test.mjs',
     'node --test scripts/ci/__tests__/qualification-impact.test.mjs',
     'node --test scripts/ci/__tests__/run-untrusted-qualification-verifier.test.mjs',
@@ -4440,6 +4451,7 @@ jobs:
   for (const testPath of [
     'autoqa/tests/test_migration_runner.py',
     'scripts/updater/__tests__/test_prepare_a_canary_inputs.py',
+    'scripts/updater/__tests__/test_prepare_recovery_qualification_inputs.py',
   ]) {
     const missingPythonContract = workflow.replace(
       testPath,
@@ -4707,10 +4719,12 @@ jobs:
           node --test scripts/updater/__tests__/legacy-manifest-policy.test.mjs
           node --test scripts/updater/__tests__/legacy-pause-transaction.test.mjs
           node --test scripts/updater/__tests__/promotion-transaction.test.mjs
+          node --test scripts/updater/__tests__/recovery-qualification.test.mjs
           node --test scripts/updater/__tests__/updater.test.mjs
           python3 -m unittest \\
             autoqa/tests/test_migration_runner.py \\
-            scripts/updater/__tests__/test_prepare_a_canary_inputs.py
+            scripts/updater/__tests__/test_prepare_a_canary_inputs.py \\
+            scripts/updater/__tests__/test_prepare_recovery_qualification_inputs.py
       - working-directory: target
         run: |
           test_files=(

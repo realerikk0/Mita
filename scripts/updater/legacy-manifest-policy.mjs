@@ -121,6 +121,26 @@ function sha256(bytes) {
   return createHash('sha256').update(bytes).digest('hex')
 }
 
+function parseStableVersion(value) {
+  const match =
+    typeof value === 'string'
+      ? /^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$/.exec(value)
+      : null
+  return match ? match.slice(1).map(Number) : null
+}
+
+function isImmediatePatch(previous, current) {
+  const before = parseStableVersion(previous)
+  const after = parseStableVersion(current)
+  return Boolean(
+    before
+    && after
+    && before[0] === after[0]
+    && before[1] === after[1]
+    && before[2] + 1 === after[2],
+  )
+}
+
 function activeTrainReleases(trainPolicy = releaseTrainPolicy) {
   const active = trainPolicy?.trains?.find(
     (train) =>
@@ -132,6 +152,107 @@ function activeTrainReleases(trainPolicy = releaseTrainPolicy) {
     )
   }
   return active.releases
+}
+
+function validateDirectCRecovery({
+  candidate,
+  currentPolicy,
+  direct,
+  effectivePhase,
+  nextPolicy,
+  release,
+  trainPolicy,
+}) {
+  if (currentPolicy.deploymentMode !== 'direct-c') {
+    throw new Error(
+      'DIRECT_C recovery requires an already deployed direct-c policy',
+    )
+  }
+  const history = trainPolicy?.supersededTerminalReleases
+  if (!Array.isArray(history) || history.length < 4) {
+    throw new Error(
+      'DIRECT_C recovery requires contiguous published terminal history',
+    )
+  }
+  const directBaseline = history.find(
+    (entry) => entry?.version === direct.approvedNext.version,
+  )
+  if (
+    !isPlainObject(directBaseline)
+    || directBaseline.tag !== direct.approvedNext.tag
+    || directBaseline.sourceCommit !== direct.approvedNext.sourceCommit
+    || directBaseline.migrationPhase !== 'C'
+    || directBaseline.dataSchema !== 3
+    || directBaseline.status !== 'published-superseded'
+  ) {
+    throw new Error(
+      `DIRECT_C recovery must preserve the exact published ${direct.approvedNext.tag} baseline`,
+    )
+  }
+
+  const previous = history.at(-1)
+  assertPlainObject(previous, 'Latest superseded terminal release')
+  const active = trainPolicy?.activeTerminalRelease
+  assertPlainObject(active, 'Active terminal release')
+  if (
+    active.tag !== `v${active.version}`
+    || active.migrationPhase !== 'C'
+    || active.dataSchema !== 3
+    || !/^[0-9a-f]{40}$/.test(active.sourceCommit ?? '')
+    || !isImmediatePatch(previous.version, active.version)
+  ) {
+    throw new Error(
+      'DIRECT_C recovery active terminal must be the next exact C/3 patch after published history',
+    )
+  }
+  if (
+    candidate.version !== active.version
+    || candidate.tag !== active.tag
+    || candidate.sourceCommit !== active.sourceCommit
+    || candidate.migrationPhase !== active.migrationPhase
+    || candidate.dataSchema !== active.dataSchema
+  ) {
+    throw new Error(
+      'DIRECT_C recovery candidate must match the exact active terminal release',
+    )
+  }
+
+  const previousRelease = currentPolicy.releases?.[previous.version]
+  if (
+    currentPolicy.currentVersion !== previous.version
+    || currentPolicy.legacyBridgeVersion !== previous.version
+    || !isPlainObject(previousRelease)
+    || previousRelease.tag !== previous.tag
+    || (previousRelease.effectivePhase ?? previousRelease.phase) !== 'C'
+  ) {
+    throw new Error(
+      'DIRECT_C recovery current policy must match the latest published C terminal',
+    )
+  }
+  const transition = nextPolicy.transitions?.[previous.version]
+  if (
+    nextPolicy.currentVersion !== candidate.version
+    || nextPolicy.legacyBridgeVersion !== candidate.version
+    || release.phase !== 'RECOVERY'
+    || effectivePhase !== 'C'
+    || release.tag !== candidate.tag
+    || release.manifestKey !== candidate.manifestKey
+    || release.manifestSha256 !== candidate.manifestSha256
+    || !isPlainObject(transition)
+    || transition.to !== candidate.version
+    || transition.phase !== 'RECOVERY'
+    || transition.rollout !== 100
+    || transition.manifestKey !== candidate.manifestKey
+  ) {
+    throw new Error(
+      'DIRECT_C recovery must atomically publish the active terminal to the Router and both legacy entrypoints',
+    )
+  }
+  return {
+    activeAVersion: candidate.version,
+    effectivePhase,
+    trackedState: 'direct-c-recovery',
+  }
 }
 
 export function validateLegacyBridgePolicy(
@@ -264,6 +385,12 @@ export function validatePromotionLegacyBridge({
   if (!['A', 'B', 'C'].includes(effectivePhase)) {
     throw new Error(`Promotion effective phase must be A, B, or C; found ${effectivePhase}`)
   }
+  if (
+    currentPolicy.deploymentMode === 'direct-c'
+    && nextPolicy.deploymentMode !== 'direct-c'
+  ) {
+    throw new Error('DIRECT_C recovery cannot change deployment mode')
+  }
   if (nextPolicy.deploymentMode === 'direct-c') {
     const direct = validateDirectCTransitionPolicy(
       directTransitionPolicy ?? loadDirectCTransitionPolicy(),
@@ -276,6 +403,22 @@ export function validatePromotionLegacyBridge({
     ) {
       throw new Error(
         'DIRECT_C requires the tracked legacy bridge to remain at exact pre-a current',
+      )
+    }
+    if (release.phase === 'RECOVERY') {
+      return validateDirectCRecovery({
+        candidate,
+        currentPolicy,
+        direct,
+        effectivePhase,
+        nextPolicy,
+        release,
+        trainPolicy,
+      })
+    }
+    if (release.phase !== 'DIRECT_C') {
+      throw new Error(
+        'Direct-C deployment accepts only the initial DIRECT_C or a terminal RECOVERY',
       )
     }
     validateApprovedDirectCTransition({

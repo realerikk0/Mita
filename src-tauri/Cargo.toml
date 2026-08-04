@@ -1,6 +1,6 @@
 [package]
 name = "Biyan"
-version = "0.6.649"
+version = "0.6.650"
 description = "Biyan remote AI desktop client."
 authors = ["Jingxing"]
 license = "MIT"

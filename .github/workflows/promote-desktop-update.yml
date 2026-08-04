@@ -133,11 +133,12 @@ jobs:
           SMOKE_SHA256: ${{ inputs.smoke_evidence_sha256 }}
           HEALTH_SHA256: ${{ inputs.health_evidence_sha256 }}
           PHASE: ${{ inputs.phase }}
+          FROM_VERSION: ${{ inputs.from_version }}
         run: |
           set -euo pipefail
-          [[ "$SMOKE_RUN_ID" =~ ^[0-9]+$ ]]
+          [[ "$SMOKE_RUN_ID" =~ ^[1-9][0-9]*$ ]]
           gh run view "$SMOKE_RUN_ID" \
-            --json conclusion,headSha,workflowName,url > dist/smoke-run.json
+            --json attempt,conclusion,headSha,workflowName,url > dist/smoke-run.json
           test "$(jq -r .conclusion dist/smoke-run.json)" = "success"
           if [ "$PHASE" = "DIRECT_C" ]; then
             test "$(jq -r .workflowName dist/smoke-run.json)" = \
@@ -145,21 +146,16 @@ jobs:
             git merge-base --is-ancestor \
               "$(jq -r .headSha dist/smoke-run.json)" \
               refs/remotes/origin/mita-main
-          else
-            test "$(jq -r .workflowName dist/smoke-run.json)" = \
-              "Biyan Upgrade Smoke"
-            test "$(jq -r .headSha dist/smoke-run.json)" = \
-              "$(jq -r .sourceCommit dist/candidate/candidate.json)"
           fi
-          mkdir -p dist/evidence
-          gh run download "$SMOKE_RUN_ID" --name biyan-promotion-evidence --dir dist/evidence
-          node scripts/updater/verify-promotion-evidence.mjs \
-            --smoke dist/evidence/upgrade-smoke.json \
-            --smoke-sha256 "$SMOKE_SHA256" \
-            --health dist/evidence/rollout-health.json \
-              --health-sha256 "$HEALTH_SHA256" \
-              --output-dir dist/state
           if [ "$PHASE" = "DIRECT_C" ]; then
+            mkdir -p dist/evidence
+            gh run download "$SMOKE_RUN_ID" --name biyan-promotion-evidence --dir dist/evidence
+            node scripts/updater/verify-promotion-evidence.mjs \
+              --smoke dist/evidence/upgrade-smoke.json \
+              --smoke-sha256 "$SMOKE_SHA256" \
+              --health dist/evidence/rollout-health.json \
+                --health-sha256 "$HEALTH_SHA256" \
+                --output-dir dist/state
             node scripts/updater/direct-qualification-evidence.mjs validate-policy \
               --policy scripts/updater/direct-qualification-policy.json
             test "$(jq -er .candidate.manifestSha256 \
@@ -307,6 +303,221 @@ jobs:
                 and .harnessSha256 == $smoke[0].harnessSha256
                 and .qualificationMatrixSha256 ==
                   $smoke[0].qualificationMatrixSha256
+              ' dist/state/verified-health.json >/dev/null
+          else
+            test "$(jq -r .workflowName dist/smoke-run.json)" = \
+              "Biyan Upgrade Smoke"
+            smoke_head="$(jq -er .headSha dist/smoke-run.json)"
+            smoke_attempt="$(jq -er '.attempt | select(type == "number" and . > 0)' \
+              dist/smoke-run.json)"
+            candidate_source="$(jq -er .sourceCommit dist/candidate/candidate.json)"
+            git merge-base --is-ancestor "$candidate_source" "$smoke_head"
+            git merge-base --is-ancestor "$smoke_head" refs/remotes/origin/mita-main
+
+            recovery_harness_paths=(
+              .github/workflows/biyan-upgrade-smoke.yml
+              autoqa/migration_runner.py
+              scripts/ci/release-train-policy.json
+              scripts/updater/prepare-recovery-qualification-inputs.py
+              scripts/updater/recovery-qualification-evidence.mjs
+            )
+            if ! git diff --quiet "$smoke_head" refs/remotes/origin/mita-main -- \
+              "${recovery_harness_paths[@]}"; then
+              echo "RECOVERY qualification harness drifted after the smoke run" >&2
+              exit 1
+            fi
+
+            recovery_artifact="biyan-promotion-evidence-${SMOKE_RUN_ID}-${smoke_attempt}"
+            gh api --paginate --slurp \
+              "repos/${GITHUB_REPOSITORY}/actions/runs/${SMOKE_RUN_ID}/artifacts?per_page=100" \
+              > dist/smoke-artifacts.json
+            jq -e \
+              --arg name "$recovery_artifact" \
+              --argjson run "$SMOKE_RUN_ID" \
+              --arg head "$smoke_head" '
+                [.[].artifacts[]? | select(.name == $name)] as $matches
+                | ($matches | length) == 1
+                and ($matches[0].expired == false)
+                and ($matches[0].id | type == "number" and . > 0)
+                and ($matches[0].size_in_bytes | type == "number" and . > 0)
+                and ($matches[0].digest | test("^sha256:[0-9a-f]{64}$"))
+                and ($matches[0].workflow_run.id == $run)
+                and ($matches[0].workflow_run.head_sha == $head)
+              ' dist/smoke-artifacts.json >/dev/null
+
+            mkdir -p dist/evidence
+            gh run download "$SMOKE_RUN_ID" --name "$recovery_artifact" --dir dist/evidence
+            node scripts/updater/verify-promotion-evidence.mjs \
+              --smoke dist/evidence/upgrade-smoke.json \
+              --smoke-sha256 "$SMOKE_SHA256" \
+              --health dist/evidence/rollout-health.json \
+                --health-sha256 "$HEALTH_SHA256" \
+                --output-dir dist/state
+            train_policy="scripts/ci/release-train-policy.json"
+            train_source_tag="$(jq -er \
+              '.supersededTerminalReleases[-1].tag' "$train_policy")"
+            train_source_commit="$(jq -er \
+              '.supersededTerminalReleases[-1].sourceCommit' "$train_policy")"
+            test "$(jq -er \
+              '.supersededTerminalReleases[-1].status' "$train_policy")" = \
+              "published-superseded"
+            test "$(jq -er \
+              '.supersededTerminalReleases[-1].version' "$train_policy")" = \
+              "$FROM_VERSION"
+            jq -e \
+              --arg tag "$(jq -er .tag dist/candidate/candidate.json)" \
+              --arg version "$(jq -er .version dist/candidate/candidate.json)" \
+              --arg commit "$candidate_source" '
+                .schema == 4
+                and .activeTrain == null
+                and .activeTerminalRelease.tag == $tag
+                and .activeTerminalRelease.version == $version
+                and .activeTerminalRelease.sourceCommit == $commit
+                and .activeTerminalRelease.migrationPhase == "C"
+                and .activeTerminalRelease.dataSchema == 3
+              ' "$train_policy" >/dev/null
+            jq -e \
+              --argjson run "$SMOKE_RUN_ID" \
+              --argjson attempt "$smoke_attempt" \
+              --arg head "$smoke_head" \
+              --arg from "$FROM_VERSION" \
+              --arg source_tag "$train_source_tag" \
+              --arg source_commit "$train_source_commit" \
+              --arg tag "$(jq -er .tag dist/candidate/candidate.json)" \
+              --arg version "$(jq -er .version dist/candidate/candidate.json)" \
+              --arg commit "$candidate_source" \
+              --arg manifest "$(jq -er .manifestSha256 dist/candidate/candidate.json)" '
+                .status == "passed"
+                and .observationScope == "github-native-recovery-qualification"
+                and .deploymentMode == "recovery"
+                and .sourceVersion == $from
+                and .sourceVersions == [$from]
+                and .sourceTag == $source_tag
+                and .sourceReleaseCommit == $source_commit
+                and (.sourceManifestSha256 | test("^[0-9a-f]{64}$"))
+                and .candidateTag == $tag
+                and .candidateVersion == $version
+                and .sourceCommit == $commit
+                and .candidateManifestSha256 == $manifest
+                and .platforms == ["windows", "macos", "linux"]
+                and .scenarios == ["source-to-recovery"]
+                and .sampleSize == 3
+                and .attempts == 3
+                and .passedAttempts == 3
+                and .failedAttempts == 0
+                and (.contractSha256 | test("^[0-9a-f]{64}$"))
+                and (.harnessSha256 | test("^[0-9a-f]{64}$"))
+                and (.qualificationMatrixSha256 | test("^[0-9a-f]{64}$"))
+                and .workflow.name == "Biyan Upgrade Smoke"
+                and .workflow.path == ".github/workflows/biyan-upgrade-smoke.yml"
+                and .workflow.runId == $run
+                and .workflow.runAttempt == $attempt
+                and .workflow.headSha == $head
+                and (.results | length) == 3
+                and (
+                  .artifactDigests | keys | sort
+                ) == [
+                  "source-to-recovery-linux",
+                  "source-to-recovery-macos",
+                  "source-to-recovery-windows"
+                ]
+                and (
+                  .artifactDigests as $digests
+                  | all(
+                      .results[];
+                      .artifactSha256 == $digests[.lane].sha256
+                    )
+                )
+                and all(
+                  .artifactDigests | to_entries[];
+                  (.value.id | type == "number" and . > 0)
+                  and .value.name == (
+                    "recovery-qualification-"
+                    + (.key | sub("^source-to-recovery-"; ""))
+                    + "-" + ($run | tostring)
+                    + "-" + ($attempt | tostring)
+                  )
+                  and (.value.sha256 | test("^[0-9a-f]{64}$"))
+                )
+                and (
+                  .results
+                  | map({
+                      lane,
+                      platform,
+                      runner,
+                      scenario,
+                      qualificationMode,
+                      sourceVersion,
+                      candidateVersion,
+                      status
+                    })
+                  | sort_by(.platform)
+                ) == [
+                  {
+                    lane: "source-to-recovery-linux",
+                    platform: "linux",
+                    runner: "ubuntu-24.04",
+                    scenario: "source-to-recovery",
+                    qualificationMode: "automatic-updater",
+                    sourceVersion: $from,
+                    candidateVersion: $version,
+                    status: "passed"
+                  },
+                  {
+                    lane: "source-to-recovery-macos",
+                    platform: "macos",
+                    runner: "macos-15-intel",
+                    scenario: "source-to-recovery",
+                    qualificationMode: "automatic-updater",
+                    sourceVersion: $from,
+                    candidateVersion: $version,
+                    status: "passed"
+                  },
+                  {
+                    lane: "source-to-recovery-windows",
+                    platform: "windows",
+                    runner: "windows-2022",
+                    scenario: "source-to-recovery",
+                    qualificationMode: "automatic-updater",
+                    sourceVersion: $from,
+                    candidateVersion: $version,
+                    status: "passed"
+                  }
+                ]
+              ' dist/state/verified-smoke.json >/dev/null
+            jq -e \
+              --arg from "$FROM_VERSION" \
+              --arg source_tag "$train_source_tag" \
+              --arg source_commit "$train_source_commit" \
+              --arg tag "$(jq -er .tag dist/candidate/candidate.json)" \
+              --arg version "$(jq -er .version dist/candidate/candidate.json)" \
+              --arg commit "$candidate_source" \
+              --arg manifest "$(jq -er .manifestSha256 dist/candidate/candidate.json)" \
+              --slurpfile smoke dist/state/verified-smoke.json '
+                .status == "healthy"
+                and .observationScope == "github-native-recovery-qualification"
+                and .deploymentMode == "recovery"
+                and .sourceVersion == $from
+                and .sourceTag == $source_tag
+                and .sourceReleaseCommit == $source_commit
+                and (.sourceManifestSha256 | test("^[0-9a-f]{64}$"))
+                and .candidateTag == $tag
+                and .candidateVersion == $version
+                and .sourceCommit == $commit
+                and .candidateManifestSha256 == $manifest
+                and .platforms == ["windows", "macos", "linux"]
+                and .scenarios == ["source-to-recovery"]
+                and .sampleSize == 3
+                and .attempts == 3
+                and .passedAttempts == 3
+                and .failedAttempts == 0
+                and .p0Incidents == 0
+                and .p1Incidents == 0
+                and .dataLossIncidents == 0
+                and .migrationFailureRate == 0
+                and .contractSha256 == $smoke[0].contractSha256
+                and .harnessSha256 == $smoke[0].harnessSha256
+                and .qualificationMatrixSha256 == $smoke[0].qualificationMatrixSha256
               ' dist/state/verified-health.json >/dev/null
           fi
 

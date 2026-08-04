@@ -4,7 +4,7 @@ on:
   workflow_dispatch:
     inputs:
       version:
-        description: "Exact terminal release tag pinned by protected policy: v0.6.649"
+        description: "Exact active terminal release tag pinned by protected policy"
         required: true
         type: string
 
@@ -20,20 +20,20 @@ env:
   YARN_ENABLE_IMMUTABLE_INSTALLS: "true"
 
 jobs:
-  tag-cut:
-    name: Cut or verify exact immutable release tag
+  preflight:
+    name: Validate immutable release source
     runs-on: ubuntu-latest
-    environment: release-distribution
-    permissions:
-      contents: write
     outputs:
-      version: ${{ steps.tag.outputs.version }}
-      tag: ${{ steps.tag.outputs.tag }}
-      source_commit: ${{ steps.tag.outputs.source_commit }}
-      trusted_main_commit: ${{ steps.tag.outputs.trusted_main_commit }}
+      version: ${{ steps.release.outputs.version }}
+      tag: ${{ steps.release.outputs.tag }}
+      published_at: ${{ steps.release.outputs.published_at }}
+      source_commit: ${{ steps.release.outputs.source_commit }}
+      trusted_main_commit: ${{ steps.release.outputs.trusted_main_commit }}
+      migration_phase: ${{ steps.release.outputs.migration_phase }}
+      data_schema: ${{ steps.release.outputs.data_schema }}
     steps:
-      - name: Cut or verify exact lightweight release tag
-        id: tag
+      - name: Resolve protected active terminal policy
+        id: policy
         shell: bash
         env:
           GH_TOKEN: ${{ github.token }}
@@ -74,9 +74,16 @@ jobs:
           if ! jq -e \
             --arg tag "$RELEASE_TAG" \
             '
+              def semver:
+                capture("^(?<major>0|[1-9][0-9]*)\\.(?<minor>0|[1-9][0-9]*)\\.(?<patch>0|[1-9][0-9]*)$")
+                | [.major, .minor, .patch]
+                | map(tonumber);
+              def terminal_keys:
+                (keys | sort)
+                  == ["dataSchema", "migrationPhase", "sourceCommit", "status", "tag", "version"];
               (keys | sort)
                 == ["activeTerminalRelease", "activeTrain", "schema", "supersededTerminalReleases", "trains"]
-              and .schema == 3
+              and .schema == 4
               and .activeTrain == null
               and (.trains | type == "array")
               and ([.trains[] | select(.status == "active")] | length) == 0
@@ -84,43 +91,79 @@ jobs:
                 | length) == 1
               and .trains[-1].status == "superseded-by-terminal"
               and (.supersededTerminalReleases | type == "array")
-              and (.supersededTerminalReleases | length) == 3
-              and ((.supersededTerminalReleases[0] | keys | sort)
-                == ["dataSchema", "migrationPhase", "sourceCommit", "status", "tag", "version"])
+              and (.supersededTerminalReleases | length) >= 3
+              and (.supersededTerminalReleases[0] | terminal_keys)
               and .supersededTerminalReleases[0].tag == "v0.6.646"
               and .supersededTerminalReleases[0].version == "0.6.646"
               and .supersededTerminalReleases[0].migrationPhase == "C"
               and .supersededTerminalReleases[0].dataSchema == 3
               and .supersededTerminalReleases[0].sourceCommit == "581ebf6b19ef407a9645d0b318792f1012f8f75b"
               and .supersededTerminalReleases[0].status == "blocked-before-publication"
-              and ((.supersededTerminalReleases[1] | keys | sort)
-                == ["dataSchema", "migrationPhase", "sourceCommit", "status", "tag", "version"])
+              and (.supersededTerminalReleases[1] | terminal_keys)
               and .supersededTerminalReleases[1].tag == "v0.6.647"
               and .supersededTerminalReleases[1].version == "0.6.647"
               and .supersededTerminalReleases[1].migrationPhase == "C"
               and .supersededTerminalReleases[1].dataSchema == 3
               and .supersededTerminalReleases[1].sourceCommit == "ef963bc606366220db4589352afb25aa7d1785bf"
               and .supersededTerminalReleases[1].status == "blocked-before-publication"
-              and ((.supersededTerminalReleases[2] | keys | sort)
-                == ["dataSchema", "migrationPhase", "sourceCommit", "status", "tag", "version"])
+              and (.supersededTerminalReleases[2] | terminal_keys)
               and .supersededTerminalReleases[2].tag == "v0.6.648"
               and .supersededTerminalReleases[2].version == "0.6.648"
               and .supersededTerminalReleases[2].migrationPhase == "C"
               and .supersededTerminalReleases[2].dataSchema == 3
               and .supersededTerminalReleases[2].sourceCommit == "33e8c5b03278b2b91318a553eb3b699b19c6ad1e"
               and .supersededTerminalReleases[2].status == "blocked-before-publication"
+              and ([.supersededTerminalReleases[]
+                | select(
+                    (terminal_keys | not)
+                    or .tag != ("v" + .version)
+                    or (.version
+                      | test("^(0|[1-9][0-9]*)\\.(0|[1-9][0-9]*)\\.(0|[1-9][0-9]*)$")
+                      | not)
+                    or .migrationPhase != "C"
+                    or .dataSchema != 3
+                    or (.sourceCommit | test("^[0-9a-f]{40}$") | not)
+                  )]
+                | length) == 0
+              and ([.supersededTerminalReleases[3:][]
+                | select(.status != "published-superseded")]
+                | length) == 0
+              and (
+                [.supersededTerminalReleases[].version | semver] as $versions
+                | [range(1; $versions | length) as $index
+                    | select(
+                        $versions[$index][0] != $versions[$index - 1][0]
+                        or $versions[$index][1] != $versions[$index - 1][1]
+                        or $versions[$index][2] != ($versions[$index - 1][2] + 1)
+                      )]
+                  | length == 0
+              )
               and (.activeTerminalRelease | type == "object")
               and ((.activeTerminalRelease | keys | sort)
                 == ["dataSchema", "migrationPhase", "sourceCommit", "tag", "version"])
               and .activeTerminalRelease.tag == $tag
               and .activeTerminalRelease.tag
                 == ("v" + .activeTerminalRelease.version)
-              and .activeTerminalRelease.tag == "v0.6.649"
-              and .activeTerminalRelease.version == "0.6.649"
+              and (.activeTerminalRelease.version
+                | test("^(0|[1-9][0-9]*)\\.(0|[1-9][0-9]*)\\.(0|[1-9][0-9]*)$"))
               and .activeTerminalRelease.migrationPhase == "C"
               and .activeTerminalRelease.dataSchema == 3
               and (.activeTerminalRelease.sourceCommit
                 | test("^[0-9a-f]{40}$"))
+              and (
+                (
+                  [.supersededTerminalReleases[].sourceCommit]
+                  + [.activeTerminalRelease.sourceCommit]
+                ) as $sources
+                | ($sources | length) == ($sources | unique | length)
+              )
+              and (
+                (.supersededTerminalReleases[-1].version | semver) as $previous
+                | (.activeTerminalRelease.version | semver) as $active
+                | $active[0] == $previous[0]
+                  and $active[1] == $previous[1]
+                  and $active[2] == ($previous[2] + 1)
+              )
             ' \
             "$policy_json" >/dev/null; then
             echo "Release tag is not the exact active terminal policy binding: $RELEASE_TAG" >&2
@@ -156,81 +199,6 @@ jobs:
             exit 1
           fi
 
-          api_version="2022-11-28"
-          tag_endpoint="$GITHUB_API_URL/repos/$GITHUB_REPOSITORY/git/ref/tags/$RELEASE_TAG"
-          tag_json="$RUNNER_TEMP/tag-cut-current.json"
-          read_tag() {
-            curl --proto '=https' --tlsv1.2 --silent --show-error \
-              --output "$tag_json" \
-              --write-out '%{http_code}' \
-              --header "Accept: application/vnd.github+json" \
-              --header "Authorization: Bearer $GH_TOKEN" \
-              --header "X-GitHub-Api-Version: $api_version" \
-              "$tag_endpoint"
-          }
-
-          status="$(read_tag)"
-          case "$status" in
-            200)
-              if ! jq -e \
-                --arg ref "refs/tags/$RELEASE_TAG" \
-                --arg source "$source_commit" \
-                '
-                  .ref == $ref
-                  and .object.type == "commit"
-                  and .object.sha == $source
-                ' \
-                "$tag_json" >/dev/null; then
-                echo "Existing tag conflicts with approved lightweight ref: $RELEASE_TAG" >&2
-                exit 1
-              fi
-              echo "Exact tag already exists; no mutation required: $RELEASE_TAG"
-              ;;
-            404)
-              request_json="$RUNNER_TEMP/tag-cut-request.json"
-              created_json="$RUNNER_TEMP/tag-cut-created.json"
-              jq -n \
-                --arg ref "refs/tags/$RELEASE_TAG" \
-                --arg sha "$source_commit" \
-                '{ref: $ref, sha: $sha}' \
-                > "$request_json"
-              gh api \
-                --method POST \
-                "repos/$GITHUB_REPOSITORY/git/refs" \
-                --input "$request_json" \
-                > "$created_json"
-              jq -e \
-                --arg ref "refs/tags/$RELEASE_TAG" \
-                --arg source "$source_commit" \
-                '
-                  .ref == $ref
-                  and .object.type == "commit"
-                  and .object.sha == $source
-                ' \
-                "$created_json" >/dev/null
-              ;;
-            *)
-              echo "Unexpected tag lookup status $status for $RELEASE_TAG" >&2
-              jq . "$tag_json" >&2 || true
-              exit 1
-              ;;
-          esac
-
-          status="$(read_tag)"
-          if [ "$status" != "200" ] \
-            || ! jq -e \
-              --arg ref "refs/tags/$RELEASE_TAG" \
-              --arg source "$source_commit" \
-              '
-                .ref == $ref
-                and .object.type == "commit"
-                and .object.sha == $source
-              ' \
-              "$tag_json" >/dev/null; then
-            echo "Exact tag readback failed for $RELEASE_TAG" >&2
-            exit 1
-          fi
-
           {
             echo "version=${RELEASE_TAG#v}"
             echo "tag=$RELEASE_TAG"
@@ -238,31 +206,18 @@ jobs:
             echo "trusted_main_commit=$live_main"
           } >> "$GITHUB_OUTPUT"
 
-  preflight:
-    name: Validate immutable release source
-    runs-on: ubuntu-latest
-    needs: tag-cut
-    outputs:
-      version: ${{ steps.release.outputs.version }}
-      tag: ${{ steps.release.outputs.tag }}
-      published_at: ${{ steps.release.outputs.published_at }}
-      source_commit: ${{ steps.release.outputs.source_commit }}
-      trusted_main_commit: ${{ steps.release.outputs.trusted_main_commit }}
-      migration_phase: ${{ steps.release.outputs.migration_phase }}
-      data_schema: ${{ steps.release.outputs.data_schema }}
-    steps:
       - name: Checkout protected release harness
         uses: actions/checkout@v4
         with:
-          ref: ${{ needs.tag-cut.outputs.trusted_main_commit }}
+          ref: ${{ steps.policy.outputs.trusted_main_commit }}
           path: harness
           fetch-depth: 0
           persist-credentials: false
 
-      - name: Checkout exact release target
+      - name: Checkout exact release source
         uses: actions/checkout@v4
         with:
-          ref: ${{ needs.tag-cut.outputs.tag }}
+          ref: ${{ steps.policy.outputs.source_commit }}
           path: target
           fetch-depth: 0
           persist-credentials: false
@@ -276,9 +231,9 @@ jobs:
         id: release
         shell: bash
         env:
-          RELEASE_TAG: ${{ needs.tag-cut.outputs.tag }}
-          EXPECTED_SOURCE: ${{ needs.tag-cut.outputs.source_commit }}
-          EXPECTED_MAIN: ${{ needs.tag-cut.outputs.trusted_main_commit }}
+          RELEASE_TAG: ${{ steps.policy.outputs.tag }}
+          EXPECTED_SOURCE: ${{ steps.policy.outputs.source_commit }}
+          EXPECTED_MAIN: ${{ steps.policy.outputs.trusted_main_commit }}
         run: |
           set -euo pipefail
           if [[ ! "$RELEASE_TAG" =~ ^v[0-9]+\.[0-9]+\.[0-9]+([+-][0-9A-Za-z.-]+)?$ ]]; then
@@ -287,8 +242,7 @@ jobs:
           fi
           version="${RELEASE_TAG#v}"
           git -C harness fetch --force --no-tags origin \
-            "+refs/heads/mita-main:refs/remotes/origin/mita-main" \
-            "+refs/tags/$RELEASE_TAG:refs/tags/$RELEASE_TAG"
+            "+refs/heads/mita-main:refs/remotes/origin/mita-main"
           checkout_head="$(git -C harness rev-parse HEAD)"
           live_main="$(git -C harness rev-parse refs/remotes/origin/mita-main)"
           if [ "$checkout_head" != "$EXPECTED_MAIN" ] \
@@ -296,10 +250,9 @@ jobs:
             echo "Trusted release harness is no longer the exact dispatch-time mita-main" >&2
             exit 1
           fi
-          source_commit="$(git -C harness rev-list -n 1 "refs/tags/$RELEASE_TAG")"
+          source_commit="$(git -C target rev-parse HEAD)"
           test "$source_commit" = "$EXPECTED_SOURCE"
-          test "$source_commit" = "$(git -C target rev-parse HEAD)"
-          test "$source_commit" = "$(git -C target rev-list -n 1 "refs/tags/$RELEASE_TAG")"
+          git -C harness cat-file -e "${source_commit}^{commit}"
           git -C harness merge-base --is-ancestor \
             "$source_commit" refs/remotes/origin/mita-main
           jq -e '
@@ -319,7 +272,7 @@ jobs:
             echo "data_schema=$(jq -r .dataSchema target/biyan-release.json)"
           } >> "$GITHUB_OUTPUT"
 
-      - name: Verify exact tag with protected release policy
+      - name: Verify exact source with protected release policy
         env:
           RELEASE_TAG: ${{ steps.release.outputs.tag }}
           SOURCE_COMMIT: ${{ steps.release.outputs.source_commit }}
@@ -338,10 +291,213 @@ jobs:
           node --test scripts/ci/__tests__/release-policy.test.mjs
           node --test scripts/ci/__tests__/verify-release-target.test.mjs
 
+  tag-cut:
+    name: Cut or verify exact immutable release tag
+    runs-on: ubuntu-latest
+    needs: preflight
+    environment: release-distribution
+    permissions:
+      contents: write
+    outputs:
+      version: ${{ steps.tag.outputs.version }}
+      tag: ${{ steps.tag.outputs.tag }}
+      source_commit: ${{ steps.tag.outputs.source_commit }}
+      trusted_main_commit: ${{ steps.tag.outputs.trusted_main_commit }}
+    steps:
+      - name: Cut or verify exact lightweight release tag
+        id: tag
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_TAG: ${{ needs.preflight.outputs.tag }}
+          EXPECTED_SOURCE: ${{ needs.preflight.outputs.source_commit }}
+          EXPECTED_MAIN: ${{ needs.preflight.outputs.trusted_main_commit }}
+          WORKFLOW_REF: ${{ github.ref }}
+          WORKFLOW_SHA: ${{ github.sha }}
+        run: |
+          set -euo pipefail
+
+          if [ "$WORKFLOW_REF" != "refs/heads/mita-main" ]; then
+            echo "Candidate dispatch must use protected mita-main" >&2
+            exit 1
+          fi
+          if [ "$WORKFLOW_SHA" != "$EXPECTED_MAIN" ]; then
+            echo "Dispatch head changed before tag authorization" >&2
+            exit 1
+          fi
+
+          policy_json="$RUNNER_TEMP/release-train-policy.json"
+          assert_live_binding() {
+            live_main="$(
+              gh api "repos/$GITHUB_REPOSITORY/branches/mita-main" \
+                --jq '.commit.sha'
+            )"
+            if [ "$live_main" != "$EXPECTED_MAIN" ]; then
+              echo "Live mita-main changed after read-only preflight" >&2
+              exit 1
+            fi
+            gh api \
+              "repos/$GITHUB_REPOSITORY/contents/scripts/ci/release-train-policy.json?ref=$live_main" \
+              --jq '.content' \
+              | tr -d '\n' \
+              | base64 --decode \
+              > "$policy_json"
+            if ! jq -e \
+              --arg tag "$RELEASE_TAG" \
+              --arg source "$EXPECTED_SOURCE" \
+              '
+                .schema == 4
+                and .activeTrain == null
+                and (.activeTerminalRelease | type == "object")
+                and .activeTerminalRelease.tag == $tag
+                and .activeTerminalRelease.sourceCommit == $source
+                and .activeTerminalRelease.tag
+                  == ("v" + .activeTerminalRelease.version)
+                and .activeTerminalRelease.migrationPhase == "C"
+                and .activeTerminalRelease.dataSchema == 3
+                and (
+                  (
+                    [.supersededTerminalReleases[].sourceCommit]
+                    + [.activeTerminalRelease.sourceCommit]
+                  ) as $sources
+                  | ($sources | length) == ($sources | unique | length)
+                )
+              ' \
+              "$policy_json" >/dev/null; then
+              echo "Live active terminal binding changed after preflight" >&2
+              exit 1
+            fi
+          }
+
+          assert_live_binding
+          while IFS=$'\t' read -r history_tag history_source; do
+            if [ -z "$history_tag" ] || [ -z "$history_source" ]; then
+              echo "Published terminal history contains an empty binding" >&2
+              exit 1
+            fi
+            history_ref_json="$RUNNER_TEMP/history-ref-${history_tag}.json"
+            gh api \
+              "repos/$GITHUB_REPOSITORY/git/ref/tags/$history_tag" \
+              > "$history_ref_json"
+            jq -e \
+              --arg ref "refs/tags/$history_tag" \
+              --arg source "$history_source" \
+              '
+                .ref == $ref
+                and .object.type == "commit"
+                and .object.sha == $source
+              ' \
+              "$history_ref_json" >/dev/null
+
+            history_release_json="$RUNNER_TEMP/history-release-${history_tag}.json"
+            gh api \
+              "repos/$GITHUB_REPOSITORY/releases/tags/$history_tag" \
+              > "$history_release_json"
+            jq -e \
+              --arg tag "$history_tag" \
+              '
+                .tag_name == $tag
+                and .draft == false
+                and .prerelease == false
+                and (.published_at | type == "string" and test("Z$"))
+              ' \
+              "$history_release_json" >/dev/null
+          done < <(
+            jq -r '
+              .supersededTerminalReleases[3:][]
+              | [.tag, .sourceCommit]
+              | @tsv
+            ' "$policy_json"
+          )
+          assert_live_binding
+
+          api_version="2022-11-28"
+          tag_endpoint="$GITHUB_API_URL/repos/$GITHUB_REPOSITORY/git/ref/tags/$RELEASE_TAG"
+          tag_json="$RUNNER_TEMP/tag-cut-current.json"
+          read_tag() {
+            curl --proto '=https' --tlsv1.2 --silent --show-error \
+              --output "$tag_json" \
+              --write-out '%{http_code}' \
+              --header "Accept: application/vnd.github+json" \
+              --header "Authorization: Bearer $GH_TOKEN" \
+              --header "X-GitHub-Api-Version: $api_version" \
+              "$tag_endpoint"
+          }
+
+          status="$(read_tag)"
+          case "$status" in
+            200)
+              if ! jq -e \
+                --arg ref "refs/tags/$RELEASE_TAG" \
+                --arg source "$EXPECTED_SOURCE" \
+                '
+                  .ref == $ref
+                  and .object.type == "commit"
+                  and .object.sha == $source
+                ' \
+                "$tag_json" >/dev/null; then
+                echo "Existing tag conflicts with approved lightweight ref: $RELEASE_TAG" >&2
+                exit 1
+              fi
+              echo "Exact tag already exists; no mutation required: $RELEASE_TAG"
+              ;;
+            404)
+              assert_live_binding
+              request_json="$RUNNER_TEMP/tag-cut-request.json"
+              created_json="$RUNNER_TEMP/tag-cut-created.json"
+              jq -n \
+                --arg ref "refs/tags/$RELEASE_TAG" \
+                --arg sha "$EXPECTED_SOURCE" \
+                '{ref: $ref, sha: $sha}' \
+                > "$request_json"
+              gh api \
+                --method POST \
+                "repos/$GITHUB_REPOSITORY/git/refs" \
+                --input "$request_json" \
+                > "$created_json"
+              jq -e \
+                --arg ref "refs/tags/$RELEASE_TAG" \
+                --arg source "$EXPECTED_SOURCE" \
+                '
+                  .ref == $ref
+                  and .object.type == "commit"
+                  and .object.sha == $source
+                ' \
+                "$created_json" >/dev/null
+              ;;
+            *)
+              echo "Unexpected tag lookup status $status for $RELEASE_TAG" >&2
+              jq . "$tag_json" >&2 || true
+              exit 1
+              ;;
+          esac
+
+          status="$(read_tag)"
+          if [ "$status" != "200" ] \
+            || ! jq -e \
+              --arg ref "refs/tags/$RELEASE_TAG" \
+              --arg source "$EXPECTED_SOURCE" \
+              '
+                .ref == $ref
+                and .object.type == "commit"
+                and .object.sha == $source
+              ' \
+              "$tag_json" >/dev/null; then
+            echo "Exact tag readback failed for $RELEASE_TAG" >&2
+            exit 1
+          fi
+
+          {
+            echo "version=${RELEASE_TAG#v}"
+            echo "tag=$RELEASE_TAG"
+            echo "source_commit=$EXPECTED_SOURCE"
+            echo "trusted_main_commit=$EXPECTED_MAIN"
+          } >> "$GITHUB_OUTPUT"
+
   quality-gate:
     name: Run candidate lint and test suites
     runs-on: ubuntu-22.04
-    needs: preflight
+    needs: [preflight, tag-cut]
     timeout-minutes: 60
     steps:
       - name: Checkout tag

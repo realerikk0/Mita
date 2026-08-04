@@ -43,8 +43,8 @@ const TRUSTED_CI_JOB_KEY_ALLOWLIST = new Set([
 ])
 
 const TRUSTED_CANDIDATE_JOB_ORDER = [
-  'tag-cut',
   'preflight',
+  'tag-cut',
   'quality-gate',
   'build-macos',
   'build-windows',
@@ -60,7 +60,7 @@ const TRUSTED_RECOVERY_JOB_ORDER = [
 ]
 
 const TRUSTED_CANDIDATE_WORKFLOW_ALLOWLIST = new Set([
-  'fb78647a448ce6865fd83142b2a7aafbb20b0b4d2af69fc4624e428b211c2502',
+  '4999e53c49c441ac915d4da343e60328592c02dac15ec755b8d685c8aa6b0def',
 ])
 
 const TRUSTED_RECOVERY_WORKFLOW_ALLOWLIST = new Set([
@@ -92,10 +92,19 @@ export const TRUSTED_SENSITIVE_UPDATER_WORKFLOW_CONTRACTS = Object.freeze({
       contents: 'read',
     }),
   }),
+  '.github/workflows/biyan-upgrade-smoke.yml': Object.freeze({
+    exactJobNames: Object.freeze(['preflight', 'qualification', 'attest']),
+    expectedEnvelopeSha256:
+      '2797a5f33c0d2ddd4150f0ab6d239b853c212f816646f1d15e0f593f8e299bb8',
+    expectedPermissions: Object.freeze({
+      actions: 'read',
+      contents: 'read',
+    }),
+  }),
   '.github/workflows/promote-desktop-update.yml': Object.freeze({
     exactJobNames: Object.freeze(['promote']),
     expectedEnvelopeSha256:
-      '481a52c9e87f6c23ea648e76114710eb550c6c164c20f611f7f4becd6150fc02',
+      '912b8461e04372fbdb8e0bf7b7f3de964712dafa47f978561424fc192bdbaa8b',
     expectedPermissions: Object.freeze({
       actions: 'read',
       contents: 'read',
@@ -132,12 +141,14 @@ const UPDATER_CONTRACT_TEST_COMMANDS = Object.freeze([
   'node --test scripts/updater/__tests__/legacy-manifest-policy.test.mjs',
   'node --test scripts/updater/__tests__/legacy-pause-transaction.test.mjs',
   'node --test scripts/updater/__tests__/promotion-transaction.test.mjs',
+  'node --test scripts/updater/__tests__/recovery-qualification.test.mjs',
   'node --test scripts/updater/__tests__/updater.test.mjs',
 ])
 
 const UPDATER_PYTHON_CONTRACT_TESTS = Object.freeze([
   'autoqa/tests/test_migration_runner.py',
   'scripts/updater/__tests__/test_prepare_a_canary_inputs.py',
+  'scripts/updater/__tests__/test_prepare_recovery_qualification_inputs.py',
 ])
 
 function jobBlock(source, jobName) {
@@ -286,11 +297,16 @@ function validateUpdaterContractTestStep(block, label) {
     }
   }
   if (
-    !hasCommandSequence(block, [
-      'python3 -m unittest \\',
-      `${UPDATER_PYTHON_CONTRACT_TESTS[0]} \\`,
-      UPDATER_PYTHON_CONTRACT_TESTS[1],
-    ])
+    !hasCommandSequence(
+      block,
+      UPDATER_PYTHON_CONTRACT_TESTS.map((testPath, index) =>
+        index === 0
+          ? ['python3 -m unittest \\', `${testPath} \\`]
+          : index === UPDATER_PYTHON_CONTRACT_TESTS.length - 1
+            ? [testPath]
+            : [`${testPath} \\`]
+      ).flat()
+    )
   ) {
     failures.push(
       `${label} does not run the exact Python updater contract tests: ${UPDATER_PYTHON_CONTRACT_TESTS.join(
@@ -568,6 +584,22 @@ function jobUsesScopeFlag(block, flag) {
 
 export function validateReleaseTrainPolicy(policy) {
   const failures = []
+  const terminalSources = new Set()
+  const parseVersion = (value) => {
+    const match =
+      typeof value === 'string'
+        ? /^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$/.exec(
+            value
+          )
+        : null
+    return match ? match.slice(1).map(Number) : null
+  }
+  const isImmediateSuccessor = (previous, current) =>
+    previous &&
+    current &&
+    previous[0] === current[0] &&
+    previous[1] === current[1] &&
+    previous[2] + 1 === current[2]
   const exactKeys = (value, expected, description) => {
     if (!value || typeof value !== 'object' || Array.isArray(value)) {
       failures.push(`${description} must be an object`)
@@ -597,8 +629,8 @@ export function validateReleaseTrainPolicy(policy) {
     ],
     'release train policy'
   )
-  if (policy?.schema !== 3) {
-    failures.push('release train policy must use schema 3')
+  if (policy?.schema !== 4) {
+    failures.push('release train policy must use schema 4')
   }
   if (!Array.isArray(policy?.trains) || policy.trains.length === 0) {
     failures.push('release train policy must declare at least one train')
@@ -611,11 +643,11 @@ export function validateReleaseTrainPolicy(policy) {
   if (!Array.isArray(supersededTerminals)) {
     failures.push('release train policy must declare superseded terminal releases')
   } else if (
-    (terminalMode && supersededTerminals.length !== 3) ||
+    (terminalMode && supersededTerminals.length < 3) ||
     (!terminalMode && supersededTerminals.length !== 0)
   ) {
     failures.push(
-      'release train policy must preserve exactly three superseded terminals only in terminal mode'
+      'release train policy must preserve the three blocked terminal baselines and every later superseded terminal only in terminal mode'
     )
   }
   const active = policy.trains.filter((train) => train?.status === 'active')
@@ -690,11 +722,8 @@ export function validateReleaseTrainPolicy(policy) {
         ['version', 'dataSchema'],
         `release train ${train.id} ${phase}`
       )
-      const match =
-        typeof release?.version === 'string'
-          ? /^(\d+)\.(\d+)\.(\d+)$/.exec(release.version)
-          : null
-      if (!match || release.dataSchema !== expectedSchema) {
+      const parsedVersion = parseVersion(release?.version)
+      if (!parsedVersion || release.dataSchema !== expectedSchema) {
         failures.push(
           `release train ${train.id} has invalid ${phase} version/schema`
         )
@@ -704,7 +733,7 @@ export function validateReleaseTrainPolicy(policy) {
         failures.push(`duplicate release version: ${release.version}`)
       }
       versions.add(release.version)
-      parsedVersions.push(match.slice(1).map(Number))
+      parsedVersions.push(parsedVersion)
     }
 
     if (
@@ -779,28 +808,49 @@ export function validateReleaseTrainPolicy(policy) {
         `superseded terminal release ${index}`
       )
       if (
-        !expected ||
-        preserved?.tag !== expected.tag ||
-        preserved?.version !== expected.version ||
-        preserved?.migrationPhase !== expected.migrationPhase ||
-        preserved?.dataSchema !== expected.dataSchema ||
-        preserved?.sourceCommit !== expected.sourceCommit ||
-        preserved?.status !== expected.status ||
-        preserved?.tag !== `v${preserved?.version}`
+        expected &&
+        (preserved?.tag !== expected.tag ||
+          preserved?.version !== expected.version ||
+          preserved?.migrationPhase !== expected.migrationPhase ||
+          preserved?.dataSchema !== expected.dataSchema ||
+          preserved?.sourceCommit !== expected.sourceCommit ||
+          preserved?.status !== expected.status)
       ) {
         failures.push(
           'superseded terminal history must exactly preserve blocked v0.6.646, v0.6.647, and v0.6.648 C/3 releases'
         )
       }
+      if (
+        !expected &&
+        (preserved?.migrationPhase !== 'C' ||
+          preserved?.dataSchema !== 3 ||
+          preserved?.status !== 'published-superseded')
+      ) {
+        failures.push(
+          'terminal history after v0.6.648 must contain only published-superseded C/3 releases'
+        )
+      }
+      const parsedVersion = parseVersion(preserved?.version)
+      if (
+        !parsedVersion ||
+        preserved?.tag !== `v${preserved?.version}` ||
+        !/^[0-9a-f]{40}$/.test(preserved?.sourceCommit ?? '')
+      ) {
+        failures.push(
+          `superseded terminal release ${index} must bind an exact semantic tag to one lowercase 40-hex source commit`
+        )
+      }
+      if (terminalSources.has(preserved?.sourceCommit)) {
+        failures.push(
+          `duplicate terminal source commit: ${preserved?.sourceCommit}`
+        )
+      }
+      terminalSources.add(preserved?.sourceCommit)
       if (versions.has(preserved?.version)) {
         failures.push(`duplicate release version: ${preserved.version}`)
       }
       versions.add(preserved?.version)
-      const match =
-        typeof preserved?.version === 'string'
-          ? /^(\d+)\.(\d+)\.(\d+)$/.exec(preserved.version)
-          : null
-      if (match) preservedTerminalVersions.push(match.slice(1).map(Number))
+      if (parsedVersion) preservedTerminalVersions.push(parsedVersion)
     }
   }
 
@@ -820,11 +870,7 @@ export function validateReleaseTrainPolicy(policy) {
   for (let index = 1; index < preservedTerminalVersions.length; index += 1) {
     const previous = preservedTerminalVersions[index - 1]
     const current = preservedTerminalVersions[index]
-    if (
-      current[0] !== previous[0] ||
-      current[1] !== previous[1] ||
-      current[2] !== previous[2] + 1
-    ) {
+    if (!isImmediateSuccessor(previous, current)) {
       failures.push('superseded terminal releases must be contiguous')
     }
   }
@@ -841,31 +887,33 @@ export function validateReleaseTrainPolicy(policy) {
       ],
       'active terminal release'
     )
+    const terminalVersion = parseVersion(terminal?.version)
     if (
-      terminal?.tag !== 'v0.6.649' ||
-      terminal?.version !== '0.6.649' ||
+      !terminalVersion ||
       terminal?.migrationPhase !== 'C' ||
       terminal?.dataSchema !== 3 ||
       terminal?.tag !== `v${terminal?.version}` ||
       !/^[0-9a-f]{40}$/.test(terminal?.sourceCommit ?? '')
     ) {
       failures.push(
-        'active terminal release must exactly bind v0.6.649/C/3 to one lowercase 40-hex source commit'
+        'active terminal release must bind one exact semantic C/3 tag to one lowercase 40-hex source commit'
       )
     }
     if (versions.has(terminal?.version)) {
       failures.push(`duplicate release version: ${terminal.version}`)
     }
+    if (terminalSources.has(terminal?.sourceCommit)) {
+      failures.push(
+        `duplicate terminal source commit: ${terminal?.sourceCommit}`
+      )
+    }
     const lastPreservedTerminalVersion = preservedTerminalVersions.at(-1)
     if (
       lastPreservedTerminalVersion &&
-      (lastPreservedTerminalVersion[0] !== 0 ||
-        lastPreservedTerminalVersion[1] !== 6 ||
-        lastPreservedTerminalVersion[2] !== 648 ||
-        terminal?.version !== '0.6.649')
+      !isImmediateSuccessor(lastPreservedTerminalVersion, terminalVersion)
     ) {
       failures.push(
-        'active terminal release v0.6.649 must immediately follow superseded terminal v0.6.648'
+        'active terminal release must immediately follow the latest superseded terminal'
       )
     }
   }
@@ -892,13 +940,20 @@ export function validateReleaseIdentity({
     )
   }
 
-  const terminalRelease =
-    trainPolicy?.activeTerminalRelease?.version === version
+  const terminalRelease = [
+    trainPolicy?.activeTerminalRelease
       ? {
           ...trainPolicy.activeTerminalRelease,
           trainId: 'activeTerminalRelease',
         }
-      : null
+      : null,
+    ...(trainPolicy?.supersededTerminalReleases ?? []).map((release) => ({
+      ...release,
+      trainId: 'supersededTerminalReleases',
+    })),
+  ]
+    .filter(Boolean)
+    .find((release) => release.version === version)
   const bridgeTrain = terminalRelease ?? trainPolicy?.trains
     ?.flatMap((train) =>
       Object.entries(train.releases ?? {}).map(([phase, release]) => ({
@@ -1268,12 +1323,41 @@ export function validateCandidateWorkflow(
       )
     }
     if (
+      !jobNeeds(tagCut, 'preflight') ||
+      !tagCut.includes('RELEASE_TAG: ${{ needs.preflight.outputs.tag }}') ||
+      !tagCut.includes(
+        'EXPECTED_SOURCE: ${{ needs.preflight.outputs.source_commit }}'
+      ) ||
+      !tagCut.includes(
+        'EXPECTED_MAIN: ${{ needs.preflight.outputs.trusted_main_commit }}'
+      ) ||
+      !tagCut.includes('assert_live_binding()') ||
+      !tagCut.includes('.supersededTerminalReleases[3:][]') ||
+      !tagCut.includes(
+        '"repos/$GITHUB_REPOSITORY/git/ref/tags/$history_tag"'
+      ) ||
+      !tagCut.includes(
+        '"repos/$GITHUB_REPOSITORY/releases/tags/$history_tag"'
+      ) ||
+      !tagCut.includes('.draft == false') ||
+      !tagCut.includes('.prerelease == false')
+    ) {
+      failures.push(
+        'tag-cut must depend on read-only preflight, revalidate its exact live binding, and authenticate every published terminal history tag and release'
+      )
+    }
+    const tagCutJob = tagCut
+    {
+      const tagCut = `${preflight ?? ''}\n${tagCutJob}`
+    if (
       !tagCut.includes(
         'contents/scripts/ci/release-train-policy.json?ref=$live_main'
       ) ||
       !tagCut.includes("--jq '.content'") ||
       !tagCut.includes('| base64 --decode') ||
-      !tagCut.includes('.schema == 3') ||
+      !tagCut.includes('def semver:') ||
+      !tagCut.includes('def terminal_keys:') ||
+      !tagCut.includes('.schema == 4') ||
       !tagCut.includes('.activeTrain == null') ||
       !/\(\[\.trains\[\]\s*\|\s*select\(\.status == "active"\)\]\s*\|\s*length\)\s*== 0/.test(
         tagCut
@@ -1285,7 +1369,7 @@ export function validateCandidateWorkflow(
         '.trains[-1].status == "superseded-by-terminal"'
       ) ||
       !tagCut.includes(
-        '(.supersededTerminalReleases | length) == 3'
+        '(.supersededTerminalReleases | length) >= 3'
       ) ||
       !tagCut.includes(
         '.supersededTerminalReleases[0].tag == "v0.6.646"'
@@ -1314,11 +1398,21 @@ export function validateCandidateWorkflow(
       !tagCut.includes(
         '.supersededTerminalReleases[2].status == "blocked-before-publication"'
       ) ||
+      !tagCut.includes('[.supersededTerminalReleases[]') ||
+      !tagCut.includes('(terminal_keys | not)') ||
+      !tagCut.includes('.tag != ("v" + .version)') ||
+      !tagCut.includes('.migrationPhase != "C"') ||
+      !tagCut.includes('.dataSchema != 3') ||
+      !tagCut.includes('[.supersededTerminalReleases[3:][]') ||
+      !tagCut.includes('.status != "published-superseded"') ||
+      !tagCut.includes('range(1; $versions | length) as $index') ||
+      !tagCut.includes(
+        '$versions[$index][2] != ($versions[$index - 1][2] + 1)'
+      ) ||
       !tagCut.includes('.activeTerminalRelease.tag == $tag') ||
-      !tagCut.includes('.activeTerminalRelease.tag == "v0.6.649"') ||
-      !tagCut.includes('.activeTerminalRelease.version == "0.6.649"') ||
       !tagCut.includes('.activeTerminalRelease.migrationPhase == "C"') ||
       !tagCut.includes('.activeTerminalRelease.dataSchema == 3') ||
+      !tagCut.includes('$active[2] == ($previous[2] + 1)') ||
       !tagCut.includes('test("^[0-9a-f]{40}$")') ||
       !tagCut.includes(
         `jq -er '.activeTerminalRelease.sourceCommit' "$policy_json"`
@@ -1329,7 +1423,7 @@ export function validateCandidateWorkflow(
       /\bv0\.6\.(?:643|644|645)\b/.test(tagCut)
     ) {
       failures.push(
-        'tag-cut must preserve blocked v0.6.646, v0.6.647, and v0.6.648 releases and resolve only the exact v0.6.649/C/3 terminal source binding from protected live-main policy'
+        'tag-cut must preserve the blocked baseline, validate contiguous published terminal history, and resolve only the exact active C/3 terminal source binding from protected live-main policy'
       )
     }
     if (
@@ -1363,6 +1457,7 @@ export function validateCandidateWorkflow(
         'tag-cut must bind the dispatch SHA to live mita-main and prove the exact terminal source is its ancestor'
       )
     }
+    }
     if (
       !tagCut.includes(
         'tag_endpoint="$GITHUB_API_URL/repos/$GITHUB_REPOSITORY/git/ref/tags/$RELEASE_TAG"'
@@ -1372,7 +1467,8 @@ export function validateCandidateWorkflow(
       !tagCut.includes('            404)') ||
       !tagCut.includes('            *)') ||
       !tagCut.includes('.object.type == "commit"') ||
-      !tagCut.includes('.object.sha == $source') ||
+      (!tagCut.includes('.object.sha == $source') &&
+        !tagCut.includes('.object.sha == $EXPECTED_SOURCE')) ||
       !tagCut.includes('"repos/$GITHUB_REPOSITORY/git/refs"') ||
       !tagCut.includes('{ref: $ref, sha: $sha}') ||
       !tagCut.includes('status="$(read_tag)"') ||
@@ -1549,6 +1645,9 @@ export function validateCandidateWorkflow(
     failures.push('desktop release is missing the immutable preflight job')
   } else {
     const preflightSteps = workflowStepBlocks(preflight)
+    const policyStep = preflightSteps.find((step) =>
+      /^\s*(?:-\s*)?id:\s*policy\s*$/m.test(step)
+    )
     const resolverStep = preflightSteps.find((step) =>
       /^\s*(?:-\s*)?id:\s*release\s*$/m.test(step)
     )
@@ -1556,21 +1655,24 @@ export function validateCandidateWorkflow(
       step.includes('node harness/scripts/ci/verify-release-target.mjs')
     )
     if (
-      !jobNeeds(preflight, 'tag-cut') ||
+      jobNeeds(preflight, 'tag-cut') ||
+      /^    environment:/m.test(preflight) ||
+      /\bcontents:\s*write\b/.test(preflight) ||
+      /\b(?:--method\s+POST|git\/refs)\b/.test(preflight) ||
       !checkoutSteps.some(
         (step) =>
           step.includes(
-            'ref: ${{ needs.tag-cut.outputs.trusted_main_commit }}'
+            'ref: ${{ steps.policy.outputs.trusted_main_commit }}'
           ) && /^\s*path:\s*harness\s*$/m.test(step)
       ) ||
       !checkoutSteps.some(
         (step) =>
-          step.includes('ref: ${{ needs.tag-cut.outputs.tag }}') &&
+          step.includes('ref: ${{ steps.policy.outputs.source_commit }}') &&
           /^\s*path:\s*target\s*$/m.test(step)
       )
     ) {
       failures.push(
-        'desktop release preflight must depend on tag-cut and separate its exact protected-main harness from its exact target checkout'
+        'desktop release preflight must be read-only and separate its resolved protected-main harness from the exact source checkout before tag creation'
       )
     }
     if (
@@ -1616,21 +1718,40 @@ export function validateCandidateWorkflow(
       )
     }
     if (
-      !resolverStep ||
-      !resolverStep.includes('RELEASE_TAG: ${{ needs.tag-cut.outputs.tag }}') ||
-      !resolverStep.includes(
-        'EXPECTED_SOURCE: ${{ needs.tag-cut.outputs.source_commit }}'
+      !policyStep ||
+      !policyStep.includes('RELEASE_TAG: ${{ inputs.version }}') ||
+      !policyStep.includes('WORKFLOW_REF: ${{ github.ref }}') ||
+      !policyStep.includes('WORKFLOW_SHA: ${{ github.sha }}') ||
+      !policyStep.includes(
+        'contents/scripts/ci/release-train-policy.json?ref=$live_main'
       ) ||
-      !resolverStep.includes(
-        'EXPECTED_MAIN: ${{ needs.tag-cut.outputs.trusted_main_commit }}'
+      !policyStep.includes(
+        'echo "source_commit=$source_commit"'
       ) ||
-      !resolverStep.includes('test "$source_commit" = "$EXPECTED_SOURCE"') ||
-      !resolverStep.includes(
-        'test "$source_commit" = "$(git -C target rev-parse HEAD)"'
+      !policyStep.includes(
+        'echo "trusted_main_commit=$live_main"'
       )
     ) {
       failures.push(
-        'candidate preflight must consume only the exact tag-cut source, tag, and protected-main outputs'
+        'desktop release preflight must resolve the exact active terminal source from protected live-main policy'
+      )
+    }
+    if (
+      !resolverStep ||
+      !resolverStep.includes('RELEASE_TAG: ${{ steps.policy.outputs.tag }}') ||
+      !resolverStep.includes(
+        'EXPECTED_SOURCE: ${{ steps.policy.outputs.source_commit }}'
+      ) ||
+      !resolverStep.includes(
+        'EXPECTED_MAIN: ${{ steps.policy.outputs.trusted_main_commit }}'
+      ) ||
+      !resolverStep.includes('test "$source_commit" = "$EXPECTED_SOURCE"') ||
+      !resolverStep.includes(
+        'source_commit="$(git -C target rev-parse HEAD)"'
+      )
+    ) {
+      failures.push(
+        'candidate preflight must consume only the exact read-only policy source, tag, and protected-main outputs'
       )
     }
     if (
@@ -1651,8 +1772,13 @@ export function validateCandidateWorkflow(
   if (!qualityGate) {
     failures.push('desktop release is missing the candidate quality gate')
   } else {
-    if (!jobNeeds(qualityGate, 'preflight')) {
-      failures.push('candidate quality gate must depend on immutable preflight')
+    if (
+      !jobNeeds(qualityGate, 'preflight') ||
+      !jobNeeds(qualityGate, 'tag-cut')
+    ) {
+      failures.push(
+        'candidate quality gate must depend on immutable preflight and successful exact tag creation'
+      )
     }
     if (!/(?:^|\n)\s*(?:-\s*)?run:\s*make test\s*(?:\n|$)/.test(qualityGate)) {
       failures.push('candidate quality gate must run the full make test suite')
@@ -4437,7 +4563,7 @@ export function validateCiWorkflow(source) {
       failures.push('Biyan CI release-safety must use ubuntu-24.04')
     }
     for (const command of [
-      'node scripts/ci/verify-release-policy.mjs',
+      'node scripts/ci/verify-release-policy.mjs --require-active',
       'node --test scripts/ci/__tests__/candidate-content-policy.test.mjs',
       'node --test scripts/ci/__tests__/release-policy.test.mjs',
       'node --test scripts/ci/__tests__/verify-release-target.test.mjs',

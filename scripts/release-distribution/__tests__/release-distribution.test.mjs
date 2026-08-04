@@ -69,6 +69,14 @@ const verifiedProvenance = {
   candidateManifestSha256:
     'abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789',
 }
+const TRACKED_TERMINAL = Object.freeze(
+  JSON.parse(
+    fs.readFileSync(
+      new URL('../../ci/release-train-policy.json', import.meta.url),
+      'utf8'
+    )
+  ).activeTerminalRelease
+)
 
 function releaseTrainPolicy(terminalSourceCommit = null) {
   const policy = JSON.parse(
@@ -81,10 +89,7 @@ function releaseTrainPolicy(terminalSourceCommit = null) {
     terminalSourceCommit === null
       ? null
       : {
-          tag: 'v0.6.649',
-          version: '0.6.649',
-          migrationPhase: 'C',
-          dataSchema: 3,
+          ...policy.activeTerminalRelease,
           sourceCommit: terminalSourceCommit,
         }
   if (terminalSourceCommit === null) {
@@ -1723,9 +1728,9 @@ test('candidate provenance preserves the historical active A/B/C identities befo
   )
 })
 
-test('candidate provenance switches fail-closed to exact v0.6.649 terminal tag and source', () => {
+test('candidate provenance switches fail-closed to the rolling active terminal tag and source', () => {
   const fixture = candidateFixture({
-    version: '0.6.649',
+    version: TRACKED_TERMINAL.version,
     migrationPhase: 'C',
     dataSchema: 3,
   })
@@ -1744,7 +1749,7 @@ test('candidate provenance switches fail-closed to exact v0.6.649 terminal tag a
   )
 
   const wrongPin = candidateFixture({
-    version: '0.6.649',
+    version: TRACKED_TERMINAL.version,
     migrationPhase: 'C',
     dataSchema: 3,
   })
