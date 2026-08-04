@@ -4695,6 +4695,15 @@ jobs:
           harness/scripts/ci/run-untrusted-qualification-verifier.sh \
             --read-root "$probe_root" "$verifier" \
             verify-platforms --root "$probe_root"
+      - name: Run focused TypeScript tests
+        if: steps.classification.outputs.focused == 'true'
+        run: |
+          (
+            cd target
+            yarn install --immutable
+            yarn workspace @biyan/core build
+            yarn vitest run "\${typescript_tests[@]}"
+          )
       - name: Run release policy contracts
         if: steps.classification.outputs.policy == 'true'
         working-directory: harness
@@ -4960,6 +4969,19 @@ test('exact-SHA qualification keeps the harness trusted and has no production au
     qualificationWorkflow.replace(
       'node scripts/ci/verify-release-target.mjs',
       'node scripts/ci/verify-release-policy.mjs'
+    ),
+    qualificationWorkflow.replace(
+      'yarn workspace @biyan/core build',
+      'echo skipped-core-build'
+    ),
+    qualificationWorkflow.replace(
+      "if: steps.classification.outputs.focused == 'true'",
+      'if: false'
+    ),
+    qualificationWorkflow.replace('cd target', 'cd harness'),
+    qualificationWorkflow.replace(
+      'yarn install --immutable\n            yarn workspace @biyan/core build',
+      'yarn workspace @biyan/core build\n            yarn install --immutable'
     ),
     qualificationWorkflow.replace(
       '--target-root ../target',

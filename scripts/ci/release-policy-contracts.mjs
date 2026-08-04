@@ -5185,6 +5185,31 @@ export function validateQualificationWorkflow(source) {
       (step) =>
         /^\s*(?:-\s*)?name:\s*Run release policy contracts\s*$/m.test(step)
     )
+    const focusedTypeScriptStep = workflowStepBlocks(activePreflight).find(
+      (step) =>
+        /^\s*(?:-\s*)?name:\s*Run focused TypeScript tests\s*$/m.test(step)
+    )
+    const focusedTypeScriptSequence =
+      focusedTypeScriptStep &&
+      hasCommandSequence(focusedTypeScriptStep, [
+        '(',
+        'cd target',
+        'yarn install --immutable',
+        'yarn workspace @biyan/core build',
+        'yarn vitest run "${typescript_tests[@]}"',
+        ')',
+      ])
+    if (
+      !focusedTypeScriptStep ||
+      !/^\s*if:\s*steps\.classification\.outputs\.focused\s*==\s*['"]true['"]\s*$/m.test(
+        focusedTypeScriptStep
+      ) ||
+      !focusedTypeScriptSequence
+    ) {
+      failures.push(
+        'qualification focused TypeScript tests must run against the exact target and install dependencies before building @biyan/core and running Vitest'
+      )
+    }
     if (
       !releasePolicyStep ||
       !/^\s*working-directory:\s*harness\s*$/m.test(releasePolicyStep) ||
