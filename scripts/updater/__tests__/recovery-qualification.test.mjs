@@ -29,7 +29,7 @@ const harnessSha256 = 'f'.repeat(64)
 const runId = 456
 const runAttempt = 2
 const repositoryId = 987
-const startedAt = '2026-08-04T00:00:00.000Z'
+const startedAt = '2026-08-04T00:00:00Z'
 
 function sha256Bytes(value) {
   return createHash('sha256').update(value).digest('hex')
@@ -298,7 +298,7 @@ function artifact(platform, index) {
     digest: `sha256:${String(index + 4).repeat(64)}`,
     expired: false,
     size_in_bytes: 4096,
-    created_at: `2026-08-04T00:0${index + 2}:00.000Z`,
+    created_at: `2026-08-04T00:0${index + 2}:00Z`,
     workflow_run: {
       id: runId,
       repository_id: repositoryId,
@@ -524,6 +524,45 @@ test('three exact lane artifacts aggregate into promotion evidence', (t) => {
   assert.deepEqual(evidence.health.scenarios, ['source-to-recovery'])
   assert.equal(evidence.health.migrationFailureRate, 0)
   assert.equal(evidence.health.p0Incidents, 0)
+
+  const offsetTimestamp = runReceipt()
+  offsetTimestamp.run.run_started_at = '2026-08-04T00:00:00+00:00'
+  assert.throws(
+    () =>
+      aggregateRecoveryQualificationEvidence({
+        contract,
+        inputDir: root,
+        runReceipt: offsetTimestamp,
+        artifactsResponse,
+      }),
+    /canonical ISO-8601/,
+  )
+
+  const emptyTimestamp = runReceipt()
+  emptyTimestamp.run.run_started_at = ''
+  assert.throws(
+    () =>
+      aggregateRecoveryQualificationEvidence({
+        contract,
+        inputDir: root,
+        runReceipt: emptyTimestamp,
+        artifactsResponse,
+      }),
+    /canonical ISO-8601/,
+  )
+
+  const nonCanonicalFraction = structuredClone(artifactsResponse)
+  nonCanonicalFraction.artifacts[0].created_at = '2026-08-04T00:02:00.0Z'
+  assert.throws(
+    () =>
+      aggregateRecoveryQualificationEvidence({
+        contract,
+        inputDir: root,
+        runReceipt: runReceipt(),
+        artifactsResponse: nonCanonicalFraction,
+      }),
+    /canonical ISO-8601/,
+  )
 
   const duplicate = structuredClone(artifactsResponse)
   duplicate.artifacts.push(structuredClone(duplicate.artifacts[0]))
