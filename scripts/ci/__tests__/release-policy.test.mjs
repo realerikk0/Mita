@@ -4860,6 +4860,29 @@ jobs:
         with:
           ref: \${{ needs.preflight.outputs.workflow_sha }}
           path: harness
+      - name: Build unsigned Windows qualification packages
+        if: needs.preflight.outputs.build_windows == 'true'
+        working-directory: target
+        shell: pwsh
+        env:
+          VERSION: \${{ needs.preflight.outputs.version }}
+        run: |
+          & node scripts/release-version.mjs stamp $env:VERSION --windows
+          if ($LASTEXITCODE -ne 0) {
+            throw 'Windows qualification stamp failed'
+          }
+          $tauriConfigPath = 'src-tauri/tauri.conf.json'
+          $tauriConfig = Get-Content $tauriConfigPath -Raw |
+            ConvertFrom-Json
+          $tauriConfig.bundle.createUpdaterArtifacts = $false
+          $tauriConfig | ConvertTo-Json -Depth 100 |
+            Set-Content $tauriConfigPath -Encoding utf8NoBOM
+          $unsignedConfig = Get-Content $tauriConfigPath -Raw |
+            ConvertFrom-Json
+          if ($unsignedConfig.bundle.createUpdaterArtifacts -ne $false) {
+            throw 'Exact qualification must disable updater artifacts'
+          }
+          make build
       - run: |
           & ./harness/scripts/ci/verify-windows-candidate.ps1 -Exe "$EXE" -Msi "$MSI" -Version "$VERSION"
           node ./harness/scripts/ci/candidate-path-policy.mjs --root $bundle
@@ -5238,6 +5261,38 @@ test('exact-SHA qualification keeps the harness trusted and has no production au
     qualificationWorkflow.replace(
       '& ./harness/scripts/ci/verify-windows-candidate.ps1',
       'Write-Output ./harness/scripts/ci/verify-windows-candidate.ps1'
+    ),
+    qualificationWorkflow.replace(
+      '& node scripts/release-version.mjs stamp $env:VERSION --windows',
+      'Write-Output skipped-Windows-release-stamp'
+    ),
+    qualificationWorkflow.replace(
+      'stamp $env:VERSION --windows',
+      'stamp $env:VERSION'
+    ),
+    qualificationWorkflow.replace(
+      'VERSION: \${{ needs.preflight.outputs.version }}',
+      'VERSION: 0.6.649'
+    ),
+    qualificationWorkflow.replace(
+      '$tauriConfig.bundle.createUpdaterArtifacts = $false',
+      '$tauriConfig.bundle.createUpdaterArtifacts = $true'
+    ),
+    qualificationWorkflow.replace(
+      "throw 'Exact qualification must disable updater artifacts'",
+      "Write-Output 'Ignored updater artifacts'"
+    ),
+    qualificationWorkflow.replace(
+      '        run: |\n          & node scripts/release-version.mjs stamp $env:VERSION --windows',
+      '        run: |\n          & node --version\n          & node scripts/release-version.mjs stamp $env:VERSION --windows'
+    ),
+    qualificationWorkflow.replace(
+      '          make build\n      - run: |\n          & ./harness/scripts/ci/verify-windows-candidate.ps1',
+      '          make build\n          & node --version\n      - run: |\n          & ./harness/scripts/ci/verify-windows-candidate.ps1'
+    ),
+    qualificationWorkflow.replace(
+      '          & node scripts/release-version.mjs stamp $env:VERSION --windows',
+      '          make build\n          & node scripts/release-version.mjs stamp $env:VERSION --windows'
     ),
     qualificationWorkflow.replace(
       'if: \${{ always() }}',

@@ -5571,6 +5571,47 @@ export function validateQualificationWorkflow(source) {
     }
   }
   if (windows) {
+    const windowsSteps = workflowStepBlocks(uncommentedSource(windows))
+    const buildStep = windowsSteps.find((step) =>
+      /^\s*(?:-\s*)?name:\s*Build unsigned Windows qualification packages\s*$/m.test(
+        step
+      )
+    )
+    const buildCommands = [
+      '& node scripts/release-version.mjs stamp $env:VERSION --windows',
+      'if ($LASTEXITCODE -ne 0) {',
+      "throw 'Windows qualification stamp failed'",
+      '}',
+      "$tauriConfigPath = 'src-tauri/tauri.conf.json'",
+      '$tauriConfig = Get-Content $tauriConfigPath -Raw |',
+      'ConvertFrom-Json',
+      '$tauriConfig.bundle.createUpdaterArtifacts = $false',
+      '$tauriConfig | ConvertTo-Json -Depth 100 |',
+      'Set-Content $tauriConfigPath -Encoding utf8NoBOM',
+      '$unsignedConfig = Get-Content $tauriConfigPath -Raw |',
+      'ConvertFrom-Json',
+      'if ($unsignedConfig.bundle.createUpdaterArtifacts -ne $false) {',
+      "throw 'Exact qualification must disable updater artifacts'",
+      '}',
+      'make build',
+    ]
+    if (
+      !buildStep ||
+      !/^\s*if:\s*needs\.preflight\.outputs\.build_windows\s*==\s*['"]true['"]\s*$/m.test(
+        buildStep
+      ) ||
+      !/^\s*working-directory:\s*target\s*$/m.test(buildStep) ||
+      !/^\s*shell:\s*pwsh\s*$/m.test(buildStep) ||
+      !buildStep.includes(
+        'VERSION: ${{ needs.preflight.outputs.version }}'
+      ) ||
+      /^\s*(?:-\s*)?continue-on-error:\s*/m.test(buildStep) ||
+      !hasExactRunCommands(buildStep, buildCommands)
+    ) {
+      failures.push(
+        'native-windows must stamp the exact release version into its unsigned Windows bundle before building'
+      )
+    }
     const candidatePolicy = findRunInvocation(
       windows,
       /^node\s+(?:\.\/)?harness\/scripts\/ci\/candidate-path-policy\.mjs(?:\s|$)/
