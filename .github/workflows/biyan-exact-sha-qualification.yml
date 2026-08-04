@@ -1356,7 +1356,24 @@ jobs:
         shell: pwsh
         env:
           BIYAN_DATA_SCHEMA: ${{ needs.preflight.outputs.data_schema }}
-        run: make build
+          VERSION: ${{ needs.preflight.outputs.version }}
+        run: |
+          & node scripts/release-version.mjs stamp $env:VERSION --windows
+          if ($LASTEXITCODE -ne 0) {
+            throw 'Windows qualification stamp failed'
+          }
+          $tauriConfigPath = 'src-tauri/tauri.conf.json'
+          $tauriConfig = Get-Content $tauriConfigPath -Raw |
+            ConvertFrom-Json
+          $tauriConfig.bundle.createUpdaterArtifacts = $false
+          $tauriConfig | ConvertTo-Json -Depth 100 |
+            Set-Content $tauriConfigPath -Encoding utf8NoBOM
+          $unsignedConfig = Get-Content $tauriConfigPath -Raw |
+            ConvertFrom-Json
+          if ($unsignedConfig.bundle.createUpdaterArtifacts -ne $false) {
+            throw 'Exact qualification must disable updater artifacts'
+          }
+          make build
 
       - name: Record Windows post-build disk
         if: always() && needs.preflight.outputs.build_windows == 'true'
