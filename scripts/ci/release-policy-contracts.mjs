@@ -269,6 +269,14 @@ function hasCommandSequence(block, expected) {
   })
 }
 
+function hasExactRunCommands(block, expected) {
+  return runBlocks(block).some(
+    (commands) =>
+      commands.length === expected.length &&
+      expected.every((command, index) => commands[index] === command)
+  )
+}
+
 function findRunInvocation(block, invocation) {
   for (const commands of runBlocks(block)) {
     const command = commands.find(
@@ -5251,14 +5259,25 @@ export function validateQualificationWorkflow(source) {
           step
         )
     )
+    const updaterContractRunCommands = [
+      ...UPDATER_CONTRACT_TEST_COMMANDS,
+      ...UPDATER_PYTHON_CONTRACT_TESTS.map((testPath, index) =>
+        index === 0
+          ? ['python3 -m unittest \\', `${testPath} \\`]
+          : index === UPDATER_PYTHON_CONTRACT_TESTS.length - 1
+            ? [testPath]
+            : [`${testPath} \\`]
+      ).flat(),
+    ]
     if (
       !updaterContractStep ||
       !/^\s*if:\s*steps\.classification\.outputs\.updater\s*==\s*['"]true['"]\s*$/m.test(
         updaterContractStep
       ) ||
       !/^\s*working-directory:\s*harness\s*$/m.test(updaterContractStep) ||
-      /\b(?:if|test)\s+\[\s+-f\b|^\s*(?:test_files|found)=/m.test(
-        updaterContractStep
+      !hasExactRunCommands(
+        updaterContractStep,
+        updaterContractRunCommands
       )
     ) {
       failures.push(
@@ -5285,16 +5304,12 @@ export function validateQualificationWorkflow(source) {
       !/^\s*working-directory:\s*harness\s*$/m.test(
         distributionContractStep
       ) ||
-      /\b(?:if|test)\s+\[\s+-f\b|^\s*(?:test_files|found)=/m.test(
-        distributionContractStep
-      ) ||
-      !hasRunInvocation(
+      !hasExactRunCommands(
         distributionContractStep,
-        /^node --test scripts\/release-distribution\/__tests__\/bootstrap-biyan-download-aliases\.test\.mjs$/
-      ) ||
-      !hasRunInvocation(
-        distributionContractStep,
-        /^node --test scripts\/release-distribution\/__tests__\/release-distribution\.test\.mjs$/
+        [
+          'node --test scripts/release-distribution/__tests__/bootstrap-biyan-download-aliases.test.mjs',
+          'node --test scripts/release-distribution/__tests__/release-distribution.test.mjs',
+        ]
       )
     ) {
       failures.push(

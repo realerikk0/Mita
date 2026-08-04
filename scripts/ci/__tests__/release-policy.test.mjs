@@ -5099,6 +5099,10 @@ test('exact-SHA qualification keeps the harness trusted and has no production au
       '          if [ -f scripts/updater/__tests__/recovery-qualification.test.mjs ]; then\n            node --test scripts/updater/__tests__/recovery-qualification.test.mjs\n          fi'
     ),
     qualificationWorkflow.replace(
+      '          node --test scripts/updater/__tests__/recovery-qualification.test.mjs',
+      '          if test -f scripts/updater/__tests__/recovery-qualification.test.mjs; then\n            node --test scripts/updater/__tests__/recovery-qualification.test.mjs\n          fi'
+    ),
+    qualificationWorkflow.replace(
       'node --test scripts/updater/__tests__/updater.test.mjs',
       'echo skipped-updater-contracts'
     ),
@@ -5121,6 +5125,10 @@ test('exact-SHA qualification keeps the harness trusted and has no production au
     qualificationWorkflow.replace(
       '          node --test scripts/release-distribution/__tests__/release-distribution.test.mjs',
       '          if [ -f scripts/release-distribution/__tests__/release-distribution.test.mjs ]; then\n            node --test scripts/release-distribution/__tests__/release-distribution.test.mjs\n          fi'
+    ),
+    qualificationWorkflow.replace(
+      '          node --test scripts/release-distribution/__tests__/release-distribution.test.mjs',
+      '          if [[ -f scripts/release-distribution/__tests__/release-distribution.test.mjs ]]; then\n            node --test scripts/release-distribution/__tests__/release-distribution.test.mjs\n          fi'
     ),
     qualificationWorkflow.replace(
       'node harness/scripts/ci/verify-qualification-artifacts.mjs verify',
