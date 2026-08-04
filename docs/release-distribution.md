@@ -31,18 +31,36 @@ Only manually dispatch `Desktop Release Candidate` from protected
 
 | Release | Tag | Source commit | Phase/schema |
 | --- | --- | --- | --- |
-| Complete | `v0.6.649` | `cc7bd75e40da7e32ea93433ed7311fb7ddbab379` | `C/3` |
+| Previous published | `v0.6.649` | `cc7bd75e40da7e32ea93433ed7311fb7ddbab379` | `C/3` |
+| Active complete | `v0.6.650` | `7c4f563ff8f0a7d7ab877330881f73db164cc613` | `C/3` |
 
 The retired A/B/C mappings remain immutable history, not an authorized
 automatic upgrade sequence. The trusted control plane must read the active
 terminal identity from the reviewed release policy and prove that the exact
 source commit is an ancestor of live `mita-main`.
 
+Terminal releases use one protected pull request with exactly two logical
+commits. The first commit (`P`) contains all product changes and the three
+matching version-file updates. The second commit (`Q`) changes only reviewed
+release-control paths, appends the former active release to contiguous
+`published-superseded` history, and binds the next active tag to the full
+40-character `P` SHA. Required CI and CODEOWNER review run against `Q`. Merge
+this PR with a merge commit so `P` remains an immutable one-parent ancestor;
+never squash or rebase a terminal release PR. The branch rules may allow merge
+commits for this purpose, but all status, review, deletion, and non-fast-forward
+protections remain mandatory.
+
+The rolling schema does not authorize arbitrary versions. Every new active
+terminal must be the next patch version after the latest contiguous terminal
+history entry, must attest `C/3`, and must bind one exact source commit. The
+candidate workflow reads that active identity dynamically; it does not contain
+a release-specific `v0.6.649` allowlist.
+
 The `v0.6.646`, `v0.6.647`, and `v0.6.648` tags, Draft releases, uploaded assets, and failed
 direct qualifications are immutable blocked-before-publication evidence.
 None of these candidates was published or promoted; preserve them exactly, do not
-retag or reuse them, and do not recut A/B/C. `v0.6.649` is the single higher
-cumulative complete release.
+retag or reuse them, and do not recut A/B/C. `v0.6.649` remains immutable
+published history; `v0.6.650` is the next cumulative complete release.
 
 `tag-cut` uses only the repository `GITHUB_TOKEN`; do not provide an operator
 PAT or GitHub App secret and do not directly push the tag. A missing tag is
@@ -57,7 +75,7 @@ Distribution run; do not dispatch a second non-dry-run distribution in
 parallel. Use manual non-dry-run distribution only as an explicit recovery for
 a failed or absent publication-triggered run.
 
-There is no A or B dispatch. One accepted `v0.6.649/C/3` candidate is the only
+There is no A or B dispatch. One accepted `v0.6.650/C/3` candidate is the only
 product package in this release.
 
 ## Pre-tag exact-SHA qualification
@@ -164,6 +182,30 @@ writes no production updater or download object. The former two-point A
 canary and its 48-hour receipt are retired evidence and are not valid for
 Direct-C promotion.
 
+## GitHub-native rolling recovery qualification
+
+For every terminal patch after the initial Direct-C release, publish the
+verified GitHub Release and let its one automatic `Release Distribution` run
+finish before dispatching `.github/workflows/biyan-upgrade-smoke.yml` from
+live protected `mita-main`. The workflow accepts no version or evidence URL
+input. It derives the exact source from the ledger's latest
+`published-superseded` entry and the exact candidate from
+`activeTerminalRelease`.
+
+The read-only preflight verifies both tags, published Releases, independently
+signed `candidate.json` documents, manifests, source commits, and installer
+digests. Windows, macOS, and Linux then each run one real
+`source-to-recovery` install/start/migration lane with the shipped NSIS, DMG,
+or AppImage package and a sanitized deterministic snapshot. Only exact 3/3
+success may upload
+`biyan-promotion-evidence-<run-id>-<run-attempt>`; failed and rerun attempts
+cannot be mistaken for the current evidence.
+
+This is pre-promotion laboratory health evidence, not production telemetry.
+The automatic post-promotion health gate remains required. The qualification
+workflow has only `actions: read` and `contents: read`; it has no production
+store credential or mutation step.
+
 ## Promotion
 
 Use `.github/workflows/promote-desktop-update.yml` only after environment
@@ -174,6 +216,15 @@ approval. Promotion requires:
 - real upgrade smoke evidence for the requested source/target pair;
 - rollout timing and health evidence;
 - a recoverable snapshot of the previous policy and manifests.
+
+For `RECOVERY`, promotion accepts only the exact attempt-scoped artifact from
+`Biyan Upgrade Smoke`. The candidate source must be an ancestor of the smoke
+head, the smoke head must be an ancestor of current live main, and the four
+reviewed recovery harness files plus the rolling ledger must not drift between
+those commits. The evidence source must equal `from_version` and the latest
+published terminal; its candidate must equal the active signed C/schema-3
+release. Dry-run the same request first, then perform one 100% compare-and-swap
+transaction.
 
 Direct-C promotion also requires the tracked transition policy to name the
 exact reviewed `0.6.649` manifest SHA-256 and four-platform set. It remains
@@ -212,6 +263,9 @@ manifest to both legacy origins and verify public readback.
 
 - Direct-C: one 100% transaction after all sixteen GitHub-native attempts,
   signed-candidate checks, dry-run transaction, and health evidence pass.
+- Recovery: one 100% transaction after the exact three-platform rolling
+  qualification, attempt-scoped evidence verification, signed-candidate
+  checks, and dry-run transaction pass.
 - Pause immediately on P0/P1, data loss, or migration failures above 0.5%.
 
 Public stable versions `0.6.605–0.6.608` contain

@@ -25,6 +25,7 @@ from autoqa.migration_runner import (
     SourceReadinessSpec,
     main,
     migration_matrix,
+    recovery_migration_case,
     run_matrix,
     select_migration_cases,
     validate_inputs,
@@ -94,6 +95,63 @@ class MigrationRunnerTests(unittest.TestCase):
                 "fresh-c",
             ],
         )
+
+    def test_recovery_case_is_explicit_but_not_in_the_default_matrix(self):
+        recovery = recovery_migration_case()
+        self.assertEqual(recovery.name, "source-to-recovery")
+        self.assertEqual(recovery.snapshot, "current")
+        self.assertEqual(recovery.install_sequence, ("current", "c"))
+        self.assertEqual(recovery.expected_phase, "c")
+        self.assertNotIn(
+            "source-to-recovery",
+            [case.name for case in migration_matrix()],
+        )
+        self.assertEqual(
+            select_migration_cases(["source-to-recovery"]),
+            (recovery,),
+        )
+
+    def test_recovery_manifest_requires_exact_automatic_updater_lane(self):
+        with tempfile.TemporaryDirectory(dir=Path.home()) as directory:
+            root = Path(directory)
+            installers, manifest = self.make_inputs(root)
+            payload = json.loads(manifest.read_text(encoding="utf-8"))
+            payload.update(
+                {
+                    "platform": "linux",
+                    "lane": "source-to-recovery-linux",
+                    "scenario": "source-to-recovery",
+                    "qualificationMode": "automatic-updater",
+                }
+            )
+            for phase in ("a", "b"):
+                installers.pop(phase).unlink()
+                del payload["installers"][phase]
+                del payload["expectations"][phase]
+            for snapshot in ("a", "b", "fresh"):
+                (root / f"{snapshot}.zip").unlink()
+                del payload["snapshots"][snapshot]
+            manifest.write_text(json.dumps(payload), encoding="utf-8")
+
+            validated = validate_inputs(
+                {"current": installers["current"], "c": installers["c"]},
+                manifest,
+                "linux",
+                select_migration_cases(["source-to-recovery"]),
+            )
+            self.assertEqual(set(validated.installers), {"current", "c"})
+            self.assertEqual(set(validated.snapshots), {"current"})
+            self.assertEqual(validated.qualification_mode, "automatic-updater")
+
+            payload["qualificationMode"] = "manual-installer"
+            manifest.write_text(json.dumps(payload), encoding="utf-8")
+            with self.assertRaisesRegex(ValueError, "qualificationMode"):
+                validate_inputs(
+                    {"current": installers["current"], "c": installers["c"]},
+                    manifest,
+                    "linux",
+                    select_migration_cases(["source-to-recovery"]),
+                )
 
     def test_windows_updater_command_contract_is_lock_and_config_bound(self):
         repository_root = Path(__file__).resolve().parents[2]

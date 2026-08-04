@@ -71,6 +71,8 @@ function sha256(value) {
 function promotionCandidate(version, migrationPhase, dataSchema) {
   const publishedAt = '2026-07-24T00:00:00.000Z'
   const sourceCommit = '0123456789abcdef0123456789abcdef01234567'
+  const tag = `v${version}`
+  const manifestKey = `biyan/updater/releases/${tag}/latest.json`
   const latest = manifest({
     version,
     prefix: `/biyan/updater/releases/v${version}`,
@@ -88,10 +90,12 @@ function promotionCandidate(version, migrationPhase, dataSchema) {
   return {
     candidate: {
       version,
+      tag,
       sourceCommit,
       migrationPhase,
       dataSchema,
       publishedAt,
+      manifestKey,
       manifestSha256: sha256(candidateManifestBytes),
     },
     candidateManifestBytes,
@@ -395,6 +399,178 @@ test('promotion policy mechanically preserves the active A legacy bridge', () =>
         trainPolicy: legacyTrainPolicy,
       }),
     /latest\.json SHA-256 does not match/
+  )
+})
+
+test('deployed DIRECT_C accepts only the exact rolling terminal RECOVERY patch', () => {
+  const directPolicy = JSON.parse(
+    fs.readFileSync(
+      path.join(repoRoot, 'scripts/updater/direct-c-transition-policy.json'),
+      'utf8',
+    ),
+  )
+  const trackedPolicy = JSON.parse(
+    fs.readFileSync(
+      path.join(repoRoot, 'scripts/updater/legacy-bridge-policy.json'),
+      'utf8',
+    ),
+  )
+  const previous = {
+    ...directPolicy.approvedNext,
+    status: 'published-superseded',
+  }
+  delete previous.manifestKey
+  delete previous.manifestSha256
+  delete previous.requiredPlatforms
+  const {
+    candidate,
+    candidateManifestBytes,
+  } = promotionCandidate('0.6.650', 'C', 3)
+  const trainPolicy = {
+    supersededTerminalReleases: [
+      {
+        tag: 'v0.6.646',
+        version: '0.6.646',
+        migrationPhase: 'C',
+        dataSchema: 3,
+        sourceCommit: 'a'.repeat(40),
+        status: 'blocked-before-publication',
+      },
+      {
+        tag: 'v0.6.647',
+        version: '0.6.647',
+        migrationPhase: 'C',
+        dataSchema: 3,
+        sourceCommit: 'b'.repeat(40),
+        status: 'blocked-before-publication',
+      },
+      {
+        tag: 'v0.6.648',
+        version: '0.6.648',
+        migrationPhase: 'C',
+        dataSchema: 3,
+        sourceCommit: 'c'.repeat(40),
+        status: 'blocked-before-publication',
+      },
+      previous,
+    ],
+    activeTerminalRelease: {
+      tag: candidate.tag,
+      version: candidate.version,
+      migrationPhase: candidate.migrationPhase,
+      dataSchema: candidate.dataSchema,
+      sourceCommit: candidate.sourceCommit,
+    },
+  }
+  const currentPolicy = {
+    schema: 1,
+    channel: 'stable',
+    deploymentMode: 'direct-c',
+    currentVersion: previous.version,
+    legacyBridgeVersion: previous.version,
+    releases: {
+      [previous.version]: {
+        phase: 'DIRECT_C',
+        effectivePhase: 'C',
+        tag: previous.tag,
+        sourceCommit: previous.sourceCommit,
+        dataSchema: previous.dataSchema,
+        manifestKey: directPolicy.approvedNext.manifestKey,
+        manifestSha256: directPolicy.approvedNext.manifestSha256,
+      },
+    },
+    transitions: {},
+  }
+  const nextPolicy = {
+    ...structuredClone(currentPolicy),
+    currentVersion: candidate.version,
+    legacyBridgeVersion: candidate.version,
+    releases: {
+      ...structuredClone(currentPolicy.releases),
+      [candidate.version]: {
+        phase: 'RECOVERY',
+        effectivePhase: 'C',
+        tag: candidate.tag,
+        manifestKey: candidate.manifestKey,
+        manifestSha256: candidate.manifestSha256,
+      },
+    },
+    transitions: {
+      [previous.version]: {
+        to: candidate.version,
+        phase: 'RECOVERY',
+        rollout: 100,
+        manifestKey: candidate.manifestKey,
+      },
+    },
+  }
+
+  const validate = (overrides = {}) =>
+    validatePromotionLegacyBridge({
+      candidate,
+      candidateManifestBytes,
+      currentPolicy,
+      nextPolicy,
+      trackedPolicy,
+      directTransitionPolicy: directPolicy,
+      trainPolicy,
+      ...overrides,
+    })
+
+  assert.deepEqual(validate(), {
+    activeAVersion: '0.6.650',
+    effectivePhase: 'C',
+    trackedState: 'direct-c-recovery',
+  })
+
+  const wrongSourcePolicy = structuredClone(trainPolicy)
+  wrongSourcePolicy.activeTerminalRelease.sourceCommit = 'f'.repeat(40)
+  assert.throws(
+    () => validate({ trainPolicy: wrongSourcePolicy }),
+    /candidate must match the exact active terminal release/,
+  )
+
+  const skippedPolicy = structuredClone(trainPolicy)
+  skippedPolicy.activeTerminalRelease.version = '0.6.651'
+  skippedPolicy.activeTerminalRelease.tag = 'v0.6.651'
+  assert.throws(
+    () => validate({ trainPolicy: skippedPolicy }),
+    /next exact C\/3 patch/,
+  )
+
+  assert.throws(
+    () =>
+      validate({
+        nextPolicy: {
+          ...structuredClone(nextPolicy),
+          transitions: {
+            [previous.version]: {
+              ...nextPolicy.transitions[previous.version],
+              rollout: 25,
+            },
+          },
+        },
+      }),
+    /atomically publish/,
+  )
+
+  assert.throws(
+    () =>
+      validate({
+        currentPolicy: {
+          ...structuredClone(currentPolicy),
+          legacyBridgeVersion: '0.6.648',
+        },
+      }),
+    /current policy must match the latest published C terminal/,
+  )
+
+  const driftedHistory = structuredClone(trainPolicy)
+  driftedHistory.supersededTerminalReleases.at(-1).sourceCommit =
+    'e'.repeat(40)
+  assert.throws(
+    () => validate({ trainPolicy: driftedHistory }),
+    /exact published v0\.6\.649 baseline/,
   )
 })
 

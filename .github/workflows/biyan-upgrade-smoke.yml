@@ -2,66 +2,607 @@ name: Biyan Upgrade Smoke
 
 on:
   workflow_dispatch:
-    inputs:
-      upgrade_smoke_url:
-        description: "HTTPS JSON report produced by the real Windows/macOS/Linux upgrade test run"
-        required: true
-        type: string
-      upgrade_smoke_sha256:
-        description: "SHA-256 of the upgrade smoke report"
-        required: true
-        type: string
-      rollout_health_url:
-        description: "HTTPS JSON report produced by rollout telemetry"
-        required: true
-        type: string
-      rollout_health_sha256:
-        description: "SHA-256 of the rollout health report"
-        required: true
-        type: string
 
 permissions:
+  actions: read
   contents: read
 
-jobs:
-  attest:
-    name: Verify external real-upgrade evidence
-    runs-on: ubuntu-latest
-    environment: release-distribution
-    steps:
-      - uses: actions/checkout@v4
+concurrency:
+  group: biyan-recovery-qualification
+  cancel-in-progress: false
 
-      - name: Download immutable evidence
+jobs:
+  preflight:
+    name: Bind the rolling terminal recovery contract
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    environment: release-distribution
+    outputs:
+      source_tag: ${{ steps.contract.outputs.source_tag }}
+      candidate_tag: ${{ steps.contract.outputs.candidate_tag }}
+    steps:
+      - name: Check out the exact protected dispatch
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Bind live main and download exact signed metadata
+        id: contract
         env:
-          SMOKE_URL: ${{ inputs.upgrade_smoke_url }}
-          HEALTH_URL: ${{ inputs.rollout_health_url }}
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
         run: |
           set -euo pipefail
-          [[ "$SMOKE_URL" = https://* ]]
-          [[ "$HEALTH_URL" = https://* ]]
-          mkdir -p dist/input dist/verified
-          curl --proto '=https' --tlsv1.2 -fsSL --retry 5 "$SMOKE_URL" \
-            -o dist/input/upgrade-smoke.json
-          curl --proto '=https' --tlsv1.2 -fsSL --retry 5 "$HEALTH_URL" \
-            -o dist/input/rollout-health.json
+          test "$GITHUB_REF" = "refs/heads/mita-main"
+          test "$(git rev-parse HEAD)" = "$GITHUB_SHA"
+          git fetch --force --no-tags origin \
+            "+refs/heads/mita-main:refs/remotes/origin/mita-main"
+          test "$(git rev-parse refs/remotes/origin/mita-main)" = "$GITHUB_SHA"
+          node scripts/ci/verify-release-policy.mjs --require-active
 
-      - name: Verify digests and evidence schemas
-        run: |
-          node scripts/updater/verify-promotion-evidence.mjs \
-            --smoke dist/input/upgrade-smoke.json \
-            --smoke-sha256 "${{ inputs.upgrade_smoke_sha256 }}" \
-            --health dist/input/rollout-health.json \
-            --health-sha256 "${{ inputs.rollout_health_sha256 }}" \
-            --output-dir dist/verified
-          cp dist/input/upgrade-smoke.json dist/verified/upgrade-smoke.json
-          cp dist/input/rollout-health.json dist/verified/rollout-health.json
+          policy="scripts/ci/release-train-policy.json"
+          source_tag="$(jq -er '
+            .supersededTerminalReleases[-1]
+            | select(.status == "published-superseded")
+            | .tag
+          ' "$policy")"
+          candidate_tag="$(jq -er .activeTerminalRelease.tag "$policy")"
+          source_commit="$(jq -er \
+            '.supersededTerminalReleases[-1].sourceCommit' "$policy")"
+          candidate_commit="$(jq -er \
+            '.activeTerminalRelease.sourceCommit' "$policy")"
+          [[ "$source_tag" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]
+          [[ "$candidate_tag" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]
+          [[ "$source_commit" =~ ^[0-9a-f]{40}$ ]]
+          [[ "$candidate_commit" =~ ^[0-9a-f]{40}$ ]]
 
-      - name: Upload promotion evidence
+          git fetch --force --no-tags origin \
+            "refs/tags/${source_tag}:refs/tags/${source_tag}" \
+            "refs/tags/${candidate_tag}:refs/tags/${candidate_tag}"
+          test "$(git rev-parse "refs/tags/${source_tag}^{commit}")" = \
+            "$source_commit"
+          test "$(git rev-parse "refs/tags/${candidate_tag}^{commit}")" = \
+            "$candidate_commit"
+          git merge-base --is-ancestor "$source_commit" "$candidate_commit"
+          git merge-base --is-ancestor "$candidate_commit" "$GITHUB_SHA"
+
+          mkdir -p dist/recovery-preflight/source \
+            dist/recovery-preflight/candidate
+          download_release_metadata() {
+            local label="$1" tag="$2" release
+            release="dist/recovery-preflight/${label}/release.json"
+            gh api \
+              "repos/${GITHUB_REPOSITORY}/releases/tags/${tag}" >"$release"
+            jq -e --arg tag "$tag" '
+              .tag_name == $tag
+              and .draft == false
+              and .prerelease == false
+              and (.published_at | type == "string" and length > 0)
+            ' "$release" >/dev/null
+            for asset in candidate.json candidate.json.sig latest.json; do
+              local record asset_id asset_size asset_digest output
+              record="$(jq -cer --arg asset "$asset" '
+                [.assets[] | select(.name == $asset)] as $matches
+                | if ($matches | length) == 1 then $matches[0]
+                  else error("signed metadata asset must be unique") end
+                | select(
+                    .state == "uploaded"
+                    and (.id | type == "number" and . > 0)
+                    and (.size | type == "number" and . > 0)
+                    and (.digest | test("^sha256:[0-9a-f]{64}$"))
+                  )
+                | [.id, .size, .digest] | @tsv
+              ' "$release")"
+              IFS=$'\t' read -r asset_id asset_size asset_digest <<<"$record"
+              output="dist/recovery-preflight/${label}/${asset}"
+              gh api -H "Accept: application/octet-stream" \
+                "repos/${GITHUB_REPOSITORY}/releases/assets/${asset_id}" \
+                >"$output"
+              test "$(stat -c '%s' "$output")" = "$asset_size"
+              test "sha256:$(sha256sum "$output" | awk '{print $1}')" = \
+                "$asset_digest"
+            done
+          }
+          download_release_metadata source "$source_tag"
+          download_release_metadata candidate "$candidate_tag"
+
+          source_key="$(
+            git show "${source_commit}:src-tauri/tauri.conf.json" \
+              | jq -er .plugins.updater.pubkey
+          )"
+          candidate_key="$(
+            git show "${candidate_commit}:src-tauri/tauri.conf.json" \
+              | jq -er .plugins.updater.pubkey
+          )"
+          harness_paths=(
+            .github/workflows/biyan-upgrade-smoke.yml
+            autoqa/migration_runner.py
+            scripts/updater/prepare-recovery-qualification-inputs.py
+            scripts/updater/recovery-qualification-evidence.mjs
+          )
+          git ls-tree "$GITHUB_SHA" -- "${harness_paths[@]}" \
+            > dist/recovery-preflight/harness-tree.txt
+          test "$(wc -l < dist/recovery-preflight/harness-tree.txt \
+            | tr -d ' ')" = 4
+          harness_sha256="$(
+            sha256sum dist/recovery-preflight/harness-tree.txt \
+              | awk '{print $1}'
+          )"
+
+          node scripts/updater/recovery-qualification-evidence.mjs contract \
+            --train-policy "$policy" \
+            --source-candidate \
+              dist/recovery-preflight/source/candidate.json \
+            --source-candidate-signature \
+              dist/recovery-preflight/source/candidate.json.sig \
+            --source-manifest dist/recovery-preflight/source/latest.json \
+            --source-public-key "$source_key" \
+            --candidate-candidate \
+              dist/recovery-preflight/candidate/candidate.json \
+            --candidate-candidate-signature \
+              dist/recovery-preflight/candidate/candidate.json.sig \
+            --candidate-manifest \
+              dist/recovery-preflight/candidate/latest.json \
+            --candidate-public-key "$candidate_key" \
+            --run-id "$GITHUB_RUN_ID" \
+            --run-attempt "$GITHUB_RUN_ATTEMPT" \
+            --head-sha "$GITHUB_SHA" \
+            --harness-sha256 "$harness_sha256" \
+            --output dist/recovery-preflight/contract.json
+          test "$(jq -er .source.tag \
+            dist/recovery-preflight/contract.json)" = "$source_tag"
+          test "$(jq -er .candidate.tag \
+            dist/recovery-preflight/contract.json)" = "$candidate_tag"
+          {
+            echo "source_tag=$source_tag"
+            echo "candidate_tag=$candidate_tag"
+          } >>"$GITHUB_OUTPUT"
+
+      - name: Upload immutable recovery contract
         uses: actions/upload-artifact@v4
         with:
-          name: biyan-promotion-evidence
+          name: recovery-preflight-${{ github.run_id }}-${{ github.run_attempt }}
+          path: dist/recovery-preflight/
           if-no-files-found: error
           retention-days: 30
+
+  qualification:
+    name: source-to-recovery-${{ matrix.platform }} on ${{ matrix.runner }}
+    needs: preflight
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 90
+    environment: release-distribution
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - platform: windows
+            runner: windows-2022
+          - platform: macos
+            runner: macos-15-intel
+          - platform: linux
+            runner: ubuntu-24.04
+    env:
+      PLATFORM: ${{ matrix.platform }}
+      SOURCE_TAG: ${{ needs.preflight.outputs.source_tag }}
+      CANDIDATE_TAG: ${{ needs.preflight.outputs.candidate_tag }}
+      APPIMAGE_EXTRACT_AND_RUN: "1"
+    steps:
+      - name: Check out the exact protected dispatch
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+
+      - name: Download the exact recovery contract
+        uses: actions/download-artifact@v4
+        with:
+          name: recovery-preflight-${{ github.run_id }}-${{ github.run_attempt }}
+          path: dist/recovery-preflight
+
+      - name: Bind this lane and exact installer names
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$GITHUB_REF" = "refs/heads/mita-main"
+          test "$(git rev-parse HEAD)" = "$GITHUB_SHA"
+          git fetch --force --no-tags origin \
+            "+refs/heads/mita-main:refs/remotes/origin/mita-main"
+          test "$(git rev-parse refs/remotes/origin/mita-main)" = "$GITHUB_SHA"
+          contract="dist/recovery-preflight/contract.json"
+          test "$(jq -er .source.tag "$contract")" = "$SOURCE_TAG"
+          test "$(jq -er .candidate.tag "$contract")" = "$CANDIDATE_TAG"
+          source_asset="$(jq -er --arg platform "$PLATFORM" \
+            '.source.assets[$platform].name' "$contract")"
+          candidate_asset="$(jq -er --arg platform "$PLATFORM" \
+            '.candidate.assets[$platform].name' "$contract")"
+          qual_root="$RUNNER_TEMP/biyan-recovery-$PLATFORM"
+          mkdir -p "$qual_root/assets" dist/recovery-evidence
+          printf '{"platform":"%s","status":"started"}\n' "$PLATFORM" \
+            >"dist/recovery-evidence/source-to-recovery-${PLATFORM}-execution.json"
+          {
+            echo "QUAL_ROOT=$qual_root"
+            echo "SOURCE_ASSET_NAME=$source_asset"
+            echo "CANDIDATE_ASSET_NAME=$candidate_asset"
+            echo "HARNESS_SHA256=$(jq -er .workflow.harnessSha256 "$contract")"
+          } >>"$GITHUB_ENV"
+
+      - name: Download exact published Windows installers
+        if: matrix.platform == 'windows'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          gh release download $env:SOURCE_TAG `
+            --repo $env:GITHUB_REPOSITORY `
+            --pattern $env:SOURCE_ASSET_NAME `
+            --dir (Join-Path $env:QUAL_ROOT 'assets')
+          if ($LASTEXITCODE -ne 0) { throw 'source installer download failed' }
+          gh release download $env:CANDIDATE_TAG `
+            --repo $env:GITHUB_REPOSITORY `
+            --pattern $env:CANDIDATE_ASSET_NAME `
+            --dir (Join-Path $env:QUAL_ROOT 'assets')
+          if ($LASTEXITCODE -ne 0) { throw 'candidate installer download failed' }
+
+      - name: Download exact published Unix installers
+        if: matrix.platform != 'windows'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          gh release download "$SOURCE_TAG" \
+            --repo "$GITHUB_REPOSITORY" \
+            --pattern "$SOURCE_ASSET_NAME" \
+            --dir "$QUAL_ROOT/assets"
+          gh release download "$CANDIDATE_TAG" \
+            --repo "$GITHUB_REPOSITORY" \
+            --pattern "$CANDIDATE_ASSET_NAME" \
+            --dir "$QUAL_ROOT/assets"
+
+      - name: Install Linux desktop runtime dependencies
+        if: matrix.platform == 'linux'
+        shell: bash
+        run: |
+          set -euo pipefail
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            libglib2.0-dev libatk1.0-dev libpango1.0-dev libgtk-3-dev \
+            libsoup-3.0-dev libwebkit2gtk-4.1-dev librsvg2-dev \
+            libappindicator3-dev webkit2gtk-driver xvfb
+
+      - name: Run Windows recovery qualification
+        id: execute_windows
+        if: matrix.platform == 'windows'
+        continue-on-error: true
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Continue'
+          $assets = Join-Path $env:QUAL_ROOT 'assets'
+          $inputs = Join-Path $env:QUAL_ROOT 'inputs'
+          $work = Join-Path $env:QUAL_ROOT 'work'
+          $report = Join-Path $env:QUAL_ROOT 'migration.json'
+          $source = Join-Path $assets $env:SOURCE_ASSET_NAME
+          $candidate = Join-Path $assets $env:CANDIDATE_ASSET_NAME
+          $contract = 'dist/recovery-preflight/contract.json'
+          $startedAt = (Get-Date).ToUniversalTime().ToString(
+            'yyyy-MM-ddTHH:mm:ss.fffZ'
+          )
+          & python scripts/updater/prepare-recovery-qualification-inputs.py `
+            --contract $contract `
+            --platform $env:PLATFORM `
+            --source-installer $source `
+            --candidate-installer $candidate `
+            --output-dir $inputs
+          $status = $LASTEXITCODE
+          if ($status -eq 0) {
+            & python autoqa/migration_runner.py `
+              --platform $env:PLATFORM `
+              --scenario source-to-recovery `
+              --current-installer $source `
+              --c-installer $candidate `
+              --snapshot-manifest (Join-Path $inputs 'manifest.json') `
+              --report $report `
+              --work-dir $work `
+              --startup-seconds 10 `
+              --migration-timeout-seconds 90 `
+              --allow-destructive-autoqa AUTOQA
+            $status = $LASTEXITCODE
+          }
+          $completedAt = (Get-Date).ToUniversalTime().ToString(
+            'yyyy-MM-ddTHH:mm:ss.fffZ'
+          )
+          $lane = "source-to-recovery-$($env:PLATFORM)"
+          $manifest = Join-Path $inputs 'manifest.json'
+          $snapshot = Join-Path $inputs 'snapshots/current.zip'
+          if (Test-Path $report) {
+            Copy-Item $report "dist/recovery-evidence/$lane-migration.json"
+          }
+          if (Test-Path $manifest) {
+            Copy-Item $manifest "dist/recovery-evidence/$lane-manifest.json"
+          }
+          if (Test-Path $snapshot) {
+            Copy-Item $snapshot "dist/recovery-evidence/$lane-snapshot.zip"
+          }
+          if ($status -eq 0) {
+            & node scripts/updater/recovery-qualification-evidence.mjs `
+              lane-result `
+              --contract $contract `
+              --platform $env:PLATFORM `
+              --migration-report $report `
+              --input-manifest $manifest `
+              --snapshot $snapshot `
+              --source-installer $source `
+              --candidate-installer $candidate `
+              --run-id $env:GITHUB_RUN_ID `
+              --run-attempt $env:GITHUB_RUN_ATTEMPT `
+              --head-sha $env:GITHUB_SHA `
+              --harness-sha256 $env:HARNESS_SHA256 `
+              --started-at $startedAt `
+              --completed-at $completedAt `
+              --output "dist/recovery-evidence/$lane.json"
+            $status = $LASTEXITCODE
+          }
+          if ($status -ne 0) { exit $status }
+
+      - name: Run Unix recovery qualification
+        id: execute_unix
+        if: matrix.platform != 'windows'
+        continue-on-error: true
+        shell: bash
+        run: |
+          set -uo pipefail
+          assets="$QUAL_ROOT/assets"
+          inputs_dir="$QUAL_ROOT/inputs"
+          work_dir="$QUAL_ROOT/work"
+          report="$QUAL_ROOT/migration.json"
+          source="$assets/$SOURCE_ASSET_NAME"
+          candidate="$assets/$CANDIDATE_ASSET_NAME"
+          contract="dist/recovery-preflight/contract.json"
+          lane="source-to-recovery-$PLATFORM"
+          started_at="$(date -u +%Y-%m-%dT%H:%M:%S.000Z)"
+          status=0
+          python scripts/updater/prepare-recovery-qualification-inputs.py \
+            --contract "$contract" \
+            --platform "$PLATFORM" \
+            --source-installer "$source" \
+            --candidate-installer "$candidate" \
+            --output-dir "$inputs_dir" || status=$?
+          if [ "$status" -eq 0 ]; then
+            python autoqa/migration_runner.py \
+              --platform "$PLATFORM" \
+              --scenario source-to-recovery \
+              --current-installer "$source" \
+              --c-installer "$candidate" \
+              --snapshot-manifest "$inputs_dir/manifest.json" \
+              --report "$report" \
+              --work-dir "$work_dir" \
+              --startup-seconds 10 \
+              --migration-timeout-seconds 90 \
+              --allow-destructive-autoqa AUTOQA || status=$?
+          fi
+          completed_at="$(date -u +%Y-%m-%dT%H:%M:%S.000Z)"
+          manifest="$inputs_dir/manifest.json"
+          snapshot="$inputs_dir/snapshots/current.zip"
+          [ ! -f "$report" ] || cp "$report" \
+            "dist/recovery-evidence/${lane}-migration.json"
+          [ ! -f "$manifest" ] || cp "$manifest" \
+            "dist/recovery-evidence/${lane}-manifest.json"
+          [ ! -f "$snapshot" ] || cp "$snapshot" \
+            "dist/recovery-evidence/${lane}-snapshot.zip"
+          if [ "$status" -eq 0 ]; then
+            node scripts/updater/recovery-qualification-evidence.mjs \
+              lane-result \
+              --contract "$contract" \
+              --platform "$PLATFORM" \
+              --migration-report "$report" \
+              --input-manifest "$manifest" \
+              --snapshot "$snapshot" \
+              --source-installer "$source" \
+              --candidate-installer "$candidate" \
+              --run-id "$GITHUB_RUN_ID" \
+              --run-attempt "$GITHUB_RUN_ATTEMPT" \
+              --head-sha "$GITHUB_SHA" \
+              --harness-sha256 "$HARNESS_SHA256" \
+              --started-at "$started_at" \
+              --completed-at "$completed_at" \
+              --output "dist/recovery-evidence/${lane}.json" || status=$?
+          fi
+          exit "$status"
+
+      - name: Upload immutable lane evidence even on failure
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: recovery-qualification-${{ matrix.platform }}-${{ github.run_id }}-${{ github.run_attempt }}
+          path: dist/recovery-evidence/
+          if-no-files-found: error
+          retention-days: 30
+
+      - name: Fail closed after preserving Windows evidence
+        if: >-
+          always() &&
+          matrix.platform == 'windows' &&
+          steps.execute_windows.outcome != 'success'
+        shell: pwsh
+        run: throw 'Windows recovery qualification failed'
+
+      - name: Fail closed after preserving Unix evidence
+        if: >-
+          always() &&
+          matrix.platform != 'windows' &&
+          steps.execute_unix.outcome != 'success'
+        shell: bash
+        run: |
+          echo "Unix recovery qualification failed" >&2
+          exit 1
+
+      - name: Remove staged Windows installers and snapshots
+        if: always() && matrix.platform == 'windows'
+        shell: pwsh
+        run: |
+          if ($env:QUAL_ROOT) {
+            Remove-Item -LiteralPath $env:QUAL_ROOT -Recurse -Force `
+              -ErrorAction SilentlyContinue
+          }
+
+      - name: Remove staged Unix installers and snapshots
+        if: always() && matrix.platform != 'windows'
+        shell: bash
+        run: |
+          python -c \
+            'import os, shutil; shutil.rmtree(os.environ.get("QUAL_ROOT", ""), ignore_errors=True)'
+
+  attest:
+    name: Bind exact three-platform promotion evidence
+    needs: [preflight, qualification]
+    if: >-
+      ${{
+        always()
+        && !cancelled()
+        && needs.preflight.result == 'success'
+        && (
+          needs.qualification.result == 'success'
+          || needs.qualification.result == 'failure'
+        )
+      }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    environment: release-distribution
+    steps:
+      - name: Check out the exact protected dispatch
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Download the exact recovery contract
+        uses: actions/download-artifact@v4
+        with:
+          name: recovery-preflight-${{ github.run_id }}-${{ github.run_attempt }}
+          path: dist/recovery-preflight
+
+      - name: Download this attempt's lane evidence
+        uses: actions/download-artifact@v4
+        with:
+          pattern: recovery-qualification-*-${{ github.run_id }}-${{ github.run_attempt }}
+          path: dist/recovery-inputs
+          merge-multiple: true
+
+      - name: Bind the live run and exact artifact receipts
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$GITHUB_REF" = "refs/heads/mita-main"
+          test "$(git rev-parse HEAD)" = "$GITHUB_SHA"
+          git fetch --force --no-tags origin \
+            "+refs/heads/mita-main:refs/remotes/origin/mita-main"
+          test "$(git rev-parse refs/remotes/origin/mita-main)" = "$GITHUB_SHA"
+          mkdir -p dist/recovery-receipts dist/promotion-evidence
+          harness_sha256="$(jq -er .workflow.harnessSha256 \
+            dist/recovery-preflight/contract.json)"
+          gh api \
+            "repos/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}" \
+            > dist/recovery-receipts/run-api.json
+          jq -n \
+            --arg harness "$harness_sha256" \
+            --slurpfile run dist/recovery-receipts/run-api.json \
+            '{harnessSha256: $harness, run: $run[0]}' \
+            > dist/recovery-receipts/run-receipt.json
+
+          expected_names="$(
+            for platform in windows macos linux; do
+              echo "recovery-qualification-${platform}-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
+            done | sort
+          )"
+          for try in 1 2 3 4 5; do
+            gh api \
+              "repos/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}/artifacts?per_page=100" \
+              > dist/recovery-receipts/artifacts.json
+            actual_names="$(
+              jq -r \
+                --arg suffix "-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}" '
+                  .artifacts[]
+                  | select(
+                      (.name | startswith("recovery-qualification-"))
+                      and (.name | endswith($suffix))
+                    )
+                  | .name
+                ' dist/recovery-receipts/artifacts.json | sort
+            )"
+            if [ "$actual_names" = "$expected_names" ]; then
+              break
+            fi
+            if [ "$try" -eq 5 ]; then
+              echo "Exact three recovery artifacts did not converge" >&2
+              exit 1
+            fi
+            sleep 5
+          done
+
+      - name: Aggregate promotion evidence
+        id: aggregate_evidence
+        continue-on-error: true
+        shell: bash
+        run: |
+          set -euo pipefail
+          node scripts/updater/recovery-qualification-evidence.mjs aggregate \
+            --contract dist/recovery-preflight/contract.json \
+            --input-dir dist/recovery-inputs \
+            --run-receipt dist/recovery-receipts/run-receipt.json \
+            --artifacts dist/recovery-receipts/artifacts.json \
+            --output-dir dist/promotion-evidence
+
+      - name: Upload aggregate diagnostics even on failure
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: recovery-aggregate-${{ github.run_id }}-${{ github.run_attempt }}
           path: |
-            dist/verified/upgrade-smoke.json
-            dist/verified/rollout-health.json
+            dist/recovery-preflight/
+            dist/recovery-inputs/
+            dist/recovery-receipts/
+            dist/promotion-evidence/
+          if-no-files-found: error
+          retention-days: 30
+
+      - name: Upload promotion evidence only after exact three of three
+        if: >-
+          ${{
+            needs.qualification.result == 'success'
+            && steps.aggregate_evidence.outcome == 'success'
+          }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: biyan-promotion-evidence-${{ github.run_id }}-${{ github.run_attempt }}
+          path: |
+            dist/promotion-evidence/upgrade-smoke.json
+            dist/promotion-evidence/rollout-health.json
+          if-no-files-found: error
+          retention-days: 90
+
+      - name: Fail closed after preserving aggregate evidence
+        if: >-
+          ${{
+            always()
+            && (
+              needs.qualification.result != 'success'
+              || steps.aggregate_evidence.outcome != 'success'
+            )
+          }}
+        shell: bash
+        run: |
+          echo "Recovery qualification aggregate failed" >&2
+          exit 1

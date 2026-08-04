@@ -298,7 +298,7 @@ jobs:
           test -s "$signer_probe/payload.txt.sig"
 
       - name: Verify private packages, signing keys, egress, and artifact policy
-        run: node scripts/ci/verify-release-policy.mjs
+        run: node scripts/ci/verify-release-policy.mjs --require-active
 
       - name: Test release gate policy contracts
         run: |
@@ -316,10 +316,12 @@ jobs:
           node --test scripts/updater/__tests__/legacy-manifest-policy.test.mjs
           node --test scripts/updater/__tests__/legacy-pause-transaction.test.mjs
           node --test scripts/updater/__tests__/promotion-transaction.test.mjs
+          node --test scripts/updater/__tests__/recovery-qualification.test.mjs
           node --test scripts/updater/__tests__/updater.test.mjs
           python3 -m unittest \
             autoqa/tests/test_migration_runner.py \
-            scripts/updater/__tests__/test_prepare_a_canary_inputs.py
+            scripts/updater/__tests__/test_prepare_a_canary_inputs.py \
+            scripts/updater/__tests__/test_prepare_recovery_qualification_inputs.py
 
       - name: Test scoped qualification contracts
         run: |

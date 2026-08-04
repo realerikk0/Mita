@@ -10,13 +10,15 @@ The supported release is one cumulative, forward-only terminal update:
 
 | Release | App version | Migration phase | Data schema | Purpose |
 | --- | --- | --- | --- | --- |
-| Complete | 0.6.649 | C | 3 | Deliver the full Biyan source, branding, packaging, and migration closure in one update |
+| Previous published | 0.6.649 | C | 3 | Deliver the full Biyan source, branding, packaging, and migration closure in one update |
+| Active complete | 0.6.650 | C | 3 | Add Seedance video generation and the improved provider/model experience |
 
 The former `0.6.643/A/1` → `0.6.644/B/2` → `0.6.645/C/3` train is
 preserved as immutable audit and compatibility history, but it is not an
-automatic rollout sequence. Do not recut A/B/C. The active `v0.6.649` tag is
-bound to exact terminal product source commit
-`cc7bd75e40da7e32ea93433ed7311fb7ddbab379`; later control-plane commits may
+automatic rollout sequence. Do not recut A/B/C. Published `v0.6.649` remains
+bound to `cc7bd75e40da7e32ea93433ed7311fb7ddbab379`. The active `v0.6.650`
+terminal is bound to exact product source commit
+`7c4f563ff8f0a7d7ab877330881f73db164cc613`; later control-plane commits may
 qualify or distribute that source but may not change the tagged product tree.
 
 The `v0.6.646`, `v0.6.647`, and `v0.6.648` tags, Draft releases, uploaded assets, and
@@ -42,12 +44,21 @@ the concentrated source and artifact audit and clear every product blocker
 before fixing the exact terminal source commit. Preserve all prior checkpoint
 commits, refs, tags, and evidence.
 
-Workflow-, test-, verifier-, and distribution-only changes must use an
-independent control-plane pull request. They preserve the terminal product
-commit and revalidate only the fail-closed impact scope selected by
-protected-branch policy. If a control-plane change exposes a product blocker,
-stop qualification and create a higher complete version; never retag or amend
-the accepted source.
+Prepare a terminal release in one protected pull request with two commits:
+`P` contains product changes plus the three synchronized version files, and
+`Q` contains only reviewed release-control changes that bind the new active tag
+to the exact `P` SHA. Merge the PR with a merge commit after required CI and
+CODEOWNER checks pass. This preserves `P` as a one-parent ancestor while keeping
+the release operation atomic from the reviewer's perspective. Never squash,
+rebase, amend, or retag a terminal release PR.
+
+The release-train policy is a rolling terminal ledger rather than a
+version-specific allowlist. `Q` appends the former active release as
+`published-superseded`, requires the next active release to be the immediately
+following semantic patch, and keeps all terminal entries at `C/3`. Ordinary
+workflow-, test-, verifier-, and distribution-only changes after the release
+remain independent control-plane changes and must not alter the bound product
+source.
 
 ## Release invariants
 
@@ -64,6 +75,9 @@ the accepted source.
 - Promotion is one 100% transaction gated by signed-candidate verification,
   GitHub-native upgrade evidence, a healthy report, compare-and-swap, and a
   kill switch. It does not create intermediate A or B cohorts.
+- Every later terminal patch uses the no-input rolling recovery workflow:
+  latest published terminal to active terminal on Windows, macOS, and Linux,
+  with exact 3/3 attempt-scoped evidence before a `RECOVERY` promotion.
 - The direct qualification matrix verifies Windows and macOS
   `0.6.633 → 0.6.649`, Linux fresh `0.6.649` under the exact no-current-Linux
   exception, and all three platforms from public `0.6.643`, `0.6.644`, and

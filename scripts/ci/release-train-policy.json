@@ -1,5 +1,5 @@
 {
-  "schema": 3,
+  "schema": 4,
   "activeTrain": null,
   "supersededTerminalReleases": [
     {
@@ -25,14 +25,22 @@
       "dataSchema": 3,
       "sourceCommit": "33e8c5b03278b2b91318a553eb3b699b19c6ad1e",
       "status": "blocked-before-publication"
+    },
+    {
+      "tag": "v0.6.649",
+      "version": "0.6.649",
+      "migrationPhase": "C",
+      "dataSchema": 3,
+      "sourceCommit": "cc7bd75e40da7e32ea93433ed7311fb7ddbab379",
+      "status": "published-superseded"
     }
   ],
   "activeTerminalRelease": {
-    "tag": "v0.6.649",
-    "version": "0.6.649",
+    "tag": "v0.6.650",
+    "version": "0.6.650",
     "migrationPhase": "C",
     "dataSchema": 3,
-    "sourceCommit": "cc7bd75e40da7e32ea93433ed7311fb7ddbab379"
+    "sourceCommit": "7c4f563ff8f0a7d7ab877330881f73db164cc613"
   },
   "trains": [
     {

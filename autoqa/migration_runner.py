@@ -140,12 +140,25 @@ def migration_matrix() -> Tuple[MigrationCase, ...]:
     )
 
 
+def recovery_migration_case() -> MigrationCase:
+    """Return the explicit terminal-C recovery path without widening defaults."""
+
+    return MigrationCase(
+        "source-to-recovery",
+        "current",
+        ("current", "c"),
+        "c",
+    )
+
+
 def select_migration_cases(scenarios: Sequence[str] | None = None) -> Tuple[MigrationCase, ...]:
     matrix = migration_matrix()
     if not scenarios:
         return matrix
 
-    cases_by_name = {case.name: case for case in matrix}
+    cases_by_name = {
+        case.name: case for case in (*matrix, recovery_migration_case())
+    }
     unknown = [name for name in scenarios if name not in cases_by_name]
     if unknown:
         raise ValueError(f"unknown migration scenario: {unknown[0]}")
