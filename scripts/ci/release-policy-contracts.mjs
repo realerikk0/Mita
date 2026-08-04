@@ -5247,28 +5247,58 @@ export function validateQualificationWorkflow(source) {
     }
     const updaterContractStep = workflowStepBlocks(activePreflight).find(
       (step) =>
-        /^\s*(?:-\s*)?if:\s*steps\.classification\.outputs\.updater\s*==\s*['"]true['"]\s*$/m.test(
+        /^\s*(?:-\s*)?name:\s*Run updater contracts\s*$/m.test(
           step
         )
     )
+    if (
+      !updaterContractStep ||
+      !/^\s*if:\s*steps\.classification\.outputs\.updater\s*==\s*['"]true['"]\s*$/m.test(
+        updaterContractStep
+      ) ||
+      !/^\s*working-directory:\s*harness\s*$/m.test(updaterContractStep) ||
+      /\b(?:if|test)\s+\[\s+-f\b|^\s*(?:test_files|found)=/m.test(
+        updaterContractStep
+      )
+    ) {
+      failures.push(
+        'qualification updater contracts must run only for updater impact from the protected harness'
+      )
+    }
     failures.push(
       ...validateUpdaterContractTestStep(
         updaterContractStep,
         'qualification focused preflight'
       )
     )
+    const distributionContractStep = workflowStepBlocks(activePreflight).find(
+      (step) =>
+        /^\s*(?:-\s*)?name:\s*Run trusted distribution contracts\s*$/m.test(
+          step
+        )
+    )
     if (
-      ![
-        /scripts\/release-distribution\/__tests__\/bootstrap-biyan-download-aliases\.test\.mjs/,
-        /scripts\/release-distribution\/__tests__\/release-distribution\.test\.mjs/,
-      ].every((pattern) => pattern.test(activePreflight)) ||
+      !distributionContractStep ||
+      !/^\s*if:\s*>-\s*\n\s*steps\.classification\.outputs\.policy\s*==\s*['"]true['"]\s*\|\|\s*\n\s*steps\.classification\.outputs\.updater\s*==\s*['"]true['"]\s*$/m.test(
+        distributionContractStep
+      ) ||
+      !/^\s*working-directory:\s*harness\s*$/m.test(
+        distributionContractStep
+      ) ||
+      /\b(?:if|test)\s+\[\s+-f\b|^\s*(?:test_files|found)=/m.test(
+        distributionContractStep
+      ) ||
       !hasRunInvocation(
-        preflight,
-        /^node\s+--test\s+["']?\$test_file["']?(?:\s|$)/
+        distributionContractStep,
+        /^node --test scripts\/release-distribution\/__tests__\/bootstrap-biyan-download-aliases\.test\.mjs$/
+      ) ||
+      !hasRunInvocation(
+        distributionContractStep,
+        /^node --test scripts\/release-distribution\/__tests__\/release-distribution\.test\.mjs$/
       )
     ) {
       failures.push(
-        'qualification focused preflight must run release-distribution contracts when present'
+        'qualification focused preflight must run trusted release-distribution contracts from the protected harness'
       )
     }
   }
