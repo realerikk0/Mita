@@ -633,6 +633,7 @@ jobs:
           (
             cd target
             yarn install --immutable
+            yarn workspace @biyan/core build
             yarn vitest run "${typescript_tests[@]}"
           )
 
