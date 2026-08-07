@@ -248,6 +248,33 @@ describe('useVideoGenerationStore', () => {
     expect(useVideoGenerationStore.getState().tasks['sb1']).toBeUndefined()
   })
 
+  it('surfaces the provider failure detail when polling ends in failed', async () => {
+    const hub = makeHub({
+      pollVideoTask: vi.fn().mockResolvedValue({
+        id: 'video-task-1',
+        status: 'failed',
+        progress: 100,
+        error: '输出视频可能包含敏感内容，请调整提示词后重试',
+      }),
+    })
+
+    useVideoGenerationStore.getState().start(baseInput('sb1'), hub as never)
+
+    await vi.waitFor(() =>
+      expect(
+        useVideoGenerationStore.getState().runtime['sb1']?.status
+      ).toBe('failed')
+    )
+
+    expect(useVideoGenerationStore.getState().runtime['sb1']?.error).toBe(
+      '输出视频可能包含敏感内容，请调整提示词后重试'
+    )
+    expect(toast.error).toHaveBeenCalledWith(
+      '输出视频可能包含敏感内容，请调整提示词后重试'
+    )
+    expect(hub.saveVideoAsset).not.toHaveBeenCalled()
+  })
+
   it('resumes a persisted task after a restart without re-submitting', async () => {
     const hub = makeHub()
     h.hubForResume = hub

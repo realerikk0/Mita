@@ -12,6 +12,7 @@ import {
   Minus,
   Music2,
   Plus,
+  RotateCcw,
   Scan,
   Video,
   X,
@@ -137,6 +138,7 @@ export type DirectVideoFeedProps = {
   videoSrc: (asset: VideoAssetRecord) => string
   onPreview?: (asset: VideoAssetRecord) => void
   onCancel?: (item: DirectVideoFeedItem) => void
+  onRetry?: (item: DirectVideoFeedItem) => void
 }
 
 function modelKey(option: DirectVideoModelOption) {
@@ -463,6 +465,7 @@ export function DirectVideoFeed({
   videoSrc,
   onPreview,
   onCancel,
+  onRetry,
 }: DirectVideoFeedProps) {
   if (items.length === 0) {
     return (
@@ -559,6 +562,18 @@ export function DirectVideoFeed({
                     <p className="max-w-md text-xs leading-5 text-destructive/75">
                       {item.error}
                     </p>
+                  )}
+                  {onRetry && (
+                    <Button
+                      type="button"
+                      variant="outline"
+                      size="sm"
+                      className="mt-1"
+                      onClick={() => onRetry(item)}
+                    >
+                      <RotateCcw className="size-4" />
+                      重试
+                    </Button>
                   )}
                 </div>
               )}
@@ -724,7 +739,9 @@ export function DirectVideoMode({
   const runtimeBusy =
     runtime?.status === 'queued' || runtime?.status === 'running'
   const busy = submitting || runtimeBusy
-  const errorMessage = submitError || runtime?.error
+  // Generation failures already surface on the failed card in the feed, so the
+  // composer only shows errors from the submit action itself.
+  const errorMessage = submitError
   const hasOnlyAudioReferences =
     selectedReferences.length > 0 &&
     selectedReferences.every((option) => option.reference.kind === 'audio')

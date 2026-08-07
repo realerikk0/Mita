@@ -1105,6 +1105,187 @@ describe('DefaultVideoGenerationService', () => {
     })
   })
 
+  it('extracts the provider failure detail from failed poll responses', async () => {
+    const fetchMock = vi.fn().mockResolvedValueOnce(
+      new Response(
+        JSON.stringify({
+          task_id: 'video-task-9',
+          status: 'failed',
+          progress: 100,
+          error: {
+            code: 'video_generation_failed',
+            message:
+              'Your request content[1] may be related to copyright restrictions',
+          },
+        }),
+        { status: 200, headers: { 'content-type': 'application/json' } }
+      )
+    )
+    vi.stubGlobal('fetch', fetchMock)
+
+    const service = new DefaultVideoGenerationService({
+      pollIntervalMs: 0,
+      timeoutMs: 1000,
+    })
+    const task = await service.pollVideoTask({
+      provider,
+      model,
+      taskId: 'video-task-9',
+    })
+
+    expect(task.status).toBe('failed')
+    expect(task.error).toBe(
+      'Your request content[1] may be related to copyright restrictions'
+    )
+  })
+
+  it('unwraps double-encoded JSON failure messages from failed tasks', async () => {
+    const fetchMock = vi.fn().mockResolvedValueOnce(
+      new Response(
+        JSON.stringify({
+          task_id: 'video-task-10',
+          status: 'failed',
+          error: {
+            code: 'video_generation_failed',
+            message: JSON.stringify({
+              code: 'OutputVideoSensitiveContentDetected',
+              message: '输出视频可能包含敏感内容，请调整提示词后重试',
+            }),
+          },
+        }),
+        { status: 200, headers: { 'content-type': 'application/json' } }
+      )
+    )
+    vi.stubGlobal('fetch', fetchMock)
+
+    const service = new DefaultVideoGenerationService({
+      pollIntervalMs: 0,
+      timeoutMs: 1000,
+    })
+    const task = await service.pollVideoTask({
+      provider,
+      model,
+      taskId: 'video-task-10',
+    })
+
+    expect(task.status).toBe('failed')
+    expect(task.error).toBe('输出视频可能包含敏感内容，请调整提示词后重试')
+  })
+
+  it('unwraps upstream errors nested as error.error inside the JSON string', async () => {
+    // Exact shape reported by Biyuan: error.message is a JSON string whose
+    // payload nests the real detail one level deeper under "error".
+    const fetchMock = vi.fn().mockResolvedValueOnce(
+      new Response(
+        JSON.stringify({
+          id: 'task_Ub5F0IuCIvibPPmjDEN6NUlSHCPKCv1m',
+          task_id: 'task_Ub5F0IuCIvibPPmjDEN6NUlSHCPKCv1m',
+          object: 'video',
+          model: 'doubao-seedance-2-0-260128',
+          status: 'failed',
+          progress: 100,
+          created_at: 1786099370,
+          completed_at: 1786099385,
+          error: {
+            message: JSON.stringify({
+              error: {
+                code: '***.PrivacyInformation',
+                message:
+                  "The request failed because the input image 'content[0]' may contain real person. Request id: 021786099371407817b06a784e756ea4b86a97afa590e06d8fdbd",
+                param: 'content[0]',
+                type: 'BadRequest',
+              },
+            }),
+            code: 'video_generation_failed',
+          },
+        }),
+        { status: 200, headers: { 'content-type': 'application/json' } }
+      )
+    )
+    vi.stubGlobal('fetch', fetchMock)
+
+    const service = new DefaultVideoGenerationService({
+      pollIntervalMs: 0,
+      timeoutMs: 1000,
+    })
+    const task = await service.pollVideoTask({
+      provider,
+      model,
+      taskId: 'task_Ub5F0IuCIvibPPmjDEN6NUlSHCPKCv1m',
+    })
+
+    expect(task.status).toBe('failed')
+    expect(task.error).toBe(
+      "The request failed because the input image 'content[0]' may contain real person. Request id: 021786099371407817b06a784e756ea4b86a97afa590e06d8fdbd"
+    )
+  })
+
+  it('re-polls once when a failed task has no error detail yet', async () => {
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(
+        new Response(
+          JSON.stringify({ task_id: 'video-task-12', status: 'failed' }),
+          { status: 200, headers: { 'content-type': 'application/json' } }
+        )
+      )
+      .mockResolvedValueOnce(
+        new Response(
+          JSON.stringify({
+            task_id: 'video-task-12',
+            status: 'failed',
+            error: {
+              code: 'video_generation_failed',
+              message: 'The input image may contain real person',
+            },
+          }),
+          { status: 200, headers: { 'content-type': 'application/json' } }
+        )
+      )
+    vi.stubGlobal('fetch', fetchMock)
+
+    const service = new DefaultVideoGenerationService({
+      pollIntervalMs: 0,
+      timeoutMs: 1000,
+    })
+    const task = await service.pollVideoTask({
+      provider,
+      model,
+      taskId: 'video-task-12',
+    })
+
+    expect(fetchMock).toHaveBeenCalledTimes(2)
+    expect(task.status).toBe('failed')
+    expect(task.error).toBe('The input image may contain real person')
+  })
+
+  it('falls back to the error code when a failed task has no message', async () => {
+    const fetchMock = vi.fn().mockResolvedValueOnce(
+      new Response(
+        JSON.stringify({
+          task_id: 'video-task-11',
+          status: 'failed',
+          error: { code: 'video_generation_failed' },
+        }),
+        { status: 200, headers: { 'content-type': 'application/json' } }
+      )
+    )
+    vi.stubGlobal('fetch', fetchMock)
+
+    const service = new DefaultVideoGenerationService({
+      pollIntervalMs: 0,
+      timeoutMs: 1000,
+    })
+    const task = await service.pollVideoTask({
+      provider,
+      model,
+      taskId: 'video-task-11',
+    })
+
+    expect(task.status).toBe('failed')
+    expect(task.error).toBe('video_generation_failed')
+  })
+
   it('keeps polling running tasks until a terminal result arrives', async () => {
     const fetchMock = vi
       .fn()

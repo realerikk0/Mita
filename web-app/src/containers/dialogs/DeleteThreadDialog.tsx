@@ -90,6 +90,7 @@ export function DeleteThreadDialog({
         </DialogTrigger>
       )}
       <DialogContent
+        className="sm:max-w-sm lg:max-w-sm xl:max-w-sm"
         onOpenAutoFocus={(e) => {
           e.preventDefault()
           deleteButtonRef.current?.focus()

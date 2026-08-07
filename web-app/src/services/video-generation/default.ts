@@ -67,7 +67,7 @@ type RawVideoResponse = {
   result?: RawVideoUrlCandidate
   data?: RawVideoResponse
   usage?: unknown
-  error?: { message?: string } | string
+  error?: { code?: string; message?: string } | string
   message?: string
   code?: string
 }
@@ -356,6 +356,7 @@ export class DefaultVideoGenerationService implements VideoGenerationService {
     const startedAt = Date.now()
     let currentApiKey: string | undefined
     let pollCount = 0
+    let failedDetailRetries = 0
 
     while (Date.now() - startedAt <= this.timeoutMs) {
       this.throwIfAborted(request.signal)
@@ -385,6 +386,14 @@ export class DefaultVideoGenerationService implements VideoGenerationService {
       )
 
       if (task.status === 'succeeded' || task.status === 'failed') {
+        // The gateway may flip status to failed before attaching the error
+        // detail; give it one more poll to backfill so the UI can show the
+        // real reason instead of the generic fallback.
+        if (task.status === 'failed' && !task.error && failedDetailRetries < 1) {
+          failedDetailRetries += 1
+          await this.sleep(this.pollIntervalMs, request.signal)
+          continue
+        }
         return task
       }
 
@@ -1098,6 +1107,17 @@ export class DefaultVideoGenerationService implements VideoGenerationService {
     return {
       id,
       status,
+      error:
+        status === 'failed'
+          ? this.videoTaskErrorMessage(
+              task.error,
+              wrapper?.error,
+              response.error,
+              task.message,
+              wrapper?.message,
+              response.message
+            )
+          : undefined,
       progress: this.videoProgress(
         wrapper?.progress ?? response.progress ?? task.progress,
         status
@@ -1206,6 +1226,52 @@ export class DefaultVideoGenerationService implements VideoGenerationService {
       return response.data
     }
     return undefined
+  }
+
+  /**
+   * Pick the first usable failure detail from the response. Providers report it
+   * as `error.message`, a bare `message`, or just an error `code`; Biyuan also
+   * double-encodes the upstream failure as a JSON string (e.g. `error.message`
+   * itself is `'{"code":…,"message":"…"}'`), so nested JSON layers are unwrapped
+   * until a human-readable message remains.
+   */
+  private videoTaskErrorMessage(
+    ...candidates: Array<RawVideoResponse['error'] | undefined>
+  ) {
+    for (const candidate of candidates) {
+      const message = this.unwrapErrorMessage(candidate, 0)
+      if (message) return message
+    }
+    return undefined
+  }
+
+  private unwrapErrorMessage(value: unknown, depth: number): string | undefined {
+    if (value == null || depth > 4) return undefined
+
+    if (typeof value === 'string') {
+      const text = value.trim()
+      if (!text) return undefined
+      if (/^[[{]/.test(text)) {
+        try {
+          const unwrapped = this.unwrapErrorMessage(
+            JSON.parse(text),
+            depth + 1
+          )
+          if (unwrapped) return unwrapped
+        } catch {
+          // Not JSON — use the raw text.
+        }
+      }
+      return text
+    }
+
+    const record = errorRecord(value)
+    if (!record) return undefined
+    return (
+      this.unwrapErrorMessage(record.message, depth + 1) ??
+      this.unwrapErrorMessage(record.error, depth + 1) ??
+      stringValue(record.code)
+    )
   }
 
   private videoStatus(status?: string): VideoGenerationStatus {

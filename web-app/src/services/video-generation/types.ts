@@ -68,6 +68,8 @@ export type VideoGenerationTask = {
   progress: number
   videoUrl?: string
   lastFrameUrl?: string
+  /** Provider-reported failure detail, present when status is 'failed'. */
+  error?: string
   usage?: unknown
   raw?: unknown
 }

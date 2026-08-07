@@ -213,7 +213,12 @@ async function finishTask(
   model: Model,
   hub: VideoHub,
   controller: AbortController,
-  initialTask?: { status: VideoGenerationStatus; videoUrl?: string; usage?: unknown }
+  initialTask?: {
+    status: VideoGenerationStatus
+    videoUrl?: string
+    error?: string
+    usage?: unknown
+  }
 ) {
   try {
     const persisted = useVideoGenerationStore.getState().tasks[key]
@@ -245,7 +250,7 @@ async function finishTask(
     })
 
     if (finalTask.status !== 'succeeded') {
-      throw new Error(VIDEO_GENERATION_FAILED)
+      throw new Error(finalTask.error || VIDEO_GENERATION_FAILED)
     }
     if (!finalTask.videoUrl) {
       videoDebugLog('store:finish:no-video-url', {

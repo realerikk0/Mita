@@ -170,8 +170,14 @@ type DirectVideoSubmissionSnapshot = {
   ratio: VideoRatio
   resolution: VideoResolution
   duration: number
+  generateAudio: boolean
   references: VideoGenerationReference[]
 }
+
+// Module-scope so the failed card keeps its prompt/model (and stays retryable)
+// after a route remount; app restarts also drop the in-memory runtime that
+// surfaces the failed card, so module lifetime is exactly enough.
+let lastDirectVideoSubmission: DirectVideoSubmissionSnapshot | null = null
 
 function createSourceAssetCache(
   assets: ImageAssetRecord[] = []
@@ -4296,8 +4302,15 @@ function Images() {
   const [directVideoAssets, setDirectVideoAssets] = useState<
     VideoAssetRecord[]
   >([])
-  const [directVideoSubmission, setDirectVideoSubmission] =
-    useState<DirectVideoSubmissionSnapshot | null>(null)
+  const [directVideoSubmission, setDirectVideoSubmissionState] =
+    useState<DirectVideoSubmissionSnapshot | null>(() => lastDirectVideoSubmission)
+  const setDirectVideoSubmission = useCallback(
+    (snapshot: DirectVideoSubmissionSnapshot | null) => {
+      lastDirectVideoSubmission = snapshot
+      setDirectVideoSubmissionState(snapshot)
+    },
+    []
+  )
   const [contextMenu, setContextMenu] = useState<AssetContextMenuState>(null)
   const videoTasks = useVideoGenerationStore((state) => state.tasks)
   const videoRuntime = useVideoGenerationStore((state) => state.runtime)
@@ -4587,6 +4600,7 @@ function Images() {
         ratio: input.ratio,
         resolution: input.resolution,
         duration: input.duration,
+        generateAudio: input.generateAudio,
         references,
       })
       useVideoGenerationStore.getState().start(
@@ -4616,7 +4630,51 @@ function Images() {
         serviceHub.videoGeneration()
       )
     },
-    [serviceHub]
+    [serviceHub, setDirectVideoSubmission]
+  )
+
+  const retryDirectVideo = useCallback(
+    (item: DirectVideoFeedItem) => {
+      const snapshot =
+        directVideoSubmission?.taskKey === directVideoTaskKey
+          ? directVideoSubmission
+          : undefined
+      const providerName =
+        item.provider ?? directVideoTask?.providerName ?? snapshot?.provider
+      const option =
+        videoModels.find(
+          (candidate) =>
+            candidate.model.id === item.model &&
+            (!providerName || candidate.provider.provider === providerName)
+        ) ?? videoModels.find((candidate) => candidate.model.id === item.model)
+      if (!option) {
+        toast.error('无法重试：未找到对应的视频模型，请修改提示词后重新生成')
+        return
+      }
+      const references =
+        item.asset?.references ??
+        (item.id === directVideoTaskKey
+          ? (directVideoTask?.references ?? snapshot?.references)
+          : undefined) ??
+        []
+      void generateDirectVideo({
+        provider: option.provider,
+        model: option.model,
+        prompt: item.prompt,
+        ratio: item.ratio,
+        duration: item.duration,
+        resolution: item.resolution,
+        generateAudio: snapshot?.generateAudio ?? true,
+        references,
+      })
+    },
+    [
+      directVideoSubmission,
+      directVideoTask,
+      directVideoTaskKey,
+      generateDirectVideo,
+      videoModels,
+    ]
   )
 
   const clearMediaHistorySearch = useCallback(() => {
@@ -6631,6 +6689,7 @@ function Images() {
                   onCancel={(item) =>
                     useVideoGenerationStore.getState().cancel(item.id)
                   }
+                  onRetry={retryDirectVideo}
                 />
               </>
             ) : (
