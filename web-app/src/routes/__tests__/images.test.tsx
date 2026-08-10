@@ -507,6 +507,7 @@ describe('Images route', () => {
         fileName: 'video.mp4',
       })
     )
+    h.dialogSave.mockResolvedValue('/Users/test/Downloads/video.mp4')
 
     renderComponent()
     fireEvent.click(screen.getByRole('button', { name: 'Video' }))
@@ -548,6 +549,17 @@ describe('Images route', () => {
         'src',
         expect.stringContaining('/mock/biyan/video-assets/')
       )
+    )
+    fireEvent.click(screen.getByRole('button', { name: '下载' }))
+    await waitFor(() =>
+      expect(h.dialogSave).toHaveBeenCalledWith({
+        fileName: 'video.mp4',
+        filters: [{ name: 'MP4', extensions: ['mp4'] }],
+      })
+    )
+    expect(h.copyFile).toHaveBeenCalledWith(
+      expect.stringContaining('/mock/biyan/video-assets/'),
+      '/Users/test/Downloads/video.mp4'
     )
   })
 

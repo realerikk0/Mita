@@ -5404,14 +5404,15 @@ function Images() {
       ? previewVideoAsset.path
       : serviceHub.core().convertFileSrc(previewVideoAsset.path)
     : ''
-  const downloadPreviewVideo = useCallback(async () => {
-    if (!previewVideoAsset || !previewVideoSrc) return
+  const downloadVideoAsset = useCallback(async (asset: VideoAssetRecord) => {
+    const source = videoAssetSrc(asset)
+    if (!source) return
 
-    const fileName = previewVideoAsset.fileName || 'storyboard-video.mp4'
-    const sourcePath = localDownloadSourcePath(previewVideoAsset.path)
+    const fileName = asset.fileName || 'video.mp4'
+    const sourcePath = localDownloadSourcePath(asset.path)
 
     if (sourcePath) {
-      const extension = downloadExtension(fileName, previewVideoAsset.mimeType)
+      const extension = downloadExtension(fileName, asset.mimeType)
       const destination = await serviceHub.dialog().save({
         fileName,
         filters: [
@@ -5431,7 +5432,7 @@ function Images() {
           }),
         })
       } catch (error) {
-        console.error('Failed to download preview video:', error)
+        console.error('Failed to download video:', error)
         toast.error(t('common:toast.downloadFailed.title'), {
           description: t('common:toast.downloadFailed.description', {
             item: fileName,
@@ -5441,8 +5442,8 @@ function Images() {
       return
     }
 
-    triggerBrowserDownload(previewVideoSrc, fileName)
-  }, [previewVideoAsset, previewVideoSrc, serviceHub, t])
+    triggerBrowserDownload(source, fileName)
+  }, [serviceHub, t, videoAssetSrc])
 
   const selectedModelCanEdit = selectedModel?.model
     ? isImageEditModel(selectedModel.model)
@@ -6717,6 +6718,7 @@ function Images() {
                   items={directVideoFeedItems}
                   videoSrc={videoAssetSrc}
                   onPreview={setPreviewVideoAsset}
+                  onDownload={downloadVideoAsset}
                   onCancel={(item) =>
                     useVideoGenerationStore.getState().cancel(item.id)
                   }
@@ -6870,7 +6872,11 @@ function Images() {
                   type="button"
                   variant="secondary"
                   size="sm"
-                  onClick={() => void downloadPreviewVideo()}
+                  onClick={() => {
+                    if (previewVideoAsset) {
+                      void downloadVideoAsset(previewVideoAsset)
+                    }
+                  }}
                 >
                   <Download className="size-4" />
                   {imageT(t, 'storyboard.downloadVideo')}

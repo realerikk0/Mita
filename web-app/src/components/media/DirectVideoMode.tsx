@@ -5,6 +5,7 @@ import {
   ArrowUp,
   Check,
   ChevronsUpDown,
+  Download,
   Eye,
   Film,
   Image as ImageIcon,
@@ -143,6 +144,7 @@ export type DirectVideoFeedProps = {
   items: DirectVideoFeedItem[]
   videoSrc: (asset: VideoAssetRecord) => string
   onPreview?: (asset: VideoAssetRecord) => void
+  onDownload?: (asset: VideoAssetRecord) => void | Promise<void>
   onCancel?: (item: DirectVideoFeedItem) => void
   onRetry?: (item: DirectVideoFeedItem) => void
 }
@@ -473,6 +475,7 @@ export function DirectVideoFeed({
   items,
   videoSrc,
   onPreview,
+  onDownload,
   onCancel,
   onRetry,
 }: DirectVideoFeedProps) {
@@ -637,6 +640,17 @@ export function DirectVideoFeed({
                 >
                   <Eye className="size-4" />
                   打开预览
+                </Button>
+              )}
+              {item.status === 'succeeded' && item.asset && onDownload && (
+                <Button
+                  type="button"
+                  variant="secondary"
+                  size="sm"
+                  onClick={() => void onDownload(item.asset!)}
+                >
+                  <Download className="size-4" />
+                  下载
                 </Button>
               )}
               {busy && onCancel && (

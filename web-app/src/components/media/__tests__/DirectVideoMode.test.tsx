@@ -505,18 +505,21 @@ describe('DirectVideoFeed', () => {
           },
         ]}
         videoSrc={() => ''}
+        onDownload={vi.fn()}
         onRetry={vi.fn()}
       />
     )
 
     expect(screen.getByText('视频生成失败')).toBeInTheDocument()
     expect(screen.getByRole('button', { name: '重试' })).toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: '下载' })).not.toBeInTheDocument()
     expect(screen.queryByRole('button', { name: '继续查询' })).not.toBeInTheDocument()
   })
 
-  it('renders a completed video in the feed and opens its preview', async () => {
+  it('renders completed video actions for preview and direct download', async () => {
     const user = userEvent.setup()
     const onPreview = vi.fn()
+    const onDownload = vi.fn()
     const asset = {
       id: 'video-1',
       prompt: '海边日落',
@@ -552,6 +555,7 @@ describe('DirectVideoFeed', () => {
         ]}
         videoSrc={() => 'asset://video-1.mp4'}
         onPreview={onPreview}
+        onDownload={onDownload}
       />
     )
 
@@ -561,5 +565,7 @@ describe('DirectVideoFeed', () => {
     )
     await user.click(screen.getByRole('button', { name: '打开预览' }))
     expect(onPreview).toHaveBeenCalledWith(asset)
+    await user.click(screen.getByRole('button', { name: '下载' }))
+    expect(onDownload).toHaveBeenCalledWith(asset)
   })
 })
