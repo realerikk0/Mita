@@ -265,6 +265,25 @@ describe('DirectVideoMode', () => {
     expect(onGenerate).not.toHaveBeenCalled()
   })
 
+  it('keeps the video composer busy while its polling connection recovers', () => {
+    render(
+      <DirectVideoMode
+        videoModels={[{ provider: provider(), model: model() }]}
+        runtime={{
+          status: 'running',
+          progress: 42,
+          connectionState: 'reconnecting',
+          retryAt: Date.now() + 5_000,
+        }}
+        onGenerate={vi.fn()}
+      />
+    )
+
+    expect(screen.getByText('网络波动，正在重连')).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: '正在生成' })).toBeDisabled()
+    expect(screen.queryByText('视频生成失败')).not.toBeInTheDocument()
+  })
+
   it('does not claim multimodal-reference support for an unverified provider', async () => {
     const user = userEvent.setup()
     const onPickReferences = vi
@@ -415,6 +434,84 @@ describe('DirectVideoFeed', () => {
     expect(screen.getByText('42%')).toBeInTheDocument()
     await user.click(screen.getByRole('button', { name: '取消' }))
     expect(onCancel).toHaveBeenCalledWith(item)
+  })
+
+  it('shows a reconnecting video task as active instead of failed', () => {
+    render(
+      <DirectVideoFeed
+        items={[
+          {
+            id: 'direct-video:reconnecting',
+            prompt: '雨夜跑车',
+            model: 'seedance-2.0',
+            ratio: '16:9',
+            resolution: '720p',
+            duration: 5,
+            status: 'running',
+            progress: 42,
+            connectionState: 'reconnecting',
+          },
+        ]}
+        videoSrc={() => ''}
+      />
+    )
+
+    expect(screen.getAllByText('网络波动，正在重连')).toHaveLength(2)
+    expect(screen.queryByText('视频生成失败')).not.toBeInTheDocument()
+  })
+
+  it('continues polling a persisted failed task instead of regenerating it', async () => {
+    const user = userEvent.setup()
+    const onRetry = vi.fn()
+    const item = {
+      id: 'direct-video:persisted',
+      prompt: '雨夜跑车',
+      model: 'seedance-2.0',
+      ratio: '16:9' as const,
+      resolution: '720p' as const,
+      duration: 5,
+      status: 'failed' as const,
+      error: '网络连接暂时中断',
+      hasPersistedTask: true,
+    }
+
+    render(
+      <DirectVideoFeed
+        items={[item]}
+        videoSrc={() => ''}
+        onRetry={onRetry}
+      />
+    )
+
+    expect(screen.getByText('视频任务查询已暂停')).toBeInTheDocument()
+    expect(screen.queryByText('视频生成失败')).not.toBeInTheDocument()
+    await user.click(screen.getByRole('button', { name: '继续查询' }))
+    expect(onRetry).toHaveBeenCalledWith(item)
+  })
+
+  it('keeps regenerate available only for a terminal failure without a task', () => {
+    render(
+      <DirectVideoFeed
+        items={[
+          {
+            id: 'direct-video:terminal-failure',
+            prompt: '雨夜跑车',
+            model: 'seedance-2.0',
+            ratio: '16:9',
+            resolution: '720p',
+            duration: 5,
+            status: 'failed',
+            error: '输出视频可能包含敏感内容',
+          },
+        ]}
+        videoSrc={() => ''}
+        onRetry={vi.fn()}
+      />
+    )
+
+    expect(screen.getByText('视频生成失败')).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: '重试' })).toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: '继续查询' })).not.toBeInTheDocument()
   })
 
   it('renders a completed video in the feed and opens its preview', async () => {

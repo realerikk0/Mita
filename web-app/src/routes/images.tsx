@@ -2607,6 +2607,11 @@ function StoryboardVideoMode({
   )
   const videoStatus: VideoGenerationStatus =
     videoRuntime?.status ?? (pendingTask ? 'running' : 'queued')
+  const videoReconnecting = videoRuntime?.connectionState === 'reconnecting'
+  const videoInFlight = videoStatus === 'running' || videoReconnecting
+  const videoNeedsResume = Boolean(
+    pendingTask && videoStatus === 'failed' && !videoReconnecting
+  )
   // After a restart the runtime is empty; fall back to the finished video saved
   // in the restored session (matched to this storyboard) so it shows inline.
   const restoredVideoAsset =
@@ -2623,20 +2628,20 @@ function StoryboardVideoMode({
     candidateVideoAsset && failedAssetIds.has(candidateVideoAsset.id)
       ? undefined
       : candidateVideoAsset
-  const videoAsset = videoStatus === 'running' ? undefined : lastVideoAsset
+  const videoAsset = videoInFlight ? undefined : lastVideoAsset
   const progressStartedAt = videoRuntime?.startedAt ?? pendingTask?.startedAt
   const progressEstimateMs = videoRuntime?.estimateMs ?? pendingTask?.estimateMs
   const [videoNowMs, setVideoNowMs] = useState(() => Date.now())
   useEffect(() => {
-    if (videoStatus !== 'running') return
+    if (!videoInFlight) return
     const id = window.setInterval(() => setVideoNowMs(Date.now()), 1000)
     return () => window.clearInterval(id)
-  }, [videoStatus])
+  }, [videoInFlight])
   // Providers expose no real progress (a fixed 50% while running), so the bar
   // is estimated from elapsed time and snaps to 100% when the asset lands.
   const videoProgress = useMemo(() => {
     if (videoStatus === 'succeeded') return 100
-    if (videoStatus !== 'running' || !progressStartedAt || !progressEstimateMs) {
+    if (!videoInFlight || !progressStartedAt || !progressEstimateMs) {
       return 0
     }
     const elapsed = videoNowMs - progressStartedAt
@@ -2644,7 +2649,13 @@ function StoryboardVideoMode({
       90,
       Math.max(0, Math.round((elapsed / progressEstimateMs) * 90))
     )
-  }, [videoStatus, videoNowMs, progressStartedAt, progressEstimateMs])
+  }, [
+    videoInFlight,
+    videoStatus,
+    videoNowMs,
+    progressStartedAt,
+    progressEstimateMs,
+  ])
   const [referenceAssets, setReferenceAssets] = useState<ImageAssetRecord[]>(
     () => initialSession?.referenceAssets ?? []
   )
@@ -3205,6 +3216,11 @@ function StoryboardVideoMode({
   ])
 
   const generateVideo = useCallback(() => {
+    const videoStore = useVideoGenerationStore.getState()
+    if (taskKey && videoStore.tasks[taskKey]) {
+      videoStore.resume(taskKey)
+      return
+    }
     if (!videoModel || !storyboardAsset) return
 
     const prompt = buildVideoPrompt(story, shots, videoSettings)
@@ -3232,6 +3248,7 @@ function StoryboardVideoMode({
     shots,
     storyboardAsset,
     story,
+    taskKey,
     totalDuration,
     videoModel,
     videoSettings,
@@ -3917,7 +3934,7 @@ function StoryboardVideoMode({
                         markAssetFailed(videoAsset.id)
                       }}
                     />
-                  ) : videoStatus === 'running' ? (
+                  ) : videoInFlight ? (
                     <div className="flex w-2/3 flex-col items-center gap-3">
                       <Film className="size-7 animate-pulse text-[#f36f4f]" />
                       <div className="h-1.5 w-full overflow-hidden rounded-full bg-white/10">
@@ -3929,6 +3946,11 @@ function StoryboardVideoMode({
                       <span className="font-mono text-xs text-neutral-400">
                         {videoProgress}%
                       </span>
+                      {videoReconnecting && (
+                        <span className="text-xs text-amber-300">
+                          网络波动，正在重连
+                        </span>
+                      )}
                     </div>
                   ) : (
                     <div className="flex size-14 items-center justify-center rounded-full bg-white/90 text-neutral-950">
@@ -4196,19 +4218,20 @@ function StoryboardVideoMode({
                 type="button"
                 className="w-full bg-[#f36f4f] text-white hover:bg-[#e96346]"
                 disabled={
-                  !videoModel ||
-                  !storyboardAsset ||
-                  videoStatus === 'running' ||
-                  planIsStale
+                  videoInFlight ||
+                  (!videoNeedsResume &&
+                    (!videoModel || !storyboardAsset || planIsStale))
                 }
                 onClick={generateVideo}
               >
-                {videoStatus === 'running' ? (
+                {videoInFlight ? (
                   <Loader2 className="size-4 animate-spin" />
                 ) : (
                   <Film className="size-4" />
                 )}
-                {imageT(t, 'storyboard.generateVideo')}
+                {videoNeedsResume
+                  ? '继续查询'
+                  : imageT(t, 'storyboard.generateVideo')}
               </Button>
             </aside>
           </div>
@@ -4635,6 +4658,11 @@ function Images() {
 
   const retryDirectVideo = useCallback(
     (item: DirectVideoFeedItem) => {
+      const videoStore = useVideoGenerationStore.getState()
+      if (videoStore.tasks[item.id]) {
+        videoStore.resume(item.id)
+        return
+      }
       const snapshot =
         directVideoSubmission?.taskKey === directVideoTaskKey
           ? directVideoSubmission
@@ -5322,6 +5350,9 @@ function Images() {
         status: directVideoStatus,
         progress: directVideoProgress,
         error: directVideoRuntime?.error,
+        connectionState: directVideoRuntime?.connectionState,
+        retryAt: directVideoRuntime?.retryAt,
+        hasPersistedTask: Boolean(directVideoTask),
         asset: directVideoAsset,
         sourceImageSrc:
           videoReferenceSrc(currentImageReference) ??
@@ -6720,6 +6751,8 @@ function Images() {
                     status: directVideoStatus,
                     progress: directVideoProgress,
                     error: directVideoRuntime?.error,
+                    connectionState: directVideoRuntime?.connectionState,
+                    retryAt: directVideoRuntime?.retryAt,
                   }}
                   onPickReferences={pickDirectVideoReferences}
                   loadPricePerMillionCny={loadDirectVideoPrice}

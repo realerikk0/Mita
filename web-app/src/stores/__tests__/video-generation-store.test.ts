@@ -19,6 +19,7 @@ vi.mock('@/hooks/useModelProvider', () => ({
 
 import { toast } from 'sonner'
 import { SEEDANCE_MULTIMODAL_REFERENCE_CAPABILITIES } from '@/lib/seedance-video'
+import { RecoverableVideoPollingError } from '@/services/video-generation/retry-error'
 import type { VideoGenerationReference } from '@/services/video-generation/types'
 import { useVideoGenerationStore } from '../video-generation-store'
 
@@ -107,6 +108,10 @@ function makeHub(overrides: Record<string, unknown> = {}) {
       ),
     ...overrides,
   }
+}
+
+async function flushPromises() {
+  for (let index = 0; index < 8; index += 1) await Promise.resolve()
 }
 
 describe('useVideoGenerationStore', () => {
@@ -225,7 +230,7 @@ describe('useVideoGenerationStore', () => {
     )
   })
 
-  it('fails and toasts when the task finishes without a video URL', async () => {
+  it('fails without orphaning the task when success has no video URL', async () => {
     const hub = makeHub({
       generateVideo: vi
         .fn()
@@ -245,7 +250,9 @@ describe('useVideoGenerationStore', () => {
     expect(toast.error).toHaveBeenCalledWith(
       'Video generation finished without a playable video URL'
     )
-    expect(useVideoGenerationStore.getState().tasks['sb1']).toBeUndefined()
+    expect(useVideoGenerationStore.getState().tasks['sb1']?.taskId).toBe(
+      'video-task-1'
+    )
   })
 
   it('surfaces the provider failure detail when polling ends in failed', async () => {
@@ -273,6 +280,146 @@ describe('useVideoGenerationStore', () => {
       '输出视频可能包含敏感内容，请调整提示词后重试'
     )
     expect(hub.saveVideoAsset).not.toHaveBeenCalled()
+    expect(useVideoGenerationStore.getState().tasks.sb1).toBeUndefined()
+  })
+
+  it('keeps an existing task running and reconnects after a polling outage', async () => {
+    vi.useFakeTimers()
+    try {
+      const hub = makeHub({
+        pollVideoTask: vi
+          .fn()
+          .mockRejectedValueOnce(
+            new RecoverableVideoPollingError(
+              'error sending request for url (https://api.biyuan.ai)'
+            )
+          )
+          .mockResolvedValueOnce({
+            id: 'video-task-1',
+            status: 'succeeded',
+            progress: 100,
+            videoUrl: 'https://cdn.example.test/recovered.mp4',
+            usage: {},
+          }),
+      })
+
+      useVideoGenerationStore.getState().start(baseInput('sb1'), hub as never)
+      await flushPromises()
+
+      expect(hub.generateVideo).toHaveBeenCalledTimes(1)
+      expect(hub.pollVideoTask).toHaveBeenCalledTimes(1)
+      expect(useVideoGenerationStore.getState().runtime.sb1).toEqual(
+        expect.objectContaining({
+          status: 'running',
+          connectionState: 'reconnecting',
+          retryAt: expect.any(Number),
+        })
+      )
+      expect(useVideoGenerationStore.getState().tasks.sb1?.taskId).toBe(
+        'video-task-1'
+      )
+      expect(toast.error).not.toHaveBeenCalled()
+
+      await vi.advanceTimersByTimeAsync(5_000)
+      await flushPromises()
+
+      expect(hub.generateVideo).toHaveBeenCalledTimes(1)
+      expect(hub.pollVideoTask).toHaveBeenCalledTimes(2)
+      expect(hub.pollVideoTask).toHaveBeenLastCalledWith(
+        expect.objectContaining({ taskId: 'video-task-1' })
+      )
+      expect(useVideoGenerationStore.getState().runtime.sb1).toEqual(
+        expect.objectContaining({
+          status: 'succeeded',
+          connectionState: 'connected',
+        })
+      )
+      expect(useVideoGenerationStore.getState().tasks.sb1).toBeUndefined()
+      expect(toast.error).not.toHaveBeenCalled()
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  it('retains a completed task when saving has a recoverable network error', async () => {
+    vi.useFakeTimers()
+    try {
+      const saveVideoAsset = vi
+        .fn()
+        .mockRejectedValueOnce(
+          new RecoverableVideoPollingError('connection reset while saving video')
+        )
+        .mockImplementationOnce((request: Record<string, unknown>) =>
+          Promise.resolve({
+            ...request,
+            createdAt: '2026-06-17T00:00:00Z',
+            path: '/mock/video-assets/asset-sb1/video.mp4',
+            fileName: 'video.mp4',
+          })
+        )
+      const hub = makeHub({
+        generateVideo: vi.fn().mockResolvedValue({
+          id: 'video-task-1',
+          status: 'succeeded',
+          progress: 100,
+          videoUrl: 'https://cdn.example.test/video.mp4',
+          usage: {},
+        }),
+        saveVideoAsset,
+      })
+
+      useVideoGenerationStore.getState().start(baseInput('sb1'), hub as never)
+      await flushPromises()
+
+      expect(useVideoGenerationStore.getState().runtime.sb1).toEqual(
+        expect.objectContaining({
+          status: 'running',
+          connectionState: 'reconnecting',
+        })
+      )
+      expect(useVideoGenerationStore.getState().tasks.sb1).toBeDefined()
+      expect(toast.error).not.toHaveBeenCalled()
+
+      await vi.advanceTimersByTimeAsync(5_000)
+      await flushPromises()
+
+      expect(hub.generateVideo).toHaveBeenCalledTimes(1)
+      expect(hub.pollVideoTask).not.toHaveBeenCalled()
+      expect(saveVideoAsset).toHaveBeenCalledTimes(2)
+      expect(useVideoGenerationStore.getState().runtime.sb1?.status).toBe(
+        'succeeded'
+      )
+      expect(useVideoGenerationStore.getState().tasks.sb1).toBeUndefined()
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  it('aborts a scheduled reconnect when the existing task is cancelled', async () => {
+    vi.useFakeTimers()
+    try {
+      const hub = makeHub({
+        pollVideoTask: vi.fn().mockRejectedValue(
+          new RecoverableVideoPollingError('network request failed')
+        ),
+      })
+
+      useVideoGenerationStore.getState().start(baseInput('sb1'), hub as never)
+      await flushPromises()
+      expect(hub.pollVideoTask).toHaveBeenCalledTimes(1)
+
+      useVideoGenerationStore.getState().cancel('sb1')
+      await vi.advanceTimersByTimeAsync(30_000)
+      await flushPromises()
+
+      expect(hub.generateVideo).toHaveBeenCalledTimes(1)
+      expect(hub.pollVideoTask).toHaveBeenCalledTimes(1)
+      expect(useVideoGenerationStore.getState().tasks.sb1).toBeUndefined()
+      expect(useVideoGenerationStore.getState().runtime.sb1).toBeUndefined()
+      expect(toast.error).not.toHaveBeenCalled()
+    } finally {
+      vi.useRealTimers()
+    }
   })
 
   it('resumes a persisted task after a restart without re-submitting', async () => {
@@ -303,7 +450,7 @@ describe('useVideoGenerationStore', () => {
       runtime: {},
     })
 
-    useVideoGenerationStore.getState().resumeAll()
+    useVideoGenerationStore.getState().resume('sb2')
 
     await vi.waitFor(() =>
       expect(
@@ -453,6 +600,9 @@ describe('useVideoGenerationStore', () => {
     await vi.waitFor(() =>
       expect(useVideoGenerationStore.getState().tasks['stale']).toBeUndefined()
     )
+    expect(useVideoGenerationStore.getState().runtime.stale?.error).toContain(
+      'expired'
+    )
     expect(hub.pollVideoTask).not.toHaveBeenCalled()
   })
 
@@ -510,11 +660,9 @@ describe('useVideoGenerationStore', () => {
       videoUrl: 'https://cdn.example.test/A.mp4',
       usage: {},
     })
-    await vi.waitFor(() =>
-      expect(hub.saveVideoAsset).toHaveBeenCalledTimes(2)
-    )
     await Promise.resolve()
 
+    expect(hub.saveVideoAsset).toHaveBeenCalledTimes(1)
     expect(
       useVideoGenerationStore.getState().runtime['sb1']?.asset?.path
     ).toBe('/mock/video-assets/asset-B/video.mp4')

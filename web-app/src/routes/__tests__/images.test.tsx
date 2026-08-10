@@ -551,6 +551,67 @@ describe('Images route', () => {
     )
   })
 
+  it('continues a persisted direct-video task without submitting another video', async () => {
+    const taskKey = 'direct-video:persisted-task'
+    const startedAt = Date.now() - 60_000
+    h.search = { media: 'video' }
+    h.providers = [
+      {
+        provider: 'jingxing',
+        base_url: 'https://api.jingxing.uk/v1',
+        settings: [],
+        models: [
+          {
+            id: 'seedance-2.0',
+            capabilities: [ModelCapabilities.VIDEO_GENERATION],
+          },
+        ],
+      },
+    ]
+    act(() => {
+      useVideoGenerationStore.setState({
+        tasks: {
+          [taskKey]: {
+            key: taskKey,
+            assetId: 'direct-video-asset',
+            taskId: 'provider-task-id',
+            providerName: 'jingxing',
+            modelId: 'seedance-2.0',
+            prompt: '雨夜跑车',
+            ratio: '16:9',
+            resolution: '720p',
+            duration: 5,
+            fps: 24,
+            sourceAssetIds: [],
+            assetKind: 'generated',
+            startedAt,
+            estimateMs: 450_000,
+          },
+        },
+        runtime: {
+          [taskKey]: {
+            status: 'failed',
+            assetKind: 'generated',
+            startedAt,
+            estimateMs: 450_000,
+            error: '网络连接暂时中断',
+          },
+        },
+      })
+    })
+    const resume = vi
+      .spyOn(useVideoGenerationStore.getState(), 'resume')
+      .mockImplementation(() => {})
+
+    renderComponent()
+
+    fireEvent.click(
+      await screen.findByRole('button', { name: '继续查询' })
+    )
+    expect(resume).toHaveBeenCalledWith(taskKey)
+    expect(h.generateVideo).not.toHaveBeenCalled()
+  })
+
   it('imports local image, video, and audio references through the native picker', async () => {
     const createElement = document.createElement.bind(document)
     vi.spyOn(document, 'createElement').mockImplementation(
@@ -3012,6 +3073,145 @@ describe('Images route', () => {
     ).toBeInTheDocument()
     expect(screen.getByText('15,000 tokens')).toBeInTheDocument()
     expect(screen.getByText('Download video')).toBeInTheDocument()
+  })
+
+  it('continues a persisted storyboard-video task without submitting another video', async () => {
+    const taskKey = 'storyboard-resume-1'
+    const startedAt = Date.now() - 60_000
+    const storyboardAsset = {
+      id: taskKey,
+      prompt: 'robot storyboard',
+      mode: 'generate',
+      provider: 'jingxing',
+      model: 'gpt-image-2',
+      ratio: '16:9',
+      size: '1280x720',
+      quality: 'standard',
+      sourceAssetIds: [],
+      createdAt: '2026-08-10T00:00:00Z',
+      status: 'succeeded',
+      path: `/mock/mita/image-assets/${taskKey}/image.png`,
+      fileName: 'image.png',
+      mimeType: 'image/png',
+      assetKind: 'storyboard',
+    }
+    h.providers = [
+      {
+        provider: 'jingxing',
+        base_url: 'https://api.jingxing.uk/v1',
+        settings: [],
+        models: [
+          {
+            id: 'gpt-image-2',
+            capabilities: [ModelCapabilities.IMAGE_GENERATION],
+          },
+          {
+            id: 'seedance-2.0',
+            capabilities: [ModelCapabilities.VIDEO_GENERATION],
+          },
+        ],
+      },
+    ]
+    act(() => {
+      useStoryboardSessionStore.getState().save({
+        stage: 'video',
+        story: 'A robot crosses a neon city.',
+        settings: {
+          style: '电影感',
+          aspect: '16:9',
+          qualityPreset: 'sd',
+          variantCount: 1,
+          template: 'board',
+          consistency: 'lockedCharacter',
+        },
+        videoSettings: {
+          ratio: '16:9',
+          resolution: '1080p',
+          duration: 8,
+          fps: 30,
+          camera: '自动',
+          motion: 55,
+          generateAudio: true,
+        },
+        shots: [],
+        promptTabs: [],
+        activePromptTabId: '',
+        storyboardStatus: 'succeeded',
+        storyboardAsset,
+        storyboardVersions: [
+          {
+            id: taskKey,
+            label: 'Original',
+            asset: storyboardAsset,
+            kind: 'original',
+            createdAt: storyboardAsset.createdAt,
+          },
+        ],
+        activeStoryboardVersionId: taskKey,
+        referenceAssets: [],
+        selectedVideoModelKey: 'jingxing::seedance-2.0',
+        videoAsset: undefined,
+      } as any)
+      useStoryboardSessionStore.getState().setMediaMode('storyboard')
+      useVideoGenerationStore.setState({
+        tasks: {
+          [taskKey]: {
+            key: taskKey,
+            assetId: 'storyboard-video-asset',
+            taskId: 'provider-storyboard-task',
+            providerName: 'jingxing',
+            modelId: 'seedance-2.0',
+            prompt: 'A robot crosses a neon city.',
+            ratio: '16:9',
+            resolution: '1080p',
+            duration: 8,
+            fps: 30,
+            sourceAssetIds: [taskKey],
+            assetKind: 'storyboard',
+            startedAt,
+            estimateMs: 720_000,
+          },
+        },
+        runtime: {
+          [taskKey]: {
+            status: 'running',
+            connectionState: 'reconnecting',
+            retryAt: Date.now() + 5_000,
+            assetKind: 'storyboard',
+            startedAt,
+            estimateMs: 720_000,
+          },
+        },
+      })
+    })
+    const resume = vi
+      .spyOn(useVideoGenerationStore.getState(), 'resume')
+      .mockImplementation(() => {})
+
+    renderComponent()
+
+    expect(await screen.findByText('网络波动，正在重连')).toBeInTheDocument()
+    expect(screen.queryByText('视频生成失败')).not.toBeInTheDocument()
+    act(() => {
+      useVideoGenerationStore.setState((state) => ({
+        runtime: {
+          ...state.runtime,
+          [taskKey]: {
+            ...state.runtime[taskKey],
+            status: 'failed',
+            connectionState: 'connected',
+            retryAt: undefined,
+            error: '网络连接暂时中断',
+          },
+        },
+      }))
+    })
+
+    fireEvent.click(
+      await screen.findByRole('button', { name: '继续查询' })
+    )
+    expect(resume).toHaveBeenCalledWith(taskKey)
+    expect(h.generateVideo).not.toHaveBeenCalled()
   })
 
   it('reports storyboard video tasks that finish without a video URL', async () => {
