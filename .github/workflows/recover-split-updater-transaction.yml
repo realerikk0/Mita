@@ -35,10 +35,6 @@ jobs:
       AWS_DEFAULT_REGION: auto
       ALIYUN_OSS_ENDPOINT: ${{ vars.ALIYUN_OSS_ENDPOINT || 'oss-cn-hangzhou.aliyuncs.com' }}
       ALIYUN_REGION: ${{ vars.ALIYUN_REGION || 'cn-hangzhou' }}
-      LEGACY_ALIYUN_KEY: mita/latest.json
-      LEGACY_R2_KEY: mita/latest.json
-      LEGACY_ALIYUN_URL: https://static.mitapp.cn/mita/latest.json
-      LEGACY_R2_URL: https://updates.mita.so/mita/latest.json
       POLICY_KEY: biyan/updater/stable/policy.json
       OPEN_TRANSACTION_KEY: biyan/updater/transactions/open.json
     steps:

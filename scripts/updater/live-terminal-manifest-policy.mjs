@@ -6,14 +6,15 @@ import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 
 import { validateCanonicalUpdaterManifest } from './candidate-url-policy.mjs'
+import {
+  validateLegacyBridgePolicy,
+  validateLegacyManifest,
+} from './legacy-manifest-policy.mjs'
 
 const scriptDirectory = path.dirname(fileURLToPath(import.meta.url))
-const releaseTrainPolicyPath = path.join(
+const legacyBridgePolicyPath = path.join(
   scriptDirectory,
-  '../ci/release-train-policy.json',
-)
-const releaseTrainPolicy = JSON.parse(
-  fs.readFileSync(releaseTrainPolicyPath, 'utf8'),
+  'legacy-bridge-policy.json',
 )
 
 function isPlainObject(value) {
@@ -36,38 +37,20 @@ function sha256(bytes) {
   return createHash('sha256').update(bytes).digest('hex')
 }
 
-function allowedLiveTerminals(trainPolicy) {
-  const history = trainPolicy?.supersededTerminalReleases
-  const previous = Array.isArray(history)
-    ? history.filter((entry) => entry?.status === 'published-superseded').at(-1)
-    : undefined
-  const active = trainPolicy?.activeTerminalRelease
-  const allowed = [previous, active].filter(Boolean)
-  if (allowed.length === 0) {
-    throw new Error('Release train policy has no published or active terminal release')
-  }
-  for (const terminal of allowed) {
-    if (
-      !isPlainObject(terminal)
-      || terminal.tag !== `v${terminal.version}`
-      || terminal.migrationPhase !== 'C'
-      || terminal.dataSchema !== 3
-      || !/^[0-9a-f]{40}$/.test(terminal.sourceCommit ?? '')
-    ) {
-      throw new Error('Release train policy contains an invalid live terminal release')
-    }
-  }
-  return allowed
-}
-
-export function verifyLiveTerminalManifestPair({
+export function verifyFrozenLegacyHandoff({
   aliyunBytes,
   r2Bytes,
   githubManifestBytes,
   githubRelease,
-  trainPolicy = releaseTrainPolicy,
+  trackedPolicy,
   verifiedAt = new Date().toISOString(),
 }) {
+  const policy = validateLegacyBridgePolicy(trackedPolicy)
+  if (policy.state !== 'frozen-handoff') {
+    throw new Error(
+      `Frozen legacy handoff verifier requires frozen-handoff state; found ${policy.state}`,
+    )
+  }
   const aliyun = Buffer.from(aliyunBytes ?? '')
   const r2 = Buffer.from(r2Bytes ?? '')
   const githubManifest = Buffer.from(githubManifestBytes ?? '')
@@ -81,21 +64,27 @@ export function verifyLiveTerminalManifestPair({
     throw new Error('Live updater manifests must match the published GitHub manifest')
   }
 
-  const manifest = parseJson(aliyun, 'Live updater manifest')
-  const terminal = allowedLiveTerminals(trainPolicy).find(
-    (entry) => entry.version === manifest.version,
-  )
-  if (!terminal) {
+  const manifestSha256 = sha256(githubManifest)
+  if (manifestSha256 !== policy.expectedManifestSha256) {
     throw new Error(
-      `Live updater version ${manifest.version ?? '(missing)'} is not the latest published or active terminal release`,
+      `Frozen legacy handoff SHA-256 must be exactly ${policy.expectedManifestSha256}; found ${manifestSha256}`,
     )
   }
-  validateCanonicalUpdaterManifest(manifest, terminal)
+  const manifest = parseJson(aliyun, 'Live updater manifest')
+  validateLegacyManifest(manifest, policy)
+  const frozenRelease = {
+    version: policy.expectedVersion,
+    sourceCommit: manifest.sourceCommit,
+    migrationPhase: 'C',
+    dataSchema: 3,
+  }
+  validateCanonicalUpdaterManifest(manifest, frozenRelease)
+  const frozenTag = `v${policy.expectedVersion}`
 
   if (
     !isPlainObject(githubRelease)
-    || githubRelease.tag_name !== terminal.tag
-    || githubRelease.target_commitish !== terminal.sourceCommit
+    || githubRelease.tag_name !== frozenTag
+    || githubRelease.target_commitish !== manifest.sourceCommit
     || githubRelease.draft !== false
     || githubRelease.prerelease !== false
     || typeof githubRelease.published_at !== 'string'
@@ -109,7 +98,6 @@ export function verifyLiveTerminalManifestPair({
     throw new Error('GitHub release must contain exactly one latest.json asset')
   }
   const asset = matches[0]
-  const manifestSha256 = sha256(githubManifest)
   if (
     asset.state !== 'uploaded'
     || asset.size !== githubManifest.length
@@ -122,9 +110,10 @@ export function verifyLiveTerminalManifestPair({
     schema: 1,
     status: 'passed',
     verifiedAt,
-    version: terminal.version,
-    tag: terminal.tag,
-    sourceCommit: terminal.sourceCommit,
+    state: policy.state,
+    version: policy.expectedVersion,
+    tag: frozenTag,
+    sourceCommit: manifest.sourceCommit,
     manifestSha256,
     aliyunSha256: manifestSha256,
     r2Sha256: manifestSha256,
@@ -167,7 +156,7 @@ function runCli() {
   try {
     const args = parseArgs(process.argv.slice(2))
     evidenceFile = path.resolve(args['--evidence'])
-    const evidence = verifyLiveTerminalManifestPair({
+    const evidence = verifyFrozenLegacyHandoff({
       aliyunBytes: fs.readFileSync(path.resolve(args['--aliyun'])),
       r2Bytes: fs.readFileSync(path.resolve(args['--r2'])),
       githubManifestBytes: fs.readFileSync(
@@ -177,10 +166,14 @@ function runCli() {
         fs.readFileSync(path.resolve(args['--github-release'])),
         'GitHub release',
       ),
+      trackedPolicy: parseJson(
+        fs.readFileSync(legacyBridgePolicyPath),
+        'Tracked legacy bridge policy',
+      ),
     })
     writeEvidence(evidenceFile, evidence)
     console.log(
-      `Verified live terminal ${evidence.tag} across Aliyun, R2, and GitHub`,
+      `Verified frozen legacy handoff ${evidence.tag} across Aliyun, R2, and GitHub`,
     )
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error)

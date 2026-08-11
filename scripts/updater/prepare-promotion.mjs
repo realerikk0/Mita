@@ -499,13 +499,14 @@ export function preparePromotion({
       ],
     }
   }
-  // The two legacy entrypoints always pin to the latest healthy A-lineage
-  // bridge, including an A recovery patch. Pre-A clients must never be forced
-  // through a known-bad A build before reaching its forward recovery.
-  if (
-    effectivePhase === 'A'
-    || (currentPolicy.deploymentMode === 'direct-c' && effectivePhase === 'C')
-  ) {
+  // The two legacy entrypoints are a frozen handoff, not a rolling release
+  // channel. Once the bridge exists, every future Router promotion must keep
+  // the exact version and release digest already recorded by current policy.
+  // The initial A/DIRECT_C bootstrap paths above remain able to establish the
+  // pointer, but no later A recovery or direct-C recovery may advance it.
+  if (currentPolicy.legacyBridgeVersion != null) {
+    next.legacyBridgeVersion = currentPolicy.legacyBridgeVersion
+  } else if (effectivePhase === 'A') {
     next.legacyBridgeVersion = targetVersion
   }
   if (percentage === 100) {

@@ -1,16 +1,16 @@
-name: Verify Legacy Updater Bridge
+name: Verify Frozen Legacy Handoff
 
 on:
   workflow_dispatch:
   schedule:
-    - cron: "17 */6 * * *"
+    - cron: "17 3 * * 1"
 
 permissions:
   contents: read
 
 jobs:
   verify:
-    name: Legacy manifests match the published terminal release
+    name: Frozen manifests match the tracked handoff
     runs-on: ubuntu-latest
     env:
       GH_TOKEN: ${{ github.token }}
@@ -29,6 +29,9 @@ jobs:
           set -euo pipefail
           policy=scripts/updater/legacy-bridge-policy.json
           mkdir -p dist
+          test "$(jq -er '.state' "$policy")" = frozen-handoff
+          version="$(jq -er '.expectedVersion' "$policy")"
+          [[ "$version" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]
           aliyun_url="$(jq -er '.manifestUrls.aliyun' "$policy")"
           r2_url="$(jq -er '.manifestUrls.r2' "$policy")"
           curl --proto '=https' --tlsv1.2 -fsSL \
@@ -40,8 +43,6 @@ jobs:
             --connect-timeout 10 --max-time 120 \
             "$r2_url" -o dist/r2-latest.json
 
-          version="$(jq -er '.version' dist/aliyun-latest.json)"
-          [[ "$version" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]
           tag="v$version"
           gh api "repos/$GITHUB_REPOSITORY/releases/tags/$tag" \
             > dist/github-release.json
@@ -58,7 +59,7 @@ jobs:
             "repos/$GITHUB_REPOSITORY/releases/assets/$asset_id" \
             > dist/github-latest.json
 
-      - name: Verify exact published state and write evidence
+      - name: Verify exact frozen state and write evidence
         run: |
           set -euo pipefail
           node scripts/updater/live-terminal-manifest-policy.mjs \
@@ -66,7 +67,7 @@ jobs:
             --r2 dist/r2-latest.json \
             --github-release dist/github-release.json \
             --github-manifest dist/github-latest.json \
-            --evidence dist/live-terminal-manifest-verification.json
+            --evidence dist/frozen-legacy-handoff-verification.json
           sha256sum \
             dist/aliyun-latest.json \
             dist/r2-latest.json \
@@ -76,7 +77,7 @@ jobs:
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: legacy-bridge-verification-${{ github.run_id }}
+          name: frozen-legacy-handoff-verification-${{ github.run_id }}
           if-no-files-found: warn
           retention-days: 30
           path: dist/*.json

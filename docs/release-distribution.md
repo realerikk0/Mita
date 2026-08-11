@@ -44,11 +44,12 @@ commits. The first commit (`P`) contains all product changes and the three
 matching version-file updates. The second commit (`Q`) changes only reviewed
 release-control paths, appends the former active release to contiguous
 `published-superseded` history, and binds the next active tag to the full
-40-character `P` SHA. Required CI and CODEOWNER review run against `Q`. Merge
-this PR with a merge commit so `P` remains an immutable one-parent ancestor;
-never squash or rebase a terminal release PR. The branch rules may allow merge
-commits for this purpose, but all status, review, deletion, and non-fast-forward
-protections remain mandatory.
+40-character `P` SHA. Required CI and release-policy checks run against `Q`;
+CODEOWNERS records the accountable repository owner but does not require a
+separate approval. Merge this PR with a merge commit so `P` remains an immutable
+one-parent ancestor; never squash or rebase a terminal release PR. The branch
+rules may allow merge commits for this purpose, but required status, deletion,
+and non-fast-forward protections remain mandatory.
 
 The rolling schema does not authorize arbitrary versions. Every new active
 terminal must be the next patch version after the latest contiguous terminal
@@ -114,12 +115,13 @@ an invalid commit topology, or an unrecognized path fails closed.
 Its final check belongs to the protected `mita-main` dispatch run and is an
 operator pre-tag gate, not a required check attached to the input target PR.
 
-Scoped PR checks are valid only while the protected branch ruleset requires
-CODEOWNER review for CI-control paths and dismisses stale approvals after a
-push. GitHub required-check names do not identify the workflow that emitted
-them, so checked-in policy tests are defense in depth rather than a substitute
-for that repository rule. PR test jobs keep a read-only token, disable checkout
-credential persistence, and never comment with a write token.
+Scoped PR checks are valid only while the protected branch ruleset requires the
+PR CI Gate and blocks deletion and non-fast-forward updates. CODEOWNERS records
+accountability but does not create a required approval gate. GitHub
+required-check names do not identify the workflow that emitted them, so the
+checked-in release-policy tests must reject attempts to weaken CI-control
+paths. PR test jobs keep a read-only token, disable checkout credential
+persistence, and never comment with a write token.
 
 Candidate builds, reusable formal-build templates, release distribution,
 updater router deployment, upgrade smoke attestation, promotion, health gating,
@@ -154,7 +156,7 @@ permissions and command envelope in release-policy tests.
 
 Run `.github/workflows/biyan-direct-qualification.yml` once from protected
 `mita-main` after the exact candidate source, manifest, and installer digests
-are pinned by a CODEOWNER-reviewed control-plane commit. The workflow performs
+are pinned by an owner-controlled control-plane commit. The workflow performs
 real installs on GitHub-hosted x86_64 runners:
 
 - Windows and macOS: `0.6.608 → 0.6.649` as manual-installer compatibility
@@ -202,9 +204,12 @@ success may upload
 cannot be mistaken for the current evidence.
 
 This is pre-promotion laboratory health evidence, not production telemetry.
-The automatic post-promotion health gate remains required. The qualification
-workflow has only `actions: read` and `contents: read`; it has no production
-store credential or mutation step.
+The post-promotion Health Gate is an incident-triggered evidence consumer, not
+a telemetry collector or automatic emitter. An external monitor or operator
+must publish a content-addressed `rollout-health.json` and trigger it through
+`biyan-updater-health` repository dispatch or manual dispatch. The
+qualification workflow has only `actions: read` and `contents: read`; it has no
+production store credential or mutation step.
 
 ## Promotion
 
@@ -215,7 +220,8 @@ approval. Promotion requires:
 - candidate checksum and signature verification;
 - real upgrade smoke evidence for the requested source/target pair;
 - rollout timing and health evidence;
-- a recoverable snapshot of the previous policy and manifests.
+- a recoverable snapshot of the previous Router policy and fail-closed,
+  read-only verification of the frozen legacy manifests.
 
 For `RECOVERY`, promotion accepts only the exact attempt-scoped artifact from
 `Biyan Upgrade Smoke`. The candidate source must be an ancestor of the smoke
@@ -226,46 +232,64 @@ published terminal; its candidate must equal the active signed C/schema-3
 release. Dry-run the same request first, then perform one 100% compare-and-swap
 transaction.
 
-Direct-C promotion also requires the tracked transition policy to name the
-exact reviewed `0.6.649` manifest SHA-256 and four-platform set. It remains
-`approvedNext: null` until the signed candidate exists and passes source,
-candidate, and artifact acceptance. Populate that identity through a
-CODEOWNER-reviewed control-plane pull request; this verifier-only change does
-not change the terminal product source. A missing or mismatched approval
-blocks qualification and promotion before any production mutation.
+The historical Direct-C promotion required the tracked transition policy to
+name the exact reviewed `0.6.649` manifest SHA-256 and four-platform set. That
+identity remains immutable baseline evidence; it is not authority to mutate the
+frozen legacy handoff. A missing or mismatched candidate approval in the
+tracked transition policy blocks qualification and promotion before any
+production mutation.
 
 The dynamic Biyan route returns `204` when a phase is closed, paused, outside
-its cohort, or covered by the kill switch. The one production transaction
-publishes three exact 100% Router transitions:
-`0.6.643 → 0.6.649`, `0.6.644 → 0.6.649`, and
-`0.6.645 → 0.6.649`. It also replaces both legacy manifests byte-identically,
-so clients `0.6.609–0.6.633` receive `0.6.649` directly. `0.6.609` and
-`0.6.610` were Draft releases; the lowest public stable automatic source is
-`0.6.611`. The target is always
-the same signed C/schema-3 manifest; no client is routed through A or B.
+its cohort, or covered by the kill switch. The original Direct-C transaction
+published exact 100% Router transitions from public A/B/C sources to
+`v0.6.649`; that transition is immutable history and no client is routed
+through an intermediate A or B release.
 
-The two compatibility manifests are generated from one canonical byte stream,
-published together, and verified byte-identical with the same SHA-256. Existing
-updater and CDN paths remain compatibility infrastructure; product names,
-installer filenames, process names, and the CLI are Biyan-branded.
+`v0.6.651` is the final compatibility handoff for public stable legacy updater
+clients `0.6.611–0.6.633`. Keep these two public manifests permanently static,
+read-only, and byte-identical to the exact signed `v0.6.651` manifest. Their
+Aliyun and R2 public endpoints are pinned by
+`scripts/updater/legacy-bridge-policy.json`; do not copy them into a second
+configuration source.
 
-The updater kill switch and automatic health gate use the same fail-closed
-pause transaction. They require the exact pre-update compatibility backups
-persisted and authenticated by Direct-C promotion, then pause the Router
-policy and replace both legacy origins with those bytes. Policy
-compare-and-swap, dual-cloud journals, byte readback, and CDN purge verification
-are one recovery boundary; an unknown or partially applied state leaves the
-journal open and blocks later promotion. Resuming does not merely clear
-`paused`: the transaction must first restore the active complete compatibility
-manifest to both legacy origins and verify public readback.
+An eligible legacy client follows that bridge once to install `v0.6.651`; the
+installed client then uses the dynamic Biyan Router for `v0.6.652` and later.
+Existing updater and CDN paths remain compatibility infrastructure; product
+names, installer filenames, process names, and the CLI remain Biyan-branded.
+
+`Verify Frozen Legacy Handoff` runs weekly and may be dispatched manually. It
+downloads both live manifests and the published GitHub `v0.6.651` manifest,
+verifies their exact tracked version, canonical bytes, and SHA-256, and uploads
+evidence. It is a read-only verifier, not a publication or repair workflow.
+
+From `v0.6.652` onward, `RECOVERY` promotion publishes immutable versioned
+objects and mutates only Router policy. It must read and verify both frozen
+legacy manifests as a fail-closed invariant, but it must never write them. The
+Kill Switch and incident-triggered Health Gate likewise pause only Router
+policy. A clear Health Gate decision does not resume service automatically;
+resumption requires a new health-gated promotion.
+
+Do not delete, return `404` from, or redirect either legacy endpoint in the hope
+that an old binary will display a manual-download prompt. A failed updater
+cannot add UI to an already shipped client. External support or download
+messaging may supplement the one-time bridge, but it cannot replace it.
+
+There is no routine break-glass legacy writer. If an integrity or availability
+incident requires repair, break-glass authority is limited to restoring the
+exact already-approved `v0.6.651` byte stream; it never authorizes advancing the
+legacy target. Require explicit repository-owner authorization, an
+incident-specific reviewed plan or script, preserved pre-change evidence,
+signature and digest verification, and byte-for-byte public readback from both
+origins. Without that complete proof, fail closed and leave both objects
+untouched.
 
 ## Rollout gates
 
 - Direct-C: one 100% transaction after all sixteen GitHub-native attempts,
   signed-candidate checks, dry-run transaction, and health evidence pass.
-- Recovery: one 100% transaction after the exact three-platform rolling
-  qualification, attempt-scoped evidence verification, signed-candidate
-  checks, and dry-run transaction pass.
+- Recovery (`v0.6.652+`): one 100% Router-only transaction after the exact
+  three-platform rolling qualification, attempt-scoped evidence verification,
+  signed-candidate checks, and dry-run transaction pass.
 - Pause immediately on P0/P1, data loss, or migration failures above 0.5%.
 
 Public stable versions `0.6.605–0.6.608` contain

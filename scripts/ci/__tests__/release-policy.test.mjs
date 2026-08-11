@@ -21,6 +21,7 @@ import {
   validateDocsArchiveConfig,
   validateDraftAssetRepairWorkflow,
   validateFlatpakMetadata,
+  validateFrozenLegacyHandoffWorkflow,
   validateLinuxReleaseBuild,
   validateMacOSCandidateVerifier,
   validateQualificationWorkflow,
@@ -3064,6 +3065,40 @@ test(
   }
 )
 
+test('frozen legacy handoff verification is weekly, pinned, and read-only', () => {
+  const workflow = fs.readFileSync(
+    '.github/workflows/sync-legacy-updater.yml',
+    'utf8'
+  )
+  assert.deepEqual(validateFrozenLegacyHandoffWorkflow(workflow), [])
+
+  for (const [needle, replacement, expectedFailure] of [
+    [
+      `version="$(jq -er '.expectedVersion' "$policy")"`,
+      `version="$(jq -er '.version' dist/aliyun-latest.json)"`,
+      'tracked frozen policy',
+    ],
+    [
+      '    - cron: "17 3 * * 1"',
+      '    - cron: "17 */6 * * *"',
+      'weekly read-only triggers',
+    ],
+    [
+      '          gh api "repos/$GITHUB_REPOSITORY/releases/tags/$tag" \\',
+      '          gh release delete "$tag" --yes \\',
+      'never follow the rolling terminal or mutate',
+    ],
+  ]) {
+    const mutated = workflow.replace(needle, replacement)
+    assert.notEqual(mutated, workflow)
+    assert.ok(
+      validateFrozenLegacyHandoffWorkflow(mutated).some((failure) =>
+        failure.includes(expectedFailure)
+      )
+    )
+  }
+})
+
 test('formal build, release, and updater jobs share the release-distribution environment', () => {
   const workflows = {
     '.github/workflows/biyan-a-canary.yml': {
@@ -3252,7 +3287,7 @@ test('formal build, release, and updater jobs share the release-distribution env
       '.github/workflows/updater-health-gate.yml',
       (source) =>
         source.replace(
-          '          bash scripts/updater/run-pause-transaction.sh',
+          '          bash scripts/updater/run-router-pause-transaction.sh',
           '          echo skipped-shared-pause-runner'
         ),
       'execution envelope',
@@ -3261,7 +3296,7 @@ test('formal build, release, and updater jobs share the release-distribution env
       '.github/workflows/updater-kill-switch.yml',
       (source) =>
         source.replace(
-          '          bash scripts/updater/run-pause-transaction.sh',
+          '          bash scripts/updater/run-router-pause-transaction.sh',
           '          echo skipped-shared-pause-runner'
         ),
       'execution envelope',
@@ -3768,6 +3803,7 @@ jobs:
           node --test scripts/updater/__tests__/a-canary-evidence.test.mjs
           node --test scripts/updater/__tests__/legacy-manifest-policy.test.mjs
           node --test scripts/updater/__tests__/legacy-pause-transaction.test.mjs
+          node --test scripts/updater/__tests__/router-pause-transaction.test.mjs
           node --test scripts/updater/__tests__/promotion-transaction.test.mjs
           node --test scripts/updater/__tests__/recovery-qualification.test.mjs
           node --test scripts/updater/__tests__/updater.test.mjs
@@ -4417,6 +4453,7 @@ jobs:
     'node --test scripts/updater/__tests__/a-canary-evidence.test.mjs',
     'node --test scripts/updater/__tests__/legacy-manifest-policy.test.mjs',
     'node --test scripts/updater/__tests__/legacy-pause-transaction.test.mjs',
+    'node --test scripts/updater/__tests__/router-pause-transaction.test.mjs',
     'node --test scripts/updater/__tests__/promotion-transaction.test.mjs',
     'node --test scripts/updater/__tests__/recovery-qualification.test.mjs',
     'node --test scripts/updater/__tests__/updater.test.mjs',
@@ -4497,7 +4534,7 @@ jobs:
   }
 })
 
-test('PR CI is read-only and CI control paths require owner review', () => {
+test('PR CI is read-only and CI control paths assign the repository owner', () => {
   const workflow = fs
     .readFileSync('.github/workflows/biyan-linter-and-test.yml', 'utf8')
     .replace(/\r\n?/g, '\n')
@@ -4529,18 +4566,14 @@ test('PR CI is read-only and CI control paths require owner review', () => {
 
   const codeowners = fs.readFileSync('.github/CODEOWNERS', 'utf8')
   assert.deepEqual(validateCiControlOwnership(codeowners), [])
-  for (const owner of ['@realerikk0', '@twokar']) {
-    assert.ok(
-      validateCiControlOwnership(
-        codeowners.replace(
-          `/.github/ @realerikk0 @twokar`,
-          `/.github/ ${owner}`
-        )
-      ).some(
-        (failure) => failure.includes('/.github/') && !failure.endsWith(owner)
-      )
+  assert.ok(
+    validateCiControlOwnership(
+      codeowners.replace('/.github/ @realerikk0', '/.github/ @someone-else')
+    ).some(
+      (failure) =>
+        failure.includes('/.github/') && failure.endsWith('@realerikk0')
     )
-  }
+  )
 })
 
 test('protected Windows verifier authenticates native EXE and MSI identity', () => {
@@ -4728,6 +4761,7 @@ jobs:
           node --test scripts/updater/__tests__/a-canary-evidence.test.mjs
           node --test scripts/updater/__tests__/legacy-manifest-policy.test.mjs
           node --test scripts/updater/__tests__/legacy-pause-transaction.test.mjs
+          node --test scripts/updater/__tests__/router-pause-transaction.test.mjs
           node --test scripts/updater/__tests__/promotion-transaction.test.mjs
           node --test scripts/updater/__tests__/recovery-qualification.test.mjs
           node --test scripts/updater/__tests__/updater.test.mjs
@@ -5108,6 +5142,10 @@ test('exact-SHA qualification keeps the harness trusted and has no production au
     qualificationWorkflow.replace(
       'node --test scripts/updater/__tests__/legacy-pause-transaction.test.mjs',
       'echo skipped-pause-contracts'
+    ),
+    qualificationWorkflow.replace(
+      'node --test scripts/updater/__tests__/router-pause-transaction.test.mjs',
+      'echo skipped-router-pause-contracts'
     ),
     qualificationWorkflow.replace(
       'node --test scripts/updater/__tests__/promotion-transaction.test.mjs',

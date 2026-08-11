@@ -1,12 +1,13 @@
 {
   "schema": 1,
-  "state": "pre-a",
-  "expectedVersion": "0.6.633",
-  "expectedManifestSha256": "142abddf03744562195404d0dd9ae92f53d8f74d20b2cef19b2db60aeb8ec350",
+  "state": "frozen-handoff",
+  "expectedVersion": "0.6.651",
+  "expectedManifestSha256": "6d35de00e0ccec6957d437c1a39e6a2445e5daa4a47a904ac85cae2203f6e7b1",
   "requiredPlatforms": [
     "darwin-aarch64",
     "darwin-x86_64",
-    "windows-x86_64"
+    "windows-x86_64",
+    "linux-x86_64"
   ],
   "manifestUrls": {
     "aliyun": "https://static.mitapp.cn/mita/latest.json",

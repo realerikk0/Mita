@@ -17,6 +17,8 @@ export const OPEN_TRANSACTION_KEY =
   'biyan/updater/transactions/open.json'
 export const TRANSACTION_PREFIX = 'biyan/updater/transactions'
 export const TRUSTED_HEALTH_EVIDENCE_ORIGIN = 'https://static.mitapp.cn'
+export const STABLE_POLICY_KEY = 'biyan/updater/stable/policy.json'
+export const FROZEN_LEGACY_MANIFEST_KEY = 'mita/latest.json'
 export const JOURNAL_STATES = Object.freeze([
   'prepared',
   'committing',
@@ -84,6 +86,95 @@ function readJsonBytes(file, description = file) {
 
 function sha256Bytes(bytes) {
   return createHash('sha256').update(bytes).digest('hex')
+}
+
+function parseJsonBuffer(bytes, description) {
+  if (!Buffer.isBuffer(bytes) || bytes.length === 0) {
+    throw new Error(`${description} bytes must be nonempty`)
+  }
+  try {
+    const value = JSON.parse(bytes.toString('utf8'))
+    assertPlainObject(value, description)
+    return value
+  } catch (error) {
+    if (error instanceof SyntaxError) {
+      throw new Error(`${description} is not valid JSON`)
+    }
+    throw error
+  }
+}
+
+/**
+ * Prove that a promotion leaves the final legacy handoff byte-for-byte frozen.
+ * These two endpoints are read-only retirement invariants: promotion, pause,
+ * and recovery code may verify them but must never rewrite them.
+ */
+export function validateFrozenLegacyInvariant({
+  currentPolicyBytes,
+  nextPolicyBytes,
+  ossLegacyBytes,
+  r2LegacyBytes,
+}) {
+  const currentPolicy = parseJsonBuffer(
+    currentPolicyBytes,
+    'Current updater policy'
+  )
+  const nextPolicy = parseJsonBuffer(nextPolicyBytes, 'Next updater policy')
+  if (
+    currentPolicy.schema !== 1 ||
+    currentPolicy.channel !== 'stable' ||
+    nextPolicy.schema !== 1 ||
+    nextPolicy.channel !== 'stable'
+  ) {
+    throw new Error('Frozen legacy invariant requires stable schema-1 policies')
+  }
+  const version = currentPolicy.legacyBridgeVersion
+  assertVersion(version, 'Frozen legacy bridge version')
+  if (nextPolicy.legacyBridgeVersion !== version) {
+    throw new Error('Next policy must preserve the frozen legacy bridge version')
+  }
+  const currentRelease = currentPolicy.releases?.[version]
+  const nextRelease = nextPolicy.releases?.[version]
+  if (!isPlainObject(currentRelease) || !isPlainObject(nextRelease)) {
+    throw new Error('Frozen legacy release must remain present in both policies')
+  }
+  const expectedManifestKey =
+    `biyan/updater/releases/v${version}/latest.json`
+  if (currentRelease.manifestKey !== expectedManifestKey) {
+    throw new Error('Frozen legacy release manifestKey is not canonical')
+  }
+  assertSha256(
+    currentRelease.manifestSha256,
+    'Frozen legacy manifestSha256'
+  )
+  if (
+    nextRelease.manifestSha256 !== currentRelease.manifestSha256 ||
+    nextRelease.manifestKey !== currentRelease.manifestKey
+  ) {
+    throw new Error('Next policy must preserve the frozen legacy release identity')
+  }
+  if (
+    !Buffer.isBuffer(ossLegacyBytes) ||
+    !Buffer.isBuffer(r2LegacyBytes) ||
+    !ossLegacyBytes.equals(r2LegacyBytes)
+  ) {
+    throw new Error('Frozen OSS and R2 legacy manifests must be byte-identical')
+  }
+  const manifestSha256 = sha256Bytes(ossLegacyBytes)
+  if (manifestSha256 !== currentRelease.manifestSha256) {
+    throw new Error('Frozen legacy endpoint bytes do not match policy digest')
+  }
+  const manifest = parseJsonBuffer(ossLegacyBytes, 'Frozen legacy manifest')
+  if (manifest.version !== version) {
+    throw new Error(`Frozen legacy manifest version must be exactly ${version}`)
+  }
+  return {
+    schema: 1,
+    kind: 'frozen-legacy-handoff',
+    version,
+    manifestKey: currentRelease.manifestKey,
+    manifestSha256,
+  }
 }
 
 export function validateHealthEvidenceUrl(value, expectedSha256) {
@@ -616,8 +707,14 @@ export function createJournal({
   if (!Buffer.isBuffer(nextPolicyBytes) || nextPolicyBytes.length === 0) {
     throw new Error('Transaction next policy bytes must be nonempty')
   }
-  if (!Array.isArray(snapshots) || snapshots.length === 0) {
-    throw new Error('Transaction must snapshot every mutable object')
+  if (
+    !Array.isArray(snapshots) ||
+    snapshots.length !== 1 ||
+    snapshots[0]?.provider !== 'r2' ||
+    snapshots[0]?.key !== STABLE_POLICY_KEY ||
+    snapshots[0]?.existed !== true
+  ) {
+    throw new Error('Router promotion must snapshot only the mutable policy')
   }
   snapshots.forEach((snapshot, index) =>
     validateObjectSnapshot(snapshot, `Transaction snapshot ${index}`)
@@ -630,8 +727,15 @@ export function createJournal({
     throw new Error('Transaction createdAt must be canonical ISO-8601')
   }
   const transactionId = `${runId}-${runAttempt}`
+  if (
+    snapshots[0].backupKey !==
+      `${TRANSACTION_PREFIX}/${transactionId}/backups/policy.json`
+  ) {
+    throw new Error('Router promotion policy backup key is not transaction-bound')
+  }
   return {
-    schema: 2,
+    schema: 3,
+    kind: 'router-promotion',
     transactionId,
     runId: String(runId),
     runAttempt: String(runAttempt),
@@ -662,6 +766,7 @@ export function validateJournal(journal) {
     journal,
     [
       'schema',
+      'kind',
       'transactionId',
       'runId',
       'runAttempt',
@@ -680,12 +785,22 @@ export function validateJournal(journal) {
     ],
     'Promotion transaction journal'
   )
-  if (journal.schema !== 2 || !JOURNAL_STATES.includes(journal.state)) {
-    throw new Error('Promotion transaction journal schema/state is invalid')
+  if (
+    journal.schema !== 3 ||
+    journal.kind !== 'router-promotion' ||
+    !JOURNAL_STATES.includes(journal.state)
+  ) {
+    throw new Error('Router promotion journal schema/kind/state is invalid')
   }
   assertRunIdentity(journal.runId, journal.runAttempt)
   if (journal.transactionId !== `${journal.runId}-${journal.runAttempt}`) {
     throw new Error('Promotion transaction journal identity mismatch')
+  }
+  if (
+    journal.snapshots?.[0]?.backupKey !==
+      `${TRANSACTION_PREFIX}/${journal.transactionId}/backups/policy.json`
+  ) {
+    throw new Error('Router promotion policy backup key is not transaction-bound')
   }
   if (
     journal.targetTag !== `v${journal.targetVersion}` ||
@@ -713,8 +828,14 @@ export function validateJournal(journal) {
   if (!Number.isInteger(journal.sequence) || journal.sequence < 0) {
     throw new Error('Promotion transaction sequence must be nonnegative')
   }
-  if (!Array.isArray(journal.snapshots) || journal.snapshots.length === 0) {
-    throw new Error('Promotion transaction snapshots are missing')
+  if (
+    !Array.isArray(journal.snapshots) ||
+    journal.snapshots.length !== 1 ||
+    journal.snapshots[0]?.provider !== 'r2' ||
+    journal.snapshots[0]?.key !== STABLE_POLICY_KEY ||
+    journal.snapshots[0]?.existed !== true
+  ) {
+    throw new Error('Router promotion journal must snapshot only the policy')
   }
   journal.snapshots.forEach((snapshot, index) =>
     validateObjectSnapshot(snapshot, `Transaction snapshot ${index}`)
@@ -722,6 +843,8 @@ export function validateJournal(journal) {
   if (!Array.isArray(journal.immutableLedger)) {
     throw new Error('Promotion immutable ledger must be an array')
   }
+  const immutableReleasePrefix =
+    `biyan/updater/releases/v${journal.targetVersion}/`
   for (const [index, entry] of journal.immutableLedger.entries()) {
     assertPlainObject(entry, `Promotion immutable ledger ${index}`)
     assertExactKeys(
@@ -739,6 +862,25 @@ export function validateJournal(journal) {
     )
     if (!['r2', 'oss'].includes(entry.provider)) {
       throw new Error(`Promotion immutable ledger ${index} provider is invalid`)
+    }
+    if (entry.key === FROZEN_LEGACY_MANIFEST_KEY) {
+      throw new Error(
+        `Promotion immutable ledger ${index} may never target the frozen legacy manifest`
+      )
+    }
+    const immutableFile =
+      typeof entry.key === 'string' && entry.key.startsWith(immutableReleasePrefix)
+        ? entry.key.slice(immutableReleasePrefix.length)
+        : ''
+    if (
+      !immutableFile ||
+      immutableFile.includes('/') ||
+      immutableFile.includes('..') ||
+      !/^[0-9A-Za-z][0-9A-Za-z._+-]*$/.test(immutableFile)
+    ) {
+      throw new Error(
+        `Promotion immutable ledger ${index} key must be one canonical file under ${immutableReleasePrefix}`
+      )
     }
     assertSha256(entry.sha256, `Promotion immutable ledger ${index} sha256`)
     if (
@@ -1010,43 +1152,19 @@ export function terminalPromotionRecoveryPlan({
         ({ snapshot }) =>
           snapshot.provider === provider && snapshot.key === key
       )
-  const policyMatches = snapshotMatches(
-    'r2',
-    'biyan/updater/stable/policy.json'
-  )
-  const legacyOssMatches = snapshotMatches('oss', 'mita/latest.json')
-  const legacyR2Matches = snapshotMatches('r2', 'mita/latest.json')
-  if (
-    journal.snapshots.length !== 3 ||
-    policyMatches.length !== 1 ||
-    legacyOssMatches.length !== 1 ||
-    legacyR2Matches.length !== 1 ||
-    !legacyOssMatches[0].snapshot.existed ||
-    !legacyR2Matches[0].snapshot.existed
-  ) {
+  const policyMatches = snapshotMatches('r2', STABLE_POLICY_KEY)
+  if (journal.snapshots.length !== 1 || policyMatches.length !== 1) {
     throw new Error(
-      'Terminal promotion journal must contain exact policy and legacy snapshots'
+      'Terminal Router promotion journal must contain only the policy snapshot'
     )
   }
   const { snapshot: policySnapshot, index: policySnapshotIndex } =
     policyMatches[0]
-  const {
-    snapshot: legacyOssSnapshot,
-    index: legacyOssSnapshotIndex,
-  } = legacyOssMatches[0]
-  const {
-    snapshot: legacyR2Snapshot,
-    index: legacyR2SnapshotIndex,
-  } = legacyR2Matches[0]
   const backupPrefix =
     `${TRANSACTION_PREFIX}/${journal.transactionId}/backups`
   if (
     policySnapshot.backupKey !==
-      (policySnapshot.existed ? `${backupPrefix}/policy.json` : null) ||
-    legacyOssSnapshot.backupKey !==
-      `${backupPrefix}/legacy-oss.json` ||
-    legacyR2Snapshot.backupKey !==
-      `${backupPrefix}/legacy-r2.json`
+      (policySnapshot.existed ? `${backupPrefix}/policy.json` : null)
   ) {
     throw new Error(
       'Terminal promotion snapshot backups do not match the journal transaction'
@@ -1119,6 +1237,20 @@ export function terminalPromotionRecoveryPlan({
     legacyRelease.manifestSha256,
     'Terminal promotion legacy manifestSha256'
   )
+  if (
+    beforePolicy?.legacyBridgeVersion != null &&
+    (
+      beforePolicy.legacyBridgeVersion !== legacyBridgeVersion ||
+      beforePolicy.releases?.[legacyBridgeVersion]?.manifestKey !==
+        legacyRelease.manifestKey ||
+      beforePolicy.releases?.[legacyBridgeVersion]?.manifestSha256 !==
+        legacyRelease.manifestSha256
+    )
+  ) {
+    throw new Error(
+      'Terminal promotion must preserve the frozen legacy release identity'
+    )
+  }
 
   const beforeCurrentVersion =
     beforePolicy?.currentVersion ??
@@ -1280,11 +1412,10 @@ export function terminalPromotionRecoveryPlan({
 
   return {
     schema: 1,
+    kind: 'router-promotion-terminal-recovery',
     terminalState: journal.state,
     transactionId: journal.transactionId,
     policySnapshotIndex,
-    legacyOssSnapshotIndex,
-    legacyR2SnapshotIndex,
     beforePolicyExisted: policySnapshot.existed,
     beforeCurrentVersion,
     terminalRequest: {
@@ -1293,7 +1424,7 @@ export function terminalPromotionRecoveryPlan({
       expectedCurrent: beforeCurrentVersion,
       rollout: terminalRollout,
     },
-    legacyTarget: {
+    frozenLegacy: {
       version: legacyBridgeVersion,
       key: legacyRelease.manifestKey,
       sha256: legacyRelease.manifestSha256,
@@ -1318,40 +1449,15 @@ export function recoveryCommands(journalInput) {
       'Recovery commands require a committing or rollback-required journal'
     )
   }
-  const findSnapshot = (provider, key) =>
-    journal.snapshots
-      .map((snapshot, index) => ({ snapshot, index }))
-      .filter(
-        ({ snapshot }) =>
-          snapshot.provider === provider && snapshot.key === key
-      )
-  const policyMatches = findSnapshot(
-    'r2',
-    'biyan/updater/stable/policy.json'
-  )
-  const legacyOssMatches = findSnapshot('oss', 'mita/latest.json')
-  const legacyR2Matches = findSnapshot('r2', 'mita/latest.json')
+  const [policy] = journal.snapshots
   if (
-    journal.snapshots.length !== 3 ||
-    policyMatches.length !== 1 ||
-    legacyOssMatches.length !== 1 ||
-    legacyR2Matches.length !== 1 ||
-    !legacyOssMatches[0].snapshot.existed ||
-    !legacyR2Matches[0].snapshot.existed
+    journal.snapshots.length !== 1 ||
+    policy.provider !== 'r2' ||
+    policy.key !== STABLE_POLICY_KEY ||
+    !policy.existed
   ) {
-    throw new Error(
-      'Recovery journal must contain exactly policy and dual legacy snapshots'
-    )
+    throw new Error('Router recovery requires one existing policy snapshot')
   }
-  const { snapshot: policy, index: policyIndex } = policyMatches[0]
-  const { snapshot: legacyOss, index: legacyOssIndex } =
-    legacyOssMatches[0]
-  const { snapshot: legacyR2, index: legacyR2Index } =
-    legacyR2Matches[0]
-  const q = shellQuote
-  const terminalHistoryKey =
-    `${TRANSACTION_PREFIX}/${journal.transactionId}/journal-` +
-    `${String(journal.sequence).padStart(4, '0')}.json`
   const sameImmutableObject = (left, right) =>
     left.provider === right.provider &&
     left.key === right.key &&
@@ -1364,588 +1470,250 @@ export function recoveryCommands(journalInput) {
   )
   const cleanupKeys = new Set()
   for (const entry of cleanupLedger) {
-    const objectKey = `${entry.provider}\0${entry.key}`
-    if (cleanupKeys.has(objectKey)) {
+    const identity = `${entry.provider}\0${entry.key}`
+    if (cleanupKeys.has(identity)) {
       throw new Error(
         `Recovery journal contains duplicate verified immutable object ${entry.provider}:${entry.key}`
       )
     }
-    cleanupKeys.add(objectKey)
+    cleanupKeys.add(identity)
   }
   const unverifiedLedger = journal.immutableLedger.filter(
     (item, index, entries) =>
       item.createdByTransaction &&
       !item.verified &&
-      !entries
-        .slice(index + 1)
-        .some(
-          (later) =>
-            later.createdByTransaction &&
-            later.verified &&
-            sameImmutableObject(item, later)
-        )
+      !entries.slice(index + 1).some(
+        (later) =>
+          later.createdByTransaction &&
+          later.verified &&
+          sameImmutableObject(item, later)
+      )
   )
+  const q = shellQuote
+  const policyIndex = 0
   const lines = [
     '#!/usr/bin/env bash',
-    '# Generated from the durable promotion journal; run only in release-distribution recovery.',
-    '# Classification is intentionally complete before RECOVERY MUTATIONS BEGIN.',
+    '# Generated from a schema-3 Router promotion journal.',
+    '# Frozen legacy manifests are verified read-only and are never recovery targets.',
     'set -euo pipefail',
     ': "${CLOUDFLARE_R2_ACCOUNT_ID:?}"',
     ': "${CLOUDFLARE_R2_BUCKET:?}"',
     ': "${ALIYUN_OSS_BUCKET:?}"',
     ': "${ALIYUN_OSS_ENDPOINT:?}"',
     ': "${ALIYUN_REGION:?}"',
-    ': "${LEGACY_ALIYUN_URL:?}"',
-    ': "${LEGACY_R2_URL:?}"',
     'JOURNAL="${JOURNAL:-promotion-journal.json}"',
     'test -s "$JOURNAL"',
     'node scripts/updater/promotion-transaction.mjs validate-journal --journal "$JOURNAL"',
     'r2_endpoint="https://${CLOUDFLARE_R2_ACCOUNT_ID}.r2.cloudflarestorage.com"',
     'oss_endpoint="${ALIYUN_OSS_ENDPOINT#https://}"',
     'oss_endpoint="https://${oss_endpoint#http://}"',
-    '# Fail closed before network access if this AWS CLI lacks required CAS inputs.',
     'put_skeleton="$(aws s3api put-object --generate-cli-skeleton input)"',
     'delete_skeleton="$(aws s3api delete-object --generate-cli-skeleton input)"',
-    'jq -e \'has("IfMatch") and has("IfNoneMatch")\' <<<"$put_skeleton" >/dev/null || exit 1',
-    'jq -e \'has("IfMatch")\' <<<"$delete_skeleton" >/dev/null || exit 1',
+    'jq -e \'has("IfMatch") and has("IfNoneMatch")\' <<<"$put_skeleton" >/dev/null',
+    'jq -e \'has("IfMatch")\' <<<"$delete_skeleton" >/dev/null',
     'unset put_skeleton delete_skeleton',
     `transaction_id=${q(journal.transactionId)}`,
-    `policy_existed=${q(policy.existed)}`,
-    'mkdir -p recovery-readback/{backups,live,decisions,plans,ledger}',
+    `policy_key=${q(policy.key)}`,
+    `policy_backup_key=${q(policy.backupKey)}`,
+    `next_policy_key=${q(journal.nextPolicy.key)}`,
+    `next_policy_sha256=${q(journal.nextPolicy.sha256)}`,
+    `policy_sha256=${q(policy.bytesSha256)}`,
+    'legacy_key="mita/latest.json"',
+    'mkdir -p recovery-readback/{backups,live,ledger,probes}',
     'probe_r2_recovery() {',
     '  local key="$1" name="$2" rc',
-    '  if aws s3api head-object --bucket "$CLOUDFLARE_R2_BUCKET" --key "$key" --endpoint-url "$r2_endpoint" >"recovery-readback/${name}.stdout" 2>"recovery-readback/${name}.stderr"; then',
-    '    rc=0',
-    '  else',
-    '    rc=$?',
-    '  fi',
-    '  node scripts/updater/promotion-transaction.mjs classify-probe --provider r2 --key "$key" --exit-code "$rc" --stdout "recovery-readback/${name}.stdout" --stderr "recovery-readback/${name}.stderr" --output "recovery-readback/${name}.json"',
+    '  if aws s3api head-object --bucket "$CLOUDFLARE_R2_BUCKET" --key "$key" --endpoint-url "$r2_endpoint" >"recovery-readback/probes/${name}.stdout" 2>"recovery-readback/probes/${name}.stderr"; then rc=0; else rc=$?; fi',
+    '  node scripts/updater/promotion-transaction.mjs classify-probe --provider r2 --key "$key" --exit-code "$rc" --stdout "recovery-readback/probes/${name}.stdout" --stderr "recovery-readback/probes/${name}.stderr" --output "recovery-readback/probes/${name}.json"',
     '}',
     'probe_oss_recovery() {',
     '  local key="$1" name="$2" rc',
-    '  if ossutil api head-object --bucket "$ALIYUN_OSS_BUCKET" --key "$key" --endpoint "$oss_endpoint" --region "$ALIYUN_REGION" --output-format json --quiet >"recovery-readback/${name}.stdout" 2>"recovery-readback/${name}.stderr"; then',
-    '    rc=0',
-    '  else',
-    '    rc=$?',
-    '  fi',
-    '  node scripts/updater/promotion-transaction.mjs classify-probe --provider oss --key "$key" --exit-code "$rc" --stdout "recovery-readback/${name}.stdout" --stderr "recovery-readback/${name}.stderr" --output "recovery-readback/${name}.json"',
+    '  if ossutil api head-object --bucket "$ALIYUN_OSS_BUCKET" --key "$key" --endpoint "$oss_endpoint" --region "$ALIYUN_REGION" --output-format json --quiet >"recovery-readback/probes/${name}.stdout" 2>"recovery-readback/probes/${name}.stderr"; then rc=0; else rc=$?; fi',
+    '  node scripts/updater/promotion-transaction.mjs classify-probe --provider oss --key "$key" --exit-code "$rc" --stdout "recovery-readback/probes/${name}.stdout" --stderr "recovery-readback/probes/${name}.stderr" --output "recovery-readback/probes/${name}.json"',
     '}',
-    '# Recover the exact content-addressed next policy from both clouds.',
-    `next_policy_key=${q(journal.nextPolicy.key)}`,
-    `next_policy_sha256=${q(journal.nextPolicy.sha256)}`,
-    'aws s3api get-object --bucket "$CLOUDFLARE_R2_BUCKET" --key "$next_policy_key" --endpoint-url "$r2_endpoint" recovery-readback/next-policy-r2.json > recovery-readback/next-policy-r2-metadata.json',
+    'verify_recovery_json_metadata() {',
+    '  local metadata="$1" plan="$2"',
+    '  node scripts/updater/promotion-transaction.mjs backup-metadata-plan --metadata "$metadata" --output "$plan"',
+    '  jq -e \'.contentType == "application/json" and .cacheControl == "no-store"\' "$plan" >/dev/null',
+    '}',
+    'persist_recovery_journal() {',
+    '  local next="$1" previous="$2" sequence history_key open_etag r2_state oss_state',
+    '  sequence="$(jq -er .sequence "$next")"',
+    '  history_key="biyan/updater/transactions/${transaction_id}/journal-$(printf \'%04d\' "$sequence").json"',
+    '  probe_r2_recovery "$history_key" history-r2-before',
+    '  probe_oss_recovery "$history_key" history-oss-before',
+    '  r2_state="$(jq -er .state recovery-readback/probes/history-r2-before.json)"',
+    '  oss_state="$(jq -er .state recovery-readback/probes/history-oss-before.json)"',
+    '  if [[ "$r2_state" == exists ]]; then',
+    '    aws s3api get-object --bucket "$CLOUDFLARE_R2_BUCKET" --key "$history_key" --endpoint-url "$r2_endpoint" recovery-readback/live/history-r2-before.json >recovery-readback/live/history-r2-before-metadata.json',
+    '    cmp "$next" recovery-readback/live/history-r2-before.json',
+    '    verify_recovery_json_metadata recovery-readback/live/history-r2-before-metadata.json recovery-readback/live/history-r2-before-plan.json',
+    '  else',
+    '    test "$r2_state" = absent',
+    '  fi',
+    '  if [[ "$oss_state" == exists ]]; then',
+    '    ossutil cp "oss://${ALIYUN_OSS_BUCKET}/${history_key}" recovery-readback/live/history-oss-before.json --force --endpoint "$oss_endpoint" --region "$ALIYUN_REGION"',
+    '    ossutil api head-object --bucket "$ALIYUN_OSS_BUCKET" --key "$history_key" --endpoint "$oss_endpoint" --region "$ALIYUN_REGION" --output-format json --quiet >recovery-readback/live/history-oss-before-metadata.json',
+    '    cmp "$next" recovery-readback/live/history-oss-before.json',
+    '    verify_recovery_json_metadata recovery-readback/live/history-oss-before-metadata.json recovery-readback/live/history-oss-before-plan.json',
+    '  else',
+    '    test "$oss_state" = absent',
+    '  fi',
+    '  if [[ "$r2_state" == absent ]]; then',
+    '    aws s3api put-object --bucket "$CLOUDFLARE_R2_BUCKET" --key "$history_key" --body "$next" --content-type application/json --cache-control no-store --if-none-match \'*\' --endpoint-url "$r2_endpoint" >/dev/null',
+    '  fi',
+    '  if [[ "$oss_state" == absent ]]; then',
+    '    ossutil api put-object --bucket "$ALIYUN_OSS_BUCKET" --key "$history_key" --body "file://${next}" --content-type application/json --cache-control no-store --object-acl default --forbid-overwrite true --endpoint "$oss_endpoint" --region "$ALIYUN_REGION" --output-format json --quiet >/dev/null',
+    '  fi',
+    '  aws s3api get-object --bucket "$CLOUDFLARE_R2_BUCKET" --key "$history_key" --endpoint-url "$r2_endpoint" recovery-readback/live/history-r2-persisted.json >recovery-readback/live/history-r2-persisted-metadata.json',
+    '  ossutil cp "oss://${ALIYUN_OSS_BUCKET}/${history_key}" recovery-readback/live/history-oss-persisted.json --force --endpoint "$oss_endpoint" --region "$ALIYUN_REGION"',
+    '  ossutil api head-object --bucket "$ALIYUN_OSS_BUCKET" --key "$history_key" --endpoint "$oss_endpoint" --region "$ALIYUN_REGION" --output-format json --quiet >recovery-readback/live/history-oss-persisted-metadata.json',
+    '  cmp "$next" recovery-readback/live/history-r2-persisted.json',
+    '  cmp "$next" recovery-readback/live/history-oss-persisted.json',
+    '  verify_recovery_json_metadata recovery-readback/live/history-r2-persisted-metadata.json recovery-readback/live/history-r2-persisted-plan.json',
+    '  verify_recovery_json_metadata recovery-readback/live/history-oss-persisted-metadata.json recovery-readback/live/history-oss-persisted-plan.json',
+    `  aws s3api get-object --bucket "$CLOUDFLARE_R2_BUCKET" --key ${q(OPEN_TRANSACTION_KEY)} --endpoint-url "$r2_endpoint" recovery-readback/live/open-r2-boundary.json >recovery-readback/live/open-r2-boundary-metadata.json`,
+    `  ossutil cp "oss://\${ALIYUN_OSS_BUCKET}/${OPEN_TRANSACTION_KEY}" recovery-readback/live/open-oss-boundary.json --force --endpoint "$oss_endpoint" --region "$ALIYUN_REGION"`,
+    '  cmp "$previous" recovery-readback/live/open-r2-boundary.json',
+    '  cmp "$previous" recovery-readback/live/open-oss-boundary.json',
+    '  open_etag="$(node scripts/updater/promotion-transaction.mjs extract-r2-etag --metadata recovery-readback/live/open-r2-boundary-metadata.json)"',
+    `  aws s3api put-object --bucket "$CLOUDFLARE_R2_BUCKET" --key ${q(OPEN_TRANSACTION_KEY)} --body "$next" --content-type application/json --cache-control no-store --if-match "$open_etag" --endpoint-url "$r2_endpoint" >/dev/null`,
+    `  ossutil cp "oss://\${ALIYUN_OSS_BUCKET}/${OPEN_TRANSACTION_KEY}" recovery-readback/live/open-oss-immediate.json --force --endpoint "$oss_endpoint" --region "$ALIYUN_REGION"`,
+    '  cmp "$previous" recovery-readback/live/open-oss-immediate.json',
+    `  ossutil api put-object --bucket "$ALIYUN_OSS_BUCKET" --key ${q(OPEN_TRANSACTION_KEY)} --body "file://\${next}" --content-type application/json --cache-control no-store --object-acl default --endpoint "$oss_endpoint" --region "$ALIYUN_REGION" --output-format json --quiet >/dev/null`,
+    `  aws s3 cp "s3://\${CLOUDFLARE_R2_BUCKET}/${OPEN_TRANSACTION_KEY}" recovery-readback/live/open-r2-persisted.json --endpoint-url "$r2_endpoint"`,
+    `  ossutil cp "oss://\${ALIYUN_OSS_BUCKET}/${OPEN_TRANSACTION_KEY}" recovery-readback/live/open-oss-persisted.json --force --endpoint "$oss_endpoint" --region "$ALIYUN_REGION"`,
+    '  cmp "$next" recovery-readback/live/open-r2-persisted.json',
+    '  cmp "$next" recovery-readback/live/open-oss-persisted.json',
+    '}',
+    '# Load the content-addressed next policy and the only mutable snapshot.',
+    'aws s3api get-object --bucket "$CLOUDFLARE_R2_BUCKET" --key "$next_policy_key" --endpoint-url "$r2_endpoint" recovery-readback/next-policy-r2.json >recovery-readback/next-policy-r2-metadata.json',
     'ossutil cp "oss://${ALIYUN_OSS_BUCKET}/${next_policy_key}" recovery-readback/next-policy-oss.json --force --endpoint "$oss_endpoint" --region "$ALIYUN_REGION"',
-    'ossutil api head-object --bucket "$ALIYUN_OSS_BUCKET" --key "$next_policy_key" --endpoint "$oss_endpoint" --region "$ALIYUN_REGION" --output-format json --quiet > recovery-readback/next-policy-oss-metadata.json',
     'cmp recovery-readback/next-policy-r2.json recovery-readback/next-policy-oss.json',
     'test "$(sha256sum recovery-readback/next-policy-r2.json | cut -d\' \' -f1)" = "$next_policy_sha256"',
-    'node scripts/updater/promotion-transaction.mjs backup-metadata-plan --metadata recovery-readback/next-policy-r2-metadata.json --output recovery-readback/plans/next-policy-r2.json',
-    'node scripts/updater/promotion-transaction.mjs backup-metadata-plan --metadata recovery-readback/next-policy-oss-metadata.json --output recovery-readback/plans/next-policy-oss.json',
-    'jq -e \'.contentType == "application/json" and .cacheControl == "no-store"\' recovery-readback/plans/next-policy-r2.json >/dev/null',
-    'jq -e \'.contentType == "application/json" and .cacheControl == "no-store"\' recovery-readback/plans/next-policy-oss.json >/dev/null',
-    'NEXT_POLICY=recovery-readback/next-policy-r2.json',
-    '# Verify every immutable backup before inspecting or mutating live state.',
+    'aws s3api get-object --bucket "$CLOUDFLARE_R2_BUCKET" --key "$policy_backup_key" --endpoint-url "$r2_endpoint" recovery-readback/backups/policy.json >recovery-readback/backups/policy-metadata.json',
+    'test "$(sha256sum recovery-readback/backups/policy.json | cut -d\' \' -f1)" = "$policy_sha256"',
+    `node scripts/updater/promotion-transaction.mjs verify-snapshot-readback --journal "$JOURNAL" --index ${q(policyIndex)} --bytes recovery-readback/backups/policy.json --metadata recovery-readback/backups/policy-metadata.json --output recovery-readback/backups/policy-verified.json`,
+    '# Prove the final handoff remains frozen before any recovery mutation.',
+    'ossutil cp "oss://${ALIYUN_OSS_BUCKET}/${legacy_key}" recovery-readback/frozen-legacy-oss.json --force --endpoint "$oss_endpoint" --region "$ALIYUN_REGION"',
+    'aws s3 cp "s3://${CLOUDFLARE_R2_BUCKET}/${legacy_key}" recovery-readback/frozen-legacy-r2.json --endpoint-url "$r2_endpoint"',
+    'node scripts/updater/promotion-transaction.mjs validate-frozen-legacy --current-policy recovery-readback/backups/policy.json --next-policy recovery-readback/next-policy-r2.json --oss-legacy recovery-readback/frozen-legacy-oss.json --r2-legacy recovery-readback/frozen-legacy-r2.json --output recovery-readback/frozen-legacy-invariant.json',
+    '# Both open-lock replicas must still match this exact journal.',
+    `probe_r2_recovery ${q(OPEN_TRANSACTION_KEY)} open-r2`,
+    `probe_oss_recovery ${q(OPEN_TRANSACTION_KEY)} open-oss`,
+    'jq -e \'.state == "exists"\' recovery-readback/probes/open-r2.json >/dev/null',
+    'jq -e \'.state == "exists"\' recovery-readback/probes/open-oss.json >/dev/null',
+    `aws s3api get-object --bucket "$CLOUDFLARE_R2_BUCKET" --key ${q(OPEN_TRANSACTION_KEY)} --endpoint-url "$r2_endpoint" recovery-readback/live/open-r2.json >recovery-readback/live/open-r2-metadata.json`,
+    `ossutil cp "oss://\${ALIYUN_OSS_BUCKET}/${OPEN_TRANSACTION_KEY}" recovery-readback/live/open-oss.json --force --endpoint "$oss_endpoint" --region "$ALIYUN_REGION"`,
+    'cmp "$JOURNAL" recovery-readback/live/open-r2.json',
+    'cmp "$JOURNAL" recovery-readback/live/open-oss.json',
+    '# Classify policy and every immutable create before mutation.',
+    'probe_r2_recovery "$policy_key" live-policy',
+    'test "$(jq -er .state recovery-readback/probes/live-policy.json)" = exists',
+    'aws s3api get-object --bucket "$CLOUDFLARE_R2_BUCKET" --key "$policy_key" --endpoint-url "$r2_endpoint" recovery-readback/live/policy.json >recovery-readback/live/policy-metadata.json',
+    'node scripts/updater/promotion-transaction.mjs classify-policy-rollback --policy-existed true --original recovery-readback/backups/policy.json --next recovery-readback/next-policy-r2.json --live-state exists --live recovery-readback/live/policy.json --output recovery-readback/policy-decision.json',
   ]
-
-  for (const [index, snapshot] of journal.snapshots.entries()) {
-    if (!snapshot.existed) continue
-    if (snapshot.provider === 'r2') {
-      lines.push(
-        `aws s3api get-object --bucket "$CLOUDFLARE_R2_BUCKET" --key ${q(snapshot.backupKey)} --endpoint-url "$r2_endpoint" "recovery-readback/backups/${index}" > "recovery-readback/backups/${index}-metadata.json"`,
-        `node scripts/updater/promotion-transaction.mjs verify-snapshot-readback --journal "$JOURNAL" --index ${q(index)} --bytes "recovery-readback/backups/${index}" --metadata "recovery-readback/backups/${index}-metadata.json" --output "recovery-readback/backups/${index}-verified.json"`
-      )
-    } else {
-      lines.push(
-        `ossutil cp "oss://\${ALIYUN_OSS_BUCKET}/${snapshot.backupKey}" "recovery-readback/backups/${index}" --force --endpoint "$oss_endpoint" --region "$ALIYUN_REGION"`,
-        `ossutil api head-object --bucket "$ALIYUN_OSS_BUCKET" --key ${q(snapshot.backupKey)} --endpoint "$oss_endpoint" --region "$ALIYUN_REGION" --output-format json --quiet > "recovery-readback/backups/${index}-metadata.json"`,
-        `ossutil api get-object-acl --bucket "$ALIYUN_OSS_BUCKET" --key ${q(snapshot.backupKey)} --endpoint "$oss_endpoint" --region "$ALIYUN_REGION" --output-format json --quiet > "recovery-readback/backups/${index}-acl.json"`,
-        `node scripts/updater/promotion-transaction.mjs verify-snapshot-readback --journal "$JOURNAL" --index ${q(index)} --bytes "recovery-readback/backups/${index}" --metadata "recovery-readback/backups/${index}-metadata.json" --acl "recovery-readback/backups/${index}-acl.json" --output "recovery-readback/backups/${index}-verified.json"`
-      )
-    }
-    lines.push(
-      `node scripts/updater/promotion-transaction.mjs backup-metadata-plan --metadata "recovery-readback/backups/${index}-metadata.json" --output "recovery-readback/plans/${index}.json"`
-    )
-  }
-
-  lines.push(
-    '# Bind recovery to every still-present copy of the transaction lock.',
-    `probe_r2_recovery ${q(OPEN_TRANSACTION_KEY)} initial-open-r2`,
-    `probe_oss_recovery ${q(OPEN_TRANSACTION_KEY)} initial-open-oss`,
-    'open_r2_state="$(jq -er .state recovery-readback/initial-open-r2.json)"',
-    'open_oss_state="$(jq -er .state recovery-readback/initial-open-oss.json)"',
-    'open_lock_present=false',
-    'if [[ "$open_r2_state" == exists ]]; then',
-    `  aws s3api get-object --bucket "$CLOUDFLARE_R2_BUCKET" --key ${q(OPEN_TRANSACTION_KEY)} --endpoint-url "$r2_endpoint" recovery-readback/live/open-r2.json > recovery-readback/live/open-r2-metadata.json`,
-    '  cmp "$JOURNAL" recovery-readback/live/open-r2.json',
-    '  test "$(jq -er .transactionId recovery-readback/live/open-r2.json)" = "$transaction_id"',
-    '  node scripts/updater/promotion-transaction.mjs backup-metadata-plan --metadata recovery-readback/live/open-r2-metadata.json --output recovery-readback/plans/open-r2.json',
-    '  jq -e \'.contentType == "application/json" and .cacheControl == "no-store"\' recovery-readback/plans/open-r2.json >/dev/null',
-    '  open_lock_present=true',
-    'else',
-    '  test "$open_r2_state" = absent',
-    'fi',
-    'if [[ "$open_oss_state" == exists ]]; then',
-    `  ossutil cp "oss://\${ALIYUN_OSS_BUCKET}/${OPEN_TRANSACTION_KEY}" recovery-readback/live/open-oss.json --force --endpoint "$oss_endpoint" --region "$ALIYUN_REGION"`,
-    `  ossutil api head-object --bucket "$ALIYUN_OSS_BUCKET" --key ${q(OPEN_TRANSACTION_KEY)} --endpoint "$oss_endpoint" --region "$ALIYUN_REGION" --output-format json --quiet > recovery-readback/live/open-oss-metadata.json`,
-    '  cmp "$JOURNAL" recovery-readback/live/open-oss.json',
-    '  test "$(jq -er .transactionId recovery-readback/live/open-oss.json)" = "$transaction_id"',
-    '  node scripts/updater/promotion-transaction.mjs backup-metadata-plan --metadata recovery-readback/live/open-oss-metadata.json --output recovery-readback/plans/open-oss.json',
-    '  jq -e \'.contentType == "application/json" and .cacheControl == "no-store"\' recovery-readback/plans/open-oss.json >/dev/null',
-    '  open_lock_present=true',
-    'else',
-    '  test "$open_oss_state" = absent',
-    'fi',
-    '# Classify policy.',
-    `probe_r2_recovery ${q(policy.key)} live-policy-probe`,
-    'policy_live_state="$(jq -er .state recovery-readback/live-policy-probe.json)"'
-  )
-  if (policy.existed) {
-    lines.push('test "$policy_live_state" = exists')
-  }
-  lines.push(
-    'policy_classify_args=(classify-policy-rollback',
-    `  --policy-existed ${q(policy.existed)}`,
-    '  --next "$NEXT_POLICY"',
-    '  --live-state "$policy_live_state"',
-    '  --output recovery-readback/decisions/policy.json)',
-    'if [[ "$policy_live_state" == exists ]]; then',
-    `  aws s3api get-object --bucket "$CLOUDFLARE_R2_BUCKET" --key ${q(policy.key)} --endpoint-url "$r2_endpoint" recovery-readback/live/policy.json > recovery-readback/live/policy-metadata.json`,
-    '  policy_classify_args+=(--live recovery-readback/live/policy.json)',
-    'fi'
-  )
-  if (policy.existed) {
-    lines.push(
-      `policy_classify_args+=(--original "recovery-readback/backups/${policyIndex}")`
-    )
-  }
-  lines.push(
-    'node scripts/updater/promotion-transaction.mjs "${policy_classify_args[@]}"',
-    '# Classify both legacy origins against the exact next-policy A bridge.',
-    'legacy_target_key="$(jq -er \'.legacyBridgeVersion as $version | .releases[$version].manifestKey\' "$NEXT_POLICY")"',
-    'legacy_target_sha256="$(jq -er \'.legacyBridgeVersion as $version | .releases[$version].manifestSha256\' "$NEXT_POLICY")"',
-    'probe_oss_recovery "$legacy_target_key" legacy-target-oss-probe',
-    'probe_r2_recovery "$legacy_target_key" legacy-target-r2-probe',
-    'legacy_target_oss_state="$(jq -er .state recovery-readback/legacy-target-oss-probe.json)"',
-    'legacy_target_r2_state="$(jq -er .state recovery-readback/legacy-target-r2-probe.json)"',
-    `ossutil cp "oss://\${ALIYUN_OSS_BUCKET}/${legacyOss.key}" recovery-readback/live/legacy-oss.json --force --endpoint "$oss_endpoint" --region "$ALIYUN_REGION"`,
-    `aws s3api get-object --bucket "$CLOUDFLARE_R2_BUCKET" --key ${q(legacyR2.key)} --endpoint-url "$r2_endpoint" recovery-readback/live/legacy-r2.json > recovery-readback/live/legacy-r2-metadata.json`,
-    'if [[ "$legacy_target_oss_state" == exists && "$legacy_target_r2_state" == exists ]]; then',
-    '  ossutil cp "oss://${ALIYUN_OSS_BUCKET}/${legacy_target_key}" recovery-readback/live/legacy-target-oss.json --force --endpoint "$oss_endpoint" --region "$ALIYUN_REGION"',
-    '  aws s3 cp "s3://${CLOUDFLARE_R2_BUCKET}/${legacy_target_key}" recovery-readback/live/legacy-target-r2.json --endpoint-url "$r2_endpoint"',
-    '  cmp recovery-readback/live/legacy-target-oss.json recovery-readback/live/legacy-target-r2.json',
-    '  test "$(sha256sum recovery-readback/live/legacy-target-oss.json | cut -d\' \' -f1)" = "$legacy_target_sha256"',
-    `  if cmp -s "recovery-readback/backups/${legacyOssIndex}" recovery-readback/live/legacy-target-oss.json; then`,
-    `  cmp "recovery-readback/backups/${legacyOssIndex}" recovery-readback/live/legacy-oss.json`,
-    '    jq -n \'{action:"no-change",reason:"target-already-equals-snapshot"}\' > recovery-readback/decisions/legacy-oss.json',
-    '  else',
-    `    node scripts/updater/legacy-pause-transaction.mjs classify-rollback --object-kind legacy-oss --live-state exists --live recovery-readback/live/legacy-oss.json --before "recovery-readback/backups/${legacyOssIndex}" --paused recovery-readback/live/legacy-target-oss.json --output recovery-readback/decisions/legacy-oss.json`,
-    '  fi',
-    `  if cmp -s "recovery-readback/backups/${legacyR2Index}" recovery-readback/live/legacy-target-r2.json; then`,
-    `  cmp "recovery-readback/backups/${legacyR2Index}" recovery-readback/live/legacy-r2.json`,
-    '    jq -n \'{action:"no-change",reason:"target-already-equals-snapshot"}\' > recovery-readback/decisions/legacy-r2.json',
-    '  else',
-    `    node scripts/updater/legacy-pause-transaction.mjs classify-rollback --object-kind legacy-r2 --live-state exists --live recovery-readback/live/legacy-r2.json --before "recovery-readback/backups/${legacyR2Index}" --paused recovery-readback/live/legacy-target-r2.json --output recovery-readback/decisions/legacy-r2.json`,
-    '  fi',
-    'elif [[ "$legacy_target_oss_state" == absent && "$legacy_target_r2_state" == absent ]]; then',
-    `  test ${q(cleanupLedger.length)} -eq 0`,
-    '  # A pre-create failure may omit the target manifest only when every',
-    '  # unverified create intent is still absent and live legacy state is the',
-    '  # exact durable snapshot. Any partial target or mutable drift is unsafe.'
-  )
   for (const [index, entry] of unverifiedLedger.entries()) {
-    const probeName = `missing-target-unverified-${index}-${entry.provider}`
     lines.push(
-      `  probe_${entry.provider}_recovery ${q(entry.key)} ${q(probeName)}`,
-      `  jq -e '.state == "absent"' recovery-readback/${probeName}.json >/dev/null`
+      `probe_${entry.provider}_recovery ${q(entry.key)} unverified-${index}`,
+      `jq -e '.state == "absent"' recovery-readback/probes/unverified-${index}.json >/dev/null`
     )
   }
-  lines.push(
-    `  ossutil api head-object --bucket "$ALIYUN_OSS_BUCKET" --key ${q(legacyOss.key)} --endpoint "$oss_endpoint" --region "$ALIYUN_REGION" --output-format json --quiet > recovery-readback/live/legacy-oss-metadata.json`,
-    `  ossutil api get-object-acl --bucket "$ALIYUN_OSS_BUCKET" --key ${q(legacyOss.key)} --endpoint "$oss_endpoint" --region "$ALIYUN_REGION" --output-format json --quiet > recovery-readback/live/legacy-oss-acl.json`,
-    `  node scripts/updater/promotion-transaction.mjs verify-snapshot-readback --journal "$JOURNAL" --index ${q(legacyOssIndex)} --bytes recovery-readback/live/legacy-oss.json --metadata recovery-readback/live/legacy-oss-metadata.json --acl recovery-readback/live/legacy-oss-acl.json --output recovery-readback/missing-target-legacy-oss-verified.json`,
-    `  node scripts/updater/promotion-transaction.mjs verify-snapshot-readback --journal "$JOURNAL" --index ${q(legacyR2Index)} --bytes recovery-readback/live/legacy-r2.json --metadata recovery-readback/live/legacy-r2-metadata.json --output recovery-readback/missing-target-legacy-r2-verified.json`,
-    '  jq -n \'{action:"no-change",reason:"target-never-created-live-equals-snapshot"}\' > recovery-readback/decisions/legacy-oss.json',
-    '  jq -n \'{action:"no-change",reason:"target-never-created-live-equals-snapshot"}\' > recovery-readback/decisions/legacy-r2.json',
-    'else',
-    '  echo "Legacy target manifest presence differs across recovery stores" >&2',
-    '  exit 1',
-    'fi',
-    '# Classify every immutable object before any deletion or restore.',
-    'ledger_cleanup_pending=false'
-  )
-
   for (const [index, entry] of cleanupLedger.entries()) {
-    const probeName = `initial-ledger-${index}-${entry.provider}`
+    const name = `ledger-${index}`
+    lines.push(
+      `probe_${entry.provider}_recovery ${q(entry.key)} ${q(name)}`,
+      `ledger_state="$(jq -er .state recovery-readback/probes/${name}.json)"`,
+      `printf '%s\\n' "$ledger_state" >recovery-readback/ledger/${index}-state`,
+      'if [[ "$ledger_state" == exists ]]; then'
+    )
     if (entry.provider === 'r2') {
       lines.push(
-        `probe_r2_recovery ${q(entry.key)} ${q(probeName)}`,
-        `ledger_state="$(jq -er .state recovery-readback/${probeName}.json)"`,
-        `printf '%s\\n' "$ledger_state" > "recovery-readback/ledger/${index}-state"`,
-        'if [[ "$ledger_state" == exists ]]; then',
-        `  aws s3api get-object --bucket "$CLOUDFLARE_R2_BUCKET" --key ${q(entry.key)} --endpoint-url "$r2_endpoint" "recovery-readback/ledger/${index}" > "recovery-readback/ledger/${index}-metadata.json"`
+        `  aws s3api get-object --bucket "$CLOUDFLARE_R2_BUCKET" --key ${q(entry.key)} --endpoint-url "$r2_endpoint" recovery-readback/ledger/${index} >recovery-readback/ledger/${index}-metadata.json`
       )
     } else {
       lines.push(
-        `probe_oss_recovery ${q(entry.key)} ${q(probeName)}`,
-        `ledger_state="$(jq -er .state recovery-readback/${probeName}.json)"`,
-        `printf '%s\\n' "$ledger_state" > "recovery-readback/ledger/${index}-state"`,
-        'if [[ "$ledger_state" == exists ]]; then',
-        `  ossutil cp "oss://\${ALIYUN_OSS_BUCKET}/${entry.key}" "recovery-readback/ledger/${index}" --force --endpoint "$oss_endpoint" --region "$ALIYUN_REGION"`,
-        `  ossutil api head-object --bucket "$ALIYUN_OSS_BUCKET" --key ${q(entry.key)} --endpoint "$oss_endpoint" --region "$ALIYUN_REGION" --output-format json --quiet > "recovery-readback/ledger/${index}-metadata.json"`
+        `  ossutil cp "oss://\${ALIYUN_OSS_BUCKET}/${entry.key}" recovery-readback/ledger/${index} --force --endpoint "$oss_endpoint" --region "$ALIYUN_REGION"`,
+        `  ossutil api head-object --bucket "$ALIYUN_OSS_BUCKET" --key ${q(entry.key)} --endpoint "$oss_endpoint" --region "$ALIYUN_REGION" --output-format json --quiet >recovery-readback/ledger/${index}-metadata.json`
       )
     }
     lines.push(
-      `  test "$(sha256sum "recovery-readback/ledger/${index}" | cut -d' ' -f1)" = ${q(entry.sha256)}`,
-      `  node scripts/updater/promotion-transaction.mjs backup-metadata-plan --metadata "recovery-readback/ledger/${index}-metadata.json" --output "recovery-readback/ledger/${index}-metadata-plan.json"`,
-      `  jq -e --arg contentType ${q(entry.contentType)} --arg cacheControl ${q(entry.cacheControl)} '.contentType == $contentType and .cacheControl == $cacheControl' "recovery-readback/ledger/${index}-metadata-plan.json" >/dev/null`,
-      '  ledger_cleanup_pending=true',
+      `  test "$(sha256sum recovery-readback/ledger/${index} | cut -d' ' -f1)" = ${q(entry.sha256)}`,
+      `  node scripts/updater/promotion-transaction.mjs backup-metadata-plan --metadata recovery-readback/ledger/${index}-metadata.json --output recovery-readback/ledger/${index}-metadata-plan.json`,
+      `  jq -e --arg type ${q(entry.contentType)} --arg cache ${q(entry.cacheControl)} '.contentType == $type and .cacheControl == $cache' recovery-readback/ledger/${index}-metadata-plan.json >/dev/null`,
       'else',
       '  test "$ledger_state" = absent',
       'fi'
     )
   }
-
   lines.push(
-    'recovery_mutation_needed=false',
-    'if [[ "$(jq -r .action recovery-readback/decisions/policy.json)" == restore ]]; then recovery_mutation_needed=true; fi',
-    'if [[ "$(jq -r .action recovery-readback/decisions/legacy-oss.json)" == restore ]]; then recovery_mutation_needed=true; fi',
-    'if [[ "$(jq -r .action recovery-readback/decisions/legacy-r2.json)" == restore ]]; then recovery_mutation_needed=true; fi',
-    'if [[ "$ledger_cleanup_pending" == true ]]; then recovery_mutation_needed=true; fi',
-    'if [[ "$open_lock_present" != true ]]; then',
-    '  if [[ "$recovery_mutation_needed" == true ]]; then',
-    '    echo "Both transaction locks are absent while recovery mutations remain; refusing unlocked recovery." >&2',
-    '    exit 1',
-    '  fi',
-    '  test "$(jq -r .action recovery-readback/decisions/policy.json)" = no-change',
-    '  test "$(jq -r .action recovery-readback/decisions/legacy-oss.json)" = no-change',
-    '  test "$(jq -r .action recovery-readback/decisions/legacy-r2.json)" = no-change',
-    '  # Prove exact mutable bytes, metadata, and ACL without a recovery lock.',
-    '  if [[ "$policy_existed" == true ]]; then',
-    `    node scripts/updater/promotion-transaction.mjs verify-snapshot-readback --journal "$JOURNAL" --index ${q(policyIndex)} --bytes recovery-readback/live/policy.json --metadata recovery-readback/live/policy-metadata.json --output recovery-readback/no-lock-policy-verified.json`,
-    '  else',
-    `    probe_r2_recovery ${q(policy.key)} no-lock-policy-absent`,
-    '    jq -e \'.state == "absent"\' recovery-readback/no-lock-policy-absent.json >/dev/null',
-    '  fi',
-    `  ossutil api head-object --bucket "$ALIYUN_OSS_BUCKET" --key ${q(legacyOss.key)} --endpoint "$oss_endpoint" --region "$ALIYUN_REGION" --output-format json --quiet > recovery-readback/live/legacy-oss-metadata.json`,
-    `  ossutil api get-object-acl --bucket "$ALIYUN_OSS_BUCKET" --key ${q(legacyOss.key)} --endpoint "$oss_endpoint" --region "$ALIYUN_REGION" --output-format json --quiet > recovery-readback/live/legacy-oss-acl.json`,
-    `  node scripts/updater/promotion-transaction.mjs verify-snapshot-readback --journal "$JOURNAL" --index ${q(legacyOssIndex)} --bytes recovery-readback/live/legacy-oss.json --metadata recovery-readback/live/legacy-oss-metadata.json --acl recovery-readback/live/legacy-oss-acl.json --output recovery-readback/no-lock-legacy-oss-verified.json`,
-    `  node scripts/updater/promotion-transaction.mjs verify-snapshot-readback --journal "$JOURNAL" --index ${q(legacyR2Index)} --bytes recovery-readback/live/legacy-r2.json --metadata recovery-readback/live/legacy-r2-metadata.json --output recovery-readback/no-lock-legacy-r2-verified.json`,
-    '  # Anchor the local journal to its exact immutable dual-cloud history.',
-    `  terminal_history_key=${q(terminalHistoryKey)}`,
-    '  aws s3api get-object --bucket "$CLOUDFLARE_R2_BUCKET" --key "$terminal_history_key" --endpoint-url "$r2_endpoint" recovery-readback/no-lock-history-r2.json > recovery-readback/no-lock-history-r2-metadata.json',
-    '  ossutil cp "oss://${ALIYUN_OSS_BUCKET}/${terminal_history_key}" recovery-readback/no-lock-history-oss.json --force --endpoint "$oss_endpoint" --region "$ALIYUN_REGION"',
-    '  ossutil api head-object --bucket "$ALIYUN_OSS_BUCKET" --key "$terminal_history_key" --endpoint "$oss_endpoint" --region "$ALIYUN_REGION" --output-format json --quiet > recovery-readback/no-lock-history-oss-metadata.json',
-    '  cmp "$JOURNAL" recovery-readback/no-lock-history-r2.json',
-    '  cmp "$JOURNAL" recovery-readback/no-lock-history-oss.json',
-    '  node scripts/updater/promotion-transaction.mjs backup-metadata-plan --metadata recovery-readback/no-lock-history-r2-metadata.json --output recovery-readback/plans/no-lock-history-r2.json',
-    '  node scripts/updater/promotion-transaction.mjs backup-metadata-plan --metadata recovery-readback/no-lock-history-oss-metadata.json --output recovery-readback/plans/no-lock-history-oss.json',
-    '  jq -e \'.contentType == "application/json" and .cacheControl == "no-store"\' recovery-readback/plans/no-lock-history-r2.json >/dev/null',
-    '  jq -e \'.contentType == "application/json" and .cacheControl == "no-store"\' recovery-readback/plans/no-lock-history-oss.json >/dev/null',
-    '  # A lock-free rerun may only confirm already-complete public state.',
-    `  node scripts/updater/promotion-transaction.mjs poll-url --url "$LEGACY_ALIYUN_URL" --expected "recovery-readback/backups/${legacyOssIndex}" --timeout-seconds 600 --interval-seconds 10 --output recovery-readback/no-lock-legacy-aliyun-cdn.json`,
-    `  node scripts/updater/promotion-transaction.mjs poll-url --url "$LEGACY_R2_URL" --expected "recovery-readback/backups/${legacyR2Index}" --timeout-seconds 600 --interval-seconds 10 --output recovery-readback/no-lock-legacy-r2-cdn.json`,
-    '  # Close the read-only proof with fresh origin reads after CDN polling.',
-    '  if [[ "$policy_existed" == true ]]; then',
-    `    aws s3api get-object --bucket "$CLOUDFLARE_R2_BUCKET" --key ${q(policy.key)} --endpoint-url "$r2_endpoint" recovery-readback/no-lock-final-policy.json > recovery-readback/no-lock-final-policy-metadata.json`,
-    `    node scripts/updater/promotion-transaction.mjs verify-snapshot-readback --journal "$JOURNAL" --index ${q(policyIndex)} --bytes recovery-readback/no-lock-final-policy.json --metadata recovery-readback/no-lock-final-policy-metadata.json --output recovery-readback/no-lock-final-policy-verified.json`,
-    '  else',
-    `    probe_r2_recovery ${q(policy.key)} no-lock-final-policy-absent`,
-    '    jq -e \'.state == "absent"\' recovery-readback/no-lock-final-policy-absent.json >/dev/null',
-    '  fi',
-    `  ossutil cp "oss://\${ALIYUN_OSS_BUCKET}/${legacyOss.key}" recovery-readback/no-lock-final-legacy-oss.json --force --endpoint "$oss_endpoint" --region "$ALIYUN_REGION"`,
-    `  ossutil api head-object --bucket "$ALIYUN_OSS_BUCKET" --key ${q(legacyOss.key)} --endpoint "$oss_endpoint" --region "$ALIYUN_REGION" --output-format json --quiet > recovery-readback/no-lock-final-legacy-oss-metadata.json`,
-    `  ossutil api get-object-acl --bucket "$ALIYUN_OSS_BUCKET" --key ${q(legacyOss.key)} --endpoint "$oss_endpoint" --region "$ALIYUN_REGION" --output-format json --quiet > recovery-readback/no-lock-final-legacy-oss-acl.json`,
-    `  node scripts/updater/promotion-transaction.mjs verify-snapshot-readback --journal "$JOURNAL" --index ${q(legacyOssIndex)} --bytes recovery-readback/no-lock-final-legacy-oss.json --metadata recovery-readback/no-lock-final-legacy-oss-metadata.json --acl recovery-readback/no-lock-final-legacy-oss-acl.json --output recovery-readback/no-lock-final-legacy-oss-verified.json`,
-    `  aws s3api get-object --bucket "$CLOUDFLARE_R2_BUCKET" --key ${q(legacyR2.key)} --endpoint-url "$r2_endpoint" recovery-readback/no-lock-final-legacy-r2.json > recovery-readback/no-lock-final-legacy-r2-metadata.json`,
-    `  node scripts/updater/promotion-transaction.mjs verify-snapshot-readback --journal "$JOURNAL" --index ${q(legacyR2Index)} --bytes recovery-readback/no-lock-final-legacy-r2.json --metadata recovery-readback/no-lock-final-legacy-r2-metadata.json --output recovery-readback/no-lock-final-legacy-r2-verified.json`
+    '# RECOVERY MUTATIONS BEGIN: mark the durable journal first.',
+    'cp "$JOURNAL" recovery-readback/journal-before-recovery.json',
+    'node scripts/updater/promotion-transaction.mjs advance-journal --journal "$JOURNAL" --state rollback-required --checkpoint operator-recovery-started --updated-at "$(date -u +%Y-%m-%dT%H:%M:%S.000Z)" --output recovery-readback/journal-rollback-required.json',
+    'persist_recovery_journal recovery-readback/journal-rollback-required.json recovery-readback/journal-before-recovery.json',
+    'cp recovery-readback/journal-rollback-required.json "$JOURNAL"',
+    '# Restore the exact prior Router policy with content CAS.',
+    'if [[ "$(jq -er .action recovery-readback/policy-decision.json)" == restore ]]; then',
+    '  aws s3api get-object --bucket "$CLOUDFLARE_R2_BUCKET" --key "$policy_key" --endpoint-url "$r2_endpoint" recovery-readback/live/policy-prewrite.json >recovery-readback/live/policy-prewrite-metadata.json',
+    '  cmp recovery-readback/live/policy.json recovery-readback/live/policy-prewrite.json',
+    '  policy_etag="$(node scripts/updater/promotion-transaction.mjs extract-r2-etag --metadata recovery-readback/live/policy-prewrite-metadata.json)"',
+    '  aws s3api put-object --bucket "$CLOUDFLARE_R2_BUCKET" --key "$policy_key" --body recovery-readback/backups/policy.json --content-type application/json --cache-control no-store --if-match "$policy_etag" --endpoint-url "$r2_endpoint" >/dev/null',
+    'fi',
+    'aws s3api get-object --bucket "$CLOUDFLARE_R2_BUCKET" --key "$policy_key" --endpoint-url "$r2_endpoint" recovery-readback/policy-restored.json >recovery-readback/policy-restored-metadata.json',
+    'cmp recovery-readback/backups/policy.json recovery-readback/policy-restored.json',
+    `node scripts/updater/promotion-transaction.mjs verify-snapshot-readback --journal "$JOURNAL" --index ${q(policyIndex)} --bytes recovery-readback/policy-restored.json --metadata recovery-readback/policy-restored-metadata.json --output recovery-readback/policy-restored-verified.json`,
+    '# Delete only immutable objects proven to have been created by this transaction.'
   )
-  for (const [index, entry] of cleanupLedger.entries()) {
-    const finalProbeName =
-      `no-lock-final-ledger-${index}-${entry.provider}`
+  for (const [index, entry] of [...cleanupLedger].reverse().entries()) {
+    const originalIndex = cleanupLedger.indexOf(entry)
     lines.push(
-      `  probe_${entry.provider}_recovery ${q(entry.key)} ${q(finalProbeName)}`,
-      `  jq -e '.state == "absent"' recovery-readback/${finalProbeName}.json >/dev/null`
-    )
-  }
-  lines.push(
-    `  probe_r2_recovery ${q(OPEN_TRANSACTION_KEY)} no-lock-final-r2`,
-    `  probe_oss_recovery ${q(OPEN_TRANSACTION_KEY)} no-lock-final-oss`,
-    '  jq -e \'.state == "absent"\' recovery-readback/no-lock-final-r2.json >/dev/null',
-    '  jq -e \'.state == "absent"\' recovery-readback/no-lock-final-oss.json >/dev/null',
-    '  echo "Recovery already complete; both transaction locks and every ledger object are absent."',
-    '  exit 0',
-    'fi',
-    '# RECOVERY MUTATIONS BEGIN: every mutable object is now classified.',
-    '# Re-probe both locks at the mutation boundary; initial state is stale now.',
-    `probe_r2_recovery ${q(OPEN_TRANSACTION_KEY)} boundary-open-r2`,
-    `probe_oss_recovery ${q(OPEN_TRANSACTION_KEY)} boundary-open-oss`,
-    'open_r2_state="$(jq -er .state recovery-readback/boundary-open-r2.json)"',
-    'open_oss_state="$(jq -er .state recovery-readback/boundary-open-oss.json)"',
-    'if [[ "$open_r2_state" == exists ]]; then',
-    `  aws s3api get-object --bucket "$CLOUDFLARE_R2_BUCKET" --key ${q(OPEN_TRANSACTION_KEY)} --endpoint-url "$r2_endpoint" recovery-readback/live/open-r2-boundary.json > recovery-readback/live/open-r2-boundary-metadata.json`,
-    '  cmp "$JOURNAL" recovery-readback/live/open-r2-boundary.json',
-    '  test "$(jq -er .transactionId recovery-readback/live/open-r2-boundary.json)" = "$transaction_id"',
-    '  node scripts/updater/promotion-transaction.mjs backup-metadata-plan --metadata recovery-readback/live/open-r2-boundary-metadata.json --output recovery-readback/plans/open-r2-boundary.json',
-    '  jq -e \'.contentType == "application/json" and .cacheControl == "no-store"\' recovery-readback/plans/open-r2-boundary.json >/dev/null',
-    'else',
-    '  test "$open_r2_state" = absent',
-    'fi',
-    'if [[ "$open_oss_state" == exists ]]; then',
-    `  ossutil cp "oss://\${ALIYUN_OSS_BUCKET}/${OPEN_TRANSACTION_KEY}" recovery-readback/live/open-oss-boundary.json --force --endpoint "$oss_endpoint" --region "$ALIYUN_REGION"`,
-    `  ossutil api head-object --bucket "$ALIYUN_OSS_BUCKET" --key ${q(OPEN_TRANSACTION_KEY)} --endpoint "$oss_endpoint" --region "$ALIYUN_REGION" --output-format json --quiet > recovery-readback/live/open-oss-boundary-metadata.json`,
-    '  cmp "$JOURNAL" recovery-readback/live/open-oss-boundary.json',
-    '  test "$(jq -er .transactionId recovery-readback/live/open-oss-boundary.json)" = "$transaction_id"',
-    '  node scripts/updater/promotion-transaction.mjs backup-metadata-plan --metadata recovery-readback/live/open-oss-boundary-metadata.json --output recovery-readback/plans/open-oss-boundary.json',
-    '  jq -e \'.contentType == "application/json" and .cacheControl == "no-store"\' recovery-readback/plans/open-oss-boundary.json >/dev/null',
-    'else',
-    '  test "$open_oss_state" = absent',
-    'fi',
-    'if [[ "$open_r2_state" == absent && "$open_oss_state" == absent ]]; then',
-    '  echo "Both transaction locks disappeared before the mutation boundary; rerun for lock-free verification." >&2',
-    '  exit 1',
-    'fi',
-    'if [[ "$recovery_mutation_needed" == true ]]; then',
-    '  # Repair a current split lock create-only before product/cleanup mutation.',
-    '  if [[ "$open_r2_state" == absent ]]; then',
-    `    aws s3api put-object --bucket "$CLOUDFLARE_R2_BUCKET" --key ${q(OPEN_TRANSACTION_KEY)} --body "$JOURNAL" --content-type application/json --cache-control no-store --if-none-match '*' --endpoint-url "$r2_endpoint" >/dev/null`,
-    '  fi',
-    '  if [[ "$open_oss_state" == absent ]]; then',
-    `    ossutil api put-object --bucket "$ALIYUN_OSS_BUCKET" --key ${q(OPEN_TRANSACTION_KEY)} --body "file://$JOURNAL" --content-type application/json --cache-control no-store --object-acl default --forbid-overwrite true --endpoint "$oss_endpoint" --region "$ALIYUN_REGION" --output-format json --quiet >/dev/null`,
-    '  fi',
-    `  aws s3api get-object --bucket "$CLOUDFLARE_R2_BUCKET" --key ${q(OPEN_TRANSACTION_KEY)} --endpoint-url "$r2_endpoint" recovery-readback/live/open-r2-repaired.json > recovery-readback/live/open-r2-repaired-metadata.json`,
-    `  ossutil cp "oss://\${ALIYUN_OSS_BUCKET}/${OPEN_TRANSACTION_KEY}" recovery-readback/live/open-oss-repaired.json --force --endpoint "$oss_endpoint" --region "$ALIYUN_REGION"`,
-    `  ossutil api head-object --bucket "$ALIYUN_OSS_BUCKET" --key ${q(OPEN_TRANSACTION_KEY)} --endpoint "$oss_endpoint" --region "$ALIYUN_REGION" --output-format json --quiet > recovery-readback/live/open-oss-repaired-metadata.json`,
-    '  cmp "$JOURNAL" recovery-readback/live/open-r2-repaired.json',
-    '  cmp "$JOURNAL" recovery-readback/live/open-oss-repaired.json',
-    '  test "$(jq -er .transactionId recovery-readback/live/open-r2-repaired.json)" = "$transaction_id"',
-    '  test "$(jq -er .transactionId recovery-readback/live/open-oss-repaired.json)" = "$transaction_id"',
-    '  node scripts/updater/promotion-transaction.mjs backup-metadata-plan --metadata recovery-readback/live/open-r2-repaired-metadata.json --output recovery-readback/plans/open-r2-repaired.json',
-    '  node scripts/updater/promotion-transaction.mjs backup-metadata-plan --metadata recovery-readback/live/open-oss-repaired-metadata.json --output recovery-readback/plans/open-oss-repaired.json',
-    '  jq -e \'.contentType == "application/json" and .cacheControl == "no-store"\' recovery-readback/plans/open-r2-repaired.json >/dev/null',
-    '  jq -e \'.contentType == "application/json" and .cacheControl == "no-store"\' recovery-readback/plans/open-oss-repaired.json >/dev/null',
-    'fi',
-    'legacy_restored=false',
-    'legacy_oss_restore_needed=false',
-    'legacy_r2_restore_needed=false',
-    '# Re-read both legacy origins before the first recovery write.',
-    'if [[ "$(jq -r .action recovery-readback/decisions/legacy-oss.json)" == restore ]]; then',
-    `  ossutil cp "oss://\${ALIYUN_OSS_BUCKET}/${legacyOss.key}" recovery-readback/live/legacy-oss-prewrite.json --force --endpoint "$oss_endpoint" --region "$ALIYUN_REGION"`,
-    '  cmp recovery-readback/live/legacy-oss.json recovery-readback/live/legacy-oss-prewrite.json',
-    `  legacy_oss_acl="$(node scripts/updater/promotion-transaction.mjs extract-oss-acl --acl "$JOURNAL" --snapshot-index ${q(legacyOssIndex)})"`,
-    '  case "$legacy_oss_acl" in default|private|public-read) ;; *) echo "Unsafe ACL in journal" >&2; exit 1;; esac',
-    '  legacy_oss_restore_needed=true',
-    'fi',
-    'if [[ "$(jq -r .action recovery-readback/decisions/legacy-r2.json)" == restore ]]; then',
-    `  aws s3api get-object --bucket "$CLOUDFLARE_R2_BUCKET" --key ${q(legacyR2.key)} --endpoint-url "$r2_endpoint" recovery-readback/live/legacy-r2-prewrite.json > recovery-readback/live/legacy-r2-prewrite-metadata.json`,
-    '  cmp recovery-readback/live/legacy-r2.json recovery-readback/live/legacy-r2-prewrite.json',
-    '  legacy_r2_etag="$(node scripts/updater/promotion-transaction.mjs extract-r2-etag --metadata recovery-readback/live/legacy-r2-prewrite-metadata.json)"',
-    '  legacy_r2_restore_needed=true',
-    'fi',
-    'if [[ "$legacy_oss_restore_needed" == true ]]; then',
-    `  ossutil api put-object --bucket "$ALIYUN_OSS_BUCKET" --key ${q(legacyOss.key)} --body "file://recovery-readback/backups/${legacyOssIndex}" --content-type "$(jq -er .contentType recovery-readback/plans/${legacyOssIndex}.json)" --cache-control "$(jq -er .cacheControl recovery-readback/plans/${legacyOssIndex}.json)" --object-acl "$legacy_oss_acl" --endpoint "$oss_endpoint" --region "$ALIYUN_REGION" --output-format json --quiet >/dev/null`,
-    '  legacy_restored=true',
-    'fi',
-    'if [[ "$legacy_r2_restore_needed" == true ]]; then',
-    `  aws s3api put-object --bucket "$CLOUDFLARE_R2_BUCKET" --key ${q(legacyR2.key)} --body "recovery-readback/backups/${legacyR2Index}" --content-type "$(jq -er .contentType recovery-readback/plans/${legacyR2Index}.json)" --cache-control "$(jq -er .cacheControl recovery-readback/plans/${legacyR2Index}.json)" --if-match "$legacy_r2_etag" --endpoint-url "$r2_endpoint" >/dev/null`,
-    '  legacy_restored=true',
-    'fi',
-    '# Verify both legacy origins before the policy is restored.',
-    `ossutil cp "oss://\${ALIYUN_OSS_BUCKET}/${legacyOss.key}" "recovery-readback/oss-${legacyOssIndex}" --force --endpoint "$oss_endpoint" --region "$ALIYUN_REGION"`,
-    `ossutil api head-object --bucket "$ALIYUN_OSS_BUCKET" --key ${q(legacyOss.key)} --endpoint "$oss_endpoint" --region "$ALIYUN_REGION" --output-format json --quiet > "recovery-readback/oss-${legacyOssIndex}-metadata.json"`,
-    `ossutil api get-object-acl --bucket "$ALIYUN_OSS_BUCKET" --key ${q(legacyOss.key)} --endpoint "$oss_endpoint" --region "$ALIYUN_REGION" --output-format json --quiet > "recovery-readback/oss-${legacyOssIndex}-acl.json"`,
-    `node scripts/updater/promotion-transaction.mjs verify-snapshot-readback --journal "$JOURNAL" --index ${q(legacyOssIndex)} --bytes "recovery-readback/oss-${legacyOssIndex}" --metadata "recovery-readback/oss-${legacyOssIndex}-metadata.json" --acl "recovery-readback/oss-${legacyOssIndex}-acl.json" --output "recovery-readback/oss-${legacyOssIndex}-verified.json"`,
-    `aws s3api get-object --bucket "$CLOUDFLARE_R2_BUCKET" --key ${q(legacyR2.key)} --endpoint-url "$r2_endpoint" "recovery-readback/r2-${legacyR2Index}" > "recovery-readback/r2-${legacyR2Index}-metadata.json"`,
-    `node scripts/updater/promotion-transaction.mjs verify-snapshot-readback --journal "$JOURNAL" --index ${q(legacyR2Index)} --bytes "recovery-readback/r2-${legacyR2Index}" --metadata "recovery-readback/r2-${legacyR2Index}-metadata.json" --output "recovery-readback/r2-${legacyR2Index}-verified.json"`,
-    'if [[ "$legacy_restored" == true ]]; then',
-    '  aliyun --profile release cdn RefreshObjectCaches --region "$ALIYUN_REGION" --ObjectPath "$LEGACY_ALIYUN_URL" --ObjectType File > recovery-readback/aliyun-cache-purge.json',
-    '  jq -e \'.RefreshTaskId or .RequestId\' recovery-readback/aliyun-cache-purge.json >/dev/null',
-    `  node scripts/updater/promotion-transaction.mjs poll-url --url "$LEGACY_ALIYUN_URL" --expected "recovery-readback/backups/${legacyOssIndex}" --timeout-seconds 600 --interval-seconds 10 --output recovery-readback/legacy-aliyun-cdn.json`,
-    `  node scripts/updater/promotion-transaction.mjs poll-url --url "$LEGACY_R2_URL" --expected "recovery-readback/backups/${legacyR2Index}" --timeout-seconds 600 --interval-seconds 10 --output recovery-readback/legacy-r2-cdn.json`,
-    'fi',
-    '# Restore the policy last, after legacy origins and caches converge.',
-    'if [[ "$(jq -r .action recovery-readback/decisions/policy.json)" == restore ]]; then'
-  )
-
-  if (policy.existed) {
-    lines.push(
-      `  aws s3api get-object --bucket "$CLOUDFLARE_R2_BUCKET" --key ${q(policy.key)} --endpoint-url "$r2_endpoint" recovery-readback/live/policy-prewrite.json > recovery-readback/live/policy-prewrite-metadata.json`,
-      '  cmp recovery-readback/live/policy.json recovery-readback/live/policy-prewrite.json',
-      '  policy_etag="$(node scripts/updater/promotion-transaction.mjs extract-r2-etag --metadata recovery-readback/live/policy-prewrite-metadata.json)"',
-      `  aws s3api put-object --bucket "$CLOUDFLARE_R2_BUCKET" --key ${q(policy.key)} --body "recovery-readback/backups/${policyIndex}" --content-type "$(jq -er .contentType recovery-readback/plans/${policyIndex}.json)" --cache-control "$(jq -er .cacheControl recovery-readback/plans/${policyIndex}.json)" --if-match "$policy_etag" --endpoint-url "$r2_endpoint" >/dev/null`
-    )
-  } else {
-    lines.push(
-      `  aws s3api get-object --bucket "$CLOUDFLARE_R2_BUCKET" --key ${q(policy.key)} --endpoint-url "$r2_endpoint" recovery-readback/live/policy-predelete.json > recovery-readback/live/policy-predelete-metadata.json`,
-      '  cmp recovery-readback/live/policy.json recovery-readback/live/policy-predelete.json',
-      '  policy_etag="$(node scripts/updater/promotion-transaction.mjs extract-r2-etag --metadata recovery-readback/live/policy-predelete-metadata.json)"',
-      `  aws s3api delete-object --bucket "$CLOUDFLARE_R2_BUCKET" --key ${q(policy.key)} --if-match "$policy_etag" --endpoint-url "$r2_endpoint" >/dev/null`
-    )
-  }
-  lines.push('fi', '# Verify the policy after its final restore.')
-  if (policy.existed) {
-    lines.push(
-      `aws s3api get-object --bucket "$CLOUDFLARE_R2_BUCKET" --key ${q(policy.key)} --endpoint-url "$r2_endpoint" "recovery-readback/r2-${policyIndex}" > "recovery-readback/r2-${policyIndex}-metadata.json"`,
-      `node scripts/updater/promotion-transaction.mjs verify-snapshot-readback --journal "$JOURNAL" --index ${q(policyIndex)} --bytes "recovery-readback/r2-${policyIndex}" --metadata "recovery-readback/r2-${policyIndex}-metadata.json" --output "recovery-readback/r2-${policyIndex}-verified.json"`
-    )
-  } else {
-    lines.push(
-      `probe_r2_recovery ${q(policy.key)} "verify-absent-${policyIndex}"`,
-      `jq -e '.state == "absent"' "recovery-readback/verify-absent-${policyIndex}.json" >/dev/null`
-    )
-  }
-
-  lines.push(
-    '# Reclassify every cleanup object before the first cleanup deletion.'
-  )
-  for (const [index, entry] of unverifiedLedger.entries()) {
-    const probeName = `unverified-ledger-${index}-${entry.provider}`
-    lines.push(
-      `# An unverified create intent is ambiguous: it must still be absent.`,
-      `probe_${entry.provider}_recovery ${q(entry.key)} ${q(probeName)}`,
-      `jq -e '.state == "absent"' recovery-readback/${probeName}.json >/dev/null`
-    )
-  }
-  const reverseCleanupLedger = [...cleanupLedger].reverse()
-  for (const [index, entry] of reverseCleanupLedger.entries()) {
-    const probeName = `predelete-ledger-${index}-${entry.provider}`
-    if (entry.provider === 'r2') {
-      lines.push(
-        `probe_r2_recovery ${q(entry.key)} ${q(probeName)}`,
-        `ledger_state="$(jq -er .state recovery-readback/${probeName}.json)"`,
-        `printf '%s\\n' "$ledger_state" > "recovery-readback/ledger/predelete-r2-${index}-state"`,
-        'if [[ "$ledger_state" == exists ]]; then',
-        `  aws s3api get-object --bucket "$CLOUDFLARE_R2_BUCKET" --key ${q(entry.key)} --endpoint-url "$r2_endpoint" "recovery-readback/ledger/predelete-r2-${index}" > "recovery-readback/ledger/predelete-r2-${index}-metadata.json"`,
-        `  test "$(sha256sum "recovery-readback/ledger/predelete-r2-${index}" | cut -d' ' -f1)" = ${q(entry.sha256)}`,
-        `  node scripts/updater/promotion-transaction.mjs backup-metadata-plan --metadata "recovery-readback/ledger/predelete-r2-${index}-metadata.json" --output "recovery-readback/ledger/predelete-r2-${index}-metadata-plan.json"`,
-        `  jq -e --arg contentType ${q(entry.contentType)} --arg cacheControl ${q(entry.cacheControl)} '.contentType == $contentType and .cacheControl == $cacheControl' "recovery-readback/ledger/predelete-r2-${index}-metadata-plan.json" >/dev/null`,
-        'else',
-        '  test "$ledger_state" = absent',
-        'fi'
-      )
-    } else {
-      lines.push(
-        `probe_oss_recovery ${q(entry.key)} ${q(probeName)}`,
-        `ledger_state="$(jq -er .state recovery-readback/${probeName}.json)"`,
-        `printf '%s\\n' "$ledger_state" > "recovery-readback/ledger/predelete-oss-${index}-state"`,
-        'if [[ "$ledger_state" == exists ]]; then',
-        `  ossutil cp "oss://\${ALIYUN_OSS_BUCKET}/${entry.key}" "recovery-readback/ledger/predelete-oss-${index}" --force --endpoint "$oss_endpoint" --region "$ALIYUN_REGION"`,
-        `  test "$(sha256sum "recovery-readback/ledger/predelete-oss-${index}" | cut -d' ' -f1)" = ${q(entry.sha256)}`,
-        `  ossutil api head-object --bucket "$ALIYUN_OSS_BUCKET" --key ${q(entry.key)} --endpoint "$oss_endpoint" --region "$ALIYUN_REGION" --output-format json --quiet > "recovery-readback/ledger/predelete-oss-${index}-metadata.json"`,
-        `  node scripts/updater/promotion-transaction.mjs backup-metadata-plan --metadata "recovery-readback/ledger/predelete-oss-${index}-metadata.json" --output "recovery-readback/ledger/predelete-oss-${index}-metadata-plan.json"`,
-        `  jq -e --arg contentType ${q(entry.contentType)} --arg cacheControl ${q(entry.cacheControl)} '.contentType == $contentType and .cacheControl == $cacheControl' "recovery-readback/ledger/predelete-oss-${index}-metadata-plan.json" >/dev/null`,
-        'else',
-        '  test "$ledger_state" = absent',
-        'fi'
-      )
-    }
-  }
-  lines.push(
-    '# Reject absent-to-exists resurrection before the first cleanup delete.'
-  )
-  for (const [index, entry] of reverseCleanupLedger.entries()) {
-    const initialIndex = cleanupLedger.indexOf(entry)
-    const predeleteState =
-      `recovery-readback/ledger/predelete-${entry.provider}-${index}-state`
-    lines.push(
-      `initial_ledger_state="$(cat "recovery-readback/ledger/${initialIndex}-state")"`,
-      `predelete_ledger_state="$(cat "${predeleteState}")"`,
+      `probe_${entry.provider}_recovery ${q(entry.key)} predelete-${index}`,
+      `initial_ledger_state="$(cat recovery-readback/ledger/${originalIndex}-state)"`,
+      `predelete_ledger_state="$(jq -er .state recovery-readback/probes/predelete-${index}.json)"`,
       'if [[ "$initial_ledger_state" == absent ]]; then',
       '  test "$predelete_ledger_state" = absent',
       'else',
       '  test "$initial_ledger_state" = exists',
-      '  case "$predelete_ledger_state" in exists|absent) ;; *) exit 1 ;; esac',
-      'fi'
+      '  if [[ "$predelete_ledger_state" == exists ]]; then'
+    )
+    if (entry.provider === 'r2') {
+      lines.push(
+        `    aws s3api get-object --bucket "$CLOUDFLARE_R2_BUCKET" --key ${q(entry.key)} --endpoint-url "$r2_endpoint" recovery-readback/ledger/predelete-${index} >recovery-readback/ledger/predelete-${index}-metadata.json`,
+        `    test "$(sha256sum recovery-readback/ledger/predelete-${index} | cut -d' ' -f1)" = ${q(entry.sha256)}`,
+        `    node scripts/updater/promotion-transaction.mjs backup-metadata-plan --metadata recovery-readback/ledger/predelete-${index}-metadata.json --output recovery-readback/ledger/predelete-${index}-metadata-plan.json`,
+        `    jq -e --arg type ${q(entry.contentType)} --arg cache ${q(entry.cacheControl)} '.contentType == $type and .cacheControl == $cache' recovery-readback/ledger/predelete-${index}-metadata-plan.json >/dev/null`,
+        `    ledger_etag="$(node scripts/updater/promotion-transaction.mjs extract-r2-etag --metadata recovery-readback/ledger/predelete-${index}-metadata.json)"`,
+        `    aws s3api delete-object --bucket "$CLOUDFLARE_R2_BUCKET" --key ${q(entry.key)} --if-match "$ledger_etag" --endpoint-url "$r2_endpoint" >/dev/null`
+      )
+    } else {
+      lines.push(
+        `    ossutil cp "oss://\${ALIYUN_OSS_BUCKET}/${entry.key}" recovery-readback/ledger/predelete-${index} --force --endpoint "$oss_endpoint" --region "$ALIYUN_REGION"`,
+        `    test "$(sha256sum recovery-readback/ledger/predelete-${index} | cut -d' ' -f1)" = ${q(entry.sha256)}`,
+        `    ossutil api head-object --bucket "$ALIYUN_OSS_BUCKET" --key ${q(entry.key)} --endpoint "$oss_endpoint" --region "$ALIYUN_REGION" --output-format json --quiet >recovery-readback/ledger/predelete-${index}-metadata.json`,
+        `    node scripts/updater/promotion-transaction.mjs backup-metadata-plan --metadata recovery-readback/ledger/predelete-${index}-metadata.json --output recovery-readback/ledger/predelete-${index}-metadata-plan.json`,
+        `    jq -e --arg type ${q(entry.contentType)} --arg cache ${q(entry.cacheControl)} '.contentType == $type and .cacheControl == $cache' recovery-readback/ledger/predelete-${index}-metadata-plan.json >/dev/null`,
+        `    ossutil api delete-object --bucket "$ALIYUN_OSS_BUCKET" --key ${q(entry.key)} --endpoint "$oss_endpoint" --region "$ALIYUN_REGION" --output-format json --quiet >/dev/null`
+      )
+    }
+    lines.push(
+      '  else',
+      '    test "$predelete_ledger_state" = absent',
+      '  fi',
+      'fi',
+      `probe_${entry.provider}_recovery ${q(entry.key)} ${q(`deleted-${index}`)}`,
+      `jq -e '.state == "absent"' recovery-readback/probes/deleted-${index}.json >/dev/null`
     )
   }
-  lines.push('# Delete cleanup objects only after every predelete classification.')
-  for (const [index, entry] of reverseCleanupLedger.entries()) {
-    if (entry.provider === 'r2') {
-      lines.push(
-        `if [[ "$(cat "recovery-readback/ledger/predelete-r2-${index}-state")" == exists ]]; then`,
-        `  ledger_etag="$(node scripts/updater/promotion-transaction.mjs extract-r2-etag --metadata "recovery-readback/ledger/predelete-r2-${index}-metadata.json")"`,
-        `  aws s3api delete-object --bucket "$CLOUDFLARE_R2_BUCKET" --key ${q(entry.key)} --if-match "$ledger_etag" --endpoint-url "$r2_endpoint" >/dev/null`,
-        'else',
-        `  test "$(cat "recovery-readback/ledger/predelete-r2-${index}-state")" = absent`,
-        'fi'
-      )
-    } else {
-      lines.push(
-        `if [[ "$(cat "recovery-readback/ledger/predelete-oss-${index}-state")" == exists ]]; then`,
-        `  ossutil api delete-object --bucket "$ALIYUN_OSS_BUCKET" --key ${q(entry.key)} --endpoint "$oss_endpoint" --region "$ALIYUN_REGION" --output-format json --quiet >/dev/null`,
-        'else',
-        `  test "$(cat "recovery-readback/ledger/predelete-oss-${index}-state")" = absent`,
-        'fi'
-      )
-    }
-  }
   lines.push(
-    '# Every cleanup object must now be absent before either lock can close.'
-  )
-  for (const [index, entry] of reverseCleanupLedger.entries()) {
-    const probeName = `deleted-ledger-${index}-${entry.provider}`
-    if (entry.provider === 'r2') {
-      lines.push(
-        `probe_r2_recovery ${q(entry.key)} ${q(probeName)}`,
-        `jq -e '.state == "absent"' recovery-readback/${probeName}.json >/dev/null`
-      )
-    } else {
-      lines.push(
-        `probe_oss_recovery ${q(entry.key)} ${q(probeName)}`,
-        `jq -e '.state == "absent"' recovery-readback/${probeName}.json >/dev/null`
-      )
-    }
-  }
-  lines.push(
-    '# Delete each still-present matching lock; an absent side is already done.',
-    `probe_r2_recovery ${q(OPEN_TRANSACTION_KEY)} final-open-r2`,
-    `probe_oss_recovery ${q(OPEN_TRANSACTION_KEY)} final-open-oss`,
-    'open_r2_state="$(jq -er .state recovery-readback/final-open-r2.json)"',
-    'open_oss_state="$(jq -er .state recovery-readback/final-open-oss.json)"',
-    'open_r2_delete_needed=false',
-    'open_oss_delete_needed=false',
-    'if [[ "$open_r2_state" == exists ]]; then',
-    `  aws s3api get-object --bucket "$CLOUDFLARE_R2_BUCKET" --key ${q(OPEN_TRANSACTION_KEY)} --endpoint-url "$r2_endpoint" recovery-readback/live/open-r2-predelete.json > recovery-readback/live/open-r2-predelete-metadata.json`,
-    '  cmp "$JOURNAL" recovery-readback/live/open-r2-predelete.json',
-    '  test "$(jq -er .transactionId recovery-readback/live/open-r2-predelete.json)" = "$transaction_id"',
-    '  node scripts/updater/promotion-transaction.mjs backup-metadata-plan --metadata recovery-readback/live/open-r2-predelete-metadata.json --output recovery-readback/plans/open-r2-predelete.json',
-    '  jq -e \'.contentType == "application/json" and .cacheControl == "no-store"\' recovery-readback/plans/open-r2-predelete.json >/dev/null',
-    '  open_etag="$(node scripts/updater/promotion-transaction.mjs extract-r2-etag --metadata recovery-readback/live/open-r2-predelete-metadata.json)"',
-    '  open_r2_delete_needed=true',
-    'else',
-    '  test "$open_r2_state" = absent',
-    'fi',
-    'if [[ "$open_oss_state" == exists ]]; then',
-    `  ossutil cp "oss://\${ALIYUN_OSS_BUCKET}/${OPEN_TRANSACTION_KEY}" recovery-readback/live/open-oss-predelete.json --force --endpoint "$oss_endpoint" --region "$ALIYUN_REGION"`,
-    `  ossutil api head-object --bucket "$ALIYUN_OSS_BUCKET" --key ${q(OPEN_TRANSACTION_KEY)} --endpoint "$oss_endpoint" --region "$ALIYUN_REGION" --output-format json --quiet > recovery-readback/live/open-oss-predelete-metadata.json`,
-    '  cmp "$JOURNAL" recovery-readback/live/open-oss-predelete.json',
-    '  test "$(jq -er .transactionId recovery-readback/live/open-oss-predelete.json)" = "$transaction_id"',
-    '  node scripts/updater/promotion-transaction.mjs backup-metadata-plan --metadata recovery-readback/live/open-oss-predelete-metadata.json --output recovery-readback/plans/open-oss-predelete.json',
-    '  jq -e \'.contentType == "application/json" and .cacheControl == "no-store"\' recovery-readback/plans/open-oss-predelete.json >/dev/null',
-    '  open_oss_delete_needed=true',
-    'else',
-    '  test "$open_oss_state" = absent',
-    'fi',
-    'if [[ "$open_r2_delete_needed" == true ]]; then',
-    `  aws s3api delete-object --bucket "$CLOUDFLARE_R2_BUCKET" --key ${q(OPEN_TRANSACTION_KEY)} --if-match "$open_etag" --endpoint-url "$r2_endpoint" >/dev/null`,
-    'fi',
-    'if [[ "$open_oss_delete_needed" == true ]]; then',
-    `  probe_oss_recovery ${q(OPEN_TRANSACTION_KEY)} final-open-oss-immediate`,
-    '  open_oss_state="$(jq -er .state recovery-readback/final-open-oss-immediate.json)"',
-    '  if [[ "$open_oss_state" == exists ]]; then',
-    `    ossutil cp "oss://\${ALIYUN_OSS_BUCKET}/${OPEN_TRANSACTION_KEY}" recovery-readback/live/open-oss-immediate.json --force --endpoint "$oss_endpoint" --region "$ALIYUN_REGION"`,
-    `    ossutil api head-object --bucket "$ALIYUN_OSS_BUCKET" --key ${q(OPEN_TRANSACTION_KEY)} --endpoint "$oss_endpoint" --region "$ALIYUN_REGION" --output-format json --quiet > recovery-readback/live/open-oss-immediate-metadata.json`,
-    '    cmp "$JOURNAL" recovery-readback/live/open-oss-immediate.json',
-    '    test "$(jq -er .transactionId recovery-readback/live/open-oss-immediate.json)" = "$transaction_id"',
-    '    node scripts/updater/promotion-transaction.mjs backup-metadata-plan --metadata recovery-readback/live/open-oss-immediate-metadata.json --output recovery-readback/plans/open-oss-immediate.json',
-    '    jq -e \'.contentType == "application/json" and .cacheControl == "no-store"\' recovery-readback/plans/open-oss-immediate.json >/dev/null',
-    `    ossutil api delete-object --bucket "$ALIYUN_OSS_BUCKET" --key ${q(OPEN_TRANSACTION_KEY)} --endpoint "$oss_endpoint" --region "$ALIYUN_REGION" --output-format json --quiet >/dev/null`,
-    '  else',
-    '    test "$open_oss_state" = absent',
-    '  fi',
-    'fi',
-    `probe_r2_recovery ${q(OPEN_TRANSACTION_KEY)} final-open-r2-absent`,
-    `probe_oss_recovery ${q(OPEN_TRANSACTION_KEY)} final-open-oss-absent`,
-    'jq -e \'.state == "absent"\' recovery-readback/final-open-r2-absent.json >/dev/null',
-    'jq -e \'.state == "absent"\' recovery-readback/final-open-oss-absent.json >/dev/null'
+    '# The frozen handoff must still match after all allowed mutations.',
+    'ossutil cp "oss://${ALIYUN_OSS_BUCKET}/${legacy_key}" recovery-readback/frozen-legacy-oss-final.json --force --endpoint "$oss_endpoint" --region "$ALIYUN_REGION"',
+    'aws s3 cp "s3://${CLOUDFLARE_R2_BUCKET}/${legacy_key}" recovery-readback/frozen-legacy-r2-final.json --endpoint-url "$r2_endpoint"',
+    'node scripts/updater/promotion-transaction.mjs validate-frozen-legacy --current-policy recovery-readback/policy-restored.json --next-policy recovery-readback/next-policy-r2.json --oss-legacy recovery-readback/frozen-legacy-oss-final.json --r2-legacy recovery-readback/frozen-legacy-r2-final.json --output recovery-readback/frozen-legacy-final.json',
+    'cp "$JOURNAL" recovery-readback/journal-before-terminal.json',
+    'node scripts/updater/promotion-transaction.mjs advance-journal --journal "$JOURNAL" --state rolled-back --checkpoint router-policy-restored --updated-at "$(date -u +%Y-%m-%dT%H:%M:%S.000Z)" --output recovery-readback/journal-rolled-back.json',
+    'persist_recovery_journal recovery-readback/journal-rolled-back.json recovery-readback/journal-before-terminal.json',
+    'cp recovery-readback/journal-rolled-back.json "$JOURNAL"',
+    '# Leave terminal lock cleanup to the standard terminal-recovery path.',
+    'echo "Router promotion recovered; terminal journal is ready for verified cleanup."'
   )
   return `${lines.join('\n')}\n`
 }
@@ -2062,6 +1830,23 @@ async function runCli() {
       fs.writeFileSync(
         path.resolve(args['--output']),
         `${JSON.stringify({ url }, null, 2)}\n`
+      )
+    }
+    return
+  }
+  if (command === 'validate-frozen-legacy') {
+    const result = validateFrozenLegacyInvariant({
+      currentPolicyBytes: fs.readFileSync(
+        path.resolve(args['--current-policy'])
+      ),
+      nextPolicyBytes: fs.readFileSync(path.resolve(args['--next-policy'])),
+      ossLegacyBytes: fs.readFileSync(path.resolve(args['--oss-legacy'])),
+      r2LegacyBytes: fs.readFileSync(path.resolve(args['--r2-legacy'])),
+    })
+    if (args['--output']) {
+      fs.writeFileSync(
+        path.resolve(args['--output']),
+        `${JSON.stringify(result, null, 2)}\n`
       )
     }
     return

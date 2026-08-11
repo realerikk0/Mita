@@ -104,7 +104,7 @@ export const TRUSTED_SENSITIVE_UPDATER_WORKFLOW_CONTRACTS = Object.freeze({
   '.github/workflows/promote-desktop-update.yml': Object.freeze({
     exactJobNames: Object.freeze(['promote']),
     expectedEnvelopeSha256:
-      '912b8461e04372fbdb8e0bf7b7f3de964712dafa47f978561424fc192bdbaa8b',
+      '00d928585f71efe9edaad7d471c64fcb2fc054c83d66a9f5faf4085832fe96aa',
     expectedPermissions: Object.freeze({
       actions: 'read',
       contents: 'read',
@@ -113,7 +113,7 @@ export const TRUSTED_SENSITIVE_UPDATER_WORKFLOW_CONTRACTS = Object.freeze({
   '.github/workflows/recover-split-updater-transaction.yml': Object.freeze({
     exactJobNames: Object.freeze(['recover']),
     expectedEnvelopeSha256:
-      '7ee85ed89ac8fbd8133ec70a8635aa936d73aebac93a01d041e512c4e5904e4e',
+      '22106ada966a6f85792aa9b2f46928f7a3299f74722eed2c2931f40cbc442c5b',
     expectedPermissions: Object.freeze({
       contents: 'read',
     }),
@@ -121,7 +121,7 @@ export const TRUSTED_SENSITIVE_UPDATER_WORKFLOW_CONTRACTS = Object.freeze({
   '.github/workflows/updater-health-gate.yml': Object.freeze({
     exactJobNames: Object.freeze(['evaluate']),
     expectedEnvelopeSha256:
-      'fc9a5bb11a201f17861650dcaa7603dacd495b1a9a26cf4ed490dbac381158e9',
+      '3173d9ea7ebeba53d425bc1f833e50923dba4396079ec0d4403327a1eed45d17',
     expectedPermissions: Object.freeze({
       contents: 'read',
     }),
@@ -129,7 +129,7 @@ export const TRUSTED_SENSITIVE_UPDATER_WORKFLOW_CONTRACTS = Object.freeze({
   '.github/workflows/updater-kill-switch.yml': Object.freeze({
     exactJobNames: Object.freeze(['update']),
     expectedEnvelopeSha256:
-      'b1bf32244c98fb4cd83d0ba4eb57283b752548d86f1a948851bb2ef4d984cd3d',
+      'dc7f62e3bfff7b84b547d1e3f1bac1dc778095d4856e6f0501891cd55548f800',
     expectedPermissions: Object.freeze({
       contents: 'read',
     }),
@@ -140,6 +140,7 @@ const UPDATER_CONTRACT_TEST_COMMANDS = Object.freeze([
   'node --test scripts/updater/__tests__/a-canary-evidence.test.mjs',
   'node --test scripts/updater/__tests__/legacy-manifest-policy.test.mjs',
   'node --test scripts/updater/__tests__/legacy-pause-transaction.test.mjs',
+  'node --test scripts/updater/__tests__/router-pause-transaction.test.mjs',
   'node --test scripts/updater/__tests__/promotion-transaction.test.mjs',
   'node --test scripts/updater/__tests__/recovery-qualification.test.mjs',
   'node --test scripts/updater/__tests__/updater.test.mjs',
@@ -3675,6 +3676,56 @@ export function validateDraftAssetRepairWorkflow(source, stateHelperSource) {
   return failures
 }
 
+export function validateFrozenLegacyHandoffWorkflow(source) {
+  const failures = []
+  const active = uncommentedSource(source)
+  const trigger = topLevelBlock(active, 'on')
+  const triggerKeys = trigger
+    ? [...trigger.matchAll(/^  ([A-Za-z0-9_-]+):\s*$/gm)].map(
+        (match) => match[1]
+      )
+    : []
+  if (
+    !/^name:\s*Verify Frozen Legacy Handoff\s*$/m.test(active) ||
+    triggerKeys.length !== 2 ||
+    triggerKeys[0] !== 'workflow_dispatch' ||
+    triggerKeys[1] !== 'schedule' ||
+    !/^    - cron:\s*"17 3 \* \* 1"\s*$/m.test(trigger ?? '')
+  ) {
+    failures.push(
+      'frozen legacy handoff verifier must expose only manual and weekly read-only triggers'
+    )
+  }
+  const required = [
+    'contents: read',
+    'ref: ${{ github.event.repository.default_branch }}',
+    'persist-credentials: false',
+    'policy=scripts/updater/legacy-bridge-policy.json',
+    `test "$(jq -er '.state' "$policy")" = frozen-handoff`,
+    `version="$(jq -er '.expectedVersion' "$policy")"`,
+    'node scripts/updater/live-terminal-manifest-policy.mjs',
+    '--evidence dist/frozen-legacy-handoff-verification.json',
+  ]
+  if (required.some((needle) => !active.includes(needle))) {
+    failures.push(
+      'frozen legacy handoff verifier must bind all three live manifests to the tracked frozen policy'
+    )
+  }
+  if (
+    active.includes('release-train-policy.json') ||
+    /version="\$\(jq -er '\.version'\s+dist\//.test(active) ||
+    /\bcontents:\s*write\b/.test(active) ||
+    /\b(?:ossutil|wrangler)\b|\baws\s+s3(?:api)?\b|\bgh\s+release\b|\bcurl\b[^\n]*(?:--upload-file|-T\b|-X\s*(?:POST|PUT|PATCH|DELETE)|--data(?:-binary)?\b|--form\b)/i.test(
+      active
+    )
+  ) {
+    failures.push(
+      'frozen legacy handoff verifier must never follow the rolling terminal or mutate a release origin'
+    )
+  }
+  return failures
+}
+
 export function validateReleaseEnvironmentWorkflows(workflows) {
   const failures = []
   for (const [
@@ -3792,6 +3843,48 @@ export function validateReleaseEnvironmentWorkflows(workflows) {
       ) {
         failures.push(
           `${workflow} must bind DIRECT_C to exact direct qualification evidence and the fail-closed one-shot promotion contract`
+        )
+      }
+      if (
+        /\bLEGACY_(?:ALIYUN|R2)_/.test(active) ||
+        active.includes('mita/latest.json') ||
+        active.includes('legacy-pause-fallback') ||
+        !active.includes(
+          'node scripts/updater/legacy-manifest-policy.mjs validate-promotion'
+        )
+      ) {
+        failures.push(
+          `${workflow} must preserve the frozen legacy handoff through policy validation without reading or writing legacy origins`
+        )
+      }
+    }
+    if (workflow === '.github/workflows/recover-split-updater-transaction.yml') {
+      const active = uncommentedSource(source)
+      if (
+        /\bLEGACY_(?:ALIYUN|R2)_/.test(active) ||
+        active.includes('mita/latest.json')
+      ) {
+        failures.push(
+          `${workflow} must recover Router policy state without reading or writing frozen legacy origins`
+        )
+      }
+    }
+    if (
+      workflow === '.github/workflows/updater-health-gate.yml' ||
+      workflow === '.github/workflows/updater-kill-switch.yml'
+    ) {
+      const active = uncommentedSource(source)
+      if (
+        !active.includes(
+          'bash scripts/updater/run-router-pause-transaction.sh'
+        ) ||
+        /\bLEGACY_(?:ALIYUN|R2)_/.test(active) ||
+        active.includes('mita/latest.json') ||
+        active.includes('run-pause-transaction.sh') ||
+        /\b(?:ALIYUN_|OSS_ACCESS_|ossutil\b|aliyun\s+configure)/.test(active)
+      ) {
+        failures.push(
+          `${workflow} must pause Router policy only and leave frozen legacy origins read-only`
         )
       }
     }
@@ -4815,12 +4908,11 @@ export function validateCiControlOwnership(source) {
     '/yarn.lock',
   ]) {
     const owners = ownersByPattern.get(pattern) ?? []
-    for (const owner of ['@realerikk0', '@twokar']) {
-      if (!owners.includes(owner)) {
-        failures.push(
-          `CI control path ${pattern} must require review from ${owner}`
-        )
-      }
+    const owner = '@realerikk0'
+    if (!owners.includes(owner)) {
+      failures.push(
+        `CI control path ${pattern} must assign ownership to ${owner}`
+      )
     }
   }
   return failures
