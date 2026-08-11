@@ -6,6 +6,7 @@ import path from 'node:path'
 import test from 'node:test'
 
 import {
+  FROZEN_LEGACY_MANIFEST_KEY,
   OPEN_TRANSACTION_KEY,
   STABLE_POLICY_KEY,
   advanceJournal,
@@ -192,6 +193,59 @@ test('schema-3 Router promotion journal snapshots only policy', () => {
   assert.throws(
     () => validateJournal(driftedJournal),
     /backup key is not transaction-bound/
+  )
+
+  for (const provider of ['oss', 'r2']) {
+    const poisonedEntry = {
+      provider,
+      key: FROZEN_LEGACY_MANIFEST_KEY,
+      sha256: sha('f'),
+      contentType: 'application/json',
+      cacheControl: 'public, max-age=31536000, immutable',
+      createdByTransaction: true,
+      verified: true,
+    }
+    assert.throws(
+      () =>
+        advanceJournal(journal, {
+          state: 'committing',
+          checkpoint: `poisoned-${provider}-legacy-entry`,
+          immutableEntry: poisonedEntry,
+          updatedAt: '2026-08-11T00:01:00.000Z',
+        }),
+      /may never target the frozen legacy manifest/
+    )
+
+    const committing = advanceJournal(journal, {
+      state: 'committing',
+      checkpoint: `before-${provider}-recovery`,
+      updatedAt: '2026-08-11T00:01:00.000Z',
+    })
+    committing.immutableLedger.push(poisonedEntry)
+    assert.throws(
+      () => recoveryCommands(committing),
+      /may never target the frozen legacy manifest/
+    )
+  }
+
+  const crossReleaseEntry = {
+    provider: 'r2',
+    key: 'biyan/updater/releases/v0.6.651/latest.json',
+    sha256: sha('e'),
+    contentType: 'application/json',
+    cacheControl: 'public, max-age=31536000, immutable',
+    createdByTransaction: true,
+    verified: true,
+  }
+  assert.throws(
+    () =>
+      advanceJournal(journal, {
+        state: 'committing',
+        checkpoint: 'poisoned-cross-release-entry',
+        immutableEntry: crossReleaseEntry,
+        updatedAt: '2026-08-11T00:01:00.000Z',
+      }),
+    /must be one canonical file under biyan\/updater\/releases\/v0\.6\.652\//
   )
 })
 
@@ -505,8 +559,14 @@ test('production runners keep legacy handoff read-only and pause only Router pol
   }
 
   assert.match(pause, /--if-match "\$policy_before_etag"/)
-  assert.match(pause, /classify-policy-rollback/)
   assert.match(pause, /validate-router-probe/)
+  assert.match(pause, /status=paused-unverified/)
+  assert.match(pause, /automaticResumeAttempted:false/)
+  assert.doesNotMatch(pause, /classify-policy-rollback/)
+  assert.doesNotMatch(
+    pause,
+    /--body "\$\{state_dir\}\/before-policy\.json"/
+  )
   assert.doesNotMatch(pause, /ALIYUN|OSS|mita\/latest|legacy/i)
   assert.equal(
     fs.existsSync(

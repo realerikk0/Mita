@@ -2504,13 +2504,19 @@ test('Router-only pause proves state before mutation and after pause', () => {
     runner.slice(firstWrite, postProbe),
     /--if-match "\$policy_before_etag"/
   )
-  const rollback = runner.slice(
-    runner.indexOf('rollback() {'),
-    runner.indexOf('trap rollback ERR INT TERM')
+  const failureHandler = runner.slice(
+    runner.indexOf('fail_closed() {'),
+    runner.indexOf('trap fail_closed ERR INT TERM')
   )
-  assert.match(rollback, /classify-policy-rollback/)
-  assert.match(rollback, /--if-match "\$rollback_etag"/)
-  assert.match(rollback, /probe_router rollback/)
+  assert.match(failureHandler, /fetch_policy failure-observed/)
+  assert.match(failureHandler, /status=paused-unverified/)
+  assert.match(failureHandler, /automaticResumeAttempted:false/)
+  assert.doesNotMatch(failureHandler, /classify-policy-rollback/)
+  assert.doesNotMatch(
+    failureHandler,
+    /--body "\$\{state_dir\}\/before-policy\.json"/
+  )
+  assert.doesNotMatch(failureHandler, /probe_router rollback/)
   assert.doesNotMatch(runner, /ALIYUN|OSS|mita\/latest|legacy/i)
 })
 

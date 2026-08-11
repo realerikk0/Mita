@@ -53,6 +53,27 @@ function legacy633Bytes() {
   )
 }
 
+function historicalPreALegacyPolicy() {
+  const tracked = JSON.parse(
+    fs.readFileSync(
+      path.join(repoRoot, 'scripts/updater/legacy-bridge-policy.json'),
+      'utf8',
+    ),
+  )
+  return {
+    schema: 1,
+    state: 'pre-a',
+    expectedVersion: DIRECT_C_CURRENT.version,
+    expectedManifestSha256: DIRECT_C_CURRENT.manifestSha256,
+    requiredPlatforms: [
+      'darwin-aarch64',
+      'darwin-x86_64',
+      'windows-x86_64',
+    ],
+    manifestUrls: structuredClone(tracked.manifestUrls),
+  }
+}
+
 function initialPolicy() {
   return {
     schema: 1,
@@ -438,12 +459,7 @@ test('DIRECT_C rejects partial rollout, missing qualification, and policy drift'
 
 test('legacy bridge validation accepts DIRECT_C C lineage with a frozen fallback', () => {
   const fixture = directFixture()
-  const trackedLegacyPolicy = JSON.parse(
-    fs.readFileSync(
-      path.join(repoRoot, 'scripts/updater/legacy-bridge-policy.json'),
-      'utf8',
-    ),
-  )
+  const trackedLegacyPolicy = historicalPreALegacyPolicy()
   assert.deepEqual(
     validatePromotionLegacyBridge({
       candidate: fixture.candidate,
@@ -473,12 +489,7 @@ test('legacy bridge validation accepts DIRECT_C C lineage with a frozen fallback
 
 test('post-promotion legacy monitoring pins only the exact DIRECT_C target', () => {
   const fixture = directFixture()
-  const preA = JSON.parse(
-    fs.readFileSync(
-      path.join(repoRoot, 'scripts/updater/legacy-bridge-policy.json'),
-      'utf8',
-    ),
-  )
+  const preA = historicalPreALegacyPolicy()
   const pinned = {
     ...preA,
     state: 'direct-c-pinned',

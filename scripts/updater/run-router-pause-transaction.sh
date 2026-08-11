@@ -127,61 +127,58 @@ node scripts/updater/router-pause-transaction.mjs validate-policy \
   --output "${state_dir}/policy-transition.json"
 
 policy_write_attempted=false
-rollback() {
-  local original_rc=$? rollback_failed=0
+fail_closed() {
+  local original_rc=$?
+  local status=pre-write-failure
+  local observed_state=not-checked
+  local mutated_json=false
+  local requires_review_json=false
   if [[ "$original_rc" -eq 0 ]]; then original_rc=1; fi
   trap - ERR INT TERM
   set +e
+
+  # A pause is a one-way safety action. Once its conditional PUT may have
+  # reached Router policy, an error must never write the previous active policy
+  # back. Observe the live state for evidence and leave any successful pause in
+  # place; a later health-gated promotion is the only authorized resume path.
   if [[ "$policy_write_attempted" == true ]]; then
-    fetch_policy rollback-live || rollback_failed=1
-    if [[ "$rollback_failed" -eq 0 ]]; then
-      node scripts/updater/promotion-transaction.mjs classify-policy-rollback \
-        --policy-existed true \
-        --original "${state_dir}/before-policy.json" \
-        --next "${state_dir}/paused-policy.json" \
-        --live-state exists --live "${state_dir}/rollback-live-policy.json" \
-        --output "${state_dir}/rollback-decision.json" \
-        || rollback_failed=1
-    fi
-    if [[ "$rollback_failed" -eq 0 \
-      && "$(jq -er .action "${state_dir}/rollback-decision.json")" == restore ]]; then
-      rollback_etag="$(node scripts/updater/promotion-transaction.mjs \
-        extract-r2-etag \
-        --metadata "${state_dir}/rollback-live-policy-metadata.json")" \
-        || rollback_failed=1
-      if [[ "$rollback_failed" -eq 0 ]]; then
-        aws s3api put-object --bucket "$CLOUDFLARE_R2_BUCKET" \
-          --key "$POLICY_KEY" --body "${state_dir}/before-policy.json" \
-          --content-type application/json --cache-control no-store \
-          --if-match "$rollback_etag" --endpoint-url "$r2_endpoint" \
-          >/dev/null || rollback_failed=1
+    status=pause-state-unknown
+    observed_state=unavailable
+    mutated_json=null
+    requires_review_json=true
+    if fetch_policy failure-observed; then
+      if cmp -s "${state_dir}/paused-policy.json" \
+        "${state_dir}/failure-observed-policy.json"; then
+        status=paused-unverified
+        observed_state=paused
+        mutated_json=true
+      elif cmp -s "${state_dir}/before-policy.json" \
+        "${state_dir}/failure-observed-policy.json"; then
+        status=write-not-applied
+        observed_state=active
+        mutated_json=false
+      else
+        status=live-policy-drift
+        observed_state=unexpected
       fi
     fi
   fi
-  if [[ "$rollback_failed" -eq 0 ]]; then
-    fetch_policy rollback-verified || rollback_failed=1
-    cmp "${state_dir}/before-policy.json" \
-      "${state_dir}/rollback-verified-policy.json" || rollback_failed=1
-  fi
-  if [[ "$rollback_failed" -eq 0 ]]; then
-    probe_router rollback || rollback_failed=1
-    test "$(cat "${state_dir}/rollback-router.status")" = 204 \
-      || rollback_failed=1
-    test "$(cat "${state_dir}/rollback-router.state")" = no-transition \
-      || rollback_failed=1
-  fi
+
   jq -n --arg current "$EXPECTED_CURRENT" \
-    --argjson rollbackFailed "$rollback_failed" '{
-      schema:1, kind:"router-pause-result", status:"rolled-back",
-      currentVersion:$current, mutated:true,
-      rollbackVerified:($rollbackFailed == 0)
+    --arg status "$status" --arg observedState "$observed_state" \
+    --argjson writeAttempted "$policy_write_attempted" \
+    --argjson mutated "$mutated_json" \
+    --argjson requiresOperatorReview "$requires_review_json" '{
+      schema:1, kind:"router-pause-result", status:$status,
+      currentVersion:$current, policyWriteAttempted:$writeAttempted,
+      observedState:$observedState, mutated:$mutated,
+      automaticResumeAttempted:false,
+      requiresOperatorReview:$requiresOperatorReview
     }' >"${state_dir}/summary.json"
-  if [[ "$rollback_failed" -ne 0 ]]; then
-    echo "Router pause rollback incomplete; policy requires operator review." >&2
-  fi
+  echo "Router pause failed closed; the previous active policy was not restored." >&2
   exit "$original_rc"
 }
-trap rollback ERR INT TERM
+trap fail_closed ERR INT TERM
 
 # Re-read at the mutation boundary and bind the write to the exact ETag.
 fetch_policy forward

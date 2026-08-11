@@ -843,6 +843,8 @@ export function validateJournal(journal) {
   if (!Array.isArray(journal.immutableLedger)) {
     throw new Error('Promotion immutable ledger must be an array')
   }
+  const immutableReleasePrefix =
+    `biyan/updater/releases/v${journal.targetVersion}/`
   for (const [index, entry] of journal.immutableLedger.entries()) {
     assertPlainObject(entry, `Promotion immutable ledger ${index}`)
     assertExactKeys(
@@ -860,6 +862,25 @@ export function validateJournal(journal) {
     )
     if (!['r2', 'oss'].includes(entry.provider)) {
       throw new Error(`Promotion immutable ledger ${index} provider is invalid`)
+    }
+    if (entry.key === FROZEN_LEGACY_MANIFEST_KEY) {
+      throw new Error(
+        `Promotion immutable ledger ${index} may never target the frozen legacy manifest`
+      )
+    }
+    const immutableFile =
+      typeof entry.key === 'string' && entry.key.startsWith(immutableReleasePrefix)
+        ? entry.key.slice(immutableReleasePrefix.length)
+        : ''
+    if (
+      !immutableFile ||
+      immutableFile.includes('/') ||
+      immutableFile.includes('..') ||
+      !/^[0-9A-Za-z][0-9A-Za-z._+-]*$/.test(immutableFile)
+    ) {
+      throw new Error(
+        `Promotion immutable ledger ${index} key must be one canonical file under ${immutableReleasePrefix}`
+      )
     }
     assertSha256(entry.sha256, `Promotion immutable ledger ${index} sha256`)
     if (
