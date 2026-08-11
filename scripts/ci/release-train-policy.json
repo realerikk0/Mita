@@ -33,14 +33,22 @@
       "dataSchema": 3,
       "sourceCommit": "cc7bd75e40da7e32ea93433ed7311fb7ddbab379",
       "status": "published-superseded"
+    },
+    {
+      "tag": "v0.6.650",
+      "version": "0.6.650",
+      "migrationPhase": "C",
+      "dataSchema": 3,
+      "sourceCommit": "7c4f563ff8f0a7d7ab877330881f73db164cc613",
+      "status": "published-superseded"
     }
   ],
   "activeTerminalRelease": {
-    "tag": "v0.6.650",
-    "version": "0.6.650",
+    "tag": "v0.6.651",
+    "version": "0.6.651",
     "migrationPhase": "C",
     "dataSchema": 3,
-    "sourceCommit": "7c4f563ff8f0a7d7ab877330881f73db164cc613"
+    "sourceCommit": "624c979b4cac6947af19cd5fb2dbf343960503be"
   },
   "trains": [
     {

@@ -10,15 +10,15 @@ The supported release is one cumulative, forward-only terminal update:
 
 | Release | App version | Migration phase | Data schema | Purpose |
 | --- | --- | --- | --- | --- |
-| Previous published | 0.6.649 | C | 3 | Deliver the full Biyan source, branding, packaging, and migration closure in one update |
-| Active complete | 0.6.650 | C | 3 | Add Seedance video generation and the improved provider/model experience |
+| Previous published | 0.6.650 | C | 3 | Add Seedance video generation and the improved provider/model experience |
+| Active complete | 0.6.651 | C | 3 | Improve resilient video generation, task recovery, and direct downloads |
 
 The former `0.6.643/A/1` → `0.6.644/B/2` → `0.6.645/C/3` train is
 preserved as immutable audit and compatibility history, but it is not an
-automatic rollout sequence. Do not recut A/B/C. Published `v0.6.649` remains
-bound to `cc7bd75e40da7e32ea93433ed7311fb7ddbab379`. The active `v0.6.650`
+automatic rollout sequence. Do not recut A/B/C. Published `v0.6.650` remains
+bound to `7c4f563ff8f0a7d7ab877330881f73db164cc613`. The active `v0.6.651`
 terminal is bound to exact product source commit
-`7c4f563ff8f0a7d7ab877330881f73db164cc613`; later control-plane commits may
+`624c979b4cac6947af19cd5fb2dbf343960503be`; later control-plane commits may
 qualify or distribute that source but may not change the tagged product tree.
 
 The `v0.6.646`, `v0.6.647`, and `v0.6.648` tags, Draft releases, uploaded assets, and
