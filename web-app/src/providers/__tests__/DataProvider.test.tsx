@@ -26,6 +26,7 @@ const h = vi.hoisted(() => {
     toastSuccess: vi.fn(),
     toastError: vi.fn(),
     toastWarning: vi.fn(),
+    videoResumeAll: vi.fn(),
   }
 })
 
@@ -63,6 +64,12 @@ vi.mock('@/hooks/useAssistant', () => ({
 
 vi.mock('@/hooks/useThreads', () => ({
   useThreads: () => ({ setThreads: h.setThreads }),
+}))
+
+vi.mock('@/stores/video-generation-store', () => ({
+  useVideoGenerationStore: {
+    getState: () => ({ resumeAll: h.videoResumeAll }),
+  },
 }))
 
 vi.mock('@/lib/utils', () => ({
@@ -166,11 +173,20 @@ describe('DataProvider', () => {
     h.toastSuccess.mockClear()
     h.toastError.mockClear()
     h.toastWarning.mockClear()
+    h.videoResumeAll.mockClear()
   })
 
   it('renders null (no DOM output)', () => {
     const { container } = render(<DataProvider />)
     expect(container.firstChild).toBeNull()
+  })
+
+  it('checks persisted video tasks even when no providers are configured', async () => {
+    h.providers = []
+
+    render(<DataProvider />)
+
+    await waitFor(() => expect(h.videoResumeAll).toHaveBeenCalledTimes(1))
   })
 
   it('hydrates providers, mcp config, assistants, threads on mount', async () => {

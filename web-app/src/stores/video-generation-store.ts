@@ -15,6 +15,7 @@ import type { ImageAssetRecord } from '@/services/image-generation/types'
 import {
   isRecoverableVideoPollingError,
   normalizeVideoError,
+  RecoverableVideoPollingError,
 } from '@/services/video-generation/retry-error'
 import type {
   VideoAssetKind,
@@ -45,6 +46,8 @@ const VIDEO_PROVIDER_UNAVAILABLE =
 const VIDEO_MODEL_UNAVAILABLE =
   'Video model unavailable — refresh the provider to resume, or generate again'
 const VIDEO_TASK_EXPIRED = 'Video task expired — generate it again'
+const VIDEO_TASK_PAUSED =
+  'Video task polling paused — continue checking to resume'
 
 type VideoHub = Pick<
   VideoGenerationService,
@@ -70,13 +73,15 @@ export type PersistedVideoTask = {
   assetKind?: VideoAssetKind
   startedAt: number
   estimateMs: number
+  /** Manual tasks only resume after an explicit user action. */
+  resumePolicy?: 'auto' | 'manual'
 }
 
 /** Live, in-memory state surfaced to the UI (never persisted). */
 export type VideoRuntime = {
   status: VideoGenerationStatus
   /** Transport health for an already-created provider task. */
-  connectionState?: 'connected' | 'reconnecting'
+  connectionState?: 'connected' | 'reconnecting' | 'paused'
   /** Epoch milliseconds for the next attempt while reconnecting. */
   retryAt?: number
   assetId?: string
@@ -201,6 +206,62 @@ function removePersisted(key: string) {
   })
 }
 
+function setResumePolicy(key: string, resumePolicy: 'auto' | 'manual') {
+  useVideoGenerationStore.setState((state) => {
+    const task = state.tasks[key]
+    if (!task) return {}
+    return {
+      tasks: {
+        ...state.tasks,
+        [key]: { ...task, resumePolicy },
+      },
+    }
+  })
+}
+
+function pausePersistedTask(key: string, message: string) {
+  const persisted = useVideoGenerationStore.getState().tasks[key]
+  if (!persisted) return
+  setResumePolicy(key, 'manual')
+  setRuntime(key, {
+    status: 'failed',
+    connectionState: 'paused',
+    retryAt: undefined,
+    assetId: persisted.assetId,
+    assetKind: assetKindForPersistedTask(persisted),
+    startedAt: persisted.startedAt,
+    estimateMs: persisted.estimateMs,
+    error: message,
+  })
+}
+
+function failPollingTask(key: string, message: string) {
+  setRuntime(key, {
+    status: 'failed',
+    connectionState: 'connected',
+    retryAt: undefined,
+    error: message,
+  })
+  toast.error(message)
+  removePersisted(key)
+}
+
+function expireTaskIfNeeded(key: string, persisted: PersistedVideoTask) {
+  if (Date.now() - persisted.startedAt <= MAX_RESUMABLE_AGE_MS) return false
+  setRuntime(key, {
+    status: 'failed',
+    connectionState: 'connected',
+    retryAt: undefined,
+    assetId: persisted.assetId,
+    assetKind: assetKindForPersistedTask(persisted),
+    startedAt: persisted.startedAt,
+    estimateMs: persisted.estimateMs,
+    error: VIDEO_TASK_EXPIRED,
+  })
+  removePersisted(key)
+  return true
+}
+
 function clearRuntime(key: string) {
   useVideoGenerationStore.setState((state) => {
     if (!(key in state.runtime)) return {}
@@ -262,20 +323,7 @@ async function finishTask(
     while (!isSuperseded(key, controller)) {
       const persisted = useVideoGenerationStore.getState().tasks[key]
       if (!persisted) return
-      if (Date.now() - persisted.startedAt > MAX_RESUMABLE_AGE_MS) {
-        setRuntime(key, {
-          status: 'failed',
-          connectionState: 'connected',
-          retryAt: undefined,
-          assetId: persisted.assetId,
-          assetKind: assetKindForPersistedTask(persisted),
-          startedAt: persisted.startedAt,
-          estimateMs: persisted.estimateMs,
-          error: VIDEO_TASK_EXPIRED,
-        })
-        removePersisted(key)
-        return
-      }
+      if (expireTaskIfNeeded(key, persisted)) return
       videoDebugLog('store:finish:start', {
         key,
         taskId: persisted.taskId,
@@ -288,24 +336,36 @@ async function finishTask(
         recoveryAttempt,
       })
 
+      let phase: 'polling' | 'saving' = completedTask ? 'saving' : 'polling'
       try {
         if (!completedTask) {
+          phase = 'polling'
           const finalTask = await hub.pollVideoTask({
             provider,
             model,
             taskId: persisted.taskId,
             signal: controller.signal,
+            onPollResponse: () => {
+              if (isSuperseded(key, controller)) return
+              recoveryAttempt = 0
+              setRuntime(key, {
+                status: 'running',
+                connectionState: 'connected',
+                retryAt: undefined,
+                error: undefined,
+              })
+            },
           })
           // Some transports can resolve after AbortSignal cancellation. Never
           // let an older poll mutate or download over the replacement task.
           if (isSuperseded(key, controller)) return
+          if (expireTaskIfNeeded(key, persisted)) return
           videoDebugLog('store:finish:final-task', {
             key,
             taskId: persisted.taskId,
             finalTask,
           })
           completedTask = finalTask
-          recoveryAttempt = 0
         }
 
         if (completedTask.status === 'failed') {
@@ -314,14 +374,7 @@ async function finishTask(
             key,
             taskId: persisted.taskId,
           })
-          setRuntime(key, {
-            status: 'failed',
-            connectionState: 'connected',
-            retryAt: undefined,
-            error: message,
-          })
-          toast.error(message)
-          removePersisted(key)
+          failPollingTask(key, message)
           return
         }
         if (completedTask.status !== 'succeeded') {
@@ -333,15 +386,11 @@ async function finishTask(
             taskId: persisted.taskId,
             finalTask: completedTask,
           })
-          throw new Error(VIDEO_GENERATION_NO_URL)
+          failPollingTask(key, VIDEO_GENERATION_NO_URL)
+          return
         }
-        setRuntime(key, {
-          status: 'running',
-          connectionState: 'connected',
-          retryAt: undefined,
-          error: undefined,
-        })
 
+        phase = 'saving'
         const saved = await hub.saveVideoAsset({
           id: persisted.assetId,
           prompt: persisted.prompt,
@@ -383,13 +432,38 @@ async function finishTask(
         // Aborted/superseded runs (cancel()/reset()/regenerate) already cleaned
         // up and may have started a newer run for this key.
         if (isSuperseded(key, controller)) return
+        if (expireTaskIfNeeded(key, persisted)) return
 
         const normalized = normalizeVideoError(error)
         if (isRecoverableVideoPollingError(normalized)) {
-          const delayMs =
-            RECOVERY_BACKOFF_MS[
-              Math.min(recoveryAttempt, RECOVERY_BACKOFF_MS.length - 1)
-            ]!
+          if (
+            normalized instanceof RecoverableVideoPollingError &&
+            normalized.reason === 'timeout'
+          ) {
+            videoDebugError('store:finish:poll-timeout-paused', normalized, {
+              key,
+              taskId: persisted.taskId,
+            })
+            pausePersistedTask(
+              key,
+              normalized.message || VIDEO_GENERATION_FAILED
+            )
+            return
+          }
+          if (recoveryAttempt >= RECOVERY_BACKOFF_MS.length) {
+            videoDebugError('store:finish:retries-paused', normalized, {
+              key,
+              taskId: persisted.taskId,
+              recoveryAttempt,
+            })
+            pausePersistedTask(
+              key,
+              normalized.message || VIDEO_GENERATION_FAILED
+            )
+            return
+          }
+
+          const delayMs = RECOVERY_BACKOFF_MS[recoveryAttempt]!
           const retryAt = Date.now() + delayMs
           videoDebugError('store:finish:reconnecting', normalized, {
             key,
@@ -408,22 +482,28 @@ async function finishTask(
           if (isSuperseded(key, controller)) return
           setRuntime(key, {
             status: 'running',
-            connectionState: 'connected',
+            connectionState: 'reconnecting',
             retryAt: undefined,
             error: undefined,
           })
           continue
         }
 
+        if (phase === 'saving') {
+          videoDebugError('store:finish:save-paused', normalized, {
+            key,
+            taskId: persisted.taskId,
+          })
+          pausePersistedTask(key, normalized.message || VIDEO_GENERATION_FAILED)
+          return
+        }
+
         videoDebugError('store:finish:failed', normalized, { key })
         console.error('Video generation failed:', normalized)
-        setRuntime(key, {
-          status: 'failed',
-          connectionState: 'connected',
-          retryAt: undefined,
-          error: normalized.message || VIDEO_GENERATION_FAILED,
-        })
-        toast.error(normalized.message || VIDEO_GENERATION_FAILED)
+        failPollingTask(
+          key,
+          normalized.message || VIDEO_GENERATION_FAILED
+        )
         return
       }
     }
@@ -554,6 +634,7 @@ export const useVideoGenerationStore = create<VideoGenerationStoreState>()(
             assetKind,
             startedAt,
             estimateMs,
+            resumePolicy: 'auto',
           })
 
           await finishTask(
@@ -579,20 +660,11 @@ export const useVideoGenerationStore = create<VideoGenerationStoreState>()(
         const persisted = get().tasks[key]
         if (!persisted) return
 
-        if (Date.now() - persisted.startedAt > MAX_RESUMABLE_AGE_MS) {
-          setRuntime(key, {
-            status: 'failed',
-            connectionState: 'connected',
-            retryAt: undefined,
-            assetId: persisted.assetId,
-            assetKind: assetKindForPersistedTask(persisted),
-            startedAt: persisted.startedAt,
-            estimateMs: persisted.estimateMs,
-            error: VIDEO_TASK_EXPIRED,
-          })
-          removePersisted(key)
-          return
-        }
+        if (expireTaskIfNeeded(key, persisted)) return
+
+        // `resume` is an explicit user action. Clear a manual pause before
+        // querying the existing task; it must never submit a replacement POST.
+        setResumePolicy(key, 'auto')
 
         const providers = useModelProvider.getState().providers
         const provider = providers.find(
@@ -605,7 +677,7 @@ export const useVideoGenerationStore = create<VideoGenerationStoreState>()(
           // Keep the descriptor so a later provider refresh can resume it.
           setRuntime(key, {
             status: 'failed',
-            connectionState: 'connected',
+            connectionState: 'paused',
             retryAt: undefined,
             assetId: persisted.assetId,
             assetKind: assetKindForPersistedTask(persisted),
@@ -619,7 +691,7 @@ export const useVideoGenerationStore = create<VideoGenerationStoreState>()(
           // Keep the descriptor so a later provider refresh can resume it.
           setRuntime(key, {
             status: 'failed',
-            connectionState: 'connected',
+            connectionState: 'paused',
             retryAt: undefined,
             assetId: persisted.assetId,
             assetKind: assetKindForPersistedTask(persisted),
@@ -632,7 +704,7 @@ export const useVideoGenerationStore = create<VideoGenerationStoreState>()(
 
         setRuntime(key, {
           status: 'running',
-          connectionState: 'connected',
+          connectionState: 'reconnecting',
           retryAt: undefined,
           assetId: persisted.assetId,
           assetKind: assetKindForPersistedTask(persisted),
@@ -649,7 +721,29 @@ export const useVideoGenerationStore = create<VideoGenerationStoreState>()(
       },
 
       resumeAll: () => {
-        for (const key of Object.keys(get().tasks)) get().resume(key)
+        for (const key of Object.keys(get().tasks)) {
+          const persisted = get().tasks[key]
+          if (!persisted) continue
+          // Expiry is final for both auto and manual descriptors. Check it
+          // before policy routing so a paused task cannot survive forever.
+          if (expireTaskIfNeeded(key, persisted)) continue
+          if (persisted.resumePolicy === 'manual') {
+            const existing = get().runtime[key]
+            setRuntime(key, {
+              status: 'failed',
+              connectionState: 'paused',
+              retryAt: undefined,
+              assetId: persisted.assetId,
+              assetKind: assetKindForPersistedTask(persisted),
+              startedAt: persisted.startedAt,
+              estimateMs: persisted.estimateMs,
+              error: existing?.error || VIDEO_TASK_PAUSED,
+            })
+            continue
+          }
+          // Old records have no policy and retain the legacy auto-resume default.
+          get().resume(key)
+        }
       },
 
       reset: () => {

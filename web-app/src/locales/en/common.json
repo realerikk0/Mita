@@ -132,6 +132,8 @@
       "storyboardReady": "Storyboard ready",
       "videoModelRequired": "Configure a video model to generate video.",
       "generateVideo": "Generate video",
+      "continueQuery": "Continue polling",
+      "abandonVideoTask": "Abandon task",
       "downloadStoryboard": "Download storyboard",
       "downloadVideo": "Download video",
       "style": "Style",

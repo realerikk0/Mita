@@ -2605,12 +2605,25 @@ function StoryboardVideoMode({
   const pendingTask = useVideoGenerationStore((state) =>
     taskKey ? state.tasks[taskKey] : undefined
   )
-  const videoStatus: VideoGenerationStatus =
-    videoRuntime?.status ?? (pendingTask ? 'running' : 'queued')
   const videoReconnecting = videoRuntime?.connectionState === 'reconnecting'
-  const videoInFlight = videoStatus === 'running' || videoReconnecting
+  const videoPaused = Boolean(
+    !videoReconnecting &&
+      pendingTask &&
+      (videoRuntime?.connectionState === 'paused' ||
+        (!videoRuntime && pendingTask.resumePolicy === 'manual') ||
+        (videoRuntime?.status === 'failed' &&
+          pendingTask.resumePolicy === 'manual'))
+  )
+  const videoStatus: VideoGenerationStatus =
+    videoRuntime?.status ??
+    (pendingTask ? (videoPaused ? 'failed' : 'running') : 'queued')
+  const videoInFlight =
+    !videoPaused && (videoStatus === 'running' || videoReconnecting)
   const videoNeedsResume = Boolean(
-    pendingTask && videoStatus === 'failed' && !videoReconnecting
+    pendingTask &&
+      videoPaused &&
+      videoStatus === 'failed' &&
+      !videoReconnecting
   )
   // After a restart the runtime is empty; fall back to the finished video saved
   // in the restored session (matched to this storyboard) so it shows inline.
@@ -3217,10 +3230,13 @@ function StoryboardVideoMode({
 
   const generateVideo = useCallback(() => {
     const videoStore = useVideoGenerationStore.getState()
-    if (taskKey && videoStore.tasks[taskKey]) {
+    if (taskKey && videoNeedsResume && videoStore.tasks[taskKey]) {
       videoStore.resume(taskKey)
       return
     }
+    // An active provider task must be cancelled or finish before another POST
+    // can be created for the same storyboard.
+    if (taskKey && videoStore.tasks[taskKey]) return
     if (!videoModel || !storyboardAsset) return
 
     const prompt = buildVideoPrompt(story, shots, videoSettings)
@@ -3251,8 +3267,14 @@ function StoryboardVideoMode({
     taskKey,
     totalDuration,
     videoModel,
+    videoNeedsResume,
     videoSettings,
   ])
+
+  const cancelVideo = useCallback(() => {
+    if (!taskKey) return
+    useVideoGenerationStore.getState().cancel(taskKey)
+  }, [taskKey])
 
   const videoSrc = videoAsset?.path
     ? /^https?:/i.test(videoAsset.path)
@@ -4214,25 +4236,40 @@ function StoryboardVideoMode({
                   {imageT(t, 'storyboard.storyChangedNotice')}
                 </p>
               )}
-              <Button
-                type="button"
-                className="w-full bg-[#f36f4f] text-white hover:bg-[#e96346]"
-                disabled={
-                  videoInFlight ||
-                  (!videoNeedsResume &&
-                    (!videoModel || !storyboardAsset || planIsStale))
-                }
-                onClick={generateVideo}
-              >
-                {videoInFlight ? (
-                  <Loader2 className="size-4 animate-spin" />
-                ) : (
-                  <Film className="size-4" />
+              <div className="grid gap-2">
+                <Button
+                  type="button"
+                  className="w-full bg-[#f36f4f] text-white hover:bg-[#e96346]"
+                  disabled={
+                    videoInFlight ||
+                    (!videoNeedsResume &&
+                      (!videoModel || !storyboardAsset || planIsStale))
+                  }
+                  onClick={generateVideo}
+                >
+                  {videoInFlight ? (
+                    <Loader2 className="size-4 animate-spin" />
+                  ) : (
+                    <Film className="size-4" />
+                  )}
+                  {videoNeedsResume
+                    ? imageT(t, 'storyboard.continueQuery')
+                    : imageT(t, 'storyboard.generateVideo')}
+                </Button>
+                {(videoInFlight || videoNeedsResume) && (
+                  <Button
+                    type="button"
+                    variant="outline"
+                    className="w-full"
+                    onClick={cancelVideo}
+                  >
+                    <X className="size-4" />
+                    {videoNeedsResume
+                      ? imageT(t, 'storyboard.abandonVideoTask')
+                      : t('common:cancel')}
+                  </Button>
                 )}
-                {videoNeedsResume
-                  ? '继续查询'
-                  : imageT(t, 'storyboard.generateVideo')}
-              </Button>
+              </div>
             </aside>
           </div>
         </div>
@@ -4360,8 +4397,14 @@ function Images() {
   const directVideoTask = directVideoTaskKey
     ? videoTasks[directVideoTaskKey]
     : undefined
+  const directVideoPaused = Boolean(
+    directVideoTask?.resumePolicy === 'manual' &&
+      (!directVideoRuntime ||
+        directVideoRuntime.connectionState === 'paused')
+  )
   const directVideoStatus =
-    directVideoRuntime?.status ?? (directVideoTask ? 'running' : 'idle')
+    directVideoRuntime?.status ??
+    (directVideoTask ? (directVideoPaused ? 'failed' : 'running') : 'idle')
   const [directVideoNowMs, setDirectVideoNowMs] = useState(() => Date.now())
 
   useEffect(() => {
@@ -4610,6 +4653,15 @@ function Images() {
 
   const generateDirectVideo = useCallback(
     (input: DirectVideoGenerationInput) => {
+      const hasPersistedDirectTask = Object.entries(
+        useVideoGenerationStore.getState().tasks
+      ).some(
+        ([key, task]) =>
+          key.startsWith(DIRECT_VIDEO_TASK_KEY_PREFIX) ||
+          task.assetKind === 'generated'
+      )
+      if (hasPersistedDirectTask) return
+
       const assetId = createId()
       const taskKey = `${DIRECT_VIDEO_TASK_KEY_PREFIX}${assetId}`
       const references = input.references ?? []
@@ -4669,12 +4721,13 @@ function Images() {
           : undefined
       const providerName =
         item.provider ?? directVideoTask?.providerName ?? snapshot?.provider
-      const option =
-        videoModels.find(
-          (candidate) =>
-            candidate.model.id === item.model &&
-            (!providerName || candidate.provider.provider === providerName)
-        ) ?? videoModels.find((candidate) => candidate.model.id === item.model)
+      const option = providerName
+        ? videoModels.find(
+            (candidate) =>
+              candidate.model.id === item.model &&
+              candidate.provider.provider === providerName
+          )
+        : videoModels.find((candidate) => candidate.model.id === item.model)
       if (!option) {
         toast.error('无法重试：未找到对应的视频模型，请修改提示词后重新生成')
         return
@@ -5353,6 +5406,7 @@ function Images() {
         connectionState: directVideoRuntime?.connectionState,
         retryAt: directVideoRuntime?.retryAt,
         hasPersistedTask: Boolean(directVideoTask),
+        resumePolicy: directVideoTask?.resumePolicy,
         asset: directVideoAsset,
         sourceImageSrc:
           videoReferenceSrc(currentImageReference) ??
@@ -6753,7 +6807,9 @@ function Images() {
                     status: directVideoStatus,
                     progress: directVideoProgress,
                     error: directVideoRuntime?.error,
-                    connectionState: directVideoRuntime?.connectionState,
+                    connectionState:
+                      directVideoRuntime?.connectionState ??
+                      (directVideoPaused ? 'paused' : undefined),
                     retryAt: directVideoRuntime?.retryAt,
                   }}
                   onPickReferences={pickDirectVideoReferences}

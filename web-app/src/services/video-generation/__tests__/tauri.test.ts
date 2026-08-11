@@ -12,7 +12,28 @@ vi.mock('@tauri-apps/plugin-http', () => ({
 import { invoke } from '@tauri-apps/api/core'
 import { fetch as fetchTauri } from '@tauri-apps/plugin-http'
 import { ModelCapabilities } from '@/types/models'
+import {
+  isRecoverableVideoPollingError,
+  RecoverableVideoPollingError,
+} from '../retry-error'
 import { TauriVideoGenerationService } from '../tauri'
+
+function remoteSaveRequest() {
+  return {
+    id: 'video-asset-transport-test',
+    prompt: 'gold robot',
+    provider: 'jingxing',
+    model: 'seedance-2.0',
+    ratio: '16:9' as const,
+    resolution: '1080p' as const,
+    duration: 8,
+    fps: 30,
+    sourceAssetIds: ['storyboard-1'],
+    status: 'succeeded' as const,
+    mimeType: 'video/mp4',
+    videoUrl: 'https://cdn.example.test/video.mp4',
+  }
+}
 
 describe('TauriVideoGenerationService', () => {
   beforeEach(() => {
@@ -275,5 +296,37 @@ describe('TauriVideoGenerationService', () => {
       },
     })
     expect(result).toBe(record)
+  })
+
+  it('marks native remote-save transport rejections as recoverable', async () => {
+    const nativeError =
+      'Unable to download generated video: error sending request for url (https://cdn.example.test/video.mp4)'
+    vi.mocked(invoke).mockRejectedValue(nativeError)
+
+    const service = new TauriVideoGenerationService()
+    const error = await service
+      .saveVideoAsset(remoteSaveRequest())
+      .catch((caught) => caught)
+
+    expect(error).toBeInstanceOf(RecoverableVideoPollingError)
+    expect(error).toMatchObject({
+      reason: 'network',
+      message: nativeError,
+    })
+    expect(isRecoverableVideoPollingError(error)).toBe(true)
+  })
+
+  it('does not classify native HTTP response bodies as save transport failures', async () => {
+    const nativeError =
+      'Unable to download generated video (404 Not Found): Upstream generation timed out'
+    vi.mocked(invoke).mockRejectedValue(nativeError)
+
+    const service = new TauriVideoGenerationService()
+    const error = await service
+      .saveVideoAsset(remoteSaveRequest())
+      .catch((caught) => caught)
+
+    expect(error).toBe(nativeError)
+    expect(isRecoverableVideoPollingError(error)).toBe(false)
   })
 })

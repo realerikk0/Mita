@@ -8,6 +8,7 @@ import { ModelCapabilities } from '@/types/models'
 import { DefaultVideoGenerationService } from '../default'
 import {
   isRecoverableVideoPollingError,
+  isVideoTransportFailure,
   normalizeVideoError,
   RecoverableVideoPollingError,
 } from '../retry-error'
@@ -67,10 +68,14 @@ describe('DefaultVideoGenerationService', () => {
     const tauriError =
       'error sending request for url (https://api.biyuan.ai/v1/video/generations/task-1)'
 
-    expect(isRecoverableVideoPollingError(tauriError)).toBe(true)
-    expect(isRecoverableVideoPollingError('invalid response payload')).toBe(
-      false
-    )
+    expect(isVideoTransportFailure(tauriError)).toBe(true)
+    expect(isVideoTransportFailure('invalid response payload')).toBe(false)
+    expect(isRecoverableVideoPollingError(tauriError)).toBe(false)
+    expect(
+      isRecoverableVideoPollingError(
+        new Error('Upstream generation timed out')
+      )
+    ).toBe(false)
     expect(normalizeVideoError(tauriError)).toMatchObject({
       name: 'Error',
       message: tauriError,
@@ -1459,6 +1464,108 @@ describe('DefaultVideoGenerationService', () => {
     })
   })
 
+  it('wraps an exhausted primitive Tauri transport rejection as recoverable', async () => {
+    const tauriError =
+      'error sending request for url (https://api.biyuan.ai/v1/video/generations/task-tauri-down)'
+    const fetchMock = vi.fn().mockRejectedValue(tauriError)
+    vi.stubGlobal('fetch', fetchMock)
+
+    const service = new DefaultVideoGenerationService({
+      pollIntervalMs: 0,
+      timeoutMs: 1000,
+      requestRetryDelaysMs: [],
+    })
+    const error = await service
+      .pollVideoTask({
+        provider,
+        model,
+        taskId: 'video-task-tauri-down',
+      })
+      .catch((caught) => caught)
+
+    expect(error).toBeInstanceOf(RecoverableVideoPollingError)
+    expect(error).toMatchObject({
+      reason: 'network',
+      message: tauriError,
+    })
+    expect(isRecoverableVideoPollingError(error)).toBe(true)
+    expect(fetchMock).toHaveBeenCalledTimes(1)
+  })
+
+  it.each([
+    [400, 'Upstream generation timed out'],
+    [404, 'Task connection closed permanently'],
+  ])(
+    'does not retry HTTP %i provider errors whose body resembles a transport failure',
+    async (status, message) => {
+      const fetchMock = vi.fn().mockResolvedValue(
+        new Response(JSON.stringify({ error: { message } }), {
+          status,
+          headers: { 'content-type': 'application/json' },
+        })
+      )
+      vi.stubGlobal('fetch', fetchMock)
+
+      const service = new DefaultVideoGenerationService({
+        pollIntervalMs: 0,
+        timeoutMs: 1000,
+        requestRetryDelaysMs: [0, 0],
+      })
+      const error = await service
+        .pollVideoTask({
+          provider,
+          model,
+          taskId: `video-task-terminal-${status}`,
+        })
+        .catch((caught) => caught)
+
+      expect(error).toMatchObject({ message })
+      expect(isRecoverableVideoPollingError(error)).toBe(false)
+      expect(fetchMock).toHaveBeenCalledTimes(1)
+    }
+  )
+
+  it('notifies after every successfully fetched and parsed polling response', async () => {
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(
+        new Response(
+          JSON.stringify({
+            task_id: 'video-task-connection-restored',
+            status: 'running',
+          }),
+          { status: 200, headers: { 'content-type': 'application/json' } }
+        )
+      )
+      .mockResolvedValueOnce(
+        new Response(
+          JSON.stringify({
+            task_id: 'video-task-connection-restored',
+            status: 'completed',
+            video_url: 'https://cdn.example.test/connection-restored.mp4',
+          }),
+          { status: 200, headers: { 'content-type': 'application/json' } }
+        )
+      )
+    vi.stubGlobal('fetch', fetchMock)
+    const onPollResponse = vi.fn()
+
+    const service = new DefaultVideoGenerationService({
+      pollIntervalMs: 0,
+      timeoutMs: 1000,
+    })
+    const task = await service.pollVideoTask({
+      provider,
+      model,
+      taskId: 'video-task-connection-restored',
+      onPollResponse,
+    })
+
+    expect(task.status).toBe('succeeded')
+    expect(fetchMock).toHaveBeenCalledTimes(2)
+    expect(onPollResponse).toHaveBeenCalledTimes(2)
+  })
+
   it('stops retrying polling network failures after the configured budget', async () => {
     const fetchMock = vi
       .fn()
@@ -1530,6 +1637,7 @@ describe('DefaultVideoGenerationService', () => {
       .catch((caught) => caught)
 
     expect(error).toBe(abortError)
+    expect(isVideoTransportFailure(error)).toBe(false)
     expect(isRecoverableVideoPollingError(error)).toBe(false)
     expect(fetchMock).toHaveBeenCalledTimes(1)
   })

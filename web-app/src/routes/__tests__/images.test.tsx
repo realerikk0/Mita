@@ -159,6 +159,8 @@ const translations: Record<string, string> = {
   'common:imageGeneration.storyboard.videoModelRequired':
     'Configure a video model to generate video.',
   'common:imageGeneration.storyboard.generateVideo': 'Generate video',
+  'common:imageGeneration.storyboard.continueQuery': 'Continue polling',
+  'common:imageGeneration.storyboard.abandonVideoTask': 'Abandon task',
   'common:imageGeneration.storyboard.downloadStoryboard': 'Download storyboard',
   'common:imageGeneration.storyboard.downloadVideo': 'Download video',
   'common:imageGeneration.storyboard.variantCount': 'Variants',
@@ -596,6 +598,7 @@ describe('Images route', () => {
             fps: 24,
             sourceAssetIds: [],
             assetKind: 'generated',
+            resumePolicy: 'manual',
             startedAt,
             estimateMs: 450_000,
           },
@@ -603,6 +606,7 @@ describe('Images route', () => {
         runtime: {
           [taskKey]: {
             status: 'failed',
+            connectionState: 'paused',
             assetKind: 'generated',
             startedAt,
             estimateMs: 450_000,
@@ -617,11 +621,158 @@ describe('Images route', () => {
 
     renderComponent()
 
+    const createButton = screen.getByRole('button', { name: '正在生成' })
+    expect(createButton).toBeDisabled()
+    fireEvent.click(createButton)
+    expect(h.generateVideo).not.toHaveBeenCalled()
     fireEvent.click(
-      await screen.findByRole('button', { name: '继续查询' })
+      await screen.findByRole('button', { name: 'Continue polling' })
     )
     expect(resume).toHaveBeenCalledWith(taskKey)
     expect(h.generateVideo).not.toHaveBeenCalled()
+  })
+
+  it('retries a terminal direct-video failure with its original provider after a route remount', async () => {
+    h.search = { media: 'video' }
+    h.providers = [
+      {
+        provider: 'provider-a',
+        base_url: 'https://provider-a.example/v1',
+        settings: [],
+        models: [
+          {
+            id: 'seedance-2.0',
+            capabilities: [ModelCapabilities.VIDEO_GENERATION],
+          },
+        ],
+      },
+    ]
+    h.generateVideo
+      .mockRejectedValueOnce(new Error('creation failed'))
+      .mockResolvedValueOnce({
+        id: 'retried-provider-task',
+        status: 'failed',
+        error: 'replacement rejected',
+      })
+
+    const view = renderComponent()
+    fireEvent.change(screen.getByLabelText('提示词'), {
+      target: { value: '原提供商重试' },
+    })
+    fireEvent.click(screen.getByRole('button', { name: '生成视频' }))
+    await waitFor(() => expect(h.generateVideo).toHaveBeenCalledTimes(1))
+    expect(
+      await screen.findByRole('button', { name: '重试' })
+    ).toBeInTheDocument()
+
+    view.unmount()
+    renderComponent()
+    fireEvent.click(await screen.findByRole('button', { name: '重试' }))
+
+    await waitFor(() => expect(h.generateVideo).toHaveBeenCalledTimes(2))
+    expect(h.generateVideo.mock.calls[1][0]).toMatchObject({
+      provider: expect.objectContaining({ provider: 'provider-a' }),
+      model: expect.objectContaining({ id: 'seedance-2.0' }),
+      prompt: '原提供商重试',
+    })
+  })
+
+  it('does not silently retry a direct video with another provider exposing the same model', async () => {
+    h.search = { media: 'video' }
+    h.providers = [
+      {
+        provider: 'provider-a',
+        base_url: 'https://provider-a.example/v1',
+        settings: [],
+        models: [
+          {
+            id: 'seedance-2.0',
+            capabilities: [ModelCapabilities.VIDEO_GENERATION],
+          },
+        ],
+      },
+    ]
+    h.generateVideo.mockRejectedValueOnce(new Error('creation failed'))
+
+    const view = renderComponent()
+    fireEvent.change(screen.getByLabelText('提示词'), {
+      target: { value: '不能切换提供商' },
+    })
+    fireEvent.click(screen.getByRole('button', { name: '生成视频' }))
+    await waitFor(() => expect(h.generateVideo).toHaveBeenCalledTimes(1))
+    expect(
+      await screen.findByRole('button', { name: '重试' })
+    ).toBeInTheDocument()
+    view.unmount()
+
+    h.providers = [
+      {
+        provider: 'provider-b',
+        base_url: 'https://provider-b.example/v1',
+        settings: [],
+        models: [
+          {
+            id: 'seedance-2.0',
+            capabilities: [ModelCapabilities.VIDEO_GENERATION],
+          },
+        ],
+      },
+    ]
+    renderComponent()
+    fireEvent.click(await screen.findByRole('button', { name: '重试' }))
+
+    expect(h.generateVideo).toHaveBeenCalledTimes(1)
+    expect(h.toast.error).toHaveBeenCalledWith(
+      '无法重试：未找到对应的视频模型，请修改提示词后重新生成'
+    )
+  })
+
+  it('keeps model-only retry available for a legacy failed asset without provider metadata', async () => {
+    h.search = { media: 'video' }
+    h.providers = [
+      {
+        provider: 'provider-b',
+        base_url: 'https://provider-b.example/v1',
+        settings: [],
+        models: [
+          {
+            id: 'seedance-2.0',
+            capabilities: [ModelCapabilities.VIDEO_GENERATION],
+          },
+        ],
+      },
+    ]
+    h.listVideoAssets.mockResolvedValue([
+      {
+        id: 'legacy-failed-video',
+        prompt: '旧资产重试',
+        provider: undefined,
+        model: 'seedance-2.0',
+        ratio: '16:9',
+        resolution: '720p',
+        duration: 5,
+        fps: 24,
+        sourceAssetIds: [],
+        createdAt: '2026-08-01T00:00:00Z',
+        status: 'failed',
+        assetKind: 'generated',
+      },
+    ])
+    h.generateVideo.mockResolvedValueOnce({
+      id: 'legacy-retry-task',
+      status: 'failed',
+      error: 'replacement rejected',
+    })
+
+    renderComponent()
+    fireEvent.click(await screen.findByRole('button', { name: '重试' }))
+
+    await waitFor(() => expect(h.generateVideo).toHaveBeenCalledTimes(1))
+    expect(h.generateVideo.mock.calls[0][0]).toMatchObject({
+      provider: expect.objectContaining({ provider: 'provider-b' }),
+      model: expect.objectContaining({ id: 'seedance-2.0' }),
+      prompt: '旧资产重试',
+    })
   })
 
   it('imports local image, video, and audio references through the native picker', async () => {
@@ -3087,7 +3238,7 @@ describe('Images route', () => {
     expect(screen.getByText('Download video')).toBeInTheDocument()
   })
 
-  it('continues a persisted storyboard-video task without submitting another video', async () => {
+  it('lets storyboard users cancel runtime-only creation or continue and abandon a paused task', async () => {
     const taskKey = 'storyboard-resume-1'
     const startedAt = Date.now() - 60_000
     const storyboardAsset = {
@@ -3124,6 +3275,23 @@ describe('Images route', () => {
         ],
       },
     ]
+    const persistedTask = {
+      key: taskKey,
+      assetId: 'storyboard-video-asset',
+      taskId: 'provider-storyboard-task',
+      providerName: 'jingxing',
+      modelId: 'seedance-2.0',
+      prompt: 'A robot crosses a neon city.',
+      ratio: '16:9' as const,
+      resolution: '1080p' as const,
+      duration: 8,
+      fps: 30,
+      sourceAssetIds: [taskKey],
+      assetKind: 'storyboard' as const,
+      resumePolicy: 'auto' as const,
+      startedAt,
+      estimateMs: 720_000,
+    }
     act(() => {
       useStoryboardSessionStore.getState().save({
         stage: 'video',
@@ -3166,29 +3334,11 @@ describe('Images route', () => {
       } as any)
       useStoryboardSessionStore.getState().setMediaMode('storyboard')
       useVideoGenerationStore.setState({
-        tasks: {
-          [taskKey]: {
-            key: taskKey,
-            assetId: 'storyboard-video-asset',
-            taskId: 'provider-storyboard-task',
-            providerName: 'jingxing',
-            modelId: 'seedance-2.0',
-            prompt: 'A robot crosses a neon city.',
-            ratio: '16:9',
-            resolution: '1080p',
-            duration: 8,
-            fps: 30,
-            sourceAssetIds: [taskKey],
-            assetKind: 'storyboard',
-            startedAt,
-            estimateMs: 720_000,
-          },
-        },
+        tasks: {},
         runtime: {
           [taskKey]: {
             status: 'running',
-            connectionState: 'reconnecting',
-            retryAt: Date.now() + 5_000,
+            connectionState: 'connected',
             assetKind: 'storyboard',
             startedAt,
             estimateMs: 720_000,
@@ -3196,34 +3346,57 @@ describe('Images route', () => {
         },
       })
     })
-    const resume = vi
-      .spyOn(useVideoGenerationStore.getState(), 'resume')
-      .mockImplementation(() => {})
+    const cancel = vi.spyOn(useVideoGenerationStore.getState(), 'cancel')
 
     renderComponent()
 
-    expect(await screen.findByText('网络波动，正在重连')).toBeInTheDocument()
-    expect(screen.queryByText('视频生成失败')).not.toBeInTheDocument()
+    fireEvent.click(await screen.findByRole('button', { name: 'Cancel' }))
+    expect(cancel).toHaveBeenCalledWith(taskKey)
+    expect(useVideoGenerationStore.getState().tasks[taskKey]).toBeUndefined()
+    expect(useVideoGenerationStore.getState().runtime[taskKey]).toBeUndefined()
+    expect(
+      await screen.findByRole('button', { name: 'Generate video' })
+    ).toBeEnabled()
+
     act(() => {
       useVideoGenerationStore.setState((state) => ({
+        tasks: {
+          ...state.tasks,
+          [taskKey]: {
+            ...persistedTask,
+            resumePolicy: 'manual',
+          },
+        },
         runtime: {
           ...state.runtime,
           [taskKey]: {
-            ...state.runtime[taskKey],
             status: 'failed',
-            connectionState: 'connected',
+            connectionState: 'paused',
             retryAt: undefined,
+            assetKind: 'storyboard',
+            startedAt,
+            estimateMs: 720_000,
             error: '网络连接暂时中断',
           },
         },
       }))
     })
+    const resume = vi
+      .spyOn(useVideoGenerationStore.getState(), 'resume')
+      .mockImplementation(() => {})
 
     fireEvent.click(
-      await screen.findByRole('button', { name: '继续查询' })
+      await screen.findByRole('button', { name: 'Continue polling' })
     )
     expect(resume).toHaveBeenCalledWith(taskKey)
     expect(h.generateVideo).not.toHaveBeenCalled()
+    fireEvent.click(screen.getByRole('button', { name: 'Abandon task' }))
+    expect(cancel).toHaveBeenCalledTimes(2)
+    expect(cancel).toHaveBeenLastCalledWith(taskKey)
+    expect(useVideoGenerationStore.getState().tasks[taskKey]).toBeUndefined()
+    expect(
+      await screen.findByRole('button', { name: 'Generate video' })
+    ).toBeEnabled()
   })
 
   it('reports storyboard video tasks that finish without a video URL', async () => {
@@ -3296,6 +3469,21 @@ describe('Images route', () => {
       )
     )
     expect(h.saveVideoAsset).not.toHaveBeenCalled()
+    await waitFor(() =>
+      expect(Object.keys(useVideoGenerationStore.getState().tasks)).toHaveLength(
+        0
+      )
+    )
+
+    h.generateVideo.mockResolvedValueOnce({
+      id: 'video-task-2',
+      status: 'failed',
+      error: 'Provider rejected the replacement task',
+    })
+    fireEvent.click(
+      await screen.findByRole('button', { name: 'Generate video' })
+    )
+    await waitFor(() => expect(h.generateVideo).toHaveBeenCalledTimes(2))
   })
 
   it('restores the storyboard editing session after leaving and returning', async () => {

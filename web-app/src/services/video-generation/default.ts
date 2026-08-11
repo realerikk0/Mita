@@ -33,7 +33,7 @@ import type {
   VideoResolution,
 } from './types'
 import {
-  isRecoverableVideoPollingError,
+  isVideoTransportFailure,
   normalizeVideoError,
   RecoverableVideoPollingError,
 } from './retry-error'
@@ -351,6 +351,7 @@ export class DefaultVideoGenerationService implements VideoGenerationService {
               : undefined,
         }
       )
+      request.onPollResponse?.()
 
       if (task.status === 'succeeded' || task.status === 'failed') {
         // The gateway may flip status to failed before attaching the error
@@ -919,7 +920,7 @@ export class DefaultVideoGenerationService implements VideoGenerationService {
           this.throwIfAborted(signal)
 
           if (
-            isRecoverableVideoPollingError(error) &&
+            isVideoTransportFailure(error) &&
             requestRetryIndex < this.requestRetryDelaysMs.length
           ) {
             const retryDelayMs =
@@ -935,7 +936,7 @@ export class DefaultVideoGenerationService implements VideoGenerationService {
             continue
           }
 
-          if (isRecoverableVideoPollingError(error)) {
+          if (isVideoTransportFailure(error)) {
             const normalized = normalizeVideoError(error)
             throw new RecoverableVideoPollingError(normalized.message, {
               cause: normalized,

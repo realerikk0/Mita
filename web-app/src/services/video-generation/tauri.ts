@@ -2,6 +2,11 @@ import { convertFileSrc, invoke } from '@tauri-apps/api/core'
 import { fetch as fetchTauri } from '@tauri-apps/plugin-http'
 import { videoDebugError, videoDebugLog } from '@/lib/video-generation-debug'
 import { DefaultVideoGenerationService } from './default'
+import {
+  isVideoTransportFailure,
+  normalizeVideoError,
+  RecoverableVideoPollingError,
+} from './retry-error'
 import type {
   SaveVideoAssetRequest,
   UploadedVideoReferenceMedia,
@@ -34,6 +39,27 @@ function mediaUploadErrorFromUnknown(error: unknown) {
     if (payload[field] !== undefined) uploadError[field] = payload[field]
   }
   return uploadError
+}
+
+const VIDEO_DOWNLOAD_HTTP_RESPONSE_ERROR =
+  /^Unable to download generated video \(\d{3}(?: [^)]+)?\)(?::|$)/i
+
+function videoAssetDownloadError(error: unknown) {
+  const normalized = normalizeVideoError(error)
+  // The native command includes the HTTP status before a provider/CDN error
+  // body. Never let phrases inside that body (for example, "timed out") turn a
+  // terminal 4xx response into a transport retry.
+  if (
+    !VIDEO_DOWNLOAD_HTTP_RESPONSE_ERROR.test(normalized.message) &&
+    isVideoTransportFailure(error)
+  ) {
+    return new RecoverableVideoPollingError(normalized.message, {
+      cause: normalized,
+      reason: 'network',
+    })
+  }
+
+  return error
 }
 
 export class TauriVideoGenerationService extends DefaultVideoGenerationService {
@@ -93,7 +119,7 @@ export class TauriVideoGenerationService extends DefaultVideoGenerationService {
         id: request.id,
         videoUrl: request.videoUrl,
       })
-      throw error
+      throw videoAssetDownloadError(error)
     }
 
     try {

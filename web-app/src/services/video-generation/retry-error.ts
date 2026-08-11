@@ -85,12 +85,12 @@ export class RecoverableVideoPollingError extends Error {
 }
 
 /**
- * Classifies transport errors that are safe to recover by polling the same
- * already-created video task. It deliberately does not apply to creation
- * requests, which must never be replayed after an ambiguous POST failure.
+ * Classifies a rejection raised directly by a network transport. Message
+ * sniffing is deliberately confined to that boundary because provider HTTP
+ * error bodies may contain phrases such as "timed out" without representing a
+ * broken connection.
  */
-export function isRecoverableVideoPollingError(error: unknown) {
-  if (error instanceof RecoverableVideoPollingError) return true
+export function isVideoTransportFailure(error: unknown) {
   if (isAbortError(error)) return false
 
   const visited = new Set<unknown>()
@@ -101,8 +101,6 @@ export function isRecoverableVideoPollingError(error: unknown) {
     visited.add(current)
 
     const record = errorRecord(current)
-    if (record?.recoverableVideoPollingError === true) return true
-
     const code = stringValue(record?.code)
     if (
       code &&
@@ -116,6 +114,38 @@ export function isRecoverableVideoPollingError(error: unknown) {
 
     const name = stringValue(record?.name)
     if (name === 'TypeError' && /fetch/i.test(message ?? '')) return true
+
+    current = record?.cause
+  }
+
+  return false
+}
+
+/**
+ * Identifies errors that have already crossed the video polling transport
+ * boundary and were explicitly marked safe to resume. It intentionally does
+ * not infer recoverability from arbitrary messages or generic network codes.
+ */
+export function isRecoverableVideoPollingError(error: unknown) {
+  if (isAbortError(error)) return false
+  if (error instanceof RecoverableVideoPollingError) return true
+
+  const visited = new Set<unknown>()
+  let current: unknown = error
+
+  for (let depth = 0; current && depth < 6; depth += 1) {
+    if (visited.has(current)) break
+    visited.add(current)
+
+    if (current instanceof RecoverableVideoPollingError) return true
+
+    const record = errorRecord(current)
+    if (
+      record?.recoverableVideoPollingError === true ||
+      stringValue(record?.code) === RECOVERABLE_VIDEO_POLLING_ERROR_CODE
+    ) {
+      return true
+    }
 
     current = record?.cause
   }

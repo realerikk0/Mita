@@ -495,7 +495,6 @@ export function DataProvider() {
   // idempotent (it skips tasks that already have a live runner).
   const videoResumeProviders = useModelProvider((state) => state.providers)
   useEffect(() => {
-    if (videoResumeProviders.length === 0) return
     useVideoGenerationStore.getState().resumeAll()
   }, [videoResumeProviders])
 

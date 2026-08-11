@@ -21,7 +21,10 @@ import { toast } from 'sonner'
 import { SEEDANCE_MULTIMODAL_REFERENCE_CAPABILITIES } from '@/lib/seedance-video'
 import { RecoverableVideoPollingError } from '@/services/video-generation/retry-error'
 import type { VideoGenerationReference } from '@/services/video-generation/types'
-import { useVideoGenerationStore } from '../video-generation-store'
+import {
+  type PersistedVideoTask,
+  useVideoGenerationStore,
+} from '../video-generation-store'
 
 const provider = {
   provider: 'biyuan',
@@ -79,6 +82,28 @@ function baseInput(key: string) {
     generateAudio: false,
     sourceAsset,
     sourceAssetIds: [key],
+  }
+}
+
+function persistedTask(
+  key: string,
+  overrides: Partial<PersistedVideoTask> = {}
+): PersistedVideoTask {
+  return {
+    key,
+    assetId: `asset-${key}`,
+    taskId: `video-task-${key}`,
+    providerName: 'biyuan',
+    modelId: 'doubao-seedance-2-0',
+    prompt: 'a gold robot',
+    ratio: '16:9',
+    resolution: '720p',
+    duration: 6,
+    fps: 24,
+    sourceAssetIds: [key],
+    startedAt: Date.now() - 60_000,
+    estimateMs: 540_000,
+    ...overrides,
   }
 }
 
@@ -230,7 +255,7 @@ describe('useVideoGenerationStore', () => {
     )
   })
 
-  it('fails without orphaning the task when success has no video URL', async () => {
+  it('clears the task when success has no playable video URL', async () => {
     const hub = makeHub({
       generateVideo: vi
         .fn()
@@ -250,9 +275,7 @@ describe('useVideoGenerationStore', () => {
     expect(toast.error).toHaveBeenCalledWith(
       'Video generation finished without a playable video URL'
     )
-    expect(useVideoGenerationStore.getState().tasks['sb1']?.taskId).toBe(
-      'video-task-1'
-    )
+    expect(useVideoGenerationStore.getState().tasks.sb1).toBeUndefined()
   })
 
   it('surfaces the provider failure detail when polling ends in failed', async () => {
@@ -283,9 +306,14 @@ describe('useVideoGenerationStore', () => {
     expect(useVideoGenerationStore.getState().tasks.sb1).toBeUndefined()
   })
 
-  it('keeps an existing task running and reconnects after a polling outage', async () => {
+  it('only marks a reconnect connected after a successful poll response', async () => {
     vi.useFakeTimers()
     try {
+      let onPollResponse: (() => void) | undefined
+      let resolvePoll: (value: unknown) => void = () => {}
+      const pendingPoll = new Promise((resolve) => {
+        resolvePoll = resolve
+      })
       const hub = makeHub({
         pollVideoTask: vi
           .fn()
@@ -294,13 +322,12 @@ describe('useVideoGenerationStore', () => {
               'error sending request for url (https://api.biyuan.ai)'
             )
           )
-          .mockResolvedValueOnce({
-            id: 'video-task-1',
-            status: 'succeeded',
-            progress: 100,
-            videoUrl: 'https://cdn.example.test/recovered.mp4',
-            usage: {},
-          }),
+          .mockImplementationOnce(
+            (request: { onPollResponse?: () => void }) => {
+              onPollResponse = request.onPollResponse
+              return pendingPoll
+            }
+          ),
       })
 
       useVideoGenerationStore.getState().start(baseInput('sb1'), hub as never)
@@ -325,14 +352,38 @@ describe('useVideoGenerationStore', () => {
 
       expect(hub.generateVideo).toHaveBeenCalledTimes(1)
       expect(hub.pollVideoTask).toHaveBeenCalledTimes(2)
-      expect(hub.pollVideoTask).toHaveBeenLastCalledWith(
-        expect.objectContaining({ taskId: 'video-task-1' })
-      )
       expect(useVideoGenerationStore.getState().runtime.sb1).toEqual(
         expect.objectContaining({
-          status: 'succeeded',
+          status: 'running',
+          connectionState: 'reconnecting',
+          retryAt: undefined,
+        })
+      )
+      onPollResponse?.()
+      expect(useVideoGenerationStore.getState().runtime.sb1).toEqual(
+        expect.objectContaining({
+          status: 'running',
           connectionState: 'connected',
         })
+      )
+
+      resolvePoll({
+        id: 'video-task-1',
+        status: 'succeeded',
+        progress: 100,
+        videoUrl: 'https://cdn.example.test/recovered.mp4',
+        usage: {},
+      })
+      await flushPromises()
+
+      expect(hub.pollVideoTask).toHaveBeenLastCalledWith(
+        expect.objectContaining({
+          taskId: 'video-task-1',
+          onPollResponse: expect.any(Function),
+        })
+      )
+      expect(useVideoGenerationStore.getState().runtime.sb1?.status).toBe(
+        'succeeded'
       )
       expect(useVideoGenerationStore.getState().tasks.sb1).toBeUndefined()
       expect(toast.error).not.toHaveBeenCalled()
@@ -340,6 +391,118 @@ describe('useVideoGenerationStore', () => {
       vi.useRealTimers()
     }
   })
+
+  it('uses four bounded reconnect delays before pausing the existing task', async () => {
+    vi.useFakeTimers()
+    try {
+      const hub = makeHub({
+        pollVideoTask: vi.fn().mockRejectedValue(
+          new RecoverableVideoPollingError('network request failed', {
+            reason: 'network',
+          })
+        ),
+      })
+
+      useVideoGenerationStore.getState().start(baseInput('sb1'), hub as never)
+      await flushPromises()
+
+      for (const delayMs of [5_000, 10_000, 20_000, 30_000]) {
+        const runtime = useVideoGenerationStore.getState().runtime.sb1
+        expect(runtime).toEqual(
+          expect.objectContaining({
+            status: 'running',
+            connectionState: 'reconnecting',
+          })
+        )
+        expect(runtime?.retryAt).toBe(Date.now() + delayMs)
+        await vi.advanceTimersByTimeAsync(delayMs)
+        await flushPromises()
+      }
+
+      expect(hub.generateVideo).toHaveBeenCalledTimes(1)
+      expect(hub.pollVideoTask).toHaveBeenCalledTimes(5)
+      expect(useVideoGenerationStore.getState().runtime.sb1).toEqual(
+        expect.objectContaining({
+          status: 'failed',
+          connectionState: 'paused',
+          retryAt: undefined,
+        })
+      )
+      expect(useVideoGenerationStore.getState().tasks.sb1).toEqual(
+        expect.objectContaining({
+          taskId: 'video-task-1',
+          resumePolicy: 'manual',
+        })
+      )
+      expect(toast.error).not.toHaveBeenCalled()
+
+      await vi.advanceTimersByTimeAsync(120_000)
+      expect(hub.pollVideoTask).toHaveBeenCalledTimes(5)
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  it('pauses immediately when the 20-minute poll window times out', async () => {
+    vi.useFakeTimers()
+    try {
+      const hub = makeHub({
+        pollVideoTask: vi.fn().mockRejectedValue(
+          new RecoverableVideoPollingError(
+            'Video task video-task-1 did not finish in time',
+            { reason: 'timeout' }
+          )
+        ),
+      })
+
+      useVideoGenerationStore.getState().start(baseInput('sb1'), hub as never)
+      await flushPromises()
+
+      expect(hub.pollVideoTask).toHaveBeenCalledTimes(1)
+      expect(useVideoGenerationStore.getState().runtime.sb1).toEqual(
+        expect.objectContaining({
+          status: 'failed',
+          connectionState: 'paused',
+          retryAt: undefined,
+        })
+      )
+      expect(useVideoGenerationStore.getState().tasks.sb1?.resumePolicy).toBe(
+        'manual'
+      )
+
+      await vi.advanceTimersByTimeAsync(60 * 60 * 1000)
+      expect(hub.pollVideoTask).toHaveBeenCalledTimes(1)
+      expect(toast.error).not.toHaveBeenCalled()
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  it.each([
+    [401, 'provider says connection closed'],
+    [403, 'provider says request timed out'],
+    [404, 'video task was not found'],
+  ])(
+    'treats HTTP %i polling errors as terminal even when their body sounds transient',
+    async (status, message) => {
+      const pollingError = Object.assign(new Error(message), { status })
+      const hub = makeHub({
+        pollVideoTask: vi.fn().mockRejectedValue(pollingError),
+      })
+
+      useVideoGenerationStore.getState().start(baseInput('sb1'), hub as never)
+
+      await vi.waitFor(() =>
+        expect(useVideoGenerationStore.getState().runtime.sb1?.status).toBe(
+          'failed'
+        )
+      )
+
+      expect(hub.pollVideoTask).toHaveBeenCalledTimes(1)
+      expect(useVideoGenerationStore.getState().tasks.sb1).toBeUndefined()
+      expect(toast.error).toHaveBeenCalledWith(message)
+    }
+  )
 
   it('retains a completed task when saving has a recoverable network error', async () => {
     vi.useFakeTimers()
@@ -393,6 +556,80 @@ describe('useVideoGenerationStore', () => {
     } finally {
       vi.useRealTimers()
     }
+  })
+
+  it('pauses a nonrecoverable save and resumes only the existing task explicitly', async () => {
+    const saveVideoAsset = vi
+      .fn()
+      .mockRejectedValueOnce(new Error('Unable to write the downloaded video'))
+      .mockImplementationOnce((request: Record<string, unknown>) =>
+        Promise.resolve({
+          ...request,
+          createdAt: '2026-06-17T00:00:00Z',
+          path: '/mock/video-assets/asset-sb1/video.mp4',
+          fileName: 'video.mp4',
+        })
+      )
+    const hub = makeHub({
+      generateVideo: vi.fn().mockResolvedValue({
+        id: 'video-task-1',
+        status: 'succeeded',
+        progress: 100,
+        videoUrl: 'https://cdn.example.test/video.mp4',
+        usage: {},
+      }),
+      saveVideoAsset,
+    })
+    h.hubForResume = hub
+    h.providersForResume = [provider]
+
+    useVideoGenerationStore.getState().start(baseInput('sb1'), hub as never)
+
+    await vi.waitFor(() =>
+      expect(useVideoGenerationStore.getState().runtime.sb1).toEqual(
+        expect.objectContaining({
+          status: 'failed',
+          connectionState: 'paused',
+        })
+      )
+    )
+    expect(useVideoGenerationStore.getState().tasks.sb1).toEqual(
+      expect.objectContaining({
+        taskId: 'video-task-1',
+        resumePolicy: 'manual',
+      })
+    )
+    expect(toast.error).not.toHaveBeenCalled()
+
+    useVideoGenerationStore.getState().resumeAll()
+    useVideoGenerationStore.getState().resumeAll()
+    expect(hub.pollVideoTask).not.toHaveBeenCalled()
+    expect(toast.error).not.toHaveBeenCalled()
+
+    useVideoGenerationStore.getState().resume('sb1')
+    expect(useVideoGenerationStore.getState().tasks.sb1?.resumePolicy).toBe(
+      'auto'
+    )
+    expect(useVideoGenerationStore.getState().runtime.sb1).toEqual(
+      expect.objectContaining({
+        status: 'running',
+        connectionState: 'reconnecting',
+      })
+    )
+
+    await vi.waitFor(() =>
+      expect(useVideoGenerationStore.getState().runtime.sb1?.status).toBe(
+        'succeeded'
+      )
+    )
+
+    expect(hub.generateVideo).toHaveBeenCalledTimes(1)
+    expect(hub.pollVideoTask).toHaveBeenCalledTimes(1)
+    expect(hub.pollVideoTask).toHaveBeenCalledWith(
+      expect.objectContaining({ taskId: 'video-task-1' })
+    )
+    expect(saveVideoAsset).toHaveBeenCalledTimes(2)
+    expect(useVideoGenerationStore.getState().tasks.sb1).toBeUndefined()
   })
 
   it('aborts a scheduled reconnect when the existing task is cancelled', async () => {
@@ -471,6 +708,63 @@ describe('useVideoGenerationStore', () => {
       })
     )
     expect(useVideoGenerationStore.getState().tasks['sb2']).toBeUndefined()
+  })
+
+  it('does not auto-resume or replay toasts for a manually paused task', () => {
+    const hub = makeHub()
+    h.hubForResume = hub
+    h.providersForResume = [provider]
+    useVideoGenerationStore.setState({
+      tasks: {
+        paused: persistedTask('paused', { resumePolicy: 'manual' }),
+      },
+      runtime: {},
+    })
+
+    useVideoGenerationStore.getState().resumeAll()
+    useVideoGenerationStore.getState().resumeAll()
+
+    expect(hub.generateVideo).not.toHaveBeenCalled()
+    expect(hub.pollVideoTask).not.toHaveBeenCalled()
+    expect(toast.error).not.toHaveBeenCalled()
+    expect(useVideoGenerationStore.getState().runtime.paused).toEqual(
+      expect.objectContaining({
+        status: 'failed',
+        connectionState: 'paused',
+        error: expect.stringContaining('polling paused'),
+      })
+    )
+    expect(useVideoGenerationStore.getState().tasks.paused?.resumePolicy).toBe(
+      'manual'
+    )
+  })
+
+  it('expires a stale manually paused task before resume policy routing', () => {
+    const hub = makeHub()
+    h.hubForResume = hub
+    h.providersForResume = [provider]
+    useVideoGenerationStore.setState({
+      tasks: {
+        stale: persistedTask('stale', {
+          resumePolicy: 'manual',
+          startedAt: Date.now() - 25 * 60 * 60 * 1000,
+        }),
+      },
+      runtime: {},
+    })
+
+    useVideoGenerationStore.getState().resumeAll()
+
+    expect(useVideoGenerationStore.getState().tasks.stale).toBeUndefined()
+    expect(useVideoGenerationStore.getState().runtime.stale).toEqual(
+      expect.objectContaining({
+        status: 'failed',
+        error: expect.stringContaining('expired'),
+      })
+    )
+    expect(hub.generateVideo).not.toHaveBeenCalled()
+    expect(hub.pollVideoTask).not.toHaveBeenCalled()
+    expect(toast.error).not.toHaveBeenCalled()
   })
 
   it('resumes a generated task with its references and asset kind', async () => {
@@ -556,6 +850,7 @@ describe('useVideoGenerationStore', () => {
     ).toEqual(
       expect.objectContaining({
         status: 'failed',
+        connectionState: 'paused',
         assetId: 'asset-missing-model',
         assetKind: 'generated',
         error: expect.stringContaining('Video model unavailable'),
@@ -566,7 +861,36 @@ describe('useVideoGenerationStore', () => {
         'direct-video:missing-model'
       ]
     ).toBeDefined()
+    expect(
+      useVideoGenerationStore.getState().tasks['direct-video:missing-model']
+        ?.resumePolicy
+    ).toBe('auto')
     expect(hub.pollVideoTask).not.toHaveBeenCalled()
+  })
+
+  it('keeps a missing-provider task escapable without making it manual', () => {
+    const hub = makeHub()
+    h.hubForResume = hub
+    h.providersForResume = []
+    useVideoGenerationStore.setState({
+      tasks: { missing: persistedTask('missing') },
+      runtime: {},
+    })
+
+    useVideoGenerationStore.getState().resumeAll()
+
+    expect(useVideoGenerationStore.getState().runtime.missing).toEqual(
+      expect.objectContaining({
+        status: 'failed',
+        connectionState: 'paused',
+        error: expect.stringContaining('provider unavailable'),
+      })
+    )
+    expect(useVideoGenerationStore.getState().tasks.missing?.resumePolicy).toBe(
+      'auto'
+    )
+    expect(hub.pollVideoTask).not.toHaveBeenCalled()
+    expect(toast.error).not.toHaveBeenCalled()
   })
 
   it('drops persisted tasks older than the signed-URL lifetime on resume', async () => {
@@ -604,6 +928,52 @@ describe('useVideoGenerationStore', () => {
       'expired'
     )
     expect(hub.pollVideoTask).not.toHaveBeenCalled()
+  })
+
+  it('expires an active reconnect loop at the 24-hour boundary', async () => {
+    vi.useFakeTimers()
+    try {
+      const maxResumeAgeMs = 24 * 60 * 60 * 1000
+      const hub = makeHub({
+        pollVideoTask: vi.fn().mockRejectedValue(
+          new RecoverableVideoPollingError('network request failed', {
+            reason: 'network',
+          })
+        ),
+      })
+      h.hubForResume = hub
+      h.providersForResume = [provider]
+      useVideoGenerationStore.setState({
+        tasks: {
+          expiring: persistedTask('expiring', {
+            startedAt: Date.now() - maxResumeAgeMs + 1_000,
+          }),
+        },
+        runtime: {},
+      })
+
+      useVideoGenerationStore.getState().resume('expiring')
+      await flushPromises()
+      expect(hub.pollVideoTask).toHaveBeenCalledTimes(1)
+      expect(
+        useVideoGenerationStore.getState().runtime.expiring?.connectionState
+      ).toBe('reconnecting')
+
+      await vi.advanceTimersByTimeAsync(5_000)
+      await flushPromises()
+
+      expect(hub.pollVideoTask).toHaveBeenCalledTimes(1)
+      expect(useVideoGenerationStore.getState().tasks.expiring).toBeUndefined()
+      expect(useVideoGenerationStore.getState().runtime.expiring).toEqual(
+        expect.objectContaining({
+          status: 'failed',
+          error: expect.stringContaining('expired'),
+        })
+      )
+      expect(toast.error).not.toHaveBeenCalled()
+    } finally {
+      vi.useRealTimers()
+    }
   })
 
   it('does not let a superseded run clobber the run that replaced it', async () => {

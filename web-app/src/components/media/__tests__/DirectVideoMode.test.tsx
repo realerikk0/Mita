@@ -8,6 +8,16 @@ import {
   type VideoReferenceAssetOption,
 } from '../DirectVideoMode'
 
+vi.mock('@/i18n/react-i18next-compat', () => ({
+  useTranslation: () => {
+    const translations: Record<string, string> = {
+      'common:imageGeneration.storyboard.continueQuery': 'Continue polling',
+      'common:imageGeneration.storyboard.abandonVideoTask': 'Abandon task',
+    }
+    return { t: (key: string) => translations[key] ?? key }
+  },
+}))
+
 function provider(overrides: Partial<ModelProvider> = {}): ModelProvider {
   return {
     active: true,
@@ -274,6 +284,7 @@ describe('DirectVideoMode', () => {
           progress: 42,
           connectionState: 'reconnecting',
           retryAt: Date.now() + 5_000,
+          error: 'stale polling error',
         }}
         onGenerate={vi.fn()}
       />
@@ -281,7 +292,26 @@ describe('DirectVideoMode', () => {
 
     expect(screen.getByText('网络波动，正在重连')).toBeInTheDocument()
     expect(screen.getByRole('button', { name: '正在生成' })).toBeDisabled()
-    expect(screen.queryByText('视频生成失败')).not.toBeInTheDocument()
+    expect(screen.queryByRole('alert')).not.toBeInTheDocument()
+  })
+
+  it('keeps the composer locked while an existing task is manually paused', async () => {
+    const user = userEvent.setup()
+    const onGenerate = vi.fn()
+
+    render(
+      <DirectVideoMode
+        videoModels={[{ provider: provider(), model: model() }]}
+        runtime={{ status: 'failed', connectionState: 'paused' }}
+        onGenerate={onGenerate}
+      />
+    )
+
+    expect(screen.getByLabelText('提示词')).toBeDisabled()
+    const generateButton = screen.getByRole('button', { name: '正在生成' })
+    expect(generateButton).toBeDisabled()
+    await user.click(generateButton)
+    expect(onGenerate).not.toHaveBeenCalled()
   })
 
   it('does not claim multimodal-reference support for an unverified provider', async () => {
@@ -463,6 +493,7 @@ describe('DirectVideoFeed', () => {
   it('continues polling a persisted failed task instead of regenerating it', async () => {
     const user = userEvent.setup()
     const onRetry = vi.fn()
+    const onCancel = vi.fn()
     const item = {
       id: 'direct-video:persisted',
       prompt: '雨夜跑车',
@@ -472,21 +503,26 @@ describe('DirectVideoFeed', () => {
       duration: 5,
       status: 'failed' as const,
       error: '网络连接暂时中断',
+      connectionState: 'paused' as const,
       hasPersistedTask: true,
+      resumePolicy: 'manual' as const,
     }
 
     render(
       <DirectVideoFeed
         items={[item]}
         videoSrc={() => ''}
+        onCancel={onCancel}
         onRetry={onRetry}
       />
     )
 
     expect(screen.getByText('视频任务查询已暂停')).toBeInTheDocument()
     expect(screen.queryByText('视频生成失败')).not.toBeInTheDocument()
-    await user.click(screen.getByRole('button', { name: '继续查询' }))
+    await user.click(screen.getByRole('button', { name: 'Continue polling' }))
     expect(onRetry).toHaveBeenCalledWith(item)
+    await user.click(screen.getByRole('button', { name: 'Abandon task' }))
+    expect(onCancel).toHaveBeenCalledWith(item)
   })
 
   it('keeps regenerate available only for a terminal failure without a task', () => {
@@ -505,6 +541,7 @@ describe('DirectVideoFeed', () => {
           },
         ]}
         videoSrc={() => ''}
+        onCancel={vi.fn()}
         onDownload={vi.fn()}
         onRetry={vi.fn()}
       />
@@ -513,7 +550,12 @@ describe('DirectVideoFeed', () => {
     expect(screen.getByText('视频生成失败')).toBeInTheDocument()
     expect(screen.getByRole('button', { name: '重试' })).toBeInTheDocument()
     expect(screen.queryByRole('button', { name: '下载' })).not.toBeInTheDocument()
-    expect(screen.queryByRole('button', { name: '继续查询' })).not.toBeInTheDocument()
+    expect(
+      screen.queryByRole('button', { name: 'Continue polling' })
+    ).not.toBeInTheDocument()
+    expect(
+      screen.queryByRole('button', { name: 'Abandon task' })
+    ).not.toBeInTheDocument()
   })
 
   it('renders completed video actions for preview and direct download', async () => {

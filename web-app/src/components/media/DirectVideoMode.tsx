@@ -34,6 +34,7 @@ import {
 } from '@/components/ui/tooltip'
 import ProvidersAvatar from '@/containers/ProvidersAvatar'
 import { isBiyuanProvider } from '@/constants/biyuan'
+import { useTranslation } from '@/i18n/react-i18next-compat'
 import { estimateSeedanceVideoCost } from '@/lib/seedance-video-cost'
 import {
   cn,
@@ -94,7 +95,7 @@ export type DirectVideoRuntime = {
   status?: 'idle' | VideoGenerationStatus
   progress?: number
   error?: string
-  connectionState?: 'connected' | 'reconnecting'
+  connectionState?: 'connected' | 'reconnecting' | 'paused'
   retryAt?: number
 }
 
@@ -132,10 +133,12 @@ export type DirectVideoFeedItem = {
   status: VideoGenerationStatus
   progress?: number
   error?: string
-  connectionState?: 'connected' | 'reconnecting'
+  connectionState?: 'connected' | 'reconnecting' | 'paused'
   retryAt?: number
   /** The provider task id is persisted, so this card can resume polling. */
   hasPersistedTask?: boolean
+  /** Manual tasks are only resumed by an explicit user action. */
+  resumePolicy?: 'auto' | 'manual'
   asset?: VideoAssetRecord
   sourceImageSrc?: string
 }
@@ -465,7 +468,10 @@ function videoStatusLabel(item: DirectVideoFeedItem) {
   if (item.connectionState === 'reconnecting') return '网络波动，正在重连'
   if (item.status === 'succeeded') return '已完成'
   if (item.status === 'failed') {
-    return item.hasPersistedTask ? '查询已暂停' : '生成失败'
+    return item.hasPersistedTask &&
+      (item.connectionState === 'paused' || item.resumePolicy === 'manual')
+      ? '查询已暂停'
+      : '生成失败'
   }
   if (item.status === 'queued') return '排队中'
   return '生成中'
@@ -479,6 +485,8 @@ export function DirectVideoFeed({
   onCancel,
   onRetry,
 }: DirectVideoFeedProps) {
+  const { t } = useTranslation()
+
   if (items.length === 0) {
     return (
       <div
@@ -494,10 +502,18 @@ export function DirectVideoFeed({
     <div className="space-y-5" data-testid="direct-video-feed">
       {items.map((item) => {
         const reconnecting = item.connectionState === 'reconnecting'
+        const paused =
+          !reconnecting &&
+          (item.connectionState === 'paused' ||
+            (item.status === 'failed' && item.resumePolicy === 'manual'))
         const busy =
-          reconnecting || item.status === 'queued' || item.status === 'running'
+          !paused &&
+          (reconnecting || item.status === 'queued' || item.status === 'running')
         const resumableFailure =
-          item.status === 'failed' && item.hasPersistedTask && !reconnecting
+          item.status === 'failed' &&
+          item.hasPersistedTask &&
+          paused &&
+          !reconnecting
         const src = item.asset ? videoSrc(item.asset) : ''
 
         return (
@@ -592,18 +608,34 @@ export function DirectVideoFeed({
                       {item.error}
                     </p>
                   )}
-                  {onRetry && (
-                    <Button
-                      type="button"
-                      variant="outline"
-                      size="sm"
-                      className="mt-1"
-                      onClick={() => onRetry(item)}
-                    >
-                      <RotateCcw className="size-4" />
-                      继续查询
-                    </Button>
-                  )}
+                  <div className="mt-1 flex flex-wrap items-center justify-center gap-2">
+                    {onRetry && (
+                      <Button
+                        type="button"
+                        variant="outline"
+                        size="sm"
+                        onClick={() => onRetry(item)}
+                      >
+                        <RotateCcw className="size-4" />
+                        {t(
+                          'common:imageGeneration.storyboard.continueQuery'
+                        )}
+                      </Button>
+                    )}
+                    {onCancel && (
+                      <Button
+                        type="button"
+                        variant="ghost"
+                        size="sm"
+                        onClick={() => onCancel(item)}
+                      >
+                        <X className="size-4" />
+                        {t(
+                          'common:imageGeneration.storyboard.abandonVideoTask'
+                        )}
+                      </Button>
+                    )}
+                  </div>
                 </div>
               ) : (
                 <div className="flex size-full flex-col items-center justify-center gap-2 px-8 text-center text-destructive">
@@ -801,11 +833,12 @@ export function DirectVideoMode({
   }, [resolution, resolutionOptions])
 
   const runtimeReconnecting = runtime?.connectionState === 'reconnecting'
+  const runtimePaused = runtime?.connectionState === 'paused'
   const runtimeBusy =
     runtimeReconnecting ||
     runtime?.status === 'queued' ||
     runtime?.status === 'running'
-  const busy = submitting || runtimeBusy
+  const busy = submitting || runtimeBusy || runtimePaused
   // Generation failures already surface on the failed card in the feed, so the
   // composer only shows errors from the submit action itself.
   const errorMessage = submitError

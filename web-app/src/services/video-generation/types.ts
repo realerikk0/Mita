@@ -98,6 +98,8 @@ export type PollVideoTaskRequest = {
   model: Model
   taskId: string
   signal?: AbortSignal
+  /** Called after a polling response is fetched and parsed successfully. */
+  onPollResponse?: () => void
 }
 
 export type VideoAssetRecord = {
