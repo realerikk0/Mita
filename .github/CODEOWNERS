@@ -1,12 +1,12 @@
-/.github/ @realerikk0 @twokar
-/scripts/ci/ @realerikk0 @twokar
-/scripts/release-distribution/ @realerikk0 @twokar
-/scripts/updater/ @realerikk0 @twokar
-/scripts/macos-architecture-policy.mjs @realerikk0 @twokar
-/scripts/sign-macos-binaries.mjs @realerikk0 @twokar
-/scripts/verify-macos-candidate.mjs @realerikk0 @twokar
-/.yarn/ @realerikk0 @twokar
-/.yarnrc.yml @realerikk0 @twokar
-/Makefile @realerikk0 @twokar
-/package.json @realerikk0 @twokar
-/yarn.lock @realerikk0 @twokar
+/.github/ @realerikk0
+/scripts/ci/ @realerikk0
+/scripts/release-distribution/ @realerikk0
+/scripts/updater/ @realerikk0
+/scripts/macos-architecture-policy.mjs @realerikk0
+/scripts/sign-macos-binaries.mjs @realerikk0
+/scripts/verify-macos-candidate.mjs @realerikk0
+/.yarn/ @realerikk0
+/.yarnrc.yml @realerikk0
+/Makefile @realerikk0
+/package.json @realerikk0
+/yarn.lock @realerikk0

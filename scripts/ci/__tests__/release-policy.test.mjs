@@ -4534,7 +4534,7 @@ jobs:
   }
 })
 
-test('PR CI is read-only and CI control paths require owner review', () => {
+test('PR CI is read-only and CI control paths assign the repository owner', () => {
   const workflow = fs
     .readFileSync('.github/workflows/biyan-linter-and-test.yml', 'utf8')
     .replace(/\r\n?/g, '\n')
@@ -4566,18 +4566,14 @@ test('PR CI is read-only and CI control paths require owner review', () => {
 
   const codeowners = fs.readFileSync('.github/CODEOWNERS', 'utf8')
   assert.deepEqual(validateCiControlOwnership(codeowners), [])
-  for (const owner of ['@realerikk0', '@twokar']) {
-    assert.ok(
-      validateCiControlOwnership(
-        codeowners.replace(
-          `/.github/ @realerikk0 @twokar`,
-          `/.github/ ${owner}`
-        )
-      ).some(
-        (failure) => failure.includes('/.github/') && !failure.endsWith(owner)
-      )
+  assert.ok(
+    validateCiControlOwnership(
+      codeowners.replace('/.github/ @realerikk0', '/.github/ @someone-else')
+    ).some(
+      (failure) =>
+        failure.includes('/.github/') && failure.endsWith('@realerikk0')
     )
-  }
+  )
 })
 
 test('protected Windows verifier authenticates native EXE and MSI identity', () => {

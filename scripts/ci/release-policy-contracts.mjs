@@ -4908,12 +4908,11 @@ export function validateCiControlOwnership(source) {
     '/yarn.lock',
   ]) {
     const owners = ownersByPattern.get(pattern) ?? []
-    for (const owner of ['@realerikk0', '@twokar']) {
-      if (!owners.includes(owner)) {
-        failures.push(
-          `CI control path ${pattern} must require review from ${owner}`
-        )
-      }
+    const owner = '@realerikk0'
+    if (!owners.includes(owner)) {
+      failures.push(
+        `CI control path ${pattern} must assign ownership to ${owner}`
+      )
     }
   }
   return failures

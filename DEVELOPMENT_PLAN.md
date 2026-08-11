@@ -48,9 +48,10 @@ Prepare a terminal release in one protected pull request with two commits:
 `P` contains product changes plus the three synchronized version files, and
 `Q` contains only reviewed release-control changes that bind the new active tag
 to the exact `P` SHA. Merge the PR with a merge commit after required CI and
-CODEOWNER checks pass. This preserves `P` as a one-parent ancestor while keeping
-the release operation atomic from the reviewer's perspective. Never squash,
-rebase, amend, or retag a terminal release PR.
+release-policy checks pass. CODEOWNERS identifies the accountable repository
+owner but does not impose an approval gate. This preserves `P` as a one-parent
+ancestor while keeping the release operation atomic from the owner's
+perspective. Never squash, rebase, amend, or retag a terminal release PR.
 
 The release-train policy is a rolling terminal ledger rather than a
 version-specific allowlist. `Q` appends the former active release as
@@ -140,6 +141,7 @@ accepted terminal source. This scoped workflow never substitutes for the
 exact-tag candidate contract: every release tag still runs `make test`, all
 three signed platform builds, candidate verification, and immutable updater
 packaging.
-The protected branch ruleset must additionally enforce CODEOWNER review and
-dismiss stale approvals for CI-control paths; a required check name alone does
-not bind the result to an immutable workflow definition.
+The protected branch ruleset must enforce the required CI gate and the existing
+deletion and non-fast-forward protections. CODEOWNER review is optional and is
+not a release prerequisite; checked-in policy tests remain the defense against
+weakening CI-control paths through a pull request.

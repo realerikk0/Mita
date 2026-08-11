@@ -44,11 +44,12 @@ commits. The first commit (`P`) contains all product changes and the three
 matching version-file updates. The second commit (`Q`) changes only reviewed
 release-control paths, appends the former active release to contiguous
 `published-superseded` history, and binds the next active tag to the full
-40-character `P` SHA. Required CI and CODEOWNER review run against `Q`. Merge
-this PR with a merge commit so `P` remains an immutable one-parent ancestor;
-never squash or rebase a terminal release PR. The branch rules may allow merge
-commits for this purpose, but all status, review, deletion, and non-fast-forward
-protections remain mandatory.
+40-character `P` SHA. Required CI and release-policy checks run against `Q`;
+CODEOWNERS records the accountable repository owner but does not require a
+separate approval. Merge this PR with a merge commit so `P` remains an immutable
+one-parent ancestor; never squash or rebase a terminal release PR. The branch
+rules may allow merge commits for this purpose, but required status, deletion,
+and non-fast-forward protections remain mandatory.
 
 The rolling schema does not authorize arbitrary versions. Every new active
 terminal must be the next patch version after the latest contiguous terminal
@@ -114,12 +115,13 @@ an invalid commit topology, or an unrecognized path fails closed.
 Its final check belongs to the protected `mita-main` dispatch run and is an
 operator pre-tag gate, not a required check attached to the input target PR.
 
-Scoped PR checks are valid only while the protected branch ruleset requires
-CODEOWNER review for CI-control paths and dismisses stale approvals after a
-push. GitHub required-check names do not identify the workflow that emitted
-them, so checked-in policy tests are defense in depth rather than a substitute
-for that repository rule. PR test jobs keep a read-only token, disable checkout
-credential persistence, and never comment with a write token.
+Scoped PR checks are valid only while the protected branch ruleset requires the
+PR CI Gate and blocks deletion and non-fast-forward updates. CODEOWNERS records
+accountability but does not create a required approval gate. GitHub
+required-check names do not identify the workflow that emitted them, so the
+checked-in release-policy tests must reject attempts to weaken CI-control
+paths. PR test jobs keep a read-only token, disable checkout credential
+persistence, and never comment with a write token.
 
 Candidate builds, reusable formal-build templates, release distribution,
 updater router deployment, upgrade smoke attestation, promotion, health gating,
@@ -154,7 +156,7 @@ permissions and command envelope in release-policy tests.
 
 Run `.github/workflows/biyan-direct-qualification.yml` once from protected
 `mita-main` after the exact candidate source, manifest, and installer digests
-are pinned by a CODEOWNER-reviewed control-plane commit. The workflow performs
+are pinned by an owner-controlled control-plane commit. The workflow performs
 real installs on GitHub-hosted x86_64 runners:
 
 - Windows and macOS: `0.6.608 → 0.6.649` as manual-installer compatibility
@@ -230,9 +232,10 @@ Direct-C promotion also requires the tracked transition policy to name the
 exact reviewed `0.6.649` manifest SHA-256 and four-platform set. It remains
 `approvedNext: null` until the signed candidate exists and passes source,
 candidate, and artifact acceptance. Populate that identity through a
-CODEOWNER-reviewed control-plane pull request; this verifier-only change does
-not change the terminal product source. A missing or mismatched approval
-blocks qualification and promotion before any production mutation.
+repository-owner-controlled control-plane pull request; this verifier-only
+change does not change the terminal product source. A missing or mismatched
+candidate approval in the tracked transition policy blocks qualification and
+promotion before any production mutation.
 
 The dynamic Biyan route returns `204` when a phase is closed, paused, outside
 its cohort, or covered by the kill switch. The one production transaction
