@@ -31,8 +31,8 @@ Only manually dispatch `Desktop Release Candidate` from protected
 
 | Release | Tag | Source commit | Phase/schema |
 | --- | --- | --- | --- |
-| Previous published | `v0.6.649` | `cc7bd75e40da7e32ea93433ed7311fb7ddbab379` | `C/3` |
-| Active complete | `v0.6.650` | `7c4f563ff8f0a7d7ab877330881f73db164cc613` | `C/3` |
+| Previous published | `v0.6.650` | `7c4f563ff8f0a7d7ab877330881f73db164cc613` | `C/3` |
+| Active complete | `v0.6.651` | `624c979b4cac6947af19cd5fb2dbf343960503be` | `C/3` |
 
 The retired A/B/C mappings remain immutable history, not an authorized
 automatic upgrade sequence. The trusted control plane must read the active
@@ -59,8 +59,8 @@ a release-specific `v0.6.649` allowlist.
 The `v0.6.646`, `v0.6.647`, and `v0.6.648` tags, Draft releases, uploaded assets, and failed
 direct qualifications are immutable blocked-before-publication evidence.
 None of these candidates was published or promoted; preserve them exactly, do not
-retag or reuse them, and do not recut A/B/C. `v0.6.649` remains immutable
-published history; `v0.6.650` is the next cumulative complete release.
+retag or reuse them, and do not recut A/B/C. `v0.6.649` and `v0.6.650` remain
+immutable published history; `v0.6.651` is the next cumulative complete release.
 
 `tag-cut` uses only the repository `GITHUB_TOKEN`; do not provide an operator
 PAT or GitHub App secret and do not directly push the tag. A missing tag is
@@ -75,7 +75,7 @@ Distribution run; do not dispatch a second non-dry-run distribution in
 parallel. Use manual non-dry-run distribution only as an explicit recovery for
 a failed or absent publication-triggered run.
 
-There is no A or B dispatch. One accepted `v0.6.650/C/3` candidate is the only
+There is no A or B dispatch. One accepted `v0.6.651/C/3` candidate is the only
 product package in this release.
 
 ## Pre-tag exact-SHA qualification
