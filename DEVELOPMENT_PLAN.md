@@ -70,9 +70,9 @@ source.
   hostnames may remain only as documented upgrade/ingress infrastructure; they
   must never surface as the product name or re-enable retired behavior.
 - The updater installs the exact signed update object that was checked.
-- Direct-C promotion stays fail-closed until a control-plane pull request pins
-  the accepted `0.6.649` source, manifest, platform assets, and the exact
-  published compatibility sources.
+- The initial Direct-C cutover is immutable history: it accepted only the
+  pinned `0.6.649` source, manifest, platform assets, and compatibility
+  sources. It is not authority to mutate the frozen legacy handoff.
 - Promotion is one 100% transaction gated by signed-candidate verification,
   GitHub-native upgrade evidence, a healthy report, compare-and-swap, and a
   kill switch. It does not create intermediate A or B cohorts.
@@ -83,11 +83,51 @@ source.
   `0.6.633 → 0.6.649`, Linux fresh `0.6.649` under the exact no-current-Linux
   exception, and all three platforms from public `0.6.643`, `0.6.644`, and
   `0.6.645` to `0.6.649`.
-- Kill Switch and Health Gate pause the Router and restore both legacy updater
-  origins from the exact persisted pre-update backup in one journaled
-  transaction. Promotion may resume only after the active complete
-  compatibility manifest is restored and read back.
+- From `v0.6.652` onward, `RECOVERY` promotion publishes immutable versioned
+  objects and changes only Router policy. It reads the frozen legacy manifests
+  as a fail-closed invariant but never writes them.
+- Kill Switch and Health Gate may pause only Router policy. They do not rewrite
+  either legacy origin and cannot automatically resume service; resumption
+  requires a new health-gated promotion.
 - User-owned retired data is deleted only after explicit confirmation.
+
+## Frozen legacy updater handoff
+
+`v0.6.651` is the final compatibility handoff for public stable legacy updater
+clients `0.6.611–0.6.633`. The two legacy manifests are permanent, static,
+byte-identical copies of the exact signed `v0.6.651` manifest. Their Aliyun and
+R2 public endpoints are pinned by
+`scripts/updater/legacy-bridge-policy.json`; do not copy them into a second
+configuration source.
+
+These objects are permanently read-only for every routine release, promotion,
+rollback, health, and kill-switch path. The weekly and manually dispatchable
+`Verify Frozen Legacy Handoff` workflow only compares both public origins and
+the published GitHub `v0.6.651` manifest with the tracked version, SHA-256, and
+canonical bytes, then records verification evidence. It has no writer path.
+
+An eligible legacy client uses this bridge once to install `v0.6.651`; the
+installed client then obtains `v0.6.652` and later releases through the dynamic
+Biyan Router. All later promotions, pauses, and resumptions are therefore
+Router-only. Do not delete, return `404` from, or redirect either legacy
+endpoint in the hope that an old binary will show a manual-download prompt: an
+updater failure cannot add UI to an already shipped client. External support or
+download messaging may supplement the handoff, but cannot replace it.
+
+There is no routine break-glass legacy writer. If an integrity or availability
+incident requires repair, break-glass authority is limited to restoring the
+exact already-approved `v0.6.651` byte stream; it never authorizes advancing the
+legacy target. The operation requires explicit repository-owner authorization,
+an incident-specific reviewed plan or script, preserved pre-change evidence,
+signature and digest verification, and byte-for-byte readback from both public
+origins. Without that complete proof, fail closed and leave both objects
+untouched.
+
+The post-promotion Health Gate is an incident-triggered evidence consumer, not
+a telemetry collector or automatic emitter. An external monitor or operator
+must provide a content-addressed `rollout-health.json` by repository dispatch or
+manual dispatch. A breached threshold may pause Router policy; a clear report
+never resumes it automatically.
 
 ## Phase C source closure
 
