@@ -10,6 +10,7 @@ import {
   validatePromotionLegacyBridge,
   verifyLegacyManifestPair,
 } from '../legacy-manifest-policy.mjs'
+import { verifyLiveTerminalManifestPair } from '../live-terminal-manifest-policy.mjs'
 
 const endpoints = {
   aliyun: 'https://static.mitapp.cn/mita/latest.json',
@@ -128,6 +129,147 @@ test('pre-a accepts the exact live version, platform set, and Biyan assets', () 
   assert.equal(evidence.status, 'passed')
   assert.equal(evidence.expectedVersion, '0.6.633')
   assert.equal(evidence.aliyunSha256, evidence.r2Sha256)
+})
+
+test('live terminal verification follows the published rolling release state', () => {
+  const releaseManifest = promotionCandidate('0.6.650', 'C', 3)
+  const trainPolicy = {
+    supersededTerminalReleases: [
+      {
+        tag: 'v0.6.649',
+        version: '0.6.649',
+        migrationPhase: 'C',
+        dataSchema: 3,
+        sourceCommit: '9'.repeat(40),
+        status: 'published-superseded',
+      },
+    ],
+    activeTerminalRelease: {
+      tag: releaseManifest.candidate.tag,
+      version: releaseManifest.candidate.version,
+      migrationPhase: releaseManifest.candidate.migrationPhase,
+      dataSchema: releaseManifest.candidate.dataSchema,
+      sourceCommit: releaseManifest.candidate.sourceCommit,
+    },
+  }
+  const manifestBytes = releaseManifest.candidateManifestBytes
+  const manifestDigest = sha256(manifestBytes)
+  const githubRelease = {
+    tag_name: 'v0.6.650',
+    target_commitish: releaseManifest.candidate.sourceCommit,
+    draft: false,
+    prerelease: false,
+    published_at: '2026-08-04T12:36:39Z',
+    assets: [
+      {
+        name: 'latest.json',
+        state: 'uploaded',
+        size: manifestBytes.length,
+        digest: `sha256:${manifestDigest}`,
+      },
+    ],
+  }
+
+  assert.deepEqual(
+    verifyLiveTerminalManifestPair({
+      aliyunBytes: manifestBytes,
+      r2Bytes: manifestBytes,
+      githubManifestBytes: manifestBytes,
+      githubRelease,
+      trainPolicy,
+      verifiedAt: '2026-08-11T00:00:00.000Z',
+    }),
+    {
+      schema: 1,
+      status: 'passed',
+      verifiedAt: '2026-08-11T00:00:00.000Z',
+      version: '0.6.650',
+      tag: 'v0.6.650',
+      sourceCommit: releaseManifest.candidate.sourceCommit,
+      manifestSha256: manifestDigest,
+      aliyunSha256: manifestDigest,
+      r2Sha256: manifestDigest,
+      githubSha256: manifestDigest,
+    },
+  )
+
+  const previousManifest = promotionCandidate('0.6.649', 'C', 3)
+  const previousBytes = previousManifest.candidateManifestBytes
+  const previousDigest = sha256(previousBytes)
+  const previousPolicy = structuredClone(trainPolicy)
+  previousPolicy.supersededTerminalReleases[0].sourceCommit =
+    previousManifest.candidate.sourceCommit
+  previousPolicy.activeTerminalRelease.sourceCommit = 'a'.repeat(40)
+  const previousRelease = {
+    ...githubRelease,
+    tag_name: 'v0.6.649',
+    target_commitish: previousManifest.candidate.sourceCommit,
+    assets: [
+      {
+        name: 'latest.json',
+        state: 'uploaded',
+        size: previousBytes.length,
+        digest: `sha256:${previousDigest}`,
+      },
+    ],
+  }
+  assert.equal(
+    verifyLiveTerminalManifestPair({
+      aliyunBytes: previousBytes,
+      r2Bytes: previousBytes,
+      githubManifestBytes: previousBytes,
+      githubRelease: previousRelease,
+      trainPolicy: previousPolicy,
+    }).version,
+    '0.6.649',
+  )
+
+  assert.throws(
+    () =>
+      verifyLiveTerminalManifestPair({
+        aliyunBytes: manifestBytes,
+        r2Bytes: Buffer.from(`${manifestBytes.toString()} `),
+        githubManifestBytes: manifestBytes,
+        githubRelease,
+        trainPolicy,
+      }),
+    /Aliyun and R2 updater manifests must be byte-identical/,
+  )
+  assert.throws(
+    () =>
+      verifyLiveTerminalManifestPair({
+        aliyunBytes: manifestBytes,
+        r2Bytes: manifestBytes,
+        githubManifestBytes: Buffer.from(`${manifestBytes.toString()} `),
+        githubRelease,
+        trainPolicy,
+      }),
+    /must match the published GitHub manifest/,
+  )
+  assert.throws(
+    () =>
+      verifyLiveTerminalManifestPair({
+        aliyunBytes: manifestBytes,
+        r2Bytes: manifestBytes,
+        githubManifestBytes: manifestBytes,
+        githubRelease: { ...githubRelease, draft: true },
+        trainPolicy,
+      }),
+    /does not match the exact published terminal identity/,
+  )
+
+  const staleManifest = promotionCandidate('0.6.648', 'C', 3)
+  assert.throws(
+    () =>
+      verifyLiveTerminalManifestPair({
+        aliyunBytes: staleManifest.candidateManifestBytes,
+        r2Bytes: staleManifest.candidateManifestBytes,
+        githubManifestBytes: staleManifest.candidateManifestBytes,
+        githubRelease,
+        trainPolicy,
+      }),
+    /is not the latest published or active terminal release/,
+  )
 })
 
 test('platform set is exact and rejects both extra and missing platforms', () => {
