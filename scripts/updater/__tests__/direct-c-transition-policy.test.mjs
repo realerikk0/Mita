@@ -14,10 +14,7 @@ import {
   validateDirectCTransitionPolicy,
 } from '../direct-c-transition-policy.mjs'
 import {
-  classifyLegacyPauseRollback,
-  createLegacyPauseJournal,
-  validateLegacyResumeInputs,
-  validateLivePauseInputs,
+  validateLegacyPauseFallbackBytes,
 } from '../legacy-pause-transaction.mjs'
 import {
   validateLegacyBridgePolicy,
@@ -439,7 +436,7 @@ test('DIRECT_C rejects partial rollout, missing qualification, and policy drift'
   )
 })
 
-test('legacy bridge validation, pause, and resume accept DIRECT_C C lineage', () => {
+test('legacy bridge validation accepts DIRECT_C C lineage with a frozen fallback', () => {
   const fixture = directFixture()
   const trackedLegacyPolicy = JSON.parse(
     fs.readFileSync(
@@ -463,56 +460,15 @@ test('legacy bridge validation, pause, and resume accept DIRECT_C C lineage', ()
     },
   )
 
-  const live = validateLivePauseInputs({
-    policyBytes: jsonBytes(fixture.nextPolicy),
-    expectedCurrentVersion: '0.6.649',
-    ossLegacyBytes: fixture.manifestBytes,
-    r2LegacyBytes: fixture.manifestBytes,
-  })
-  assert.equal(live.activeAVersion, '0.6.649')
-  assert.equal(live.activeAManifestSha256, fixture.candidate.manifestSha256)
-
   const fallbackBytes = legacy633Bytes()
   assert.equal(sha256(fallbackBytes), DIRECT_C_CURRENT.manifestSha256)
-  const resumed = validateLegacyResumeInputs({
-    policyBytes: jsonBytes({ ...fixture.nextPolicy, paused: true }),
-    expectedCurrentVersion: '0.6.649',
-    ossLegacyBytes: fallbackBytes,
-    r2LegacyBytes: fallbackBytes,
-    activeABytes: fixture.manifestBytes,
+  const validatedFallback = validateLegacyPauseFallbackBytes({
+    fallback: fixture.nextPolicy.legacyPauseFallback,
+    ossBytes: fallbackBytes,
+    r2Bytes: fallbackBytes,
   })
-  assert.equal(resumed.activeAVersion, '0.6.649')
-  assert.equal(resumed.fallback.version, '0.6.633')
-
-  const policyBeforeBytes = jsonBytes(fixture.nextPolicy)
-  const proposedPausedPolicyBytes = jsonBytes({
-    ...fixture.nextPolicy,
-    paused: true,
-    updatedAt: '2026-07-29T00:00:01.000Z',
-  })
-  const pauseJournal = createLegacyPauseJournal({
-    transactionId: '880-1',
-    createdAt: promotedAt,
-    expectedCurrentVersion: '0.6.649',
-    policyBeforeBytes,
-    ossLegacyBeforeBytes: fixture.manifestBytes,
-    r2LegacyBeforeBytes: fixture.manifestBytes,
-    ossLegacyAclBytes: jsonBytes({ acl: 'public-read' }),
-    proposedPausedPolicyBytes,
-    ossFallbackBytes: fallbackBytes,
-    r2FallbackBytes: fallbackBytes,
-  })
-  assert.equal(pauseJournal.legacySnapshots.oss.version, '0.6.649')
-  assert.deepEqual(
-    classifyLegacyPauseRollback({
-      objectKind: 'policy',
-      liveState: 'exists',
-      liveBytes: proposedPausedPolicyBytes,
-      beforeBytes: policyBeforeBytes,
-      pausedBytes: proposedPausedPolicyBytes,
-    }),
-    { action: 'restore', reason: 'paused-bytes-are-live' },
-  )
+  assert.equal(validatedFallback.version, '0.6.633')
+  assert.equal(validatedFallback.manifestSha256, DIRECT_C_CURRENT.manifestSha256)
 })
 
 test('post-promotion legacy monitoring pins only the exact DIRECT_C target', () => {
@@ -613,7 +569,6 @@ test('terminal recovery derives all five DIRECT_C Router probes atomically', () 
   const fixture = directFixture()
   const beforePolicyBytes = jsonBytes(fixture.currentPolicy)
   const nextPolicyBytes = jsonBytes(fixture.nextPolicy)
-  const fallbackBytes = legacy633Bytes()
   const journal = createJournal({
     runId: '778',
     runAttempt: '1',
@@ -628,18 +583,6 @@ test('terminal recovery derives all five DIRECT_C Router probes atomically', () 
         key: 'biyan/updater/stable/policy.json',
         bytes: beforePolicyBytes,
         backupName: 'policy',
-      }),
-      snapshot({
-        provider: 'oss',
-        key: 'mita/latest.json',
-        bytes: fallbackBytes,
-        backupName: 'legacy-oss',
-      }),
-      snapshot({
-        provider: 'r2',
-        key: 'mita/latest.json',
-        bytes: fallbackBytes,
-        backupName: 'legacy-r2',
       }),
     ],
   })
@@ -673,73 +616,46 @@ test('terminal recovery derives all five DIRECT_C Router probes atomically', () 
     ],
   )
 
-  const absentPolicyJournal = createJournal({
-    runId: '779',
-    runAttempt: '1',
-    targetTag: fixture.candidate.tag,
-    targetVersion: fixture.candidate.version,
-    sourceCommit: fixture.candidate.sourceCommit,
-    nextPolicyBytes,
-    createdAt: promotedAt,
-    snapshots: [
-      snapshot({
-        provider: 'r2',
-        key: 'biyan/updater/stable/policy.json',
-        existed: false,
+  assert.throws(
+    () =>
+      createJournal({
+        runId: '779',
+        runAttempt: '1',
+        targetTag: fixture.candidate.tag,
+        targetVersion: fixture.candidate.version,
+        sourceCommit: fixture.candidate.sourceCommit,
+        nextPolicyBytes,
+        createdAt: promotedAt,
+        snapshots: [
+          snapshot({
+            provider: 'r2',
+            key: 'biyan/updater/stable/policy.json',
+            existed: false,
+          }),
+        ],
       }),
-      snapshot({
-        provider: 'oss',
-        key: 'mita/latest.json',
-        bytes: fallbackBytes,
-        backupName: 'legacy-oss',
-        transactionId: '779-1',
-      }),
-      snapshot({
-        provider: 'r2',
-        key: 'mita/latest.json',
-        bytes: fallbackBytes,
-        backupName: 'legacy-r2',
-        transactionId: '779-1',
-      }),
-    ],
-  })
-  absentPolicyJournal.state = 'committed'
-  assert.equal(
-    terminalPromotionRecoveryPlan({
-      journal: absentPolicyJournal,
-      nextPolicyBytes,
-      beforePolicyBytes: null,
-      candidate: fixture.candidate,
-      phase: 'DIRECT_C',
-      fromVersion: '0.6.633',
-      expectedCurrent: '0.6.633',
-      rollout: '100',
-      smokeEvidence: fixture.smokeEvidence,
-      healthEvidence: fixture.healthEvidence,
-      directTransitionPolicy: fixture.directTransitionPolicy,
-    }).sameRequest,
-    true,
+    /snapshot only the mutable policy/,
   )
 })
 
-test('promotion transaction writes both legacy origins before policy and probes every DIRECT_C source', () => {
+test('promotion transaction keeps the legacy handoff frozen and probes every DIRECT_C source', () => {
   const runner = fs.readFileSync(
     path.join(repoRoot, 'scripts/updater/run-promotion-transaction.sh'),
     'utf8',
   ).replace(/\r\n?/g, '\n')
-  const legacyWrite = runner.indexOf(
-    'advance_journal committing before-legacy-dual-write',
-  )
+  const firstFrozenCheck = runner.indexOf('validate-frozen-legacy')
   const policyWrite = runner.indexOf(
     'advance_journal committing before-policy-write',
   )
   const routerProbe = runner.indexOf('probe_index=0')
-  assert.ok(legacyWrite >= 0)
-  assert.ok(policyWrite > legacyWrite)
+  const finalFrozenCheck = runner.lastIndexOf('validate-frozen-legacy')
+  assert.ok(firstFrozenCheck >= 0)
+  assert.ok(policyWrite > firstFrozenCheck)
   assert.ok(routerProbe > policyWrite)
+  assert.ok(finalFrozenCheck > routerProbe)
   assert.match(
     runner,
-    /current_legacy_version" != "\$next_legacy_version"[\s\S]+update_legacy=true/,
+    /test "\$current_legacy_version" = "\$next_legacy_version"/,
   )
   assert.match(
     runner,
@@ -749,8 +665,12 @@ test('promotion transaction writes both legacy origins before policy and probes 
     runner,
     /test "\$probe_state" = "no-transition"/,
   )
-  assert.match(
-    runner,
-    /if \[\[ "\$next_legacy_version" == "\$current_legacy_version" \]\]; then[\s\S]+legacy_publish_source=dist\/state\/resume-active-a\.json/,
-  )
+  assert.doesNotMatch(runner, /before-legacy-dual-write/)
+  for (const line of runner.split('\n')) {
+    if (!/legacy_(?:aliyun|r2)_key/.test(line)) continue
+    assert.doesNotMatch(
+      line,
+      /put-object|delete-object|RefreshObjectCaches|--ObjectPath/,
+    )
+  }
 })

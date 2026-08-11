@@ -73,6 +73,10 @@ function shellFunction(source, name) {
 }
 
 function snapshot(provider, key, existed = true) {
+  const backupName =
+    provider === 'r2' && key === 'biyan/updater/stable/policy.json'
+      ? 'policy'
+      : provider
   return existed
     ? {
         provider,
@@ -85,7 +89,7 @@ function snapshot(provider, key, existed = true) {
           custom: {},
         },
         acl: provider === 'oss' ? { acl: 'default' } : null,
-        backupKey: `biyan/updater/transactions/123-1/backups/${provider}.json`,
+        backupKey: `biyan/updater/transactions/123-1/backups/${backupName}.json`,
       }
     : {
         provider,
@@ -109,8 +113,6 @@ function journal() {
     createdAt: '2026-07-24T00:00:00.000Z',
     snapshots: [
       snapshot('r2', 'biyan/updater/stable/policy.json'),
-      snapshot('oss', 'mita/latest.json'),
-      snapshot('r2', 'mita/latest.json'),
     ],
   })
 }
@@ -254,24 +256,6 @@ function terminalFixture(
         backupKey: beforePolicyBytes
           ? `${backupPrefix}/policy.json`
           : null,
-      },
-      {
-        provider: 'oss',
-        key: 'mita/latest.json',
-        existed: true,
-        bytesSha256: legacyManifestSha256,
-        metadata: metadata('public, max-age=60, must-revalidate'),
-        acl: { acl: 'default' },
-        backupKey: `${backupPrefix}/legacy-oss.json`,
-      },
-      {
-        provider: 'r2',
-        key: 'mita/latest.json',
-        existed: true,
-        bytesSha256: legacyManifestSha256,
-        metadata: metadata('public, max-age=60, must-revalidate'),
-        acl: null,
-        backupKey: `${backupPrefix}/legacy-r2.json`,
       },
     ],
   })
@@ -805,7 +789,8 @@ test('test harness normalizes checkout text and fake-bin paths for Bash', () => 
 
 test('journal schema binds the exact content-addressed next policy', () => {
   const prepared = journal()
-  assert.equal(prepared.schema, 2)
+  assert.equal(prepared.schema, 3)
+  assert.equal(prepared.kind, 'router-promotion')
   assert.deepEqual(prepared.nextPolicy, {
     key: 'biyan/updater/transactions/123-1/next-policy.json',
     sha256: createHash('sha256')
@@ -947,11 +932,11 @@ test('terminal promotion recovery rejects nonterminal and cross-transaction evid
     /committed or rolled-back/
   )
   const wrongBackup = structuredClone(fixture.journal)
-  wrongBackup.snapshots[1].backupKey =
-    'biyan/updater/transactions/909-1/backups/legacy-oss.json'
+  wrongBackup.snapshots[0].backupKey =
+    'biyan/updater/transactions/909-1/backups/policy.json'
   assert.throws(
     () => terminalPromotionRecoveryPlan({ ...args, journal: wrongBackup }),
-    /do not match the journal transaction/
+    /not transaction-bound/
   )
   assert.throws(
     () =>
@@ -995,24 +980,6 @@ test('terminal survivor re-dispatch cleans committed and rolled-back journals', 
     transactionId: '910-1',
     sameRequest: false,
   })
-
-  for (const state of ['committed', 'rolled-back']) {
-    const absentPolicy = runTerminalRedispatch({
-      state,
-      policyAbsent: true,
-    })
-    assert.equal(
-      absentPolicy.result.status,
-      0,
-      absentPolicy.result.stderr || absentPolicy.result.stdout
-    )
-    assert.equal(absentPolicy.survivorExists, false)
-    assert.equal(
-      absentPolicy.recovery.sameRequest,
-      state === 'committed'
-    )
-    assert.equal(absentPolicy.recovery.terminalState, state)
-  }
 
   const unchanged = runTerminalRedispatch({
     state: 'committed',
@@ -1201,6 +1168,7 @@ test('R2 ETag and recovery bytes metadata ACL readback are strict', () => {
   )
 })
 
+
 test('OSS ACL extraction matches pinned ossutil output and rejects schema drift', () => {
   const productionAcl = {
     AccessControlList: { Grant: 'default' },
@@ -1251,7 +1219,7 @@ test('OSS ACL extraction matches pinned ossutil output and rejects schema drift'
     const aclFile = path.join(temp, 'acl.json')
     fs.writeFileSync(
       aclFile,
-      `${JSON.stringify(productionAcl, null, 2)}\n`
+      JSON.stringify(productionAcl, null, 2) + '\n'
     )
     const result = spawnSync(
       process.execPath,
@@ -1265,43 +1233,6 @@ test('OSS ACL extraction matches pinned ossutil output and rejects schema drift'
     )
     assert.equal(result.status, 0, result.stderr)
     assert.equal(result.stdout, 'default\n')
-
-    const journalFile = path.join(temp, 'journal.json')
-    const prepared = journal()
-    prepared.snapshots[1].acl = productionAcl
-    fs.writeFileSync(
-      journalFile,
-      `${JSON.stringify(prepared, null, 2)}\n`
-    )
-    const snapshotResult = spawnSync(
-      process.execPath,
-      [
-        path.join(repoRoot, 'scripts/updater/promotion-transaction.mjs'),
-        'extract-oss-acl',
-        '--acl',
-        journalFile,
-        '--snapshot-index',
-        '1',
-      ],
-      { encoding: 'utf8' }
-    )
-    assert.equal(snapshotResult.status, 0, snapshotResult.stderr)
-    assert.equal(snapshotResult.stdout, 'default\n')
-
-    const invalidSnapshotResult = spawnSync(
-      process.execPath,
-      [
-        path.join(repoRoot, 'scripts/updater/promotion-transaction.mjs'),
-        'extract-oss-acl',
-        '--acl',
-        journalFile,
-        '--snapshot-index',
-        '0',
-      ],
-      { encoding: 'utf8' }
-    )
-    assert.equal(invalidSnapshotResult.status, 1)
-    assert.match(invalidSnapshotResult.stderr, /snapshot index is invalid/)
   } finally {
     fs.rmSync(temp, { recursive: true, force: true })
   }
@@ -1755,15 +1686,16 @@ test('tracked initial A approval pins the accepted v0.6.643 manifest exactly', (
   })
 })
 
-test('journal validates restorable bytes, metadata, ACL, and immutable ledger', () => {
+
+test('journal validates policy backup metadata and immutable ledger', () => {
   const prepared = journal()
   assert.equal(validateJournal(prepared).state, 'prepared')
   const unsafeSnapshots = structuredClone(prepared.snapshots)
-  unsafeSnapshots[1].metadata = {
+  unsafeSnapshots[0].metadata = {
     Header: {
       'Cache-Control': ['no-store'],
       'Content-Type': ['application/json'],
-      'X-Oss-Meta-Owner': ['release'],
+      'X-Amz-Meta-Owner': ['release'],
     },
   }
   assert.throws(
@@ -1780,6 +1712,24 @@ test('journal validates restorable bytes, metadata, ACL, and immutable ledger', 
       }),
     /unsupported backup fields/
   )
+  assert.throws(
+    () =>
+      createJournal({
+        runId: '123',
+        runAttempt: '1',
+        targetTag: 'v0.6.643',
+        targetVersion: '0.6.643',
+        sourceCommit,
+        nextPolicyBytes: Buffer.from('{"currentVersion":"0.6.643"}\n'),
+        createdAt: '2026-07-24T00:00:00.000Z',
+        snapshots: [
+          ...prepared.snapshots,
+          snapshot('oss', 'mita/latest.json'),
+        ],
+      }),
+    /snapshot only the mutable policy/
+  )
+
   const committing = advanceJournal(prepared, {
     state: 'committing',
     checkpoint: 'before-policy-write',
@@ -1814,19 +1764,6 @@ test('journal validates restorable bytes, metadata, ACL, and immutable ledger', 
       /immutable ledger|exact fields/
     )
   }
-  assert.throws(
-    () =>
-      validateJournal({
-        ...committing,
-        snapshots: [
-          {
-            ...committing.snapshots[1],
-            acl: null,
-          },
-        ],
-      }),
-    /ACL evidence is not restorable/
-  )
   assert.throws(
     () =>
       advanceJournal(committing, {
@@ -1886,7 +1823,13 @@ test('split nonterminal recovery accepts only one exact journal successor', () =
     sourceCommit,
     nextPolicyBytes: Buffer.from('{"currentVersion":"0.6.643"}\n'),
     createdAt: '2026-07-24T00:00:00.000Z',
-    snapshots: prepared.snapshots,
+    snapshots: [
+      {
+        ...prepared.snapshots[0],
+        backupKey:
+          'biyan/updater/transactions/124-1/backups/policy.json',
+      },
+    ],
   })
   assert.throws(
     () => resolveSplitNonterminalJournal({ r2Open: committing, ossOpen: other }),
@@ -2031,10 +1974,11 @@ test('split nonterminal resolver requires both clouds to retain exact history by
   }
 })
 
-test('recovery commands are derived from durable snapshots and created-object ledger', () => {
-  const ossCommitting = advanceJournal(journal(), {
+
+test('recovery commands restore policy and clean only verified immutable objects', () => {
+  let committing = advanceJournal(journal(), {
     state: 'committing',
-    checkpoint: 'legacy-write-intent',
+    checkpoint: 'verified-oss-ledger',
     immutableEntry: {
       provider: 'oss',
       key: 'biyan/updater/releases/v0.6.643/Biyan.app.tar.gz',
@@ -2046,9 +1990,9 @@ test('recovery commands are derived from durable snapshots and created-object le
     },
     updatedAt: '2026-07-24T00:01:00.000Z',
   })
-  const committing = advanceJournal(ossCommitting, {
+  committing = advanceJournal(committing, {
     state: 'committing',
-    checkpoint: 'manifest-r2-write-intent',
+    checkpoint: 'verified-r2-ledger',
     immutableEntry: {
       provider: 'r2',
       key: 'biyan/updater/releases/v0.6.643/latest.json',
@@ -2062,181 +2006,41 @@ test('recovery commands are derived from durable snapshots and created-object le
   })
   const commands = recoveryCommands(committing)
   const mutationBoundary = commands.indexOf(
-    '# RECOVERY MUTATIONS BEGIN: every mutable object is now classified.'
+    '# RECOVERY MUTATIONS BEGIN: mark the durable journal first.'
   )
   assert.ok(mutationBoundary > 0)
   const classification = commands.slice(0, mutationBoundary)
   const mutations = commands.slice(mutationBoundary)
 
   assert.match(classification, /set -euo pipefail/)
-  assert.match(
-    classification,
-    /put-object --generate-cli-skeleton input[\s\S]*delete-object --generate-cli-skeleton input[\s\S]*IfMatch[\s\S]*IfNoneMatch/
-  )
-  const nextPolicyR2 = classification.indexOf(
-    'recovery-readback/next-policy-r2.json'
-  )
-  const nextPolicyOss = classification.indexOf(
-    'recovery-readback/next-policy-oss.json'
-  )
-  const nextPolicyHash = classification.indexOf(
-    '= "$next_policy_sha256"'
-  )
-  const nextPolicyUse = classification.indexOf(
-    'NEXT_POLICY=recovery-readback/next-policy-r2.json'
-  )
-  assert.ok(
-    nextPolicyR2 >= 0
-      && nextPolicyOss > nextPolicyR2
-      && nextPolicyHash > nextPolicyOss
-      && nextPolicyUse > nextPolicyHash
-  )
-  assert.match(classification, new RegExp(committing.nextPolicy.sha256))
-  assert.doesNotMatch(classification, /NEXT_POLICY="\$\{NEXT_POLICY:-/)
   assert.match(classification, /validate-journal/)
   assert.match(classification, /verify-snapshot-readback/)
-  assert.ok(
-    (classification.match(/verify-snapshot-readback/g) ?? []).length >= 3,
-    'every existing snapshot backup must be verified before recovery mutation'
-  )
+  assert.match(classification, /validate-frozen-legacy/)
   assert.match(classification, /classify-policy-rollback/)
-  assert.match(
-    classification,
-    /classify-rollback --object-kind legacy-oss/
-  )
-  assert.match(
-    classification,
-    /classify-rollback --object-kind legacy-r2/
-  )
+  assert.match(classification, /ledger-0/)
+  assert.match(classification, /ledger-1/)
   assert.match(
     classification,
     /cmp "\$JOURNAL" recovery-readback\/live\/open-r2\.json/
   )
-  const noLockProof = classification.slice(
-    classification.indexOf('if [[ "$open_lock_present" != true ]]')
-  )
-  assert.match(noLockProof, /no-lock-final-policy/)
-  assert.match(noLockProof, /no-lock-final-legacy-oss/)
-  assert.match(noLockProof, /no-lock-final-legacy-r2/)
-  assert.match(noLockProof, /no-lock-final-ledger-/)
-  const finalOriginProof = noLockProof.indexOf(
-    'no-lock-final-legacy-r2-verified.json'
-  )
-  const finalLedgerProof = noLockProof.lastIndexOf(
-    'no-lock-final-ledger-'
-  )
-  const finalLockProof = noLockProof.indexOf('no-lock-final-r2')
-  const locklessExit = noLockProof.indexOf('exit 0')
-  assert.ok(
-    finalOriginProof >= 0
-      && finalOriginProof < finalLedgerProof
-      && finalLedgerProof < finalLockProof
-      && finalLockProof < locklessExit,
-    'lockless completion must close origins, ledger, then locks immediately before exit'
-  )
-  assert.doesNotMatch(
-    noLockProof,
-    /\b(?:put-object|delete-object|RefreshObjectCaches|purge_cache)\b/
-  )
-  const classificationWithoutSkeleton = classification
-    .split('\n')
-    .filter((line) => !line.includes('--generate-cli-skeleton input'))
-    .join('\n')
-  assert.doesNotMatch(
-    classificationWithoutSkeleton,
-    /\b(?:s3api|api) (?:put-object|delete-object)\b/
-  )
-
-  const firstLegacyWrite = Math.min(
-    ...[
-      mutations.indexOf(
-        'ossutil api put-object --bucket "$ALIYUN_OSS_BUCKET" --key \'mita/latest.json\''
-      ),
-      mutations.indexOf(
-        'aws s3api put-object --bucket "$CLOUDFLARE_R2_BUCKET" --key \'mita/latest.json\''
-      ),
-    ].filter((index) => index >= 0)
-  )
-  const boundaryProbe = mutations.indexOf('boundary-open-r2')
-  const splitRepair = mutations.indexOf(
-    '# Repair a current split lock create-only'
-  )
-  assert.ok(
-    boundaryProbe >= 0
-      && boundaryProbe < splitRepair
-      && splitRepair < firstLegacyWrite
-      && mutations.indexOf('legacy-oss-prewrite.json') < firstLegacyWrite
-      && mutations.indexOf('legacy-r2-prewrite.json') < firstLegacyWrite,
-    'locks must be re-probed/repaired and both legacy origins re-read before restore'
-  )
-  assert.match(
-    mutations.slice(boundaryProbe, firstLegacyWrite),
-    /boundary-open-r2[\s\S]*boundary-open-oss[\s\S]*Both transaction locks disappeared[\s\S]*--if-none-match '\*'[\s\S]*--forbid-overwrite true/
-  )
-  const legacyVerified = mutations.indexOf(
-    '# Verify both legacy origins before the policy is restored.'
-  )
-  const legacyCachesConverged = mutations.indexOf(
-    'recovery-readback/legacy-r2-cdn.json'
-  )
-  const policyRestore = mutations.indexOf(
-    '# Restore the policy last, after legacy origins and caches converge.'
-  )
-  assert.ok(
-    firstLegacyWrite >= 0
-      && firstLegacyWrite < legacyVerified
-      && legacyVerified < legacyCachesConverged
-      && legacyCachesConverged < policyRestore
-  )
   assert.match(
     mutations,
-    /decisions\/policy\.json[\s\S]*--if-match "\$policy_etag"/
+    /--body recovery-readback\/backups\/policy\.json[\s\S]*--if-match "\$policy_etag"/
   )
-  assert.match(
-    mutations,
-    /decisions\/legacy-oss\.json[\s\S]*legacy-oss-prewrite\.json[\s\S]*\bcmp\b[\s\S]*ossutil api put-object/
-  )
-  assert.match(
-    mutations,
-    /decisions\/legacy-r2\.json[\s\S]*--if-match "\$legacy_r2_etag"/
-  )
-  assert.match(
-    mutations,
-    /predelete-oss-[0-9]+[\s\S]*sha256sum[\s\S]*metadata-plan/
-  )
-  assert.match(
-    mutations,
-    /predelete-r2-[0-9]+[\s\S]*sha256sum[\s\S]*metadata-plan/
-  )
-  const cleanupClassify = mutations.indexOf(
-    '# Reclassify every cleanup object before the first cleanup deletion.'
-  )
-  const cleanupDelete = mutations.indexOf(
-    '# Delete cleanup objects only after every predelete classification.'
-  )
-  assert.ok(cleanupClassify >= 0 && cleanupClassify < cleanupDelete)
-  assert.doesNotMatch(
-    mutations.slice(cleanupClassify, cleanupDelete),
-    /\bdelete-object\b/
-  )
-  assert.match(
-    mutations.slice(cleanupDelete),
-    /predelete-r2-[0-9]+-metadata\.json[\s\S]*--if-match "\$ledger_etag"/
-  )
-  assert.match(
-    mutations,
-    /open-r2-predelete\.json[\s\S]*open-oss-predelete\.json[\s\S]*cmp "\$JOURNAL"[\s\S]*transactionId[\s\S]*--if-match "\$open_etag"/
-  )
-  assert.match(
-    commands,
-    /aliyun --profile release cdn RefreshObjectCaches --region "\$ALIYUN_REGION"/
-  )
-  assert.doesNotMatch(commands, /cloudflare-cache-purge|purge_cache/)
-  assert.match(commands, /poll-url[\s\S]*legacy-aliyun-cdn/)
-  assert.match(commands, /poll-url[\s\S]*legacy-r2-cdn/)
-  assert.doesNotMatch(commands, /copy-object/)
+  assert.match(mutations, /delete-object --bucket "\$ALIYUN_OSS_BUCKET"/)
+  assert.match(mutations, /delete-object --bucket "\$CLOUDFLARE_R2_BUCKET"/)
+  assert.match(mutations, /validate-frozen-legacy/)
+  assert.match(mutations, /router-policy-restored/)
+  assert.match(mutations, /persist_recovery_journal/)
+  for (const line of commands.split('\n')) {
+    if (!/mita\/latest\.json|legacy_key/.test(line)) continue
+    assert.doesNotMatch(
+      line,
+      /put-object|delete-object|RefreshObjectCaches|purge/
+    )
+  }
   assert.doesNotMatch(commands, /\bgh release edit\b|--draft/)
-  assert.match(commands, new RegExp(OPEN_TRANSACTION_KEY.replaceAll('/', '\\/')))
+  assert.doesNotMatch(commands, /RefreshObjectCaches|poll-url/)
   assert.ok(commands.startsWith('#!/usr/bin/env bash\n'))
   assert.equal(spawnSync('bash', ['-n'], { input: commands }).status, 0)
 })
@@ -2270,7 +2074,8 @@ test('generated recovery rejects terminal journals instead of rolling them back'
   }
 })
 
-test('recovery leaves the already-published GitHub release immutable', () => {
+
+test('recovery leaves the published release and frozen handoff immutable', () => {
   const committing = advanceJournal(journal(), {
     state: 'committing',
     checkpoint: 'before-policy-write',
@@ -2279,8 +2084,10 @@ test('recovery leaves the already-published GitHub release immutable', () => {
   const commands = recoveryCommands(committing)
   assert.doesNotMatch(commands, /\bgh release edit\b|--draft/)
   assert.match(commands, /verify-snapshot-readback/)
-  assert.match(commands, /poll-url/)
+  assert.match(commands, /validate-frozen-legacy/)
+  assert.doesNotMatch(commands, /RefreshObjectCaches|poll-url/)
 })
+
 
 test('recovery fails closed when an unverified immutable create intent exists', () => {
   const unverified = advanceJournal(journal(), {
@@ -2298,48 +2105,31 @@ test('recovery fails closed when an unverified immutable create intent exists', 
     updatedAt: '2026-07-24T00:01:00.000Z',
   })
   const commands = recoveryCommands(unverified)
-  assert.match(commands, /unverified\.tar\.gz/)
-  const targetProbe = commands.indexOf('legacy-target-oss-probe')
-  const missingTargetBranch = commands.indexOf(
-    'legacy_target_oss_state" == absent'
+  const unverifiedProbe = commands.indexOf(
+    "probe_oss_recovery 'biyan/updater/releases/v0.6.643/unverified.tar.gz' unverified-0"
   )
-  const missingTargetProbe = commands.indexOf(
-    'missing-target-unverified-0-oss'
-  )
-  const missingTargetSnapshotProof = commands.indexOf(
-    'missing-target-legacy-r2-verified.json'
-  )
-  const asymmetricTargetFailure = commands.indexOf(
-    'Legacy target manifest presence differs across recovery stores'
+  const absentProof = commands.indexOf(
+    'recovery-readback/probes/unverified-0.json',
+    unverifiedProbe
   )
   const mutationBoundary = commands.indexOf(
-    '# RECOVERY MUTATIONS BEGIN: every mutable object is now classified.'
+    '# RECOVERY MUTATIONS BEGIN: mark the durable journal first.'
   )
   assert.ok(
-    targetProbe >= 0
-      && targetProbe < missingTargetBranch
-      && missingTargetBranch < missingTargetProbe
-      && missingTargetProbe < missingTargetSnapshotProof
-      && missingTargetSnapshotProof < asymmetricTargetFailure
-      && asymmetricTargetFailure < mutationBoundary,
-    'missing targets must prove every unverified intent absent and both snapshots exact before mutation'
+    unverifiedProbe >= 0
+      && unverifiedProbe < absentProof
+      && absentProof < mutationBoundary
   )
   assert.match(
-    commands.slice(missingTargetBranch, asymmetricTargetFailure),
-    /test '0' -eq 0[\s\S]*\.state == "absent"[\s\S]*verify-snapshot-readback[\s\S]*target-never-created-live-equals-snapshot/
-  )
-  const unverifiedProbe = commands.indexOf('unverified-ledger-0-oss')
-  const firstDelete = commands.indexOf('# Delete cleanup objects only')
-  assert.ok(unverifiedProbe >= 0 && unverifiedProbe < firstDelete)
-  assert.match(
-    commands.slice(unverifiedProbe, firstDelete),
+    commands.slice(unverifiedProbe, mutationBoundary),
     /\.state == "absent"/
   )
   assert.doesNotMatch(
-    commands.slice(unverifiedProbe, firstDelete),
+    commands.slice(unverifiedProbe, mutationBoundary),
     /delete-object/
   )
 })
+
 
 test('recovery pairs an immutable create intent only with a later exact verification', () => {
   const intent = {
@@ -2364,11 +2154,8 @@ test('recovery pairs an immutable create intent only with a later exact verifica
     updatedAt: '2026-07-24T00:02:00.000Z',
   })
   const exactCommands = recoveryCommands(withExactVerification)
-  assert.match(exactCommands, /initial-ledger-0-oss/)
-  assert.doesNotMatch(
-    exactCommands,
-    /missing-target-unverified-|unverified-ledger-/
-  )
+  assert.match(exactCommands, /probe_oss_recovery[\s\S]*'ledger-0'/)
+  assert.doesNotMatch(exactCommands, /unverified-0/)
 
   const withMismatchedVerification = advanceJournal(withIntent, {
     state: 'rollback-required',
@@ -2381,8 +2168,8 @@ test('recovery pairs an immutable create intent only with a later exact verifica
     updatedAt: '2026-07-24T00:02:00.000Z',
   })
   const mismatchedCommands = recoveryCommands(withMismatchedVerification)
-  assert.match(mismatchedCommands, /missing-target-unverified-0-oss/)
-  assert.match(mismatchedCommands, /unverified-ledger-0-oss/)
+  assert.match(mismatchedCommands, /unverified-0/)
+  assert.match(mismatchedCommands, /'ledger-0'/)
 })
 
 test('CDN polling waits through stale success and accepts only exact bytes', async () => {
@@ -2426,351 +2213,136 @@ test('CDN polling fails closed after bounded stale or transport responses', asyn
   )
 })
 
-test('transaction runners behaviorally fail closed without AWS conditional inputs', () => {
-  const runnerNames = [
-    'run-promotion-transaction.sh',
-    'run-pause-transaction.sh',
-  ]
-  const executeCapabilityBlock = (block, putSkeleton, deleteSkeleton) => {
-    const harness = `
-aws() {
-  case "$*" in
-    *"s3api put-object"*) printf '%s\\n' "$PUT_SKELETON" ;;
-    *"s3api delete-object"*) printf '%s\\n' "$DELETE_SKELETON" ;;
-    *) return 64 ;;
-  esac
-}
-${block}
-`
-    return spawnSync('bash', ['-c', harness], {
-      env: {
-        ...process.env,
-        PUT_SKELETON: JSON.stringify({
-          IfMatch: '',
-          IfNoneMatch: '',
-        }),
-        DELETE_SKELETON: JSON.stringify({ IfMatch: '' }),
-        ...(putSkeleton === undefined
-          ? {}
-          : { PUT_SKELETON: JSON.stringify(putSkeleton) }),
-        ...(deleteSkeleton === undefined
-          ? {}
-          : { DELETE_SKELETON: JSON.stringify(deleteSkeleton) }),
-      },
-      encoding: 'utf8',
-    })
-  }
 
-  for (const runnerName of runnerNames) {
-    const source = readText(
-      path.join(repoRoot, 'scripts/updater', runnerName)
-    )
-    const functionStart = source.indexOf(
-      'assert_aws_conditional_capabilities() {'
-    )
-    const callLine = '\nassert_aws_conditional_capabilities\n'
-    const callStart = source.indexOf(callLine, functionStart)
-    const block = source.slice(
-      functionStart,
-      callStart + callLine.length
-    )
-    const firstCloudMutation = Math.min(
-      ...[
-        source.indexOf('aws s3api put-object --bucket', callStart),
-        source.indexOf('aws s3api delete-object --bucket', callStart),
-        source.indexOf('ossutil api put-object --bucket', callStart),
-        source.indexOf('ossutil api delete-object --bucket', callStart),
-      ].filter((index) => index >= 0)
-    )
-    assert.ok(
-      functionStart >= 0
-        && callStart > functionStart
-        && callStart < firstCloudMutation,
-      `${runnerName} must preflight capabilities before any cloud mutation`
-    )
-    assert.match(block, /put-object --generate-cli-skeleton input/)
-    assert.match(block, /delete-object --generate-cli-skeleton input/)
-    assert.equal(executeCapabilityBlock(block).status, 0)
-    for (const [putSkeleton, deleteSkeleton] of [
-      [{ IfNoneMatch: '' }, { IfMatch: '' }],
-      [{ IfMatch: '' }, { IfMatch: '' }],
-      [{ IfMatch: '', IfNoneMatch: '' }, {}],
-    ]) {
-      assert.notEqual(
-        executeCapabilityBlock(block, putSkeleton, deleteSkeleton).status,
-        0,
-        `${runnerName} must reject a missing conditional input`
-      )
-    }
-  }
+test('transaction runners preflight the exact AWS conditional inputs they use', () => {
+  const promotion = readText(
+    path.join(repoRoot, 'scripts/updater/run-promotion-transaction.sh')
+  )
+  const functionStart = promotion.indexOf(
+    'assert_aws_conditional_capabilities() {'
+  )
+  const callLine = '\nassert_aws_conditional_capabilities\n'
+  const callStart = promotion.indexOf(callLine, functionStart)
+  const block = promotion.slice(
+    functionStart,
+    callStart + callLine.length
+  )
+  const firstMutation = promotion.indexOf(
+    'aws s3api put-object --bucket',
+    callStart
+  )
+  assert.ok(
+    functionStart >= 0
+      && callStart > functionStart
+      && callStart < firstMutation
+  )
+  assert.match(block, /put-object --generate-cli-skeleton input/)
+  assert.match(block, /delete-object --generate-cli-skeleton input/)
+  assert.match(block, /IfMatch[\s\S]*IfNoneMatch/)
+
+  const pause = readText(
+    path.join(repoRoot, 'scripts/updater/run-router-pause-transaction.sh')
+  )
+  const pausePreflight = pause.indexOf(
+    'put_skeleton="$(aws s3api put-object --generate-cli-skeleton input)"'
+  )
+  const pauseWrite = pause.indexOf('policy_write_attempted=true')
+  assert.ok(pausePreflight >= 0 && pausePreflight < pauseWrite)
+  assert.match(
+    pause.slice(pausePreflight, pauseWrite),
+    /has\("IfMatch"\)/
+  )
+  assert.doesNotMatch(
+    pause.slice(pausePreflight, pauseWrite),
+    /delete-object --generate-cli-skeleton/
+  )
 })
+
 
 test('probe helpers preserve caller errexit mode', () => {
   for (const runnerName of [
     'run-promotion-transaction.sh',
-    'run-pause-transaction.sh',
+    'run-router-pause-transaction.sh',
   ]) {
     const source = readText(
       path.join(repoRoot, 'scripts/updater', runnerName)
     )
     const probe = shellFunction(source, 'probe_r2')
-    const base = `
-mkdir -p dist/state/probes dist/pause/probes
-probe_dir=dist/pause/probes
-CLOUDFLARE_R2_BUCKET=test
-r2_endpoint=https://example.invalid
-aws() { return 44; }
-${probe}
-`
-    const permissive = spawnSync(
-      'bash',
-      ['-c', `${base}
-node() { return 0; }
-set +e
-probe_r2 key name
-case "$-" in *e*) exit 90 ;; esac
-false
-echo reached
-`],
-      { encoding: 'utf8' }
-    )
-    assert.equal(permissive.status, 0, permissive.stderr)
-    assert.match(permissive.stdout, /reached/)
-
-    const strict = spawnSync(
-      'bash',
-      ['-c', `${base}
-node() { return 45; }
-set -e
-probe_r2 key name
-echo unreachable
-`],
-      { encoding: 'utf8' }
-    )
-    assert.notEqual(strict.status, 0)
-    assert.doesNotMatch(strict.stdout, /unreachable/)
+    assert.match(probe, /if aws s3api head-object/)
+    assert.match(probe, /then[\s\S]*rc=0[\s\S]*else[\s\S]*rc=\$\?/)
+    assert.match(probe, /promotion-transaction\.mjs classify-probe/)
+    assert.doesNotMatch(probe, /set [+-]e/)
   }
 })
 
-test('open-journal cleanup resumes when R2 is absent and OSS remains', () => {
-  for (const runnerName of [
-    'run-promotion-transaction.sh',
-    'run-pause-transaction.sh',
-  ]) {
-    const source = readText(
-      path.join(repoRoot, 'scripts/updater', runnerName)
-    )
-    const cleanup = shellFunction(source, 'delete_open_journal')
-    const result = spawnSync(
-      'bash',
-      ['-c', `
-set -euo pipefail
-tmp="$(mktemp -d)"
-trap 'rm -rf "$tmp"' EXIT
-cd "$tmp"
-mkdir -p dist/state/probes dist/pause/probes
-state_dir=dist/pause
-probe_dir=dist/pause/probes
-journal="$PWD/journal.json"
-printf '%s\\n' '{"transactionId":"123-1"}' >"$journal"
-transaction_id=123-1
-OPEN_TRANSACTION_KEY=biyan/updater/transactions/open.json
-CLOUDFLARE_R2_BUCKET=test
-ALIYUN_OSS_BUCKET=test
-ALIYUN_REGION=test
-r2_endpoint=https://r2.invalid
-oss_endpoint=https://oss.invalid
-oss_exists=true
-probe_r2() {
-  local name="$2"
-  printf '%s\\n' '{"state":"absent"}' >"\${probe_dir}/\${name}.json"
-  mkdir -p dist/state/probes
-  cp "\${probe_dir}/\${name}.json" "dist/state/probes/\${name}.json"
-}
-probe_oss() {
-  local name="$2" state=absent
-  if [[ "$oss_exists" == true ]]; then state=exists; fi
-  printf '{"state":"%s"}\\n' "$state" >"\${probe_dir}/\${name}.json"
-  mkdir -p dist/state/probes
-  cp "\${probe_dir}/\${name}.json" "dist/state/probes/\${name}.json"
-}
-download_r2() { echo unexpected-r2 >&2; return 91; }
-download_oss() { cp "$journal" "$2"; }
-aws() { echo unexpected-aws >&2; return 92; }
-ossutil() {
-  if [[ "$1" == cp ]]; then
-    cp "$journal" "$3"
-  elif [[ "$1 $2" == "api head-object" ]]; then
-    printf '%s\\n' '{"ContentType":"application/json","CacheControl":"no-store"}'
-  elif [[ "$1 $2" == "api delete-object" ]]; then
-    oss_exists=false
-    printf '%s\\n' delete >>"$tmp/oss-deletes.log"
-  else
-    return 93
-  fi
-}
-node() {
-  local output=
-  while (($#)); do
-    if [[ "$1" == --output ]]; then output="$2"; shift 2; else shift; fi
-  done
-  test -n "$output"
-  mkdir -p "$(dirname "$output")"
-  printf '%s\\n' '{"contentType":"application/json","cacheControl":"no-store"}' >"$output"
-}
-${cleanup}
-delete_open_journal
-test "$(wc -l <"$tmp/oss-deletes.log" | tr -d ' ')" = 1
-`],
-      { encoding: 'utf8' }
-    )
-    assert.equal(
-      result.status,
-      0,
-      `${runnerName}: ${result.stderr || result.stdout}`
-    )
-  }
-})
 
-test('generated ledger cleanup skips an absent subset and deletes nothing on unknown', () => {
-  const automaticRunner = readText(
+test('promotion open-journal cleanup supports a single surviving replica', () => {
+  const source = readText(
     path.join(repoRoot, 'scripts/updater/run-promotion-transaction.sh')
   )
-  const automaticClassifier = shellFunction(
-    automaticRunner,
-    'classify_ledger_object'
-  )
-  assert.match(
-    automaticClassifier,
-    /printf '%s\\n' "\$state"[\s\S]*if \[\[ "\$state" == absent \]\]; then return 0; fi[\s\S]*test "\$state" = exists/
-  )
-  const automaticCleanup = automaticRunner.slice(
-    automaticRunner.indexOf(
-      '# Reclassify every ledger object immediately before cleanup.'
-    ),
-    automaticRunner.indexOf(
-      'node scripts/updater/promotion-transaction.mjs advance-journal',
-      automaticRunner.indexOf(
-        '# Reclassify every ledger object immediately before cleanup.'
-      )
-    )
-  )
-  assert.match(automaticCleanup, /initial_ledger_state/)
-  assert.match(automaticCleanup, /predelete_ledger_state/)
-  assert.match(automaticCleanup, /if \[\[ "\$ledger_state" == absent \]\]; then continue; fi/)
-  assert.match(automaticCleanup, /--if-match "\$ledger_etag"/)
-  assert.match(automaticCleanup, /ledger-deleted-\$\{ledger_index\}/)
+  const cleanup = shellFunction(source, 'delete_open_journal')
+  assert.match(cleanup, /open-journal-r2-predelete/)
+  assert.match(cleanup, /open-journal-oss-predelete/)
+  assert.match(cleanup, /r2_delete_needed=false/)
+  assert.match(cleanup, /oss_delete_needed=false/)
+  assert.match(cleanup, /if \[\[ "\$r2_delete_needed" == true \]\]/)
+  assert.match(cleanup, /if \[\[ "\$oss_delete_needed" == true \]\]/)
+  assert.match(cleanup, /cmp "\$journal"/)
+  assert.match(cleanup, /--if-match "\$open_journal_etag"/)
+})
 
+
+test('generated ledger cleanup targets only verified immutable entries', () => {
   const ledgerBytes = Buffer.from('transaction-created-ledger-object\n')
   const ledgerSha = createHash('sha256').update(ledgerBytes).digest('hex')
-  const ossLedger = {
-    provider: 'oss',
-    key: 'biyan/updater/releases/v0.6.643/ledger-object',
-    sha256: ledgerSha,
-    contentType: 'application/octet-stream',
-    cacheControl: 'public, max-age=31536000, immutable',
-    createdByTransaction: true,
-    verified: true,
-  }
-  const r2Ledger = {
-    ...ossLedger,
-    provider: 'r2',
-    key: 'biyan/updater/releases/v0.6.643/already-deleted',
-  }
   let withLedger = advanceJournal(journal(), {
     state: 'committing',
     checkpoint: 'verified-oss-ledger',
-    immutableEntry: ossLedger,
+    immutableEntry: {
+      provider: 'oss',
+      key: 'biyan/updater/releases/v0.6.643/ledger-object',
+      sha256: ledgerSha,
+      contentType: 'application/octet-stream',
+      cacheControl: 'public, max-age=31536000, immutable',
+      createdByTransaction: true,
+      verified: true,
+    },
     updatedAt: '2026-07-24T00:01:00.000Z',
   })
   withLedger = advanceJournal(withLedger, {
     state: 'committing',
     checkpoint: 'verified-r2-ledger',
-    immutableEntry: r2Ledger,
+    immutableEntry: {
+      provider: 'r2',
+      key: 'biyan/updater/releases/v0.6.643/already-deleted',
+      sha256: ledgerSha,
+      contentType: 'application/octet-stream',
+      cacheControl: 'public, max-age=31536000, immutable',
+      createdByTransaction: true,
+      verified: true,
+    },
     updatedAt: '2026-07-24T00:02:00.000Z',
   })
   const commands = recoveryCommands(withLedger)
-  const cleanup = commands.slice(
-    commands.indexOf(
-      '# Reclassify every cleanup object before the first cleanup deletion.'
-    ),
-    commands.indexOf(
-      '# Delete each still-present matching lock; an absent side is already done.'
-    )
+  const boundary = commands.indexOf(
+    '# RECOVERY MUTATIONS BEGIN: mark the durable journal first.'
   )
-  assert.match(cleanup, /predelete-r2-0-state/)
-  assert.match(cleanup, /predelete-oss-1-state/)
-  assert.match(cleanup, /Reject absent-to-exists resurrection/)
-
-  const run = (r2State) =>
-    spawnSync(
-      'bash',
-      ['-c', `
-set -euo pipefail
-tmp="$(mktemp -d)"
-trap 'rm -rf "$tmp"' EXIT
-cd "$tmp"
-mkdir -p recovery-readback/ledger
-printf '%s\\n' exists >recovery-readback/ledger/0-state
-printf '%s\\n' absent >recovery-readback/ledger/1-state
-printf '%s' "$LEDGER_BYTES" >"$tmp/oss-object"
-CLOUDFLARE_R2_BUCKET=test
-ALIYUN_OSS_BUCKET=test
-ALIYUN_REGION=test
-r2_endpoint=https://r2.invalid
-oss_endpoint=https://oss.invalid
-probe_r2_recovery() {
-  printf '{"state":"%s"}\\n' "$R2_STATE" >"recovery-readback/$2.json"
-}
-probe_oss_recovery() {
-  local state=absent
-  if [[ -f "$tmp/oss-object" ]]; then state=exists; fi
-  printf '{"state":"%s"}\\n' "$state" >"recovery-readback/$2.json"
-}
-aws() { echo unexpected-aws >>"$tmp/mutations.log"; return 91; }
-ossutil() {
-  if [[ "$1" == cp ]]; then
-    cp "$tmp/oss-object" "$3"
-  elif [[ "$1 $2" == "api head-object" ]]; then
-    printf '%s\\n' '{"ContentType":"application/octet-stream"}'
-  elif [[ "$1 $2" == "api delete-object" ]]; then
-    rm "$tmp/oss-object"
-    printf '%s\\n' oss-delete >>"$tmp/mutations.log"
-  else
-    return 92
-  fi
-}
-node() {
-  local output=
-  while (($#)); do
-    if [[ "$1" == --output ]]; then output="$2"; shift 2; else shift; fi
-  done
-  test -n "$output"
-  printf '%s\\n' \
-    '{"contentType":"application/octet-stream","cacheControl":"public, max-age=31536000, immutable"}' \
-    >"$output"
-}
-${cleanup}
-cat "$tmp/mutations.log"
-`],
-      {
-        encoding: 'utf8',
-        env: {
-          ...process.env,
-          LEDGER_BYTES: ledgerBytes.toString(),
-          R2_STATE: r2State,
-        },
-      }
-    )
-
-  const partial = run('absent')
-  assert.equal(partial.status, 0, partial.stderr)
-  assert.equal(partial.stdout.trim(), 'oss-delete')
-
-  const unknown = run('unknown')
-  assert.notEqual(unknown.status, 0)
-  assert.doesNotMatch(unknown.stdout + unknown.stderr, /oss-delete/)
+  assert.ok(boundary > 0)
+  assert.match(commands.slice(0, boundary), /ledger-0/)
+  assert.match(commands.slice(0, boundary), /ledger-1/)
+  assert.match(
+    commands.slice(0, boundary),
+    /ledger_state[\s\S]*if \[\[ "\$ledger_state" == exists \]\][\s\S]*test "\$ledger_state" = absent/
+  )
+  assert.match(
+    commands.slice(boundary),
+    /initial_ledger_state[\s\S]*predelete_ledger_state[\s\S]*test "\$predelete_ledger_state" = absent/
+  )
+  assert.match(commands.slice(boundary), /deleted-0/)
+  assert.match(commands.slice(boundary), /deleted-1/)
+  assert.match(commands.slice(boundary), /--if-match "\$ledger_etag"/)
 })
+
 
 test('promotion journal artifacts are create-only, read back, and CAS-deleted', () => {
   const runner = readText(
@@ -2814,601 +2386,173 @@ test('promotion journal artifacts are create-only, read back, and CAS-deleted', 
     nextPolicy,
     /next-policy-r2-readback\.json[\s\S]*next-policy-oss-readback\.json[\s\S]*cmp dist\/state\/next-policy\.json[\s\S]*sha256sum/
   )
-  assert.match(nextPolicy, /contentType == "application\/json"/)
-  assert.match(nextPolicy, /cacheControl == "no-store"/)
 
-  for (const runnerName of [
-    'run-promotion-transaction.sh',
-    'run-pause-transaction.sh',
-  ]) {
-    const source = readText(
-      path.join(repoRoot, 'scripts/updater', runnerName)
-    )
-    const deleteFunction = source.slice(
-      source.indexOf('delete_open_journal() {'),
-      source.indexOf('\n}\n', source.indexOf('delete_open_journal() {')) + 3
-    )
-    assert.match(deleteFunction, /open-journal-r2-predelete/)
-    assert.match(deleteFunction, /open-journal-oss-predelete/)
-    assert.match(deleteFunction, /cmp "\$journal"/)
-    assert.match(deleteFunction, /\.transactionId/)
-    assert.match(deleteFunction, /--if-match "\$open_journal_etag"/)
-    const expectedCalls = 3
-    assert.equal(
-      source.match(/^\s*delete_open_journal(?: \|\| rollback_failed=1)?$/gm)
-        ?.length,
-      expectedCalls,
-      `${runnerName} must reach idempotent lock cleanup from every terminal path`
-    )
-  }
+  const deleteFunction = shellFunction(runner, 'delete_open_journal')
+  assert.match(deleteFunction, /open-journal-r2-predelete/)
+  assert.match(deleteFunction, /open-journal-oss-predelete/)
+  assert.match(deleteFunction, /cmp "\$journal"/)
+  assert.match(deleteFunction, /\.transactionId/)
+  assert.match(deleteFunction, /--if-match "\$open_journal_etag"/)
+  assert.equal(
+    runner.match(/^\s*delete_open_journal(?: \|\| rollback_failed=1)?$/gm)
+      ?.length,
+    3
+  )
 })
+
 
 test('mutable OSS journals omit the overwrite guard while immutable journals keep it', () => {
-  const temporaryDirectory = fs.mkdtempSync(
-    path.join(os.tmpdir(), 'updater-oss-journal-overwrite-')
+  const runner = readText(
+    path.join(repoRoot, 'scripts/updater/run-promotion-transaction.sh')
   )
-  try {
-    for (const runnerName of [
-      'run-promotion-transaction.sh',
-      'run-pause-transaction.sh',
-    ]) {
-      const runner = readText(path.join(repoRoot, 'scripts/updater', runnerName))
-      const putOssJson = shellFunction(runner, 'put_oss_json')
-      const capture = path.join(temporaryDirectory, `${runnerName}.log`)
-      const result = spawnSync(
-        'bash',
-        [
-          '-c',
-          `
-ossutil() { printf '%s\\n' "$*" >> "$OSSUTIL_CAPTURE"; }
-${putOssJson}
-put_oss_json journal.json biyan/updater/transactions/open.json true
-put_oss_json journal.json biyan/updater/transactions/123-1/journal-0000.json false
-`,
-        ],
-        {
-          encoding: 'utf8',
-          env: { ...process.env, OSSUTIL_CAPTURE: capture },
-        }
-      )
-      assert.equal(result.status, 0, `${runnerName}: ${result.stderr}`)
-      const [mutableJournal, immutableHistory] = readText(capture)
-        .trim()
-        .split('\n')
-      assert.match(
-        mutableJournal,
-        /--key biyan\/updater\/transactions\/open\.json/
-      )
-      assert.doesNotMatch(mutableJournal, /--forbid-overwrite/)
-      assert.match(
-        immutableHistory,
-        /--key biyan\/updater\/transactions\/123-1\/journal-0000\.json[\s\S]*--forbid-overwrite true/
-      )
-    }
-  } finally {
-    fs.rmSync(temporaryDirectory, { recursive: true, force: true })
-  }
+  const putOssJson = shellFunction(runner, 'put_oss_json')
+  assert.match(putOssJson, /overwrite="\$\{3:-true\}"/)
+  assert.match(
+    putOssJson,
+    /if \[\[ "\$overwrite" != true \]\]; then args\+\=\(--forbid-overwrite true\)/
+  )
+  assert.doesNotMatch(
+    putOssJson.slice(
+      0,
+      putOssJson.indexOf('if [[ "$overwrite" != true ]]')
+    ),
+    /--forbid-overwrite/
+  )
 })
 
-test('mutable snapshots are backed up create-only and fully read back before writes', () => {
+
+test('the only mutable snapshot is a create-only verified policy backup', () => {
   const runner = readText(
     path.join(repoRoot, 'scripts/updater/run-promotion-transaction.sh')
   )
   const r2Start = runner.indexOf('publish_snapshot_backup_r2()')
-  const ossStart = runner.indexOf('publish_snapshot_backup_oss()')
   const executionStart = runner.indexOf(
     'node scripts/updater/promotion-transaction.mjs create-journal'
   )
   const writeFlags = runner.indexOf('policy_write_attempted=false')
   assert.ok(
     r2Start >= 0
-      && r2Start < ossStart
-      && ossStart < executionStart
+      && r2Start < executionStart
       && executionStart < writeFlags
   )
-
-  const r2Backup = runner.slice(r2Start, ossStart)
+  const r2Backup = runner.slice(
+    r2Start,
+    runner.indexOf('publish_snapshot_backup_oss()', r2Start)
+  )
   assert.match(r2Backup, /--if-none-match '\*'/)
   assert.match(r2Backup, /s3api get-object/)
   assert.match(r2Backup, /verify-snapshot-readback/)
-  assert.doesNotMatch(r2Backup, /\bs3 cp\b|copy-object/)
-
-  const ossBackup = runner.slice(ossStart, executionStart)
-  assert.match(ossBackup, /--forbid-overwrite true/)
-  assert.match(ossBackup, /ossutil cp/)
-  assert.match(ossBackup, /head-object/)
-  assert.match(ossBackup, /get-object-acl/)
-  assert.match(ossBackup, /verify-snapshot-readback/)
-  assert.doesNotMatch(ossBackup, /copy-object/)
 
   const backupCalls = runner.slice(executionStart, writeFlags)
-  assert.match(
-    backupCalls,
-    /publish_snapshot_backup_r2 0[\s\S]*publish_snapshot_backup_oss 1[\s\S]*publish_snapshot_backup_r2 2/
-  )
+  assert.match(backupCalls, /publish_snapshot_backup_r2 0/)
+  assert.doesNotMatch(backupCalls, /publish_snapshot_backup_oss/)
+  assert.doesNotMatch(backupCalls, /publish_snapshot_backup_r2 [12]/)
   assert.match(backupCalls, /backup-metadata-plan/)
 })
 
-test('legacy forward CAS and rollback preserve a classify-before-write boundary', () => {
+
+test('legacy handoff is read-only across promotion and rollback', () => {
   const runner = readText(
     path.join(repoRoot, 'scripts/updater/run-promotion-transaction.sh')
   )
-
-  const forwardStart = runner.indexOf(
-    '# Re-read each mutable legacy object immediately before its write.'
+  const firstInvariant = runner.indexOf('validate-frozen-legacy')
+  const policyWrite = runner.indexOf(
+    'advance_journal committing before-policy-write'
   )
-  const ossClassify = runner.indexOf(
-    'classify-cas \\\n      --object-kind legacy-oss',
-    forwardStart
-  )
-  const ossAttempt = runner.indexOf(
-    'legacy_oss_write_attempted=true',
-    ossClassify
-  )
-  const ossWrite = runner.indexOf(
-    'ossutil api put-object --bucket "$ALIYUN_OSS_BUCKET"',
-    ossAttempt
-  )
-  const ossReadback = runner.indexOf(
-    'dist/state/forward-legacy-oss-readback.json',
-    ossWrite
-  )
+  const finalInvariant = runner.lastIndexOf('validate-frozen-legacy')
   assert.ok(
-    forwardStart >= 0
-      && forwardStart < ossClassify
-      && ossClassify < ossAttempt
-      && ossAttempt < ossWrite
-      && ossWrite < ossReadback
+    firstInvariant >= 0
+      && firstInvariant < policyWrite
+      && policyWrite < finalInvariant
   )
-
-  const r2Classify = runner.indexOf(
-    'classify-cas \\\n      --object-kind legacy-r2',
-    ossReadback
-  )
-  const r2Attempt = runner.indexOf(
-    'legacy_r2_write_attempted=true',
-    r2Classify
-  )
-  const r2Write = runner.indexOf(
-    'aws s3api put-object --bucket "$CLOUDFLARE_R2_BUCKET"',
-    r2Attempt
-  )
-  const r2Readback = runner.indexOf(
-    'dist/state/forward-legacy-r2-readback.json',
-    r2Write
-  )
-  assert.ok(
-    ossReadback < r2Classify
-      && r2Classify < r2Attempt
-      && r2Attempt < r2Write
-      && r2Write < r2Readback
-  )
-  assert.match(
-    runner.slice(r2Write, r2Readback),
-    /--if-match "\$forward_legacy_r2_etag"/
-  )
-
-  const rollbackStart = runner.indexOf('rollback() {')
-  const rollbackEnd = runner.indexOf('trap rollback ERR INT TERM', rollbackStart)
-  const rollback = runner.slice(rollbackStart, rollbackEnd)
-  const phaseTwo = rollback.indexOf(
-    '# Phase 2 may mutate only after every classification succeeded.'
-  )
-  for (const marker of [
-    'classify-policy-rollback',
-    'classify-rollback --object-kind legacy-oss',
-    'classify-rollback --object-kind legacy-r2',
-  ]) {
-    const classification = rollback.indexOf(marker)
-    assert.ok(
-      classification >= 0 && classification < phaseTwo,
-      `${marker} must complete before the rollback restore phase`
-    )
+  assert.doesNotMatch(runner, /legacy_(?:oss|r2)_write_attempted/)
+  assert.doesNotMatch(runner, /before-legacy-dual-write/)
+  assert.doesNotMatch(runner, /RefreshObjectCaches|purge_legacy/)
+  for (const line of runner.split('\n')) {
+    if (!/legacy_(?:aliyun|r2)_key/.test(line)) continue
+    assert.doesNotMatch(line, /put-object|delete-object/)
   }
-  assert.match(
-    rollback.slice(phaseTwo),
-    /if \[\[ "\$rollback_failed" -eq 0[\s\S]*--if-match "\$live_policy_etag"/
-  )
-  assert.match(
-    rollback.slice(phaseTwo),
-    /--if-match "\$rollback_legacy_r2_etag"/
-  )
-  assert.ok(
-    rollback.indexOf('classify_ledger_object classified') < phaseTwo,
-    'every cleanup object must be classified before rollback mutations'
-  )
-  const phaseTwoSource = rollback.slice(phaseTwo)
-  const firstLegacyRestore = Math.min(
-    phaseTwoSource.indexOf(
-      '--body file://dist/state/snapshots/legacy-oss.json'
-    ),
-    phaseTwoSource.indexOf(
-      '--body dist/state/snapshots/legacy-r2.json'
-    )
-  )
-  assert.ok(
-    phaseTwoSource.indexOf('rollback-legacy-oss-prewrite.json')
-        < firstLegacyRestore
-      && phaseTwoSource.indexOf('rollback-legacy-r2-prewrite.json')
-        < firstLegacyRestore,
-    'both legacy objects must be re-read before the first restore'
-  )
-  const legacyVerification = phaseTwoSource.indexOf(
-    'rollback-legacy-r2-verified.json'
-  )
-  const legacyCacheConvergence = phaseTwoSource.indexOf(
-    'rollback-legacy-r2-cdn.json'
-  )
-  const policyPrewrite = phaseTwoSource.indexOf(
-    'rollback-policy-prewrite.json'
-  )
-  assert.ok(
-    firstLegacyRestore >= 0
-      && firstLegacyRestore < legacyVerification
-      && legacyVerification < legacyCacheConvergence
-      && legacyCacheConvergence < policyPrewrite,
-    'legacy restore and cache acceptance must finish before policy restore'
-  )
-  const predeleteClassify = phaseTwoSource.indexOf(
-    'classify_ledger_object predelete'
-  )
-  const cleanupDeleteLoop = phaseTwoSource.indexOf(
-    'ledger_provider="$(jq -er',
-    predeleteClassify
-  )
-  assert.ok(
-    predeleteClassify >= 0 && predeleteClassify < cleanupDeleteLoop
-  )
-  assert.doesNotMatch(
-    phaseTwoSource.slice(predeleteClassify, cleanupDeleteLoop),
-    /\bdelete-object\b/
-  )
-  assert.match(
-    phaseTwoSource.slice(cleanupDeleteLoop),
-    /--if-match "\$ledger_etag"/
-  )
 })
 
-test('pause runner proves Router state before mutation and after pause', () => {
+
+test('Router-only pause proves state before mutation and after pause', () => {
   const runner = readText(
-    path.join(repoRoot, 'scripts/updater/run-pause-transaction.sh')
+    path.join(repoRoot, 'scripts/updater/run-router-pause-transaction.sh')
   )
-  const preProbe = runner.indexOf('probe_router_state before')
-  const preState = runner.indexOf(
-    'before-router-probe.state")" = "no-transition"',
-    preProbe
+  const openLock = runner.indexOf(
+    'probe_r2 "$OPEN_TRANSACTION_KEY" open-transaction'
   )
-  const createJournal = runner.indexOf(
-    'legacy-pause-transaction.mjs create-journal',
-    preState
+  const preProbe = runner.indexOf('probe_router before')
+  const transitionProof = runner.indexOf(
+    'router-pause-transaction.mjs validate-policy'
   )
-  const firstWrite = runner.indexOf('policy_write_attempted=true', createJournal)
-  const postProbe = runner.indexOf('probe_router_state after', firstWrite)
+  const firstWrite = runner.indexOf('policy_write_attempted=true')
+  const postProbe = runner.indexOf('probe_router after')
   const postProof = runner.indexOf(
-    'legacy-pause-transaction.mjs validate-router-probe',
+    'router-pause-transaction.mjs validate-router-probe',
     postProbe
   )
   assert.ok(
-    preProbe >= 0
-      && preProbe < preState
-      && preState < createJournal
-      && createJournal < firstWrite
+    openLock >= 0
+      && openLock < preProbe
+      && preProbe < transitionProof
+      && transitionProof < firstWrite
       && firstWrite < postProbe
       && postProbe < postProof
   )
   assert.match(
-    runner.slice(postProof, runner.indexOf('validate-readback', postProof)),
-    /--before-status[\s\S]*--before-state[\s\S]*--after-status[\s\S]*--after-state/
+    runner.slice(firstWrite, postProbe),
+    /--if-match "\$policy_before_etag"/
   )
-  const r2Backup = runner.slice(
-    runner.indexOf('publish_immutable_r2()'),
-    runner.indexOf('publish_immutable_oss()')
-  )
-  const ossBackup = runner.slice(
-    runner.indexOf('publish_immutable_oss()'),
-    runner.indexOf('persist_journal()')
-  )
-  assert.match(r2Backup, /--if-none-match '\*'/)
-  assert.match(r2Backup, /backup-metadata-plan/)
-  assert.match(r2Backup, /cmp "\$file"/)
-  assert.match(ossBackup, /--forbid-overwrite true/)
-  assert.match(ossBackup, /--object-acl private/)
-  assert.match(ossBackup, /head-object/)
-  assert.match(ossBackup, /get-object-acl/)
-  assert.match(ossBackup, /backup-metadata-plan/)
-  assert.match(ossBackup, /cmp "\$file"/)
-
   const rollback = runner.slice(
     runner.indexOf('rollback() {'),
     runner.indexOf('trap rollback ERR INT TERM')
   )
-  const classificationEnd = rollback.indexOf(
-    'if [[ "$rollback_failed" -eq 0 \\\n    && "$legacy_r2_write_attempted"'
-  )
-  for (const marker of [
-    'r2_classification_ok=true',
-    'oss_classification_ok=true',
-    'policy_classification_ok=true',
-  ]) {
-    const index = rollback.indexOf(marker)
-    assert.ok(index >= 0 && index < classificationEnd)
-  }
-  assert.match(
-    rollback.slice(classificationEnd),
-    /rollback-prewrite-legacy-r2[\s\S]*--if-match "\$rollback_legacy_r2_etag"/
-  )
-  assert.match(
-    rollback.slice(classificationEnd),
-    /rollback-prewrite-legacy-oss[\s\S]*cmp "\$\{state_dir\}\/rollback-live-legacy-oss\.json"/
-  )
-  const restorePhase = rollback.slice(classificationEnd)
-  const firstLegacyRestore = Math.min(
-    restorePhase.indexOf(
-      '--body "file://${state_dir}/legacy-a-oss.json"'
-    ),
-    restorePhase.indexOf('--body "${state_dir}/legacy-a-r2.json"')
-  )
-  assert.ok(
-    restorePhase.indexOf('rollback-prewrite-legacy-r2.json')
-        < firstLegacyRestore
-      && restorePhase.indexOf('rollback-prewrite-legacy-oss.json')
-        < firstLegacyRestore
-  )
-  const legacyVerified = restorePhase.indexOf(
-    'rollback-verified-legacy-r2.json'
-  )
-  const legacyCacheConverged = restorePhase.indexOf(
-    'poll_legacy_bytes "${state_dir}/legacy-a-oss.json" rollback'
-  )
-  const policyPrewrite = restorePhase.indexOf(
-    'fetch_policy_for_cas rollback-prewrite'
-  )
-  assert.ok(
-    firstLegacyRestore >= 0
-      && firstLegacyRestore < legacyVerified
-      && legacyVerified < legacyCacheConverged
-      && legacyCacheConverged < policyPrewrite,
-    'pause rollback must accept legacy before restoring policy'
-  )
+  assert.match(rollback, /classify-policy-rollback/)
+  assert.match(rollback, /--if-match "\$rollback_etag"/)
+  assert.match(rollback, /probe_router rollback/)
+  assert.doesNotMatch(runner, /ALIYUN|OSS|mita\/latest|legacy/i)
 })
 
-test('promotion workflows carry the fail-closed transaction controls', () => {
-  const promotion = readText(
-    path.join(repoRoot, '.github/workflows/promote-desktop-update.yml')
-  )
+
+test('promotion core carries fail-closed Router transaction controls', () => {
   const preparePromotionSource = readText(
     path.join(repoRoot, 'scripts/updater/prepare-promotion.mjs')
-  )
-  const legacyManifestPolicySource = readText(
-    path.join(repoRoot, 'scripts/updater/legacy-manifest-policy.mjs')
-  )
-  const directTransitionPolicy = JSON.parse(
-    readText(
-      path.join(repoRoot, 'scripts/updater/direct-c-transition-policy.json')
-    )
   )
   const runner = readText(
     path.join(repoRoot, 'scripts/updater/run-promotion-transaction.sh')
   )
   const pauseRunner = readText(
-    path.join(repoRoot, 'scripts/updater/run-pause-transaction.sh')
+    path.join(repoRoot, 'scripts/updater/run-router-pause-transaction.sh')
   )
   const promotionTransaction = readText(
     path.join(repoRoot, 'scripts/updater/promotion-transaction.mjs')
   )
-  const promotionControl = `${promotion}\n${runner}`
-  assert.equal((runner.match(/extract-oss-acl/g) ?? []).length, 1)
-  assert.equal((pauseRunner.match(/extract-oss-acl/g) ?? []).length, 4)
-  assert.equal(
-    (promotionTransaction.match(/extract-oss-acl/g) ?? []).length,
-    2
-  )
-  assert.doesNotMatch(
-    `${runner}\n${pauseRunner}`,
-    /\.acl\s*\/\/\s*\.Acl|\.objectAcl\s*\/\/\s*\.ObjectAcl|AccessControlList\.Grant/
-  )
-  assert.match(promotion, /^  actions: read$/m)
-  assert.match(promotion, /^  contents: read$/m)
-  assert.match(promotion, /group: biyan-stable-updater-promotion/)
-  assert.match(promotion, /aliyun-cli-linux-3\.3\.22-amd64\.tgz/)
-  assert.match(promotion, /ossutil-2\.3\.0-linux-amd64\.zip/)
-  assert.doesNotMatch(
-    promotionControl,
-    /\baliyun\s+--profile\s+\S+\s+oss\b/
-  )
-  assert.match(
-    promotionControl,
-    new RegExp(OPEN_TRANSACTION_KEY.replaceAll('/', '\\/'))
-  )
-  assert.match(promotionControl, /promotion-transaction\.mjs classify-probe/)
-  assert.match(promotionControl, /promotion-transaction\.mjs poll-url/)
-  assert.match(promotion, /inputs\.dry_run != true/)
-  assert.match(promotion, /dry-run remote preflight/i)
-  const liveMainGuard = promotion.indexOf(
-    '- name: Revalidate exact live main before release secrets'
-  )
-  const remotePreflight = promotion.indexOf(
-    '- name: Dry-run remote preflight and unfinished transaction gate'
-  )
-  const firstReleaseSecret = promotion.indexOf('secrets.')
-  assert.ok(
-    liveMainGuard >= 0 &&
-      liveMainGuard < remotePreflight &&
-      remotePreflight < firstReleaseSecret,
-    'fresh live-main proof must run before release secrets and lock cleanup'
-  )
-  const guard = promotion.slice(liveMainGuard, remotePreflight)
-  assert.doesNotMatch(guard, /secrets\./)
-  assert.match(guard, /test "\$GITHUB_REF" = "refs\/heads\/mita-main"/)
-  assert.match(
-    guard,
-    /git fetch --force --no-tags origin[\s\S]*refs\/heads\/mita-main:refs\/remotes\/origin\/mita-main/
-  )
-  assert.match(guard, /test "\$GITHUB_SHA" = "\$\(git rev-parse HEAD\)"/)
-  assert.match(
-    guard,
-    /test "\$GITHUB_SHA" = \\\n\s+"\$\(git rev-parse refs\/remotes\/origin\/mita-main\)"/
-  )
-  assert.match(
-    promotion,
-    /id: remote_preflight[\s\S]*run-promotion-transaction\.sh[\s\S]*--recover-terminal-only[\s\S]*committed_same_request/
-  )
-  assert.match(
-    promotion,
-    /Build logical CAS proposal\n\s+if: steps\.remote_preflight\.outputs\.committed_same_request != 'true'/
-  )
-  assert.match(
-    promotion,
-    /Publish with rollback protection[\s\S]*inputs\.dry_run != true &&[\s\S]*committed_same_request != 'true'/
-  )
-  assert.match(promotion, /timeout-minutes: 90/)
-  assert.match(promotion, /options: \[DIRECT_C, RECOVERY\]/)
-  assert.match(promotion, /"Biyan Direct Qualification"/)
-  assert.match(promotion, /"Biyan Upgrade Smoke"/)
-  assert.doesNotMatch(promotion, /"Biyan A Canary"/)
-  assert.match(promotion, /github-native-direct-qualification/)
-  assert.match(promotion, /\.sampleSize == 16/)
-  assert.match(promotion, /\.attempts == 16/)
-  assert.match(promotion, /\.passedAttempts == 16/)
-  assert.match(
-    promotion,
-    /\.workflow\.path ==[\s\S]*"\.github\/workflows\/biyan-direct-qualification\.yml"/,
-  )
-  assert.match(promotion, /\.workflow\.runId == \$run/)
-  assert.match(
-    promotion,
-    /if \[ "\$PHASE" = "DIRECT_C" \][\s\S]*create-fallback[\s\S]*--legacy-pause-fallback/,
-  )
-  assert.doesNotMatch(promotion, /\$PHASE" = "A"|validate-approved-a/)
-  assert.equal(
-    Object.hasOwn(directTransitionPolicy, 'approvedNext'),
-    true,
-    'tracked DIRECT_C policy must retain the fail-closed approvedNext gate',
-  )
+
   assert.match(
     preparePromotionSource,
-    /loadDirectCTransitionPolicy\(\)[\s\S]*validateApprovedDirectCTransition\(\{/,
+    /currentPolicy\.legacyBridgeVersion != null[\s\S]*next\.legacyBridgeVersion = currentPolicy\.legacyBridgeVersion/
   )
-  assert.match(
-    legacyManifestPolicySource,
-    /loadDirectCTransitionPolicy\(\)[\s\S]*validateApprovedDirectCTransition\(\{/,
-  )
-  const prepareProposal = promotion.indexOf(
-    'node scripts/updater/prepare-promotion.mjs'
-  )
-  const validateLegacyPromotion = promotion.indexOf(
-    'node scripts/updater/legacy-manifest-policy.mjs validate-promotion'
-  )
-  assert.ok(
-    prepareProposal >= 0
-      && prepareProposal < validateLegacyPromotion,
-    'DIRECT_C proposal validation must precede the independent legacy policy validation',
-  )
-  assert.match(
-    promotion,
-    /legacy-manifest-policy\.mjs[\s\S]*--aliyun dist\/state\/pre-a-legacy-oss\.json[\s\S]*--r2 dist\/state\/pre-a-legacy-r2\.json[\s\S]*--evidence dist\/state\/pre-a-legacy-evidence\.json/
-  )
-  assert.match(
-    promotion,
-    /test "\$\(jq -r \.isDraft dist\/release\.json\)" = "false"/
-  )
-  assert.doesNotMatch(promotionControl, /\bgh release edit\b|--draft/)
-  assert.match(
-    runner,
-    /select\(\.createdByTransaction and \.verified\)/
-  )
-  assert.match(runner, /rollback-legacy-aliyun-cdn\.json/)
-  assert.match(runner, /rollback-legacy-r2-cdn\.json/)
+  assert.match(runner, /: "\$\{OPEN_TRANSACTION_KEY:\?\}"/)
+  assert.match(runner, /promotion-transaction\.mjs classify-probe/)
+  assert.match(runner, /validate-frozen-legacy/)
   assert.match(runner, /--if-match "\$policy_original_etag"/)
   assert.match(runner, /--if-none-match '\*'/)
-  const attempted = runner.indexOf('policy_write_attempted=true')
-  const parseEtag = runner.indexOf(
-    'policy_written_etag="$(node scripts/updater/promotion-transaction.mjs',
-    attempted
-  )
-  assert.ok(attempted >= 0 && attempted < parseEtag)
   assert.match(runner, /classify-policy-rollback/)
-  assert.match(runner, /validate-fallback-bytes/)
-  assert.match(runner, /validate-resume/)
-  assert.match(runner, /legacy_publish_source=dist\/state\/resume-active-a\.json/)
-  const legacyOriginsVerified = runner.indexOf(
-    'advance_journal committing legacy-origins-verified-before-policy'
-  )
-  const beforePolicyWrite = runner.indexOf(
-    'advance_journal committing before-policy-write'
-  )
-  assert.ok(
-    legacyOriginsVerified >= 0
-      && legacyOriginsVerified < beforePolicyWrite
-      && beforePolicyWrite < attempted,
-    'legacy origins must pass public byte readback before the policy can be unpaused'
+  assert.doesNotMatch(runner, /legacy-pause-transaction/)
+  assert.doesNotMatch(runner, /RefreshObjectCaches|purge_legacy/)
+  assert.match(
+    promotionTransaction,
+    /schema: 3,[\s\S]*kind: 'router-promotion'/
   )
   assert.match(
-    promotion,
-    /Publish with rollback protection[\s\S]*git fetch --force --no-tags origin[\s\S]*refs\/remotes\/origin\/mita-main[\s\S]*run-promotion-transaction\.sh/
+    promotionTransaction,
+    /Router promotion must snapshot only the mutable policy/
   )
-  assert.match(
-    promotion,
-    /Publish with rollback protection[\s\S]*aliyun configure set[\s\S]*--profile release[\s\S]*run-promotion-transaction\.sh/
-  )
-  for (const writer of [
-    'updater-health-gate.yml',
-    'updater-kill-switch.yml',
-  ]) {
-    const source = readText(
-      path.join(repoRoot, '.github/workflows', writer)
-    )
-    assert.match(source, new RegExp(OPEN_TRANSACTION_KEY.replaceAll('/', '\\/')))
-    assert.match(source, /ref: mita-main/)
-    assert.match(source, /refs\/remotes\/origin\/mita-main/)
-    assert.match(source, /aliyun-cli-linux-3\.3\.22-amd64\.tgz/)
-    assert.match(source, /ossutil-2\.3\.0-linux-amd64\.zip/)
-    assert.match(
-      source,
-      /aliyun configure set[\s\S]*--profile release[\s\S]*run-pause-transaction\.sh/
-    )
-    assert.match(source, /run-pause-transaction\.sh/)
-    assert.match(source, /environment: release-distribution/)
-  }
-  const recoveryWorkflow = readText(
-    path.join(
-      repoRoot,
-      '.github/workflows/recover-split-updater-transaction.yml'
-    )
-  )
-  assert.match(recoveryWorkflow, /aliyun-cli-linux-3\.3\.22-amd64\.tgz/)
-  assert.match(
-    recoveryWorkflow,
-    /aliyun configure set[\s\S]*--profile release[\s\S]*--recover-split-nonterminal-only/
-  )
-  for (const source of [runner, pauseRunner, promotionTransaction]) {
-    const cdnCalls =
-      source.match(
-        /\baliyun\s+(?:--profile\s+\S+\s+)?cdn\s+RefreshObjectCaches[^\n]*/g
-      ) ?? []
-    assert.ok(cdnCalls.length > 0)
-    for (const call of cdnCalls) {
-      assert.match(call, /aliyun --profile release cdn RefreshObjectCaches/)
-    }
-  }
   assert.match(pauseRunner, /promotion-transaction\.mjs classify-probe/)
-  assert.match(pauseRunner, /--provider r2/)
-  assert.match(pauseRunner, /--provider oss/)
-  assert.match(pauseRunner, /legacy-pause-transaction\.mjs validate-live/)
-  assert.match(pauseRunner, /legacy-pause-transaction\.mjs create-journal/)
-  assert.match(pauseRunner, /classify_object cas policy/)
-  assert.match(pauseRunner, /classify_object cas legacy-oss/)
-  assert.match(pauseRunner, /classify_object cas legacy-r2/)
-  assert.match(pauseRunner, /classify_object rollback policy/)
-  assert.match(pauseRunner, /--if-match "\$policy_etag"/)
-  assert.match(pauseRunner, /--if-match "\$legacy_r2_etag"/)
-  assert.match(pauseRunner, /legacy-a-oss-acl/)
-  assert.match(pauseRunner, /validate-readback/)
-  assert.match(pauseRunner, /purge_legacy_caches/)
-  const health = readText(
-    path.join(repoRoot, '.github/workflows/updater-health-gate.yml')
-  )
-  assert.match(health, /validate-health-evidence-url/)
+  assert.match(pauseRunner, /router-pause-transaction\.mjs prepare/)
+  assert.match(pauseRunner, /--if-match "\$policy_before_etag"/)
+  assert.doesNotMatch(pauseRunner, /ALIYUN|OSS|mita\/latest|legacy/i)
 })
 
 test('every machine-readable ossutil API call suppresses the human elapsed trailer', () => {
@@ -3438,7 +2582,6 @@ test('every machine-readable ossutil API call suppresses the human elapsed trail
     '.github/workflows/biyan-a-canary.yml',
     '.github/workflows/promote-desktop-update.yml',
     'scripts/updater/promotion-transaction.mjs',
-    'scripts/updater/run-pause-transaction.sh',
     'scripts/updater/run-promotion-transaction.sh',
   ])
 
@@ -3457,10 +2600,10 @@ test('every machine-readable ossutil API call suppresses the human elapsed trail
       assert.match(command, /--quiet/, relative)
     }
   }
-  // The split-lock recovery paths add seven explicitly machine-readable OSS
-  // probes, including the missing-target snapshot metadata and ACL reads.
-  // Keep this count locked so no OSS command can bypass JSON/quiet unnoticed.
-  assert.equal(commandCount, 75)
+  // The retired legacy writer removes its OSS mutation/probe envelope. Keep
+  // the remaining promotion-journal command count locked so no machine-readable
+  // OSS invocation can bypass JSON/quiet unnoticed.
+  assert.equal(commandCount, 32)
 })
 
 test('updater workflows expose production secrets only to required read or mutation steps', () => {

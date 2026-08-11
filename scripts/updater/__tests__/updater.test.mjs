@@ -263,7 +263,7 @@ test('promotion is forward-only, phase-gated, and supports rollout increases', (
     rollout: 100,
     promotedAt: '2026-07-15T00:00:00Z',
   })
-  assert.equal(policyAPatch.legacyBridgeVersion, '0.6.635')
+  assert.equal(policyAPatch.legacyBridgeVersion, '0.6.634')
   assert.deepEqual(
     policyAPatch.legacyPauseFallback,
     policyA.legacyPauseFallback
@@ -497,7 +497,7 @@ test('recovery stays forward-only and preserves the source migration schema', ()
   })
   assert.equal(recovered.transitions['0.6.634'].to, '0.6.635')
   assert.equal(recovered.releases['0.6.635'].effectivePhase, 'A')
-  assert.equal(recovered.legacyBridgeVersion, '0.6.635')
+  assert.equal(recovered.legacyBridgeVersion, '0.6.634')
   assert.throws(() => promote({
     candidate: { ...recovery, migrationPhase: 'C', dataSchema: 3 },
     currentPolicy: policyA,
