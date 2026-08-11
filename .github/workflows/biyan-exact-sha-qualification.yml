@@ -662,6 +662,7 @@ jobs:
           node --test scripts/updater/__tests__/a-canary-evidence.test.mjs
           node --test scripts/updater/__tests__/legacy-manifest-policy.test.mjs
           node --test scripts/updater/__tests__/legacy-pause-transaction.test.mjs
+          node --test scripts/updater/__tests__/router-pause-transaction.test.mjs
           node --test scripts/updater/__tests__/promotion-transaction.test.mjs
           node --test scripts/updater/__tests__/recovery-qualification.test.mjs
           node --test scripts/updater/__tests__/updater.test.mjs

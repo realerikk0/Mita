@@ -23,7 +23,12 @@ const releaseTrainPolicy = JSON.parse(
   fs.readFileSync(releaseTrainPolicyPath, 'utf8'),
 )
 
-const states = new Set(['pre-a', 'a-pinned', 'direct-c-pinned'])
+const states = new Set([
+  'pre-a',
+  'a-pinned',
+  'direct-c-pinned',
+  'frozen-handoff',
+])
 const preAPlatforms = [
   'darwin-aarch64',
   'darwin-x86_64',
@@ -161,6 +166,7 @@ function validateDirectCRecovery({
   effectivePhase,
   nextPolicy,
   release,
+  tracked,
   trainPolicy,
 }) {
   if (currentPolicy.deploymentMode !== 'direct-c') {
@@ -218,21 +224,29 @@ function validateDirectCRecovery({
   }
 
   const previousRelease = currentPolicy.releases?.[previous.version]
+  const currentFrozenRelease =
+    currentPolicy.releases?.[tracked.expectedVersion]
+  const nextFrozenRelease = nextPolicy.releases?.[tracked.expectedVersion]
   if (
     currentPolicy.currentVersion !== previous.version
-    || currentPolicy.legacyBridgeVersion !== previous.version
+    || currentPolicy.legacyBridgeVersion !== tracked.expectedVersion
     || !isPlainObject(previousRelease)
     || previousRelease.tag !== previous.tag
     || (previousRelease.effectivePhase ?? previousRelease.phase) !== 'C'
+    || !isPlainObject(currentFrozenRelease)
+    || currentFrozenRelease.manifestSha256
+      !== tracked.expectedManifestSha256
   ) {
     throw new Error(
-      'DIRECT_C recovery current policy must match the latest published C terminal',
+      'DIRECT_C recovery current policy must match the latest published C terminal and frozen legacy handoff',
     )
   }
   const transition = nextPolicy.transitions?.[previous.version]
   if (
     nextPolicy.currentVersion !== candidate.version
-    || nextPolicy.legacyBridgeVersion !== candidate.version
+    || nextPolicy.legacyBridgeVersion !== tracked.expectedVersion
+    || !isPlainObject(nextFrozenRelease)
+    || nextFrozenRelease.manifestSha256 !== tracked.expectedManifestSha256
     || release.phase !== 'RECOVERY'
     || effectivePhase !== 'C'
     || release.tag !== candidate.tag
@@ -245,13 +259,13 @@ function validateDirectCRecovery({
     || transition.manifestKey !== candidate.manifestKey
   ) {
     throw new Error(
-      'DIRECT_C recovery must atomically publish the active terminal to the Router and both legacy entrypoints',
+      'DIRECT_C recovery must publish the active terminal to the Router while preserving the frozen legacy handoff',
     )
   }
   return {
-    activeAVersion: candidate.version,
+    activeAVersion: tracked.expectedVersion,
     effectivePhase,
-    trackedState: 'direct-c-recovery',
+    trackedState: tracked.state,
   }
 }
 
@@ -278,7 +292,7 @@ export function validateLegacyBridgePolicy(
   if (value.schema !== 1) throw new Error(`Unsupported legacy bridge policy schema: ${value.schema}`)
   if (!states.has(value.state)) {
     throw new Error(
-      `Legacy bridge policy state must be pre-a, a-pinned, or direct-c-pinned; found ${value.state}`,
+      `Legacy bridge policy state must be pre-a, a-pinned, direct-c-pinned, or frozen-handoff; found ${value.state}`,
     )
   }
   if (
@@ -331,6 +345,13 @@ export function validateLegacyBridgePolicy(
       value.requiredPlatforms,
       direct.approvedNext.requiredPlatforms,
       'direct-c-pinned requiredPlatforms',
+    )
+  }
+  if (value.state === 'frozen-handoff') {
+    assertExactPlatformSet(
+      value.requiredPlatforms,
+      aPinnedPlatforms,
+      'frozen-handoff requiredPlatforms',
     )
   }
 
@@ -396,6 +417,23 @@ export function validatePromotionLegacyBridge({
       directTransitionPolicy ?? loadDirectCTransitionPolicy(),
       { requireApprovedNext: true },
     )
+    if (release.phase === 'RECOVERY') {
+      if (tracked.state !== 'frozen-handoff') {
+        throw new Error(
+          'DIRECT_C recovery requires the tracked frozen legacy handoff',
+        )
+      }
+      return validateDirectCRecovery({
+        candidate,
+        currentPolicy,
+        direct,
+        effectivePhase,
+        nextPolicy,
+        release,
+        tracked,
+        trainPolicy,
+      })
+    }
     if (
       tracked.state !== 'pre-a'
       || tracked.expectedVersion !== direct.current.version
@@ -404,17 +442,6 @@ export function validatePromotionLegacyBridge({
       throw new Error(
         'DIRECT_C requires the tracked legacy bridge to remain at exact pre-a current',
       )
-    }
-    if (release.phase === 'RECOVERY') {
-      return validateDirectCRecovery({
-        candidate,
-        currentPolicy,
-        direct,
-        effectivePhase,
-        nextPolicy,
-        release,
-        trainPolicy,
-      })
     }
     if (release.phase !== 'DIRECT_C') {
       throw new Error(

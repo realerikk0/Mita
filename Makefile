@@ -142,6 +142,7 @@ endif
 	node --test ./scripts/ci/__tests__/legacy-compatibility-policy.test.mjs
 	node --test ./scripts/ci/__tests__/release-policy.test.mjs
 	node --test ./scripts/updater/__tests__/legacy-manifest-policy.test.mjs
+	node --test ./scripts/updater/__tests__/router-pause-transaction.test.mjs
 	node --test ./scripts/updater/__tests__/promotion-transaction.test.mjs
 	node --test ./scripts/updater/__tests__/updater.test.mjs
 	node --test ./scripts/release-distribution/__tests__/release-distribution.test.mjs

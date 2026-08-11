@@ -10,7 +10,7 @@ import {
   validatePromotionLegacyBridge,
   verifyLegacyManifestPair,
 } from '../legacy-manifest-policy.mjs'
-import { verifyLiveTerminalManifestPair } from '../live-terminal-manifest-policy.mjs'
+import { verifyFrozenLegacyHandoff } from '../live-terminal-manifest-policy.mjs'
 
 const endpoints = {
   aliyun: 'https://static.mitapp.cn/mita/latest.json',
@@ -131,31 +131,25 @@ test('pre-a accepts the exact live version, platform set, and Biyan assets', () 
   assert.equal(evidence.aliyunSha256, evidence.r2Sha256)
 })
 
-test('live terminal verification follows the published rolling release state', () => {
-  const releaseManifest = promotionCandidate('0.6.650', 'C', 3)
-  const trainPolicy = {
-    supersededTerminalReleases: [
-      {
-        tag: 'v0.6.649',
-        version: '0.6.649',
-        migrationPhase: 'C',
-        dataSchema: 3,
-        sourceCommit: '9'.repeat(40),
-        status: 'published-superseded',
-      },
-    ],
-    activeTerminalRelease: {
-      tag: releaseManifest.candidate.tag,
-      version: releaseManifest.candidate.version,
-      migrationPhase: releaseManifest.candidate.migrationPhase,
-      dataSchema: releaseManifest.candidate.dataSchema,
-      sourceCommit: releaseManifest.candidate.sourceCommit,
-    },
-  }
+test('frozen handoff verification remains pinned when the active terminal advances', () => {
+  const releaseManifest = promotionCandidate('0.6.651', 'C', 3)
   const manifestBytes = releaseManifest.candidateManifestBytes
   const manifestDigest = sha256(manifestBytes)
+  const trackedPolicy = {
+    schema: 1,
+    state: 'frozen-handoff',
+    expectedVersion: '0.6.651',
+    expectedManifestSha256: manifestDigest,
+    requiredPlatforms: [
+      'darwin-aarch64',
+      'darwin-x86_64',
+      'windows-x86_64',
+      'linux-x86_64',
+    ],
+    manifestUrls: endpoints,
+  }
   const githubRelease = {
-    tag_name: 'v0.6.650',
+    tag_name: 'v0.6.651',
     target_commitish: releaseManifest.candidate.sourceCommit,
     draft: false,
     prerelease: false,
@@ -169,22 +163,43 @@ test('live terminal verification follows the published rolling release state', (
       },
     ],
   }
+  const trainPolicyAfterAdvance = {
+    supersededTerminalReleases: [
+      {
+        tag: 'v0.6.651',
+        version: '0.6.651',
+        migrationPhase: 'C',
+        dataSchema: 3,
+        sourceCommit: releaseManifest.candidate.sourceCommit,
+        status: 'published-superseded',
+      },
+    ],
+    activeTerminalRelease: {
+      tag: 'v0.6.652',
+      version: '0.6.652',
+      migrationPhase: 'C',
+      dataSchema: 3,
+      sourceCommit: 'a'.repeat(40),
+    },
+  }
 
   assert.deepEqual(
-    verifyLiveTerminalManifestPair({
+    verifyFrozenLegacyHandoff({
       aliyunBytes: manifestBytes,
       r2Bytes: manifestBytes,
       githubManifestBytes: manifestBytes,
       githubRelease,
-      trainPolicy,
+      trackedPolicy,
+      trainPolicy: trainPolicyAfterAdvance,
       verifiedAt: '2026-08-11T00:00:00.000Z',
     }),
     {
       schema: 1,
       status: 'passed',
       verifiedAt: '2026-08-11T00:00:00.000Z',
-      version: '0.6.650',
-      tag: 'v0.6.650',
+      state: 'frozen-handoff',
+      version: '0.6.651',
+      tag: 'v0.6.651',
       sourceCommit: releaseManifest.candidate.sourceCommit,
       manifestSha256: manifestDigest,
       aliyunSha256: manifestDigest,
@@ -193,82 +208,62 @@ test('live terminal verification follows the published rolling release state', (
     },
   )
 
-  const previousManifest = promotionCandidate('0.6.649', 'C', 3)
-  const previousBytes = previousManifest.candidateManifestBytes
-  const previousDigest = sha256(previousBytes)
-  const previousPolicy = structuredClone(trainPolicy)
-  previousPolicy.supersededTerminalReleases[0].sourceCommit =
-    previousManifest.candidate.sourceCommit
-  previousPolicy.activeTerminalRelease.sourceCommit = 'a'.repeat(40)
-  const previousRelease = {
-    ...githubRelease,
-    tag_name: 'v0.6.649',
-    target_commitish: previousManifest.candidate.sourceCommit,
-    assets: [
-      {
-        name: 'latest.json',
-        state: 'uploaded',
-        size: previousBytes.length,
-        digest: `sha256:${previousDigest}`,
-      },
-    ],
-  }
-  assert.equal(
-    verifyLiveTerminalManifestPair({
-      aliyunBytes: previousBytes,
-      r2Bytes: previousBytes,
-      githubManifestBytes: previousBytes,
-      githubRelease: previousRelease,
-      trainPolicy: previousPolicy,
-    }).version,
-    '0.6.649',
-  )
-
   assert.throws(
     () =>
-      verifyLiveTerminalManifestPair({
+      verifyFrozenLegacyHandoff({
         aliyunBytes: manifestBytes,
         r2Bytes: Buffer.from(`${manifestBytes.toString()} `),
         githubManifestBytes: manifestBytes,
         githubRelease,
-        trainPolicy,
+        trackedPolicy,
       }),
     /Aliyun and R2 updater manifests must be byte-identical/,
   )
   assert.throws(
     () =>
-      verifyLiveTerminalManifestPair({
+      verifyFrozenLegacyHandoff({
         aliyunBytes: manifestBytes,
         r2Bytes: manifestBytes,
         githubManifestBytes: Buffer.from(`${manifestBytes.toString()} `),
         githubRelease,
-        trainPolicy,
+        trackedPolicy,
       }),
     /must match the published GitHub manifest/,
   )
   assert.throws(
     () =>
-      verifyLiveTerminalManifestPair({
+      verifyFrozenLegacyHandoff({
         aliyunBytes: manifestBytes,
         r2Bytes: manifestBytes,
         githubManifestBytes: manifestBytes,
         githubRelease: { ...githubRelease, draft: true },
-        trainPolicy,
+        trackedPolicy,
       }),
     /does not match the exact published terminal identity/,
   )
 
-  const staleManifest = promotionCandidate('0.6.648', 'C', 3)
+  const rollingManifest = promotionCandidate('0.6.652', 'C', 3)
   assert.throws(
     () =>
-      verifyLiveTerminalManifestPair({
-        aliyunBytes: staleManifest.candidateManifestBytes,
-        r2Bytes: staleManifest.candidateManifestBytes,
-        githubManifestBytes: staleManifest.candidateManifestBytes,
+      verifyFrozenLegacyHandoff({
+        aliyunBytes: rollingManifest.candidateManifestBytes,
+        r2Bytes: rollingManifest.candidateManifestBytes,
+        githubManifestBytes: rollingManifest.candidateManifestBytes,
         githubRelease,
-        trainPolicy,
+        trackedPolicy,
       }),
-    /is not the latest published or active terminal release/,
+    /Frozen legacy handoff SHA-256 must be exactly/,
+  )
+  assert.throws(
+    () =>
+      verifyFrozenLegacyHandoff({
+        aliyunBytes: manifestBytes,
+        r2Bytes: manifestBytes,
+        githubManifestBytes: manifestBytes,
+        githubRelease,
+        trackedPolicy: preAPolicy,
+      }),
+    /requires frozen-handoff state/,
   )
 })
 
@@ -339,10 +334,10 @@ test('byte-identical manifests must also match the reviewed candidate hash', () 
   )
 })
 
-test('policy rejects unknown states and a-pinned without the exact four platforms', () => {
+test('policy rejects unknown states and pinned handoffs without the exact four platforms', () => {
   assert.throws(
     () => validateLegacyBridgePolicy({ ...preAPolicy, state: 'transitioning' }),
-    /state must be pre-a, a-pinned, or direct-c-pinned/,
+    /state must be pre-a, a-pinned, direct-c-pinned, or frozen-handoff/,
   )
   assert.throws(
     () => validateLegacyBridgePolicy({
@@ -351,6 +346,14 @@ test('policy rejects unknown states and a-pinned without the exact four platform
       expectedVersion: '0.6.643',
     }),
     /a-pinned requiredPlatforms must be exactly/,
+  )
+  assert.throws(
+    () => validateLegacyBridgePolicy({
+      ...preAPolicy,
+      state: 'frozen-handoff',
+      expectedVersion: '0.6.651',
+    }),
+    /frozen-handoff requiredPlatforms must be exactly/,
   )
 })
 
@@ -544,30 +547,46 @@ test('promotion policy mechanically preserves the active A legacy bridge', () =>
   )
 })
 
-test('deployed DIRECT_C accepts only the exact rolling terminal RECOVERY patch', () => {
+test('deployed DIRECT_C advances the Router while preserving the frozen handoff', () => {
   const directPolicy = JSON.parse(
     fs.readFileSync(
       path.join(repoRoot, 'scripts/updater/direct-c-transition-policy.json'),
       'utf8',
     ),
   )
-  const trackedPolicy = JSON.parse(
-    fs.readFileSync(
-      path.join(repoRoot, 'scripts/updater/legacy-bridge-policy.json'),
-      'utf8',
-    ),
-  )
-  const previous = {
+  const directBaseline = {
     ...directPolicy.approvedNext,
     status: 'published-superseded',
   }
-  delete previous.manifestKey
-  delete previous.manifestSha256
-  delete previous.requiredPlatforms
+  delete directBaseline.manifestKey
+  delete directBaseline.manifestSha256
+  delete directBaseline.requiredPlatforms
+  const frozen = promotionCandidate('0.6.651', 'C', 3)
+  const trackedPolicy = {
+    schema: 1,
+    state: 'frozen-handoff',
+    expectedVersion: frozen.candidate.version,
+    expectedManifestSha256: frozen.candidate.manifestSha256,
+    requiredPlatforms: [
+      'darwin-aarch64',
+      'darwin-x86_64',
+      'windows-x86_64',
+      'linux-x86_64',
+    ],
+    manifestUrls: endpoints,
+  }
+  const previous = {
+    tag: frozen.candidate.tag,
+    version: frozen.candidate.version,
+    migrationPhase: 'C',
+    dataSchema: 3,
+    sourceCommit: frozen.candidate.sourceCommit,
+    status: 'published-superseded',
+  }
   const {
     candidate,
     candidateManifestBytes,
-  } = promotionCandidate('0.6.650', 'C', 3)
+  } = promotionCandidate('0.6.652', 'C', 3)
   const trainPolicy = {
     supersededTerminalReleases: [
       {
@@ -594,6 +613,15 @@ test('deployed DIRECT_C accepts only the exact rolling terminal RECOVERY patch',
         sourceCommit: 'c'.repeat(40),
         status: 'blocked-before-publication',
       },
+      directBaseline,
+      {
+        tag: 'v0.6.650',
+        version: '0.6.650',
+        migrationPhase: 'C',
+        dataSchema: 3,
+        sourceCommit: 'd'.repeat(40),
+        status: 'published-superseded',
+      },
       previous,
     ],
     activeTerminalRelease: {
@@ -617,8 +645,8 @@ test('deployed DIRECT_C accepts only the exact rolling terminal RECOVERY patch',
         tag: previous.tag,
         sourceCommit: previous.sourceCommit,
         dataSchema: previous.dataSchema,
-        manifestKey: directPolicy.approvedNext.manifestKey,
-        manifestSha256: directPolicy.approvedNext.manifestSha256,
+        manifestKey: frozen.candidate.manifestKey,
+        manifestSha256: frozen.candidate.manifestSha256,
       },
     },
     transitions: {},
@@ -626,7 +654,7 @@ test('deployed DIRECT_C accepts only the exact rolling terminal RECOVERY patch',
   const nextPolicy = {
     ...structuredClone(currentPolicy),
     currentVersion: candidate.version,
-    legacyBridgeVersion: candidate.version,
+    legacyBridgeVersion: frozen.candidate.version,
     releases: {
       ...structuredClone(currentPolicy.releases),
       [candidate.version]: {
@@ -660,9 +688,9 @@ test('deployed DIRECT_C accepts only the exact rolling terminal RECOVERY patch',
     })
 
   assert.deepEqual(validate(), {
-    activeAVersion: '0.6.650',
+    activeAVersion: '0.6.651',
     effectivePhase: 'C',
-    trackedState: 'direct-c-recovery',
+    trackedState: 'frozen-handoff',
   })
 
   const wrongSourcePolicy = structuredClone(trainPolicy)
@@ -673,8 +701,8 @@ test('deployed DIRECT_C accepts only the exact rolling terminal RECOVERY patch',
   )
 
   const skippedPolicy = structuredClone(trainPolicy)
-  skippedPolicy.activeTerminalRelease.version = '0.6.651'
-  skippedPolicy.activeTerminalRelease.tag = 'v0.6.651'
+  skippedPolicy.activeTerminalRelease.version = '0.6.653'
+  skippedPolicy.activeTerminalRelease.tag = 'v0.6.653'
   assert.throws(
     () => validate({ trainPolicy: skippedPolicy }),
     /next exact C\/3 patch/,
@@ -693,7 +721,7 @@ test('deployed DIRECT_C accepts only the exact rolling terminal RECOVERY patch',
           },
         },
       }),
-    /atomically publish/,
+    /preserving the frozen legacy handoff/,
   )
 
   assert.throws(
@@ -701,18 +729,31 @@ test('deployed DIRECT_C accepts only the exact rolling terminal RECOVERY patch',
       validate({
         currentPolicy: {
           ...structuredClone(currentPolicy),
-          legacyBridgeVersion: '0.6.648',
+          legacyBridgeVersion: '0.6.650',
         },
       }),
-    /current policy must match the latest published C terminal/,
+    /current policy must match the latest published C terminal and frozen legacy handoff/,
   )
 
   const driftedHistory = structuredClone(trainPolicy)
-  driftedHistory.supersededTerminalReleases.at(-1).sourceCommit =
+  driftedHistory.supersededTerminalReleases.find(
+    (entry) => entry.version === directBaseline.version,
+  ).sourceCommit =
     'e'.repeat(40)
   assert.throws(
     () => validate({ trainPolicy: driftedHistory }),
     /exact published v0\.6\.649 baseline/,
+  )
+
+  assert.throws(
+    () =>
+      validate({
+        nextPolicy: {
+          ...structuredClone(nextPolicy),
+          legacyBridgeVersion: candidate.version,
+        },
+      }),
+    /preserving the frozen legacy handoff/,
   )
 })
 

@@ -15,6 +15,7 @@ import {
   validateDirectQualificationWorkflow,
   validateDraftAssetRepairWorkflow,
   validateFlatpakMetadata,
+  validateFrozenLegacyHandoffWorkflow,
   validateLinuxReleaseBuild,
   validateMacOSCandidateVerifier,
   validateQualificationWorkflow,
@@ -274,6 +275,11 @@ for (const message of validateBiyanDownloadAliasBootstrapWorkflow(
 }
 for (const message of validateReleaseEnvironmentWorkflows(
   releaseEnvironmentWorkflows
+)) {
+  fail(message)
+}
+for (const message of validateFrozenLegacyHandoffWorkflow(
+  read('.github/workflows/sync-legacy-updater.yml')
 )) {
   fail(message)
 }

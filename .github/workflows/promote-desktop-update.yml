@@ -69,10 +69,6 @@ jobs:
       OSS_ENDPOINT: ${{ vars.ALIYUN_OSS_ENDPOINT || 'oss-cn-hangzhou.aliyuncs.com' }}
       OSS_REGION: ${{ vars.ALIYUN_REGION || 'cn-hangzhou' }}
       DYNAMIC_UPDATER_BASE_URL: "https://updates.mita.so/biyan/v1/stable"
-      LEGACY_ALIYUN_KEY: "mita/latest.json"
-      LEGACY_R2_KEY: "mita/latest.json"
-      LEGACY_ALIYUN_URL: "https://static.mitapp.cn/mita/latest.json"
-      LEGACY_R2_URL: "https://updates.mita.so/mita/latest.json"
       POLICY_KEY: "biyan/updater/stable/policy.json"
       OPEN_TRANSACTION_KEY: "biyan/updater/transactions/open.json"
     steps:
@@ -627,11 +623,6 @@ jobs:
           fi
 
           probe_r2 "$POLICY_KEY" policy-r2
-          probe_oss "$LEGACY_ALIYUN_KEY" legacy-oss
-          probe_r2 "$LEGACY_R2_KEY" legacy-r2
-          for probe in legacy-oss legacy-r2; do
-            jq -e '.state == "exists"' "dist/state/probes/${probe}.json" >/dev/null
-          done
 
           # Dry-run is deliberately remote read-only, but it exercises both
           # clouds and every candidate key so conflicts fail before mutation.
@@ -714,31 +705,6 @@ jobs:
             --health-evidence dist/state/verified-health.json
             --output dist/state/next-policy.json
           )
-          if [ "$PHASE" = "DIRECT_C" ] \
-            && [ "$(jq -r '.legacyBridgeVersion // empty' dist/state/current-policy.json 2>/dev/null || true)" = "" ]; then
-            oss_endpoint="${ALIYUN_OSS_ENDPOINT#https://}"
-            oss_endpoint="https://${oss_endpoint#http://}"
-            ossutil cp "oss://${ALIYUN_OSS_BUCKET}/${LEGACY_ALIYUN_KEY}" \
-              dist/state/pre-a-legacy-oss.json --force \
-              --endpoint "$oss_endpoint" --region "$ALIYUN_REGION"
-            aws s3 cp "s3://${CLOUDFLARE_R2_BUCKET}/${LEGACY_R2_KEY}" \
-              dist/state/pre-a-legacy-r2.json --endpoint-url "$r2_endpoint"
-            cmp dist/state/pre-a-legacy-oss.json dist/state/pre-a-legacy-r2.json
-            node scripts/updater/legacy-manifest-policy.mjs \
-              --aliyun dist/state/pre-a-legacy-oss.json \
-              --r2 dist/state/pre-a-legacy-r2.json \
-              --evidence dist/state/pre-a-legacy-evidence.json
-            test "$(jq -er .expectedVersion \
-              dist/state/pre-a-legacy-evidence.json)" = "$EXPECTED_CURRENT"
-            node scripts/updater/legacy-pause-transaction.mjs create-fallback \
-              --version "$EXPECTED_CURRENT" \
-              --manifest-sha256 "$(sha256sum dist/state/pre-a-legacy-oss.json | cut -d' ' -f1)" \
-              --transaction-id "${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}" \
-              --output dist/state/legacy-pause-fallback.json
-            prepare_args+=(
-              --legacy-pause-fallback dist/state/legacy-pause-fallback.json
-            )
-          fi
           node scripts/updater/prepare-promotion.mjs "${prepare_args[@]}"
           node scripts/updater/legacy-manifest-policy.mjs validate-promotion \
             --candidate dist/candidate/candidate.json \
