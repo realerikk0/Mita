@@ -68,6 +68,8 @@ export type VideoGenerationTask = {
   progress: number
   videoUrl?: string
   lastFrameUrl?: string
+  /** Provider-reported failure detail, present when status is 'failed'. */
+  error?: string
   usage?: unknown
   raw?: unknown
 }
@@ -96,6 +98,8 @@ export type PollVideoTaskRequest = {
   model: Model
   taskId: string
   signal?: AbortSignal
+  /** Called after a polling response is fetched and parsed successfully. */
+  onPollResponse?: () => void
 }
 
 export type VideoAssetRecord = {

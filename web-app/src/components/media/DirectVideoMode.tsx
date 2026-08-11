@@ -5,6 +5,7 @@ import {
   ArrowUp,
   Check,
   ChevronsUpDown,
+  Download,
   Eye,
   Film,
   Image as ImageIcon,
@@ -12,6 +13,7 @@ import {
   Minus,
   Music2,
   Plus,
+  RotateCcw,
   Scan,
   Video,
   X,
@@ -32,6 +34,7 @@ import {
 } from '@/components/ui/tooltip'
 import ProvidersAvatar from '@/containers/ProvidersAvatar'
 import { isBiyuanProvider } from '@/constants/biyuan'
+import { useTranslation } from '@/i18n/react-i18next-compat'
 import { estimateSeedanceVideoCost } from '@/lib/seedance-video-cost'
 import {
   cn,
@@ -92,6 +95,8 @@ export type DirectVideoRuntime = {
   status?: 'idle' | VideoGenerationStatus
   progress?: number
   error?: string
+  connectionState?: 'connected' | 'reconnecting' | 'paused'
+  retryAt?: number
 }
 
 export type VideoReferenceAssetOption = {
@@ -128,6 +133,12 @@ export type DirectVideoFeedItem = {
   status: VideoGenerationStatus
   progress?: number
   error?: string
+  connectionState?: 'connected' | 'reconnecting' | 'paused'
+  retryAt?: number
+  /** The provider task id is persisted, so this card can resume polling. */
+  hasPersistedTask?: boolean
+  /** Manual tasks are only resumed by an explicit user action. */
+  resumePolicy?: 'auto' | 'manual'
   asset?: VideoAssetRecord
   sourceImageSrc?: string
 }
@@ -136,7 +147,9 @@ export type DirectVideoFeedProps = {
   items: DirectVideoFeedItem[]
   videoSrc: (asset: VideoAssetRecord) => string
   onPreview?: (asset: VideoAssetRecord) => void
+  onDownload?: (asset: VideoAssetRecord) => void | Promise<void>
   onCancel?: (item: DirectVideoFeedItem) => void
+  onRetry?: (item: DirectVideoFeedItem) => void
 }
 
 function modelKey(option: DirectVideoModelOption) {
@@ -451,10 +464,16 @@ function ReferenceMediaStack({
   )
 }
 
-function videoStatusLabel(status: VideoGenerationStatus) {
-  if (status === 'succeeded') return '已完成'
-  if (status === 'failed') return '生成失败'
-  if (status === 'queued') return '排队中'
+function videoStatusLabel(item: DirectVideoFeedItem) {
+  if (item.connectionState === 'reconnecting') return '网络波动，正在重连'
+  if (item.status === 'succeeded') return '已完成'
+  if (item.status === 'failed') {
+    return item.hasPersistedTask &&
+      (item.connectionState === 'paused' || item.resumePolicy === 'manual')
+      ? '查询已暂停'
+      : '生成失败'
+  }
+  if (item.status === 'queued') return '排队中'
   return '生成中'
 }
 
@@ -462,8 +481,12 @@ export function DirectVideoFeed({
   items,
   videoSrc,
   onPreview,
+  onDownload,
   onCancel,
+  onRetry,
 }: DirectVideoFeedProps) {
+  const { t } = useTranslation()
+
   if (items.length === 0) {
     return (
       <div
@@ -478,7 +501,19 @@ export function DirectVideoFeed({
   return (
     <div className="space-y-5" data-testid="direct-video-feed">
       {items.map((item) => {
-        const busy = item.status === 'queued' || item.status === 'running'
+        const reconnecting = item.connectionState === 'reconnecting'
+        const paused =
+          !reconnecting &&
+          (item.connectionState === 'paused' ||
+            (item.status === 'failed' && item.resumePolicy === 'manual'))
+        const busy =
+          !paused &&
+          (reconnecting || item.status === 'queued' || item.status === 'running')
+        const resumableFailure =
+          item.status === 'failed' &&
+          item.hasPersistedTask &&
+          paused &&
+          !reconnecting
         const src = item.asset ? videoSrc(item.asset) : ''
 
         return (
@@ -515,14 +550,20 @@ export function DirectVideoFeed({
                     item.status === 'succeeded' &&
                       'bg-emerald-500/10 text-emerald-600',
                     item.status === 'failed' &&
+                      !resumableFailure &&
+                      !reconnecting &&
                       'bg-destructive/10 text-destructive',
                     item.status === 'running' &&
+                      !reconnecting &&
                       'bg-blue-500/10 text-blue-600',
                     item.status === 'queued' &&
-                      'bg-secondary text-muted-foreground'
+                      !reconnecting &&
+                      'bg-secondary text-muted-foreground',
+                    (reconnecting || resumableFailure) &&
+                      'bg-amber-500/10 text-amber-700 dark:text-amber-300'
                   )}
                 >
-                  {videoStatusLabel(item.status)}
+                  {videoStatusLabel(item)}
                 </span>
               </div>
             </div>
@@ -542,13 +583,58 @@ export function DirectVideoFeed({
                 >
                   <div className="flex items-center gap-2 text-sm text-muted-foreground">
                     <Loader2 className="size-5 animate-spin" />
-                    {item.status === 'queued' ? '任务排队中' : '视频生成中'}
+                    {reconnecting
+                      ? '网络波动，正在重连'
+                      : item.status === 'queued'
+                        ? '任务排队中'
+                        : '视频生成中'}
                   </div>
                   <div className="w-full max-w-sm space-y-2">
                     <Progress value={item.progress ?? 0} className="h-1.5" />
                     <p className="text-center text-xs text-muted-foreground">
                       {Math.round(item.progress ?? 0)}%
                     </p>
+                  </div>
+                </div>
+              ) : resumableFailure ? (
+                <div className="flex size-full flex-col items-center justify-center gap-2 px-8 text-center text-amber-700 dark:text-amber-300">
+                  <AlertTriangle className="size-6" />
+                  <p className="text-sm font-medium">视频任务查询已暂停</p>
+                  <p className="max-w-md text-xs leading-5 text-muted-foreground">
+                    任务仍在服务端，可继续查询原任务，不会重新生成。
+                  </p>
+                  {item.error && (
+                    <p className="max-w-md text-xs leading-5 text-muted-foreground">
+                      {item.error}
+                    </p>
+                  )}
+                  <div className="mt-1 flex flex-wrap items-center justify-center gap-2">
+                    {onRetry && (
+                      <Button
+                        type="button"
+                        variant="outline"
+                        size="sm"
+                        onClick={() => onRetry(item)}
+                      >
+                        <RotateCcw className="size-4" />
+                        {t(
+                          'common:imageGeneration.storyboard.continueQuery'
+                        )}
+                      </Button>
+                    )}
+                    {onCancel && (
+                      <Button
+                        type="button"
+                        variant="ghost"
+                        size="sm"
+                        onClick={() => onCancel(item)}
+                      >
+                        <X className="size-4" />
+                        {t(
+                          'common:imageGeneration.storyboard.abandonVideoTask'
+                        )}
+                      </Button>
+                    )}
                   </div>
                 </div>
               ) : (
@@ -559,6 +645,18 @@ export function DirectVideoFeed({
                     <p className="max-w-md text-xs leading-5 text-destructive/75">
                       {item.error}
                     </p>
+                  )}
+                  {onRetry && (
+                    <Button
+                      type="button"
+                      variant="outline"
+                      size="sm"
+                      className="mt-1"
+                      onClick={() => onRetry(item)}
+                    >
+                      <RotateCcw className="size-4" />
+                      重试
+                    </Button>
                   )}
                 </div>
               )}
@@ -576,6 +674,17 @@ export function DirectVideoFeed({
                   打开预览
                 </Button>
               )}
+              {item.status === 'succeeded' && item.asset && onDownload && (
+                <Button
+                  type="button"
+                  variant="secondary"
+                  size="sm"
+                  onClick={() => void onDownload(item.asset!)}
+                >
+                  <Download className="size-4" />
+                  下载
+                </Button>
+              )}
               {busy && onCancel && (
                 <Button
                   type="button"
@@ -590,7 +699,9 @@ export function DirectVideoFeed({
               {!item.asset && !busy && (
                 <span className="inline-flex items-center gap-1.5 text-xs text-muted-foreground">
                   <Film className="size-3.5" />
-                  可修改提示词后重新生成
+                  {resumableFailure
+                    ? '任务仍在服务端，可继续查询结果'
+                    : '可修改提示词后重新生成'}
                 </span>
               )}
             </div>
@@ -721,10 +832,16 @@ export function DirectVideoMode({
     }
   }, [resolution, resolutionOptions])
 
+  const runtimeReconnecting = runtime?.connectionState === 'reconnecting'
+  const runtimePaused = runtime?.connectionState === 'paused'
   const runtimeBusy =
-    runtime?.status === 'queued' || runtime?.status === 'running'
-  const busy = submitting || runtimeBusy
-  const errorMessage = submitError || runtime?.error
+    runtimeReconnecting ||
+    runtime?.status === 'queued' ||
+    runtime?.status === 'running'
+  const busy = submitting || runtimeBusy || runtimePaused
+  // Generation failures already surface on the failed card in the feed, so the
+  // composer only shows errors from the submit action itself.
+  const errorMessage = submitError
   const hasOnlyAudioReferences =
     selectedReferences.length > 0 &&
     selectedReferences.every((option) => option.reference.kind === 'audio')
@@ -904,7 +1021,11 @@ export function DirectVideoMode({
           >
             <div className="flex items-center justify-between text-xs text-muted-foreground">
               <span>
-                {runtime?.status === 'queued' ? '任务排队中' : '视频生成中'}
+                {runtimeReconnecting
+                  ? '网络波动，正在重连'
+                  : runtime?.status === 'queued'
+                    ? '任务排队中'
+                    : '视频生成中'}
               </span>
               {typeof runtime?.progress === 'number' && (
                 <span>{Math.round(runtime.progress)}%</span>

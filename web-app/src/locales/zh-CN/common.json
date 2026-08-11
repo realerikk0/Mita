@@ -127,6 +127,8 @@
       "storyboardReady": "故事板已生成",
       "videoModelRequired": "需要配置视频模型后才能生成视频。",
       "generateVideo": "生成视频",
+      "continueQuery": "继续查询",
+      "abandonVideoTask": "放弃任务",
       "downloadStoryboard": "下载故事板",
       "downloadVideo": "下载视频",
       "style": "风格",

@@ -6,6 +6,12 @@ import {
 } from '@/lib/seedance-video'
 import { ModelCapabilities } from '@/types/models'
 import { DefaultVideoGenerationService } from '../default'
+import {
+  isRecoverableVideoPollingError,
+  isVideoTransportFailure,
+  normalizeVideoError,
+  RecoverableVideoPollingError,
+} from '../retry-error'
 import type {
   UploadedVideoReferenceMedia,
   UploadVideoReferenceMediaRequest,
@@ -56,6 +62,24 @@ describe('DefaultVideoGenerationService', () => {
     localStorage.removeItem('biyan.videoGeneration.debug')
     vi.restoreAllMocks()
     vi.unstubAllGlobals()
+  })
+
+  it('classifies Tauri polling strings without treating arbitrary strings as network errors', () => {
+    const tauriError =
+      'error sending request for url (https://api.biyuan.ai/v1/video/generations/task-1)'
+
+    expect(isVideoTransportFailure(tauriError)).toBe(true)
+    expect(isVideoTransportFailure('invalid response payload')).toBe(false)
+    expect(isRecoverableVideoPollingError(tauriError)).toBe(false)
+    expect(
+      isRecoverableVideoPollingError(
+        new Error('Upstream generation timed out')
+      )
+    ).toBe(false)
+    expect(normalizeVideoError(tauriError)).toMatchObject({
+      name: 'Error',
+      message: tauriError,
+    })
   })
 
   it('creates video tasks through the provider video endpoint', async () => {
@@ -239,6 +263,32 @@ describe('DefaultVideoGenerationService', () => {
     })
 
     await expect(promise).rejects.toThrow('Failed to fetch')
+    expect(fetchMock).toHaveBeenCalledTimes(1)
+  })
+
+  it('normalizes a primitive video creation rejection without replaying the POST', async () => {
+    const tauriError =
+      'error sending request for url (https://api.jingxing.uk/v1/video/generations)'
+    const fetchMock = vi.fn().mockRejectedValueOnce(tauriError)
+    vi.stubGlobal('fetch', fetchMock)
+
+    const service = new DefaultVideoGenerationService({
+      requestRetryDelaysMs: [0, 0],
+    })
+    const promise = service.generateVideo({
+      provider,
+      model,
+      prompt: 'Preserve the desktop transport error.',
+      ratio: '16:9',
+      duration: 8,
+      resolution: '1080p',
+      fps: 24,
+    })
+
+    await expect(promise).rejects.toMatchObject({
+      name: 'Error',
+      message: tauriError,
+    })
     expect(fetchMock).toHaveBeenCalledTimes(1)
   })
 
@@ -1105,6 +1155,187 @@ describe('DefaultVideoGenerationService', () => {
     })
   })
 
+  it('extracts the provider failure detail from failed poll responses', async () => {
+    const fetchMock = vi.fn().mockResolvedValueOnce(
+      new Response(
+        JSON.stringify({
+          task_id: 'video-task-9',
+          status: 'failed',
+          progress: 100,
+          error: {
+            code: 'video_generation_failed',
+            message:
+              'Your request content[1] may be related to copyright restrictions',
+          },
+        }),
+        { status: 200, headers: { 'content-type': 'application/json' } }
+      )
+    )
+    vi.stubGlobal('fetch', fetchMock)
+
+    const service = new DefaultVideoGenerationService({
+      pollIntervalMs: 0,
+      timeoutMs: 1000,
+    })
+    const task = await service.pollVideoTask({
+      provider,
+      model,
+      taskId: 'video-task-9',
+    })
+
+    expect(task.status).toBe('failed')
+    expect(task.error).toBe(
+      'Your request content[1] may be related to copyright restrictions'
+    )
+  })
+
+  it('unwraps double-encoded JSON failure messages from failed tasks', async () => {
+    const fetchMock = vi.fn().mockResolvedValueOnce(
+      new Response(
+        JSON.stringify({
+          task_id: 'video-task-10',
+          status: 'failed',
+          error: {
+            code: 'video_generation_failed',
+            message: JSON.stringify({
+              code: 'OutputVideoSensitiveContentDetected',
+              message: '输出视频可能包含敏感内容，请调整提示词后重试',
+            }),
+          },
+        }),
+        { status: 200, headers: { 'content-type': 'application/json' } }
+      )
+    )
+    vi.stubGlobal('fetch', fetchMock)
+
+    const service = new DefaultVideoGenerationService({
+      pollIntervalMs: 0,
+      timeoutMs: 1000,
+    })
+    const task = await service.pollVideoTask({
+      provider,
+      model,
+      taskId: 'video-task-10',
+    })
+
+    expect(task.status).toBe('failed')
+    expect(task.error).toBe('输出视频可能包含敏感内容，请调整提示词后重试')
+  })
+
+  it('unwraps upstream errors nested as error.error inside the JSON string', async () => {
+    // Exact shape reported by Biyuan: error.message is a JSON string whose
+    // payload nests the real detail one level deeper under "error".
+    const fetchMock = vi.fn().mockResolvedValueOnce(
+      new Response(
+        JSON.stringify({
+          id: 'task_Ub5F0IuCIvibPPmjDEN6NUlSHCPKCv1m',
+          task_id: 'task_Ub5F0IuCIvibPPmjDEN6NUlSHCPKCv1m',
+          object: 'video',
+          model: 'doubao-seedance-2-0-260128',
+          status: 'failed',
+          progress: 100,
+          created_at: 1786099370,
+          completed_at: 1786099385,
+          error: {
+            message: JSON.stringify({
+              error: {
+                code: '***.PrivacyInformation',
+                message:
+                  "The request failed because the input image 'content[0]' may contain real person. Request id: 021786099371407817b06a784e756ea4b86a97afa590e06d8fdbd",
+                param: 'content[0]',
+                type: 'BadRequest',
+              },
+            }),
+            code: 'video_generation_failed',
+          },
+        }),
+        { status: 200, headers: { 'content-type': 'application/json' } }
+      )
+    )
+    vi.stubGlobal('fetch', fetchMock)
+
+    const service = new DefaultVideoGenerationService({
+      pollIntervalMs: 0,
+      timeoutMs: 1000,
+    })
+    const task = await service.pollVideoTask({
+      provider,
+      model,
+      taskId: 'task_Ub5F0IuCIvibPPmjDEN6NUlSHCPKCv1m',
+    })
+
+    expect(task.status).toBe('failed')
+    expect(task.error).toBe(
+      "The request failed because the input image 'content[0]' may contain real person. Request id: 021786099371407817b06a784e756ea4b86a97afa590e06d8fdbd"
+    )
+  })
+
+  it('re-polls once when a failed task has no error detail yet', async () => {
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(
+        new Response(
+          JSON.stringify({ task_id: 'video-task-12', status: 'failed' }),
+          { status: 200, headers: { 'content-type': 'application/json' } }
+        )
+      )
+      .mockResolvedValueOnce(
+        new Response(
+          JSON.stringify({
+            task_id: 'video-task-12',
+            status: 'failed',
+            error: {
+              code: 'video_generation_failed',
+              message: 'The input image may contain real person',
+            },
+          }),
+          { status: 200, headers: { 'content-type': 'application/json' } }
+        )
+      )
+    vi.stubGlobal('fetch', fetchMock)
+
+    const service = new DefaultVideoGenerationService({
+      pollIntervalMs: 0,
+      timeoutMs: 1000,
+    })
+    const task = await service.pollVideoTask({
+      provider,
+      model,
+      taskId: 'video-task-12',
+    })
+
+    expect(fetchMock).toHaveBeenCalledTimes(2)
+    expect(task.status).toBe('failed')
+    expect(task.error).toBe('The input image may contain real person')
+  })
+
+  it('falls back to the error code when a failed task has no message', async () => {
+    const fetchMock = vi.fn().mockResolvedValueOnce(
+      new Response(
+        JSON.stringify({
+          task_id: 'video-task-11',
+          status: 'failed',
+          error: { code: 'video_generation_failed' },
+        }),
+        { status: 200, headers: { 'content-type': 'application/json' } }
+      )
+    )
+    vi.stubGlobal('fetch', fetchMock)
+
+    const service = new DefaultVideoGenerationService({
+      pollIntervalMs: 0,
+      timeoutMs: 1000,
+    })
+    const task = await service.pollVideoTask({
+      provider,
+      model,
+      taskId: 'video-task-11',
+    })
+
+    expect(task.status).toBe('failed')
+    expect(task.error).toBe('video_generation_failed')
+  })
+
   it('keeps polling running tasks until a terminal result arrives', async () => {
     const fetchMock = vi
       .fn()
@@ -1197,6 +1428,144 @@ describe('DefaultVideoGenerationService', () => {
     })
   })
 
+  it('retries a primitive Tauri polling network error', async () => {
+    const fetchMock = vi
+      .fn()
+      .mockRejectedValueOnce(
+        'error sending request for url (https://api.biyuan.ai/v1/video/generations/task-tauri)'
+      )
+      .mockResolvedValueOnce(
+        new Response(
+          JSON.stringify({
+            task_id: 'video-task-after-tauri-retry',
+            status: 'completed',
+            result_url: 'https://cdn.example.test/tauri-recovered.mp4',
+          }),
+          { status: 200, headers: { 'content-type': 'application/json' } }
+        )
+      )
+    vi.stubGlobal('fetch', fetchMock)
+
+    const service = new DefaultVideoGenerationService({
+      pollIntervalMs: 0,
+      timeoutMs: 1000,
+      requestRetryDelaysMs: [0],
+    })
+    const task = await service.pollVideoTask({
+      provider,
+      model,
+      taskId: 'video-task-after-tauri-retry',
+    })
+
+    expect(fetchMock).toHaveBeenCalledTimes(2)
+    expect(task).toMatchObject({
+      status: 'succeeded',
+      videoUrl: 'https://cdn.example.test/tauri-recovered.mp4',
+    })
+  })
+
+  it('wraps an exhausted primitive Tauri transport rejection as recoverable', async () => {
+    const tauriError =
+      'error sending request for url (https://api.biyuan.ai/v1/video/generations/task-tauri-down)'
+    const fetchMock = vi.fn().mockRejectedValue(tauriError)
+    vi.stubGlobal('fetch', fetchMock)
+
+    const service = new DefaultVideoGenerationService({
+      pollIntervalMs: 0,
+      timeoutMs: 1000,
+      requestRetryDelaysMs: [],
+    })
+    const error = await service
+      .pollVideoTask({
+        provider,
+        model,
+        taskId: 'video-task-tauri-down',
+      })
+      .catch((caught) => caught)
+
+    expect(error).toBeInstanceOf(RecoverableVideoPollingError)
+    expect(error).toMatchObject({
+      reason: 'network',
+      message: tauriError,
+    })
+    expect(isRecoverableVideoPollingError(error)).toBe(true)
+    expect(fetchMock).toHaveBeenCalledTimes(1)
+  })
+
+  it.each([
+    [400, 'Upstream generation timed out'],
+    [404, 'Task connection closed permanently'],
+  ])(
+    'does not retry HTTP %i provider errors whose body resembles a transport failure',
+    async (status, message) => {
+      const fetchMock = vi.fn().mockResolvedValue(
+        new Response(JSON.stringify({ error: { message } }), {
+          status,
+          headers: { 'content-type': 'application/json' },
+        })
+      )
+      vi.stubGlobal('fetch', fetchMock)
+
+      const service = new DefaultVideoGenerationService({
+        pollIntervalMs: 0,
+        timeoutMs: 1000,
+        requestRetryDelaysMs: [0, 0],
+      })
+      const error = await service
+        .pollVideoTask({
+          provider,
+          model,
+          taskId: `video-task-terminal-${status}`,
+        })
+        .catch((caught) => caught)
+
+      expect(error).toMatchObject({ message })
+      expect(isRecoverableVideoPollingError(error)).toBe(false)
+      expect(fetchMock).toHaveBeenCalledTimes(1)
+    }
+  )
+
+  it('notifies after every successfully fetched and parsed polling response', async () => {
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(
+        new Response(
+          JSON.stringify({
+            task_id: 'video-task-connection-restored',
+            status: 'running',
+          }),
+          { status: 200, headers: { 'content-type': 'application/json' } }
+        )
+      )
+      .mockResolvedValueOnce(
+        new Response(
+          JSON.stringify({
+            task_id: 'video-task-connection-restored',
+            status: 'completed',
+            video_url: 'https://cdn.example.test/connection-restored.mp4',
+          }),
+          { status: 200, headers: { 'content-type': 'application/json' } }
+        )
+      )
+    vi.stubGlobal('fetch', fetchMock)
+    const onPollResponse = vi.fn()
+
+    const service = new DefaultVideoGenerationService({
+      pollIntervalMs: 0,
+      timeoutMs: 1000,
+    })
+    const task = await service.pollVideoTask({
+      provider,
+      model,
+      taskId: 'video-task-connection-restored',
+      onPollResponse,
+    })
+
+    expect(task.status).toBe('succeeded')
+    expect(fetchMock).toHaveBeenCalledTimes(2)
+    expect(onPollResponse).toHaveBeenCalledTimes(2)
+  })
+
   it('stops retrying polling network failures after the configured budget', async () => {
     const fetchMock = vi
       .fn()
@@ -1214,8 +1583,120 @@ describe('DefaultVideoGenerationService', () => {
       taskId: 'video-task-network-down',
     })
 
-    await expect(promise).rejects.toThrow('Failed to fetch')
+    const error = await promise.catch((caught) => caught)
+    expect(error).toBeInstanceOf(RecoverableVideoPollingError)
+    expect(error).toMatchObject({
+      code: 'recoverable_video_polling_error',
+      reason: 'network',
+      message: 'Failed to fetch',
+    })
+    expect(isRecoverableVideoPollingError(error)).toBe(true)
     expect(fetchMock).toHaveBeenCalledTimes(3)
+  })
+
+  it('does not retry a non-network primitive polling rejection', async () => {
+    const fetchMock = vi.fn().mockRejectedValueOnce('invalid response payload')
+    vi.stubGlobal('fetch', fetchMock)
+
+    const service = new DefaultVideoGenerationService({
+      pollIntervalMs: 0,
+      timeoutMs: 1000,
+      requestRetryDelaysMs: [0, 0],
+    })
+    const promise = service.pollVideoTask({
+      provider,
+      model,
+      taskId: 'video-task-invalid-response',
+    })
+
+    await expect(promise).rejects.toMatchObject({
+      name: 'Error',
+      message: 'invalid response payload',
+    })
+    expect(fetchMock).toHaveBeenCalledTimes(1)
+  })
+
+  it('does not retry AbortError polling rejections', async () => {
+    const abortError = Object.assign(new Error('The operation was aborted'), {
+      name: 'AbortError',
+    })
+    const fetchMock = vi.fn().mockRejectedValueOnce(abortError)
+    vi.stubGlobal('fetch', fetchMock)
+
+    const service = new DefaultVideoGenerationService({
+      pollIntervalMs: 0,
+      timeoutMs: 1000,
+      requestRetryDelaysMs: [0, 0],
+    })
+    const error = await service
+      .pollVideoTask({
+        provider,
+        model,
+        taskId: 'video-task-aborted',
+      })
+      .catch((caught) => caught)
+
+    expect(error).toBe(abortError)
+    expect(isVideoTransportFailure(error)).toBe(false)
+    expect(isRecoverableVideoPollingError(error)).toBe(false)
+    expect(fetchMock).toHaveBeenCalledTimes(1)
+  })
+
+  it.each([408, 425, 429, 500, 502, 503, 504, 522, 523, 524])(
+    'marks exhausted polling HTTP %i retries as recoverable',
+    async (status) => {
+      const fetchMock = vi.fn().mockImplementation(() =>
+        Promise.resolve(
+          new Response(JSON.stringify({ message: 'Temporarily unavailable' }), {
+            status,
+            headers: { 'content-type': 'application/json' },
+          })
+        )
+      )
+      vi.stubGlobal('fetch', fetchMock)
+
+      const service = new DefaultVideoGenerationService({
+        pollIntervalMs: 0,
+        timeoutMs: 1000,
+        requestRetryDelaysMs: [0],
+      })
+      const error = await service
+        .pollVideoTask({
+          provider,
+          model,
+          taskId: `video-task-http-${status}`,
+        })
+        .catch((caught) => caught)
+
+      expect(error).toBeInstanceOf(RecoverableVideoPollingError)
+      expect(error).toMatchObject({
+        code: 'recoverable_video_polling_error',
+        message: 'Temporarily unavailable',
+      })
+      expect(error.cause).toMatchObject({ status })
+      expect(fetchMock).toHaveBeenCalledTimes(2)
+    }
+  )
+
+  it('marks the polling time limit as recoverable', async () => {
+    const fetchMock = vi.fn()
+    vi.stubGlobal('fetch', fetchMock)
+
+    const service = new DefaultVideoGenerationService({ timeoutMs: -1 })
+    const error = await service
+      .pollVideoTask({
+        provider,
+        model,
+        taskId: 'video-task-timeout',
+      })
+      .catch((caught) => caught)
+
+    expect(error).toBeInstanceOf(RecoverableVideoPollingError)
+    expect(error).toMatchObject({
+      reason: 'timeout',
+      message: 'Video task video-task-timeout did not finish in time',
+    })
+    expect(fetchMock).not.toHaveBeenCalled()
   })
 
   it('extracts gateway result_url videos from completed tasks', async () => {

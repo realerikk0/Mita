@@ -32,6 +32,11 @@ import type {
   UploadedVideoReferenceMedia,
   VideoResolution,
 } from './types'
+import {
+  isVideoTransportFailure,
+  normalizeVideoError,
+  RecoverableVideoPollingError,
+} from './retry-error'
 import type { ProjectAssignment } from '@/services/projects/types'
 
 type RawVideoResponse = {
@@ -67,7 +72,7 @@ type RawVideoResponse = {
   result?: RawVideoUrlCandidate
   data?: RawVideoResponse
   usage?: unknown
-  error?: { message?: string } | string
+  error?: { code?: string; message?: string } | string
   message?: string
   code?: string
 }
@@ -120,20 +125,9 @@ const DEFAULT_TASK_TIMEOUT_MS = 20 * 60 * 1000
 const DEFAULT_REQUEST_RETRY_DELAYS_MS = [500, 1500, 3000] as const
 const MAX_RETRY_AFTER_MS = 30_000
 const UPSTREAM_TASK_RATE_LIMIT_CODE = 'upstream_task_rate_limited'
-const RETRYABLE_NETWORK_ERROR_CODES = new Set([
-  'ECONNRESET',
-  'ECONNREFUSED',
-  'EPIPE',
-  'ETIMEDOUT',
-  'EAI_AGAIN',
-  'ENETUNREACH',
-  'EHOSTUNREACH',
-  'UND_ERR_SOCKET',
-  'UND_ERR_CONNECT_TIMEOUT',
-  'UND_ERR_HEADERS_TIMEOUT',
+const RECOVERABLE_POLLING_HTTP_STATUSES = new Set([
+  408, 425, 429, 500, 502, 503, 504, 522, 523, 524,
 ])
-const RETRYABLE_NETWORK_ERROR_MESSAGE =
-  /failed to fetch|fetch failed|network(?: request)? failed|networkerror|network socket disconnected|socket hang up|connection (?:reset|closed)|econnreset|timed? ?out/i
 const LEGACY_SEEDANCE_REFERENCE_CAPABILITIES: SeedanceReferenceCapabilities =
   Object.freeze({
     maxImages: 1,
@@ -151,33 +145,6 @@ function errorRecord(value: unknown) {
   return value && typeof value === 'object'
     ? (value as Record<string, unknown>)
     : undefined
-}
-
-function isRetryableNetworkError(error: unknown) {
-  const visited = new Set<unknown>()
-  let current: unknown = error
-
-  for (let depth = 0; current && depth < 6; depth += 1) {
-    if (visited.has(current)) break
-    visited.add(current)
-
-    const record = errorRecord(current)
-    const name = stringValue(record?.name)
-    if (name === 'AbortError') return false
-
-    const code = stringValue(record?.code)
-    if (code && RETRYABLE_NETWORK_ERROR_CODES.has(code.toUpperCase())) {
-      return true
-    }
-
-    const message = stringValue(record?.message)
-    if (message && RETRYABLE_NETWORK_ERROR_MESSAGE.test(message)) return true
-    if (name === 'TypeError' && /fetch/i.test(message ?? '')) return true
-
-    current = record?.cause
-  }
-
-  return false
 }
 
 function referenceLogSummary(request: GenerateVideoRequest) {
@@ -356,6 +323,7 @@ export class DefaultVideoGenerationService implements VideoGenerationService {
     const startedAt = Date.now()
     let currentApiKey: string | undefined
     let pollCount = 0
+    let failedDetailRetries = 0
 
     while (Date.now() - startedAt <= this.timeoutMs) {
       this.throwIfAborted(request.signal)
@@ -383,15 +351,27 @@ export class DefaultVideoGenerationService implements VideoGenerationService {
               : undefined,
         }
       )
+      request.onPollResponse?.()
 
       if (task.status === 'succeeded' || task.status === 'failed') {
+        // The gateway may flip status to failed before attaching the error
+        // detail; give it one more poll to backfill so the UI can show the
+        // real reason instead of the generic fallback.
+        if (task.status === 'failed' && !task.error && failedDetailRetries < 1) {
+          failedDetailRetries += 1
+          await this.sleep(this.pollIntervalMs, request.signal)
+          continue
+        }
         return task
       }
 
       await this.sleep(this.pollIntervalMs, request.signal)
     }
 
-    throw new Error(`Video task ${request.taskId} did not finish in time`)
+    throw new RecoverableVideoPollingError(
+      `Video task ${request.taskId} did not finish in time`,
+      { reason: 'timeout' }
+    )
   }
 
   async saveVideoAsset(
@@ -857,15 +837,21 @@ export class DefaultVideoGenerationService implements VideoGenerationService {
       while (true) {
         // A rejected POST may already have reached the provider, so only retry
         // explicit capacity responses that confirm no task was accepted.
-        const response = await this.fetch()(endpoint, {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-            ...this.baseHeaders(provider, apiKey, !rotateApiKeys),
-          },
-          body: JSON.stringify(body),
-          signal,
-        })
+        let response: Response
+        try {
+          response = await this.fetch()(endpoint, {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+              ...this.baseHeaders(provider, apiKey, !rotateApiKeys),
+            },
+            body: JSON.stringify(body),
+            signal,
+          })
+        } catch (error) {
+          this.throwIfAborted(signal)
+          throw normalizeVideoError(error)
+        }
         videoDebugLog('http:post-response', {
           endpoint,
           ok: response.ok,
@@ -934,7 +920,7 @@ export class DefaultVideoGenerationService implements VideoGenerationService {
           this.throwIfAborted(signal)
 
           if (
-            isRetryableNetworkError(error) &&
+            isVideoTransportFailure(error) &&
             requestRetryIndex < this.requestRetryDelaysMs.length
           ) {
             const retryDelayMs =
@@ -950,8 +936,15 @@ export class DefaultVideoGenerationService implements VideoGenerationService {
             continue
           }
 
-          if (index < attempts.length - 1) continue keyAttempts
-          throw error
+          if (isVideoTransportFailure(error)) {
+            const normalized = normalizeVideoError(error)
+            throw new RecoverableVideoPollingError(normalized.message, {
+              cause: normalized,
+              reason: 'network',
+            })
+          }
+
+          throw normalizeVideoError(error)
         }
         videoDebugLog('http:get-response', {
           endpoint,
@@ -960,23 +953,43 @@ export class DefaultVideoGenerationService implements VideoGenerationService {
           contentType: response.headers.get('content-type'),
         })
 
-        const capacityError = await this.upstreamCapacityDetails(response)
-        if (capacityError) {
+        if (RECOVERABLE_POLLING_HTTP_STATUSES.has(response.status)) {
+          const capacityError = await this.upstreamCapacityDetails(response)
+          const retryReason = capacityError
+            ? UPSTREAM_TASK_RATE_LIMIT_CODE
+            : `http_${response.status}`
           if (requestRetryIndex < this.requestRetryDelaysMs.length) {
             const retryDelayMs = this.retryDelayMs(response, requestRetryIndex)
             requestRetryIndex += 1
             await this.discardResponse(response)
             videoDebugLog('http:get-retry', {
               endpoint,
-              reason: UPSTREAM_TASK_RATE_LIMIT_CODE,
+              reason: retryReason,
               retryAttempt: requestRetryIndex,
               retryDelayMs,
             })
             await this.sleep(retryDelayMs, signal)
             continue
           }
+
+          const details = capacityError ?? (await this.providerErrorDetails(response))
+          const message =
+            details.message ??
+            `Video task polling temporarily unavailable (HTTP ${response.status})`
+          const cause = new Error(message) as Error & {
+            code?: string
+            status?: number
+          }
+          cause.name = capacityError
+            ? 'UpstreamCapacityError'
+            : 'VideoPollingHttpError'
+          cause.code = details.code
+          cause.status = response.status
           await this.discardResponse(response)
-          throw this.upstreamCapacityError()
+          throw new RecoverableVideoPollingError(message, {
+            cause,
+            reason: capacityError ? 'capacity' : 'network',
+          })
         }
 
         const retry = await this.shouldRetryOrThrow(
@@ -1098,6 +1111,17 @@ export class DefaultVideoGenerationService implements VideoGenerationService {
     return {
       id,
       status,
+      error:
+        status === 'failed'
+          ? this.videoTaskErrorMessage(
+              task.error,
+              wrapper?.error,
+              response.error,
+              task.message,
+              wrapper?.message,
+              response.message
+            )
+          : undefined,
       progress: this.videoProgress(
         wrapper?.progress ?? response.progress ?? task.progress,
         status
@@ -1206,6 +1230,52 @@ export class DefaultVideoGenerationService implements VideoGenerationService {
       return response.data
     }
     return undefined
+  }
+
+  /**
+   * Pick the first usable failure detail from the response. Providers report it
+   * as `error.message`, a bare `message`, or just an error `code`; Biyuan also
+   * double-encodes the upstream failure as a JSON string (e.g. `error.message`
+   * itself is `'{"code":…,"message":"…"}'`), so nested JSON layers are unwrapped
+   * until a human-readable message remains.
+   */
+  private videoTaskErrorMessage(
+    ...candidates: Array<RawVideoResponse['error'] | undefined>
+  ) {
+    for (const candidate of candidates) {
+      const message = this.unwrapErrorMessage(candidate, 0)
+      if (message) return message
+    }
+    return undefined
+  }
+
+  private unwrapErrorMessage(value: unknown, depth: number): string | undefined {
+    if (value == null || depth > 4) return undefined
+
+    if (typeof value === 'string') {
+      const text = value.trim()
+      if (!text) return undefined
+      if (/^[[{]/.test(text)) {
+        try {
+          const unwrapped = this.unwrapErrorMessage(
+            JSON.parse(text),
+            depth + 1
+          )
+          if (unwrapped) return unwrapped
+        } catch {
+          // Not JSON — use the raw text.
+        }
+      }
+      return text
+    }
+
+    const record = errorRecord(value)
+    if (!record) return undefined
+    return (
+      this.unwrapErrorMessage(record.message, depth + 1) ??
+      this.unwrapErrorMessage(record.error, depth + 1) ??
+      stringValue(record.code)
+    )
   }
 
   private videoStatus(status?: string): VideoGenerationStatus {
