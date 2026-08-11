@@ -2617,6 +2617,13 @@ test('updater workflows expose production secrets only to required read or mutat
     return match[1]
   }
   const count = (source, pattern) => source.match(pattern)?.length ?? 0
+  const stepRange = (source, startName, endName) => {
+    const start = source.indexOf(`- name: ${startName}`)
+    const end = source.indexOf(`- name: ${endName}`, start)
+    assert.ok(start >= 0, `missing workflow step: ${startName}`)
+    assert.ok(end > start, `missing workflow step after ${startName}: ${endName}`)
+    return source.slice(start, end)
+  }
 
   const promotion = workflow('promote-desktop-update.yml')
   const recovery = workflow('recover-split-updater-transaction.yml')
@@ -2645,19 +2652,19 @@ test('updater workflows expose production secrets only to required read or mutat
     'rollout salt is exposed only to terminal readback and publish'
   )
   assert.doesNotMatch(
-    health.slice(
-      health.indexOf('- name: Evaluate fail-closed health thresholds'),
-      health.indexOf(
-        '- name: Pause Router and legacy origins when a threshold is breached'
-      )
+    stepRange(
+      health,
+      'Evaluate fail-closed health thresholds',
+      'Pause Router policy when a threshold is breached'
     ),
     /secrets\./
   )
   assert.equal(count(health, /secrets\.BIYAN_SIGNING_KEY/g), 1)
   assert.doesNotMatch(
-    kill.slice(
-      kill.indexOf('- name: Check out trusted policy writer'),
-      kill.indexOf('- name: Apply fail-closed dual-cloud pause transaction')
+    stepRange(
+      kill,
+      'Check out trusted policy writer',
+      'Apply fail-closed Router policy pause transaction'
     ),
     /secrets\./
   )
