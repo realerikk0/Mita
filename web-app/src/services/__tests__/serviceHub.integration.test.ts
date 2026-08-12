@@ -132,6 +132,10 @@ vi.mock('../deeplink/tauri', () => ({
   TauriDeepLinkService: vi.fn().mockImplementation(() => ({}))
 }))
 
+vi.mock('../novels/tauri', () => ({
+  TauriNovelService: vi.fn().mockImplementation(() => ({}))
+}))
+
 // Mock console to avoid noise in tests
 vi.spyOn(console, 'log').mockImplementation(() => {})
 vi.spyOn(console, 'error').mockImplementation(() => {})
@@ -175,7 +179,7 @@ describe('ServiceHub Integration Tests', () => {
       const services = [
         'theme', 'window', 'events', 'hardware', 'app', 'analytic',
         'messages', 'mcp', 'threads', 'providers', 'models', 'assistants',
-        'dialog', 'opener', 'updater', 'path', 'core', 'deeplink'
+        'dialog', 'opener', 'updater', 'path', 'core', 'deeplink', 'novels'
       ]
 
       services.forEach(serviceName => {

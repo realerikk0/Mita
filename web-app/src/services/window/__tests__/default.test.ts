@@ -59,4 +59,10 @@ describe('DefaultWindowService', () => {
     const svc = new DefaultWindowService()
     await expect(svc.openLocalApiServerLogsWindow()).resolves.toBeUndefined()
   })
+
+  it('provides a no-op fullscreen fallback', async () => {
+    const svc = new DefaultWindowService()
+    await expect(svc.setFullscreen(true)).resolves.toBeUndefined()
+    await expect(svc.isFullscreen()).resolves.toBe(false)
+  })
 })

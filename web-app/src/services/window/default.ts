@@ -40,4 +40,12 @@ export class DefaultWindowService implements WindowService {
   async openLocalApiServerLogsWindow(): Promise<void> {
     // No-op
   }
+
+  async setFullscreen(fullscreen: boolean): Promise<void> {
+    void fullscreen
+  }
+
+  async isFullscreen(): Promise<boolean> {
+    return false
+  }
 }

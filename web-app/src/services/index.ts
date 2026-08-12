@@ -33,6 +33,8 @@ import { DefaultVideoGenerationService } from './video-generation/default'
 import type { VideoGenerationService } from './video-generation/types'
 import { DefaultStoryboardGenerationService } from './storyboard-generation/default'
 import type { StoryboardGenerationService } from './storyboard-generation/types'
+import { DefaultNovelService } from './novels/default'
+import type { NovelService } from './novels/types'
 
 // Import service types
 import type { ThemeService } from './theme/types'
@@ -77,6 +79,7 @@ export interface ServiceHub {
   imageGeneration(): ImageGenerationService
   videoGeneration(): VideoGenerationService
   storyboardGeneration(): StoryboardGenerationService
+  novels(): NovelService
 }
 
 class PlatformServiceHub implements ServiceHub {
@@ -104,6 +107,7 @@ class PlatformServiceHub implements ServiceHub {
     new DefaultVideoGenerationService()
   private storyboardGenerationService: StoryboardGenerationService =
     new DefaultStoryboardGenerationService()
+  private novelService: NovelService = new DefaultNovelService()
   private initialized = false
 
   /**
@@ -145,6 +149,7 @@ class PlatformServiceHub implements ServiceHub {
           imageGenerationModule,
           videoGenerationModule,
           storyboardGenerationModule,
+          novelModule,
         ] = await Promise.all([
           import('./theme/tauri'),
           import('./window/tauri'),
@@ -163,6 +168,7 @@ class PlatformServiceHub implements ServiceHub {
           import('./image-generation/tauri'),
           import('./video-generation/tauri'),
           import('./storyboard-generation/tauri'),
+          import('./novels/tauri'),
         ])
 
         this.themeService = new themeModule.TauriThemeService()
@@ -185,6 +191,7 @@ class PlatformServiceHub implements ServiceHub {
           new videoGenerationModule.TauriVideoGenerationService()
         this.storyboardGenerationService =
           new storyboardGenerationModule.TauriStoryboardGenerationService()
+        this.novelService = new novelModule.TauriNovelService()
       } else if (isPlatformIOS() || isPlatformAndroid()) {
         const [
           themeModule,
@@ -362,6 +369,11 @@ class PlatformServiceHub implements ServiceHub {
   storyboardGeneration(): StoryboardGenerationService {
     this.ensureInitialized()
     return this.storyboardGenerationService
+  }
+
+  novels(): NovelService {
+    this.ensureInitialized()
+    return this.novelService
   }
 }
 

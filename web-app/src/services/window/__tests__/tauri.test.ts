@@ -9,6 +9,7 @@ const {
   mockSetTheme,
   mockGetByLabel,
   mockConstructor,
+  mockCurrentWindow,
 } = vi.hoisted(() => ({
   mockClose: vi.fn(),
   mockShow: vi.fn(),
@@ -18,6 +19,10 @@ const {
   mockSetTheme: vi.fn(),
   mockGetByLabel: vi.fn(),
   mockConstructor: vi.fn(),
+  mockCurrentWindow: {
+    setFullscreen: vi.fn(),
+    isFullscreen: vi.fn(),
+  },
 }))
 
 function makeMockWindow() {
@@ -37,7 +42,7 @@ vi.mock('@tauri-apps/api/webviewWindow', () => {
     return makeMockWindow()
   } as unknown as { new (...args: unknown[]): unknown; getByLabel: typeof mockGetByLabel }
   Ctor.getByLabel = mockGetByLabel
-  return { WebviewWindow: Ctor }
+  return { WebviewWindow: Ctor, getCurrentWebviewWindow: () => mockCurrentWindow }
 })
 
 vi.mock('@tauri-apps/api/event', () => ({
@@ -68,6 +73,8 @@ describe('TauriWindowService', () => {
     mockSetFocus.mockResolvedValue(undefined)
     mockSetTitle.mockResolvedValue(undefined)
     mockSetTheme.mockResolvedValue(undefined)
+    mockCurrentWindow.setFullscreen.mockResolvedValue(undefined)
+    mockCurrentWindow.isFullscreen.mockResolvedValue(false)
     localStorage.clear()
     svc = new TauriWindowService()
   })
@@ -279,5 +286,12 @@ describe('TauriWindowService', () => {
       await expect(svc.openLocalApiServerLogsWindow()).rejects.toBe(err)
       spy.mockRestore()
     })
+  })
+
+  it('delegates fullscreen state to the current window', async () => {
+    mockCurrentWindow.isFullscreen.mockResolvedValueOnce(true)
+    await svc.setFullscreen(true)
+    expect(mockCurrentWindow.setFullscreen).toHaveBeenCalledWith(true)
+    await expect(svc.isFullscreen()).resolves.toBe(true)
   })
 })

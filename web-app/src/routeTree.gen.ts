@@ -15,6 +15,7 @@ import { Route as LogsRouteImport } from './routes/logs'
 import { Route as LoadingRibbonDemoRouteImport } from './routes/loading-ribbon-demo'
 import { Route as ImagesRouteImport } from './routes/images'
 import { Route as IndexRouteImport } from './routes/index'
+import { Route as NovelsIndexRouteImport } from './routes/novels/index'
 import { Route as HubIndexRouteImport } from './routes/hub/index'
 import { Route as ThreadsThreadIdRouteImport } from './routes/threads/$threadId'
 import { Route as SettingsShortcutsRouteImport } from './routes/settings/shortcuts'
@@ -35,6 +36,7 @@ import { Route as LocalApiServerLogsRouteImport } from './routes/local-api-serve
 import { Route as HubModelIdRouteImport } from './routes/hub/$modelId'
 import { Route as SettingsProvidersIndexRouteImport } from './routes/settings/providers/index'
 import { Route as SettingsProvidersProviderNameRouteImport } from './routes/settings/providers/$providerName'
+import { Route as NovelsNovelIdUnitIdRouteImport } from './routes/novels/$novelId/$unitId'
 
 const ThinkingContentDemoRoute = ThinkingContentDemoRouteImport.update({
   id: '/thinking-content-demo',
@@ -64,6 +66,11 @@ const ImagesRoute = ImagesRouteImport.update({
 const IndexRoute = IndexRouteImport.update({
   id: '/',
   path: '/',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const NovelsIndexRoute = NovelsIndexRouteImport.update({
+  id: '/novels/',
+  path: '/novels/',
   getParentRoute: () => rootRouteImport,
 } as any)
 const HubIndexRoute = HubIndexRouteImport.update({
@@ -167,6 +174,11 @@ const SettingsProvidersProviderNameRoute =
     path: '/settings/providers/$providerName',
     getParentRoute: () => rootRouteImport,
   } as any)
+const NovelsNovelIdUnitIdRoute = NovelsNovelIdUnitIdRouteImport.update({
+  id: '/novels/$novelId/$unitId',
+  path: '/novels/$novelId/$unitId',
+  getParentRoute: () => rootRouteImport,
+} as any)
 
 export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
@@ -193,6 +205,8 @@ export interface FileRoutesByFullPath {
   '/settings/shortcuts': typeof SettingsShortcutsRoute
   '/threads/$threadId': typeof ThreadsThreadIdRoute
   '/hub/': typeof HubIndexRoute
+  '/novels/': typeof NovelsIndexRoute
+  '/novels/$novelId/$unitId': typeof NovelsNovelIdUnitIdRoute
   '/settings/providers/$providerName': typeof SettingsProvidersProviderNameRoute
   '/settings/providers/': typeof SettingsProvidersIndexRoute
 }
@@ -221,6 +235,8 @@ export interface FileRoutesByTo {
   '/settings/shortcuts': typeof SettingsShortcutsRoute
   '/threads/$threadId': typeof ThreadsThreadIdRoute
   '/hub': typeof HubIndexRoute
+  '/novels': typeof NovelsIndexRoute
+  '/novels/$novelId/$unitId': typeof NovelsNovelIdUnitIdRoute
   '/settings/providers/$providerName': typeof SettingsProvidersProviderNameRoute
   '/settings/providers': typeof SettingsProvidersIndexRoute
 }
@@ -250,6 +266,8 @@ export interface FileRoutesById {
   '/settings/shortcuts': typeof SettingsShortcutsRoute
   '/threads/$threadId': typeof ThreadsThreadIdRoute
   '/hub/': typeof HubIndexRoute
+  '/novels/': typeof NovelsIndexRoute
+  '/novels/$novelId/$unitId': typeof NovelsNovelIdUnitIdRoute
   '/settings/providers/$providerName': typeof SettingsProvidersProviderNameRoute
   '/settings/providers/': typeof SettingsProvidersIndexRoute
 }
@@ -280,6 +298,8 @@ export interface FileRouteTypes {
     | '/settings/shortcuts'
     | '/threads/$threadId'
     | '/hub/'
+    | '/novels/'
+    | '/novels/$novelId/$unitId'
     | '/settings/providers/$providerName'
     | '/settings/providers/'
   fileRoutesByTo: FileRoutesByTo
@@ -308,6 +328,8 @@ export interface FileRouteTypes {
     | '/settings/shortcuts'
     | '/threads/$threadId'
     | '/hub'
+    | '/novels'
+    | '/novels/$novelId/$unitId'
     | '/settings/providers/$providerName'
     | '/settings/providers'
   id:
@@ -336,6 +358,8 @@ export interface FileRouteTypes {
     | '/settings/shortcuts'
     | '/threads/$threadId'
     | '/hub/'
+    | '/novels/'
+    | '/novels/$novelId/$unitId'
     | '/settings/providers/$providerName'
     | '/settings/providers/'
   fileRoutesById: FileRoutesById
@@ -365,6 +389,8 @@ export interface RootRouteChildren {
   SettingsShortcutsRoute: typeof SettingsShortcutsRoute
   ThreadsThreadIdRoute: typeof ThreadsThreadIdRoute
   HubIndexRoute: typeof HubIndexRoute
+  NovelsIndexRoute: typeof NovelsIndexRoute
+  NovelsNovelIdUnitIdRoute: typeof NovelsNovelIdUnitIdRoute
   SettingsProvidersProviderNameRoute: typeof SettingsProvidersProviderNameRoute
   SettingsProvidersIndexRoute: typeof SettingsProvidersIndexRoute
 }
@@ -411,6 +437,13 @@ declare module '@tanstack/react-router' {
       path: '/'
       fullPath: '/'
       preLoaderRoute: typeof IndexRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/novels/': {
+      id: '/novels/'
+      path: '/novels'
+      fullPath: '/novels/'
+      preLoaderRoute: typeof NovelsIndexRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/hub/': {
@@ -553,6 +586,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof SettingsProvidersProviderNameRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/novels/$novelId/$unitId': {
+      id: '/novels/$novelId/$unitId'
+      path: '/novels/$novelId/$unitId'
+      fullPath: '/novels/$novelId/$unitId'
+      preLoaderRoute: typeof NovelsNovelIdUnitIdRouteImport
+      parentRoute: typeof rootRouteImport
+    }
   }
 }
 
@@ -581,6 +621,8 @@ const rootRouteChildren: RootRouteChildren = {
   SettingsShortcutsRoute: SettingsShortcutsRoute,
   ThreadsThreadIdRoute: ThreadsThreadIdRoute,
   HubIndexRoute: HubIndexRoute,
+  NovelsIndexRoute: NovelsIndexRoute,
+  NovelsNovelIdUnitIdRoute: NovelsNovelIdUnitIdRoute,
   SettingsProvidersProviderNameRoute: SettingsProvidersProviderNameRoute,
   SettingsProvidersIndexRoute: SettingsProvidersIndexRoute,
 }

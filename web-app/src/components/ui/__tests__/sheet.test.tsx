@@ -205,7 +205,13 @@ describe('Sheet Components', () => {
 
     const overlay = document.querySelector('[data-slot="sheet-overlay"]')
     expect(overlay).toBeInTheDocument()
-    expect(overlay).toHaveClass('fixed', 'inset-0', 'z-50', 'bg-black/50', 'backdrop-blur')
+    expect(overlay).toHaveClass(
+      'fixed',
+      'inset-0',
+      'z-50',
+      'bg-black/50',
+      'backdrop-blur'
+    )
   })
 
   it('renders SheetClose component', () => {
@@ -237,6 +243,24 @@ describe('Sheet Components', () => {
 
     const content = document.querySelector('[data-slot="sheet-content"]')
     expect(content).toHaveClass('custom-sheet')
+  })
+
+  it('accepts a custom overlay class without changing the default layer', () => {
+    render(
+      <Sheet defaultOpen>
+        <SheetContent className="z-[70]" overlayClassName="z-[70]">
+          <SheetTitle>Layered Sheet</SheetTitle>
+          <SheetDescription>Layered description</SheetDescription>
+        </SheetContent>
+      </Sheet>
+    )
+
+    expect(document.querySelector('[data-slot="sheet-content"]')).toHaveClass(
+      'z-[70]'
+    )
+    expect(document.querySelector('[data-slot="sheet-overlay"]')).toHaveClass(
+      'z-[70]'
+    )
   })
 
   it('renders complete sheet structure', () => {

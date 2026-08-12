@@ -26,6 +26,7 @@ vi.mock('../path/tauri', () => ({ TauriPathService: vi.fn().mockImplementation((
 vi.mock('../core/tauri', () => ({ TauriCoreService: vi.fn().mockImplementation(() => ({})) }))
 vi.mock('../deeplink/tauri', () => ({ TauriDeepLinkService: vi.fn().mockImplementation(() => ({})) }))
 vi.mock('../core/mobile', () => ({ MobileCoreService: vi.fn().mockImplementation(() => ({})) }))
+vi.mock('../novels/tauri', () => ({ TauriNovelService: vi.fn().mockImplementation(() => ({ platform: 'desktop' })) }))
 
 vi.spyOn(console, 'log').mockImplementation(() => {})
 vi.spyOn(console, 'error').mockImplementation(() => {})
@@ -42,6 +43,16 @@ describe('ServiceHub – coverage', () => {
     const { initializeServiceHub } = await import('../index')
     const hub = await initializeServiceHub()
     expect(hub.projects()).toBeDefined()
+    expect(hub.novels()).toBeDefined()
+  })
+
+  it('uses the native novel service on desktop', async () => {
+    mockIsTauri.mockReturnValue(true)
+
+    const { initializeServiceHub } = await import('../index')
+    const hub = await initializeServiceHub()
+
+    expect(hub.novels()).toMatchObject({ platform: 'desktop' })
   })
 
   it('double initialization is a no-op', async () => {

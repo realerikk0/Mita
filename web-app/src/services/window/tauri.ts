@@ -2,7 +2,10 @@
  * Tauri Window Service - Desktop implementation
  */
 
-import { WebviewWindow } from '@tauri-apps/api/webviewWindow'
+import {
+  getCurrentWebviewWindow,
+  WebviewWindow,
+} from '@tauri-apps/api/webviewWindow'
 import {
   legacyStorage,
   readCanonicalStorageValue,
@@ -151,6 +154,14 @@ export class TauriWindowService extends DefaultWindowService {
       )
       throw error
     }
+  }
+
+  async setFullscreen(fullscreen: boolean): Promise<void> {
+    await getCurrentWebviewWindow().setFullscreen(fullscreen)
+  }
+
+  async isFullscreen(): Promise<boolean> {
+    return getCurrentWebviewWindow().isFullscreen()
   }
 
   private toWindowInstance(

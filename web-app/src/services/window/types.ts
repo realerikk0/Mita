@@ -32,4 +32,6 @@ export interface WindowService {
   openLogsWindow(): Promise<void>
   openSystemMonitorWindow(): Promise<void>
   openLocalApiServerLogsWindow(): Promise<void>
+  setFullscreen(fullscreen: boolean): Promise<void>
+  isFullscreen(): Promise<boolean>
 }

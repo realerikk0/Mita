@@ -52,6 +52,7 @@ const USER_DATA_DIRS: &[&str] = &[
     "image-assets",
     "video-assets",
     "agent-workspaces",
+    "novels",
 ];
 const USER_DATA_FILES: &[&str] = &["settings.json", "mcp_config.json", "store.json"];
 pub const LEGACY_LOCAL_DATA_DIRS: &[&str] = &[
@@ -1253,7 +1254,7 @@ fn validate_json_tree(root: &Path) -> Result<(), String> {
         let raw = fs::read_to_string(&path).map_err(|e| format!("read_json:{e}"))?;
         serde_json::from_str::<Value>(&raw).map_err(|_| "invalid_json".to_string())?;
     }
-    for name in ["threads", "assistants"] {
+    for name in ["threads", "assistants", "novels"] {
         validate_json_content_tree(&root.join(name))?;
     }
     Ok(())
