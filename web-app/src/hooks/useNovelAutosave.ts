@@ -56,13 +56,14 @@ export function useNovelAutosave({
         { currentRevision: conflictRevisionRef.current }
       )
     }
-    if (!dirtyRef.current) return
 
     if (savingRef.current) {
       await savingRef.current
       if (dirtyRef.current && !conflictedRef.current) await flush()
       return
     }
+
+    if (!dirtyRef.current) return
 
     const snapshot = latestRef.current
     const savingVersion = editVersionRef.current
@@ -144,6 +145,14 @@ export function useNovelAutosave({
     [clearTimer]
   )
 
+  const hasPending = useCallback(
+    () =>
+      dirtyRef.current ||
+      conflictedRef.current ||
+      Boolean(timerRef.current || savingRef.current),
+    []
+  )
+
   useEffect(
     () => () => {
       clearTimer()
@@ -154,5 +163,5 @@ export function useNovelAutosave({
     [clearTimer, flush]
   )
 
-  return { state, schedule, flush, reset }
+  return { state, schedule, flush, reset, hasPending }
 }

@@ -98,4 +98,24 @@ describe('novel text anchors', () => {
       })
     ).toThrow(RangeError)
   })
+
+  it('makes collapsed continuation anchors stale when their block changes', () => {
+    const anchor = createTextAnchor({
+      unitId: 'chapter-1',
+      blockId: 'block-a',
+      blockText: '雨落在窗前',
+      fromOffset: 3,
+      toOffset: 3,
+    })
+
+    expect(validateTextAnchor(anchor, '雨落在窗前')).toMatchObject({
+      valid: true,
+      sourceText: '',
+    })
+    expect(validateTextAnchor(anchor, '雨骤落在窗前')).toMatchObject({
+      valid: false,
+      stale: true,
+      reason: 'source-changed',
+    })
+  })
 })

@@ -332,6 +332,159 @@ fn saves_versioned_resources_and_unit_scoped_suggestions() {
 }
 
 #[test]
+fn suggestion_index_watermark_hides_partial_shards_and_controls_next_cas() {
+    let data = TempDir::new().unwrap();
+    let project = storage::create_project(data.path(), create_request("照骨天书"))
+        .unwrap()
+        .project;
+    let suggestions_dir = data
+        .path()
+        .join("novels")
+        .join(&project.id)
+        .join("suggestions");
+    let committed_at = "2026-08-12T00:00:00Z";
+    let interrupted_at = "2026-08-12T00:01:00Z";
+
+    // This is the watermark-only index format written before committed
+    // snapshots were embedded in index.json.
+    fs::write(
+        suggestions_dir.join("index.json"),
+        serde_json::to_vec_pretty(&json!({
+            "schemaVersion": NOVEL_SCHEMA_VERSION,
+            "revision": 4,
+            "updatedAt": committed_at,
+            "items": []
+        }))
+        .unwrap(),
+    )
+    .unwrap();
+    fs::write(
+        suggestions_dir.join("chapter-partial.json"),
+        serde_json::to_vec_pretty(&json!({
+            "schemaVersion": NOVEL_SCHEMA_VERSION,
+            "revision": 5,
+            "updatedAt": interrupted_at,
+            "items": [{"id": "must-not-leak", "unitId": "chapter-partial"}]
+        }))
+        .unwrap(),
+    )
+    .unwrap();
+    fs::write(
+        suggestions_dir.join("chapter-committed.json"),
+        serde_json::to_vec_pretty(&json!({
+            "schemaVersion": NOVEL_SCHEMA_VERSION,
+            "revision": 4,
+            "updatedAt": committed_at,
+            "items": [{"id": "committed", "unitId": "chapter-committed"}]
+        }))
+        .unwrap(),
+    )
+    .unwrap();
+
+    let opened = storage::open_project(data.path(), &project.id).unwrap();
+    assert_eq!(opened.suggestions.revision, 4);
+    assert_eq!(opened.suggestions.items.len(), 1);
+    assert_eq!(opened.suggestions.items[0]["id"], json!("committed"));
+
+    // CAS must compare against index revision 4, not the uncommitted shard's 5.
+    // A scoped follow-up commit must also not make that partial shard visible.
+    let saved = storage::save_suggestions(
+        data.path(),
+        SaveNovelResourceRequest {
+            novel_id: project.id.clone(),
+            items: vec![json!({
+                "id": "committed-next",
+                "unitId": "chapter-committed"
+            })],
+            expected_revision: 4,
+            unit_id: Some("chapter-committed".to_string()),
+        },
+    )
+    .unwrap();
+    assert_eq!(saved.revision, 5);
+    assert_eq!(saved.items.len(), 1);
+    assert_eq!(saved.items[0]["id"], json!("committed-next"));
+    assert!(!saved
+        .items
+        .iter()
+        .any(|item| item["id"] == json!("must-not-leak")));
+
+    let reopened = storage::open_project(data.path(), &project.id).unwrap();
+    assert_eq!(reopened.suggestions, saved);
+}
+
+#[test]
+fn suggestion_shards_cannot_collide_with_the_index_commit_file() {
+    let data = TempDir::new().unwrap();
+    let project = storage::create_project(data.path(), create_request("照骨天书"))
+        .unwrap()
+        .project;
+
+    let saved = storage::save_suggestions(
+        data.path(),
+        SaveNovelResourceRequest {
+            novel_id: project.id.clone(),
+            items: vec![json!({"id": "index-unit-suggestion", "unitId": "index"})],
+            expected_revision: 0,
+            unit_id: Some("index".to_string()),
+        },
+    )
+    .unwrap();
+
+    let suggestions_dir = data
+        .path()
+        .join("novels")
+        .join(&project.id)
+        .join("suggestions");
+    assert!(suggestions_dir.join("index.json").is_file());
+    assert!(suggestions_dir.join("unit-index.json").is_file());
+    assert_eq!(saved.items[0]["unitId"], json!("index"));
+
+    // Simulate a crash after the `index` unit shard reached N+1 but before the
+    // authoritative index snapshot was published. The shard must not collide
+    // with or advance the committed snapshot, and CAS must still use N.
+    fs::write(
+        suggestions_dir.join("unit-index.json"),
+        serde_json::to_vec_pretty(&json!({
+            "schemaVersion": NOVEL_SCHEMA_VERSION,
+            "revision": 2,
+            "updatedAt": "2026-08-12T00:01:00Z",
+            "items": [{"id": "must-not-leak", "unitId": "index"}]
+        }))
+        .unwrap(),
+    )
+    .unwrap();
+    assert_eq!(
+        storage::open_project(data.path(), &project.id)
+            .unwrap()
+            .suggestions,
+        saved
+    );
+
+    let recovered = storage::save_suggestions(
+        data.path(),
+        SaveNovelResourceRequest {
+            novel_id: project.id.clone(),
+            items: vec![json!({"id": "recovered", "unitId": "index"})],
+            expected_revision: saved.revision,
+            unit_id: Some("index".to_string()),
+        },
+    )
+    .unwrap();
+    assert_eq!(recovered.revision, 2);
+    assert_eq!(
+        recovered.items,
+        vec![json!({"id": "recovered", "unitId": "index"})]
+    );
+    assert_eq!(
+        storage::open_project(data.path(), &project.id)
+            .unwrap()
+            .suggestions,
+        recovered
+    );
+}
+
+#[test]
 fn rejects_path_traversal_and_leaves_no_temp_files() {
     let data = TempDir::new().unwrap();
     let project = storage::create_project(data.path(), create_request("照骨天书"))

@@ -65,4 +65,13 @@ describe('DefaultWindowService', () => {
     await expect(svc.setFullscreen(true)).resolves.toBeUndefined()
     await expect(svc.isFullscreen()).resolves.toBe(false)
   })
+
+  it('provides a no-op close guard fallback', async () => {
+    const svc = new DefaultWindowService()
+    const guard = vi.fn().mockResolvedValue(true)
+    const unlisten = await svc.registerCloseGuard(guard)
+
+    expect(guard).not.toHaveBeenCalled()
+    expect(unlisten()).toBeUndefined()
+  })
 })

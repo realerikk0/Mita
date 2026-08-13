@@ -42,6 +42,7 @@ vi.mock('@/hooks/useAssistant', () => ({
 
 import {
   buildNovelCandidatePrompt,
+  runNovelBlueprint,
   runNovelCandidateStreams,
 } from '@/lib/novel-ai'
 import type { AiContextItem } from '@/types/novel'
@@ -130,8 +131,9 @@ describe('runNovelCandidateStreams', () => {
     )
     expect(mockStreamText).toHaveBeenCalledTimes(3)
     expect(mockStreamJingxingResponsesChat).not.toHaveBeenCalled()
-    expect(new Set(mockStreamText.mock.calls.map(([value]) => value.model)).size)
-      .toBe(3)
+    expect(
+      new Set(mockStreamText.mock.calls.map(([value]) => value.model)).size
+    ).toBe(3)
     expect(onDelta).toHaveBeenCalledTimes(6)
     expect(onStatus).toHaveBeenCalledWith(0, 'streaming')
     expect(onStatus).toHaveBeenCalledWith(1, 'ready')
@@ -303,11 +305,7 @@ describe('runNovelCandidateStreams', () => {
       'ready',
     ])
     expect(result[1]).toMatchObject({ error: 'responses unavailable' })
-    expect(onStatus).toHaveBeenCalledWith(
-      1,
-      'failed',
-      'responses unavailable'
-    )
+    expect(onStatus).toHaveBeenCalledWith(1, 'failed', 'responses unavailable')
   })
 
   it('stops every Responses stream when its parent signal aborts', async () => {
@@ -389,6 +387,138 @@ describe('runNovelCandidateStreams', () => {
     expect(result.every((value) => value.status === 'failed')).toBe(true)
     expect(onStatus).toHaveBeenCalledTimes(3)
     expect(mockCreateModel).not.toHaveBeenCalled()
+  })
+
+  it('generates a blueprint through the selected ordinary provider', async () => {
+    const result = await runNovelBlueprint({
+      title: '照心簪',
+      genre: '东方玄幻',
+      kindLabel: '网文',
+      idea: '铸簪师能看见谎言。',
+    })
+
+    expect(result).toBe('半句')
+    expect(mockCreateModel).toHaveBeenCalledTimes(1)
+    expect(mockCreateModel).toHaveBeenCalledWith(
+      'writer-model',
+      expect.objectContaining({ provider: 'openai' }),
+      { temperature: 0.72 }
+    )
+    expect(mockStreamText).toHaveBeenCalledWith(
+      expect.objectContaining({
+        system: expect.stringContaining('故事蓝图'),
+        prompt: expect.stringContaining('铸簪师能看见谎言'),
+        maxOutputTokens: 4096,
+      })
+    )
+    expect(mockStreamJingxingResponsesChat).not.toHaveBeenCalled()
+  })
+
+  it('generates a blueprint for a response-only Biyuan model', async () => {
+    const selectedModel = {
+      id: 'gpt-5.4-pro',
+      supported_endpoint_types: ['responses'],
+    }
+    const provider = {
+      provider: 'jingxing',
+      api_key: 'secret',
+      base_url: 'https://api.jingxing.io/v1',
+    }
+    mockProviderGetState.mockReturnValue({
+      selectedModel,
+      selectedProvider: 'jingxing',
+      getProviderByName: vi.fn(() => provider),
+    })
+    mockIsBiyuanProvider.mockReturnValue(true)
+    mockModelRequiresResponsesEndpoint.mockReturnValue(true)
+    mockStreamJingxingResponsesChat.mockReturnValue(
+      uiChunks(
+        { type: 'text-delta', id: 'blueprint', delta: '核心冲突' },
+        { type: 'text-delta', id: 'blueprint', delta: '：谎言。' },
+        { type: 'finish' }
+      )
+    )
+
+    const result = await runNovelBlueprint({
+      title: '照心簪',
+      genre: '东方玄幻',
+      kindLabel: '网文',
+      idea: '铸簪师能看见谎言。',
+    })
+
+    expect(result).toBe('核心冲突：谎言。')
+    expect(mockIsBiyuanProvider).toHaveBeenCalledWith(
+      'jingxing',
+      'https://api.jingxing.io/v1'
+    )
+    expect(mockModelRequiresResponsesEndpoint).toHaveBeenCalledWith(
+      'gpt-5.4-pro',
+      selectedModel
+    )
+    expect(mockStreamJingxingResponsesChat).toHaveBeenCalledWith(
+      expect.objectContaining({
+        modelId: 'gpt-5.4-pro',
+        provider,
+        system: expect.stringContaining('故事蓝图'),
+        maxOutputTokens: 4096,
+        messages: [
+          expect.objectContaining({
+            role: 'user',
+            parts: [
+              expect.objectContaining({
+                type: 'text',
+                text: expect.stringContaining('作品名：照心簪'),
+              }),
+            ],
+          }),
+        ],
+      })
+    )
+    expect(mockCreateModel).not.toHaveBeenCalled()
+    expect(mockStreamText).not.toHaveBeenCalled()
+  })
+
+  it('stops blueprint generation before starting an aborted request', async () => {
+    const controller = new AbortController()
+    controller.abort('user stopped')
+
+    await expect(
+      runNovelBlueprint({
+        title: '照心簪',
+        genre: '东方玄幻',
+        kindLabel: '网文',
+        idea: '铸簪师能看见谎言。',
+        signal: controller.signal,
+      })
+    ).rejects.toMatchObject({ name: 'AbortError' })
+    expect(mockCreateModel).not.toHaveBeenCalled()
+    expect(mockStreamText).not.toHaveBeenCalled()
+  })
+
+  it('surfaces response-only blueprint stream errors', async () => {
+    mockProviderGetState.mockReturnValue({
+      selectedModel: { id: 'gpt-5.4-pro' },
+      selectedProvider: 'biyuan',
+      getProviderByName: vi.fn(() => ({
+        provider: 'biyuan',
+        api_key: 'secret',
+        base_url: 'https://api.biyuan.ai/v1',
+      })),
+    })
+    mockIsBiyuanProvider.mockReturnValue(true)
+    mockModelRequiresResponsesEndpoint.mockReturnValue(true)
+    mockStreamJingxingResponsesChat.mockReturnValue(
+      uiChunks({ type: 'error', errorText: 'responses unavailable' })
+    )
+
+    await expect(
+      runNovelBlueprint({
+        title: '照心簪',
+        genre: '东方玄幻',
+        kindLabel: '网文',
+        idea: '铸簪师能看见谎言。',
+      })
+    ).rejects.toThrow('responses unavailable')
   })
 })
 

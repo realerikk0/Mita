@@ -35,6 +35,14 @@ export type RunNovelCandidateStreamsOptions = {
   ) => void
 }
 
+export type RunNovelBlueprintOptions = {
+  title: string
+  genre: string
+  kindLabel: string
+  idea: string
+  signal?: AbortSignal
+}
+
 const MODE_GUIDANCE: Record<AiSuggestion['mode'], string> = {
   continue: '从给出的正文自然续写，延续叙事视角、节奏、语气与事实。',
   rewrite: '只重写给出的选区，实现作者指令，同时保留上下文中的既定事实。',
@@ -50,6 +58,9 @@ const CANDIDATE_FLAVORS = [
 
 const NOVEL_SYSTEM_PROMPT =
   '你是彼岩网文模式的写作引擎。严格服从作者设定，避免复述提示词；输出只是候选，不得声称已经修改正文。'
+
+const NOVEL_BLUEPRINT_SYSTEM_PROMPT =
+  '你是网文故事策划。根据作者的一句话构思生成可执行的故事蓝图，包含核心意图、主角欲望、主要冲突、前三个推进节点和一条可长期回收的伏笔。使用紧凑中文纯文本，不要写创作说明。'
 
 const CONTEXT_LABELS: Record<AiContextItem['type'], string> = {
   selection: '当前选区',
@@ -121,6 +132,100 @@ function linkedAbortController(parent?: AbortSignal) {
   }
 }
 
+function throwIfAborted(signal?: AbortSignal): void {
+  if (!signal?.aborted) return
+  if (signal.reason instanceof Error) throw signal.reason
+  throw new DOMException('Generation stopped.', 'AbortError')
+}
+
+function blueprintPrompt(options: RunNovelBlueprintOptions) {
+  return `作品名：${options.title.trim() || '未命名'}\n类型：${options.genre.trim() || '未分类'}\n创作内核：${options.kindLabel}\n作者构思：${options.idea.trim()}`
+}
+
+async function readResponsesText(
+  stream: ReturnType<typeof streamJingxingResponsesChat>,
+  signal?: AbortSignal
+) {
+  const reader = stream.getReader()
+  let text = ''
+
+  try {
+    while (true) {
+      throwIfAborted(signal)
+      const { done, value } = await reader.read()
+      if (done) break
+      if (value.type === 'abort') {
+        throw new DOMException('Generation stopped.', 'AbortError')
+      }
+      if (value.type === 'error') throw new Error(value.errorText)
+      if (value.type === 'text-delta' && value.delta) text += value.delta
+    }
+    throwIfAborted(signal)
+    return text
+  } finally {
+    reader.releaseLock()
+  }
+}
+
+/** Generate one editable story blueprint with the user's selected model. */
+export async function runNovelBlueprint(
+  options: RunNovelBlueprintOptions
+): Promise<string> {
+  throwIfAborted(options.signal)
+  const providerState = useModelProvider.getState()
+  const selectedModel = providerState.selectedModel
+  const modelId = selectedModel?.id
+  const provider = providerState.getProviderByName(
+    providerState.selectedProvider
+  )
+  const parameters = useAssistant.getState().currentAssistant?.parameters ?? {}
+
+  if (!modelId || !provider) {
+    throw new Error('未选择可用的 AI 模型或 Provider。')
+  }
+
+  const prompt = blueprintPrompt(options)
+  if (
+    isBiyuanProvider(provider.provider, provider.base_url) &&
+    modelRequiresResponsesEndpoint(modelId, selectedModel)
+  ) {
+    return readResponsesText(
+      streamJingxingResponsesChat({
+        modelId,
+        provider,
+        messages: [
+          {
+            id: 'novel-blueprint',
+            role: 'user',
+            parts: [{ type: 'text', text: prompt }],
+          },
+        ],
+        system: NOVEL_BLUEPRINT_SYSTEM_PROMPT,
+        maxOutputTokens: 4096,
+        abortSignal: options.signal,
+      }),
+      options.signal
+    )
+  }
+
+  const model = await ModelFactory.createModel(modelId, provider, parameters)
+  throwIfAborted(options.signal)
+  const result = streamText({
+    model,
+    system: NOVEL_BLUEPRINT_SYSTEM_PROMPT,
+    prompt,
+    maxOutputTokens: 4096,
+    abortSignal: options.signal,
+  })
+  let text = ''
+  for await (const delta of result.textStream) {
+    throwIfAborted(options.signal)
+    text += delta
+  }
+  throwIfAborted(options.signal)
+  return text
+}
+
 /**
  * Starts three isolated model requests. Each candidate streams into its own
  * slot and reports its own terminal state; no output is ever applied here.
@@ -133,8 +238,7 @@ export async function runNovelCandidateStreams(
   const provider = providerState.getProviderByName(
     providerState.selectedProvider
   )
-  const parameters =
-    useAssistant.getState().currentAssistant?.parameters ?? {}
+  const parameters = useAssistant.getState().currentAssistant?.parameters ?? {}
 
   if (!modelId || !provider) {
     const error = '未选择可用的 AI 模型或 Provider。'

@@ -6,6 +6,7 @@ import {
   type Editor,
   type Extensions,
 } from '@tiptap/core'
+import { Fragment, Slice } from '@tiptap/pm/model'
 import { Plugin, PluginKey } from '@tiptap/pm/state'
 import { Decoration, DecorationSet } from '@tiptap/pm/view'
 import CharacterCount from '@tiptap/extension-character-count'
@@ -99,7 +100,7 @@ export const SceneBreak = Node.create({
       'hr',
       {
         'data-novel-scene-break': '',
-        class: 'my-8 border-0 text-center',
+        'class': 'my-8 border-0 text-center',
       },
     ]
   },
@@ -115,8 +116,8 @@ function proofingDecorations(doc: Editor['state']['doc']) {
     for (const issue of proofNovelText(text)) {
       decorations.push(
         Decoration.inline(position + 1 + issue.from, position + 1 + issue.to, {
-          class: 'novel-proofing-warning',
-          title: issue.message,
+          'class': 'novel-proofing-warning',
+          'title': issue.message,
           'data-proofing-issue': issue.code,
         })
       )
@@ -206,14 +207,7 @@ export async function selectionToTextAnchor(
 ): Promise<{ anchor: TextAnchor; selectedText: string } | null> {
   const selection = editor.state.selection
   if (selection.empty || !unitId.trim()) return null
-  let block = findAddressableBlockAtSelection(editor)
-  if (!block) {
-    // Tiptap intentionally defers extension onCreate hooks by one task. Let
-    // UniqueID finish its initial, history-free ID pass when selection happens
-    // immediately after an editor is constructed.
-    await new Promise<void>((resolve) => setTimeout(resolve, 0))
-    block = findAddressableBlockAtSelection(editor)
-  }
+  const block = await addressableBlockAtSelection(editor)
   if (!block) return null
 
   const fromOffset = selection.from - block.blockStart
@@ -240,6 +234,46 @@ export async function selectionToTextAnchor(
   }
 }
 
+async function addressableBlockAtSelection(editor: Editor) {
+  let block = findAddressableBlockAtSelection(editor)
+  if (!block) {
+    // Tiptap intentionally defers extension onCreate hooks by one task. Let
+    // UniqueID finish its initial, history-free ID pass when selection happens
+    // immediately after an editor is constructed.
+    await new Promise<void>((resolve) => setTimeout(resolve, 0))
+    block = findAddressableBlockAtSelection(editor)
+  }
+  return block
+}
+
+/** Capture a collapsed insertion point for AI continuation candidates. */
+export async function cursorToTextAnchor(
+  editor: Editor,
+  unitId: string
+): Promise<TextAnchor | null> {
+  const selection = editor.state.selection
+  if (!selection.empty || !unitId.trim()) return null
+  const block = await addressableBlockAtSelection(editor)
+  if (!block) return null
+
+  const fromOffset = selection.from - block.blockStart
+  const blockText = block.node.textBetween(
+    0,
+    block.node.content.size,
+    '\n',
+    '\n'
+  )
+  if (fromOffset < 0 || fromOffset > blockText.length) return null
+
+  return createTextAnchor({
+    unitId,
+    blockId: block.blockId,
+    blockText,
+    fromOffset,
+    toOffset: fromOffset,
+  })
+}
+
 export async function validateTextAnchor(
   editor: Editor,
   anchor: TextAnchor
@@ -254,7 +288,31 @@ export async function replaceTextAnchor(
   text: string
 ): Promise<boolean> {
   const transaction = editor.state.tr
-  const resolved = applyTextAnchorToTransaction(transaction, anchor, text)
+  const paragraphs = text
+    .replace(/\r\n?/g, '\n')
+    .split(/\n{2,}/)
+    .map((paragraph) => paragraph.trim())
+    .filter(Boolean)
+  const replacement =
+    paragraphs.length > 1
+      ? new Slice(
+          Fragment.fromArray(
+            paragraphs.map((paragraph) =>
+              editor.schema.nodes.paragraph.create(
+                null,
+                editor.schema.text(paragraph)
+              )
+            )
+          ),
+          1,
+          1
+        )
+      : text
+  const resolved = applyTextAnchorToTransaction(
+    transaction,
+    anchor,
+    replacement
+  )
   if (!resolved.valid) return false
   editor.view.dispatch(transaction)
   return true

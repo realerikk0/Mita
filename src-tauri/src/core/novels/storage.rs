@@ -7,7 +7,7 @@ use super::models::{
 };
 use chrono::Utc;
 use fs2::FileExt;
-use serde::{de::DeserializeOwned, Serialize};
+use serde::{de::DeserializeOwned, Deserialize, Serialize};
 use serde_json::{json, Value};
 use std::{
     collections::{BTreeMap, BTreeSet},
@@ -35,6 +35,39 @@ const RESOURCE_FILES: &[(&str, &str)] = &[
     ("clues", "clues.json"),
     ("comments", "comments.json"),
 ];
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct SuggestionsIndex {
+    schema_version: u32,
+    revision: u64,
+    updated_at: String,
+    #[serde(default)]
+    items: Vec<Value>,
+    #[serde(default)]
+    committed_snapshot: bool,
+}
+
+impl SuggestionsIndex {
+    fn from_collection(collection: &VersionedCollection) -> Self {
+        Self {
+            schema_version: collection.schema_version,
+            revision: collection.revision,
+            updated_at: collection.updated_at.clone(),
+            items: collection.items.clone(),
+            committed_snapshot: true,
+        }
+    }
+
+    fn into_collection(self) -> VersionedCollection {
+        VersionedCollection {
+            schema_version: self.schema_version,
+            revision: self.revision,
+            updated_at: self.updated_at,
+            items: self.items,
+        }
+    }
+}
 
 struct ProjectLock(File);
 
@@ -103,7 +136,9 @@ fn suggestion_path(project: &Path, unit_id: &str) -> NovelResult<PathBuf> {
     validate_id("manuscript unit", unit_id)?;
     Ok(project
         .join(SUGGESTIONS_DIR)
-        .join(format!("{unit_id}.json")))
+        // Prefix every shard so a valid unit id such as `index` can never
+        // collide with the authoritative suggestions/index.json commit file.
+        .join(format!("unit-{unit_id}.json")))
 }
 
 fn revision_dir(project: &Path, unit_id: &str) -> NovelResult<PathBuf> {
@@ -552,13 +587,28 @@ pub fn list_projects(data_folder: &Path) -> NovelResult<Vec<NovelProjectSummary>
 
 fn load_suggestions(project: &Path, fallback_updated_at: &str) -> NovelResult<VersionedCollection> {
     let root = project.join(SUGGESTIONS_DIR);
-    if !root.exists() {
+    let index_path = root.join("index.json");
+    if !index_path.is_file() {
         return Ok(VersionedCollection::empty(
             Vec::new(),
             fallback_updated_at.to_string(),
         ));
     }
-    let mut aggregate = VersionedCollection::empty(Vec::new(), fallback_updated_at.to_string());
+
+    let index: SuggestionsIndex = read_json(&index_path)?;
+    if index.committed_snapshot {
+        return Ok(index.into_collection());
+    }
+
+    // Legacy indexes only carried the committed revision. Reconstruct their
+    // snapshot from shards at or below that watermark, never from a shard that
+    // was written by an interrupted later transaction.
+    let mut aggregate = VersionedCollection {
+        schema_version: index.schema_version,
+        revision: index.revision,
+        updated_at: index.updated_at,
+        items: Vec::new(),
+    };
     for entry in fs::read_dir(&root)
         .map_err(|error| storage_error("io_error", "scan suggestions directory", error))?
     {
@@ -569,13 +619,14 @@ fn load_suggestions(project: &Path, fallback_updated_at: &str) -> NovelResult<Ve
             .map_err(|error| storage_error("io_error", "inspect suggestion entry", error))?
             .is_file()
             || entry.path().extension().and_then(|value| value.to_str()) != Some("json")
+            || entry.path() == index_path
         {
             continue;
         }
         let collection: VersionedCollection = read_json(&entry.path())?;
-        aggregate.revision = aggregate.revision.max(collection.revision);
-        aggregate.updated_at = aggregate.updated_at.max(collection.updated_at);
-        aggregate.items.extend(collection.items);
+        if collection.revision <= aggregate.revision {
+            aggregate.items.extend(collection.items);
+        }
     }
     Ok(aggregate)
 }
@@ -936,12 +987,31 @@ pub fn save_suggestions(
     } else {
         None
     };
+    let next_items = if let Some(unit_id) = &request.unit_id {
+        current
+            .items
+            .iter()
+            .filter(|item| item.get("unitId").and_then(Value::as_str) != Some(unit_id.as_str()))
+            .cloned()
+            .chain(request.items.iter().cloned())
+            .collect()
+    } else {
+        request.items.clone()
+    };
     let index = VersionedCollection {
         schema_version: NOVEL_SCHEMA_VERSION,
         revision,
         updated_at: timestamp.clone(),
-        items: Vec::new(),
+        items: next_items,
     };
+
+    // Upgrade a legacy watermark-only index to a full committed snapshot before
+    // touching any shard. If this save is interrupted, readers can still return
+    // the exact previous commit rather than a mixture of old and new shards.
+    write_json(
+        &project.join(SUGGESTIONS_DIR).join("index.json"),
+        &SuggestionsIndex::from_collection(&current),
+    )?;
 
     if let Some(unit_id) = &request.unit_id {
         let saved = VersionedCollection {
@@ -975,6 +1045,7 @@ pub fn save_suggestions(
                 .path()
                 .file_stem()
                 .and_then(|value| value.to_str())
+                .and_then(|value| value.strip_prefix("unit-"))
                 .map(str::to_string);
             if entry.path().is_file()
                 && unit_id.as_deref() != Some("index")
@@ -989,8 +1060,11 @@ pub fn save_suggestions(
     }
     // Publish the aggregate revision only after all requested shards exist.
     // Errors after the first shard write are conservatively marked unknown.
-    write_json(&project.join(SUGGESTIONS_DIR).join("index.json"), &index)
-        .map_err(NovelStorageError::with_outcome_unknown)?;
+    write_json(
+        &project.join(SUGGESTIONS_DIR).join("index.json"),
+        &SuggestionsIndex::from_collection(&index),
+    )
+    .map_err(NovelStorageError::with_outcome_unknown)?;
     touch_manifest(&project, None, &timestamp, false)
         .map_err(NovelStorageError::with_outcome_unknown)?;
     append_journal(

@@ -53,6 +53,7 @@ import { Textarea } from '@/components/ui/textarea'
 import { route } from '@/constants/routes'
 import { useModelProvider } from '@/hooks/useModelProvider'
 import { useNovelAutosave } from '@/hooks/useNovelAutosave'
+import { useNovelExitGuard } from '@/hooks/useNovelExitGuard'
 import { useServiceHub } from '@/hooks/useServiceHub'
 import {
   apiQualityForPreset,
@@ -61,12 +62,14 @@ import {
   imageSizeForRatio,
 } from '@/lib/image-generation'
 import {
+  cursorToTextAnchor,
   replaceTextAnchor,
   selectionToTextAnchor,
   validateTextAnchor,
 } from '@/lib/novel-editor'
-import { resolveTextAnchor } from '@/lib/novel-anchor'
+import { hashNovelText, resolveTextAnchor } from '@/lib/novel-anchor'
 import { runNovelCandidateStreams } from '@/lib/novel-ai'
+import { reusableNovelContext } from '@/lib/novel-context'
 import { proofNovelText } from '@/lib/novel-proofing'
 import { cn } from '@/lib/utils'
 import {
@@ -115,6 +118,12 @@ const tabItems: Array<{
 const generatingSuggestions = (items: AiSuggestion[]) =>
   items.some((item) => item.status === 'streaming')
 
+const suggestionsForUnit = (items: AiSuggestion[], unitId: string) =>
+  items.filter((suggestion) => suggestion.unitId === unitId)
+
+const suggestionsHash = (items: AiSuggestion[]) =>
+  hashNovelText(JSON.stringify(items))
+
 const isLiveEditor = (editor: Editor | null): editor is Editor =>
   Boolean(editor && !editor.isDestroyed)
 
@@ -158,6 +167,11 @@ export function NovelWorkspace({ novelId, unitId }: Props) {
   const generationRef = useRef<string | null>(null)
   const suggestionTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const suggestionSavingRef = useRef<Promise<void> | null>(null)
+  const suggestionPersistedHashesRef = useRef<Record<string, string>>({})
+  const projectTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const projectVersionRef = useRef(0)
+  const projectPersistedVersionRef = useRef(0)
+  const projectSavingRef = useRef<Promise<void> | null>(null)
   const requestedUnitIdRef = useRef(unitId)
   const bundleRef = useRef<NovelProjectBundle | null>(null)
   const activeUnitRef = useRef<ManuscriptUnit | null>(null)
@@ -182,18 +196,32 @@ export function NovelWorkspace({ novelId, unitId }: Props) {
   )
 
   const novelService = serviceHub.novels()
+  const windowService = serviceHub.window()
   requestedUnitIdRef.current = unitId
   activeUnitRef.current = activeUnit
   suggestionsRef.current = suggestions
 
   const persistSuggestions = useCallback(
     async (targetUnitId: string, items: AiSuggestion[]) => {
-      if (!items.length || generatingSuggestions(items)) return
-      if (suggestionSavingRef.current) {
+      if (generatingSuggestions(items)) return
+      const requestedHash = suggestionsHash(items)
+      if (
+        suggestionPersistedHashesRef.current[targetUnitId] === requestedHash
+      ) {
+        return
+      }
+
+      while (suggestionSavingRef.current) {
         await suggestionSavingRef.current
       }
+      if (
+        suggestionPersistedHashesRef.current[targetUnitId] === requestedHash
+      ) {
+        return
+      }
+
       const current = bundleRef.current
-      if (!current) return
+      if (!current || current.project.id !== novelId) return
       const request = novelService
         .saveSuggestions({
           novelId,
@@ -203,7 +231,10 @@ export function NovelWorkspace({ novelId, unitId }: Props) {
         })
         .then((saved) => {
           const latest = bundleRef.current
-          if (!latest) return
+          if (!latest || latest.project.id !== novelId) return
+          suggestionPersistedHashesRef.current[targetUnitId] = suggestionsHash(
+            suggestionsForUnit(saved.items, targetUnitId)
+          )
           const next = { ...latest, suggestions: saved }
           bundleRef.current = next
           setBundle(next)
@@ -219,6 +250,21 @@ export function NovelWorkspace({ novelId, unitId }: Props) {
         })
       suggestionSavingRef.current = request
       await request
+
+      const latestItems =
+        activeUnitRef.current?.id === targetUnitId
+          ? suggestionsRef.current
+          : suggestionsForUnit(
+              bundleRef.current?.suggestions.items ?? [],
+              targetUnitId
+            )
+      if (
+        !generatingSuggestions(latestItems) &&
+        suggestionPersistedHashesRef.current[targetUnitId] !==
+          suggestionsHash(latestItems)
+      ) {
+        await persistSuggestions(targetUnitId, latestItems)
+      }
     },
     [novelId, novelService]
   )
@@ -248,6 +294,16 @@ export function NovelWorkspace({ novelId, unitId }: Props) {
           outline: 0,
           clues: 0,
         }
+        projectVersionRef.current = 0
+        projectPersistedVersionRef.current = 0
+        suggestionPersistedHashesRef.current = Object.fromEntries(
+          loaded.units.map((unit) => [
+            unit.id,
+            suggestionsHash(
+              suggestionsForUnit(loaded.suggestions.items, unit.id)
+            ),
+          ])
+        )
         setBundle(loaded)
         const selectedUnit =
           loaded.units.find((unit) => unit.id === requestedUnitIdRef.current) ??
@@ -278,35 +334,49 @@ export function NovelWorkspace({ novelId, unitId }: Props) {
       abortRef.current?.abort()
       if (suggestionTimerRef.current) {
         clearTimeout(suggestionTimerRef.current)
+        suggestionTimerRef.current = null
       }
     }
   }, [novelId, novelService])
 
   useEffect(() => {
+    if (!activeUnitId || generatingSuggestions(suggestions)) {
+      return
+    }
+    if (bundleRef.current?.project.id !== novelId) {
+      return
+    }
     if (
-      !activeUnitId ||
-      suggestions.length === 0 ||
-      generatingSuggestions(suggestions)
+      suggestionPersistedHashesRef.current[activeUnitId] ===
+      suggestionsHash(suggestions)
     ) {
       return
     }
     if (suggestionTimerRef.current) clearTimeout(suggestionTimerRef.current)
-    suggestionTimerRef.current = setTimeout(() => {
-      void persistSuggestions(activeUnitId, suggestions).catch(() => undefined)
+    const timer = setTimeout(() => {
+      if (suggestionTimerRef.current === timer) {
+        suggestionTimerRef.current = null
+      }
+      if (activeUnitRef.current?.id !== activeUnitId) return
+      void persistSuggestions(activeUnitId, suggestionsRef.current).catch(
+        () => undefined
+      )
     }, 750)
+    suggestionTimerRef.current = timer
     return () => {
-      if (suggestionTimerRef.current) {
-        clearTimeout(suggestionTimerRef.current)
+      clearTimeout(timer)
+      if (suggestionTimerRef.current === timer) {
         suggestionTimerRef.current = null
       }
     }
-  }, [activeUnitId, persistSuggestions, suggestions])
+  }, [activeUnitId, novelId, persistSuggestions, suggestions])
 
   const {
     state: autosaveState,
     schedule: scheduleAutosave,
     flush: flushAutosave,
     reset: resetAutosave,
+    hasPending: hasPendingAutosave,
   } = useNovelAutosave({
     novelService,
     initialUnit:
@@ -344,6 +414,85 @@ export function NovelWorkspace({ novelId, unitId }: Props) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [activeUnitId])
 
+  const flushProject = useCallback(async (): Promise<void> => {
+    if (projectTimerRef.current) {
+      clearTimeout(projectTimerRef.current)
+      projectTimerRef.current = null
+    }
+    if (projectSavingRef.current) {
+      await projectSavingRef.current
+      if (projectPersistedVersionRef.current !== projectVersionRef.current) {
+        await flushProject()
+      }
+      return
+    }
+    if (projectPersistedVersionRef.current === projectVersionRef.current) return
+    const current = bundleRef.current
+    if (!current) return
+    const savingVersion = projectVersionRef.current
+    const request = novelService
+      .saveProject(current.project, current.project.revision)
+      .then((saved) => {
+        const latest = bundleRef.current
+        if (!latest) return
+        const project =
+          projectVersionRef.current === savingVersion
+            ? saved
+            : {
+                ...latest.project,
+                revision: saved.revision,
+                updatedAt: saved.updatedAt,
+              }
+        const next = { ...latest, project }
+        bundleRef.current = next
+        setBundle(next)
+        projectPersistedVersionRef.current = savingVersion
+      })
+      .catch((error) => {
+        toast.error(error instanceof Error ? error.message : '作品小传保存失败')
+        throw error
+      })
+      .finally(() => {
+        projectSavingRef.current = null
+      })
+    projectSavingRef.current = request
+    await request
+    if (projectPersistedVersionRef.current !== projectVersionRef.current) {
+      await flushProject()
+    }
+  }, [novelService])
+
+  const updateProjectSynopsis = useCallback(
+    (synopsis: string) => {
+      const current = bundleRef.current
+      if (!current) return
+      const next = {
+        ...current,
+        project: {
+          ...current.project,
+          synopsis,
+          updatedAt: new Date().toISOString(),
+        },
+      }
+      bundleRef.current = next
+      setBundle(next)
+      projectVersionRef.current += 1
+      if (projectTimerRef.current) clearTimeout(projectTimerRef.current)
+      projectTimerRef.current = setTimeout(() => {
+        void flushProject().catch(() => undefined)
+      }, 750)
+    },
+    [flushProject]
+  )
+
+  useEffect(
+    () => () => {
+      if (projectTimerRef.current) clearTimeout(projectTimerRef.current)
+      void flushProject().catch(() => undefined)
+    },
+    [flushProject]
+  )
+
   useEffect(() => {
     if (!focusMode) return
     const onKeyDown = (event: KeyboardEvent) => {
@@ -356,12 +505,12 @@ export function NovelWorkspace({ novelId, unitId }: Props) {
       }
     }
     window.addEventListener('keydown', onKeyDown)
-    void serviceHub.window().setFullscreen(true)
+    void windowService.setFullscreen(true)
     return () => {
       window.removeEventListener('keydown', onKeyDown)
-      void serviceHub.window().setFullscreen(false)
+      void windowService.setFullscreen(false)
     }
-  }, [focusMode, serviceHub])
+  }, [focusMode, windowService])
 
   const buildContext = useCallback(
     (anchor?: TextAnchor, selection?: string) => {
@@ -391,12 +540,19 @@ export function NovelWorkspace({ novelId, unitId }: Props) {
         }))
       const outline = bundle.outline.items
         .filter((item) => !item.unitId || item.unitId === activeUnit.id)
+        .sort((left, right) => Number(right.locked) - Number(left.locked))
         .slice(0, 3)
         .map<AiContextItem>((item) => ({
           id: `outline-${item.id}`,
           type: 'outline',
-          label: item.title,
-          content: item.summary,
+          label: `${item.locked ? '锁定约束 · ' : ''}${item.title}`,
+          content: [
+            item.locked ? '【不可偏离的作者约束】' : '',
+            item.intent ? `创作意图：${item.intent}` : '',
+            item.summary,
+          ]
+            .filter(Boolean)
+            .join('\n'),
           included: true,
         }))
       const clues = bundle.clues.items
@@ -455,6 +611,12 @@ export function NovelWorkspace({ novelId, unitId }: Props) {
     return result
   }, [activeUnit, buildContext, editor])
 
+  const clearAiTarget = useCallback(() => {
+    setActiveAnchor(undefined)
+    setSelectedText('')
+    setContextItems([])
+  }, [])
+
   const addSelectionToSynopsis = useCallback(async () => {
     if (!activeUnit || !isLiveEditor(editor)) return
     const selection = await selectionToTextAnchor(editor, activeUnit.id)
@@ -471,40 +633,82 @@ export function NovelWorkspace({ novelId, unitId }: Props) {
       .filter(Boolean)
       .join('\n\n')
     try {
-      const saved = await novelService.saveProject(
-        { ...current.project, synopsis },
-        current.project.revision
-      )
-      setBundle((latest) => {
-        if (!latest) return latest
-        const next = { ...latest, project: saved }
-        bundleRef.current = next
-        return next
-      })
+      updateProjectSynopsis(synopsis)
+      await flushProject()
       toast.success('选区已加入作品小传')
     } catch (error) {
       toast.error(error instanceof Error ? error.message : '作品小传保存失败')
     }
-  }, [activeUnit, editor, novelService])
+  }, [activeUnit, editor, flushProject, updateProjectSynopsis])
 
   const generateCandidates = useCallback(
     async (forcedMode?: AiSuggestion['mode']) => {
       if (!activeUnit || !isLiveEditor(editor)) return
-      let anchor = activeAnchor
+      let anchor: TextAnchor | undefined = activeAnchor
       let selection = selectedText
+      if (anchor && !(await validateTextAnchor(editor, anchor))) {
+        clearAiTarget()
+        anchor = undefined
+        selection = ''
+      }
       if (!anchor && !editor.state.selection.empty) {
         const captured = await captureSelection()
         anchor = captured?.anchor
         selection = captured?.selectedText ?? ''
       }
-      if (forcedMode === 'proofread' && !anchor) {
+      if (!anchor && editor.state.selection.empty) {
+        const cursorAnchor = await cursorToTextAnchor(editor, activeUnit.id)
+        if (!cursorAnchor) {
+          toast.error('请把光标放在一个正文段落中再续写')
+          return
+        }
+        anchor = cursorAnchor
+      }
+      if (forcedMode === 'proofread' && !selection) {
         toast.error('请先划选需要深度校对的正文')
         return
       }
-      const mode = forcedMode ?? (anchor ? 'rewrite' : 'continue')
-      const context = contextItems.length
-        ? contextItems
-        : buildContext(anchor, selection)
+      const mode = forcedMode ?? (selection ? 'rewrite' : 'continue')
+      let context = reusableNovelContext(
+        contextItems.length ? contextItems : buildContext(anchor, selection),
+        mode
+      )
+      if (mode === 'continue' && anchor) {
+        const resolved = resolveTextAnchor(editor.state.doc, anchor)
+        if (!resolved.valid) {
+          toast.error('续写位置已经变化，请重新放置光标')
+          return
+        }
+        const textBeforeCursor = editor.state.doc.textBetween(
+          Math.max(0, resolved.from - 2000),
+          resolved.from,
+          '\n',
+          '\n'
+        )
+        const textAfterCursor = editor.state.doc.textBetween(
+          resolved.to,
+          Math.min(editor.state.doc.content.size, resolved.to + 1000),
+          '\n',
+          '\n'
+        )
+        context = [
+          {
+            id: 'continuation-boundary',
+            type: 'selection',
+            label: '续写光标附近',
+            content: [
+              '<cursor_before>',
+              textBeforeCursor,
+              '</cursor_before>',
+              '<cursor_after>',
+              textAfterCursor,
+              '</cursor_after>',
+            ].join('\n'),
+            included: true,
+          },
+          ...context.filter((item) => item.id !== 'current-unit-excerpt'),
+        ]
+      }
       setContextItems(context)
       const now = new Date().toISOString()
       const slots: AiSuggestion[] = Array.from(
@@ -576,6 +780,7 @@ export function NovelWorkspace({ novelId, unitId }: Props) {
       activeUnit,
       buildContext,
       captureSelection,
+      clearAiTarget,
       contextItems,
       editor,
       instruction,
@@ -599,6 +804,15 @@ export function NovelWorkspace({ novelId, unitId }: Props) {
       toast.error('这个候选属于其他章节，不能应用到当前正文')
       return
     }
+    if (!suggestion.anchor) {
+      setSuggestions((items) =>
+        items.map((item) =>
+          item.id === suggestion.id ? { ...item, stale: true } : item
+        )
+      )
+      toast.error('这个旧候选没有稳定写作位置，请重新生成')
+      return
+    }
     if (suggestion.anchor) {
       const valid = await validateTextAnchor(editor, suggestion.anchor)
       if (!valid) {
@@ -616,8 +830,6 @@ export function NovelWorkspace({ novelId, unitId }: Props) {
         suggestion.content
       )
       if (!applied) return
-    } else {
-      editor.chain().focus().insertContent(suggestion.content).run()
     }
     setSuggestions((items) =>
       items.map((item) =>
@@ -627,6 +839,7 @@ export function NovelWorkspace({ novelId, unitId }: Props) {
       )
     )
     toast.success('候选已作为一次可撤销修改应用')
+    clearAiTarget()
   }
 
   const flushMetadata = useCallback(
@@ -888,6 +1101,7 @@ export function NovelWorkspace({ novelId, unitId }: Props) {
     setSuggestions(settledSuggestions)
     await Promise.all([
       flushAutosave(),
+      flushProject(),
       flushAllMetadata(),
       currentUnit
         ? persistSuggestions(currentUnit.id, settledSuggestions)
@@ -896,54 +1110,65 @@ export function NovelWorkspace({ novelId, unitId }: Props) {
   }, [
     flushAllMetadata,
     flushAutosave,
+    flushProject,
     persistSuggestions,
   ])
 
-  useEffect(() => {
-    const selected = bundleRef.current?.units.find((unit) => unit.id === unitId)
-    if (!selected || selected.id === activeUnitId) return
-    const previousUnitId = activeUnitId
-    let canceled = false
-
-    void flushBeforeUnitChange()
-      .then(() => {
-        if (canceled) return
-        const latestSelected = bundleRef.current?.units.find(
-          (unit) => unit.id === unitId
+  const hasPendingNovelWrites = useCallback(
+    () => {
+      const suggestionUnit = activeUnitRef.current
+      const suggestionsDirty = Boolean(
+        suggestionUnit &&
+          suggestionUnit.novelId === novelId &&
+          suggestionPersistedHashesRef.current[suggestionUnit.id] !==
+            suggestionsHash(suggestionsRef.current)
+      )
+      return (
+        hasPendingAutosave() ||
+        generatingSuggestions(suggestionsRef.current) ||
+        suggestionsDirty ||
+        Boolean(suggestionTimerRef.current || suggestionSavingRef.current) ||
+        projectVersionRef.current !== projectPersistedVersionRef.current ||
+        Boolean(projectTimerRef.current || projectSavingRef.current) ||
+        metadataKeys.some(
+          (key) =>
+            metadataVersionsRef.current[key] !==
+              metadataPersistedVersionsRef.current[key] ||
+            Boolean(
+              metadataTimersRef.current[key] || metadataSavingRef.current[key]
+            )
         )
-        if (!latestSelected) return
-        const nextSuggestions =
-          bundleRef.current?.suggestions.items.filter(
-            (suggestion) => suggestion.unitId === latestSelected.id
-          ) ?? []
-        activeUnitRef.current = latestSelected
-        suggestionsRef.current = nextSuggestions
-        setActiveUnit(latestSelected)
-        resetAutosave(latestSelected)
-        setSelectedText('')
-        setActiveAnchor(undefined)
-        setContextItems([])
-        setSuggestions(nextSuggestions)
-      })
-      .catch((error) => {
-        if (canceled) return
-        reportTransitionFailure(error, '切换章节')
-        if (previousUnitId) {
-          void navigate({
-            to: route.novels.detail as never,
-            params: { novelId, unitId: previousUnitId } as never,
-            replace: true,
-          }).catch(() => undefined)
-        }
-      })
+      )
+    },
+    [hasPendingAutosave, novelId]
+  )
 
-    return () => {
-      canceled = true
-    }
+  useNovelExitGuard({
+    windowService,
+    flush: flushBeforeUnitChange,
+    hasPendingWrites: hasPendingNovelWrites,
+    onFailure: reportTransitionFailure,
+  })
+
+  useEffect(() => {
+    const current = bundleRef.current
+    if (!current || current.project.id !== novelId) return
+    const selected = current.units.find((unit) => unit.id === unitId)
+    if (!selected || selected.id === activeUnitId) return
+    const nextSuggestions = suggestionsForUnit(
+      current.suggestions.items,
+      selected.id
+    )
+    activeUnitRef.current = selected
+    suggestionsRef.current = nextSuggestions
+    setActiveUnit(selected)
+    resetAutosave(selected)
+    setSelectedText('')
+    setActiveAnchor(undefined)
+    setContextItems([])
+    setSuggestions(nextSuggestions)
   }, [
     activeUnitId,
-    flushBeforeUnitChange,
-    navigate,
     novelId,
     resetAutosave,
     unitId,
@@ -1087,6 +1312,7 @@ export function NovelWorkspace({ novelId, unitId }: Props) {
       bundleRef.current = nextBundle
       activeUnitRef.current = saved
       suggestionsRef.current = []
+      suggestionPersistedHashesRef.current[saved.id] = suggestionsHash([])
       setBundle(nextBundle)
       setActiveUnit(saved)
       resetAutosave(saved)
@@ -1442,42 +1668,18 @@ export function NovelWorkspace({ novelId, unitId }: Props) {
             project={bundle.project}
             units={bundle.units}
             activeUnitId={activeUnit.id}
-            onSwitchProject={() =>
-              void flushBeforeUnitChange()
-                .then(() => navigate({ to: route.novels.index as never }))
-                .catch((error) =>
-                  reportTransitionFailure(error, '切换作品')
-                )
-            }
+            onSwitchProject={() => {
+              void navigate({ to: route.novels.index as never }).catch(
+                (error) => reportTransitionFailure(error, '切换作品')
+              )
+            }}
             onCreateUnit={() => void createUnit()}
             onSelect={(unit) => {
-              void flushBeforeUnitChange()
-                .then(() => {
-                  const latestUnit = bundleRef.current?.units.find(
-                    (item) => item.id === unit.id
-                  )
-                  if (!latestUnit) throw new Error('目标章节已经不可用')
-                  const nextSuggestions =
-                    bundleRef.current?.suggestions.items.filter(
-                      (suggestion) => suggestion.unitId === latestUnit.id
-                    ) ?? []
-                  activeUnitRef.current = latestUnit
-                  suggestionsRef.current = nextSuggestions
-                  setActiveUnit(latestUnit)
-                  resetAutosave(latestUnit)
-                  setSelectedText('')
-                  setActiveAnchor(undefined)
-                  setContextItems([])
-                  setSuggestions(nextSuggestions)
-                  return navigate({
-                    to: route.novels.detail as never,
-                    params: { novelId, unitId: latestUnit.id } as never,
-                    replace: true,
-                  })
-                })
-                .catch((error) =>
-                  reportTransitionFailure(error, '切换章节')
-                )
+              void navigate({
+                to: route.novels.detail as never,
+                params: { novelId, unitId: unit.id } as never,
+                replace: true,
+              }).catch((error) => reportTransitionFailure(error, '切换章节'))
             }}
           />
 
@@ -1523,6 +1725,8 @@ export function NovelWorkspace({ novelId, unitId }: Props) {
                 outline={bundle.outline.items}
                 clues={bundle.clues.items}
                 units={bundle.units}
+                synopsis={bundle.project.synopsis}
+                onSynopsisChange={updateProjectSynopsis}
                 onCharactersChange={(items) =>
                   updateCollection('characters', items)
                 }

@@ -58,6 +58,73 @@ describe('useNovelAutosave', () => {
       expect.objectContaining({ revision: 1 })
     )
     expect(result.current.state).toBe('saved')
+    expect(result.current.hasPending()).toBe(false)
+  })
+
+  it('reports a scheduled edit as pending synchronously', async () => {
+    const service = new DefaultNovelService()
+    const bundle = await service.createProject({
+      title: '照骨簪',
+      kind: 'web_novel',
+    })
+    const unit = bundle.units[0]
+    const { result } = renderHook(() =>
+      useNovelAutosave({
+        novelService: service,
+        initialUnit: unit,
+        onSaved: vi.fn(),
+        onConflict: vi.fn(),
+      })
+    )
+
+    expect(result.current.hasPending()).toBe(false)
+    act(() => {
+      result.current.schedule(edited(unit, '刚刚输入'))
+      expect(result.current.hasPending()).toBe(true)
+    })
+  })
+
+  it('waits for an in-flight save when an explicit flush arrives', async () => {
+    const service = new DefaultNovelService()
+    const bundle = await service.createProject({
+      title: '照骨簪',
+      kind: 'web_novel',
+    })
+    const unit = bundle.units[0]
+    let releaseSave: (() => void) | undefined
+    const originalSave = service.saveManuscriptUnit.bind(service)
+    vi.spyOn(service, 'saveManuscriptUnit').mockImplementation(async (input) => {
+      await new Promise<void>((resolve) => {
+        releaseSave = resolve
+      })
+      return originalSave(input)
+    })
+    const { result } = renderHook(() =>
+      useNovelAutosave({
+        novelService: service,
+        initialUnit: unit,
+        onSaved: vi.fn(),
+        onConflict: vi.fn(),
+      })
+    )
+
+    act(() => result.current.schedule(edited(unit, '正在落盘')))
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(750)
+    })
+    expect(result.current.hasPending()).toBe(true)
+
+    let flushed = false
+    const flush = result.current.flush().then(() => {
+      flushed = true
+    })
+    await Promise.resolve()
+    expect(flushed).toBe(false)
+
+    releaseSave?.()
+    await act(async () => flush)
+    expect(flushed).toBe(true)
+    expect(result.current.hasPending()).toBe(false)
   })
 
   it('flushes immediately and surfaces a structured revision conflict', async () => {

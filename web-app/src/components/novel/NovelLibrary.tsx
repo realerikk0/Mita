@@ -30,8 +30,8 @@ import { Textarea } from '@/components/ui/textarea'
 import { route } from '@/constants/routes'
 import { useServiceHub } from '@/hooks/useServiceHub'
 import { extractDocxText } from '@/lib/novel-import'
+import { runNovelBlueprint } from '@/lib/novel-ai'
 import { cn } from '@/lib/utils'
-import { runParagraphEditCompletion } from '@/lib/runParagraphEditCompletion'
 import type {
   CreateNovelProjectInput,
   NovelImportInput,
@@ -119,6 +119,8 @@ export function NovelLibrary() {
     synopsis: '',
     template: 'cultivation',
   })
+  const draftRef = useRef(draft)
+  draftRef.current = draft
 
   const refresh = useCallback(async () => {
     setLoading(true)
@@ -157,19 +159,29 @@ export function NovelLibrary() {
   }
 
   const generateBlueprint = async () => {
-    const idea = draft.synopsis?.trim()
+    const requestedSynopsis = draft.synopsis ?? ''
+    const idea = requestedSynopsis.trim()
     if (!idea) {
       toast.error('先写下一句话构思，AI 才知道故事从哪里长出来')
       return
     }
     setBlueprintGenerating(true)
     try {
-      const blueprint = await runParagraphEditCompletion({
-        system:
-          '你是网文故事策划。根据作者的一句话构思生成可执行的故事蓝图，包含核心意图、主角欲望、主要冲突、前三个推进节点和一条可长期回收的伏笔。使用紧凑中文纯文本，不要写创作说明。',
-        user: `作品名：${draft.title || '未命名'}\n类型：${draft.genre || '未分类'}\n创作内核：${kindLabel[draft.kind]}\n作者构思：${idea}`,
+      const blueprint = await runNovelBlueprint({
+        title: draft.title,
+        genre: draft.genre ?? '',
+        kindLabel: kindLabel[draft.kind],
+        idea,
       })
-      setDraft((current) => ({ ...current, synopsis: blueprint.trim() }))
+      if ((draftRef.current.synopsis ?? '') !== requestedSynopsis) {
+        toast.info('构思已更新，本次蓝图未覆盖当前内容')
+        return
+      }
+      setDraft((current) =>
+        (current.synopsis ?? '') === requestedSynopsis
+          ? { ...current, synopsis: blueprint.trim() }
+          : current
+      )
       toast.success('故事蓝图已生成，可以继续手动调味')
     } catch (error) {
       toast.error(error instanceof Error ? error.message : '故事蓝图生成失败')

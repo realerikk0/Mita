@@ -48,4 +48,11 @@ export class DefaultWindowService implements WindowService {
   async isFullscreen(): Promise<boolean> {
     return false
   }
+
+  async registerCloseGuard(
+    guard: () => boolean | Promise<boolean>
+  ): Promise<() => void> {
+    void guard
+    return () => undefined
+  }
 }

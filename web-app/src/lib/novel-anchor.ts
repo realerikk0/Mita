@@ -1,10 +1,9 @@
-import type { Node as ProseMirrorNode } from '@tiptap/pm/model'
-import type { Transaction } from '@tiptap/pm/state'
 import type {
-  TextAnchor,
-  TiptapDocument,
-  TiptapNode,
-} from '@/types/novel'
+  Node as ProseMirrorNode,
+  Slice as ProseMirrorSlice,
+} from '@tiptap/pm/model'
+import type { Transaction } from '@tiptap/pm/state'
+import type { TextAnchor, TiptapDocument, TiptapNode } from '@/types/novel'
 
 export type TextAnchorFailureReason =
   | 'unit-mismatch'
@@ -86,7 +85,14 @@ export function createTextAnchor({
     blockId,
     fromOffset,
     toOffset,
-    sourceTextHash: hashNovelText(blockText.slice(fromOffset, toOffset)),
+    // A collapsed continuation anchor has no selected source to hash. In that
+    // case hash the whole block so edits made while AI is generating mark the
+    // insertion point stale instead of silently shifting it.
+    sourceTextHash: hashNovelText(
+      fromOffset === toOffset
+        ? blockText
+        : blockText.slice(fromOffset, toOffset)
+    ),
   }
 }
 
@@ -114,7 +120,9 @@ export function validateTextAnchor(
   }
 
   const sourceText = blockText.slice(anchor.fromOffset, anchor.toOffset)
-  if (hashNovelText(sourceText) !== anchor.sourceTextHash) {
+  const hashSource =
+    anchor.fromOffset === anchor.toOffset ? blockText : sourceText
+  if (hashNovelText(hashSource) !== anchor.sourceTextHash) {
     return {
       valid: false,
       stale: true,
@@ -246,11 +254,17 @@ export function resolveTextAnchor(
 export function applyTextAnchorToTransaction(
   transaction: Transaction,
   anchor: TextAnchor,
-  replacement: string,
+  replacement: string | ProseMirrorSlice,
   unitId = anchor.unitId
 ): ResolvedTextAnchor {
   const resolved = resolveTextAnchor(transaction.doc, anchor, unitId)
   if (!resolved.valid) return resolved
-  transaction.insertText(replacement, resolved.from, resolved.to)
+  if (typeof replacement === 'string') {
+    transaction.insertText(replacement, resolved.from, resolved.to)
+  } else {
+    // An open slice lets its first and last paragraphs merge with the text on
+    // either side of the anchor, matching normal ProseMirror paste semantics.
+    transaction.replaceRange(resolved.from, resolved.to, replacement)
+  }
   return resolved
 }
