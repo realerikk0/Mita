@@ -117,6 +117,105 @@ describe('NovelAssets character avatar generation', () => {
   })
 })
 
+describe('NovelAssets character custom fields', () => {
+  function CustomFieldsHarness({
+    initialFields = {},
+    onCharactersChange = vi.fn(),
+  }: {
+    initialFields?: Record<string, string>
+    onCharactersChange?: (items: Character[]) => void
+  }) {
+    const [characters, setCharacters] = useState([
+      { ...character('character-1', '沈砚秋'), customFields: initialFields },
+    ])
+    return (
+      <NovelAssets
+        tab="characters"
+        synopsis=""
+        characters={characters}
+        relationships={[]}
+        outline={[]}
+        clues={[]}
+        units={[]}
+        onCharactersChange={(items) => {
+          onCharactersChange(items)
+          setCharacters(items)
+        }}
+        onRelationshipsChange={vi.fn()}
+        onOutlineChange={vi.fn()}
+        onCluesChange={vi.fn()}
+        onSynopsisChange={vi.fn()}
+      />
+    )
+  }
+
+  it('adds unique fields and lets the author edit keys, values, and remove them', async () => {
+    const onCharactersChange = vi.fn()
+    const user = userEvent.setup()
+    render(
+      <CustomFieldsHarness
+        initialFields={{ 境界: '筑基' }}
+        onCharactersChange={onCharactersChange}
+      />
+    )
+
+    await user.click(screen.getByRole('button', { name: '添加字段' }))
+    await user.click(screen.getByRole('button', { name: '添加字段' }))
+    expect(screen.getByLabelText('自定义属性名称：新属性')).toBeInTheDocument()
+    expect(
+      screen.getByLabelText('自定义属性名称：新属性 2')
+    ).toBeInTheDocument()
+
+    const keyInput = screen.getByLabelText('自定义属性名称：新属性')
+    await user.clear(keyInput)
+    await user.type(keyInput, '门派')
+    await user.tab()
+    await user.type(screen.getByLabelText('自定义属性值：门派'), '天剑宗')
+
+    expect(onCharactersChange).toHaveBeenLastCalledWith([
+      expect.objectContaining({
+        customFields: {
+          境界: '筑基',
+          门派: '天剑宗',
+          '新属性 2': '',
+        },
+      }),
+    ])
+
+    await user.click(
+      screen.getByRole('button', { name: '删除自定义属性：新属性 2' })
+    )
+    expect(onCharactersChange).toHaveBeenLastCalledWith([
+      expect.objectContaining({
+        customFields: { 境界: '筑基', 门派: '天剑宗' },
+      }),
+    ])
+  })
+
+  it('keeps the stored key when a renamed field is blank or duplicates another key', async () => {
+    const onCharactersChange = vi.fn()
+    const user = userEvent.setup()
+    render(
+      <CustomFieldsHarness
+        initialFields={{ 境界: '筑基', 门派: '天剑宗' }}
+        onCharactersChange={onCharactersChange}
+      />
+    )
+
+    const schoolKey = screen.getByLabelText('自定义属性名称：门派')
+    await user.clear(schoolKey)
+    fireEvent.blur(schoolKey)
+    expect(screen.getByRole('alert')).toHaveTextContent('字段名不能为空')
+    expect(onCharactersChange).not.toHaveBeenCalled()
+
+    await user.type(schoolKey, '境界')
+    fireEvent.blur(schoolKey)
+    expect(screen.getByRole('alert')).toHaveTextContent('字段名已存在')
+    expect(onCharactersChange).not.toHaveBeenCalled()
+    expect(screen.getByLabelText('自定义属性值：门派')).toHaveValue('天剑宗')
+  })
+})
+
 describe('NovelAssets relationship management', () => {
   it('creates a chosen relationship, edits every structural field, draws direction, and deletes it', async () => {
     const people = [

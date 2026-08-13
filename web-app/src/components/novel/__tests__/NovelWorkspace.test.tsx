@@ -21,6 +21,7 @@ const mocks = vi.hoisted(() => ({
         hasPendingWrites: () => boolean
       }
     | undefined,
+  selectionToTextAnchor: vi.fn(),
 }))
 
 vi.mock('@tanstack/react-router', () => ({
@@ -71,9 +72,11 @@ vi.mock('@/components/novel/ManuscriptEditor', async () => {
     ManuscriptEditor: ({
       content,
       onReady,
+      onTuneSelection,
     }: {
       content: ManuscriptUnit['content']
       onReady?: (editor: unknown) => void
+      onTuneSelection?: () => void
     }) => {
       React.useEffect(() => {
         onReady?.({
@@ -84,8 +87,11 @@ vi.mock('@/components/novel/ManuscriptEditor', async () => {
         return () => onReady?.(null)
       }, [onReady])
       return (
-        <div data-testid="manuscript">
-          {content.content?.[0]?.content?.[0]?.text}
+        <div>
+          <div data-testid="manuscript">
+            {content.content?.[0]?.content?.[0]?.text}
+          </div>
+          <button onClick={onTuneSelection}>调味选区</button>
         </div>
       )
     },
@@ -113,18 +119,34 @@ vi.mock('@/components/novel/ChapterTree', () => ({
 
 vi.mock('@/components/novel/AiInspector', () => ({
   AiInspector: ({
+    contextItems,
+    onToggleContext,
     suggestions,
     onReject,
   }: {
+    contextItems: AiContextItem[]
+    onToggleContext: (id: string) => void
     suggestions: AiSuggestion[]
     onReject: (suggestion: AiSuggestion) => void
   }) => (
-    <button
-      onClick={() => suggestions[0] && onReject(suggestions[0])}
-      disabled={!suggestions[0]}
-    >
-      拒绝候选
-    </button>
+    <div>
+      {contextItems.map((item) => (
+        <button
+          key={item.id}
+          aria-pressed={item.included}
+          title={item.content}
+          onClick={() => onToggleContext(item.id)}
+        >
+          {item.label}
+        </button>
+      ))}
+      <button
+        onClick={() => suggestions[0] && onReject(suggestions[0])}
+        disabled={!suggestions[0]}
+      >
+        拒绝候选
+      </button>
+    </div>
   ),
 }))
 
@@ -133,6 +155,12 @@ vi.mock('@/components/novel/NovelAssets', () => ({
 }))
 
 vi.mock('@/lib/novel-proofing', () => ({ proofNovelText: () => [] }))
+vi.mock('@/lib/novel-editor', () => ({
+  cursorToTextAnchor: vi.fn(),
+  replaceTextAnchor: vi.fn(),
+  selectionToTextAnchor: mocks.selectionToTextAnchor,
+  validateTextAnchor: vi.fn().mockResolvedValue(true),
+}))
 vi.mock('sonner', () => ({
   toast: { error: vi.fn(), success: vi.fn(), info: vi.fn() },
 }))
@@ -222,6 +250,16 @@ describe('NovelWorkspace suggestions and navigation', () => {
     mocks.exitOptions = undefined
     mocks.navigate.mockResolvedValue(undefined)
     mocks.openProject.mockImplementation(async () => structuredClone(makeBundle()))
+    mocks.selectionToTextAnchor.mockResolvedValue({
+      anchor: {
+        unitId: 'chapter-1',
+        blockId: 'block-1',
+        fromOffset: 0,
+        toOffset: 2,
+        sourceTextHash: 'fnv1a64:test',
+      },
+      selectedText: '选中文字',
+    })
     mocks.saveSuggestions.mockImplementation(async ({ items }) => ({
       ...makeBundle().suggestions,
       revision: 2,
@@ -284,6 +322,51 @@ describe('NovelWorkspace suggestions and navigation', () => {
 
     expect(mocks.navigate).toHaveBeenCalledWith({ to: '/novels/' })
     expect(mocks.flushAutosave).not.toHaveBeenCalled()
+  })
+
+  it('adds a non-empty project synopsis as an excludable AI context item', async () => {
+    const bundle = makeBundle()
+    bundle.project.synopsis = '守住本心，并查明照骨簪的来历。'
+    mocks.openProject.mockResolvedValue(structuredClone(bundle))
+    await renderWorkspace()
+
+    fireEvent.click(screen.getByRole('button', { name: '调味选区' }))
+    await act(async () => undefined)
+
+    const synopsisItems = screen.getAllByRole('button', {
+      name: '作品小传 · 核心意图',
+    })
+    expect(synopsisItems).not.toHaveLength(0)
+    expect(synopsisItems[0]).toHaveAttribute(
+      'title',
+      '守住本心，并查明照骨簪的来历。'
+    )
+    expect(
+      synopsisItems.every(
+        (item) => item.getAttribute('aria-pressed') === 'true'
+      )
+    ).toBe(true)
+
+    fireEvent.click(synopsisItems[0])
+    expect(
+      screen
+        .getAllByRole('button', { name: '作品小传 · 核心意图' })
+        .every((item) => item.getAttribute('aria-pressed') === 'false')
+    ).toBe(true)
+  })
+
+  it('does not add an AI context item for an empty project synopsis', async () => {
+    const bundle = makeBundle()
+    bundle.project.synopsis = '   '
+    mocks.openProject.mockResolvedValue(structuredClone(bundle))
+    await renderWorkspace()
+
+    fireEvent.click(screen.getByRole('button', { name: '调味选区' }))
+    await act(async () => undefined)
+
+    expect(
+      screen.queryByRole('button', { name: '作品小传 · 核心意图' })
+    ).not.toBeInTheDocument()
   })
 })
 

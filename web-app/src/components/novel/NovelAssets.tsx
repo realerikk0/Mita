@@ -48,6 +48,107 @@ type Props = {
 const selectClassName =
   'h-8 w-full rounded-md border border-input bg-background px-2 text-xs shadow-xs outline-none focus-visible:border-ring focus-visible:ring-[3px] focus-visible:ring-ring/50 disabled:cursor-not-allowed disabled:opacity-50'
 
+function nextCustomFieldKey(fields: Record<string, string>) {
+  const base = '新属性'
+  if (!Object.prototype.hasOwnProperty.call(fields, base)) return base
+  let suffix = 2
+  while (Object.prototype.hasOwnProperty.call(fields, `${base} ${suffix}`)) {
+    suffix += 1
+  }
+  return `${base} ${suffix}`
+}
+
+type CustomFieldRowProps = {
+  fieldKey: string
+  value: string
+  fields: Record<string, string>
+  onRename: (nextKey: string) => void
+  onValueChange: (value: string) => void
+  onRemove: () => void
+}
+
+function CustomFieldRow({
+  fieldKey,
+  value,
+  fields,
+  onRename,
+  onValueChange,
+  onRemove,
+}: CustomFieldRowProps) {
+  const errorId = useId()
+  const [draftKey, setDraftKey] = useState(fieldKey)
+  const [keyError, setKeyError] = useState('')
+
+  useEffect(() => {
+    setDraftKey(fieldKey)
+    setKeyError('')
+  }, [fieldKey])
+
+  const commitKey = () => {
+    const nextKey = draftKey.trim()
+    if (!nextKey) {
+      setKeyError('字段名不能为空')
+      return
+    }
+    if (
+      nextKey !== fieldKey &&
+      Object.prototype.hasOwnProperty.call(fields, nextKey)
+    ) {
+      setKeyError('字段名已存在')
+      return
+    }
+    setKeyError('')
+    setDraftKey(nextKey)
+    if (nextKey !== fieldKey) onRename(nextKey)
+  }
+
+  return (
+    <div className="grid grid-cols-[minmax(0,7rem)_minmax(0,1fr)_auto] items-start gap-2">
+      <div>
+        <Input
+          aria-label={`自定义属性名称：${fieldKey}`}
+          className={cn('h-8', keyError && 'border-destructive')}
+          value={draftKey}
+          onChange={(event) => {
+            setDraftKey(event.target.value)
+            if (keyError) setKeyError('')
+          }}
+          onBlur={commitKey}
+          onKeyDown={(event) => {
+            if (event.key === 'Enter') event.currentTarget.blur()
+          }}
+          aria-invalid={Boolean(keyError)}
+          aria-describedby={keyError ? errorId : undefined}
+        />
+        {keyError && (
+          <span
+            id={errorId}
+            role="alert"
+            className="mt-1 block text-[10px] text-destructive"
+          >
+            {keyError}
+          </span>
+        )}
+      </div>
+      <Input
+        aria-label={`自定义属性值：${fieldKey}`}
+        className="h-8"
+        value={value}
+        onChange={(event) => onValueChange(event.target.value)}
+      />
+      <Button
+        type="button"
+        size="icon-xs"
+        variant="ghost"
+        aria-label={`删除自定义属性：${fieldKey}`}
+        onClick={onRemove}
+      >
+        <Trash2 />
+      </Button>
+    </div>
+  )
+}
+
 export function NovelAssets(props: Props) {
   if (props.tab === 'characters') return <CharactersPanel {...props} />
   if (props.tab === 'relations') return <RelationsPanel {...props} />
@@ -85,6 +186,17 @@ function CharactersPanel({
   const update = (patch: Partial<Character>) => {
     if (!selected) return
     updateCharacter(selected.id, patch)
+  }
+
+  const updateCustomFields = (
+    characterId: string,
+    updater: (fields: Record<string, string>) => Record<string, string>
+  ) => {
+    const current = charactersRef.current.find((item) => item.id === characterId)
+    if (!current) return
+    updateCharacter(characterId, {
+      customFields: updater(current.customFields),
+    })
   }
 
   return (
@@ -273,37 +385,51 @@ function CharactersPanel({
                 <Button
                   size="xs"
                   variant="ghost"
-                  onClick={() =>
-                    update({
-                      customFields: { ...selected.customFields, 新属性: '' },
-                    })
-                  }
+                  onClick={() => {
+                    const characterId = selected.id
+                    updateCustomFields(characterId, (fields) => ({
+                      ...fields,
+                      [nextCustomFieldKey(fields)]: '',
+                    }))
+                  }}
                 >
                   <Plus /> 添加字段
                 </Button>
               </div>
-              <div className="mt-3 grid gap-2 sm:grid-cols-2">
+              <div className="mt-3 grid gap-2">
                 {Object.entries(selected.customFields).map(([key, value]) => (
-                  <div
+                  <CustomFieldRow
                     key={key}
-                    className="grid grid-cols-[7rem_1fr] items-center gap-2"
-                  >
-                    <span className="truncate text-xs text-muted-foreground">
-                      {key}
-                    </span>
-                    <Input
-                      className="h-8"
-                      value={value}
-                      onChange={(event) =>
-                        update({
-                          customFields: {
-                            ...selected.customFields,
-                            [key]: event.target.value,
-                          },
-                        })
-                      }
-                    />
-                  </div>
+                    fieldKey={key}
+                    value={value}
+                    fields={selected.customFields}
+                    onRename={(nextKey) =>
+                      updateCustomFields(selected.id, (fields) =>
+                        Object.fromEntries(
+                          Object.entries(fields).map(([fieldKey, fieldValue]) =>
+                            fieldKey === key
+                              ? [nextKey, fieldValue]
+                              : [fieldKey, fieldValue]
+                          )
+                        )
+                      )
+                    }
+                    onValueChange={(nextValue) =>
+                      updateCustomFields(selected.id, (fields) => ({
+                        ...fields,
+                        [key]: nextValue,
+                      }))
+                    }
+                    onRemove={() =>
+                      updateCustomFields(selected.id, (fields) =>
+                        Object.fromEntries(
+                          Object.entries(fields).filter(
+                            ([fieldKey]) => fieldKey !== key
+                          )
+                        )
+                      )
+                    }
+                  />
                 ))}
               </div>
             </div>

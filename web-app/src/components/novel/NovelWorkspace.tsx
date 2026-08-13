@@ -568,6 +568,7 @@ export function NovelWorkspace({ novelId, unitId }: Props) {
       const currentExcerpt = isLiveEditor(editor)
         ? editor.getText().slice(-4000).trim()
         : ''
+      const projectSynopsis = bundle.project.synopsis.trim()
       return [
         ...(selection && anchor
           ? [
@@ -576,6 +577,17 @@ export function NovelWorkspace({ novelId, unitId }: Props) {
                 type: 'selection' as const,
                 label: '当前选区',
                 content: selection,
+                included: true,
+              },
+            ]
+          : []),
+        ...(projectSynopsis
+          ? [
+              {
+                id: 'project-synopsis',
+                type: 'outline' as const,
+                label: '作品小传 · 核心意图',
+                content: projectSynopsis,
                 included: true,
               },
             ]
