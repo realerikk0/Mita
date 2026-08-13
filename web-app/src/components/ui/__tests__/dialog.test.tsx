@@ -306,6 +306,28 @@ describe('Dialog Components', () => {
     expect(dialogContent).toHaveClass('custom-dialog-class')
   })
 
+  it('accepts a custom overlay class without changing the default layer', async () => {
+    const user = userEvent.setup()
+
+    render(
+      <Dialog>
+        <DialogTrigger>Open layered dialog</DialogTrigger>
+        <DialogContent className="z-[70]" overlayClassName="z-[70]">
+          <DialogHeader>
+            <DialogTitle>Layered Dialog</DialogTitle>
+          </DialogHeader>
+        </DialogContent>
+      </Dialog>
+    )
+
+    await user.click(screen.getByText('Open layered dialog'))
+
+    expect(screen.getByRole('dialog')).toHaveClass('z-[70]')
+    expect(document.querySelector('[data-slot="dialog-overlay"]')).toHaveClass(
+      'z-[70]'
+    )
+  })
+
   it('supports onOpenChange callback', async () => {
     const onOpenChange = vi.fn()
     const user = userEvent.setup()

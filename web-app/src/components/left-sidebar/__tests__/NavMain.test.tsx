@@ -23,6 +23,17 @@ describe('NavMain', () => {
     expect(newBiyanTeamsItem?.shortcut).toBeTruthy()
   })
 
+  it('adds Novel Mode as one ordinary sidebar entry', () => {
+    const items = getNavMainItems(vi.fn(), vi.fn(), vi.fn(), vi.fn())
+    const novelItems = items.filter(
+      (item) => item.title === 'common:novelMode'
+    )
+
+    expect(novelItems).toHaveLength(1)
+    expect(novelItems[0]?.url).toBe('/novels/')
+    expect(novelItems[0]?.shortcut).toBeUndefined()
+  })
+
   it('moves New Project out of the primary action list', () => {
     const items = getNavMainItems(vi.fn(), vi.fn(), vi.fn(), vi.fn())
 

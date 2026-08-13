@@ -36,7 +36,7 @@
       "id": "generated-route-tree",
       "path": "web-app/src/routeTree.gen.ts",
       "reason": "TanStack Router generates this text file; its reviewed canonical LF content is locked instead of treated as first-party source.",
-      "sha256": "aa94c6734fa7cdf485d1480fdad6da580be83e8d721659a281a20738f986a3c7"
+      "sha256": "7158f33aea61aab61eb31594f1c11dcde6e51554d9df888ce5c8409c9eaf3a23"
     },
     {
       "digestMode": "byte-exact",

@@ -9,6 +9,9 @@ const {
   mockSetTheme,
   mockGetByLabel,
   mockConstructor,
+  mockCurrentWindow,
+  mockOnCloseRequested,
+  mockDestroy,
 } = vi.hoisted(() => ({
   mockClose: vi.fn(),
   mockShow: vi.fn(),
@@ -18,6 +21,14 @@ const {
   mockSetTheme: vi.fn(),
   mockGetByLabel: vi.fn(),
   mockConstructor: vi.fn(),
+  mockOnCloseRequested: vi.fn(),
+  mockDestroy: vi.fn(),
+  mockCurrentWindow: {
+    setFullscreen: vi.fn(),
+    isFullscreen: vi.fn(),
+    onCloseRequested: vi.fn(),
+    destroy: vi.fn(),
+  },
 }))
 
 function makeMockWindow() {
@@ -37,7 +48,7 @@ vi.mock('@tauri-apps/api/webviewWindow', () => {
     return makeMockWindow()
   } as unknown as { new (...args: unknown[]): unknown; getByLabel: typeof mockGetByLabel }
   Ctor.getByLabel = mockGetByLabel
-  return { WebviewWindow: Ctor }
+  return { WebviewWindow: Ctor, getCurrentWebviewWindow: () => mockCurrentWindow }
 })
 
 vi.mock('@tauri-apps/api/event', () => ({
@@ -68,12 +79,56 @@ describe('TauriWindowService', () => {
     mockSetFocus.mockResolvedValue(undefined)
     mockSetTitle.mockResolvedValue(undefined)
     mockSetTheme.mockResolvedValue(undefined)
+    mockCurrentWindow.setFullscreen.mockResolvedValue(undefined)
+    mockCurrentWindow.isFullscreen.mockResolvedValue(false)
+    mockCurrentWindow.onCloseRequested.mockImplementation(mockOnCloseRequested)
+    mockCurrentWindow.destroy.mockImplementation(mockDestroy)
+    mockDestroy.mockResolvedValue(undefined)
     localStorage.clear()
     svc = new TauriWindowService()
   })
 
   it('extends DefaultWindowService', () => {
     expect(svc).toBeInstanceOf(DefaultWindowService)
+  })
+
+  describe('registerCloseGuard', () => {
+    it('waits for a successful guard before force-closing', async () => {
+      const unlisten = vi.fn()
+      let closeHandler:
+        | ((event: { preventDefault: () => void }) => Promise<void>)
+        | undefined
+      mockOnCloseRequested.mockImplementationOnce((handler) => {
+        closeHandler = handler
+        return Promise.resolve(unlisten)
+      })
+      const guard = vi.fn().mockResolvedValue(true)
+      await expect(svc.registerCloseGuard(guard)).resolves.toBe(unlisten)
+
+      const preventDefault = vi.fn()
+      await closeHandler?.({ preventDefault })
+
+      expect(preventDefault).toHaveBeenCalledOnce()
+      expect(guard).toHaveBeenCalledOnce()
+      expect(mockDestroy).toHaveBeenCalledOnce()
+    })
+
+    it('keeps the window open when durable writes fail', async () => {
+      let closeHandler:
+        | ((event: { preventDefault: () => void }) => Promise<void>)
+        | undefined
+      mockOnCloseRequested.mockImplementationOnce((handler) => {
+        closeHandler = handler
+        return Promise.resolve(vi.fn())
+      })
+      await svc.registerCloseGuard(() => false)
+
+      const preventDefault = vi.fn()
+      await closeHandler?.({ preventDefault })
+
+      expect(preventDefault).toHaveBeenCalledOnce()
+      expect(mockDestroy).not.toHaveBeenCalled()
+    })
   })
 
   describe('createWebviewWindow', () => {
@@ -279,5 +334,12 @@ describe('TauriWindowService', () => {
       await expect(svc.openLocalApiServerLogsWindow()).rejects.toBe(err)
       spy.mockRestore()
     })
+  })
+
+  it('delegates fullscreen state to the current window', async () => {
+    mockCurrentWindow.isFullscreen.mockResolvedValueOnce(true)
+    await svc.setFullscreen(true)
+    expect(mockCurrentWindow.setFullscreen).toHaveBeenCalledWith(true)
+    await expect(svc.isFullscreen()).resolves.toBe(true)
   })
 })

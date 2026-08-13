@@ -1,4 +1,4 @@
-import { ImagePlus, LucideIcon, UsersRound } from 'lucide-react'
+import { BookOpenText, ImagePlus, LucideIcon, UsersRound } from 'lucide-react'
 import { route } from '@/constants/routes'
 
 import {
@@ -89,6 +89,11 @@ export const getNavMainItems = (
         <Kbd className="bg-transparent size-3 uppercase">{PlatformShortcuts[ShortcutAction.NEW_IMAGE].key}</Kbd>
       </KbdGroup>
     ),
+  },
+  {
+    title: 'common:novelMode',
+    url: route.novels.index,
+    icon: BookOpenText,
   },
   {
     title: 'common:newBiyanTeams',

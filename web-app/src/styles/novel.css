@@ -1,0 +1,90 @@
+.novel-editor .tiptap {
+  min-height: 100%;
+  outline: none;
+  color: var(--foreground);
+  font-family: ui-serif, "Noto Serif SC", "Songti SC", STSong, serif;
+  font-size: 16px;
+  line-height: 1.95;
+}
+
+.novel-editor .tiptap > * + * {
+  margin-top: 0.8em;
+}
+
+.novel-editor .tiptap h1,
+.novel-editor .tiptap h2,
+.novel-editor .tiptap h3 {
+  margin-top: 1.6em;
+  font-family: Inter, "PingFang SC", "Microsoft YaHei", sans-serif;
+  font-weight: 650;
+  line-height: 1.3;
+}
+
+.novel-editor .tiptap h1 { font-size: 1.8rem; }
+.novel-editor .tiptap h2 { font-size: 1.4rem; }
+.novel-editor .tiptap h3 { font-size: 1.15rem; }
+
+.novel-editor .tiptap blockquote {
+  border-left: 2px solid var(--primary);
+  color: var(--muted-foreground);
+  padding-left: 1rem;
+}
+
+.novel-editor .tiptap ul,
+.novel-editor .tiptap ol {
+  padding-left: 1.5rem;
+}
+
+.novel-editor .tiptap a {
+  color: var(--primary);
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}
+
+.novel-editor .tiptap mark {
+  background: color-mix(in oklab, var(--primary) 22%, transparent);
+  border-radius: 3px;
+  padding-inline: 1px;
+}
+
+.novel-editor .tiptap [data-comment-thread-id] {
+  background-image: linear-gradient(
+    to top,
+    color-mix(in oklab, var(--primary) 56%, transparent) 0 2px,
+    transparent 2px
+  );
+}
+
+.novel-editor .tiptap hr[data-novel-scene-break]::after {
+  color: var(--muted-foreground);
+  content: "* * *";
+  display: block;
+  font-family: Inter, sans-serif;
+  font-size: 0.75rem;
+  letter-spacing: 0.65em;
+  text-align: center;
+}
+
+.novel-editor .tiptap p.is-editor-empty:first-child::before {
+  color: var(--muted-foreground);
+  content: attr(data-placeholder);
+  float: left;
+  height: 0;
+  pointer-events: none;
+}
+
+.novel-proofing-warning {
+  text-decoration-line: underline;
+  text-decoration-style: wavy;
+  text-decoration-color: color-mix(in oklab, var(--primary) 80%, #d97706);
+  text-underline-offset: 3px;
+}
+
+.novel-focus-enter {
+  animation: novel-focus-enter 180ms ease-out;
+}
+
+@keyframes novel-focus-enter {
+  from { opacity: 0; transform: scale(0.995); }
+  to { opacity: 1; transform: scale(1); }
+}

@@ -2,7 +2,10 @@
  * Tauri Window Service - Desktop implementation
  */
 
-import { WebviewWindow } from '@tauri-apps/api/webviewWindow'
+import {
+  getCurrentWebviewWindow,
+  WebviewWindow,
+} from '@tauri-apps/api/webviewWindow'
 import {
   legacyStorage,
   readCanonicalStorageValue,
@@ -151,6 +154,31 @@ export class TauriWindowService extends DefaultWindowService {
       )
       throw error
     }
+  }
+
+  async setFullscreen(fullscreen: boolean): Promise<void> {
+    await getCurrentWebviewWindow().setFullscreen(fullscreen)
+  }
+
+  async isFullscreen(): Promise<boolean> {
+    return getCurrentWebviewWindow().isFullscreen()
+  }
+
+  async registerCloseGuard(
+    guard: () => boolean | Promise<boolean>
+  ): Promise<() => void> {
+    const currentWindow = getCurrentWebviewWindow()
+    return currentWindow.onCloseRequested(async (event) => {
+      // Tauri cannot await application work before its default close action,
+      // so always pause closing and explicitly destroy only after the guard
+      // confirms all durable writes completed.
+      event.preventDefault()
+      try {
+        if (await guard()) await currentWindow.destroy()
+      } catch (error) {
+        console.error('Window close guard failed:', error)
+      }
+    })
   }
 
   private toWindowInstance(

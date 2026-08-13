@@ -2,6 +2,10 @@ export const route = {
   // home as new chat or thread
   home: '/',
   images: '/images',
+  novels: {
+    index: '/novels/',
+    detail: '/novels/$novelId/$unitId',
+  },
   appLogs: '/logs',
   project: '/project',
   projectDetail: '/project/$projectId',

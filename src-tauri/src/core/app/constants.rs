@@ -18,6 +18,7 @@ pub const BIYAN_DATA_DIRS_CONVERSATIONS: &[&str] = &[
     "image-assets",
     "video-assets",
     "agent-workspaces",
+    "novels",
 ];
 
 /// Current Biyan configuration files, excluding retired local-runtime data.
@@ -40,6 +41,7 @@ pub const BIYAN_DATA_SUBDIRS: &[&str] = &[
     "image-assets",
     "video-assets",
     "agent-workspaces",
+    "novels",
     "extensions",
     "logs",
     ".npx",
@@ -105,6 +107,7 @@ mod tests {
     fn known_entries_present() {
         assert!(BIYAN_DATA_DIRS_CONVERSATIONS.contains(&"threads"));
         assert!(BIYAN_DATA_DIRS_CONVERSATIONS.contains(&"agent-workspaces"));
+        assert!(BIYAN_DATA_DIRS_CONVERSATIONS.contains(&"novels"));
         assert!(BIYAN_DATA_DIRS_COMMON.contains(&"logs"));
         assert!(BIYAN_DATA_FILES_CONFIGS.contains(&"mcp_config.json"));
     }
